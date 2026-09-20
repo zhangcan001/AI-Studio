@@ -8,7 +8,9 @@
 use crate::{
     application::{
         workflow_graph_analysis::{WorkflowGraph, WorkflowSource, WorkflowSourceTrace},
-        workflow_recognition_schema::{RecognitionDeclaredType, RecognitionSchemaContext},
+        workflow_recognition_schema::{
+            MediaKind, RecognitionDeclaredType, RecognitionSchemaContext,
+        },
         workflow_recognition_service::{
             structural_workflow_sha256, RecognitionConfidence, WorkflowIdentity,
             WorkflowRecognitionFormat,
@@ -53,6 +55,8 @@ pub enum EvidenceKind {
     GRAPH_OUTPUT_PATH,
     SCHEMA_TYPE_MATCH,
     SCHEMA_TYPE_CONFLICT,
+    SCHEMA_MEDIA_UPLOAD,
+    SCHEMA_MEDIA_OUTPUT,
     MEDIA_TYPE_MATCH,
     CLASS_TYPE_HINT,
     NODE_TITLE_HINT,
@@ -415,6 +419,9 @@ fn evidence_weight(kind: EvidenceKind) -> i32 {
         EvidenceKind::GRAPH_OUTPUT_PATH => SCORE_GRAPH_OUTPUT_PATH,
         EvidenceKind::SCHEMA_TYPE_MATCH => SCORE_SCHEMA_TYPE_MATCH,
         EvidenceKind::SCHEMA_TYPE_CONFLICT => PENALTY_SCHEMA_TYPE_CONFLICT,
+        EvidenceKind::SCHEMA_MEDIA_UPLOAD | EvidenceKind::SCHEMA_MEDIA_OUTPUT => {
+            SCORE_SCHEMA_TYPE_MATCH
+        }
         EvidenceKind::MEDIA_TYPE_MATCH => SCORE_MEDIA_TYPE_MATCH,
         EvidenceKind::CLASS_TYPE_HINT => SCORE_CLASS_TYPE_HINT,
         EvidenceKind::NODE_TITLE_HINT => SCORE_NODE_TITLE_HINT,
@@ -487,6 +494,16 @@ fn evidence_for_guess_source(source: &str) -> Vec<RecognitionEvidence> {
                 "linked source belongs to the media family",
             ),
         ],
+        "SCHEMA_MEDIA_UPLOAD_AND_OUTPUT" => vec![
+            evidence(
+                EvidenceKind::SCHEMA_MEDIA_UPLOAD,
+                "schema input declares an uploaded media selector",
+            ),
+            evidence(
+                EvidenceKind::SCHEMA_MEDIA_OUTPUT,
+                "schema node output is compatible with the uploaded media",
+            ),
+        ],
         "GRAPH_DURATION_SOURCE" => vec![
             evidence(
                 EvidenceKind::GRAPH_OUTPUT_PATH,
@@ -539,9 +556,17 @@ fn schema_literal_guess(
     input_name: &str,
     value: &Value,
 ) -> Option<Guess> {
-    let input = schema.node(class_type)?.input(input_name)?;
+    let schema_node = schema.node(class_type)?;
+    let input = schema_node.input(input_name)?;
     let name = normalize(input_name);
     let class = class_type.to_ascii_lowercase();
+    if let Some(media_kind) = input.upload_media_kind {
+        if schema_node_outputs_media_kind(schema_node, media_kind)
+            && literal_matches_media_kind(media_kind, value)
+        {
+            return Some(schema_media_guess(media_kind, input.required));
+        }
+    }
     if value.is_string()
         && matches!(
             input.declared_type,
@@ -631,6 +656,43 @@ fn schema_literal_guess(
     None
 }
 
+fn schema_media_guess(media_kind: MediaKind, required: bool) -> Guess {
+    let (semantic_key, field_type) = match media_kind {
+        MediaKind::Image => ("reference_image", "image"),
+        MediaKind::Video => ("reference_video", "video"),
+        MediaKind::Audio => ("reference_audio", "audio"),
+    };
+    Guess {
+        semantic_key,
+        field_type,
+        required,
+        confidence: RecognitionConfidence::Medium,
+        source: "SCHEMA_MEDIA_UPLOAD_AND_OUTPUT",
+    }
+}
+
+fn schema_node_outputs_media_kind(
+    node: &crate::application::workflow_recognition_schema::RecognitionNodeSchema,
+    media_kind: MediaKind,
+) -> bool {
+    node.declared_output_types
+        .iter()
+        .any(|declared| match media_kind {
+            MediaKind::Image => matches!(
+                declared,
+                RecognitionDeclaredType::Image
+                    | RecognitionDeclaredType::Mask
+                    | RecognitionDeclaredType::Latent
+            ),
+            MediaKind::Video => *declared == RecognitionDeclaredType::Video,
+            MediaKind::Audio => *declared == RecognitionDeclaredType::Audio,
+        })
+}
+
+fn literal_matches_media_kind(_media_kind: MediaKind, value: &Value) -> bool {
+    value.is_string() || value.is_array() || is_link(value)
+}
+
 fn schema_numeric_semantic(name: &str) -> Option<&'static str> {
     match name {
         "seed" | "noise_seed" | "random_seed" => Some("seed"),
@@ -653,13 +715,18 @@ fn schema_linked_guess(
     value: &Value,
     semantic_key: &'static str,
 ) -> Option<Guess> {
-    let input = schema.node(class_type)?.input(input_name)?;
+    let schema_node = schema.node(class_type)?;
+    let input = schema_node.input(input_name)?;
     let field_type = field_type_for_semantic(semantic_key);
     let declared_matches = declared_type_for_field(field_type).contains(&input.declared_type);
-    if !declared_matches {
+    let upload_matches = input.upload_media_kind.is_some_and(|media_kind| {
+        media_kind_matches_field_type(media_kind, field_type)
+            && schema_node_outputs_media_kind(schema_node, media_kind)
+    });
+    if !declared_matches && !upload_matches {
         return None;
     }
-    if !literal_matches_field(field_type, value) {
+    if !literal_matches_field(field_type, value) && !upload_matches {
         return None;
     }
     Some(Guess {
@@ -667,7 +734,11 @@ fn schema_linked_guess(
         field_type,
         required: input.required,
         confidence: RecognitionConfidence::Medium,
-        source: "SCHEMA_GRAPH_TYPE",
+        source: if upload_matches {
+            "SCHEMA_MEDIA_UPLOAD_AND_OUTPUT"
+        } else {
+            "SCHEMA_GRAPH_TYPE"
+        },
     })
 }
 
@@ -715,9 +786,18 @@ fn schema_type_matches_candidate(
     input_name: &str,
     field_type: &str,
     declared_type: RecognitionDeclaredType,
+    upload_media_kind: Option<MediaKind>,
+    upload_output_matches: bool,
     value: Option<&Value>,
 ) -> bool {
     if declared_type_for_field(field_type).contains(&declared_type) {
+        return true;
+    }
+
+    if upload_output_matches
+        && upload_media_kind
+            .is_some_and(|media_kind| media_kind_matches_field_type(media_kind, field_type))
+    {
         return true;
     }
 
@@ -745,6 +825,14 @@ fn field_type_for_media(field_type: &str) -> bool {
     )
 }
 
+fn media_kind_matches_field_type(media_kind: MediaKind, field_type: &str) -> bool {
+    match media_kind {
+        MediaKind::Image => matches!(field_type, "image" | "images"),
+        MediaKind::Video => matches!(field_type, "video" | "videos"),
+        MediaKind::Audio => matches!(field_type, "audio" | "audios"),
+    }
+}
+
 fn literal_matches_field(field_type: &str, value: &Value) -> bool {
     match field_type {
         "textarea" => value.is_string(),
@@ -767,7 +855,10 @@ fn compact_source(evidence: &[RecognitionEvidence]) -> String {
             EvidenceKind::GRAPH_DIRECT_SINK | EvidenceKind::GRAPH_OUTPUT_PATH => {
                 parts.insert("GRAPH");
             }
-            EvidenceKind::SCHEMA_TYPE_MATCH | EvidenceKind::SCHEMA_TYPE_CONFLICT => {
+            EvidenceKind::SCHEMA_TYPE_MATCH
+            | EvidenceKind::SCHEMA_TYPE_CONFLICT
+            | EvidenceKind::SCHEMA_MEDIA_UPLOAD
+            | EvidenceKind::SCHEMA_MEDIA_OUTPUT => {
                 parts.insert("SCHEMA");
             }
             EvidenceKind::MEDIA_TYPE_MATCH => {
@@ -920,54 +1011,57 @@ fn enrich_candidate_with_context(
     }
 
     if let Some(schema) = schema {
-        if let Some(input_schema) = schema
-            .node(class_type)
-            .and_then(|node| node.input(&candidate.input_name))
-        {
-            if schema_type_matches_candidate(
-                class_type,
-                &candidate.input_name,
-                &candidate.field_type,
-                input_schema.declared_type,
-                candidate.value.as_ref(),
-            ) {
-                push_evidence(
-                    candidate,
-                    evidence(
-                        EvidenceKind::SCHEMA_TYPE_MATCH,
-                        "declared schema type matches field type",
-                    ),
-                );
-            } else if input_schema.declared_type != RecognitionDeclaredType::Unknown {
-                candidate.has_schema_conflict = true;
-                push_evidence(
-                    candidate,
-                    evidence(
-                        EvidenceKind::SCHEMA_TYPE_CONFLICT,
-                        "declared schema type conflicts with field type",
-                    ),
-                );
-            }
-            if let Some(value) = candidate.value.as_ref().and_then(Value::as_f64) {
-                let within_min = input_schema.numeric_min.is_none_or(|min| value >= min);
-                let within_max = input_schema.numeric_max.is_none_or(|max| value <= max);
-                if within_min && within_max {
+        if let Some(schema_node) = schema.node(class_type) {
+            if let Some(input_schema) = schema_node.input(&candidate.input_name) {
+                if schema_type_matches_candidate(
+                    class_type,
+                    &candidate.input_name,
+                    &candidate.field_type,
+                    input_schema.declared_type,
+                    input_schema.upload_media_kind,
+                    input_schema.upload_media_kind.is_some_and(|media_kind| {
+                        schema_node_outputs_media_kind(schema_node, media_kind)
+                    }),
+                    candidate.value.as_ref(),
+                ) {
                     push_evidence(
                         candidate,
                         evidence(
-                            EvidenceKind::NUMERIC_RANGE_MATCH,
-                            "numeric literal is within schema range",
+                            EvidenceKind::SCHEMA_TYPE_MATCH,
+                            "declared schema type matches field type",
                         ),
                     );
-                } else {
+                } else if input_schema.declared_type != RecognitionDeclaredType::Unknown {
                     candidate.has_schema_conflict = true;
                     push_evidence(
                         candidate,
                         evidence(
                             EvidenceKind::SCHEMA_TYPE_CONFLICT,
-                            "numeric literal is outside schema range",
+                            "declared schema type conflicts with field type",
                         ),
                     );
+                }
+                if let Some(value) = candidate.value.as_ref().and_then(Value::as_f64) {
+                    let within_min = input_schema.numeric_min.is_none_or(|min| value >= min);
+                    let within_max = input_schema.numeric_max.is_none_or(|max| value <= max);
+                    if within_min && within_max {
+                        push_evidence(
+                            candidate,
+                            evidence(
+                                EvidenceKind::NUMERIC_RANGE_MATCH,
+                                "numeric literal is within schema range",
+                            ),
+                        );
+                    } else {
+                        candidate.has_schema_conflict = true;
+                        push_evidence(
+                            candidate,
+                            evidence(
+                                EvidenceKind::SCHEMA_TYPE_CONFLICT,
+                                "numeric literal is outside schema range",
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -1077,7 +1171,11 @@ fn infer_linked_input(
         let Some(guess) = linked_source_guess(target_semantic, guess) else {
             continue;
         };
-        let required = if target_semantic.force_media_source {
+        // Product-level media collections may expose optional indexed slots even
+        // when the upstream ComfyUI socket itself is required.
+        let required = if target_semantic.item_index.is_some() {
+            false
+        } else if target_semantic.force_media_source {
             schema
                 .and_then(|schema| {
                     workflow
@@ -1099,10 +1197,10 @@ fn infer_linked_input(
                 target_semantic.item_index,
                 Guess {
                     required,
-                    source: if guess.source == "GRAPH_LINKED_MEDIA_SOURCE" {
-                        "GRAPH_LINKED_MEDIA_SOURCE"
-                    } else {
-                        "GRAPH_LINKED_SOURCE_LEAF"
+                    source: match guess.source {
+                        "GRAPH_LINKED_MEDIA_SOURCE" => "GRAPH_LINKED_MEDIA_SOURCE",
+                        "SCHEMA_MEDIA_UPLOAD_AND_OUTPUT" => "SCHEMA_MEDIA_UPLOAD_AND_OUTPUT",
+                        _ => "GRAPH_LINKED_SOURCE_LEAF",
                     },
                     ..guess
                 },
@@ -1169,7 +1267,11 @@ fn linked_source_guess(
             field_type: field_type_for_semantic(target_semantic.semantic_key),
             required: true,
             confidence: RecognitionConfidence::High,
-            source: "GRAPH_LINKED_MEDIA_SOURCE",
+            source: if source_guess.source == "SCHEMA_MEDIA_UPLOAD_AND_OUTPUT" {
+                "SCHEMA_MEDIA_UPLOAD_AND_OUTPUT"
+            } else {
+                "GRAPH_LINKED_MEDIA_SOURCE"
+            },
         });
     }
     None
@@ -1219,9 +1321,20 @@ fn trace_crosses_unrelated_media_input(
             return false;
         }
         linked_target_semantic(&link.target_input).is_some_and(|nested| {
-            media_family(nested.semantic_key).is_some()
-                && (nested.semantic_key != target_semantic.semantic_key
-                    || nested.item_index != target_semantic.item_index)
+            let nested_family = media_family(nested.semantic_key);
+            let target_family = media_family(target_semantic.semantic_key);
+            if target_semantic.item_index.is_some() {
+                let same_family = nested_family
+                    .zip(target_family)
+                    .is_some_and(|(nested_family, target_family)| nested_family == target_family);
+                !same_family
+                    || nested.item_index.is_some()
+                        && nested.item_index != target_semantic.item_index
+            } else {
+                nested_family.is_some()
+                    && (nested.semantic_key != target_semantic.semantic_key
+                        || nested.item_index != target_semantic.item_index)
+            }
         })
     })
 }
@@ -2537,6 +2650,219 @@ mod tests {
             (0..9).map(Some).collect::<Vec<_>>()
         );
         assert!(references.iter().all(|input| input.input_name == "image"));
+    }
+
+    #[test]
+    fn schema_backed_reference_video_slots_are_inferred_and_optional() {
+        let value: Value = serde_json::from_str(REFERENCE_VIDEO).expect("fixture should parse");
+        let workflow = WorkflowDocument::parse(value).expect("workflow should be an API workflow");
+        let schema = RecognitionSchemaContext::parse(&json!({
+            "LoadVideo": {
+                "input": {"required": {
+                    "file": ["COMBO", {"video_upload": true}]
+                }},
+                "output": ["VIDEO"]
+            }
+        }));
+
+        let report = WorkflowAnalysisService::analyze_workflow_with_schema(
+            &workflow,
+            REFERENCE_VIDEO.as_bytes(),
+            Some(&schema),
+        );
+        let references = report
+            .inputs
+            .iter()
+            .filter(|input| input.semantic_key == "reference_videos")
+            .collect::<Vec<_>>();
+
+        assert_eq!(references.len(), 3, "issues: {:?}", report.issues);
+        assert_eq!(
+            references
+                .iter()
+                .map(|input| (input.node_id.as_str(), input.item_index, input.required))
+                .collect::<Vec<_>>(),
+            vec![
+                ("40", Some(0), false),
+                ("42", Some(1), false),
+                ("44", Some(2), false)
+            ]
+        );
+        assert!(references.iter().all(|input| {
+            input
+                .evidence
+                .iter()
+                .any(|evidence| evidence.kind == EvidenceKind::SCHEMA_MEDIA_UPLOAD)
+                && input
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.kind == EvidenceKind::SCHEMA_MEDIA_OUTPUT)
+                && input
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.kind == EvidenceKind::GRAPH_OUTPUT_PATH)
+                && input.confidence == RecognitionConfidence::High
+        }));
+    }
+
+    #[test]
+    fn static_reference_video_slots_remain_unbound_without_schema() {
+        let value: Value = serde_json::from_str(REFERENCE_VIDEO).expect("fixture should parse");
+        let workflow = WorkflowDocument::parse(value).expect("workflow should be an API workflow");
+        let report =
+            WorkflowAnalysisService::analyze_workflow(&workflow, REFERENCE_VIDEO.as_bytes());
+
+        assert!(!report
+            .inputs
+            .iter()
+            .any(|input| input.semantic_key == "reference_videos"));
+    }
+
+    #[test]
+    fn custom_schema_video_uploader_is_recognized_without_class_allowlist() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {
+                "class_type": "UnknownVideoUploaderXYZ",
+                "inputs": {"file": "uploaded.mp4"}
+            },
+            "2": {
+                "class_type": "ReferenceConsumer",
+                "inputs": {"reference_video": ["1", 0]}
+            },
+            "3": {
+                "class_type": "SaveVideo",
+                "output_node": true,
+                "inputs": {"video": ["2", 0]}
+            }
+        }))
+        .expect("workflow should parse");
+        let schema = RecognitionSchemaContext::parse(&json!({
+            "UnknownVideoUploaderXYZ": {
+                "input": {"required": {
+                    "file": ["COMBO", {"video_upload": true}]
+                }},
+                "output": ["VIDEO"]
+            },
+            "SaveVideo": {
+                "input": {"required": {"video": ["VIDEO", {}]}},
+                "output": ["VIDEO"],
+                "output_node": true
+            }
+        }));
+
+        let report = WorkflowAnalysisService::analyze_workflow_with_schema(
+            &workflow,
+            br#"{"custom":"video"}"#,
+            Some(&schema),
+        );
+        let input = report
+            .inputs
+            .iter()
+            .find(|input| input.semantic_key == "reference_video")
+            .expect("schema-backed custom uploader should be recognized");
+        assert_eq!(input.node_id, "1");
+        assert_eq!(input.input_name, "file");
+        assert_eq!(input.confidence, RecognitionConfidence::High);
+        assert!(input
+            .evidence
+            .iter()
+            .any(|evidence| evidence.kind == EvidenceKind::SCHEMA_MEDIA_UPLOAD));
+    }
+
+    #[test]
+    fn video_upload_metadata_without_video_output_is_not_a_video_binding() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {
+                "class_type": "UnknownVideoUploaderXYZ",
+                "inputs": {"file": "not-a-video-selector"}
+            },
+            "2": {
+                "class_type": "ReferenceConsumer",
+                "inputs": {"reference_video": ["1", 0]}
+            },
+            "3": {
+                "class_type": "SaveVideo",
+                "output_node": true,
+                "inputs": {"video": ["2", 0]}
+            }
+        }))
+        .expect("workflow should parse");
+        let schema = RecognitionSchemaContext::parse(&json!({
+            "UnknownVideoUploaderXYZ": {
+                "input": {"required": {
+                    "file": ["COMBO", {"video_upload": true}]
+                }},
+                "output": ["IMAGE"]
+            },
+            "SaveVideo": {
+                "input": {"required": {"video": ["VIDEO", {}]}},
+                "output": ["VIDEO"],
+                "output_node": true
+            }
+        }));
+
+        let report = WorkflowAnalysisService::analyze_workflow_with_schema(
+            &workflow,
+            br#"{"custom":"mismatch"}"#,
+            Some(&schema),
+        );
+        assert!(!report
+            .inputs
+            .iter()
+            .any(|input| input.semantic_key == "reference_video"));
+    }
+
+    #[test]
+    fn off_path_video_upload_does_not_beat_on_path_reference_candidate() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {
+                "class_type": "UnknownVideoUploaderXYZ",
+                "inputs": {"file": "on-path.mp4"}
+            },
+            "2": {
+                "class_type": "ReferenceConsumer",
+                "inputs": {"reference_video": ["1", 0]}
+            },
+            "3": {
+                "class_type": "UnknownVideoUploaderXYZ",
+                "inputs": {"file": "off-path.mp4"}
+            },
+            "4": {
+                "class_type": "SaveVideo",
+                "output_node": true,
+                "inputs": {"video": ["2", 0]}
+            }
+        }))
+        .expect("workflow should parse");
+        let schema = RecognitionSchemaContext::parse(&json!({
+            "UnknownVideoUploaderXYZ": {
+                "input": {"required": {
+                    "file": ["COMBO", {"video_upload": true}]
+                }},
+                "output": ["VIDEO"]
+            },
+            "SaveVideo": {
+                "input": {"required": {"video": ["VIDEO", {}]}},
+                "output": ["VIDEO"],
+                "output_node": true
+            }
+        }));
+
+        let report = WorkflowAnalysisService::analyze_workflow_with_schema(
+            &workflow,
+            br#"{"custom":"off-path"}"#,
+            Some(&schema),
+        );
+        let input = report
+            .inputs
+            .iter()
+            .find(|input| input.semantic_key == "reference_video")
+            .expect("one reference video should be selected");
+        assert_eq!(input.node_id, "1");
+        assert!(!report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "AMBIGUOUS_INPUT"));
     }
 
     #[test]

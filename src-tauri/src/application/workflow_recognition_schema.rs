@@ -4,6 +4,25 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MediaKind {
+    Image,
+    Video,
+    Audio,
+}
+
+impl MediaKind {
+    fn from_upload_value(value: &Value) -> Option<Self> {
+        match value.as_str()?.trim().to_ascii_lowercase().as_str() {
+            "image" | "images" => Some(Self::Image),
+            "video" | "videos" => Some(Self::Video),
+            "audio" | "audios" => Some(Self::Audio),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RecognitionDeclaredType {
     String,
     Integer,
@@ -41,6 +60,7 @@ impl RecognitionDeclaredType {
 pub struct RecognitionInputSchema {
     pub name: String,
     pub declared_type: RecognitionDeclaredType,
+    pub upload_media_kind: Option<MediaKind>,
     pub required: bool,
     pub enum_options: Vec<String>,
     pub numeric_min: Option<f64>,
@@ -151,6 +171,7 @@ fn parse_input_schema(name: &str, spec: &Value) -> Option<RecognitionInputSchema
     Some(RecognitionInputSchema {
         name: name.to_owned(),
         declared_type,
+        upload_media_kind: constraints.and_then(parse_upload_media_kind),
         required: false,
         enum_options,
         numeric_min: constraints
@@ -163,6 +184,31 @@ fn parse_input_schema(name: &str, spec: &Value) -> Option<RecognitionInputSchema
             .and_then(|value| value.get("step"))
             .and_then(number_value),
     })
+}
+
+fn parse_upload_media_kind(constraints: &serde_json::Map<String, Value>) -> Option<MediaKind> {
+    let explicit_kinds = [
+        ("image_upload", MediaKind::Image),
+        ("video_upload", MediaKind::Video),
+        ("audio_upload", MediaKind::Audio),
+    ]
+    .into_iter()
+    .filter_map(|(key, kind)| {
+        constraints
+            .get(key)
+            .and_then(Value::as_bool)
+            .filter(|enabled| *enabled)
+            .map(|_| kind)
+    })
+    .collect::<Vec<_>>();
+
+    match explicit_kinds.as_slice() {
+        [kind] => Some(*kind),
+        [] => constraints
+            .get("upload")
+            .and_then(MediaKind::from_upload_value),
+        _ => None,
+    }
 }
 
 fn number_value(value: &Value) -> Option<f64> {
@@ -256,6 +302,61 @@ mod tests {
                 .unwrap()
                 .declared_type,
             RecognitionDeclaredType::Unknown
+        );
+    }
+
+    #[test]
+    fn parses_upload_media_kind_separately_from_combo_enum_type() {
+        let context = RecognitionSchemaContext::parse(&json!({
+            "LoadVideo": {
+                "input": {"required": {
+                    "file": ["COMBO", {"video_upload": true}]
+                }},
+                "output": ["VIDEO"]
+            },
+            "OrdinaryCombo": {
+                "input": {"required": {
+                    "value": ["COMBO", {"options": ["one", "two"]}]
+                }}
+            }
+        }));
+
+        let video = context.node("LoadVideo").unwrap().input("file").unwrap();
+        assert_eq!(video.declared_type, RecognitionDeclaredType::Enum);
+        assert_eq!(video.upload_media_kind, Some(super::MediaKind::Video));
+        assert_eq!(
+            context
+                .node("OrdinaryCombo")
+                .unwrap()
+                .input("value")
+                .unwrap()
+                .upload_media_kind,
+            None
+        );
+    }
+
+    #[test]
+    fn ignores_ambiguous_upload_media_flags() {
+        let context = RecognitionSchemaContext::parse(&json!({
+            "AmbiguousUploader": {
+                "input": {"required": {
+                    "file": ["COMBO", {
+                        "image_upload": true,
+                        "video_upload": true,
+                        "upload": "audio"
+                    }]
+                }}
+            }
+        }));
+
+        assert_eq!(
+            context
+                .node("AmbiguousUploader")
+                .unwrap()
+                .input("file")
+                .unwrap()
+                .upload_media_kind,
+            None
         );
     }
 }

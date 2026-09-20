@@ -1,4 +1,5 @@
 use ai_studio_lib::application::workflow_analysis_service::WorkflowAnalysisService;
+use ai_studio_lib::application::workflow_recognition_schema::RecognitionSchemaContext;
 use ai_studio_lib::compiler::RecipeParser;
 use ai_studio_lib::domain::{Binding, OutputDefinition, Recipe, WorkflowDocument};
 use serde_json::Value;
@@ -233,6 +234,105 @@ SCHEMA_SOURCE=STATIC_FALLBACK",
     assert!(outputs.correct >= 9);
 }
 
+#[test]
+fn schema_aware_reference_video_benchmark_recognizes_both_packages() {
+    let schema = reference_video_schema();
+    let mut bindings = BindingMetrics::default();
+    let mut package_results = Vec::new();
+
+    for case in load_corpus().into_iter().filter(|case| {
+        matches!(
+            case.name.as_str(),
+            "minimax_h3_reference_video_1_3_0" | "minimax_h3_reference_video_quality_2_0_0"
+        )
+    }) {
+        let analysis = WorkflowAnalysisService::analyze_workflow_with_schema(
+            &case.workflow,
+            &case.workflow_bytes,
+            Some(&schema),
+        );
+        let mut package_bindings = BindingMetrics::default();
+        for binding in case
+            .recipe
+            .bindings
+            .iter()
+            .filter(|binding| binding.source == "reference_videos")
+        {
+            bindings.expected += 1;
+            package_bindings.expected += 1;
+            match classify_binding(&analysis, binding) {
+                BindingResult::Correct => {
+                    bindings.correct += 1;
+                    package_bindings.correct += 1;
+                }
+                BindingResult::Missing => {
+                    bindings.missing += 1;
+                    package_bindings.missing += 1;
+                }
+                BindingResult::Wrong => {
+                    bindings.wrong += 1;
+                    package_bindings.wrong += 1;
+                }
+                BindingResult::Ambiguous => {
+                    bindings.ambiguous += 1;
+                    package_bindings.ambiguous += 1;
+                }
+            }
+        }
+        assert!(
+            case.recipe
+                .outputs
+                .iter()
+                .all(|output| classify_output(&analysis, output) == OutputResult::Correct),
+            "schema-aware output regression in {}: {:?}",
+            case.name,
+            analysis
+        );
+        package_results.push((case.name, package_bindings));
+    }
+
+    println!(
+        "SCHEMA_AWARE_EXPECTED_CORE_BINDINGS={} \
+SCHEMA_AWARE_CORRECT_BINDINGS={} \
+SCHEMA_AWARE_MISSING_BINDINGS={} \
+SCHEMA_AWARE_WRONG_BINDINGS={} \
+SCHEMA_AWARE_WRONG_HIGH_CONFIDENCE_BINDINGS={} \
+SCHEMA_AWARE_AMBIGUOUS_BINDINGS={} \
+SCHEMA_SOURCE=SANITIZED_LIVE_LOADVIDEO_OBJECT_INFO",
+        bindings.expected,
+        bindings.correct,
+        bindings.missing,
+        bindings.wrong,
+        bindings.wrong_high_confidence,
+        bindings.ambiguous,
+    );
+
+    assert_eq!(bindings.expected, 6);
+    assert_eq!(bindings.correct, 6);
+    assert_eq!(bindings.missing, 0);
+    assert_eq!(bindings.wrong, 0);
+    assert_eq!(bindings.wrong_high_confidence, 0);
+    assert_eq!(bindings.ambiguous, 0);
+    assert!(package_results.iter().all(|(_, result)| {
+        result.expected == 3
+            && result.correct == 3
+            && result.missing == 0
+            && result.wrong == 0
+            && result.ambiguous == 0
+    }));
+}
+
+fn reference_video_schema() -> RecognitionSchemaContext {
+    RecognitionSchemaContext::parse(&serde_json::json!({
+        "LoadVideo": {
+            "input": {"required": {
+                "file": ["COMBO", {"video_upload": true}]
+            }},
+            "output": ["VIDEO"]
+        }
+    }))
+}
+
 #[derive(Clone, Copy)]
 enum BindingResult {
     Correct,
@@ -284,7 +384,7 @@ fn classify_binding(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum OutputResult {
     Correct,
     Missing,
