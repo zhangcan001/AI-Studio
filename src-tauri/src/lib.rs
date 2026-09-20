@@ -1180,6 +1180,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_onboarding::workflow_onboarding_discard,
             commands::workflow_onboarding::workflow_workspace_list,
             commands::workflow_registry::workflow_analyze_import,
+            commands::workflow_registry::workflow_reanalyze_import,
             commands::workflow_registry::workflow_commit_import,
             commands::workflow_registry::workflow_list_registry,
             commands::workflow_registry::workflow_get_registry,

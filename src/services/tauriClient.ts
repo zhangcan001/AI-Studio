@@ -527,6 +527,10 @@ export function analyzeWorkflowImport(existingWorkflowId?: string): Promise<Work
   });
 }
 
+export function reanalyzeWorkflowImport(draftId: string): Promise<WorkflowAutoOnboardingPlanView> {
+  return invoke<WorkflowAutoOnboardingPlanView>("workflow_reanalyze_import", { draftId });
+}
+
 export function commitWorkflowImport(request: WorkflowImportCommitRequest): Promise<WorkflowOnboardingPublishView> {
   return invoke<WorkflowOnboardingPublishView>("workflow_commit_import", { request });
 }

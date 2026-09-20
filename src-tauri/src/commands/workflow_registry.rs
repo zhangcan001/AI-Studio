@@ -95,6 +95,19 @@ pub async fn workflow_analyze_import(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_reanalyze_import(
+    state: State<'_, AppState>,
+    draft_id: String,
+) -> Result<WorkflowAutoOnboardingPlanView, AppError> {
+    state
+        .workflow
+        .onboarding
+        .reanalyze_draft(&draft_id)
+        .await
+        .map_err(|error| AppError::workflow_onboarding(format!("{}: {error}", error.code())))
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_commit_import(
     state: State<'_, AppState>,
     request: WorkflowImportCommitRequest,

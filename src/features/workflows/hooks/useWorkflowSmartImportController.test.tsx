@@ -3,6 +3,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  WorkflowAutoIssueView,
   WorkflowAutoOnboardingPlanView,
   WorkflowOnboardingDraftView,
 } from "../../../types/workflowOnboarding";
@@ -11,6 +12,7 @@ import { useWorkflowSmartImportController } from "./useWorkflowSmartImportContro
 
 const serviceMocks = vi.hoisted(() => ({
   analyzeWorkflowImport: vi.fn(),
+  reanalyzeWorkflowImport: vi.fn(),
   commitWorkflowImport: vi.fn(),
   discardOnboarding: vi.fn(),
   getOnboardingDraft: vi.fn(),
@@ -116,7 +118,7 @@ describe("useWorkflowSmartImportController", () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     useWorkflowOnboardingStore.getState().reset();
     serviceMocks.getOnboardingDraft.mockResolvedValue(draft);
     serviceMocks.setOnboardingInputMapping.mockResolvedValue(draft);
@@ -149,28 +151,121 @@ describe("useWorkflowSmartImportController", () => {
     expect(serviceMocks.commitWorkflowImport).not.toHaveBeenCalled();
   });
 
-  it("keeps resume and issue resolution read-only until explicit commit", async () => {
+  it("keeps the active draft when replacing import is cancelled or fails", async () => {
     serviceMocks.analyzeWorkflowImport
-      .mockResolvedValueOnce(plan({ existingWorkflowId: "workflow-existing" }))
-      .mockResolvedValueOnce(plan({ message: "已刷新" }));
+      .mockResolvedValueOnce(plan())
+      .mockResolvedValueOnce(null)
+      .mockRejectedValueOnce({ code: "IMPORT_FAILED", message: "bad replacement" });
+    const hookOptions = options();
+    const { result } = renderHook(() => useWorkflowSmartImportController(hookOptions));
+
+    await act(async () => { await result.current.smartImport(); });
+    await act(async () => { await result.current.smartImport(); });
+    expect(result.current.plan?.draftId).toBe("draft-1");
+    expect(useWorkflowOnboardingStore.getState().draft?.draftId).toBe("draft-1");
+    expect(hookOptions.onDiscardReplacedDraft).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await result.current.smartImport(); });
+    expect(result.current.plan?.draftId).toBe("draft-1");
+    expect(useWorkflowOnboardingStore.getState().draft?.draftId).toBe("draft-1");
+    expect(result.current.importError).toMatchObject({ kind: "IMPORT_FAILED" });
+    expect(hookOptions.onDiscardReplacedDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumes the current draft without reopening the file picker", async () => {
+    serviceMocks.analyzeWorkflowImport
+      .mockResolvedValueOnce(plan({
+        state: "WAITING_FOR_COMFY_UI",
+        capability: { state: "COMFY_OFFLINE", issues: [] },
+      }));
+    serviceMocks.reanalyzeWorkflowImport.mockResolvedValue(plan({ message: "已刷新" }));
     const { result } = renderHook(() => useWorkflowSmartImportController(options()));
 
     await act(async () => { await result.current.smartImport(); });
     await act(async () => { await result.current.resume(); });
-    await act(async () => {
-      await result.current.resolveIssue(
-        { code: "AMBIGUOUS_DURATION_SOURCE", field: "duration_seconds", message: "choose", candidates: [] },
-        { label: "duration", nodeId: "node-1", inputName: "duration", fieldType: "integer" },
-      );
-    });
 
-    expect(serviceMocks.analyzeWorkflowImport).toHaveBeenNthCalledWith(2, "workflow-existing");
-    expect(serviceMocks.setOnboardingInputMapping).toHaveBeenCalledWith("draft-1", expect.objectContaining({
-      semanticKey: "duration_seconds",
-      targetNode: "node-1",
-      targetInput: "duration",
-    }));
+    expect(serviceMocks.analyzeWorkflowImport).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.reanalyzeWorkflowImport).toHaveBeenCalledWith("draft-1");
+    expect(result.current.plan?.message).toBe("已刷新");
+    expect(useWorkflowOnboardingStore.getState().draft?.draftId).toBe("draft-1");
     expect(serviceMocks.commitWorkflowImport).not.toHaveBeenCalled();
+  });
+
+  it("resolves an input ambiguity in place and refreshes the same draft", async () => {
+    const issue: WorkflowAutoIssueView = {
+      code: "AMBIGUOUS_INPUT",
+      field: "duration_seconds",
+      message: "choose",
+      candidates: [{ label: "duration", nodeId: "node-1", inputName: "duration", fieldType: "integer" }],
+    };
+    const nextDraft: WorkflowOnboardingDraftView = {
+      ...draft,
+      inputMappings: [{
+        semanticKey: "duration_seconds",
+        fieldType: "integer",
+        label: "Duration",
+        required: true,
+        targetNode: "node-1",
+        targetInput: "duration",
+      }],
+    };
+    const nextPlan = plan({ issues: [], inputMappings: nextDraft.inputMappings, message: "识别完成，可以添加工作流。" });
+    serviceMocks.analyzeWorkflowImport.mockResolvedValue(plan({ issues: [issue], autoPublishable: false }));
+    serviceMocks.setOnboardingInputMapping.mockResolvedValue(nextDraft);
+    serviceMocks.reanalyzeWorkflowImport.mockResolvedValue(nextPlan);
+    serviceMocks.getOnboardingDraft
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce(nextDraft);
+    const { result } = renderHook(() => useWorkflowSmartImportController(options()));
+
+    await act(async () => { await result.current.smartImport(); });
+    await act(async () => { await result.current.resolveIssue(issue, issue.candidates[0]); });
+
+    expect(serviceMocks.setOnboardingInputMapping).toHaveBeenCalledWith("draft-1", expect.objectContaining({
+       semanticKey: "duration_seconds",
+       targetNode: "node-1",
+       targetInput: "duration",
+    }));
+    expect(serviceMocks.reanalyzeWorkflowImport).toHaveBeenCalledWith("draft-1");
+    expect(useWorkflowOnboardingStore.getState().draft).toEqual(nextDraft);
+    expect(result.current.plan?.issues).toEqual([]);
+    expect(useWorkflowOnboardingStore.getState().notice).toBe("识别完成，可以添加工作流。");
+    expect(serviceMocks.commitWorkflowImport).not.toHaveBeenCalled();
+  });
+
+  it("resolves an output ambiguity in place and preserves the selected output", async () => {
+    const issue: WorkflowAutoIssueView = {
+      code: "AMBIGUOUS_OUTPUT",
+      field: "output_1",
+      message: "choose",
+      candidates: [{ label: "video", nodeId: "node-1", outputId: "output_1", outputType: "video" }],
+    };
+    const nextDraft: WorkflowOnboardingDraftView = {
+      ...draft,
+      outputMappings: [{ outputId: "output_1", label: "video", type: "video", nodeId: "node-1", required: true }],
+    };
+    const nextPlan = plan({ issues: [], outputMappings: nextDraft.outputMappings, message: "识别完成，可以添加工作流。" });
+    serviceMocks.analyzeWorkflowImport.mockResolvedValue(plan({ issues: [issue], autoPublishable: false }));
+    serviceMocks.setOnboardingOutputMapping.mockResolvedValue(nextDraft);
+    serviceMocks.reanalyzeWorkflowImport.mockResolvedValue(nextPlan);
+    serviceMocks.getOnboardingDraft
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce(nextDraft);
+    const { result } = renderHook(() => useWorkflowSmartImportController(options()));
+
+    await act(async () => { await result.current.smartImport(); });
+    await act(async () => { await result.current.resolveIssue(issue, issue.candidates[0]); });
+
+    expect(serviceMocks.setOnboardingOutputMapping).toHaveBeenCalledWith("draft-1", {
+      outputId: "output_1",
+      label: "video",
+      type: "video",
+      nodeId: "node-1",
+      required: true,
+    });
+    expect(serviceMocks.reanalyzeWorkflowImport).toHaveBeenCalledWith("draft-1");
+    expect(useWorkflowOnboardingStore.getState().draft).toEqual(nextDraft);
+    expect(result.current.plan?.issues).toEqual([]);
   });
 
   it("commits NEW_VERSION with the exact existing workflow identity", async () => {
@@ -216,5 +311,23 @@ describe("useWorkflowSmartImportController", () => {
       workflowVersion: "1.0.1",
     }));
     expect(hookOptions.onAdvancedRequested).toHaveBeenLastCalledWith(draft);
+  });
+
+  it("refreshes Smart Import from the same draft after Advanced editing", async () => {
+    const nextDraft = { ...draft, manifest: { ...draft.manifest, name: "Edited Workflow" } };
+    serviceMocks.analyzeWorkflowImport.mockResolvedValue(plan());
+    serviceMocks.reanalyzeWorkflowImport.mockResolvedValue(plan({ metadata: nextDraft.manifest, message: "高级编辑已刷新" }));
+    serviceMocks.getOnboardingDraft
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce(nextDraft);
+    const { result } = renderHook(() => useWorkflowSmartImportController(options()));
+
+    await act(async () => { await result.current.smartImport(); });
+    await act(async () => { await result.current.reanalyzeCurrentDraft(); });
+
+    expect(serviceMocks.analyzeWorkflowImport).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.reanalyzeWorkflowImport).toHaveBeenCalledWith("draft-1");
+    expect(result.current.plan?.metadata.name).toBe("Edited Workflow");
+    expect(useWorkflowOnboardingStore.getState().draft).toEqual(nextDraft);
   });
 });

@@ -5,6 +5,7 @@ import {
   commitWorkflowImport,
   discardOnboarding,
   getOnboardingDraft,
+  reanalyzeWorkflowImport,
   rerecognizeWorkflow,
   setOnboardingInputMapping,
   setOnboardingMetadata,
@@ -115,15 +116,9 @@ export function useWorkflowSmartImportController({
         }
         setNotice(undefined);
       } else {
-        await onDiscardReplacedDraft(previousDraftId);
-        reset();
-        setLoading(true);
-        resetSession();
+        // Cancelling the picker must leave the current draft/session intact.
       }
     } catch (importErrorValue: unknown) {
-      await onDiscardReplacedDraft(previousDraftId);
-      reset();
-      resetSession();
       setError(undefined);
       setImportError(workflowImportErrorView(importErrorValue));
     } finally {
@@ -132,16 +127,18 @@ export function useWorkflowSmartImportController({
     }
   }, [busyRef, draft?.draftId, loading, onDiscardReplacedDraft, reset, resetSession, setDraft, setError, setLoading, setNotice]);
 
-  const resume = useCallback(async () => {
-    if (!plan) return;
+  const reanalyzeCurrentDraft = useCallback(async () => {
+    const draftId = plan?.draftId ?? draft?.draftId;
+    if (!draftId) return;
     await runDraftAction(async () => {
-      const nextPlan = await analyzeWorkflowImport(plan.existingWorkflowId);
-      if (!nextPlan) return;
+      const nextPlan = await reanalyzeWorkflowImport(draftId);
       setPlan(nextPlan);
-      if (nextPlan.draftId) setDraft(await getOnboardingDraft(nextPlan.draftId));
+      setDraft(await getOnboardingDraft(nextPlan.draftId));
       setNotice(nextPlan.message || "识别已刷新，请确认后再添加。");
     });
-  }, [plan, runDraftAction, setDraft, setNotice]);
+  }, [draft?.draftId, plan?.draftId, runDraftAction, setDraft, setNotice]);
+
+  const resume = reanalyzeCurrentDraft;
 
   const regenerateRecipe = useCallback(async () => {
     if (!plan?.existingWorkflowId || !plan.existingWorkflowVersion) return;
@@ -175,13 +172,14 @@ export function useWorkflowSmartImportController({
     if (!plan || !draft) return;
     await runDraftAction(async () => {
       if (issue.code === "AMBIGUOUS_OUTPUT" && candidate.nodeId && candidate.outputType) {
-        await setOnboardingOutputMapping(plan.draftId, {
+        const nextDraft = await setOnboardingOutputMapping(plan.draftId, {
           outputId: candidate.outputId ?? "output_1",
           label: candidate.label,
           type: candidate.outputType as "image" | "video",
           nodeId: candidate.nodeId,
           required: true,
         });
+        setDraft(nextDraft);
       } else if (candidate.nodeId && candidate.inputName) {
         const node = draft.nodes.find((item) => item.nodeId === candidate.nodeId);
         const input = node?.inputs.find((item) => item.name === candidate.inputName);
@@ -205,11 +203,20 @@ export function useWorkflowSmartImportController({
           targetNode: candidate.nodeId,
           targetInput: candidate.inputName,
         };
-        await setOnboardingInputMapping(plan.draftId, request);
+        const nextDraft = await setOnboardingInputMapping(plan.draftId, request);
+        setDraft(nextDraft);
+      } else {
+        return;
       }
-      setNotice("已记录这项选择，请重新分析工作流后再添加。");
+      const nextPlan = await reanalyzeWorkflowImport(plan.draftId);
+      setPlan(nextPlan);
+      setDraft(await getOnboardingDraft(nextPlan.draftId));
+      setNotice(nextPlan.issues.length
+        ? "已确认该参数，识别结果已更新。"
+        : "识别完成，可以添加工作流。",
+      );
     });
-  }, [draft, plan, runDraftAction, setNotice]);
+  }, [draft, plan, runDraftAction, setDraft, setNotice]);
 
   const commit = useCallback(async (action: WorkflowImportCommitAction = "NEW_WORKFLOW") => {
     if (!plan?.draftId) return;
@@ -308,6 +315,7 @@ export function useWorkflowSmartImportController({
     importError,
     smartImport,
     resume,
+    reanalyzeCurrentDraft,
     resolveIssue,
     regenerateRecipe,
     commit,

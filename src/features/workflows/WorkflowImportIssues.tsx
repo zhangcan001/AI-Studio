@@ -399,7 +399,7 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
         </div>
       )}
       <div className="workflow-smart-actions">
-        {waiting && <button type="button" onClick={onResume} disabled={loading}>{loading ? "正在检查..." : "继续自动确认"}</button>}
+        {waiting && <button type="button" onClick={onResume} disabled={loading}>{loading ? "正在检查..." : "继续检查"}</button>}
         {exactActive && <button type="button" onClick={onOpenExisting}>打开工作流</button>}
         {exactActive && plan.existingWorkflowId && onUseInProject && <button type="button" onClick={() => onUseInProject(plan.existingWorkflowId!, plan.existingRecipes?.[0]?.recipeId ?? plan.metadata.recipeId)}>用于当前项目</button>}
         {structuralVariant && <button type="button" onClick={() => onCommitImport ? onCommitImport("NEW_WORKFLOW") : onOpenAdvanced()}>添加为新工作流</button>}

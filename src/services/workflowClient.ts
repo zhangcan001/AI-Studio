@@ -140,6 +140,7 @@ export {
   recheckAllWorkflowCapabilities,
   removeWorkflow,
   renameWorkflow,
+  reanalyzeWorkflowImport,
   rerecognizeWorkflow,
   removeOnboardingInputMapping,
   restoreWorkflowVersion,

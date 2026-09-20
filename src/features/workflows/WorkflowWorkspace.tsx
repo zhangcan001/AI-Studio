@@ -358,6 +358,11 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     onBeforeOpen: advancedController.hideAdvanced,
   });
 
+  async function returnToSmartImport() {
+    advancedController.hideAdvanced();
+    await smartImportController.reanalyzeCurrentDraft();
+  }
+
   function resetImportViewForNewWorkflow() {
     reset();
     setLoading(true);
@@ -405,13 +410,9 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         );
         await loadWorkspace("refresh");
       } else {
-        await discardReplacedDraft(previousDraftId);
-        resetImportViewForNewWorkflow();
+        // Cancelling the picker must leave the current draft/session intact.
       }
     } catch (importError: unknown) {
-      await discardReplacedDraft(previousDraftId);
-      reset();
-      smartImportController.resetSession();
       setError(toUserMessage(importError));
     } finally {
       setLoading(false);
@@ -975,7 +976,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
               <p className="section-description">{draft.originalFilename} · {draft.nodeCount} 个节点 · {draft.uniqueClassCount} 种节点类型</p>
             </div>
             <div className="workflow-smart-actions">
-              <button type="button" className="quiet-button" onClick={advancedController.hideAdvanced}>返回智能导入</button>
+              <button type="button" className="quiet-button" onClick={() => void returnToSmartImport()}>返回智能导入</button>
               <button type="button" className="quiet-button" onClick={() => void advancedController.discardDraft()} disabled={loading}>丢弃草稿</button>
             </div>
           </div>

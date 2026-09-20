@@ -900,7 +900,14 @@ impl WorkflowOnboardingService {
         &self,
         draft_id: &str,
     ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
-        self.auto_confirm_internal(draft_id, false).await
+        self.auto_confirm_internal(draft_id, false, false).await
+    }
+
+    pub async fn reanalyze_draft(
+        &self,
+        draft_id: &str,
+    ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
+        self.auto_confirm_internal(draft_id, false, true).await
     }
 
     /// Re-read one logical Workflow from the Registry and create a fresh,
@@ -995,21 +1002,25 @@ impl WorkflowOnboardingService {
         &self,
         draft_id: &str,
     ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
-        self.auto_confirm_internal(draft_id, true).await
+        self.auto_confirm_internal(draft_id, true, false).await
     }
 
     async fn auto_confirm_internal(
         &self,
         draft_id: &str,
         allow_publish: bool,
+        preserve_user_metadata: bool,
     ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
         let initial = self.with_registry(|registry| registry.get(draft_id))??;
         let existing = self
             .existing_packages_for_identity(&initial.workflow_sha256, &initial.workflow)
             .await?;
-        let (inference, current) = self.run_current_inference(draft_id).await?;
+        let (inference, current) = self
+            .run_current_inference(draft_id, preserve_user_metadata)
+            .await?;
         let validation = validation_for_draft(&current);
-        let mut issues = inference.issues.clone();
+        let inference_issues = unresolved_inference_issues(&current, &inference.issues);
+        let mut issues = inference_issues.clone();
         issues.extend(auto_issues_from_capability(&current.capability));
         let has_ambiguous_required = issues.iter().any(|issue| {
             matches!(
@@ -1025,7 +1036,7 @@ impl WorkflowOnboardingService {
             validation.ready_to_publish && !has_ambiguous_required && issues.is_empty();
         let auto_importable = importable_validation(&validation)
             && !has_ambiguous_required
-            && inference.issues.is_empty();
+            && inference_issues.is_empty();
 
         let explicit_structural_new_version = current.allow_existing_workflow_sha
             && existing
@@ -1290,6 +1301,7 @@ impl WorkflowOnboardingService {
     async fn run_current_inference(
         &self,
         draft_id: &str,
+        preserve_user_metadata: bool,
     ) -> Result<(AutoInferenceResult, WorkflowOnboardingDraft), WorkflowOnboardingError> {
         let initial = self.with_registry(|registry| registry.get(draft_id))??;
         let (capability, enriched_nodes) = self.check_capability_for_workflow(&initial).await;
@@ -1333,9 +1345,11 @@ impl WorkflowOnboardingService {
             draft
                 .output_mappings
                 .sort_by(|left, right| left.output_id.cmp(&right.output_id));
-            draft.manifest.name = inference.name.clone();
-            draft.manifest.category = inference.category.clone();
-            draft.manifest.mode = inference.mode.clone();
+            if !preserve_user_metadata {
+                draft.manifest.name = inference.name.clone();
+                draft.manifest.category = inference.category.clone();
+                draft.manifest.mode = inference.mode.clone();
+            }
             Ok(())
         })??;
         let current = self.with_registry(|registry| registry.get(draft_id))??;
@@ -1749,7 +1763,7 @@ impl WorkflowOnboardingService {
             registry.insert(draft);
             Ok(())
         })??;
-        let (inference, current) = self.run_current_inference(&draft_id).await?;
+        let (inference, current) = self.run_current_inference(&draft_id, false).await?;
         let validation = validation_for_draft(&current);
         let mut issues = inference.issues.clone();
         issues.extend(auto_issues_from_capability(&current.capability));
@@ -1946,17 +1960,6 @@ impl WorkflowOnboardingService {
                     "one semantic key cannot use multiple field types",
                 ));
             }
-            if draft.input_mappings.iter().any(|existing| {
-                existing.semantic_key == request.semantic_key
-                    && existing.item_index == request.item_index
-                    && (existing.target_node != request.target_node
-                        || existing.target_input != request.target_input)
-            }) {
-                return Err(WorkflowOnboardingError::new(
-                    "MAPPING_DUPLICATE",
-                    "semantic key is already mapped for this item",
-                ));
-            }
             let min_items = if field_type.is_plural() {
                 request
                     .min_items
@@ -2068,16 +2071,9 @@ impl WorkflowOnboardingService {
                 node_id: request.node_id,
                 required: request.required,
             };
-            if draft
+            draft
                 .output_mappings
-                .iter()
-                .any(|existing| existing.output_id == request.output_id)
-            {
-                return Err(WorkflowOnboardingError::new(
-                    "OUTPUT_DUPLICATE",
-                    format!("output id {} is already mapped", request.output_id),
-                ));
-            }
+                .retain(|existing| existing.output_id != request.output_id);
             draft.output_mappings.push(output);
             draft
                 .output_mappings
@@ -2911,6 +2907,59 @@ fn auto_plan_for_draft(
 fn infer_auto_onboarding(draft: &WorkflowOnboardingDraft) -> AutoInferenceResult {
     let analysis = analysis_for_draft(draft);
     auto_inference_from_analysis(draft, &analysis)
+}
+
+fn unresolved_inference_issues(
+    draft: &WorkflowOnboardingDraft,
+    issues: &[WorkflowAutoIssueView],
+) -> Vec<WorkflowAutoIssueView> {
+    issues
+        .iter()
+        .filter(|issue| !inference_issue_resolved_by_mapping(draft, issue))
+        .cloned()
+        .collect()
+}
+
+fn inference_issue_resolved_by_mapping(
+    draft: &WorkflowOnboardingDraft,
+    issue: &WorkflowAutoIssueView,
+) -> bool {
+    let Some(field) = issue.field.as_deref() else {
+        return false;
+    };
+
+    match issue.code.as_str() {
+        "AMBIGUOUS_INPUT"
+        | "UNKNOWN_INPUT"
+        | "AMBIGUOUS_DURATION_SOURCE"
+        | "FLOAT_INPUT_NEEDS_REVIEW" => draft
+            .input_mappings
+            .iter()
+            .filter(|mapping| mapping.semantic_key == field)
+            .any(|mapping| {
+                issue.candidates.is_empty()
+                    || issue.candidates.iter().any(|candidate| {
+                        candidate.node_id.as_deref() == Some(mapping.target_node.as_str())
+                            && candidate.input_name.as_deref()
+                                == Some(mapping.target_input.as_str())
+                    })
+            }),
+        "AMBIGUOUS_OUTPUT" | "UNKNOWN_OUTPUT" => draft
+            .output_mappings
+            .iter()
+            .filter(|mapping| mapping.output_id == field)
+            .any(|mapping| {
+                issue.candidates.is_empty()
+                    || issue.candidates.iter().any(|candidate| {
+                        candidate
+                            .output_id
+                            .as_deref()
+                            .is_none_or(|output_id| output_id == mapping.output_id)
+                            && candidate.node_id.as_deref() == Some(mapping.node_id.as_str())
+                    })
+            }),
+        _ => false,
+    }
 }
 
 fn analysis_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowAnalysisReport {
@@ -6667,6 +6716,97 @@ outputs: []
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn reanalyze_draft_preserves_user_mapping_and_metadata() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("library");
+        let staging_root = directory.path().join("staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let service = WorkflowOnboardingService::new(
+            source.clone(),
+            Arc::new(StubComfyAdapter::ready()),
+            Arc::new(WorkflowLibraryService::new(
+                source,
+                Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+                Arc::new(TestClock),
+            )),
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root,
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        );
+        let raw = br#"{
+            "1":{"inputs":{"prompt_a":"first","prompt_b":"second"},"class_type":"Sampler"},
+            "2":{"inputs":{"images":["1",0]},"class_type":"SaveImage","output_node":true}
+        }"#
+        .to_vec();
+        let imported = service
+            .import_bytes(raw, "ambiguous.json".to_owned(), None)
+            .await
+            .unwrap();
+        let initial = service.reanalyze_draft(&imported.draft_id).await.unwrap();
+        assert!(initial
+            .issues
+            .iter()
+            .any(|issue| issue.code == "AMBIGUOUS_INPUT"));
+
+        let mapping = |target_input: &str| WorkflowOnboardingInputMappingRequest {
+            semantic_key: "prompt".to_owned(),
+            field_type: "textarea".to_owned(),
+            label: "Prompt".to_owned(),
+            required: true,
+            default_value: None,
+            min_value: None,
+            max_value: None,
+            step: None,
+            min_items: None,
+            max_items: None,
+            target_node: "1".to_owned(),
+            target_input: target_input.to_owned(),
+            item_index: None,
+        };
+        service
+            .set_input_mapping(&imported.draft_id, mapping("prompt_a"))
+            .unwrap();
+        service
+            .set_input_mapping(&imported.draft_id, mapping("prompt_b"))
+            .expect("user mapping should replace the previous mapping for the same field");
+        service
+            .set_metadata(
+                &imported.draft_id,
+                WorkflowOnboardingMetadataRequest {
+                    workflow_id: None,
+                    name: "User Workflow".to_owned(),
+                    workflow_version: "1.0.0".to_owned(),
+                    recipe_version: "1.0.0".to_owned(),
+                    category: "video".to_owned(),
+                    mode: "custom_video".to_owned(),
+                },
+            )
+            .unwrap();
+
+        let refreshed = service.reanalyze_draft(&imported.draft_id).await.unwrap();
+        let prompt = refreshed
+            .input_mappings
+            .iter()
+            .find(|mapping| mapping.semantic_key == "prompt")
+            .expect("selected prompt mapping should remain in the plan");
+        assert_eq!(refreshed.draft_id, imported.draft_id);
+        assert_eq!(prompt.target_node, "1");
+        assert_eq!(prompt.target_input, "prompt_b");
+        assert_eq!(refreshed.metadata.name, "User Workflow");
+        assert_eq!(refreshed.metadata.category, "video");
+        assert!(refreshed
+            .issues
+            .iter()
+            .all(|issue| issue.code != "AMBIGUOUS_INPUT"));
     }
 
     #[tokio::test]

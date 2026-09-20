@@ -230,6 +230,28 @@ describe("WorkflowImportIssues", () => {
     expect(screen.getByText(/候选.*available\.safetensors/)).toBeTruthy();
   });
 
+  it("等待 ComfyUI 时把恢复动作标为继续检查并委托当前 session", async () => {
+    const user = userEvent.setup();
+    const onResume = vi.fn();
+    render(
+      <WorkflowImportIssues
+        plan={planWithIssues([], {
+          state: "WAITING_FOR_COMFY_UI",
+          capability: { state: "COMFY_OFFLINE", issues: [] },
+        })}
+        loading={false}
+        onResolve={vi.fn()}
+        onResume={onResume}
+        onOpenAdvanced={vi.fn()}
+        onOpenExisting={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "继续检查" }));
+    expect(onResume).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "继续自动确认" })).toBeNull();
+  });
+
   it("Recipe 过期时保留现有身份、语义匹配诊断和重新生成入口", async () => {
     const user = userEvent.setup();
     const onRegenerateRecipe = vi.fn();
