@@ -4,9 +4,12 @@ use crate::application::{
         WorkflowPackageFiles, WorkflowPackageLoad, WorkflowPackageStore, WorkflowRunRepository,
         WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
-    workflow_analysis_service::{WorkflowAnalysisReport, WorkflowAnalysisService},
+    workflow_analysis_service::{
+        RecognitionEvidence, WorkflowAnalysisReport, WorkflowAnalysisService,
+    },
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
+    workflow_recognition_schema::RecognitionSchemaContext,
     workflow_recognition_service::{
         structural_workflow_sha256, RuntimeCapabilityState, RuntimeCapabilitySummary,
         WorkflowRecognitionReport, WorkflowRecognitionService,
@@ -448,6 +451,9 @@ pub struct WorkflowAutoIssueCandidateView {
     pub output_id: Option<String>,
     pub output_type: Option<String>,
     pub field_type: Option<String>,
+    pub reason: String,
+    pub score: i32,
+    pub evidence: Vec<RecognitionEvidence>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1304,10 +1310,75 @@ impl WorkflowOnboardingService {
         preserve_user_metadata: bool,
     ) -> Result<(AutoInferenceResult, WorkflowOnboardingDraft), WorkflowOnboardingError> {
         let initial = self.with_registry(|registry| registry.get(draft_id))??;
-        let (capability, enriched_nodes) = self.check_capability_for_workflow(&initial).await;
+        let static_analysis =
+            || WorkflowAnalysisService::analyze_workflow(&initial.workflow, &initial.raw_bytes);
+        let (capability, enriched_nodes, analysis) =
+            match self.comfy_adapter.get_object_info().await {
+                Ok(object) if object.is_object() => {
+                    let schema = RecognitionSchemaContext::parse(&object);
+                    let mut nodes = initial.nodes.clone();
+                    enrich_nodes_with_schema(&mut nodes, &schema);
+                    let capability = evaluate_capability_with_schema(
+                        &initial.workflow,
+                        &nodes,
+                        &schema,
+                        &BTreeSet::new(),
+                    );
+                    let analysis = WorkflowAnalysisService::analyze_workflow_with_schema(
+                        &initial.workflow,
+                        &initial.raw_bytes,
+                        Some(&schema),
+                    );
+                    (capability, Some(nodes), analysis)
+                }
+                Ok(_) => (
+                    CapabilityCheckView {
+                        state: CapabilityState::IncompatibleInputValues,
+                        checked_at: Some(self.clock.now().to_rfc3339()),
+                        issues: vec![CapabilityIssueView {
+                            code: "COMFY_PROTOCOL_ERROR".to_owned(),
+                            class_type: None,
+                            node_id: None,
+                            affected_node_ids: Vec::new(),
+                            input_name: None,
+                            current_value: None,
+                            message: "ComfyUI object_info response is not an object".to_owned(),
+                        }],
+                    },
+                    None,
+                    static_analysis(),
+                ),
+                Err(ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_)) => (
+                    CapabilityCheckView {
+                        state: CapabilityState::ComfyOffline,
+                        checked_at: Some(self.clock.now().to_rfc3339()),
+                        issues: Vec::new(),
+                    },
+                    None,
+                    static_analysis(),
+                ),
+                Err(error) => (
+                    CapabilityCheckView {
+                        state: CapabilityState::IncompatibleInputValues,
+                        checked_at: Some(self.clock.now().to_rfc3339()),
+                        issues: vec![CapabilityIssueView {
+                            code: "COMFY_PROTOCOL_ERROR".to_owned(),
+                            class_type: None,
+                            node_id: None,
+                            affected_node_ids: Vec::new(),
+                            input_name: None,
+                            current_value: None,
+                            message: error.to_string(),
+                        }],
+                    },
+                    None,
+                    static_analysis(),
+                ),
+            };
         self.with_registry(|registry| {
             let draft = registry.get_mut(draft_id)?;
             draft.capability = capability.clone();
+            draft.analysis = Some(analysis);
             draft.recognition = draft
                 .recognition
                 .clone()
@@ -2161,16 +2232,26 @@ impl WorkflowOnboardingService {
         recipe: &Recipe,
         object_info: &Value,
     ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
+        let schema = RecognitionSchemaContext::parse(object_info);
+        self.check_runtime_workflow_with_recipe_and_schema(workflow_json, recipe, &schema)
+    }
+
+    fn check_runtime_workflow_with_recipe_and_schema(
+        &self,
+        workflow_json: &str,
+        recipe: &Recipe,
+        schema: &RecognitionSchemaContext,
+    ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
         let workflow =
             validate_api_workflow(serde_json::from_str(workflow_json).map_err(|error| {
                 WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
             })?)?;
         let nodes = inspect_workflow(&workflow)?;
         let dynamic_binding_targets = dynamic_binding_targets(recipe);
-        Ok(evaluate_capability_with_dynamic_targets(
+        Ok(evaluate_capability_with_schema(
             &workflow,
             &nodes,
-            object_info,
+            schema,
             &dynamic_binding_targets,
         ))
     }
@@ -2186,15 +2267,21 @@ impl WorkflowOnboardingService {
             return Ok(Vec::new());
         }
         let object_info = self.comfy_adapter.get_object_info().await;
+        let schema = match &object_info {
+            Ok(object) if object.is_object() => Some(RecognitionSchemaContext::parse(object)),
+            _ => None,
+        };
         workflows
             .iter()
             .map(|input| {
                 let capability = match &object_info {
                     Ok(object) if object.is_object() => self
-                        .check_runtime_workflow_with_recipe_and_object_info(
+                        .check_runtime_workflow_with_recipe_and_schema(
                             &input.workflow_json,
                             &input.recipe,
-                            object,
+                            schema
+                                .as_ref()
+                                .expect("schema exists for object_info object"),
                         )?,
                     Ok(_) => CapabilityCheckView {
                         state: CapabilityState::IncompatibleInputValues,
@@ -2470,6 +2557,9 @@ impl WorkflowOnboardingService {
             Err(ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_)) => (None, true),
             Err(_) => (None, false),
         };
+        let capability_schema = capability_object
+            .as_ref()
+            .map(RecognitionSchemaContext::parse);
         let mut views = Vec::new();
         for package in packages {
             let WorkflowPackageLoad::Loaded(files) = package else {
@@ -2496,9 +2586,9 @@ impl WorkflowOnboardingService {
                     checked_at: None,
                     issues: Vec::new(),
                 }
-            } else if let Some(object) = &capability_object {
-                enrich_nodes_with_capability(&mut nodes, object);
-                evaluate_capability(&workflow, &nodes, object)
+            } else if let Some(schema) = &capability_schema {
+                enrich_nodes_with_schema(&mut nodes, schema);
+                evaluate_capability_with_schema(&workflow, &nodes, schema, &BTreeSet::new())
             } else {
                 CapabilityCheckView {
                     state: CapabilityState::IncompatibleInputValues,
@@ -2650,13 +2740,14 @@ impl WorkflowOnboardingService {
     ) -> (CapabilityCheckView, Option<Vec<WorkflowNodeView>>) {
         match self.comfy_adapter.get_object_info().await {
             Ok(object) if object.is_object() => {
+                let schema = RecognitionSchemaContext::parse(&object);
                 let mut nodes = draft.nodes.clone();
-                enrich_nodes_with_capability(&mut nodes, &object);
+                enrich_nodes_with_schema(&mut nodes, &schema);
                 (
-                    evaluate_capability_with_dynamic_targets(
+                    evaluate_capability_with_schema(
                         &draft.workflow,
                         &nodes,
-                        &object,
+                        &schema,
                         dynamic_binding_targets,
                     ),
                     Some(nodes),
@@ -3045,6 +3136,9 @@ fn auto_inference_from_analysis(
                     output_id: candidate.output_id.clone(),
                     output_type: candidate.output_type.clone(),
                     field_type: candidate.field_type.clone(),
+                    reason: candidate.reason.clone(),
+                    score: candidate.score,
+                    evidence: candidate.evidence.clone(),
                 })
                 .collect(),
         })
@@ -4261,7 +4355,8 @@ fn evaluate_capability(
     nodes: &[WorkflowNodeView],
     object_info: &Value,
 ) -> CapabilityCheckView {
-    evaluate_capability_with_dynamic_targets(workflow, nodes, object_info, &BTreeSet::new())
+    let schema = RecognitionSchemaContext::parse(object_info);
+    evaluate_capability_with_schema(workflow, nodes, &schema, &BTreeSet::new())
 }
 
 fn evaluate_capability_with_dynamic_targets(
@@ -4270,35 +4365,26 @@ fn evaluate_capability_with_dynamic_targets(
     object_info: &Value,
     dynamic_binding_targets: &BTreeSet<(String, String)>,
 ) -> CapabilityCheckView {
-    let Some(object) = object_info.as_object() else {
-        return CapabilityCheckView {
-            state: CapabilityState::IncompatibleInputValues,
-            checked_at: Some(chrono::Utc::now().to_rfc3339()),
-            issues: vec![CapabilityIssueView {
-                code: "COMFY_PROTOCOL_ERROR".to_owned(),
-                class_type: None,
-                node_id: None,
-                affected_node_ids: Vec::new(),
-                input_name: None,
-                current_value: None,
-                message: "ComfyUI object_info was not a JSON object".to_owned(),
-            }],
-        };
-    };
+    let schema = RecognitionSchemaContext::parse(object_info);
+    evaluate_capability_with_schema(workflow, nodes, &schema, dynamic_binding_targets)
+}
+
+fn evaluate_capability_with_schema(
+    workflow: &WorkflowDocument,
+    nodes: &[WorkflowNodeView],
+    schema: &RecognitionSchemaContext,
+    dynamic_binding_targets: &BTreeSet<(String, String)>,
+) -> CapabilityCheckView {
     let mut issues = Vec::new();
     let mut missing_by_class: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for node in nodes {
-        if !object.contains_key(&node.class_type) {
+        let Some(node_schema) = schema.node(&node.class_type) else {
             missing_by_class
                 .entry(node.class_type.clone())
                 .or_default()
                 .push(node.node_id.clone());
             continue;
-        }
-        let capability = object.get(&node.class_type).and_then(Value::as_object);
-        let input_meta = capability
-            .and_then(|node| node.get("input"))
-            .and_then(Value::as_object);
+        };
         let Some(workflow_inputs) = workflow.inputs(&node.node_id) else {
             continue;
         };
@@ -4306,42 +4392,36 @@ fn evaluate_capability_with_dynamic_targets(
             if possible_link(value).is_some() {
                 continue;
             }
-            let Some(spec) = find_input_spec(input_meta, input_name) else {
-                continue;
-            };
-            let Some(spec_array) = spec.as_array() else {
+            let Some(input_schema) = node_schema.input(input_name) else {
                 continue;
             };
             let is_dynamic_binding_target =
                 dynamic_binding_targets.contains(&(node.node_id.clone(), input_name.clone()));
-            if !is_dynamic_binding_target {
-                let options = spec_array.first().and_then(Value::as_array);
-                if let Some(options) = options {
-                    if let Some(current) = value.as_str() {
-                        let available = options
-                            .iter()
-                            .any(|option| option.as_str() == Some(current));
-                        if !available {
-                            issues.push(CapabilityIssueView {
-                                code: "INPUT_OPTION_UNAVAILABLE".to_owned(),
-                                class_type: Some(node.class_type.clone()),
-                                node_id: Some(node.node_id.clone()),
-                                affected_node_ids: Vec::new(),
-                                input_name: Some(input_name.clone()),
-                                current_value: Some(current.to_owned()),
-                                message: "Current ComfyUI does not offer this workflow value."
-                                    .to_owned(),
-                            });
-                        }
+            if !is_dynamic_binding_target && !input_schema.enum_options.is_empty() {
+                if let Some(current) = value.as_str() {
+                    if !input_schema
+                        .enum_options
+                        .iter()
+                        .any(|option| option == current)
+                    {
+                        issues.push(CapabilityIssueView {
+                            code: "INPUT_OPTION_UNAVAILABLE".to_owned(),
+                            class_type: Some(node.class_type.clone()),
+                            node_id: Some(node.node_id.clone()),
+                            affected_node_ids: Vec::new(),
+                            input_name: Some(input_name.clone()),
+                            current_value: Some(current.to_owned()),
+                            message: "Current ComfyUI does not offer this workflow value."
+                                .to_owned(),
+                        });
                     }
                 }
             }
-            if let Some(constraints) = spec_array.get(1).and_then(Value::as_object) {
+            if !is_dynamic_binding_target {
                 let current = value.as_f64();
                 if let Some(current) = current {
-                    let min = constraints.get("min").and_then(Value::as_f64);
-                    let max = constraints.get("max").and_then(Value::as_f64);
-                    if min.is_some_and(|min| current < min) || max.is_some_and(|max| current > max)
+                    if input_schema.numeric_min.is_some_and(|min| current < min)
+                        || input_schema.numeric_max.is_some_and(|max| current > max)
                     {
                         issues.push(CapabilityIssueView {
                             code: "INPUT_VALUE_OUT_OF_RANGE".to_owned(),
@@ -4350,9 +4430,8 @@ fn evaluate_capability_with_dynamic_targets(
                             affected_node_ids: Vec::new(),
                             input_name: Some(input_name.clone()),
                             current_value: Some(current_value_summary(value)),
-                            message: format!(
-                                "Workflow value is outside the current ComfyUI range."
-                            ),
+                            message: "Workflow value is outside the current ComfyUI range."
+                                .to_owned(),
                         });
                     }
                 }
@@ -4385,60 +4464,37 @@ fn evaluate_capability_with_dynamic_targets(
 }
 
 fn enrich_nodes_with_capability(nodes: &mut [WorkflowNodeView], object_info: &Value) {
-    let Some(object) = object_info.as_object() else {
-        return;
-    };
+    let schema = RecognitionSchemaContext::parse(object_info);
+    enrich_nodes_with_schema(nodes, &schema);
+}
+
+fn enrich_nodes_with_schema(nodes: &mut [WorkflowNodeView], schema: &RecognitionSchemaContext) {
     for node in nodes {
-        let Some(capability) = object.get(&node.class_type).and_then(Value::as_object) else {
+        let Some(node_schema) = schema.node(&node.class_type) else {
             continue;
         };
-        if capability
-            .get("output_node")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
+        if node_schema.output_node {
             node.is_output_node = true;
         }
-        let input_meta = capability.get("input").and_then(Value::as_object);
         for input in &mut node.inputs {
-            let Some(spec) = find_input_spec(input_meta, &input.name) else {
+            let Some(input_schema) = node_schema.input(&input.name) else {
                 continue;
             };
-            let Some(spec_array) = spec.as_array() else {
-                continue;
-            };
-            if let Some(options) = spec_array.first().and_then(Value::as_array) {
-                input.allowed_options = options
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(sanitize_display_value)
-                    .take(128)
-                    .collect();
-            }
-            if let Some(constraints) = spec_array.get(1).and_then(Value::as_object) {
-                input.numeric_min = constraints
-                    .get("min")
-                    .and_then(number_or_string)
-                    .map(|value| value);
-                input.numeric_max = constraints
-                    .get("max")
-                    .and_then(number_or_string)
-                    .map(|value| value);
-                input.numeric_step = constraints
-                    .get("step")
-                    .and_then(number_or_string)
-                    .map(|value| value);
-            }
+            input.allowed_options = input_schema
+                .enum_options
+                .iter()
+                .map(|value| sanitize_display_value(value))
+                .take(128)
+                .collect();
+            input.numeric_min = input_schema.numeric_min.map(schema_number_string);
+            input.numeric_max = input_schema.numeric_max.map(schema_number_string);
+            input.numeric_step = input_schema.numeric_step.map(schema_number_string);
         }
     }
 }
 
-fn number_or_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) => Some(value.clone()),
-        Value::Number(value) => Some(value.to_string()),
-        _ => None,
-    }
+fn schema_number_string(value: f64) -> String {
+    value.to_string()
 }
 
 fn validate_mapping_bounds(
@@ -4560,21 +4616,6 @@ fn validate_numeric_mapping_bounds(
         ));
     }
     Ok(())
-}
-
-fn find_input_spec<'a>(
-    input_meta: Option<&'a Map<String, Value>>,
-    name: &str,
-) -> Option<&'a Value> {
-    input_meta.and_then(|meta| {
-        ["required", "optional", "hidden"]
-            .iter()
-            .find_map(|section| {
-                meta.get(*section)
-                    .and_then(Value::as_object)
-                    .and_then(|values| values.get(name))
-            })
-    })
 }
 
 fn validate_mapping_value(
@@ -5588,6 +5629,37 @@ mod tests {
     }
 
     #[test]
+    fn schema_capability_helpers_use_normalized_context() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {"inputs": {"sampler": "not_available", "steps": 4}, "class_type": "Sampler"}
+        }))
+        .unwrap();
+        let object_info = json!({
+            "Sampler": {
+                "output_node": true,
+                "input": {"required": {
+                    "sampler": [["euler", "ddim"], {}],
+                    "steps": ["INT", {"min": 1, "max": 10}]
+                }}
+            }
+        });
+        let schema = RecognitionSchemaContext::parse(&object_info);
+        let mut nodes = inspect_workflow(&workflow).unwrap();
+
+        enrich_nodes_with_schema(&mut nodes, &schema);
+        assert!(nodes[0].is_output_node);
+        assert_eq!(nodes[0].inputs[0].allowed_options, vec!["euler", "ddim"]);
+        assert_eq!(nodes[0].inputs[1].numeric_min.as_deref(), Some("1"));
+
+        let report = evaluate_capability_with_schema(&workflow, &nodes, &schema, &BTreeSet::new());
+        assert_eq!(report.state, CapabilityState::IncompatibleInputValues);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "INPUT_OPTION_UNAVAILABLE"));
+    }
+
+    #[test]
     fn dynamic_recipe_target_allows_optional_placeholder_but_static_missing_file_fails() {
         let object_info = json!({
             "LoadImage": {"input": {"required": {
@@ -6260,6 +6332,65 @@ outputs: []
 
         assert_eq!(checked.len(), 10);
         assert_eq!(adapter.object_info_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn reanalysis_fetches_object_info_once_and_reuses_schema_for_analysis() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("library");
+        let staging_root = directory.path().join("staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let adapter = Arc::new(StubComfyAdapter::ready());
+        let service = WorkflowOnboardingService::new(
+            source.clone(),
+            adapter.clone(),
+            Arc::new(WorkflowLibraryService::new(
+                source,
+                Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+                Arc::new(TestClock),
+            )),
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root,
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        );
+        let draft = service
+            .import_bytes(
+                br#"{
+                    "1":{"inputs":{"prompt":"hello"},"class_type":"Sampler"},
+                    "2":{"inputs":{"image":["1",0]},"class_type":"SaveImage"}
+                }"#
+                .to_vec(),
+                "schema-reuse.json".to_owned(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(adapter.object_info_calls(), 0);
+        let plan = service.reanalyze_draft(&draft.draft_id).await.unwrap();
+        assert_eq!(adapter.object_info_calls(), 1);
+        assert!(plan.analysis.as_ref().is_some_and(|analysis| {
+            analysis.inputs.iter().any(|input| {
+                input.semantic_key == "prompt"
+                    && input
+                        .evidence
+                        .iter()
+                        .any(|evidence| {
+                            evidence.kind
+                                == crate::application::workflow_analysis_service::EvidenceKind::SCHEMA_TYPE_MATCH
+                        })
+            })
+        }));
+        assert!(plan
+            .inferences
+            .iter()
+            .any(|inference| inference.field == "prompt"));
     }
 
     #[test]

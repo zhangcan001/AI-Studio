@@ -25,6 +25,32 @@ export type WorkflowSourceKind = "PRODUCT" | "USER";
 export type WorkflowLibraryState = "ACTIVE" | "REMOVED";
 export type WorkflowImportCommitAction = "NEW_WORKFLOW" | "NEW_VERSION" | "NEW_RECIPE" | "RESTORE_EXISTING";
 
+export type WorkflowRecognitionEvidenceKind =
+  | "EXACT_INPUT_NAME"
+  | "INPUT_NAME_ALIAS"
+  | "GRAPH_DIRECT_SINK"
+  | "GRAPH_OUTPUT_PATH"
+  | "SCHEMA_TYPE_MATCH"
+  | "SCHEMA_TYPE_CONFLICT"
+  | "MEDIA_TYPE_MATCH"
+  | "CLASS_TYPE_HINT"
+  | "NODE_TITLE_HINT"
+  | "LITERAL_TYPE_MATCH"
+  | "NUMERIC_RANGE_MATCH"
+  | "OFF_OUTPUT_PATH"
+  | "UTILITY_NODE"
+  | "OUTPUT_NODE_FLAG"
+  | "TERMINAL_OUTPUT"
+  | "PREVIEW_OUTPUT"
+  | "AUXILIARY_OUTPUT"
+  | string;
+
+export interface WorkflowRecognitionEvidenceView {
+  kind: WorkflowRecognitionEvidenceKind;
+  reason: string;
+  weight: number;
+}
+
 export interface WorkflowImportCommitRequest {
   draftId: string;
   action: WorkflowImportCommitAction;
@@ -67,19 +93,40 @@ export interface WorkflowRecognitionInputView {
   inputName: string;
   itemIndex?: number;
   confidence: "HIGH" | "MEDIUM" | "LOW" | string;
+  value?: unknown;
+  source?: string;
+  score?: number;
+  evidence?: WorkflowRecognitionEvidenceView[];
 }
 
 export interface WorkflowRecognitionOutputView {
   outputId: string;
   type: "image" | "video" | string;
   nodeId: string;
+  label?: string;
   required: boolean;
   confidence: "HIGH" | "MEDIUM" | "LOW" | string;
+  score?: number;
+  evidence?: WorkflowRecognitionEvidenceView[];
+}
+
+export interface WorkflowRecognitionIssueCandidateView {
+  label: string;
+  nodeId?: string;
+  inputName?: string;
+  outputId?: string;
+  outputType?: string;
+  fieldType?: string;
+  reason?: string;
+  score?: number;
+  evidence?: WorkflowRecognitionEvidenceView[];
 }
 
 export interface WorkflowRecognitionIssueView {
   code: string;
   message: string;
+  field?: string;
+  candidates?: WorkflowRecognitionIssueCandidateView[];
 }
 
 export interface WorkflowRecognitionReportView {
@@ -280,6 +327,9 @@ export interface WorkflowAutoIssueCandidateView {
   outputId?: string;
   outputType?: "image" | "video" | string;
   fieldType?: WorkflowFieldType | string;
+  reason?: string;
+  score?: number;
+  evidence?: WorkflowRecognitionEvidenceView[];
 }
 
 export interface WorkflowAutoIssueView {
