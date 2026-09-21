@@ -1977,6 +1977,7 @@ async fn dev084_recheck_capability_survives_registry_reload() {
                 state: CapabilityState::Ready,
                 checked_at: Some("2026-01-01T00:00:00Z".to_owned()),
                 issues: Vec::new(),
+                profile: None,
             },
         )
         .await

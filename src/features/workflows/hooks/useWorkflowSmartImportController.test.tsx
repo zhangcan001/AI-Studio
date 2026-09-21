@@ -191,6 +191,22 @@ describe("useWorkflowSmartImportController", () => {
     expect(serviceMocks.commitWorkflowImport).not.toHaveBeenCalled();
   });
 
+  it("retains a pending UI draft instead of discarding it as a format error", async () => {
+    serviceMocks.analyzeWorkflowImport.mockResolvedValue(plan({
+      sourceFormat: "UI",
+      normalizationState: "UI_SOURCE_PENDING",
+      state: "WAITING_FOR_COMFY_UI",
+      capability: { state: "COMFY_OFFLINE", issues: [] },
+    }));
+    const { result } = renderHook(() => useWorkflowSmartImportController(options()));
+
+    await act(async () => { await result.current.smartImport(); });
+
+    expect(serviceMocks.getOnboardingDraft).toHaveBeenCalledWith("draft-1");
+    expect(useWorkflowOnboardingStore.getState().draft).toEqual(draft);
+    expect(result.current.plan?.normalizationState).toBe("UI_SOURCE_PENDING");
+  });
+
   it("resolves an input ambiguity in place and refreshes the same draft", async () => {
     const issue: WorkflowAutoIssueView = {
       code: "AMBIGUOUS_INPUT",

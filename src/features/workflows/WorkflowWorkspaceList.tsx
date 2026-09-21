@@ -242,6 +242,9 @@ function formatCapability(value: string): string {
   if (normalized === "READY") return "就绪";
   if (normalized === "MISSING_NODES") return "缺少节点";
   if (normalized === "COMFY_OFFLINE" || normalized === "OFFLINE") return "ComfyUI 离线";
+  if (normalized === "UNKNOWN_OUTPUT_ROOT") return "无法确定输出节点";
+  if (normalized === "AMBIGUOUS_OUTPUT_ROOT") return "输出节点有歧义";
+  if (normalized === "PARTIALLY_SUPPORTED") return "部分输出根不可用";
   if (normalized.includes("INCOMPATIBLE")) return "参数不兼容";
   if (normalized === "NOT_CHECKED") return "待检查";
   return value || "未知";

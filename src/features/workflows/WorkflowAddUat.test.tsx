@@ -316,6 +316,26 @@ describe("DEV-079 添加工作流前端 UAT", () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  it("UI JSON 规范化完成后进入识别确认，而不是再次显示 API 导出指引", () => {
+    render(
+      <WorkflowSmartImport
+        plan={plan({
+          state: "NEEDS_REVIEW",
+          sourceFormat: "UI",
+          normalizationState: "NORMALIZED_API_READY",
+          autoPublishable: false,
+          commitRequired: true,
+          published: undefined,
+        })}
+        {...smartImportProps()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "识别完成" })).toBeTruthy();
+    expect(screen.queryByText("检测到 ComfyUI 普通工作流 JSON")).toBeNull();
+  });
+
   it("识别非 API 工作流状态时显示单独的 API 导出说明", () => {
     const props = smartImportProps();
 

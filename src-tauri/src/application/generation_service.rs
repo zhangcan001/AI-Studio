@@ -655,7 +655,11 @@ impl GenerationService {
                 Ok(capability)
                     if matches!(
                         capability.state,
-                        CapabilityState::MissingNodes | CapabilityState::IncompatibleInputValues
+                        CapabilityState::MissingNodes
+                            | CapabilityState::IncompatibleInputValues
+                            | CapabilityState::UnknownOutputRoot
+                            | CapabilityState::AmbiguousOutputRoot
+                            | CapabilityState::PartiallySupported
                     ) =>
                 {
                     let error = ComfyAdapterError::WorkflowValidation {

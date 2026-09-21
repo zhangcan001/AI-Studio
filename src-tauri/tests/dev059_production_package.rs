@@ -104,7 +104,8 @@ outputs: []
 const DEV080_WORKFLOW_ID: &str = "wfl_dev080_package_custom";
 const DEV080_WORKFLOW_VERSION_ID: &str = "wfv_dev080_package_custom";
 const DEV080_RECIPE_ID: &str = "rcp_dev080_package_custom";
-const DEV080_WORKFLOW_JSON: &str = r#"{"1":{"inputs":{},"class_type":"SaveVideo"}}"#;
+const DEV080_WORKFLOW_JSON: &str =
+    r#"{"1":{"inputs":{"format":"video/h264-mp4"},"class_type":"GenericMediaSink"}}"#;
 const DEV080_RECIPE_YAML: &str = r#"
 schema_version: 1
 id: rcp_dev080_package_custom
@@ -327,7 +328,7 @@ impl NoSubmitComfyAdapter {
     }
 
     fn runtime() -> Self {
-        Self::runtime_with_object_info(json!({"SaveVideo": {}}))
+        Self::runtime_with_object_info(json!({"GenericMediaSink": {}}))
     }
 
     fn runtime_with_object_info(object_info: Value) -> Self {
@@ -1492,7 +1493,7 @@ async fn dev080_custom_package_reaches_fake_comfy_after_start_admission() {
     let submitted_workflow = comfy.submitted_workflow();
     assert_eq!(
         submitted_workflow["1"]["class_type"],
-        Value::String("SaveVideo".to_owned())
+        Value::String("GenericMediaSink".to_owned())
     );
     let pair = sqlx::query_as::<_, (String, String)>(
         "SELECT workflow_version_id, recipe_id

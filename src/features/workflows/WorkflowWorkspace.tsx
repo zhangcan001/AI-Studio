@@ -1440,6 +1440,9 @@ function formatCapability(value: string): string {
     MISSING_NODES: "缺少节点",
     INCOMPATIBLE_INPUT_VALUES: "输入值不兼容",
     COMFY_OFFLINE: "ComfyUI 离线",
+    UNKNOWN_OUTPUT_ROOT: "无法确定输出节点",
+    AMBIGUOUS_OUTPUT_ROOT: "输出节点有歧义",
+    PARTIALLY_SUPPORTED: "部分输出根不可用",
     NOT_CHECKED: "尚未检查",
   }[value] ?? "未知状态";
 }

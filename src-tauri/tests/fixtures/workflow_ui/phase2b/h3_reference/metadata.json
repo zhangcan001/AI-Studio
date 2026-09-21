@@ -1,0 +1,84 @@
+{
+  "fixture_name": "h3_reference",
+  "fixture_kind": "real_golden_ui_api_pair",
+  "captured_at": "2026-09-20T12:16:53Z",
+  "source_environment": {
+    "endpoint": "http://127.0.0.1:8188",
+    "backend_version": "0.36.0",
+    "required_frontend_version": "1.52.7",
+    "installed_frontend_version": "1.52.7",
+    "python_version": "3.12.10",
+    "source_frontend_revision": null,
+    "source_frontend_revision_status": "not_exposed_by_local_frontend"
+  },
+  "workflow_format_version": "0.4",
+  "source_frontend_version": "1.52.7",
+  "source_frontend_version_from_workflow": "1.52.7",
+  "source_frontend_provenance": "extra.frontendVersion in real ComfyUI UI export",
+  "original_source_frontend_version": null,
+  "original_source_frontend_version_status": "not_present_in_original_local_workflow; fixture was re-exported by the real frontend",
+  "serialization_profile_version": "comfyui-frontend-export-profile-v1",
+  "normalizer_policy_version": "phase2b-normalizer-policy-v1",
+  "schema_fingerprint": "5943d25398b71b9c5732ba91dec59626218700d48419a0c828e9d5306795925b",
+  "schema_fingerprint_algorithm": "sha256(canonical_json_object_info_v1)",
+  "object_info_sha256": "97f19a63e4af8ba224dac1d356d414e168cfed32f6d211d5ba9880a8d66421b2",
+  "source_ui_workflow_path": "D:\\ComfyUI-WorkFisher-V2\\ComfyUI\\user\\default\\workflows\\minmaxh3\\MiniMax H3全能参考工作流.json",
+  "source_ui_workflow_sha256": "9709712ca0bc0086eda25d6825f22cb8004ae7ad7ae45d9314affedd65fc8f3b",
+  "exported_ui_sha256": "22c1566e974557652faeb1abbf4253914be4782d5e3df877fa510f942f90d707",
+  "api_export_sha256": "2ffd1747c9313bd6b361c1b1e76a12976db9dff33bc89773771aa01548f39ae4",
+  "expected_normalized_api_sha256": "2ffd1747c9313bd6b361c1b1e76a12976db9dff33bc89773771aa01548f39ae4",
+  "ui_export_method": "ComfyUI File > Export after loading the real local workflow",
+  "api_export_method": "ComfyUI File > Export (API) from the same loaded workflow session",
+  "object_info_method": "live GET /object_info from the same local ComfyUI environment",
+  "category": "video",
+  "mode": "image_to_video_reference",
+  "output_type": "video",
+  "expected_output": {
+    "node_id": "203",
+    "class_type": "SaveVideo",
+    "slot": 0,
+    "media_type": "video"
+  },
+  "expected_core_bindings": {
+    "prompt": {
+      "node_id": "213",
+      "input": "value"
+    },
+    "seed": {
+      "node_id": "195",
+      "input": "noise_seed"
+    },
+    "width": {
+      "node_id": "199",
+      "input": "width",
+      "source_node_id": "188",
+      "source_slot": 0
+    },
+    "height": {
+      "node_id": "199",
+      "input": "height",
+      "source_node_id": "188",
+      "source_slot": 1
+    },
+    "duration_seconds": {
+      "node_id": "199",
+      "input": "length",
+      "source_node_id": "204",
+      "source_slot": 1,
+      "value_source_node_id": "197"
+    },
+    "fps": {
+      "node_id": "196",
+      "input": "fps"
+    },
+    "reference_image_0": {
+      "node_id": "199",
+      "input": "ref_images.ref_image_0",
+      "source_node_id": "208",
+      "source_slot": 0
+    }
+  },
+  "expected_normalized_api_policy": "byte-identical trusted API export for Task 1; canonicalization policy is documented by normalizer_policy_version",
+  "same_environment_pair": true,
+  "same_workflow_pair": true
+}

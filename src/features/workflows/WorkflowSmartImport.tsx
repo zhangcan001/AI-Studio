@@ -33,11 +33,12 @@ interface Props {
 type PlanWithOptionalFormat = WorkflowAutoOnboardingPlanView & {
   format?: string;
   inputFormat?: string;
+  sourceFormat?: string;
 };
 
 export function workflowImportFormat(plan: WorkflowAutoOnboardingPlanView): WorkflowImportFormat | undefined {
   const candidate = plan as PlanWithOptionalFormat;
-  const value = String(candidate.format ?? candidate.inputFormat ?? "").trim().toUpperCase();
+  const value = String(candidate.format ?? candidate.inputFormat ?? candidate.sourceFormat ?? "").trim().toUpperCase();
   if (["API", "API_FORMAT"].includes(value)) return "API";
   if (["UI", "UI_FORMAT", "COMFY_UI"].includes(value)) return "UI";
   if (["NOT_API", "NOT_API_FORMAT", "WORKFLOW_NOT_API_FORMAT"].includes(value)) return "NOT_API";
@@ -86,7 +87,11 @@ export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume,
   }
   if (!plan) return null;
   const detectedFormat = workflowImportFormat(plan);
-  const detectedIssue = detectedFormat && detectedFormat !== "API" ? formatIssue(detectedFormat) : undefined;
+  const pendingNormalization = plan.normalizationState === "UI_SOURCE_PENDING";
+  const normalizedApiReady = plan.normalizationState === "NORMALIZED_API_READY";
+  const detectedIssue = !pendingNormalization && !normalizedApiReady && detectedFormat && detectedFormat !== "API"
+    ? formatIssue(detectedFormat)
+    : undefined;
   if (detectedIssue) {
     return <WorkflowImportFormatIssue issue={detectedIssue} loading={loading} onRetry={onRetry} onCancel={onReturnToList ?? onCancel} />;
   }

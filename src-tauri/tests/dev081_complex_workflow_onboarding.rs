@@ -743,15 +743,22 @@ async fn dev081_fixture_auto_onboarding_infers_production_bindings() {
 }
 
 #[tokio::test]
-async fn dev081_output_scoring_prefers_media_and_reports_ties() {
+async fn dev081_output_scoring_prefers_media_and_keeps_compatible_ties_resolved() {
     let fixture_plan = auto_plan(fixture_value(), "dev081_output_o1.json").await;
     assert_eq!(fixture_plan.output_mappings.len(), 1);
     assert_eq!(fixture_plan.output_mappings[0].node_id, "62");
     assert_eq!(fixture_plan.output_mappings[0].output_type, "video");
 
     let save_and_preview = json!({
-        "1": {"inputs": {}, "class_type": "SaveVideo"},
-        "2": {"inputs": {"video": ["1", 0]}, "class_type": "PreviewVideo"}
+        "1": {
+            "inputs": {"format": "video/h264-mp4"},
+            "class_type": "GenericMediaSink",
+            "output_node": true
+        },
+        "2": {
+            "inputs": {"video": ["1", 0]},
+            "class_type": "GenericPreviewSink"
+        }
     });
     let saved = auto_plan(save_and_preview, "dev081_output_o2.json").await;
     assert_eq!(saved.state, WorkflowAutoOnboardingState::AutoPublished);
@@ -759,25 +766,32 @@ async fn dev081_output_scoring_prefers_media_and_reports_ties() {
     assert_eq!(saved.output_mappings[0].output_type, "video");
 
     let tied = json!({
-        "1": {"inputs": {}, "class_type": "SaveVideo"},
-        "2": {"inputs": {}, "class_type": "SaveVideo"}
+        "1": {
+            "inputs": {"format": "video/h264-mp4"},
+            "class_type": "GenericMediaSink",
+            "output_node": true
+        },
+        "2": {
+            "inputs": {"format": "video/h264-mp4"},
+            "class_type": "GenericMediaSink",
+            "output_node": true
+        }
     });
-    let ambiguous = auto_plan(tied, "dev081_output_o3.json").await;
-    assert_eq!(ambiguous.state, WorkflowAutoOnboardingState::NeedsReview);
-    assert!(ambiguous.published.is_none());
-    assert!(ambiguous.issues.iter().any(|issue| {
-        issue.code == "AMBIGUOUS_OUTPUT"
-            && issue
-                .candidates
-                .iter()
-                .map(|candidate| candidate.node_id.as_deref())
-                .any(|node_id| node_id == Some("1"))
-            && issue
-                .candidates
-                .iter()
-                .map(|candidate| candidate.node_id.as_deref())
-                .any(|node_id| node_id == Some("2"))
-    }));
+    let resolved = auto_plan(tied, "dev081_output_o3.json").await;
+    assert_eq!(resolved.state, WorkflowAutoOnboardingState::AutoPublished);
+    assert!(resolved.published.is_some());
+    assert_eq!(
+        resolved
+            .output_mappings
+            .iter()
+            .map(|mapping| mapping.node_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["1", "2"]
+    );
+    assert!(resolved
+        .issues
+        .iter()
+        .all(|issue| issue.code != "AMBIGUOUS_OUTPUT"));
 
     let utility_only = json!({
         "40": {"inputs": {}, "class_type": "easy clearCacheAll"}

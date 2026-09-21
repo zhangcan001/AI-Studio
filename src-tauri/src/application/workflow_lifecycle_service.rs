@@ -571,6 +571,7 @@ impl WorkflowLifecycleService {
                             state: capability_state_enum(&item.capability),
                             checked_at: None,
                             issues: item.capability_issues.clone(),
+                            profile: None,
                         },
                     );
                 }
@@ -2055,6 +2056,7 @@ fn fast_view_for_version(
         state: capability_state_enum(&view.capability),
         checked_at: None,
         issues: view.capability_issues.clone(),
+        profile: None,
     });
     let capability = capability.or(cached_capability.as_ref());
     let capability_name = capability
@@ -2168,6 +2170,9 @@ fn capability_state_enum(value: &str) -> CapabilityState {
         "MISSING_NODES" => CapabilityState::MissingNodes,
         "INCOMPATIBLE_INPUT_VALUES" => CapabilityState::IncompatibleInputValues,
         "COMFY_OFFLINE" => CapabilityState::ComfyOffline,
+        "UNKNOWN_OUTPUT_ROOT" => CapabilityState::UnknownOutputRoot,
+        "AMBIGUOUS_OUTPUT_ROOT" => CapabilityState::AmbiguousOutputRoot,
+        "PARTIALLY_SUPPORTED" => CapabilityState::PartiallySupported,
         _ => CapabilityState::NotChecked,
     }
 }
@@ -2196,6 +2201,11 @@ fn readiness_for(
             reasons.push("工作流输入与当前 ComfyUI 能力不兼容。".to_owned())
         }
         "COMFY_OFFLINE" => reasons.push("ComfyUI 当前离线。".to_owned()),
+        "UNKNOWN_OUTPUT_ROOT" => reasons.push("无法确定可靠的最终输出节点。".to_owned()),
+        "AMBIGUOUS_OUTPUT_ROOT" => {
+            reasons.push("多个最终输出节点无法确定唯一生产边界。".to_owned())
+        }
+        "PARTIALLY_SUPPORTED" => reasons.push("部分最终输出根尚未满足运行能力。".to_owned()),
         "NOT_CHECKED" => reasons.push("尚未完成当前运行环境检查。".to_owned()),
         _ => {}
     }
@@ -2603,6 +2613,9 @@ fn capability_for_restore_error(
         "INCOMPATIBLE_INPUT_VALUES" | "COMFY_PROTOCOL_ERROR" => {
             CapabilityState::IncompatibleInputValues
         }
+        "UNKNOWN_OUTPUT_ROOT" => CapabilityState::UnknownOutputRoot,
+        "AMBIGUOUS_OUTPUT_ROOT" => CapabilityState::AmbiguousOutputRoot,
+        "PARTIALLY_SUPPORTED" => CapabilityState::PartiallySupported,
         _ => CapabilityState::NotChecked,
     };
     CapabilityCheckView {
@@ -2617,6 +2630,7 @@ fn capability_for_restore_error(
             current_value: None,
             message: error.to_string(),
         }],
+        profile: None,
     }
 }
 
@@ -2744,7 +2758,8 @@ mod tests {
     use zip::{write::FileOptions, ZipWriter};
 
     const EXACT_WORKFLOW_JSON: &str = r#"{
-  "1": {"class_type": "TestNode", "inputs": {"mode": "bad"}}
+  "1": {"class_type": "TestNode", "inputs": {"mode": "bad"}},
+  "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 0]}}
 }"#;
     const EXACT_RECIPE_A_YAML: &str = r#"schema_version: 1
 id: rcp_exact_a
@@ -3272,13 +3287,24 @@ outputs: []
     fn exact_service_with_options(
         recipe_hash_mismatch: bool,
         initial_state: Option<WorkflowRuntimeState>,
-        object_info: Value,
+        mut object_info: Value,
         binding_repository: Option<Arc<dyn ProjectWorkflowBindingRepository>>,
     ) -> (
         WorkflowLifecycleService,
         Arc<ExactRecipeSource>,
         Arc<ExactStateRepository>,
     ) {
+        object_info
+            .as_object_mut()
+            .expect("exact object_info fixture should be an object")
+            .entry("SaveImage")
+            .or_insert_with(|| {
+                json!({
+                    "output": ["IMAGE"],
+                    "output_node": true,
+                    "input": {"required": {}}
+                })
+            });
         let mut package_a = exact_package("pkg-exact-a", "1.0.0", EXACT_RECIPE_A_YAML);
         if recipe_hash_mismatch {
             package_a

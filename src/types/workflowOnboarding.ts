@@ -5,7 +5,10 @@ export type CapabilityState =
   | "READY"
   | "MISSING_NODES"
   | "INCOMPATIBLE_INPUT_VALUES"
-  | "COMFY_OFFLINE";
+  | "COMFY_OFFLINE"
+  | "UNKNOWN_OUTPUT_ROOT"
+  | "AMBIGUOUS_OUTPUT_ROOT"
+  | "PARTIALLY_SUPPORTED";
 
 export type WorkflowAutoOnboardingState =
   | "AUTO_PUBLISHED"
@@ -17,15 +20,24 @@ export type WorkflowAutoOnboardingState =
   | "BLOCKED";
 
 export type WorkflowImportFormat = "API" | "UI" | "NOT_API" | "UNKNOWN" | "INVALID_JSON";
+export type WorkflowNormalizationState = "UI_SOURCE_PENDING" | "NORMALIZED_API_READY";
+
+export interface WorkflowNormalizationDiagnosticView {
+  code: string;
+  message: string;
+  nodeId?: string;
+  inputName?: string;
+}
 
 export type WorkflowRecognitionIdentity = "NEW" | "EXACT_RAW" | "EXACT_SEMANTIC" | "STRUCTURAL_VARIANT";
 export type WorkflowRecipeStatus = "CURRENT" | "OUTDATED" | "MISSING";
-export type WorkflowRuntimeCapability = "READY" | "MISSING_NODES" | "OFFLINE" | "INCOMPATIBLE" | "NOT_CHECKED";
+export type WorkflowRuntimeCapability = "READY" | "MISSING_NODES" | "OFFLINE" | "INCOMPATIBLE" | "UNKNOWN_OUTPUT_ROOT" | "AMBIGUOUS_OUTPUT_ROOT" | "PARTIALLY_SUPPORTED" | "NOT_CHECKED";
 export type WorkflowSourceKind = "PRODUCT" | "USER";
 export type WorkflowLibraryState = "ACTIVE" | "REMOVED";
 export type WorkflowImportCommitAction = "NEW_WORKFLOW" | "NEW_VERSION" | "NEW_RECIPE" | "RESTORE_EXISTING";
 
 export type WorkflowRecognitionEvidenceKind =
+  | "EXPLICIT_OUTPUT_MAPPING"
   | "EXACT_INPUT_NAME"
   | "INPUT_NAME_ALIAS"
   | "GRAPH_DIRECT_SINK"
@@ -70,12 +82,23 @@ export interface WorkflowAnalysisReportView {
   mode?: string;
   inputs?: WorkflowRecognitionInputView[];
   outputs?: WorkflowRecognitionOutputView[];
+  outputRootResolution?: WorkflowOutputRootResolutionView;
+  selectedRootId?: string;
   confidence?: string;
   issues?: WorkflowRecognitionIssueView[];
   recipeFreshness?: WorkflowRecipeStatus | string;
   runtimeCapability?: WorkflowRuntimeCapability | string;
   suggestedActions?: string[];
 }
+
+export interface WorkflowOutputRootView extends WorkflowRecognitionOutputView {
+  evidenceTier?: number;
+}
+
+export type WorkflowOutputRootResolutionView =
+  | { state: "RESOLVED"; roots: WorkflowOutputRootView[] }
+  | { state: "AMBIGUOUS"; candidates: WorkflowOutputRootView[]; reason: string }
+  | { state: "UNKNOWN"; reason: string };
 
 export interface WorkflowStructuralChangeView {
   field?: string;
@@ -202,10 +225,59 @@ export interface CapabilityIssueView {
   message: string;
 }
 
+export type RootCapabilityReadiness = "READY" | "UNSUPPORTED";
+export type WorkflowCapabilityReadiness = "READY" | "PARTIALLY_SUPPORTED" | "UNSUPPORTED";
+
+export interface SemanticDependencyIssueView {
+  code: string;
+  nodeId: string;
+  inputName?: string;
+  message: string;
+}
+
+export interface CapabilityOutputView {
+  nodeId: string;
+  outputType: string;
+}
+
+export interface RootCapabilityProfileView {
+  rootId: string;
+  rootNodeId: string;
+  outputType: string;
+  primaryCapability?: string;
+  secondaryCapabilities: string[];
+  requiredExternalInputs: string[];
+  optionalExternalInputs: string[];
+  outputs: CapabilityOutputView[];
+  unknownDependencies: SemanticDependencyIssueView[];
+  warnings: string[];
+  readiness: RootCapabilityReadiness;
+  usable: boolean;
+  reason?: string;
+}
+
+export interface CapabilityProfileView {
+  roots: RootCapabilityProfileView[];
+  aggregateCapabilities: string[];
+  readiness: WorkflowCapabilityReadiness;
+  selectedRootId?: string;
+  primaryCapability?: string;
+  secondaryCapabilities: string[];
+  requiredExternalInputs: string[];
+  optionalExternalInputs: string[];
+  outputs: CapabilityOutputView[];
+  unknownDependencies: SemanticDependencyIssueView[];
+  warnings: string[];
+  noncriticalUnknownNodes: string[];
+  usable: boolean;
+  reason?: string;
+}
+
 export interface CapabilityCheckView {
   state: CapabilityState;
   checkedAt?: string;
   issues: CapabilityIssueView[];
+  profile?: CapabilityProfileView;
 }
 
 export interface WorkflowInputMappingView {
@@ -286,7 +358,13 @@ export interface WorkflowOnboardingValidationView {
 export interface WorkflowOnboardingDraftView {
   draftId: string;
   workflowSha256: string;
+  rawSha256?: string;
   originalFilename: string;
+  sourceFormat?: WorkflowImportFormat | string;
+  workflowFormatVersion?: string;
+  frontendVersion?: string;
+  normalizationState?: WorkflowNormalizationState;
+  normalizationDiagnostics?: WorkflowNormalizationDiagnosticView[];
   nodeCount: number;
   uniqueClassCount: number;
   nodes: WorkflowNodeView[];
@@ -363,7 +441,13 @@ export interface WorkflowAutoOnboardingPlanView {
   structuralChanges?: WorkflowStructuralChangeView[];
   workflowKind: string;
   workflowSha256: string;
+  rawSha256?: string;
   originalFilename: string;
+  sourceFormat?: WorkflowImportFormat | string;
+  workflowFormatVersion?: string;
+  frontendVersion?: string;
+  normalizationState?: WorkflowNormalizationState;
+  normalizationDiagnostics?: WorkflowNormalizationDiagnosticView[];
   nodeCount: number;
   uniqueClassCount: number;
   metadata: WorkflowManifestView;

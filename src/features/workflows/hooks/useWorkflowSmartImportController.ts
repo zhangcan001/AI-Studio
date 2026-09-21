@@ -3,7 +3,6 @@ import type { MutableRefObject } from "react";
 import {
   analyzeWorkflowImport,
   commitWorkflowImport,
-  discardOnboarding,
   getOnboardingDraft,
   reanalyzeWorkflowImport,
   rerecognizeWorkflow,
@@ -24,7 +23,6 @@ import type {
   WorkflowProductionWorkspaceView,
 } from "../../../types/workflowOnboarding";
 import { toUserMessage } from "../../../i18n/errorMessages";
-import { workflowImportFormat } from "../WorkflowSmartImport";
 import { workflowImportErrorView, nextWorkflowVersion } from "../workflowSmartImportModel";
 import type { WorkflowWorkspaceItem } from "../workflowWorkspaceAdapters";
 
@@ -108,11 +106,8 @@ export function useWorkflowSmartImportController({
             }
           : analyzed;
         setPlan(analyzedPlan);
-        const detectedFormat = workflowImportFormat(analyzedPlan);
-        if (analyzedPlan.draftId && (!detectedFormat || detectedFormat === "API")) {
+        if (analyzedPlan.draftId) {
           setDraft(await getOnboardingDraft(analyzedPlan.draftId));
-        } else if (analyzedPlan.draftId && detectedFormat && detectedFormat !== "API") {
-          await discardOnboarding(analyzedPlan.draftId).catch(() => undefined);
         }
         setNotice(undefined);
       } else {

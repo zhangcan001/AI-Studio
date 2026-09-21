@@ -15,6 +15,10 @@ use crate::{
             structural_workflow_sha256, RecognitionConfidence, WorkflowIdentity,
             WorkflowRecognitionFormat,
         },
+        workflow_semantic_graph::{
+            canonical_semantic_hint, linked_target_semantic, semantic_field_type,
+            semantic_media_family, CanonicalSemantic, SemanticInputHint,
+        },
         workflow_semantic_identity::semantic_workflow_sha256,
     },
     domain::WorkflowDocument,
@@ -49,6 +53,7 @@ const AMBIGUITY_MARGIN: i32 = 12;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvidenceKind {
+    EXPLICIT_OUTPUT_MAPPING,
     EXACT_INPUT_NAME,
     INPUT_NAME_ALIAS,
     GRAPH_DIRECT_SINK,
@@ -93,6 +98,64 @@ pub struct WorkflowAnalysisInput {
     pub source: String,
     pub score: i32,
     pub evidence: Vec<RecognitionEvidence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum OutputRootResolutionReason {
+    NoReliableMediaRoot,
+    ConflictingCandidates,
+    InvalidExplicitSelection,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputRoot {
+    pub output_id: String,
+    #[serde(rename = "type")]
+    pub output_type: String,
+    pub node_id: String,
+    pub label: String,
+    pub score: i32,
+    pub confidence: RecognitionConfidence,
+    pub evidence_tier: u8,
+    pub evidence: Vec<RecognitionEvidence>,
+}
+
+pub type OutputRootCandidate = OutputRoot;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum OutputRootResolution {
+    Resolved {
+        roots: Vec<OutputRoot>,
+    },
+    Ambiguous {
+        candidates: Vec<OutputRootCandidate>,
+        reason: OutputRootResolutionReason,
+    },
+    Unknown {
+        reason: OutputRootResolutionReason,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OutputRootSelection {
+    pub node_id: String,
+    pub output_type: String,
+}
+
+impl OutputRootResolution {
+    pub fn is_resolved(&self) -> bool {
+        matches!(self, Self::Resolved { .. })
+    }
+
+    pub fn roots(&self) -> &[OutputRoot] {
+        match self {
+            Self::Resolved { roots } => roots,
+            Self::Ambiguous { .. } | Self::Unknown { .. } => &[],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -161,6 +224,8 @@ pub struct WorkflowAnalysisReport {
     pub inputs: Vec<WorkflowAnalysisInput>,
     pub bindings: Vec<WorkflowAnalysisBinding>,
     pub outputs: Vec<WorkflowAnalysisOutput>,
+    pub output_root_resolution: OutputRootResolution,
+    pub selected_root_id: Option<String>,
     pub confidence: RecognitionConfidence,
     pub issues: Vec<WorkflowAnalysisIssue>,
     pub suggested_actions: Vec<String>,
@@ -184,7 +249,16 @@ impl WorkflowAnalysisService {
         raw_bytes: &[u8],
         schema: Option<&RecognitionSchemaContext>,
     ) -> WorkflowAnalysisReport {
-        analyze_workflow_with_schema(workflow, raw_bytes, schema)
+        analyze_workflow_with_schema_and_output_roots(workflow, raw_bytes, schema, &[])
+    }
+
+    pub fn analyze_workflow_with_schema_and_output_roots(
+        workflow: &WorkflowDocument,
+        raw_bytes: &[u8],
+        schema: Option<&RecognitionSchemaContext>,
+        explicit_roots: &[OutputRootSelection],
+    ) -> WorkflowAnalysisReport {
+        analyze_workflow_with_schema_and_output_roots(workflow, raw_bytes, schema, explicit_roots)
     }
 
     pub fn analyze(workflow: &WorkflowDocument, raw_bytes: &[u8]) -> WorkflowAnalysisReport {
@@ -206,6 +280,18 @@ pub fn analyze_workflow_with_schema(
     raw_bytes: &[u8],
     schema: Option<&RecognitionSchemaContext>,
 ) -> WorkflowAnalysisReport {
+    analyze_workflow_with_schema_and_output_roots(workflow, raw_bytes, schema, &[])
+}
+
+/// Analyze an API workflow with an optional explicit output selection from the
+/// onboarding draft. Explicit mappings are inputs to the same resolver; they
+/// do not create a second root-selection policy.
+pub fn analyze_workflow_with_schema_and_output_roots(
+    workflow: &WorkflowDocument,
+    raw_bytes: &[u8],
+    schema: Option<&RecognitionSchemaContext>,
+    explicit_roots: &[OutputRootSelection],
+) -> WorkflowAnalysisReport {
     let raw_sha256 = sha256(raw_bytes);
     let semantic_sha256 = semantic_workflow_sha256(workflow);
     let structural_sha256 = structural_workflow_sha256(workflow);
@@ -223,6 +309,10 @@ pub fn analyze_workflow_with_schema(
                 unique_class_count,
                 Vec::new(),
                 Vec::new(),
+                OutputRootResolution::Unknown {
+                    reason: OutputRootResolutionReason::NoReliableMediaRoot,
+                },
+                None,
                 "unknown".to_owned(),
                 "unknown".to_owned(),
                 vec![WorkflowAnalysisIssue {
@@ -235,20 +325,17 @@ pub fn analyze_workflow_with_schema(
         }
     };
 
-    let output_analysis = infer_outputs(workflow, &graph, schema);
+    let output_analysis = infer_outputs(workflow, &graph, schema, explicit_roots);
     let inference_scope = output_analysis
-        .roots
+        .resolution
+        .roots()
         .iter()
-        .flat_map(|node_id| graph.upstream_closure(node_id))
+        .flat_map(|root| graph.upstream_closure(&root.node_id))
         .collect::<BTreeSet<_>>();
-    let inference_scope = if inference_scope.is_empty() {
-        graph.nodes.clone()
-    } else {
-        inference_scope
-    };
 
     let mut candidates = BTreeMap::<(String, Option<usize>), Vec<Candidate>>::new();
     let mut issues = output_analysis.issues;
+    let selected_root_id = output_analysis.selected_root_id.clone();
     let Some(nodes) = workflow.value().as_object() else {
         return report(
             raw_sha256,
@@ -258,6 +345,8 @@ pub fn analyze_workflow_with_schema(
             unique_class_count,
             Vec::new(),
             output_analysis.outputs,
+            output_analysis.resolution,
+            selected_root_id,
             "unknown".to_owned(),
             "unknown".to_owned(),
             issues,
@@ -290,7 +379,9 @@ pub fn analyze_workflow_with_schema(
                 schema
                     .and_then(|schema| schema_literal_guess(schema, class_type, input_name, value))
             }) {
-                if is_contextualized_media_literal(&graph, node_id, &guess) {
+                if is_contextualized_media_literal(&graph, node_id, &guess)
+                    && guess.source != "SCHEMA_MEDIA_TYPE_CONFLICT"
+                {
                     continue;
                 }
                 append_candidate(
@@ -315,8 +406,16 @@ pub fn analyze_workflow_with_schema(
 
     let (inputs, _bindings, input_issues) = resolve_candidates(candidates);
     issues.extend(input_issues);
-    let category = category_for_outputs(&output_analysis.outputs);
-    let mode = infer_mode(&inputs, &category);
+    let category = if output_analysis.resolution.is_resolved() {
+        category_for_outputs(&output_analysis.outputs)
+    } else {
+        "unknown".to_owned()
+    };
+    let mode = if output_analysis.resolution.is_resolved() {
+        infer_mode(&inputs, &category)
+    } else {
+        "unknown".to_owned()
+    };
     report(
         raw_sha256,
         semantic_sha256,
@@ -325,6 +424,8 @@ pub fn analyze_workflow_with_schema(
         unique_class_count,
         inputs,
         output_analysis.outputs,
+        output_analysis.resolution,
+        selected_root_id,
         category,
         mode,
         issues,
@@ -413,6 +514,7 @@ fn evidence(kind: EvidenceKind, reason: impl Into<String>) -> RecognitionEvidenc
 
 fn evidence_weight(kind: EvidenceKind) -> i32 {
     match kind {
+        EvidenceKind::EXPLICIT_OUTPUT_MAPPING => 100,
         EvidenceKind::EXACT_INPUT_NAME => SCORE_EXACT_INPUT_NAME,
         EvidenceKind::INPUT_NAME_ALIAS => SCORE_INPUT_NAME_ALIAS,
         EvidenceKind::GRAPH_DIRECT_SINK => SCORE_GRAPH_DIRECT_SINK,
@@ -639,11 +741,8 @@ fn schema_literal_guess(
                 | RecognitionDeclaredType::Audio
         )
     {
-        let (semantic_key, field_type) = match input.declared_type {
-            RecognitionDeclaredType::Video => ("reference_video", "video"),
-            RecognitionDeclaredType::Audio => ("reference_audio", "audio"),
-            _ => ("reference_image", "image"),
-        };
+        let semantic_key = semantic_key_for_declared_media(input.declared_type, input_name);
+        let field_type = semantic_field_type(semantic_key);
         return Some(Guess {
             semantic_key,
             field_type,
@@ -694,17 +793,39 @@ fn literal_matches_media_kind(_media_kind: MediaKind, value: &Value) -> bool {
 }
 
 fn schema_numeric_semantic(name: &str) -> Option<&'static str> {
-    match name {
-        "seed" | "noise_seed" | "random_seed" => Some("seed"),
-        "width" => Some("width"),
-        "height" => Some("height"),
-        "duration" | "duration_seconds" | "seconds" | "length" | "frames" | "num_frames"
-        | "frame_count" => Some("duration_seconds"),
-        "fps" | "frame_rate" | "framerate" => Some("fps"),
-        "steps" | "num_steps" | "sampling_steps" => Some("steps"),
-        "cfg" | "cfg_scale" | "guidance" => Some("cfg"),
-        "denoise" => Some("denoise"),
+    canonical_semantic_hint(name)
+        .map(|hint| hint.semantic)
+        .filter(|semantic| semantic.is_numeric())
+        .map(CanonicalSemantic::semantic_key)
+}
+
+fn semantic_key_for_declared_media(
+    declared: RecognitionDeclaredType,
+    input_name: &str,
+) -> &'static str {
+    let expected_family = match declared {
+        RecognitionDeclaredType::Image => Some("image"),
+        RecognitionDeclaredType::Video => Some("video"),
+        RecognitionDeclaredType::Audio => Some("audio"),
         _ => None,
+    };
+    if let Some(hint) = canonical_semantic_hint(input_name) {
+        if hint.semantic.media_family() == expected_family {
+            return hint.semantic_key;
+        }
+        if hint.semantic.is_reference() {
+            return match expected_family {
+                Some("image") => "reference_image",
+                Some("video") => "reference_video",
+                Some("audio") => "reference_audio",
+                _ => "image",
+            };
+        }
+    }
+    match expected_family {
+        Some("video") => "video",
+        Some("audio") => "audio",
+        _ => "image",
     }
 }
 
@@ -743,20 +864,16 @@ fn schema_linked_guess(
 }
 
 fn is_prompt_like_name(name: &str, class_type: &str) -> bool {
-    [
-        "prompt",
-        "caption",
-        "description",
-        "instruction",
-        "conditioning",
-        "positive",
-        "text",
-    ]
-    .iter()
-    .any(|marker| name.contains(marker))
-        || ["prompt", "text", "caption", "conditioning"]
-            .iter()
-            .any(|marker| class_type.contains(marker))
+    canonical_semantic_hint(name).is_some_and(|hint| {
+        matches!(
+            hint.semantic,
+            CanonicalSemantic::PromptText
+                | CanonicalSemantic::PositivePrompt
+                | CanonicalSemantic::NegativePrompt
+        )
+    }) || ["prompt", "text", "caption", "conditioning"]
+        .iter()
+        .any(|marker| class_type.contains(marker))
 }
 
 fn declared_type_for_field(field_type: &str) -> &'static [RecognitionDeclaredType] {
@@ -849,6 +966,9 @@ fn compact_source(evidence: &[RecognitionEvidence]) -> String {
     let mut parts = BTreeSet::new();
     for item in evidence {
         match item.kind {
+            EvidenceKind::EXPLICIT_OUTPUT_MAPPING => {
+                parts.insert("OUTPUT");
+            }
             EvidenceKind::EXACT_INPUT_NAME | EvidenceKind::INPUT_NAME_ALIAS => {
                 parts.insert("NAME");
             }
@@ -1087,12 +1207,7 @@ struct Guess {
     source: &'static str,
 }
 
-#[derive(Clone, Copy)]
-struct LinkedTargetSemantic {
-    semantic_key: &'static str,
-    item_index: Option<usize>,
-    force_media_source: bool,
-}
+type LinkedTargetSemantic = SemanticInputHint;
 
 fn infer_linked_input(
     workflow: &WorkflowDocument,
@@ -1278,27 +1393,11 @@ fn linked_source_guess(
 }
 
 fn field_type_for_semantic(semantic_key: &str) -> &'static str {
-    match semantic_key {
-        "prompt" | "negative_prompt" => "textarea",
-        "seed" => "seed",
-        "width" | "height" | "steps" | "duration_seconds" => "integer",
-        "fps" | "cfg" | "denoise" => "number",
-        "reference_images" => "images",
-        "reference_videos" => "videos",
-        "reference_audios" => "audios",
-        "reference_video" => "video",
-        "reference_audio" => "audio",
-        _ => "image",
-    }
+    semantic_field_type(semantic_key)
 }
 
 fn media_family(semantic_key: &str) -> Option<&'static str> {
-    match semantic_key {
-        "first_frame" | "last_frame" | "reference_image" | "reference_images" => Some("image"),
-        "reference_video" | "reference_videos" => Some("video"),
-        "reference_audio" | "reference_audios" => Some("audio"),
-        _ => None,
-    }
+    semantic_media_family(semantic_key)
 }
 
 fn is_contextualized_media_literal(graph: &WorkflowGraph, node_id: &str, guess: &Guess) -> bool {
@@ -1447,39 +1546,35 @@ fn append_candidate(
     }
 }
 
-fn literal_guess(class_type: &str, input_name: &str, value: &Value) -> Option<Guess> {
+fn literal_guess(_class_type: &str, input_name: &str, value: &Value) -> Option<Guess> {
     let name = normalize(input_name);
-    let lower_class = class_type.to_ascii_lowercase();
     let is_text = value.is_string();
     let is_number = value.is_number();
     let is_media = is_text || value.is_array();
     if is_ignored_input(&name) {
         return None;
     }
-    if is_text && matches!(name.as_str(), "prompt" | "positive_prompt") {
-        return Some(Guess {
-            semantic_key: "prompt",
-            field_type: "textarea",
-            required: true,
-            confidence: RecognitionConfidence::High,
-            source: "INPUT_NAME_EXACT",
-        });
-    }
+    let hint = canonical_semantic_hint(input_name)?;
+    let semantic = hint.semantic;
     if is_text
-        && (matches!(name.as_str(), "text" | "positive")
-            && (lower_class.contains("text") || lower_class.contains("prompt")))
+        && matches!(
+            semantic,
+            CanonicalSemantic::PromptText | CanonicalSemantic::PositivePrompt
+        )
     {
         return Some(Guess {
             semantic_key: "prompt",
             field_type: "textarea",
             required: true,
             confidence: RecognitionConfidence::High,
-            source: "INPUT_NAME_PROMPT_ALIAS",
+            source: if name == "prompt" || name == "positive_prompt" {
+                "INPUT_NAME_EXACT"
+            } else {
+                "INPUT_NAME_PROMPT_ALIAS"
+            },
         });
     }
-    if is_text
-        && (name == "negative" || name == "negative_prompt" || name.contains("negative_prompt"))
-    {
+    if is_text && semantic == CanonicalSemantic::NegativePrompt {
         return Some(Guess {
             semantic_key: "negative_prompt",
             field_type: "textarea",
@@ -1488,16 +1583,7 @@ fn literal_guess(class_type: &str, input_name: &str, value: &Value) -> Option<Gu
             source: "INPUT_NAME_NEGATIVE_PROMPT",
         });
     }
-    if is_text && (name.starts_with("prompt_") || name.ends_with("_prompt")) {
-        return Some(Guess {
-            semantic_key: "prompt",
-            field_type: "textarea",
-            required: true,
-            confidence: RecognitionConfidence::Medium,
-            source: "INPUT_NAME_PROMPT_HEURISTIC",
-        });
-    }
-    if is_number && matches!(name.as_str(), "seed" | "noise_seed" | "random_seed") {
+    if is_number && semantic == CanonicalSemantic::Seed {
         return is_integer_number(value).then_some(Guess {
             semantic_key: "seed",
             field_type: "seed",
@@ -1506,116 +1592,43 @@ fn literal_guess(class_type: &str, input_name: &str, value: &Value) -> Option<Gu
             source: "INPUT_NAME_SEED_AND_INTEGER_LITERAL",
         });
     }
-    if is_number && name == "width" {
-        return Some(numeric_guess("width", value, RecognitionConfidence::High));
-    }
-    if is_number && name == "height" {
-        return Some(numeric_guess("height", value, RecognitionConfidence::High));
-    }
-    if is_number && matches!(name.as_str(), "steps" | "num_steps" | "sampling_steps") {
+    if is_number && semantic.is_numeric() {
+        if semantic == CanonicalSemantic::Seed {
+            return None;
+        }
         return Some(numeric_guess(
-            "steps",
+            semantic.semantic_key(),
             value,
-            if name == "steps" {
+            if matches!(
+                semantic,
+                CanonicalSemantic::Width
+                    | CanonicalSemantic::Height
+                    | CanonicalSemantic::Duration
+                    | CanonicalSemantic::Frames
+                    | CanonicalSemantic::Fps
+                    | CanonicalSemantic::Denoise
+            ) {
                 RecognitionConfidence::High
             } else {
                 RecognitionConfidence::Medium
             },
         ));
     }
-    if is_number
+    if is_media
         && matches!(
-            name.as_str(),
-            "duration" | "duration_seconds" | "seconds" | "length"
+            semantic.media_family(),
+            Some("image") | Some("video") | Some("audio")
         )
     {
-        return Some(numeric_guess(
-            "duration_seconds",
-            value,
-            RecognitionConfidence::High,
-        ));
-    }
-    if is_number {
-        let semantic_key = match name.as_str() {
-            "denoise" => Some("denoise"),
-            "fps" | "frame_rate" | "framerate" => Some("fps"),
-            "cfg" | "cfg_scale" => Some("cfg"),
-            "guidance" => Some("guidance"),
-            "strength" => Some("strength"),
-            "shift" => Some("shift"),
-            "scale" => Some("scale"),
-            "weight" => Some("weight"),
-            _ => None,
-        };
-        if let Some(semantic_key) = semantic_key {
-            return Some(numeric_guess(
-                semantic_key,
-                value,
-                if matches!(semantic_key, "denoise" | "fps") {
-                    RecognitionConfidence::High
-                } else {
-                    RecognitionConfidence::Medium
-                },
-            ));
-        }
-    }
-    if is_text && (name == "first_frame" || name == "start_frame") {
         return Some(Guess {
-            semantic_key: "first_frame",
-            field_type: "image",
+            semantic_key: hint.semantic_key,
+            field_type: semantic.field_type(),
             required: true,
-            confidence: RecognitionConfidence::High,
-            source: "INPUT_NAME_FIRST_FRAME",
-        });
-    }
-    if is_text && (name == "last_frame" || name == "end_frame") {
-        return Some(Guess {
-            semantic_key: "last_frame",
-            field_type: "image",
-            required: true,
-            confidence: RecognitionConfidence::High,
-            source: "INPUT_NAME_LAST_FRAME",
-        });
-    }
-    if is_media && name.contains("image") && !is_non_media_image_parameter(&name) {
-        let plural = name.contains("images") || name.contains("reference_images");
-        return Some(Guess {
-            semantic_key: if plural {
-                "reference_images"
+            confidence: if semantic.is_reference() {
+                RecognitionConfidence::Medium
             } else {
-                "reference_image"
+                RecognitionConfidence::Low
             },
-            field_type: if plural { "images" } else { "image" },
-            required: true,
-            confidence: RecognitionConfidence::Medium,
-            source: "INPUT_NAME_MEDIA_SEMANTICS",
-        });
-    }
-    if is_media && name.contains("video") {
-        let plural = name.contains("videos") || name.contains("reference_videos");
-        return Some(Guess {
-            semantic_key: if plural {
-                "reference_videos"
-            } else {
-                "reference_video"
-            },
-            field_type: if plural { "videos" } else { "video" },
-            required: true,
-            confidence: RecognitionConfidence::Medium,
-            source: "INPUT_NAME_MEDIA_SEMANTICS",
-        });
-    }
-    if is_media && name.contains("audio") {
-        let plural = name.contains("audios") || name.contains("reference_audios");
-        return Some(Guess {
-            semantic_key: if plural {
-                "reference_audios"
-            } else {
-                "reference_audio"
-            },
-            field_type: if plural { "audios" } else { "audio" },
-            required: true,
-            confidence: RecognitionConfidence::Medium,
             source: "INPUT_NAME_MEDIA_SEMANTICS",
         });
     }
@@ -1644,110 +1657,11 @@ fn numeric_guess(
     }
 }
 
-fn linked_target_semantic(input_name: &str) -> Option<LinkedTargetSemantic> {
-    let name = normalize(input_name);
-    let semantic_key = match name.as_str() {
-        "prompt" | "text" | "positive" | "positive_prompt" => "prompt",
-        "negative" | "negative_prompt" => "negative_prompt",
-        "width" => "width",
-        "height" => "height",
-        "seed" | "noise_seed" | "random_seed" => "seed",
-        "length" | "frames" | "num_frames" | "frame_count" => "duration_seconds",
-        "first_frame" | "start_frame" | "first_image" | "start_image" => "first_frame",
-        "last_frame" | "end_frame" | "last_image" | "end_image" => "last_frame",
-        "image" | "input_image" => "reference_image",
-        "images" | "reference_images" | "ref_images" => "reference_images",
-        "video" | "input_video" => "reference_video",
-        "videos" | "reference_videos" | "ref_videos" => "reference_videos",
-        "audio" | "input_audio" => "reference_audio",
-        "audios" | "reference_audios" | "ref_audios" => "reference_audios",
-        _ => {
-            if indexed_slot(&name, IMAGE_SLOT_PREFIXES).is_some() {
-                "reference_images"
-            } else if indexed_slot(&name, VIDEO_SLOT_PREFIXES).is_some() {
-                "reference_videos"
-            } else if indexed_slot(&name, AUDIO_SLOT_PREFIXES).is_some() {
-                "reference_audios"
-            } else {
-                return None;
-            }
-        }
-    };
-    let item_index = indexed_slot_for_semantic(&name, semantic_key);
-    let force_media_source = item_index.is_some()
-        || matches!(semantic_key, "first_frame" | "last_frame")
-        || matches!(
-            name.as_str(),
-            "ref_images"
-                | "reference_images"
-                | "ref_videos"
-                | "reference_videos"
-                | "ref_audios"
-                | "reference_audios"
-        );
-    Some(LinkedTargetSemantic {
-        semantic_key,
-        item_index,
-        force_media_source,
-    })
-}
-
-const IMAGE_SLOT_PREFIXES: &[&str] = &[
-    "ref_images_ref_image_",
-    "ref_images_image_",
-    "reference_images_image_",
-    "ref_image_",
-    "reference_images_",
-    "reference_image_",
-    "image_",
-    "images_",
-];
-
-const VIDEO_SLOT_PREFIXES: &[&str] = &[
-    "ref_videos_ref_video_",
-    "ref_videos_video_",
-    "reference_videos_video_",
-    "ref_video_",
-    "reference_videos_",
-    "reference_video_",
-    "video_",
-    "videos_",
-];
-
-const AUDIO_SLOT_PREFIXES: &[&str] = &[
-    "ref_video_audios_ref_video_audio_",
-    "ref_audios_ref_audio_",
-    "ref_audios_audio_",
-    "reference_audios_audio_",
-    "ref_audio_",
-    "reference_audios_",
-    "reference_audio_",
-    "audio_",
-    "audios_",
-];
-
-fn indexed_slot_for_semantic(name: &str, semantic_key: &'static str) -> Option<usize> {
-    let prefixes: &[&str] = match semantic_key {
-        "reference_images" => IMAGE_SLOT_PREFIXES,
-        "reference_videos" => VIDEO_SLOT_PREFIXES,
-        "reference_audios" => AUDIO_SLOT_PREFIXES,
-        _ => &[],
-    };
-    indexed_slot(name, prefixes)
-}
-
-fn indexed_slot(name: &str, prefixes: &[&str]) -> Option<usize> {
-    prefixes.iter().find_map(|prefix| {
-        name.strip_prefix(prefix)
-            .filter(|suffix| !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()))
-            .and_then(|suffix| suffix.parse::<usize>().ok())
-    })
-}
-
 fn infer_outputs(
     workflow: &WorkflowDocument,
     graph: &WorkflowGraph,
     schema: Option<&RecognitionSchemaContext>,
+    explicit_roots: &[OutputRootSelection],
 ) -> OutputAnalysis {
     let Some(nodes) = workflow.value().as_object() else {
         return OutputAnalysis::unknown();
@@ -1765,12 +1679,16 @@ fn infer_outputs(
         let lower = format!("{class_type} {title}").to_ascii_lowercase();
         let schema_node = schema.and_then(|schema| schema.node(class_type));
         let schema_output_type = schema_node.and_then(declared_output_media_type);
+        let node_output_type = media_output_type_from_node(node);
+        let output_type = schema_output_type.clone().or(node_output_type);
         let explicit = node
             .get("output_node")
             .and_then(Value::as_bool)
             .unwrap_or(false)
             || schema_node.is_some_and(|node| node.output_node);
         let terminal = graph.downstream_of(node_id).is_empty();
+        let input_only = is_input_only_output_class(&lower) && !explicit;
+        let media_output_role = !input_only && (output_type.is_some() || explicit);
         let mut output_evidence = Vec::new();
         if schema_output_type.is_some() {
             push_unique_evidence(
@@ -1803,12 +1721,7 @@ fn infer_outputs(
                 ),
             );
         }
-        if is_video_output_class(&lower)
-            || is_image_output_class(&lower)
-            || lower.contains("save")
-            || node_has_media_input(node)
-            || schema_output_type.is_some()
-        {
+        if media_output_role {
             push_unique_evidence(
                 &mut output_evidence,
                 evidence(
@@ -1873,9 +1786,25 @@ fn infer_outputs(
             );
         }
         let score = output_evidence.iter().map(|item| item.weight).sum::<i32>();
-        if score <= 0 && !explicit && schema_output_type.is_none() {
+        if score <= 0 && !explicit && output_type.is_none() {
             continue;
         }
+        let evidence_tier = output_root_evidence_tier(
+            explicit,
+            schema_output_type.is_some(),
+            media_output_role,
+            terminal,
+            input_only,
+            output_evidence
+                .iter()
+                .any(|evidence| evidence.kind == EvidenceKind::PREVIEW_OUTPUT),
+            output_evidence
+                .iter()
+                .any(|evidence| evidence.kind == EvidenceKind::AUXILIARY_OUTPUT),
+            output_evidence
+                .iter()
+                .any(|evidence| evidence.kind == EvidenceKind::UTILITY_NODE),
+        );
         candidates.push(OutputCandidate {
             node_id: node_id.clone(),
             label: if title.is_empty() {
@@ -1883,77 +1812,264 @@ fn infer_outputs(
             } else {
                 title
             },
-            output_type: schema_output_type.unwrap_or_else(|| output_type_for_node(node, &lower)),
+            output_type: output_type.unwrap_or_else(|| "image".to_owned()),
             score,
             evidence: output_evidence,
+            evidence_tier,
+            explicit_eligible: explicit || (terminal && media_output_role && !input_only),
         });
     }
     candidates.sort_by(|left, right| {
         right
-            .score
-            .cmp(&left.score)
+            .evidence_tier
+            .cmp(&left.evidence_tier)
+            .then(right.score.cmp(&left.score))
             .then(left.node_id.cmp(&right.node_id))
     });
-    let Some(best_score) = candidates.first().map(|candidate| candidate.score) else {
-        return OutputAnalysis::unknown();
+    let resolution = resolve_output_roots(&candidates, explicit_roots);
+    let selected_root_id = (explicit_roots.len() == 1)
+        .then(|| explicit_roots[0].node_id.as_str())
+        .and_then(|node_id| {
+            resolution
+                .roots()
+                .iter()
+                .find(|root| root.node_id == node_id)
+                .map(|root| root.output_id.clone())
+        });
+    let outputs = match &resolution {
+        OutputRootResolution::Resolved { roots } => roots
+            .iter()
+            .enumerate()
+            .map(|(index, root)| output_from_root(root, index, false))
+            .collect::<Vec<_>>(),
+        OutputRootResolution::Ambiguous { candidates, .. } => candidates
+            .iter()
+            .enumerate()
+            .map(|(index, root)| output_from_root(root, index, true))
+            .collect::<Vec<_>>(),
+        OutputRootResolution::Unknown { .. } => Vec::new(),
     };
-    let best = candidates
-        .iter()
-        .filter(|candidate| best_score - candidate.score < AMBIGUITY_MARGIN)
-        .cloned()
-        .collect::<Vec<_>>();
-    let ambiguous = best.len() > 1;
-    let outputs: Vec<WorkflowAnalysisOutput> = best
-        .iter()
-        .enumerate()
-        .map(|(index, candidate)| WorkflowAnalysisOutput {
-            output_id: if index == 0 {
-                "output_1".to_owned()
-            } else {
-                format!("output_{}", index + 1)
-            },
-            output_type: candidate.output_type.clone(),
-            node_id: candidate.node_id.clone(),
-            label: candidate.label.clone(),
-            required: true,
-            confidence: if ambiguous {
-                RecognitionConfidence::Low
-            } else {
-                confidence_from_score(candidate.score)
-            },
-            score: candidate.score,
-            evidence: candidate.evidence.clone(),
-        })
-        .collect();
-    let issue_candidates = outputs
-        .iter()
-        .map(|output| WorkflowAnalysisIssueCandidate {
-            label: output.label.clone(),
-            node_id: Some(output.node_id.clone()),
-            input_name: None,
-            output_id: Some(output.output_id.clone()),
-            output_type: Some(output.output_type.clone()),
-            field_type: None,
-            reason: evidence_reason(&output.evidence),
-            score: output.score,
-            evidence: output.evidence.clone(),
-        })
-        .collect();
-    let issues = ambiguous
-        .then_some(vec![WorkflowAnalysisIssue {
+    let issues = match &resolution {
+        OutputRootResolution::Resolved { .. } => Vec::new(),
+        OutputRootResolution::Ambiguous { .. } => vec![WorkflowAnalysisIssue {
             code: "AMBIGUOUS_OUTPUT".to_owned(),
             message: "检测到多个可能的最终输出节点，请选择要发布的输出。".to_owned(),
             field: Some("output_1".to_owned()),
-            candidates: issue_candidates,
-        }])
-        .unwrap_or_default();
+            candidates: outputs.iter().map(output_issue_candidate).collect(),
+        }],
+        OutputRootResolution::Unknown { reason } => vec![WorkflowAnalysisIssue {
+            code: "UNKNOWN_OUTPUT".to_owned(),
+            message: match reason {
+                OutputRootResolutionReason::InvalidExplicitSelection => {
+                    "手动输出映射未指向可验证的媒体输出节点。".to_owned()
+                }
+                _ => "未能识别可靠的最终媒体输出节点。".to_owned(),
+            },
+            field: Some("output_1".to_owned()),
+            candidates: Vec::new(),
+        }],
+    };
     OutputAnalysis {
-        roots: best
-            .into_iter()
-            .map(|candidate| candidate.node_id)
+        roots: resolution
+            .roots()
+            .iter()
+            .map(|root| root.node_id.clone())
             .collect(),
         outputs,
         issues,
+        resolution,
+        selected_root_id,
+    }
+}
+
+fn resolve_output_roots(
+    candidates: &[OutputCandidate],
+    explicit_roots: &[OutputRootSelection],
+) -> OutputRootResolution {
+    if !explicit_roots.is_empty() {
+        let by_node = candidates
+            .iter()
+            .map(|candidate| (candidate.node_id.as_str(), candidate))
+            .collect::<BTreeMap<_, _>>();
+        let mut selections = explicit_roots.to_vec();
+        selections.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+        selections.dedup_by(|left, right| left.node_id == right.node_id);
+        let mut selected_candidates = BTreeMap::<String, OutputCandidate>::new();
+        for selection in selections {
+            let Some(candidate) = by_node.get(selection.node_id.as_str()) else {
+                return OutputRootResolution::Unknown {
+                    reason: OutputRootResolutionReason::InvalidExplicitSelection,
+                };
+            };
+            if !candidate.explicit_eligible || candidate.output_type != selection.output_type {
+                return OutputRootResolution::Unknown {
+                    reason: OutputRootResolutionReason::InvalidExplicitSelection,
+                };
+            }
+            let mut selected = (*candidate).clone();
+            push_unique_evidence(
+                &mut selected.evidence,
+                evidence(
+                    EvidenceKind::EXPLICIT_OUTPUT_MAPPING,
+                    "user-selected output mapping identifies this root",
+                ),
+            );
+            selected.score += evidence_weight(EvidenceKind::EXPLICIT_OUTPUT_MAPPING);
+            selected.evidence_tier = 4;
+            selected_candidates.insert(selected.node_id.clone(), selected);
+        }
+        let mut root_candidates = candidates
+            .iter()
+            .filter(|candidate| candidate.evidence_tier >= 2)
+            .cloned()
+            .collect::<Vec<_>>();
+        for candidate in selected_candidates.into_values() {
+            if let Some(existing) = root_candidates
+                .iter_mut()
+                .find(|existing| existing.node_id == candidate.node_id)
+            {
+                *existing = candidate;
+            } else {
+                root_candidates.push(candidate);
+            }
+        }
+        root_candidates.sort_by(|left, right| {
+            right
+                .evidence_tier
+                .cmp(&left.evidence_tier)
+                .then(right.score.cmp(&left.score))
+                .then(left.node_id.cmp(&right.node_id))
+        });
+        return OutputRootResolution::Resolved {
+            roots: root_candidates
+                .iter()
+                .enumerate()
+                .map(|(index, candidate)| output_root_from_candidate(candidate, index, false))
+                .collect(),
+        };
+    }
+
+    let Some(max_tier) = candidates
+        .iter()
+        .filter(|candidate| candidate.evidence_tier >= 2)
+        .map(|candidate| candidate.evidence_tier)
+        .max()
+    else {
+        return OutputRootResolution::Unknown {
+            reason: OutputRootResolutionReason::NoReliableMediaRoot,
+        };
+    };
+    let strong = candidates
+        .iter()
+        .filter(|candidate| candidate.evidence_tier == max_tier)
+        .collect::<Vec<_>>();
+    let max_score = strong
+        .iter()
+        .map(|candidate| candidate.score)
+        .max()
+        .unwrap_or(0);
+    let contenders = strong
+        .into_iter()
+        .filter(|candidate| max_score - candidate.score < AMBIGUITY_MARGIN)
+        .cloned()
+        .collect::<Vec<_>>();
+    let output_types = contenders
+        .iter()
+        .map(|candidate| candidate.output_type.as_str())
+        .collect::<BTreeSet<_>>();
+    if output_types.len() > 1 {
+        return OutputRootResolution::Ambiguous {
+            candidates: contenders
+                .iter()
+                .enumerate()
+                .map(|(index, candidate)| output_root_from_candidate(candidate, index, true))
+                .collect(),
+            reason: OutputRootResolutionReason::ConflictingCandidates,
+        };
+    }
+    OutputRootResolution::Resolved {
+        roots: contenders
+            .iter()
+            .enumerate()
+            .map(|(index, candidate)| output_root_from_candidate(candidate, index, false))
+            .collect(),
+    }
+}
+
+fn output_root_evidence_tier(
+    explicit: bool,
+    schema_typed: bool,
+    media_output_role: bool,
+    terminal: bool,
+    input_only: bool,
+    preview: bool,
+    auxiliary: bool,
+    utility: bool,
+) -> u8 {
+    if input_only && !explicit {
+        return 0;
+    }
+    if explicit && media_output_role {
+        return 3;
+    }
+    if terminal && media_output_role && !(preview || auxiliary || utility) {
+        return 2;
+    }
+    if schema_typed || preview || auxiliary || utility {
+        return 1;
+    }
+    1
+}
+
+fn output_root_from_candidate(
+    candidate: &OutputCandidate,
+    index: usize,
+    ambiguous: bool,
+) -> OutputRoot {
+    OutputRoot {
+        output_id: format!("output_{}", index + 1),
+        output_type: candidate.output_type.clone(),
+        node_id: candidate.node_id.clone(),
+        label: candidate.label.clone(),
+        score: candidate.score,
+        confidence: if ambiguous {
+            RecognitionConfidence::Low
+        } else {
+            confidence_from_score(candidate.score)
+        },
+        evidence_tier: candidate.evidence_tier,
+        evidence: candidate.evidence.clone(),
+    }
+}
+
+fn output_from_root(root: &OutputRoot, index: usize, ambiguous: bool) -> WorkflowAnalysisOutput {
+    WorkflowAnalysisOutput {
+        output_id: format!("output_{}", index + 1),
+        output_type: root.output_type.clone(),
+        node_id: root.node_id.clone(),
+        label: root.label.clone(),
+        required: true,
+        confidence: if ambiguous {
+            RecognitionConfidence::Low
+        } else {
+            root.confidence
+        },
+        score: root.score,
+        evidence: root.evidence.clone(),
+    }
+}
+
+fn output_issue_candidate(output: &WorkflowAnalysisOutput) -> WorkflowAnalysisIssueCandidate {
+    WorkflowAnalysisIssueCandidate {
+        label: output.label.clone(),
+        node_id: Some(output.node_id.clone()),
+        input_name: None,
+        output_id: Some(output.output_id.clone()),
+        output_type: Some(output.output_type.clone()),
+        field_type: None,
+        reason: evidence_reason(&output.evidence),
+        score: output.score,
+        evidence: output.evidence.clone(),
     }
 }
 
@@ -1974,6 +2090,8 @@ struct OutputCandidate {
     output_type: String,
     score: i32,
     evidence: Vec<RecognitionEvidence>,
+    evidence_tier: u8,
+    explicit_eligible: bool,
 }
 
 fn declared_output_media_type(
@@ -2003,10 +2121,16 @@ struct OutputAnalysis {
     roots: Vec<String>,
     outputs: Vec<WorkflowAnalysisOutput>,
     issues: Vec<WorkflowAnalysisIssue>,
+    resolution: OutputRootResolution,
+    selected_root_id: Option<String>,
 }
 
 impl OutputAnalysis {
     fn unknown() -> Self {
+        Self::unknown_with_reason(OutputRootResolutionReason::NoReliableMediaRoot)
+    }
+
+    fn unknown_with_reason(reason: OutputRootResolutionReason) -> Self {
         Self {
             roots: Vec::new(),
             outputs: Vec::new(),
@@ -2016,6 +2140,8 @@ impl OutputAnalysis {
                 field: Some("output_1".to_owned()),
                 candidates: Vec::new(),
             }],
+            resolution: OutputRootResolution::Unknown { reason },
+            selected_root_id: None,
         }
     }
 }
@@ -2028,6 +2154,8 @@ fn report(
     unique_class_count: usize,
     inputs: Vec<WorkflowAnalysisInput>,
     outputs: Vec<WorkflowAnalysisOutput>,
+    output_root_resolution: OutputRootResolution,
+    selected_root_id: Option<String>,
     category: String,
     mode: String,
     issues: Vec<WorkflowAnalysisIssue>,
@@ -2070,6 +2198,8 @@ fn report(
             .collect(),
         inputs,
         outputs,
+        output_root_resolution,
+        selected_root_id,
         confidence,
         suggested_actions: if issues.is_empty() {
             vec!["ADD_TO_LIBRARY".to_owned()]
@@ -2100,9 +2230,17 @@ fn infer_mode(inputs: &[WorkflowAnalysisInput], category: &str) -> String {
     if category == "video" {
         if keys.contains("first_frame") || keys.contains("last_frame") {
             "image_to_video".to_owned()
-        } else if keys.iter().any(|key| key.starts_with("reference_")) {
+        } else if inputs.iter().any(|input| {
+            linked_target_semantic(&input.input_name).is_some_and(|hint| hint.explicit_reference)
+                || matches!(
+                    input.semantic_key.as_str(),
+                    "reference_video" | "reference_videos" | "reference_audio" | "reference_audios"
+                )
+        }) {
             "reference_to_video".to_owned()
         } else if keys.contains("image") {
+            "image_to_video".to_owned()
+        } else if keys.contains("reference_image") {
             "image_to_video".to_owned()
         } else {
             "text_to_video".to_owned()
@@ -2121,43 +2259,46 @@ fn infer_mode(inputs: &[WorkflowAnalysisInput], category: &str) -> String {
     }
 }
 
-fn output_type_for_node(node: &serde_json::Map<String, Value>, text: &str) -> String {
-    if is_video_output_class(text)
-        || text.contains("video")
-        || text.contains("animated")
-        || text.contains("webm")
-        || node_has_video_input(node)
-    {
-        "video".to_owned()
-    } else {
-        "image".to_owned()
+fn media_output_type_from_node(node: &serde_json::Map<String, Value>) -> Option<String> {
+    let inputs = node.get("inputs").and_then(Value::as_object)?;
+    let mut serialized_media_types = BTreeSet::new();
+
+    for value in inputs.values() {
+        if let Some(serialized) = value.as_str().map(str::trim).map(str::to_ascii_lowercase) {
+            if serialized.starts_with("video/") {
+                serialized_media_types.insert("video");
+            } else if serialized.starts_with("image/") {
+                serialized_media_types.insert("image");
+            }
+        }
     }
-}
 
-fn node_has_video_input(node: &serde_json::Map<String, Value>) -> bool {
-    node.get("inputs")
-        .and_then(Value::as_object)
-        .is_some_and(|inputs| {
-            inputs.keys().any(|name| {
-                let name = normalize(name);
-                name.contains("video") || name.contains("videos") || name.contains("frames")
-            })
-        })
-}
+    if serialized_media_types.len() == 1 {
+        return serialized_media_types.into_iter().next().map(str::to_owned);
+    }
 
-fn node_has_media_input(node: &serde_json::Map<String, Value>) -> bool {
-    node.get("inputs")
-        .and_then(Value::as_object)
-        .is_some_and(|inputs| {
-            inputs.keys().any(|name| {
-                let name = normalize(name);
-                name.contains("image")
-                    || name.contains("images")
-                    || name.contains("video")
-                    || name.contains("videos")
-                    || name.contains("frames")
-            })
-        })
+    let mut socket_media_types = BTreeSet::new();
+    for (name, value) in inputs {
+        let linked_socket = value
+            .as_array()
+            .is_some_and(|link| link.len() >= 2 && link.first().is_some_and(Value::is_string));
+        if !linked_socket {
+            continue;
+        }
+        let normalized_name = normalize(name);
+        if normalized_name.contains("video") || normalized_name.contains("frames") {
+            socket_media_types.insert("video");
+        } else if normalized_name.contains("image")
+            || normalized_name.contains("mask")
+            || normalized_name.contains("latent")
+        {
+            socket_media_types.insert("image");
+        }
+    }
+
+    (socket_media_types.len() == 1)
+        .then(|| socket_media_types.into_iter().next().map(str::to_owned))
+        .flatten()
 }
 
 fn node_title(node: &serde_json::Map<String, Value>) -> String {
@@ -2179,19 +2320,29 @@ fn is_utility_class(text: &str) -> bool {
 }
 
 fn is_video_output_class(text: &str) -> bool {
-    [
-        "savevideo",
-        "vhs_videocombine",
-        "videocombine",
-        "createvideo",
-        "videooutput",
-    ]
-    .iter()
-    .any(|marker| text.contains(marker))
+    ["savevideo", "createvideo", "videooutput"]
+        .iter()
+        .any(|marker| text.contains(marker))
 }
 
 fn is_image_output_class(text: &str) -> bool {
     text.contains("saveimage") || text.contains("imageoutput")
+}
+
+fn is_input_only_output_class(text: &str) -> bool {
+    [
+        "loadimage",
+        "loadvideo",
+        "loadaudio",
+        "inputimage",
+        "inputvideo",
+        "inputaudio",
+        "uploadimage",
+        "uploadvideo",
+        "uploadaudio",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
 }
 
 fn is_ignored_input(name: &str) -> bool {
@@ -2211,12 +2362,6 @@ fn is_ignored_input(name: &str) -> bool {
         || name.contains("clip")
         || name.contains("lora")
         || name.contains("scheduler")
-}
-
-fn is_non_media_image_parameter(name: &str) -> bool {
-    ["image_size", "image_scale", "ref_image_size"]
-        .iter()
-        .any(|marker| name == *marker || name.ends_with(marker))
 }
 
 fn graph_numeric_leaves(graph: &WorkflowGraph, node_id: &str) -> Vec<WorkflowSource> {
@@ -2418,6 +2563,304 @@ mod tests {
         WorkflowAnalysisService::analyze_workflow(&workflow, AITUDOU_8STEP.as_bytes())
     }
 
+    fn phase2a_schema() -> RecognitionSchemaContext {
+        RecognitionSchemaContext::parse(&json!({
+            "ImageOutput": {
+                "output": ["IMAGE"],
+                "output_node": true,
+                "input": {"required": {"image": ["IMAGE", {}]}}
+            },
+            "VideoOutput": {
+                "output": ["VIDEO"],
+                "output_node": true,
+                "input": {"required": {"video": ["VIDEO", {}]}}
+            },
+            "NodeAlpha": {
+                "output": ["VIDEO"],
+                "output_node": true,
+                "input": {"required": {"frames": ["IMAGE", {}]}}
+            },
+            "PreviewImage": {
+                "output": ["IMAGE"],
+                "input": {"required": {"image": ["IMAGE", {}]}}
+            },
+            "SaveImage": {
+                "output": ["IMAGE"],
+                "output_node": true,
+                "input": {"required": {"image": ["IMAGE", {}]}}
+            },
+            "CustomCacheOutput": {
+                "output": ["IMAGE"],
+                "input": {"required": {"image": ["IMAGE", {}]}}
+            },
+            "LoadImage": {
+                "output": ["IMAGE"],
+                "input": {"required": {"image": [["input.png"], {}]}}
+            },
+            "Transform": {
+                "output": ["FLOAT"],
+                "input": {"required": {"value": ["FLOAT", {}]}}
+            },
+            "PromptSource": {
+                "input": {"required": {"text": ["STRING", {}]}}
+            }
+        }))
+    }
+
+    fn phase2a_report(
+        value: Value,
+        explicit_roots: &[OutputRootSelection],
+    ) -> WorkflowAnalysisReport {
+        let workflow = WorkflowDocument::parse(value).expect("synthetic workflow should parse");
+        let schema = phase2a_schema();
+        let bytes = serde_json::to_vec(workflow.value()).expect("workflow should serialize");
+        WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
+            &workflow,
+            &bytes,
+            Some(&schema),
+            explicit_roots,
+        )
+    }
+
+    #[test]
+    fn no_root_returns_unknown_not_full_graph() {
+        let report = phase2a_report(
+            json!({
+                "1": {"class_type": "PromptSource", "inputs": {"text": "hello"}},
+                "2": {"class_type": "Transform", "inputs": {"value": ["1", 0]}},
+                "99": {"class_type": "UnknownDisconnected", "inputs": {"prompt": "unused"}}
+            }),
+            &[],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Unknown { .. }
+        ));
+        assert!(
+            report.inputs.is_empty(),
+            "unknown roots must not analyze the full graph"
+        );
+        assert_eq!(report.category, "unknown");
+        assert_eq!(report.mode, "unknown");
+    }
+
+    #[test]
+    fn ambiguous_root_returns_ambiguous() {
+        let report = phase2a_report(
+            json!({
+                "1": {"class_type": "ImageOutput", "inputs": {}},
+                "2": {"class_type": "VideoOutput", "inputs": {}}
+            }),
+            &[],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Ambiguous { .. }
+        ));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "AMBIGUOUS_OUTPUT"));
+    }
+
+    #[test]
+    fn strong_root_beats_weak_preview() {
+        let report = phase2a_report(
+            json!({
+                "1": {"class_type": "Sampler", "inputs": {}},
+                "2": {"class_type": "PreviewImage", "inputs": {"image": ["1", 0]}},
+                "3": {"class_type": "SaveImage", "inputs": {"image": ["1", 0]}}
+            }),
+            &[],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Resolved { ref roots }
+                if roots.len() == 1 && roots[0].node_id == "3"
+        ));
+    }
+
+    #[test]
+    fn explicit_output_mapping_resolves_unknown() {
+        let report = phase2a_report(
+            json!({"1": {"class_type": "CustomCacheOutput", "inputs": {"image": "cached.png"}}}),
+            &[OutputRootSelection {
+                node_id: "1".to_owned(),
+                output_type: "image".to_owned(),
+            }],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Resolved { ref roots }
+                if roots.len() == 1 && roots[0].node_id == "1"
+        ));
+        assert!(report.outputs[0]
+            .evidence
+            .iter()
+            .any(|evidence| evidence.kind == EvidenceKind::EXPLICIT_OUTPUT_MAPPING));
+    }
+
+    #[test]
+    fn invalid_explicit_output_mapping_fails_safe() {
+        let report = phase2a_report(
+            json!({"1": {"class_type": "CustomCacheOutput", "inputs": {"image": "cached.png"}}}),
+            &[OutputRootSelection {
+                node_id: "missing".to_owned(),
+                output_type: "image".to_owned(),
+            }],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Unknown {
+                reason: OutputRootResolutionReason::InvalidExplicitSelection
+            }
+        ));
+        assert_eq!(report.category, "unknown");
+    }
+
+    #[test]
+    fn terminal_input_node_is_not_output_root() {
+        let report = phase2a_report(
+            json!({"1": {"class_type": "LoadImage", "inputs": {"image": "input.png"}}}),
+            &[],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Unknown { .. }
+        ));
+        assert!(report.outputs.is_empty());
+    }
+
+    #[test]
+    fn weak_class_title_hint_alone_does_not_resolve_root() {
+        let report = phase2a_report(
+            json!({
+                "1": {
+                    "class_type": "FinalPass",
+                    "_meta": {"title": "Final"},
+                    "inputs": {"value": "not-a-media-output"}
+                }
+            }),
+            &[],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Unknown { .. }
+        ));
+    }
+
+    #[test]
+    fn generic_typed_terminal_media_sink_is_output_root() {
+        let report = phase2a_report(
+            json!({
+                "1": {"class_type": "Generator", "inputs": {}},
+                "2": {
+                    "class_type": "NodeAlpha",
+                    "inputs": {"frames": ["1", 0]}
+                }
+            }),
+            &[],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Resolved { ref roots }
+                if roots.len() == 1
+                    && roots[0].node_id == "2"
+                    && roots[0].output_type == "video"
+        ));
+    }
+
+    #[test]
+    fn terminal_unknown_node_without_media_evidence_is_not_root() {
+        let report = phase2a_report(
+            json!({
+                "1": {
+                    "class_type": "OpaqueSinkA",
+                    "inputs": {"value": "artifact.bin"}
+                }
+            }),
+            &[],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Unknown { .. }
+        ));
+        assert!(report.outputs.is_empty());
+    }
+
+    #[test]
+    fn generic_serialized_terminal_media_sink_is_output_root() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {"class_type": "Generator", "inputs": {}},
+            "2": {
+                "class_type": "GenericMediaSink",
+                "inputs": {
+                    "images": ["1", 0],
+                    "format": "video/h264-mp4"
+                }
+            }
+        }))
+        .expect("synthetic workflow should parse");
+        let bytes = serde_json::to_vec(workflow.value()).expect("workflow should serialize");
+        let report = WorkflowAnalysisService::analyze_workflow(&workflow, &bytes);
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Resolved { ref roots }
+                if roots.len() == 1
+                    && roots[0].node_id == "2"
+                    && roots[0].output_type == "video"
+        ));
+    }
+
+    #[test]
+    fn two_compatible_strong_roots_remain_resolved() {
+        let report = phase2a_report(
+            json!({
+                "1": {"class_type": "ImageOutput", "inputs": {}},
+                "2": {"class_type": "ImageOutput", "inputs": {}}
+            }),
+            &[],
+        );
+
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Resolved { ref roots }
+                if roots.iter().map(|root| root.node_id.as_str()).collect::<Vec<_>>()
+                    == vec!["1", "2"]
+        ));
+    }
+
+    #[test]
+    fn root_resolution_is_order_independent() {
+        let first = phase2a_report(
+            json!({
+                "2": {"class_type": "ImageOutput", "inputs": {}},
+                "1": {"class_type": "ImageOutput", "inputs": {}}
+            }),
+            &[],
+        );
+        let second = phase2a_report(
+            json!({
+                "1": {"class_type": "ImageOutput", "inputs": {}},
+                "2": {"class_type": "ImageOutput", "inputs": {}}
+            }),
+            &[],
+        );
+
+        assert_eq!(first.output_root_resolution, second.output_root_resolution);
+        assert_eq!(first.outputs, second.outputs);
+    }
+
     #[test]
     fn aitudou_8step_exposes_the_shared_production_fields() {
         let report = fixture_report();
@@ -2463,10 +2906,15 @@ mod tests {
             .and_then(|candidate| candidate.value.as_ref())
             .and_then(Value::as_i64);
         assert_eq!(duration, Some(5));
-        assert!(report
+        let video_output = report
             .outputs
             .iter()
-            .any(|output| output.output_type == "video" && output.node_id == "62"));
+            .find(|output| output.output_type == "video" && output.node_id == "62")
+            .expect("VHS output should be recognized by generic media evidence");
+        assert!(!video_output
+            .evidence
+            .iter()
+            .any(|evidence| evidence.kind == EvidenceKind::CLASS_TYPE_HINT));
     }
 
     #[test]
@@ -3119,7 +3567,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_real_outputs_remain_ambiguous() {
+    fn equal_real_outputs_remain_resolved_as_compatible_roots() {
         let workflow = WorkflowDocument::parse(json!({
             "1": {"class_type": "Sampler", "inputs": {}},
             "2": {
@@ -3155,6 +3603,10 @@ mod tests {
         assert!(report
             .issues
             .iter()
-            .any(|issue| issue.code == "AMBIGUOUS_OUTPUT"));
+            .all(|issue| issue.code != "AMBIGUOUS_OUTPUT"));
+        assert!(matches!(
+            report.output_root_resolution,
+            OutputRootResolution::Resolved { ref roots } if roots.len() == 2
+        ));
     }
 }

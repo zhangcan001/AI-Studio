@@ -15,7 +15,7 @@ use ai_studio_lib::application::{
     workflow_library_service::WorkflowLibraryService,
     workflow_onboarding_service::{
         detect_comfy_workflow_format, CapabilityState, ComfyWorkflowInputFormat,
-        WorkflowAutoOnboardingState, WorkflowOnboardingService,
+        WorkflowAutoOnboardingState, WorkflowNormalizationState, WorkflowOnboardingService,
     },
 };
 use ai_studio_lib::infrastructure::{
@@ -576,11 +576,11 @@ async fn auto_adds_video_without_claiming_an_exact_h3_mode() {
     assert!(plan
         .input_mappings
         .iter()
-        .any(|mapping| mapping.semantic_key == "reference_video"));
+        .any(|mapping| mapping.semantic_key == "video"));
     assert!(plan
         .input_mappings
         .iter()
-        .any(|mapping| mapping.semantic_key == "reference_audio"));
+        .any(|mapping| mapping.semantic_key == "audio"));
 }
 
 #[tokio::test]
@@ -848,7 +848,7 @@ async fn existing_sha_outdated_recipe_is_regenerated_without_workflow_version_or
 }
 
 #[tokio::test]
-async fn invalid_unknown_and_ui_inputs_are_explicitly_rejected_without_publishing() {
+async fn invalid_unknown_and_ui_inputs_are_explicitly_handled_without_publishing() {
     let invalid_harness = harness(object_info()).await;
     assert_format_diagnostic(
         invalid_harness
@@ -876,13 +876,22 @@ async fn invalid_unknown_and_ui_inputs_are_explicitly_rejected_without_publishin
     assert_no_package_or_staging(&unknown_harness);
 
     let ui_harness = harness(object_info()).await;
-    assert_format_diagnostic(
-        ui_harness
-            .service
-            .auto_onboard_bytes(UI_WORKFLOW.as_bytes().to_vec(), "ui.json".to_owned(), None)
-            .await,
-        "UNSUPPORTED_UI_FORMAT",
-        "请在 ComfyUI 中将该工作流导出为 API Format JSON，然后重新选择该文件。",
+    let ui_plan = ui_harness
+        .service
+        .auto_onboard_bytes(UI_WORKFLOW.as_bytes().to_vec(), "ui.json".to_owned(), None)
+        .await
+        .expect("UI source should remain a pending draft when provenance is unavailable");
+    assert_eq!(ui_plan.state, WorkflowAutoOnboardingState::Blocked);
+    assert_eq!(
+        ui_plan.normalization_state,
+        WorkflowNormalizationState::UiSourcePending
     );
+    assert_eq!(ui_plan.source_format, "UI");
+    assert!(!ui_plan.auto_publishable);
+    assert!(ui_plan.published.is_none());
+    assert!(ui_plan
+        .normalization_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "FRONTEND_VERSION_UNKNOWN"));
     assert_no_package_or_staging(&ui_harness);
 }

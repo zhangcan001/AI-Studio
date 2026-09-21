@@ -74,10 +74,11 @@ function isArchivedDuplicate(plan: WorkflowAutoOnboardingPlanView): boolean {
 
 function canCommitImport(plan: WorkflowAutoOnboardingPlanView): boolean {
   return Boolean(
-    plan.autoPublishable
+    plan.normalizationState !== "UI_SOURCE_PENDING"
+      && (plan.autoPublishable
       || plan.validation.readyToPublish
       || plan.importability?.trim().toUpperCase() === "IMPORTABLE"
-      || plan.recognition?.importable,
+      || plan.recognition?.importable),
   );
 }
 
@@ -184,9 +185,16 @@ export function WorkflowImportFormatIssue({ issue, loading, onRetry, onCancel }:
 }
 
 function planMessage(plan: WorkflowAutoOnboardingPlanView): string {
+  if (plan.normalizationState === "UI_SOURCE_PENDING") {
+    if (plan.capability.state === "COMFY_OFFLINE") return "已保留当前 UI 工作流草稿；连接 ComfyUI 后可继续规范化，不需要重新选择文件。";
+    const diagnostic = plan.normalizationDiagnostics?.[0]?.message?.trim();
+    return diagnostic || "已保留当前 UI 工作流草稿，等待兼容的 ComfyUI schema 完成规范化。";
+  }
   if (isExistingRecipeOutdated(plan)) {
     if (plan.capability.state === "COMFY_OFFLINE") return "已识别为现有工作流，但当前 ComfyUI 离线；连接 ComfyUI 后可重新生成 Recipe。";
     if (plan.capability.state === "MISSING_NODES" || plan.capability.state === "INCOMPATIBLE_INPUT_VALUES") return "已识别为现有工作流，但当前 ComfyUI 依赖尚未满足；修复节点或输入后可重新生成 Recipe。";
+    if (plan.capability.state === "UNKNOWN_OUTPUT_ROOT" || plan.capability.state === "AMBIGUOUS_OUTPUT_ROOT") return "已识别为现有工作流，但无法安全确定最终输出节点；请检查输出映射后再生成 Recipe。";
+    if (plan.capability.state === "PARTIALLY_SUPPORTED") return "已识别为现有工作流，但部分输出根尚未满足运行能力；请检查节点依赖后再生成 Recipe。";
     return "已识别为现有工作流，当前 Recipe 需要升级。重新生成只会新增 Recipe，不会修改原工作流或旧 Recipe。";
   }
   if (isStructuralVariant(plan)) return "检测到一个结构相似的工作流。它可能只是参数不同，不会自动合并，请选择如何保存。";
@@ -210,12 +218,23 @@ function issueTitle(code: string): string {
       return "输入选项不可用";
     case "AMBIGUOUS_OUTPUT":
       return "检测到多个输出节点";
+    case "AMBIGUOUS_OUTPUT_ROOT":
+      return "输出节点有歧义";
+    case "PARTIALLY_SUPPORTED":
+      return "部分输出根不可用";
+    case "UNKNOWN_OUTPUT_ROOT":
+    case "INVALID_OUTPUT_ROOT_MAPPING":
+      return "无法确定可靠的输出节点";
     case "AMBIGUOUS_DURATION_SOURCE":
       return "无法自动确认视频时长来源";
     case "FLOAT_INPUT_NEEDS_REVIEW":
       return "数值参数需要确认";
     case "EXISTING_RECIPE_OUTDATED":
       return "现有 Recipe 需要升级";
+    case "UI_SOURCE_PENDING":
+      return "等待工作流规范化";
+    case "NORMALIZATION_BLOCKED":
+      return "工作流规范化被阻止";
   }
   const normalized = code.trim().toUpperCase();
   if (normalized.includes("MULTIPLE_OUTPUT") || normalized.includes("OUTPUT_AMBIGUOUS")) return "检测到多个输出节点";
@@ -277,7 +296,8 @@ function issueCapabilityDetails(plan: WorkflowAutoOnboardingPlanView, issue: Wor
 
 export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onOpenExistingVersion, onUseInProject, onRegenerateRecipe, onRestoreExisting, onCommitImport, onCancel }: Props) {
   const [selected, setSelected] = useState<Record<string, number>>({});
-  const waiting = plan.state === "WAITING_FOR_COMFY_UI";
+  const normalizationPending = plan.normalizationState === "UI_SOURCE_PENDING";
+  const waiting = plan.state === "WAITING_FOR_COMFY_UI" || normalizationPending;
   const outdated = isExistingRecipeOutdated(plan);
   const exactDuplicate = isExactDuplicate(plan);
   const archivedDuplicate = isArchivedDuplicate(plan);
@@ -293,7 +313,7 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
       <div className="workflow-smart-issues-heading">
         <div>
           <span className="section-label">添加工作流</span>
-          <h3>{outdated ? "检测到现有工作流，需要更新配置" : structuralVariant ? "发现结构相似工作流" : archivedDuplicate ? "该工作流已删除" : exactActive ? "该工作流已经存在" : waiting ? "等待 ComfyUI 连接" : plan.state === "BLOCKED" ? "工作流可以保存，但当前不能运行" : "识别完成"}</h3>
+          <h3>{normalizationPending ? "等待工作流规范化" : outdated ? "检测到现有工作流，需要更新配置" : structuralVariant ? "发现结构相似工作流" : archivedDuplicate ? "该工作流已删除" : exactActive ? "该工作流已经存在" : waiting ? "等待 ComfyUI 连接" : plan.state === "BLOCKED" ? "工作流可以保存，但当前不能运行" : "识别完成"}</h3>
           <p>{planMessage(plan)}</p>
         </div>
         <span className={`workflow-smart-state workflow-smart-state-${plan.state.toLowerCase()}`}>{outdated ? (waiting || plan.capability.state === "COMFY_OFFLINE" ? "等待连接" : "需要升级") : archivedDuplicate ? "已删除" : exactActive ? "已存在" : structuralVariant ? "需选择" : waiting ? "等待中" : importable ? "可添加" : plan.state === "BLOCKED" ? "暂不可用" : "待确认"}</span>
@@ -336,6 +356,7 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
             const showCandidateFallback = normalizedCode !== "MISSING_NODES"
               && normalizedCode !== "MISSING_NODE"
               && normalizedCode !== "EXISTING_RECIPE_OUTDATED"
+              && !normalizationPending
               && !issue.candidates.length
               && !details.allowedOptions.length
               && !details.inferredCandidates.length;
@@ -385,7 +406,19 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
           })}
         </div>
       )}
-      {!hasExistingWorkflow && (
+      {normalizationPending && (
+        <div className="workflow-import-guidance" aria-label="工作流规范化状态">
+          <strong>已保留导入草稿</strong>
+          <div className="workflow-detail-grid">
+            <span>来源格式<strong>{plan.sourceFormat ?? "UI"}</strong></span>
+            <span>文件<strong>{plan.originalFilename}</strong></span>
+            <span>工作流版本<strong>{plan.workflowFormatVersion ?? "—"}</strong></span>
+            <span>前端版本<strong>{plan.frontendVersion ?? "待确认"}</strong></span>
+          </div>
+          <p>后端尚未生成可执行 API 工作流；当前不会创建 Recipe、身份或运行能力结论。</p>
+        </div>
+      )}
+      {!hasExistingWorkflow && !normalizationPending && (
         <div className="workflow-import-guidance" aria-label="工作流识别结果">
           <strong>识别完成</strong>
           <div className="workflow-detail-grid">
@@ -407,7 +440,7 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
         {outdated && onRegenerateRecipe && <button type="button" onClick={onRegenerateRecipe} disabled={loading}>更新工作流配置</button>}
         {archivedDuplicate && onRestoreExisting && <button type="button" onClick={onRestoreExisting} disabled={loading}>恢复工作流</button>}
         {!exactDuplicate && !structuralVariant && !archivedDuplicate && onCommitImport && <button type="button" onClick={() => onCommitImport("NEW_WORKFLOW")} disabled={loading || !importable}>添加工作流</button>}
-        <button type="button" className="quiet-button" onClick={onOpenAdvanced}>高级编辑</button>
+        {!normalizationPending && <button type="button" className="quiet-button" onClick={onOpenAdvanced}>高级编辑</button>}
         {onCancel && <button type="button" className="quiet-button" onClick={onCancel} disabled={loading}>取消添加</button>}
       </div>
     </section>

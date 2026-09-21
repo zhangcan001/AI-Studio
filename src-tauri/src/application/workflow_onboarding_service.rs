@@ -5,8 +5,10 @@ use crate::application::{
         WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
     workflow_analysis_service::{
-        RecognitionEvidence, WorkflowAnalysisReport, WorkflowAnalysisService,
+        OutputRootResolution, OutputRootResolutionReason, OutputRootSelection, RecognitionEvidence,
+        WorkflowAnalysisReport, WorkflowAnalysisService,
     },
+    workflow_graph_analysis::WorkflowGraph,
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
     workflow_recognition_schema::RecognitionSchemaContext,
@@ -17,7 +19,16 @@ use crate::application::{
     workflow_registry_service::{
         WorkflowRegistryIdentityCandidate, WorkflowRegistryService, WORKFLOW_LIBRARY_REMOVED,
     },
+    workflow_semantic_graph::{
+        build_capability_profile_for_roots, canonical_suggestion_for_input, linked_target_semantic,
+        resolve_semantic_graph, ActiveDependencyGraph, CapabilityProfile, RootDependencyClosure,
+    },
     workflow_semantic_identity::semantic_workflow_sha256,
+    workflow_ui_normalizer::{normalize_ui_workflow, parse_ui_workflow},
+    workflow_ui_serialization::{
+        canonical_schema_fingerprint, FrontendSerializationProfile,
+        NormalizationCompatibilityContext, UiSerializationDescriptorSet,
+    },
 };
 use crate::compiler::{
     BindingValidator, RecipeParser, RecipeValidator, WorkflowCompiler, WorkflowValidator,
@@ -45,12 +56,28 @@ const INVALID_JSON_MESSAGE: &str = "无法读取这个文件，它不是有效�
 const UNKNOWN_WORKFLOW_MESSAGE: &str = "这个 JSON 不是可识别的 ComfyUI 工作流。";
 const UNSUPPORTED_UI_WORKFLOW_MESSAGE: &str = "检测到 ComfyUI 普通工作流 JSON。这个格式包含界面布局信息，暂时无法可靠转换成可执行 API 工作流。请在 ComfyUI 中将该工作流导出为 API Format JSON，然后重新选择该文件。";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ComfyWorkflowInputFormat {
     Api,
     Ui,
     Unknown,
     InvalidJson,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkflowNormalizationState {
+    UiSourcePending,
+    NormalizedApiReady,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowNormalizationDiagnosticView {
+    pub code: String,
+    pub message: String,
+    pub node_id: Option<String>,
+    pub input_name: Option<String>,
 }
 
 impl ComfyWorkflowInputFormat {
@@ -153,6 +180,9 @@ pub enum CapabilityState {
     MissingNodes,
     IncompatibleInputValues,
     ComfyOffline,
+    UnknownOutputRoot,
+    AmbiguousOutputRoot,
+    PartiallySupported,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -242,7 +272,13 @@ fn default_required() -> bool {
 pub struct WorkflowOnboardingDraftView {
     pub draft_id: String,
     pub workflow_sha256: String,
+    pub raw_sha256: String,
     pub original_filename: String,
+    pub source_format: String,
+    pub workflow_format_version: Option<String>,
+    pub frontend_version: Option<String>,
+    pub normalization_state: WorkflowNormalizationState,
+    pub normalization_diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
     pub node_count: usize,
     pub unique_class_count: usize,
     pub nodes: Vec<WorkflowNodeView>,
@@ -287,6 +323,8 @@ pub struct CapabilityCheckView {
     pub state: CapabilityState,
     pub checked_at: Option<String>,
     pub issues: Vec<CapabilityIssueView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<CapabilityProfile>,
 }
 
 #[derive(Clone, Debug)]
@@ -483,7 +521,13 @@ pub struct WorkflowAutoOnboardingPlanView {
     pub state: WorkflowAutoOnboardingState,
     pub workflow_kind: String,
     pub workflow_sha256: String,
+    pub raw_sha256: String,
     pub original_filename: String,
+    pub source_format: String,
+    pub workflow_format_version: Option<String>,
+    pub frontend_version: Option<String>,
+    pub normalization_state: WorkflowNormalizationState,
+    pub normalization_diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
     pub node_count: usize,
     pub unique_class_count: usize,
     pub metadata: WorkflowManifestView,
@@ -559,9 +603,16 @@ struct OutputMapping {
 struct WorkflowOnboardingDraft {
     draft_id: String,
     raw_bytes: Vec<u8>,
-    workflow: WorkflowDocument,
+    normalized_api: Option<WorkflowDocument>,
     workflow_sha256: String,
+    raw_sha256: String,
     original_filename: String,
+    source_format: ComfyWorkflowInputFormat,
+    workflow_format_version: Option<String>,
+    frontend_version: Option<String>,
+    compatibility_context: Option<NormalizationCompatibilityContext>,
+    normalization_state: WorkflowNormalizationState,
+    normalization_diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
     nodes: Vec<WorkflowNodeView>,
     manifest: WorkflowManifest,
     recipe_id: String,
@@ -570,9 +621,33 @@ struct WorkflowOnboardingDraft {
     input_mappings: Vec<InputMapping>,
     output_mappings: Vec<OutputMapping>,
     /// The pure graph analysis captured at import time. Test-only/manual
-    /// drafts may leave this empty and use the compatibility fallback.
+    /// drafts may leave this empty until inference is run.
     analysis: Option<WorkflowAnalysisReport>,
     recognition: WorkflowRecognitionReport,
+}
+
+impl WorkflowOnboardingDraft {
+    fn normalized_workflow(&self) -> Result<&WorkflowDocument, WorkflowOnboardingError> {
+        self.normalized_api.as_ref().ok_or_else(|| {
+            WorkflowOnboardingError::new(
+                "NORMALIZATION_REQUIRED",
+                "the UI workflow must be normalized before API-only operations can continue",
+            )
+        })
+    }
+
+    fn normalized_api_bytes(&self) -> Result<Vec<u8>, WorkflowOnboardingError> {
+        if self.source_format == ComfyWorkflowInputFormat::Api {
+            return Ok(self.raw_bytes.clone());
+        }
+        let workflow = self.normalized_workflow()?;
+        serde_json::to_vec(workflow.value()).map_err(|error| {
+            WorkflowOnboardingError::new(
+                "WORKFLOW_SERIALIZATION_FAILED",
+                format!("normalized API workflow could not be serialized: {error}"),
+            )
+        })
+    }
 }
 
 #[derive(Default)]
@@ -782,15 +857,15 @@ impl WorkflowOnboardingService {
         &self,
         draft: &WorkflowOnboardingDraft,
     ) -> Result<WorkflowRecognitionReport, WorkflowOnboardingError> {
+        let workflow = draft.normalized_workflow()?;
+        let api_bytes = draft.normalized_api_bytes()?;
         let existing = self.identity_package_files().await?;
-        let analysis = draft.analysis.clone().unwrap_or_else(|| {
-            WorkflowAnalysisService::analyze_workflow(&draft.workflow, &draft.raw_bytes)
-        });
+        let analysis = draft
+            .analysis
+            .clone()
+            .unwrap_or_else(|| WorkflowAnalysisService::analyze_workflow(workflow, &api_bytes));
         Ok(WorkflowRecognitionService::recognize_analysis(
-            &draft.workflow,
-            &draft.raw_bytes,
-            &existing,
-            &analysis,
+            workflow, &api_bytes, &existing, &analysis,
         )
         .with_runtime_capability(runtime_capability_summary(&draft.capability)))
     }
@@ -811,12 +886,21 @@ impl WorkflowOnboardingService {
                 ),
             ));
         }
-        let workflow = parse_import_workflow(&bytes)?;
-        let nodes = inspect_workflow(&workflow)?;
-        let workflow_sha256 = sha256(&bytes);
-        let analysis = WorkflowAnalysisService::analyze_workflow(&workflow, &bytes);
-        let recognition =
-            WorkflowRecognitionService::recognize_analysis(&workflow, &bytes, &[], &analysis);
+        let input_format = detect_comfy_workflow_format(&bytes);
+        let ui_document = if input_format == ComfyWorkflowInputFormat::Ui {
+            Some(
+                parse_ui_workflow(&bytes)
+                    .map_err(|error| WorkflowOnboardingError::new(error.code, error.message))?,
+            )
+        } else {
+            None
+        };
+        let workflow = match input_format {
+            ComfyWorkflowInputFormat::Api => Some(parse_import_workflow(&bytes)?),
+            ComfyWorkflowInputFormat::Ui => None,
+            _ => Some(parse_import_workflow(&bytes)?),
+        };
+        let raw_sha256 = sha256(&bytes);
         let is_new_version = existing_workflow_id.is_some();
         let workflow_id = match existing_workflow_id {
             Some(value) => validate_workflow_id(&value)?,
@@ -832,40 +916,104 @@ impl WorkflowOnboardingService {
         let name = filename_stem(&original_filename);
         let draft_id = format!("onb_{}", Uuid::new_v4());
         let recipe_id = format!("rcp_{}", Uuid::new_v4());
-        let draft = WorkflowOnboardingDraft {
-            draft_id,
-            raw_bytes: bytes,
-            workflow,
-            workflow_sha256,
-            original_filename: safe_filename(&original_filename),
-            nodes,
-            manifest: WorkflowManifest {
-                schema_version: 1,
-                id: workflow_id,
-                name: if name.trim().is_empty() {
-                    "Imported Workflow".to_owned()
-                } else {
-                    name
+        let draft = if let Some(workflow) = workflow {
+            let nodes = inspect_workflow(&workflow)?;
+            let analysis = WorkflowAnalysisService::analyze_workflow(&workflow, &bytes);
+            let recognition =
+                WorkflowRecognitionService::recognize_analysis(&workflow, &bytes, &[], &analysis);
+            WorkflowOnboardingDraft {
+                draft_id,
+                raw_bytes: bytes,
+                normalized_api: Some(workflow),
+                workflow_sha256: raw_sha256.clone(),
+                raw_sha256,
+                original_filename: safe_filename(&original_filename),
+                source_format: ComfyWorkflowInputFormat::Api,
+                workflow_format_version: None,
+                frontend_version: None,
+                compatibility_context: None,
+                normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+                normalization_diagnostics: Vec::new(),
+                nodes,
+                manifest: WorkflowManifest {
+                    schema_version: 1,
+                    id: workflow_id,
+                    name: if name.trim().is_empty() {
+                        "Imported Workflow".to_owned()
+                    } else {
+                        name
+                    },
+                    workflow_version,
+                    recipe_version: "1.0.0".to_owned(),
+                    category: "image".to_owned(),
+                    mode: "text_to_image".to_owned(),
                 },
-                workflow_version,
-                recipe_version: "1.0.0".to_owned(),
-                category: "image".to_owned(),
-                mode: "text_to_image".to_owned(),
-            },
-            recipe_id,
-            // Supplying an existing workflow id is the explicit "new version"
-            // path. It must be allowed to reuse the workflow identity while
-            // still keeping ordinary duplicate imports read-only.
-            allow_existing_workflow_sha: is_new_version,
-            capability: CapabilityCheckView {
-                state: CapabilityState::NotChecked,
-                checked_at: None,
-                issues: Vec::new(),
-            },
-            input_mappings: Vec::new(),
-            output_mappings: Vec::new(),
-            analysis: Some(analysis),
-            recognition,
+                recipe_id,
+                allow_existing_workflow_sha: is_new_version,
+                capability: CapabilityCheckView {
+                    state: CapabilityState::NotChecked,
+                    checked_at: None,
+                    issues: Vec::new(),
+                    profile: None,
+                },
+                input_mappings: Vec::new(),
+                output_mappings: Vec::new(),
+                analysis: Some(analysis),
+                recognition,
+            }
+        } else {
+            let ui_document = ui_document.expect("UI input format must have a parsed document");
+            let mut recognition = WorkflowRecognitionService::recognize_bytes(&bytes, &[]);
+            // The format is recognized, but semantic/API recognition has not
+            // run until the source is normalized against a live schema.
+            recognition.recognized = false;
+            recognition.importable = false;
+            recognition.executable = false;
+            WorkflowOnboardingDraft {
+                draft_id,
+                raw_bytes: bytes,
+                normalized_api: None,
+                workflow_sha256: raw_sha256.clone(),
+                raw_sha256,
+                original_filename: safe_filename(&original_filename),
+                source_format: ComfyWorkflowInputFormat::Ui,
+                workflow_format_version: Some(ui_document.workflow_format_version),
+                frontend_version: ui_document.frontend_version,
+                compatibility_context: None,
+                normalization_state: WorkflowNormalizationState::UiSourcePending,
+                normalization_diagnostics: vec![WorkflowNormalizationDiagnosticView {
+                    code: "UI_SOURCE_PENDING".to_owned(),
+                    message: "UI 工作流已接收，等待 ComfyUI schema 进行安全规范化。".to_owned(),
+                    node_id: None,
+                    input_name: None,
+                }],
+                nodes: Vec::new(),
+                manifest: WorkflowManifest {
+                    schema_version: 1,
+                    id: workflow_id,
+                    name: if name.trim().is_empty() {
+                        "Imported Workflow".to_owned()
+                    } else {
+                        name
+                    },
+                    workflow_version,
+                    recipe_version: "1.0.0".to_owned(),
+                    category: "unknown".to_owned(),
+                    mode: "unknown".to_owned(),
+                },
+                recipe_id,
+                allow_existing_workflow_sha: is_new_version,
+                capability: CapabilityCheckView {
+                    state: CapabilityState::NotChecked,
+                    checked_at: None,
+                    issues: Vec::new(),
+                    profile: None,
+                },
+                input_mappings: Vec::new(),
+                output_mappings: Vec::new(),
+                analysis: None,
+                recognition,
+            }
         };
         let draft_id = draft.draft_id.clone();
         self.with_registry(|registry| {
@@ -971,9 +1119,16 @@ impl WorkflowOnboardingService {
         let draft = WorkflowOnboardingDraft {
             draft_id: format!("onb_{}", Uuid::new_v4()),
             workflow_sha256: sha256(&raw_bytes),
+            raw_sha256: sha256(&raw_bytes),
             original_filename: safe_filename(&format!("{}.json", workflow_view.name)),
+            source_format: ComfyWorkflowInputFormat::Api,
+            workflow_format_version: None,
+            frontend_version: None,
+            compatibility_context: None,
+            normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+            normalization_diagnostics: Vec::new(),
             nodes: inspect_workflow(&workflow)?,
-            workflow,
+            normalized_api: Some(workflow),
             raw_bytes,
             manifest: WorkflowManifest {
                 schema_version: 1,
@@ -990,6 +1145,7 @@ impl WorkflowOnboardingService {
                 state: CapabilityState::NotChecked,
                 checked_at: None,
                 issues: Vec::new(),
+                profile: None,
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
@@ -1017,12 +1173,47 @@ impl WorkflowOnboardingService {
         allow_publish: bool,
         preserve_user_metadata: bool,
     ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
-        let initial = self.with_registry(|registry| registry.get(draft_id))??;
-        let existing = self
-            .existing_packages_for_identity(&initial.workflow_sha256, &initial.workflow)
-            .await?;
         let (inference, current) = self
             .run_current_inference(draft_id, preserve_user_metadata)
+            .await?;
+        if current.normalized_api.is_none() {
+            let normalization_issues = current
+                .normalization_diagnostics
+                .iter()
+                .map(|diagnostic| WorkflowAutoIssueView {
+                    code: diagnostic.code.clone(),
+                    message: diagnostic.message.clone(),
+                    field: diagnostic.input_name.clone(),
+                    candidates: Vec::new(),
+                })
+                .collect::<Vec<_>>();
+            let (state, message) = if current.capability.state == CapabilityState::ComfyOffline {
+                (
+                    WorkflowAutoOnboardingState::WaitingForComfyUi,
+                    "等待 ComfyUI 连接后继续解析此 UI 工作流。".to_owned(),
+                )
+            } else {
+                (
+                    WorkflowAutoOnboardingState::Blocked,
+                    "工作流等待兼容的 ComfyUI schema 后才能继续解析。".to_owned(),
+                )
+            };
+            return Ok(auto_plan_for_draft(
+                &current,
+                state,
+                &inference.inferences,
+                &normalization_issues,
+                false,
+                None,
+                None,
+                None,
+                None,
+                message,
+            ));
+        }
+        let workflow = current.normalized_workflow()?;
+        let existing = self
+            .existing_packages_for_identity(&current.workflow_sha256, workflow)
             .await?;
         let validation = validation_for_draft(&current);
         let inference_issues = unresolved_inference_issues(&current, &inference.issues);
@@ -1035,6 +1226,9 @@ impl WorkflowOnboardingService {
                     | "UNKNOWN_INPUT"
                     | "AMBIGUOUS_OUTPUT"
                     | "UNKNOWN_OUTPUT"
+                    | "AMBIGUOUS_OUTPUT_ROOT"
+                    | "UNKNOWN_OUTPUT_ROOT"
+                    | "INVALID_OUTPUT_ROOT_MAPPING"
                     | "FLOAT_INPUT_NEEDS_REVIEW"
             )
         });
@@ -1224,6 +1418,14 @@ impl WorkflowOnboardingService {
                 WorkflowAutoOnboardingState::Blocked,
                 "工作流需要确认：当前 ComfyUI 缺少工作流节点。".to_owned(),
             ),
+            CapabilityState::UnknownOutputRoot | CapabilityState::AmbiguousOutputRoot => (
+                WorkflowAutoOnboardingState::NeedsReview,
+                "工作流需要确认：无法确定可靠的最终输出节点，请检查输出映射。".to_owned(),
+            ),
+            CapabilityState::PartiallySupported => (
+                WorkflowAutoOnboardingState::NeedsReview,
+                "工作流需要确认：部分输出根尚未满足运行能力，请检查输出与节点依赖。".to_owned(),
+            ),
             _ if issues.is_empty() => (
                 WorkflowAutoOnboardingState::Blocked,
                 "工作流需要确认：自动校验尚未通过。".to_owned(),
@@ -1253,6 +1455,8 @@ impl WorkflowOnboardingService {
         &self,
         request: WorkflowImportCommitRequest,
     ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
+        let draft = self.with_registry(|registry| registry.get(&request.draft_id))??;
+        draft.normalized_workflow()?;
         match request.action {
             WorkflowImportCommitAction::RestoreExisting => {
                 return Err(WorkflowOnboardingError::new(
@@ -1310,24 +1514,45 @@ impl WorkflowOnboardingService {
         preserve_user_metadata: bool,
     ) -> Result<(AutoInferenceResult, WorkflowOnboardingDraft), WorkflowOnboardingError> {
         let initial = self.with_registry(|registry| registry.get(draft_id))??;
+        let pending_result = if initial.normalized_api.is_none() {
+            Some(self.normalize_pending_ui_draft(draft_id, &initial).await?)
+        } else {
+            None
+        };
+        let current_after_normalization =
+            self.with_registry(|registry| registry.get(draft_id))??;
+        if current_after_normalization.normalized_api.is_none() {
+            return Ok((AutoInferenceResult::default(), current_after_normalization));
+        }
+
+        let current_workflow = current_after_normalization.normalized_workflow()?;
+        let current_api_bytes = current_after_normalization.normalized_api_bytes()?;
         let static_analysis =
-            || WorkflowAnalysisService::analyze_workflow(&initial.workflow, &initial.raw_bytes);
-        let (capability, enriched_nodes, analysis) =
-            match self.comfy_adapter.get_object_info().await {
+            || WorkflowAnalysisService::analyze_workflow(current_workflow, &current_api_bytes);
+        let (capability, enriched_nodes, analysis) = match pending_result {
+            Some(Some((capability, nodes, analysis))) => (capability, Some(nodes), analysis),
+            Some(None) => unreachable!("pending normalization without a normalized workflow"),
+            None => match self.comfy_adapter.get_object_info().await {
                 Ok(object) if object.is_object() => {
                     let schema = RecognitionSchemaContext::parse(&object);
-                    let mut nodes = initial.nodes.clone();
+                    let mut nodes = current_after_normalization.nodes.clone();
                     enrich_nodes_with_schema(&mut nodes, &schema);
-                    let capability = evaluate_capability_with_schema(
-                        &initial.workflow,
+                    let output_roots = output_root_selections_from_mappings(
+                        &current_after_normalization.output_mappings,
+                    );
+                    let analysis =
+                        WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
+                            current_workflow,
+                            &current_api_bytes,
+                            Some(&schema),
+                            &output_roots,
+                        );
+                    let capability = evaluate_capability_with_schema_and_analysis(
+                        current_workflow,
                         &nodes,
                         &schema,
                         &BTreeSet::new(),
-                    );
-                    let analysis = WorkflowAnalysisService::analyze_workflow_with_schema(
-                        &initial.workflow,
-                        &initial.raw_bytes,
-                        Some(&schema),
+                        &analysis,
                     );
                     (capability, Some(nodes), analysis)
                 }
@@ -1344,6 +1569,7 @@ impl WorkflowOnboardingService {
                             current_value: None,
                             message: "ComfyUI object_info response is not an object".to_owned(),
                         }],
+                        profile: None,
                     },
                     None,
                     static_analysis(),
@@ -1353,6 +1579,7 @@ impl WorkflowOnboardingService {
                         state: CapabilityState::ComfyOffline,
                         checked_at: Some(self.clock.now().to_rfc3339()),
                         issues: Vec::new(),
+                        profile: None,
                     },
                     None,
                     static_analysis(),
@@ -1370,11 +1597,13 @@ impl WorkflowOnboardingService {
                             current_value: None,
                             message: error.to_string(),
                         }],
+                        profile: None,
                     },
                     None,
                     static_analysis(),
                 ),
-            };
+            },
+        };
         self.with_registry(|registry| {
             let draft = registry.get_mut(draft_id)?;
             draft.capability = capability.clone();
@@ -1433,6 +1662,166 @@ impl WorkflowOnboardingService {
         Ok((inference, current))
     }
 
+    async fn normalize_pending_ui_draft(
+        &self,
+        draft_id: &str,
+        initial: &WorkflowOnboardingDraft,
+    ) -> Result<
+        Option<(
+            CapabilityCheckView,
+            Vec<WorkflowNodeView>,
+            WorkflowAnalysisReport,
+        )>,
+        WorkflowOnboardingError,
+    > {
+        let pending = |code: &'static str,
+                       message: String,
+                       state: CapabilityState|
+         -> Result<
+            Option<(
+                CapabilityCheckView,
+                Vec<WorkflowNodeView>,
+                WorkflowAnalysisReport,
+            )>,
+            WorkflowOnboardingError,
+        > {
+            let diagnostic = WorkflowNormalizationDiagnosticView {
+                code: code.to_owned(),
+                message,
+                node_id: None,
+                input_name: None,
+            };
+            let capability = CapabilityCheckView {
+                state,
+                checked_at: Some(self.clock.now().to_rfc3339()),
+                issues: Vec::new(),
+                profile: None,
+            };
+            self.with_registry(|registry| {
+                let draft = registry.get_mut(draft_id)?;
+                draft.normalized_api = None;
+                draft.workflow_sha256 = draft.raw_sha256.clone();
+                draft.compatibility_context = None;
+                draft.normalization_state = WorkflowNormalizationState::UiSourcePending;
+                draft.normalization_diagnostics = vec![diagnostic];
+                draft.nodes.clear();
+                draft.analysis = None;
+                draft.capability = capability.clone();
+                draft.recognition = draft
+                    .recognition
+                    .clone()
+                    .with_runtime_capability(runtime_capability_summary(&capability));
+                Ok(())
+            })??;
+            Ok(None)
+        };
+
+        let object = match self.comfy_adapter.get_object_info().await {
+            Ok(object) if object.is_object() => object,
+            Ok(_) => {
+                return pending(
+                    "COMFY_PROTOCOL_ERROR",
+                    "ComfyUI object_info response is not an object".to_owned(),
+                    CapabilityState::IncompatibleInputValues,
+                );
+            }
+            Err(ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_)) => {
+                return pending(
+                    "WAITING_FOR_COMFY_UI",
+                    "等待 ComfyUI 连接后继续解析此 UI 工作流。".to_owned(),
+                    CapabilityState::ComfyOffline,
+                );
+            }
+            Err(error) => {
+                return pending(
+                    "COMFY_PROTOCOL_ERROR",
+                    error.to_string(),
+                    CapabilityState::IncompatibleInputValues,
+                );
+            }
+        };
+
+        let result = (|| -> Result<_, String> {
+            let schema = RecognitionSchemaContext::parse(&object);
+            let workflow_format_version = initial
+                .workflow_format_version
+                .as_deref()
+                .ok_or_else(|| {
+                    "WORKFLOW_FORMAT_VERSION_UNKNOWN: source UI workflow has no workflow format version provenance".to_owned()
+                })?;
+            let compatibility = NormalizationCompatibilityContext::from_source(
+                workflow_format_version,
+                initial.frontend_version.as_deref(),
+                canonical_schema_fingerprint(&object),
+            )
+            .map_err(|error| error.to_string())?;
+            let profile = FrontendSerializationProfile::from_context(&compatibility)
+                .map_err(|error| error.to_string())?;
+            let descriptors =
+                UiSerializationDescriptorSet::build(&schema, profile, compatibility.clone())
+                    .map_err(|error| error.to_string())?;
+            let ui_document =
+                parse_ui_workflow(&initial.raw_bytes).map_err(|error| error.to_string())?;
+            let normalized = normalize_ui_workflow(&ui_document, &descriptors)
+                .map_err(|error| error.to_string())?;
+            let mut nodes =
+                inspect_workflow(&normalized.workflow).map_err(|error| error.to_string())?;
+            enrich_nodes_with_schema(&mut nodes, &schema);
+            let output_roots = output_root_selections_from_mappings(&initial.output_mappings);
+            let analysis = WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
+                &normalized.workflow,
+                &normalized.api_bytes,
+                Some(&schema),
+                &output_roots,
+            );
+            let capability = evaluate_capability_with_schema_and_analysis(
+                &normalized.workflow,
+                &nodes,
+                &schema,
+                &BTreeSet::new(),
+                &analysis,
+            );
+            Ok((normalized, nodes, capability, analysis))
+        })();
+
+        match result {
+            Ok((normalized, nodes, capability, analysis)) => {
+                self.with_registry(|registry| {
+                    let draft = registry.get_mut(draft_id)?;
+                    draft.workflow_sha256 = sha256(&normalized.api_bytes);
+                    draft.normalized_api = Some(normalized.workflow.clone());
+                    draft.compatibility_context = Some(normalized.compatibility.clone());
+                    draft.normalization_state = WorkflowNormalizationState::NormalizedApiReady;
+                    draft.normalization_diagnostics.clear();
+                    draft.nodes = nodes.clone();
+                    Ok(())
+                })??;
+                Ok(Some((capability, nodes, analysis)))
+            }
+            Err(error) => {
+                let code = match error.split(':').next().unwrap_or_default() {
+                    "UNKNOWN_NODE_CLASS" => "MISSING_NODES",
+                    "WORKFLOW_FORMAT_VERSION_UNKNOWN" => "WORKFLOW_FORMAT_VERSION_UNKNOWN",
+                    "FRONTEND_VERSION_UNKNOWN" => "FRONTEND_VERSION_UNKNOWN",
+                    "FRONTEND_VERSION_UNSUPPORTED" => "FRONTEND_VERSION_UNSUPPORTED",
+                    "UNSUPPORTED_NORMALIZATION_COMPATIBILITY" => {
+                        "UNSUPPORTED_NORMALIZATION_COMPATIBILITY"
+                    }
+                    "SCHEMA_EMPTY" => "SCHEMA_UNAVAILABLE",
+                    _ => "NORMALIZATION_BLOCKED",
+                };
+                pending(
+                    code,
+                    error,
+                    if code == "MISSING_NODES" {
+                        CapabilityState::MissingNodes
+                    } else {
+                        CapabilityState::IncompatibleInputValues
+                    },
+                )
+            }
+        }
+    }
     async fn existing_packages_for_identity(
         &self,
         workflow_sha256: &str,
@@ -1732,9 +2121,16 @@ impl WorkflowOnboardingService {
         let draft = WorkflowOnboardingDraft {
             draft_id: format!("onb_{}", Uuid::new_v4()),
             workflow_sha256: sha256(&raw_bytes),
+            raw_sha256: sha256(&raw_bytes),
             original_filename: safe_filename(&format!("{}.json", next_manifest.name)),
+            source_format: ComfyWorkflowInputFormat::Api,
+            workflow_format_version: None,
+            frontend_version: None,
+            compatibility_context: None,
+            normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+            normalization_diagnostics: Vec::new(),
             nodes: inspect_workflow(&workflow)?,
-            workflow,
+            normalized_api: Some(workflow),
             raw_bytes,
             manifest: next_manifest,
             recipe_id: format!("rcp_{}", Uuid::new_v4()),
@@ -1743,6 +2139,7 @@ impl WorkflowOnboardingService {
                 state: CapabilityState::NotChecked,
                 checked_at: None,
                 issues: Vec::new(),
+                profile: None,
             },
             input_mappings: input_mappings_from_recipe(&recipe)?,
             output_mappings: recipe
@@ -1812,9 +2209,16 @@ impl WorkflowOnboardingService {
         let draft = WorkflowOnboardingDraft {
             draft_id: format!("onb_{}", Uuid::new_v4()),
             workflow_sha256: sha256(&raw_bytes),
+            raw_sha256: sha256(&raw_bytes),
             original_filename: safe_filename(&format!("{}.json", manifest.name)),
+            source_format: ComfyWorkflowInputFormat::Api,
+            workflow_format_version: None,
+            frontend_version: None,
+            compatibility_context: None,
+            normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+            normalization_diagnostics: Vec::new(),
             nodes: inspect_workflow(&workflow)?,
-            workflow,
+            normalized_api: Some(workflow),
             raw_bytes,
             manifest,
             recipe_id: format!("rcp_{}", Uuid::new_v4()),
@@ -1823,6 +2227,7 @@ impl WorkflowOnboardingService {
                 state: CapabilityState::NotChecked,
                 checked_at: None,
                 issues: Vec::new(),
+                profile: None,
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
@@ -1965,7 +2370,8 @@ impl WorkflowOnboardingService {
         }
         let view = self.with_registry(|registry| {
             let draft = registry.get_mut(draft_id)?;
-            let node = draft.workflow.node(&request.target_node).ok_or_else(|| {
+            let workflow = draft.normalized_workflow()?;
+            let node = workflow.node(&request.target_node).ok_or_else(|| {
                 WorkflowOnboardingError::new(
                     "MAPPING_INVALID",
                     format!("target node {} does not exist", request.target_node),
@@ -1987,7 +2393,7 @@ impl WorkflowOnboardingService {
                     format!("target input {} does not exist", request.target_input),
                 )
             })?;
-            let linked = is_workflow_link(current, &draft.workflow)?.is_some();
+            let linked = is_workflow_link(current, workflow)?.is_some();
             if is_dangerous_input_name(&request.target_input) {
                 return Err(WorkflowOnboardingError::new(
                     "MAPPING_DANGEROUS_INPUT",
@@ -1999,7 +2405,7 @@ impl WorkflowOnboardingService {
             }
             if linked
                 && linked_target_semantic(&request.target_input)
-                    != Some(request.semantic_key.as_str())
+                    .is_none_or(|hint| hint.semantic_key != request.semantic_key)
             {
                 return Err(WorkflowOnboardingError::new(
                     "LINKED_INPUT_NOT_BINDABLE",
@@ -2091,6 +2497,7 @@ impl WorkflowOnboardingService {
     ) -> Result<WorkflowOnboardingDraftView, WorkflowOnboardingError> {
         let view = self.with_registry(|registry| {
             let draft = registry.get_mut(draft_id)?;
+            draft.normalized_workflow()?;
             draft.input_mappings.retain(|mapping| {
                 !(mapping.semantic_key == request.semantic_key
                     && mapping.item_index == request.item_index)
@@ -2129,7 +2536,8 @@ impl WorkflowOnboardingService {
         };
         let view = self.with_registry(|registry| {
             let draft = registry.get_mut(draft_id)?;
-            if draft.workflow.node(&request.node_id).is_none() {
+            let workflow = draft.normalized_workflow()?;
+            if workflow.node(&request.node_id).is_none() {
                 return Err(WorkflowOnboardingError::new(
                     "OUTPUT_INVALID",
                     format!("output node {} does not exist", request.node_id),
@@ -2159,6 +2567,9 @@ impl WorkflowOnboardingService {
         draft_id: &str,
     ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
         let draft = self.with_registry(|registry| registry.get(draft_id))??;
+        if draft.normalized_api.is_none() {
+            return Ok(draft.capability);
+        }
         let (capability, enriched_nodes) = self.check_capability_for_workflow(&draft).await;
         self.with_registry(|registry| {
             let draft = registry.get_mut(draft_id)?;
@@ -2180,7 +2591,7 @@ impl WorkflowOnboardingService {
         &self,
         workflow_json: &str,
     ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
-        self.check_runtime_workflow_with_dynamic_targets(workflow_json, &BTreeSet::new())
+        self.check_runtime_workflow_with_dynamic_targets(workflow_json, &BTreeSet::new(), &[])
             .await
     }
 
@@ -2196,18 +2607,28 @@ impl WorkflowOnboardingService {
         recipe: &Recipe,
     ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
         let dynamic_binding_targets = dynamic_binding_targets(recipe);
-        self.check_runtime_workflow_with_dynamic_targets(workflow_json, &dynamic_binding_targets)
-            .await
+        let output_roots = output_root_selections_from_recipe(recipe);
+        self.check_runtime_workflow_with_dynamic_targets(
+            workflow_json,
+            &dynamic_binding_targets,
+            &output_roots,
+        )
+        .await
     }
 
     async fn check_runtime_workflow_with_dynamic_targets(
         &self,
         workflow_json: &str,
         dynamic_binding_targets: &BTreeSet<(String, String)>,
+        output_roots: &[OutputRootSelection],
     ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
         let draft = runtime_check_draft(workflow_json)?;
         Ok(self
-            .check_capability_for_workflow_with_dynamic_targets(&draft, dynamic_binding_targets)
+            .check_capability_for_workflow_with_dynamic_targets_and_roots(
+                &draft,
+                dynamic_binding_targets,
+                output_roots,
+            )
             .await
             .0)
     }
@@ -2248,11 +2669,13 @@ impl WorkflowOnboardingService {
             })?)?;
         let nodes = inspect_workflow(&workflow)?;
         let dynamic_binding_targets = dynamic_binding_targets(recipe);
-        Ok(evaluate_capability_with_schema(
+        let output_roots = output_root_selections_from_recipe(recipe);
+        Ok(evaluate_capability_with_schema_and_output_roots(
             &workflow,
             &nodes,
             schema,
             &dynamic_binding_targets,
+            &output_roots,
         ))
     }
 
@@ -2295,12 +2718,14 @@ impl WorkflowOnboardingService {
                             current_value: None,
                             message: "ComfyUI object_info response is not an object".to_owned(),
                         }],
+                        profile: None,
                     },
                     Err(ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_)) => {
                         CapabilityCheckView {
                             state: CapabilityState::ComfyOffline,
                             checked_at: Some(self.clock.now().to_rfc3339()),
                             issues: Vec::new(),
+                            profile: None,
                         }
                     }
                     Err(error) => CapabilityCheckView {
@@ -2315,6 +2740,7 @@ impl WorkflowOnboardingService {
                             current_value: None,
                             message: error.to_string(),
                         }],
+                        profile: None,
                     },
                 };
                 Ok((input.workflow_version_id.clone(), capability))
@@ -2353,6 +2779,8 @@ impl WorkflowOnboardingService {
         // READY result is only a snapshot and cannot authorize a stale draft.
         self.check_capability(draft_id).await?;
         let draft = self.with_registry(|registry| registry.get(draft_id))??;
+        let workflow = draft.normalized_workflow()?;
+        let workflow_bytes = draft.normalized_api_bytes()?;
         let validation = validation_for_draft(&draft);
         let valid = if allow_unready_capability {
             importable_validation(&validation)
@@ -2367,7 +2795,7 @@ impl WorkflowOnboardingService {
         }
 
         let existing_packages = self
-            .existing_packages_for_identity(&draft.workflow_sha256, &draft.workflow)
+            .existing_packages_for_identity(&draft.workflow_sha256, workflow)
             .await?;
         if !draft.allow_existing_workflow_sha
             && existing_packages
@@ -2399,7 +2827,7 @@ impl WorkflowOnboardingService {
         let package = WorkflowPackageBytes::new(
             manifest_yaml.into_bytes(),
             recipe_yaml.into_bytes(),
-            draft.raw_bytes.clone(),
+            workflow_bytes,
         );
         self.package_store
             .stage(&staging_name, &package)
@@ -2579,16 +3007,28 @@ impl WorkflowOnboardingService {
                 Ok(workflow) => workflow,
                 Err(_) => continue,
             };
+            let parsed_recipe = RecipeParser::parse(&files.recipe_yaml).ok();
+            let output_roots = parsed_recipe
+                .as_ref()
+                .map(output_root_selections_from_recipe)
+                .unwrap_or_default();
             let mut nodes = inspect_workflow(&workflow)?;
             let capability = if offline {
                 CapabilityCheckView {
                     state: CapabilityState::ComfyOffline,
                     checked_at: None,
                     issues: Vec::new(),
+                    profile: None,
                 }
             } else if let Some(schema) = &capability_schema {
                 enrich_nodes_with_schema(&mut nodes, schema);
-                evaluate_capability_with_schema(&workflow, &nodes, schema, &BTreeSet::new())
+                evaluate_capability_with_schema_and_output_roots(
+                    &workflow,
+                    &nodes,
+                    schema,
+                    &BTreeSet::new(),
+                    &output_roots,
+                )
             } else {
                 CapabilityCheckView {
                     state: CapabilityState::IncompatibleInputValues,
@@ -2602,10 +3042,11 @@ impl WorkflowOnboardingService {
                         current_value: None,
                         message: "ComfyUI object_info was not a JSON object".to_owned(),
                     }],
+                    profile: None,
                 }
             };
-            let (input_mappings, outputs) = match RecipeParser::parse(&files.recipe_yaml) {
-                Ok(recipe) => (
+            let (input_mappings, outputs) = match parsed_recipe {
+                Some(recipe) => (
                     recipe
                         .bindings
                         .iter()
@@ -2641,7 +3082,7 @@ impl WorkflowOnboardingService {
                         .collect(),
                     recipe.outputs.iter().map(output_view).collect(),
                 ),
-                Err(_) => (Vec::new(), Vec::new()),
+                None => (Vec::new(), Vec::new()),
             };
             let has_successful_run = self
                 .workflow_run_repository
@@ -2729,26 +3170,36 @@ impl WorkflowOnboardingService {
         &self,
         draft: &WorkflowOnboardingDraft,
     ) -> (CapabilityCheckView, Option<Vec<WorkflowNodeView>>) {
-        self.check_capability_for_workflow_with_dynamic_targets(draft, &BTreeSet::new())
-            .await
+        let output_roots = output_root_selections_from_mappings(&draft.output_mappings);
+        self.check_capability_for_workflow_with_dynamic_targets_and_roots(
+            draft,
+            &BTreeSet::new(),
+            &output_roots,
+        )
+        .await
     }
 
-    async fn check_capability_for_workflow_with_dynamic_targets(
+    async fn check_capability_for_workflow_with_dynamic_targets_and_roots(
         &self,
         draft: &WorkflowOnboardingDraft,
         dynamic_binding_targets: &BTreeSet<(String, String)>,
+        output_roots: &[OutputRootSelection],
     ) -> (CapabilityCheckView, Option<Vec<WorkflowNodeView>>) {
+        let Ok(workflow) = draft.normalized_workflow() else {
+            return (draft.capability.clone(), None);
+        };
         match self.comfy_adapter.get_object_info().await {
             Ok(object) if object.is_object() => {
                 let schema = RecognitionSchemaContext::parse(&object);
                 let mut nodes = draft.nodes.clone();
                 enrich_nodes_with_schema(&mut nodes, &schema);
                 (
-                    evaluate_capability_with_schema(
-                        &draft.workflow,
+                    evaluate_capability_with_schema_and_output_roots(
+                        workflow,
                         &nodes,
                         &schema,
                         dynamic_binding_targets,
+                        output_roots,
                     ),
                     Some(nodes),
                 )
@@ -2766,6 +3217,7 @@ impl WorkflowOnboardingService {
                         current_value: None,
                         message: "ComfyUI object_info response is not an object".to_owned(),
                     }],
+                    profile: None,
                 },
                 None,
             ),
@@ -2774,6 +3226,7 @@ impl WorkflowOnboardingService {
                     state: CapabilityState::ComfyOffline,
                     checked_at: Some(self.clock.now().to_rfc3339()),
                     issues: Vec::new(),
+                    profile: None,
                 },
                 None,
             ),
@@ -2790,6 +3243,7 @@ impl WorkflowOnboardingService {
                         current_value: None,
                         message: error.to_string(),
                     }],
+                    profile: None,
                 },
                 None,
             ),
@@ -2934,6 +3388,14 @@ fn onboarding_state_and_message(
             WorkflowAutoOnboardingState::Blocked,
             "工作流需要确认：当前 ComfyUI 缺少工作流节点。".to_owned(),
         ),
+        CapabilityState::UnknownOutputRoot | CapabilityState::AmbiguousOutputRoot => (
+            WorkflowAutoOnboardingState::NeedsReview,
+            "工作流需要确认：无法确定可靠的最终输出节点，请检查输出映射。".to_owned(),
+        ),
+        CapabilityState::PartiallySupported => (
+            WorkflowAutoOnboardingState::NeedsReview,
+            "工作流需要确认：部分输出根尚未满足运行能力，请检查输出与节点依赖。".to_owned(),
+        ),
         _ if issues.is_empty() => (
             WorkflowAutoOnboardingState::Blocked,
             "工作流需要确认：自动校验尚未通过。".to_owned(),
@@ -2961,13 +3423,22 @@ fn auto_plan_for_draft(
     let workflow_kind = workflow_kind_for_outputs(&draft.output_mappings);
     WorkflowAutoOnboardingPlanView {
         draft_id: draft.draft_id.clone(),
-        analysis_id: Some(format!("ana_{}", draft.draft_id.trim_start_matches("onb_"))),
-        analysis: Some(analysis_for_draft(draft)),
+        analysis_id: draft
+            .analysis
+            .as_ref()
+            .map(|_| format!("ana_{}", draft.draft_id.trim_start_matches("onb_"))),
+        analysis: analysis_for_draft(draft),
         commit_required: published.is_none(),
         state,
         workflow_kind,
         workflow_sha256: draft.workflow_sha256.clone(),
+        raw_sha256: draft.raw_sha256.clone(),
         original_filename: draft.original_filename.clone(),
+        source_format: draft.source_format.as_str().to_owned(),
+        workflow_format_version: draft.workflow_format_version.clone(),
+        frontend_version: draft.frontend_version.clone(),
+        normalization_state: draft.normalization_state,
+        normalization_diagnostics: draft.normalization_diagnostics.clone(),
         node_count: view.node_count,
         unique_class_count: view.unique_class_count,
         metadata: view.manifest,
@@ -2996,7 +3467,9 @@ fn auto_plan_for_draft(
 }
 
 fn infer_auto_onboarding(draft: &WorkflowOnboardingDraft) -> AutoInferenceResult {
-    let analysis = analysis_for_draft(draft);
+    let Some(analysis) = analysis_for_draft(draft) else {
+        return AutoInferenceResult::default();
+    };
     auto_inference_from_analysis(draft, &analysis)
 }
 
@@ -3035,7 +3508,11 @@ fn inference_issue_resolved_by_mapping(
                                 == Some(mapping.target_input.as_str())
                     })
             }),
-        "AMBIGUOUS_OUTPUT" | "UNKNOWN_OUTPUT" => draft
+        "AMBIGUOUS_OUTPUT"
+        | "UNKNOWN_OUTPUT"
+        | "AMBIGUOUS_OUTPUT_ROOT"
+        | "UNKNOWN_OUTPUT_ROOT"
+        | "INVALID_OUTPUT_ROOT_MAPPING" => draft
             .output_mappings
             .iter()
             .filter(|mapping| mapping.output_id == field)
@@ -3053,9 +3530,11 @@ fn inference_issue_resolved_by_mapping(
     }
 }
 
-fn analysis_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowAnalysisReport {
-    draft.analysis.clone().unwrap_or_else(|| {
-        WorkflowAnalysisService::analyze_workflow(&draft.workflow, &draft.raw_bytes)
+fn analysis_for_draft(draft: &WorkflowOnboardingDraft) -> Option<WorkflowAnalysisReport> {
+    draft.analysis.clone().or_else(|| {
+        let workflow = draft.normalized_workflow().ok()?;
+        let bytes = draft.normalized_api_bytes().ok()?;
+        Some(WorkflowAnalysisService::analyze_workflow(workflow, &bytes))
     })
 }
 
@@ -3069,11 +3548,7 @@ fn auto_inference_from_analysis(
         .filter_map(|input| analysis_input_mapping(draft, input))
         .collect::<Vec<_>>();
     normalize_inferred_plural_bounds(&mut input_mappings);
-    let output_mappings = if analysis
-        .issues
-        .iter()
-        .any(|issue| issue.code == "AMBIGUOUS_OUTPUT")
-    {
+    let output_mappings = if !analysis.output_root_resolution.is_resolved() {
         Vec::new()
     } else {
         analysis
@@ -3144,7 +3619,12 @@ fn auto_inference_from_analysis(
         })
         .collect();
     AutoInferenceResult {
-        name: infer_workflow_name(&draft.workflow, &draft.original_filename),
+        name: infer_workflow_name(
+            draft
+                .normalized_workflow()
+                .expect("analysis-backed inference requires a normalized workflow"),
+            &draft.original_filename,
+        ),
         category: analysis.category.clone(),
         mode: analysis.mode.clone(),
         input_mappings,
@@ -3304,6 +3784,9 @@ fn runtime_capability_summary(capability: &CapabilityCheckView) -> RuntimeCapabi
         CapabilityState::ComfyOffline => RuntimeCapabilityState::Offline,
         CapabilityState::IncompatibleInputValues => RuntimeCapabilityState::Incompatible,
         CapabilityState::NotChecked => RuntimeCapabilityState::NotChecked,
+        CapabilityState::UnknownOutputRoot => RuntimeCapabilityState::UnknownOutputRoot,
+        CapabilityState::AmbiguousOutputRoot => RuntimeCapabilityState::AmbiguousOutputRoot,
+        CapabilityState::PartiallySupported => RuntimeCapabilityState::PartiallySupported,
     };
     RuntimeCapabilitySummary {
         state,
@@ -3423,7 +3906,13 @@ fn view_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingDraftVie
     WorkflowOnboardingDraftView {
         draft_id: draft.draft_id.clone(),
         workflow_sha256: draft.workflow_sha256.clone(),
+        raw_sha256: draft.raw_sha256.clone(),
         original_filename: draft.original_filename.clone(),
+        source_format: draft.source_format.as_str().to_owned(),
+        workflow_format_version: draft.workflow_format_version.clone(),
+        frontend_version: draft.frontend_version.clone(),
+        normalization_state: draft.normalization_state,
+        normalization_diagnostics: draft.normalization_diagnostics.clone(),
         node_count: draft.nodes.len(),
         unique_class_count: draft
             .nodes
@@ -3459,6 +3948,28 @@ fn view_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingDraftVie
 }
 
 fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingValidationView {
+    if draft.normalized_api.is_none() {
+        let mut issues = draft
+            .normalization_diagnostics
+            .iter()
+            .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
+            .collect::<Vec<_>>();
+        issues.push("NORMALIZATION_REQUIRED: normalized API workflow is required".to_owned());
+        return WorkflowOnboardingValidationView {
+            api_format: false,
+            recipe: false,
+            bindings: false,
+            outputs: false,
+            manifest: draft.manifest.validate().is_ok(),
+            capability: false,
+            dry_run: false,
+            ready_to_publish: false,
+            issues,
+        };
+    }
+    let workflow = draft
+        .normalized_workflow()
+        .expect("normalized_api presence was checked above");
     let mut issues = Vec::new();
     let manifest = draft
         .manifest
@@ -3494,13 +4005,13 @@ fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingVa
         && draft
             .output_mappings
             .iter()
-            .all(|output| draft.workflow.node(&output.node_id).is_some());
+            .all(|output| workflow.node(&output.node_id).is_some());
     if !outputs_valid {
         issues.push("OUTPUT_INVALID: at least one valid output is required".to_owned());
     }
     let bindings_valid = recipe_result
         .as_ref()
-        .is_ok_and(|recipe| BindingValidator::validate(recipe, &draft.workflow).is_ok());
+        .is_ok_and(|recipe| BindingValidator::validate(recipe, workflow).is_ok());
     if !bindings_valid {
         issues.push("BINDING_INVALID: one or more bindings are invalid".to_owned());
     }
@@ -3527,7 +4038,7 @@ fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingVa
     }
     let dry_run = recipe_result
         .as_ref()
-        .is_ok_and(|recipe| dry_run_compile(recipe, &draft.workflow).is_ok());
+        .is_ok_and(|recipe| dry_run_compile(recipe, workflow).is_ok());
     if !dry_run {
         issues.push("DRY_RUN_FAILED: recipe cannot compile without side effects".to_owned());
     }
@@ -3572,6 +4083,7 @@ fn importable_validation(validation: &WorkflowOnboardingValidationView) -> bool 
 }
 
 fn build_recipe(draft: &WorkflowOnboardingDraft) -> Result<Recipe, WorkflowOnboardingError> {
+    draft.normalized_workflow()?;
     let mut inputs = BTreeMap::new();
     let mut bindings = Vec::new();
     for mapping in &draft.input_mappings {
@@ -4261,7 +4773,8 @@ fn inspect_workflow(
                     kind: value_kind(value, linked).to_owned(),
                     current_value_summary: current_value_summary(value),
                     is_linked: linked,
-                    bindable: !linked || linked_target_semantic(name).is_some(),
+                    bindable: !linked
+                        || canonical_suggestion_for_input(name, value, linked).is_some(),
                     suggested_type: suggestion_for_input(name, value, linked),
                     suggested_semantic_key: suggestion_for_semantic_key(name, value, linked),
                     numeric_min: None,
@@ -4305,9 +4818,16 @@ fn runtime_check_draft(
     Ok(WorkflowOnboardingDraft {
         draft_id: "onb_runtime_check".to_owned(),
         workflow_sha256: sha256(&raw_bytes),
+        raw_sha256: sha256(&raw_bytes),
         original_filename: "runtime.json".to_owned(),
+        source_format: ComfyWorkflowInputFormat::Api,
+        workflow_format_version: None,
+        frontend_version: None,
+        compatibility_context: None,
+        normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+        normalization_diagnostics: Vec::new(),
         nodes: inspect_workflow(&workflow)?,
-        workflow,
+        normalized_api: Some(workflow),
         raw_bytes,
         manifest: WorkflowManifest {
             schema_version: 1,
@@ -4324,6 +4844,7 @@ fn runtime_check_draft(
             state: CapabilityState::NotChecked,
             checked_at: None,
             issues: Vec::new(),
+            profile: None,
         },
         input_mappings: Vec::new(),
         output_mappings: Vec::new(),
@@ -4341,6 +4862,33 @@ fn dynamic_binding_targets(recipe: &Recipe) -> BTreeSet<(String, String)> {
         }
     }
     targets
+}
+
+fn output_root_selections_from_mappings(mappings: &[OutputMapping]) -> Vec<OutputRootSelection> {
+    mappings
+        .iter()
+        .map(|mapping| OutputRootSelection {
+            node_id: mapping.node_id.clone(),
+            output_type: match mapping.output_type {
+                OutputType::Image => "image".to_owned(),
+                OutputType::Video => "video".to_owned(),
+            },
+        })
+        .collect()
+}
+
+fn output_root_selections_from_recipe(recipe: &Recipe) -> Vec<OutputRootSelection> {
+    recipe
+        .outputs
+        .iter()
+        .map(|output| OutputRootSelection {
+            node_id: output.node.clone(),
+            output_type: match output.output_type {
+                OutputType::Image => "image".to_owned(),
+                OutputType::Video => "video".to_owned(),
+            },
+        })
+        .collect()
 }
 
 pub fn dynamic_binding_target_labels(recipe: &Recipe) -> Vec<String> {
@@ -4375,9 +4923,149 @@ fn evaluate_capability_with_schema(
     schema: &RecognitionSchemaContext,
     dynamic_binding_targets: &BTreeSet<(String, String)>,
 ) -> CapabilityCheckView {
+    evaluate_capability_with_schema_and_output_roots(
+        workflow,
+        nodes,
+        schema,
+        dynamic_binding_targets,
+        &[],
+    )
+}
+
+fn evaluate_capability_with_schema_and_output_roots(
+    workflow: &WorkflowDocument,
+    nodes: &[WorkflowNodeView],
+    schema: &RecognitionSchemaContext,
+    dynamic_binding_targets: &BTreeSet<(String, String)>,
+    output_roots: &[OutputRootSelection],
+) -> CapabilityCheckView {
+    let analysis = WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
+        workflow,
+        &[],
+        Some(schema),
+        output_roots,
+    );
+    evaluate_capability_with_schema_and_analysis(
+        workflow,
+        nodes,
+        schema,
+        dynamic_binding_targets,
+        &analysis,
+    )
+}
+
+fn evaluate_capability_with_schema_and_analysis(
+    workflow: &WorkflowDocument,
+    nodes: &[WorkflowNodeView],
+    schema: &RecognitionSchemaContext,
+    dynamic_binding_targets: &BTreeSet<(String, String)>,
+    analysis: &WorkflowAnalysisReport,
+) -> CapabilityCheckView {
+    let output_roots = match &analysis.output_root_resolution {
+        OutputRootResolution::Resolved { roots } => roots,
+        OutputRootResolution::Ambiguous { candidates, .. } => {
+            return unresolved_output_root_capability(
+                CapabilityState::AmbiguousOutputRoot,
+                "AMBIGUOUS_OUTPUT_ROOT",
+                "多个强媒体输出根无法确定唯一的生产边界。",
+                candidates.iter().map(|candidate| candidate.node_id.clone()),
+            )
+        }
+        OutputRootResolution::Unknown { reason } => {
+            let (code, message) = if *reason == OutputRootResolutionReason::InvalidExplicitSelection
+            {
+                (
+                    "INVALID_OUTPUT_ROOT_MAPPING",
+                    "手动输出映射未指向可验证的媒体输出节点。",
+                )
+            } else {
+                ("UNKNOWN_OUTPUT_ROOT", "未能识别可靠的最终媒体输出节点。")
+            };
+            return unresolved_output_root_capability(
+                CapabilityState::UnknownOutputRoot,
+                code,
+                message,
+                Vec::new(),
+            );
+        }
+    };
+    let graph = match WorkflowGraph::from_document(workflow) {
+        Ok(graph) => graph,
+        Err(error) => {
+            return CapabilityCheckView {
+                state: CapabilityState::IncompatibleInputValues,
+                checked_at: Some(chrono::Utc::now().to_rfc3339()),
+                issues: vec![CapabilityIssueView {
+                    code: "GRAPH_INVALID".to_owned(),
+                    class_type: None,
+                    node_id: None,
+                    affected_node_ids: Vec::new(),
+                    input_name: None,
+                    current_value: None,
+                    message: error.to_string(),
+                }],
+                profile: None,
+            };
+        }
+    };
+    let roots = output_roots
+        .iter()
+        .map(|root| root.node_id.clone())
+        .collect::<Vec<_>>();
+    let active = match ActiveDependencyGraph::from_graph(&graph, &roots) {
+        Ok(active) => active,
+        Err(error) => {
+            return CapabilityCheckView {
+                state: CapabilityState::IncompatibleInputValues,
+                checked_at: Some(chrono::Utc::now().to_rfc3339()),
+                issues: vec![CapabilityIssueView {
+                    code: "GRAPH_INVALID".to_owned(),
+                    class_type: None,
+                    node_id: None,
+                    affected_node_ids: Vec::new(),
+                    input_name: None,
+                    current_value: None,
+                    message: error.to_string(),
+                }],
+                profile: None,
+            };
+        }
+    };
+    let semantic = resolve_semantic_graph(workflow, schema, active.clone());
+    let closures = output_roots
+        .iter()
+        .filter_map(|root| {
+            RootDependencyClosure::from_graph(&graph, root.output_id.clone(), &root.node_id).ok()
+        })
+        .collect::<Vec<_>>();
+    let profile = build_capability_profile_for_roots(
+        analysis,
+        &semantic,
+        &closures,
+        output_roots,
+        analysis.selected_root_id.as_deref(),
+    );
     let mut issues = Vec::new();
     let mut missing_by_class: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for node in nodes {
+    for issue in &profile.unknown_dependencies {
+        issues.push(CapabilityIssueView {
+            code: match issue.code.as_str() {
+                "invalid_required_input" => "INVALID_REQUIRED_INPUT",
+                _ => "UNKNOWN_SEMANTIC_DEPENDENCY",
+            }
+            .to_owned(),
+            class_type: workflow.class_type(&issue.node_id).map(str::to_owned),
+            node_id: (!issue.node_id.is_empty()).then(|| issue.node_id.clone()),
+            affected_node_ids: Vec::new(),
+            input_name: issue.input_name.clone(),
+            current_value: None,
+            message: issue.message.clone(),
+        });
+    }
+    for node in nodes
+        .iter()
+        .filter(|node| active.active_nodes.contains(&node.node_id))
+    {
         let Some(node_schema) = schema.node(&node.class_type) else {
             missing_by_class
                 .entry(node.class_type.clone())
@@ -4449,9 +5137,13 @@ fn evaluate_capability_with_schema(
             message: format!("Missing ComfyUI node class {class_type}"),
         });
     }
-    let state = if issues.iter().any(|issue| issue.code == "MISSING_NODE") {
+    let state = if profile.readiness
+        == crate::application::workflow_semantic_graph::WorkflowCapabilityReadiness::PartiallySupported
+    {
+        CapabilityState::PartiallySupported
+    } else if issues.iter().any(|issue| issue.code == "MISSING_NODE") {
         CapabilityState::MissingNodes
-    } else if !issues.is_empty() {
+    } else if !issues.is_empty() || !profile.usable {
         CapabilityState::IncompatibleInputValues
     } else {
         CapabilityState::Ready
@@ -4460,6 +5152,29 @@ fn evaluate_capability_with_schema(
         state,
         checked_at: Some(chrono::Utc::now().to_rfc3339()),
         issues,
+        profile: Some(profile),
+    }
+}
+
+fn unresolved_output_root_capability(
+    state: CapabilityState,
+    code: &str,
+    message: &str,
+    affected_node_ids: impl IntoIterator<Item = String>,
+) -> CapabilityCheckView {
+    CapabilityCheckView {
+        state,
+        checked_at: Some(chrono::Utc::now().to_rfc3339()),
+        issues: vec![CapabilityIssueView {
+            code: code.to_owned(),
+            class_type: None,
+            node_id: None,
+            affected_node_ids: affected_node_ids.into_iter().collect(),
+            input_name: None,
+            current_value: None,
+            message: message.to_owned(),
+        }],
+        profile: None,
     }
 }
 
@@ -4709,126 +5424,22 @@ fn current_value_summary(value: &Value) -> String {
 }
 
 fn suggestion_for_input(name: &str, value: &Value, linked: bool) -> Option<String> {
-    let name = name.to_ascii_lowercase().replace(['-', ' ', '.'], "_");
-    if linked {
-        return match name.as_str() {
-            "prompt" | "text" | "positive" | "positive_prompt" | "negative" | "negative_prompt" => {
-                Some("textarea".to_owned())
-            }
-            "width" | "height" | "length" | "frames" | "num_frames" | "frame_count" => {
-                Some("integer".to_owned())
-            }
-            "seed" | "noise_seed" | "random_seed" => Some("seed".to_owned()),
-            "image" | "input_image" | "first_frame" | "start_frame" | "first_image"
-            | "start_image" | "last_frame" | "end_frame" | "last_image" | "end_image" => {
-                Some("image".to_owned())
-            }
-            "video" | "input_video" => Some("video".to_owned()),
-            "videos" | "reference_videos" | "ref_videos" => Some("videos".to_owned()),
-            "audio" | "input_audio" => Some("audio".to_owned()),
-            "audios" | "reference_audios" | "ref_audios" => Some("audios".to_owned()),
-            "images" | "reference_images" | "ref_images" => Some("images".to_owned()),
-            _ if is_indexed_media_slot(&name, "image") => Some("images".to_owned()),
-            _ if is_indexed_media_slot(&name, "video") => Some("videos".to_owned()),
-            _ if is_indexed_media_slot(&name, "audio") => Some("audios".to_owned()),
-            _ => None,
-        };
-    }
-    if value.is_string()
-        && (["prompt", "text", "positive", "negative"]
-            .iter()
-            .any(|key| name == *key || name.contains(key)))
-    {
-        return Some("textarea".to_owned());
-    }
-    if value.is_number()
-        && ["seed", "noise_seed", "random_seed"]
-            .iter()
-            .any(|key| name == *key || name.contains(key))
-    {
-        return (value.as_i64().is_some() || value.as_u64().is_some()).then_some("seed".to_owned());
-    }
-    if value.is_number()
-        && ["cfg", "cfg_scale", "guidance"]
-            .iter()
-            .any(|key| name == *key || name.contains(key))
-    {
-        return Some(if is_integer_number(value) {
-            "integer".to_owned()
-        } else {
-            "number".to_owned()
-        });
-    }
-    if value.is_number() {
-        return Some(if is_integer_number(value) {
-            "integer".to_owned()
-        } else {
-            "number".to_owned()
-        });
-    }
-    if (value.is_string() || value.is_array()) && name.contains("image") {
-        if value.is_array() || name.contains("images") || name.contains("references") {
-            return Some("images".to_owned());
-        }
-        return Some("image".to_owned());
-    }
-    if (value.is_string() || value.is_array()) && name.contains("video") {
-        if value.is_array() || name.contains("videos") || name.contains("references") {
-            return Some("videos".to_owned());
-        }
-        return Some("video".to_owned());
-    }
-    if (value.is_string() || value.is_array()) && name.contains("audio") {
-        if value.is_array() || name.contains("audios") || name.contains("references") {
-            return Some("audios".to_owned());
-        }
-        return Some("audio".to_owned());
-    }
-    if value.is_string()
-        && ["first_frame", "start_frame", "last_frame", "end_frame"]
-            .iter()
-            .any(|key| name == *key)
-    {
-        return Some("image".to_owned());
-    }
-    None
+    canonical_suggestion_for_input(name, value, linked)
+        .map(|suggestion| suggestion.field_type)
+        .or_else(|| {
+            (!linked && value.is_number()).then(|| {
+                if is_integer_number(value) {
+                    "integer".to_owned()
+                } else {
+                    "number".to_owned()
+                }
+            })
+        })
 }
 
 fn suggestion_for_semantic_key(name: &str, value: &Value, linked: bool) -> Option<String> {
-    if value.is_object() || value.is_boolean() || value.is_null() {
-        return None;
-    }
-    let lower = name.to_ascii_lowercase();
-    if linked {
-        return linked_target_semantic(&lower).map(str::to_owned);
-    }
-    let semantic = [
-        "prompt",
-        "seed",
-        "first_frame",
-        "last_frame",
-        "width",
-        "height",
-        "steps",
-        "cfg",
-        "guidance",
-        "denoise",
-        "fps",
-        "duration",
-        "frame_count",
-        "strength",
-        "images",
-        "image",
-        "videos",
-        "video",
-        "audios",
-        "audio",
-    ];
-    semantic
-        .iter()
-        .find(|candidate| lower == **candidate || lower.contains(**candidate))
-        .map(|candidate| (*candidate).to_owned())
-        .or_else(|| is_safe_key(&lower).then_some(lower))
+    canonical_suggestion_for_input(name, value, linked)
+        .and_then(|suggestion| suggestion.semantic_key)
 }
 
 fn is_dangerous_input_name(name: &str) -> bool {
@@ -4906,80 +5517,6 @@ fn is_safe_key(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
-}
-
-fn linked_target_semantic(input_name: &str) -> Option<&'static str> {
-    let name = input_name
-        .to_ascii_lowercase()
-        .replace(['-', ' ', '.'], "_");
-    match name.as_str() {
-        "prompt" | "text" | "positive" | "positive_prompt" => Some("prompt"),
-        "negative" | "negative_prompt" => Some("negative_prompt"),
-        "width" => Some("width"),
-        "height" => Some("height"),
-        "seed" | "noise_seed" | "random_seed" => Some("seed"),
-        "length" | "frames" | "num_frames" | "frame_count" => Some("duration_seconds"),
-        "first_frame" | "start_frame" | "first_image" | "start_image" => Some("first_frame"),
-        "last_frame" | "end_frame" | "last_image" | "end_image" => Some("last_frame"),
-        "image" | "input_image" => Some("reference_image"),
-        "images" | "reference_images" | "ref_images" => Some("reference_images"),
-        "video" | "input_video" => Some("reference_video"),
-        "videos" | "reference_videos" | "ref_videos" => Some("reference_videos"),
-        "audio" | "input_audio" => Some("reference_audio"),
-        "audios" | "reference_audios" | "ref_audios" => Some("reference_audios"),
-        _ if is_indexed_media_slot(&name, "image") => Some("reference_images"),
-        _ if is_indexed_media_slot(&name, "video") => Some("reference_videos"),
-        _ if is_indexed_media_slot(&name, "audio") => Some("reference_audios"),
-        _ => None,
-    }
-}
-
-const IMAGE_SLOT_PREFIXES: &[&str] = &[
-    "ref_images_ref_image_",
-    "ref_images_image_",
-    "reference_images_image_",
-    "ref_image_",
-    "reference_images_",
-    "reference_image_",
-    "image_",
-    "images_",
-];
-
-const VIDEO_SLOT_PREFIXES: &[&str] = &[
-    "ref_videos_ref_video_",
-    "ref_videos_video_",
-    "reference_videos_video_",
-    "ref_video_",
-    "reference_videos_",
-    "reference_video_",
-    "video_",
-    "videos_",
-];
-
-const AUDIO_SLOT_PREFIXES: &[&str] = &[
-    "ref_video_audios_ref_video_audio_",
-    "ref_audios_ref_audio_",
-    "ref_audios_audio_",
-    "reference_audios_audio_",
-    "ref_audio_",
-    "reference_audios_",
-    "reference_audio_",
-    "audio_",
-    "audios_",
-];
-
-fn is_indexed_media_slot(name: &str, media: &str) -> bool {
-    let prefixes = match media {
-        "image" => IMAGE_SLOT_PREFIXES,
-        "video" => VIDEO_SLOT_PREFIXES,
-        "audio" => AUDIO_SLOT_PREFIXES,
-        _ => return false,
-    };
-    prefixes.iter().any(|prefix| {
-        name.strip_prefix(prefix).is_some_and(|suffix| {
-            !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
-        })
-    })
 }
 
 fn is_integer_number(value: &Value) -> bool {
@@ -5434,9 +5971,16 @@ mod tests {
         WorkflowOnboardingDraft {
             draft_id: "onb_test_graph".to_owned(),
             workflow_sha256: sha256(&raw_bytes),
+            raw_sha256: sha256(&raw_bytes),
             original_filename: "test_graph.json".to_owned(),
+            source_format: ComfyWorkflowInputFormat::Api,
+            workflow_format_version: None,
+            frontend_version: None,
+            compatibility_context: None,
+            normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+            normalization_diagnostics: Vec::new(),
             nodes: inspect_workflow(&workflow).unwrap(),
-            workflow,
+            normalized_api: Some(workflow),
             raw_bytes,
             manifest: WorkflowManifest {
                 schema_version: 1,
@@ -5453,6 +5997,7 @@ mod tests {
                 state: CapabilityState::Ready,
                 checked_at: None,
                 issues: Vec::new(),
+                profile: None,
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
@@ -5498,16 +6043,17 @@ mod tests {
             ("cfg", json!(7.5), "cfg", "number"),
             ("width", json!(512), "width", "integer"),
             ("height", json!(512), "height", "integer"),
-            ("image", json!("input.png"), "reference_image", "image"),
-            ("video", json!("input.mp4"), "reference_video", "video"),
-            ("audio", json!("input.wav"), "reference_audio", "audio"),
+            ("image", json!("input.png"), "image", "image"),
+            ("video", json!("input.mp4"), "video", "video"),
+            ("audio", json!("input.wav"), "audio", "audio"),
         ];
 
         for (input_name, value, semantic_key, field_type) in cases {
             let mut inputs = Map::new();
             inputs.insert(input_name.to_owned(), value);
             let workflow = WorkflowDocument::parse(json!({
-                "1": {"class_type": "CustomNode", "inputs": inputs}
+                "1": {"class_type": "CustomNode", "inputs": inputs},
+                "2": {"class_type": "SaveImage", "inputs": {"image": ["1", 0]}}
             }))
             .unwrap();
             let analysis = WorkflowAnalysisService::analyze_workflow(
@@ -5559,8 +6105,9 @@ mod tests {
     fn capability_is_generic_and_groups_missing_classes() {
         let workflow = WorkflowDocument::parse(json!({
             "1": {"inputs": {"sampler": "euler", "steps": 12}, "class_type": "Sampler"},
-            "2": {"inputs": {}, "class_type": "MissingNode"},
-            "3": {"inputs": {}, "class_type": "MissingNode"}
+            "2": {"inputs": {"source": ["3", 0]}, "class_type": "MissingNode"},
+            "3": {"inputs": {"source": ["1", 0]}, "class_type": "MissingNode"},
+            "4": {"inputs": {"image": ["2", 0]}, "class_type": "SaveImage"}
         }))
         .unwrap();
         let nodes = inspect_workflow(&workflow).unwrap();
@@ -5568,7 +6115,12 @@ mod tests {
             "Sampler": {"input": {"required": {
                 "sampler": [["euler", "ddim"], {}],
                 "steps": ["INT", {"min": 1, "max": 10}]
-            }}}
+            }}},
+            "SaveImage": {
+                "output": ["IMAGE"],
+                "output_node": true,
+                "input": {"required": {"image": ["IMAGE", {}]}}
+            }
         });
         let report = evaluate_capability(&workflow, &nodes, &object_info);
         assert_eq!(report.state, CapabilityState::MissingNodes);
@@ -5585,7 +6137,12 @@ mod tests {
                 "sampler": [["euler", "ddim"], {}],
                 "steps": ["INT", {"min": 1, "max": 10}]
             }}},
-            "MissingNode": {"input": {"required": {}}}
+            "MissingNode": {"input": {"required": {}}},
+            "SaveImage": {
+                "output": ["IMAGE"],
+                "output_node": true,
+                "input": {"required": {"image": ["IMAGE", {}]}}
+            }
         });
         let report = evaluate_capability(&workflow, &nodes, &available);
         assert_eq!(report.state, CapabilityState::IncompatibleInputValues);
@@ -5593,6 +6150,81 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "INPUT_VALUE_OUT_OF_RANGE"));
+        assert!(!report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "MISSING_NODE"));
+    }
+
+    #[test]
+    fn capability_scopes_missing_node_checks_to_active_output_closure() {
+        let object_info = json!({
+            "Source": {
+                "output": ["VIDEO"],
+                "input": {"required": {"value": ["STRING", {}]}}
+            },
+            "Output": {
+                "output": ["VIDEO"],
+                "output_node": true,
+                "input": {"required": {"video": ["VIDEO", {}]}}
+            }
+        });
+        let disconnected = WorkflowDocument::parse(json!({
+            "1": {"inputs": {"value": "ready"}, "class_type": "Source"},
+            "2": {"inputs": {"video": ["1", 0]}, "class_type": "Output"},
+            "99": {"inputs": {}, "class_type": "MissingDisconnectedNode"}
+        }))
+        .unwrap();
+        let disconnected_nodes = inspect_workflow(&disconnected).unwrap();
+        let disconnected_report =
+            evaluate_capability(&disconnected, &disconnected_nodes, &object_info);
+        assert_eq!(disconnected_report.state, CapabilityState::Ready);
+        assert!(!disconnected_report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "MISSING_NODE"));
+
+        let active_missing = WorkflowDocument::parse(json!({
+            "2": {"inputs": {"video": ["99", 0]}, "class_type": "Output"},
+            "99": {"inputs": {}, "class_type": "MissingActiveNode"}
+        }))
+        .unwrap();
+        let active_missing_nodes = inspect_workflow(&active_missing).unwrap();
+        let active_missing_report =
+            evaluate_capability(&active_missing, &active_missing_nodes, &object_info);
+        assert_eq!(active_missing_report.state, CapabilityState::MissingNodes);
+        assert!(active_missing_report.issues.iter().any(|issue| {
+            issue.code == "MISSING_NODE" && issue.affected_node_ids == vec!["99".to_owned()]
+        }));
+        assert!(active_missing_report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "UNKNOWN_SEMANTIC_DEPENDENCY"));
+    }
+
+    #[test]
+    fn capability_uses_schema_selected_output_root_without_output_node_flag() {
+        let object_info = json!({
+            "Source": {
+                "output": ["VIDEO"],
+                "input": {"required": {"value": ["STRING", {}]}}
+            },
+            "Output": {
+                "output": ["VIDEO"],
+                "input": {"required": {"video": ["VIDEO", {}]}}
+            }
+        });
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {"inputs": {"value": "ready"}, "class_type": "Source"},
+            "2": {"inputs": {"video": ["1", 0]}, "class_type": "Output"},
+            "99": {"inputs": {}, "class_type": "MissingDisconnectedNode"}
+        }))
+        .unwrap();
+        let nodes = inspect_workflow(&workflow).unwrap();
+
+        let report = evaluate_capability(&workflow, &nodes, &object_info);
+
+        assert_eq!(report.state, CapabilityState::Ready);
         assert!(!report
             .issues
             .iter()
@@ -5664,13 +6296,19 @@ mod tests {
         let object_info = json!({
             "LoadImage": {"input": {"required": {
                 "image": [["available.png"], {}]
-            }}}
+            }}},
+            "SaveImage": {
+                "output": ["IMAGE"],
+                "output_node": true,
+                "input": {"required": {"image": ["IMAGE", {}]}}
+            }
         });
         let workflow = WorkflowDocument::parse(json!({
             "24": {
                 "inputs": {"image": "__AI_STUDIO_OPTIONAL__.png"},
                 "class_type": "LoadImage"
-            }
+            },
+            "25": {"inputs": {"image": ["24", 0]}, "class_type": "SaveImage"}
         }))
         .unwrap();
         let nodes = inspect_workflow(&workflow).unwrap();
@@ -5692,7 +6330,8 @@ mod tests {
             "24": {
                 "inputs": {"image": "missing_real_image.png"},
                 "class_type": "LoadImage"
-            }
+            },
+            "25": {"inputs": {"image": ["24", 0]}, "class_type": "SaveImage"}
         }))
         .unwrap();
         let static_nodes = inspect_workflow(&static_workflow).unwrap();
@@ -5711,20 +6350,29 @@ mod tests {
     fn dynamic_target_does_not_skip_missing_nodes_or_static_enum_validation() {
         let workflow = WorkflowDocument::parse(json!({
             "24": {
-                "inputs": {"image": "__AI_STUDIO_OPTIONAL__.png"},
+                "inputs": {
+                    "image": "__AI_STUDIO_OPTIONAL__.png",
+                    "conditioning": ["7", 0]
+                },
                 "class_type": "MissingLoadImage"
             },
             "7": {
                 "inputs": {"sampler_name": "not_available"},
                 "class_type": "KSamplerSelect"
-            }
+            },
+            "25": {"inputs": {"image": ["24", 0]}, "class_type": "SaveImage"}
         }))
         .unwrap();
         let nodes = inspect_workflow(&workflow).unwrap();
         let object_info = json!({
             "KSamplerSelect": {"input": {"required": {
                 "sampler_name": [["euler", "ddim"], {}]
-            }}}
+            }}},
+            "SaveImage": {
+                "output": ["IMAGE"],
+                "output_node": true,
+                "input": {"required": {"image": ["IMAGE", {}]}}
+            }
         });
         let dynamic_targets = BTreeSet::from([("24".to_owned(), "image".to_owned())]);
         let report = evaluate_capability_with_dynamic_targets(
@@ -5861,6 +6509,24 @@ outputs: []
         );
         assert!(suggestion_for_semantic_key("connected", &json!(["1", 0]), true).is_none());
         assert!(suggestion_for_semantic_key("enabled", &json!(true), false).is_none());
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn LEGACY_SUGGESTION_CONSUMES_CANONICAL_HINTS() {
+        assert_eq!(
+            suggestion_for_input("image", &json!("input.png"), false).as_deref(),
+            Some("image")
+        );
+        assert_eq!(
+            suggestion_for_input("reference_image", &json!("input.png"), false).as_deref(),
+            Some("image")
+        );
+        assert_eq!(
+            suggestion_for_semantic_key("ref_image_1", &json!(["1", 0]), true).as_deref(),
+            Some("reference_images")
+        );
+        assert!(suggestion_for_semantic_key("image_1", &json!(["1", 0]), true).is_none());
     }
 
     #[test]
@@ -6398,7 +7064,10 @@ outputs: []
         let cases = [
             (
                 json!({
-                    "1": {"inputs": {}, "class_type": "VHS_VideoCombine"},
+                    "1": {
+                        "inputs": {"format": "video/h264-mp4"},
+                        "class_type": "GenericMediaSink"
+                    },
                     "2": {"inputs": {}, "class_type": "easy clearCacheAll"}
                 }),
                 Some("1"),
@@ -6406,7 +7075,10 @@ outputs: []
             ),
             (
                 json!({
-                    "1": {"inputs": {}, "class_type": "SaveVideo"},
+                    "1": {
+                        "inputs": {"format": "video/h264-mp4"},
+                        "class_type": "GenericMediaSink"
+                    },
                     "2": {"inputs": {}, "class_type": "PreviewVideo"}
                 }),
                 Some("1"),
@@ -6414,11 +7086,17 @@ outputs: []
             ),
             (
                 json!({
-                    "1": {"inputs": {}, "class_type": "SaveVideo"},
-                    "2": {"inputs": {}, "class_type": "SaveVideo"}
+                    "1": {
+                        "inputs": {"format": "video/h264-mp4"},
+                        "class_type": "GenericMediaSink"
+                    },
+                    "2": {
+                        "inputs": {"format": "video/h264-mp4"},
+                        "class_type": "GenericMediaSink"
+                    }
                 }),
+                Some("1"),
                 None,
-                Some("AMBIGUOUS_OUTPUT"),
             ),
             (
                 json!({"1": {"inputs": {}, "class_type": "easy clearCacheAll"}}),
@@ -6548,7 +7226,7 @@ outputs: []
         );
         let compiled = WorkflowCompiler
             .compile(
-                &draft.workflow,
+                draft.normalized_workflow().unwrap(),
                 &recipe,
                 &crate::domain::CompileRequest::new(values),
             )
@@ -6565,15 +7243,15 @@ outputs: []
         assert_eq!(compiled.workflow["50"]["inputs"]["denoise"], json!(1));
         assert_eq!(compiled.workflow["62"]["inputs"]["frame_rate"], json!(24));
         assert_eq!(
-            possible_link(&draft.workflow.inputs("63").unwrap()["width"]),
+            possible_link(&draft.normalized_workflow().unwrap().inputs("63").unwrap()["width"]),
             Some(("61", 0))
         );
         assert_eq!(
-            possible_link(&draft.workflow.inputs("63").unwrap()["height"]),
+            possible_link(&draft.normalized_workflow().unwrap().inputs("63").unwrap()["height"]),
             Some(("61", 1))
         );
         assert_eq!(
-            possible_link(&draft.workflow.inputs("63").unwrap()["length"]),
+            possible_link(&draft.normalized_workflow().unwrap().inputs("63").unwrap()["length"]),
             Some(("35", 1))
         );
     }
@@ -6735,9 +7413,16 @@ outputs: []
             draft_id: "onb_video".to_owned(),
             raw_bytes: video.to_vec(),
             workflow_sha256: sha256(video),
+            raw_sha256: sha256(video),
             original_filename: "video.json".to_owned(),
+            source_format: ComfyWorkflowInputFormat::Api,
+            workflow_format_version: None,
+            frontend_version: None,
+            compatibility_context: None,
+            normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+            normalization_diagnostics: Vec::new(),
             nodes: inspect_workflow(&workflow).unwrap(),
-            workflow,
+            normalized_api: Some(workflow),
             manifest: WorkflowManifest {
                 schema_version: 1,
                 id: "wfl_video".to_owned(),
@@ -6753,6 +7438,7 @@ outputs: []
                 state: CapabilityState::Ready,
                 checked_at: None,
                 issues: Vec::new(),
+                profile: None,
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
@@ -6792,7 +7478,7 @@ outputs: []
         ambiguous_draft.raw_bytes = ambiguous.to_vec();
         ambiguous_draft.workflow_sha256 = sha256(ambiguous);
         ambiguous_draft.original_filename = "ambiguous.json".to_owned();
-        ambiguous_draft.workflow = workflow.clone();
+        ambiguous_draft.normalized_api = Some(workflow.clone());
         ambiguous_draft.nodes = inspect_workflow(&workflow).unwrap();
         ambiguous_draft.input_mappings.clear();
         ambiguous_draft.output_mappings.clear();
@@ -6997,9 +7683,16 @@ outputs: []
             registry.insert(WorkflowOnboardingDraft {
                 draft_id: id,
                 raw_bytes,
-                workflow,
+                normalized_api: Some(workflow),
                 workflow_sha256: "sha".to_owned(),
+                raw_sha256: "sha".to_owned(),
                 original_filename: "test.json".to_owned(),
+                source_format: ComfyWorkflowInputFormat::Api,
+                workflow_format_version: None,
+                frontend_version: None,
+                compatibility_context: None,
+                normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+                normalization_diagnostics: Vec::new(),
                 nodes: Vec::new(),
                 manifest: WorkflowManifest {
                     schema_version: 1,
@@ -7016,6 +7709,7 @@ outputs: []
                     state: CapabilityState::NotChecked,
                     checked_at: None,
                     issues: Vec::new(),
+                    profile: None,
                 },
                 input_mappings: Vec::new(),
                 output_mappings: Vec::new(),
@@ -7048,9 +7742,16 @@ outputs: []
         WorkflowOnboardingDraft {
             draft_id: "onb_test".to_owned(),
             raw_bytes,
-            workflow,
+            normalized_api: Some(workflow),
             workflow_sha256: sha256(br#"sample"#),
+            raw_sha256: sha256(br#"sample"#),
             original_filename: "sample.json".to_owned(),
+            source_format: ComfyWorkflowInputFormat::Api,
+            workflow_format_version: None,
+            frontend_version: None,
+            compatibility_context: None,
+            normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+            normalization_diagnostics: Vec::new(),
             nodes,
             manifest: WorkflowManifest {
                 schema_version: 1,
@@ -7067,6 +7768,7 @@ outputs: []
                 state: CapabilityState::Ready,
                 checked_at: None,
                 issues: Vec::new(),
+                profile: None,
             },
             input_mappings: vec![
                 InputMapping {

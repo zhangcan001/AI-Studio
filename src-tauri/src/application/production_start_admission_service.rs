@@ -336,6 +336,15 @@ pub(crate) fn evaluate_recipe_runtime_inspection(
             "exact recipe capability reports ComfyUI offline",
             Vec::new(),
         )),
+        "UNKNOWN_OUTPUT_ROOT" | "AMBIGUOUS_OUTPUT_ROOT" | "PARTIALLY_SUPPORTED" => {
+            Err(runtime_failure_for_pair(
+                &inspection.workflow_version_id,
+                &inspection.recipe_id,
+                RUNTIME_ADMISSION_CAPABILITY_UNKNOWN,
+                "exact recipe output root is not safely resolved",
+                Vec::new(),
+            ))
+        }
         capability => Err(runtime_failure_for_pair(
             &inspection.workflow_version_id,
             &inspection.recipe_id,

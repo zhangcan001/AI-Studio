@@ -1,0 +1,332 @@
+{
+  "1": {
+    "inputs": {
+      "model": [
+        "57",
+        0
+      ],
+      "conditioning": [
+        "63",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基本引导器"
+    }
+  },
+  "2": {
+    "inputs": {
+      "noise_seed": 949513442203102
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "3": {
+    "inputs": {
+      "clip_name": "minmaxh3\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "6": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "14": {
+    "inputs": {
+      "noise": [
+        "2",
+        0
+      ],
+      "guider": [
+        "1",
+        0
+      ],
+      "sampler": [
+        "54",
+        0
+      ],
+      "sigmas": [
+        "50",
+        0
+      ],
+      "latent_image": [
+        "63",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "18": {
+    "inputs": {
+      "samples": [
+        "14",
+        0
+      ],
+      "vae": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码（音频）"
+    }
+  },
+  "35": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "数学表达式"
+    }
+  },
+  "39": {
+    "inputs": {
+      "samples": [
+        "14",
+        0
+      ],
+      "vae": [
+        "60",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "40": {
+    "inputs": {
+      "anything": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "easy clearCacheAll",
+    "_meta": {
+      "title": "清除全部缓存"
+    }
+  },
+  "41": {
+    "inputs": {
+      "model": [
+        "56",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Mem Eff Sage Attention Patch"
+    }
+  },
+  "49": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "FloatConstant",
+    "_meta": {
+      "title": "Float Constant"
+    }
+  },
+  "50": {
+    "inputs": {
+      "scheduler": "beta",
+      "steps": 8,
+      "denoise": 1,
+      "model": [
+        "57",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "54": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "56": {
+    "inputs": {
+      "unet_name": "minmaxh3\\minimax_h3_fl2va_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "57": {
+    "inputs": {
+      "lora_name": "minmanH3\\minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "118",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "59": {
+    "inputs": {
+      "text": "[10-second intimate cinematic relationship scene]\n\nDURATION:\n10 seconds.\n\nASPECT RATIO:\n16:9.\n\nSCENE:\nA quiet apartment entrance at night.\n\nWarm interior light falls from the open doorway into a cooler dim corridor.\n\nThe environment remains calm and visually stable throughout the scene.\n\nCHARACTER A — WOMAN:\nAn adult woman in a light beige coat, standing in the corridor.\n\nHer initial attitude is controlled and determined, but she is suppressing reluctance.\n\nCHARACTER B — MAN:\nAn adult man in a dark charcoal jacket, standing just inside the doorway.\n\nHe appears calm and restrained.\n\nKEY OBJECT:\nOne small metal apartment key held by Character A at the beginning.\n\nThe key remains physically continuous throughout the scene.\n\nINITIAL RELATIONSHIP STATE:\n\nCharacter A has come to return the key and intends to end the relationship.\n\nCharacter B understands what the gesture means.\n\nNeither character is openly emotional at the beginning.\n\nCORE PRIORITY:\n\n1. Preserve the key's ownership and movement.\n2. Preserve the relationship change.\n3. Important dialogue must create visible reaction before the next response.\n4. Eyes react before larger facial and body changes.\n5. Final relationship state is more important than decorative micro-expression.\n\nRELATIONSHIP STATE CHAIN:\n\nintention\n→ action\n→ receiving character notices\n→ silent reaction\n→ original character reads the reaction\n→ decision changes\n→ new relationship state.\n\n00:00.000–00:01.800\n\nCharacter A stands in the corridor facing Character B.\n\nShe looks down at the key in her right hand instead of immediately looking at him.\n\nHer shoulders remain deliberately straight.\n\nShe takes one quiet breath.\n\nHer right hand slowly extends the key toward Character B.\n\nCharacter B remains inside the doorway and watches the movement.\n\nHe does not reach forward yet.\n\n00:01.800–00:03.200\n\nCharacter A finally raises her eyes toward Character B.\n\nIn a quiet, controlled voice she says:\n\n<d>[Chinese] 钥匙还你。</d>\n\nThe sentence is short and firm.\n\nHowever, her fingers do not immediately release the key.\n\nHer extended hand remains suspended between them.\n\nHer posture still suggests determination.\n\n00:03.200–00:04.800\n\nREACTION DELAY.\n\nCharacter B first looks at the key.\n\nThen his eyes slowly return to Character A's face.\n\nHis right hand begins lifting toward the key.\n\nThe hand stops halfway.\n\nHe does not touch it.\n\nHis breathing becomes slightly deeper.\n\nHis expression remains restrained.\n\nThis silent hesitation is the most important reaction in the scene.\n\nCharacter A notices the stopped hand.\n\n00:04.800–00:06.300\n\nCharacter B keeps his hand suspended for a short moment.\n\nHe then slowly lowers it again without taking the key.\n\nHe looks directly at Character A and asks in a low voice:\n\n<d>[Chinese] 你真的想还吗？</d>\n\nThe final word is softer than the beginning of the sentence.\n\nAfter speaking, Character B closes his mouth and remains still.\n\nHe does not reach for the key again.\n\n00:06.300–00:07.600\n\nCharacter A does not answer immediately.\n\nHer eyes remain on Character B.\n\nHer lips part once as if she intends to say yes.\n\nNo word comes out.\n\nShe swallows instead.\n\nHer extended hand lowers several centimeters.\n\nThe key is still in her fingers.\n\nOne shoulder relaxes slightly as her earlier determination begins to weaken.\n\n00:07.600–00:08.800\n\nMAIN RELATIONSHIP REVERSAL.\n\nCharacter A looks down at the key.\n\nShe starts extending it forward again.\n\nThe second attempt stops halfway.\n\nHer fingers slowly curl around the key instead of releasing it.\n\nShe draws the hand back toward herself.\n\nThe movement is continuous and small.\n\nCharacter B watches without moving toward her.\n\nHe allows her to make the decision herself.\n\n00:08.800–00:09.400\n\nCharacter A finishes pulling the key back.\n\nHer hand comes to rest near her body.\n\nShe still holds the key.\n\nHer breathing becomes softer.\n\nShe slowly raises her eyes toward Character B again.\n\nCharacter B maintains eye contact.\n\nNeither character speaks.\n\n00:09.400–00:10.000\n\nFINAL CONTINUOUS RELATIONSHIP STATE.\n\nDo not introduce another line of dialogue.\n\nDo not add another gesture.\n\nDo not make either character leave.\n\nOnly three final-state requirements matter:\n\nCharacter A still holds the key.\n\nCharacter B has not accepted or touched the key.\n\nThe two characters maintain quiet eye contact.\n\nHold this exact relationship state through the final frame.\n\nPERFORMANCE:\n\nUse restrained cinematic acting.\n\nEmotional change begins in the eyes.\n\nFacial changes remain small.\n\nHands and breathing reveal the decision more clearly than exaggerated expressions.\n\nDo not make Character A suddenly cry.\n\nDo not make Character B suddenly smile.\n\nThe emotion should remain unresolved and controlled.\n\nKEY OBJECT CONTINUITY:\n\nThe same key remains visible and physically continuous.\n\nIt begins in Character A's hand.\n\nIt moves toward Character B.\n\nCharacter B never gains control of it.\n\nIt returns naturally to Character A's side.\n\nNo duplication.\n\nNo disappearance.\n\nNo unexplained position change.\n\nCAMERA:\n\nUse one stable medium two-shot for most of the scene.\n\nKeep both characters and the key readable.\n\nUse a very restrained slow push-in only after 00:06.300 as Character A begins reconsidering her decision.\n\nNo rapid cuts.\n\nNo orbiting camera.\n\nNo result cut during the final two seconds.\n\nSOUND PRIORITY:\n\n1. Dialogue.\n2. Breathing and silence.\n3. Small clothing and key movement sounds.\n4. Quiet apartment and corridor ambience.\n5. Very low or no background music.\n\nThe key produces one subtle metallic sound when Character A adjusts her grip.\n\nSilence after Character B's question is important.\n\nBACKGROUND MUSIC:\n\nPrefer no music.\n\nIf music is used, use only a very sparse low-volume piano texture after 00:06.300.\n\nMusic must never cover dialogue or breathing.\n\nFINAL FRAME:\n\nCharacter A still holds the key.\n\nCharacter B has not taken it.\n\nThey look at each other quietly.\n\nThe relationship is no longer fully ended.\n\nNo additional action."
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "提示词"
+    }
+  },
+  "60": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_video_vae_int8_convrot.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "61": {
+    "inputs": {
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 0.4,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "分辨率选择器"
+    }
+  },
+  "62": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "AnimateDiff",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "39",
+        0
+      ],
+      "audio": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "63": {
+    "inputs": {
+      "prompt": [
+        "59",
+        0
+      ],
+      "width": [
+        "61",
+        0
+      ],
+      "height": [
+        "61",
+        1
+      ],
+      "length": [
+        "35",
+        1
+      ],
+      "ref_image_size": "match",
+      "clip": [
+        "3",
+        0
+      ],
+      "vae": [
+        "60",
+        0
+      ],
+      "audio_vae": [
+        "6",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "109",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "110",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 参考转视频"
+    }
+  },
+  "109": {
+    "inputs": {
+      "image": "4c0363c5-16e7-493a-a721-727d4795d8d9.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "110": {
+    "inputs": {
+      "image": "b4bcd272-2fd0-4e9b-a26a-9ff0c609cc41.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "118": {
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    }
+  }
+}

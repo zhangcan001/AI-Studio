@@ -1084,6 +1084,9 @@ mod lifecycle_e2e {
                 CapabilityState::MissingNodes => "MISSING_NODES",
                 CapabilityState::ComfyOffline => "COMFY_OFFLINE",
                 CapabilityState::IncompatibleInputValues => "INCOMPATIBLE_INPUT_VALUES",
+                CapabilityState::UnknownOutputRoot => "UNKNOWN_OUTPUT_ROOT",
+                CapabilityState::AmbiguousOutputRoot => "AMBIGUOUS_OUTPUT_ROOT",
+                CapabilityState::PartiallySupported => "PARTIALLY_SUPPORTED",
                 CapabilityState::NotChecked => "NOT_CHECKED",
             },
         );

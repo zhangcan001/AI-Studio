@@ -118,6 +118,46 @@ describe("WorkflowImportIssues", () => {
     expect(screen.queryByRole("heading", { name: "无法识别这个工作流" })).toBeNull();
   });
 
+  it("显示 UI 草稿等待状态并阻止高级编辑和提交", async () => {
+    const user = userEvent.setup();
+    const onResume = vi.fn();
+    const onOpenAdvanced = vi.fn();
+    const onCommitImport = vi.fn();
+    const plan = planWithIssues([
+      {
+        code: "WAITING_FOR_COMFY_UI",
+        message: "等待 ComfyUI 连接后继续解析此 UI 工作流。",
+        candidates: [],
+      },
+    ], {
+      sourceFormat: "UI",
+      normalizationState: "UI_SOURCE_PENDING",
+      state: "WAITING_FOR_COMFY_UI",
+      capability: { state: "COMFY_OFFLINE", issues: [] },
+    });
+
+    render(
+      <WorkflowImportIssues
+        plan={plan}
+        loading={false}
+        onResolve={vi.fn()}
+        onResume={onResume}
+        onOpenAdvanced={onOpenAdvanced}
+        onOpenExisting={vi.fn()}
+        onCommitImport={onCommitImport}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "等待工作流规范化" })).toBeTruthy();
+    expect(screen.getByText(/不会创建 Recipe/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "高级编辑" })).toBeNull();
+    const continueButton = screen.getByRole("button", { name: "继续检查" });
+    await user.click(continueButton);
+    expect(onResume).toHaveBeenCalledTimes(1);
+    expect(onCommitImport).not.toHaveBeenCalled();
+    expect(onOpenAdvanced).not.toHaveBeenCalled();
+  });
+
   it("隔离相同 code 的不同 field，并向 resolve 传递准确 issue 与 candidate", async () => {
     const user = userEvent.setup();
     const onResolve = vi.fn();

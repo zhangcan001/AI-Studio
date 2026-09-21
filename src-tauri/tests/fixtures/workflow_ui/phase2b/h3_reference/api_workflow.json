@@ -1,0 +1,345 @@
+{
+  "188": {
+    "inputs": {
+      "aspect_ratio": "2:3 (Portrait Photo)",
+      "megapixels": 0.4,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Resolution Selector (Size)"
+    }
+  },
+  "189": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "190": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "191": {
+    "inputs": {
+      "samples": [
+        "200",
+        0
+      ],
+      "vae": [
+        "190",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码（音频）"
+    }
+  },
+  "192": {
+    "inputs": {
+      "samples": [
+        "200",
+        0
+      ],
+      "vae": [
+        "189",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "193": {
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "194": {
+    "inputs": {
+      "model": [
+        "254",
+        0
+      ],
+      "conditioning": [
+        "199",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基本引导器"
+    }
+  },
+  "195": {
+    "inputs": {
+      "noise_seed": 1101969383562055
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "196": {
+    "inputs": {
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB",
+      "codec": "none",
+      "images": [
+        "192",
+        0
+      ],
+      "audio": [
+        "191",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "197": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (Duration)"
+    }
+  },
+  "198": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 24,
+      "denoise": 1,
+      "model": [
+        "254",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "199": {
+    "inputs": {
+      "prompt": [
+        "213",
+        0
+      ],
+      "width": [
+        "188",
+        0
+      ],
+      "height": [
+        "188",
+        1
+      ],
+      "length": [
+        "204",
+        1
+      ],
+      "ref_image_size": "match",
+      "clip": [
+        "202",
+        0
+      ],
+      "vae": [
+        "189",
+        0
+      ],
+      "audio_vae": [
+        "190",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "208",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 参考转视频"
+    }
+  },
+  "200": {
+    "inputs": {
+      "noise": [
+        "195",
+        0
+      ],
+      "guider": [
+        "194",
+        0
+      ],
+      "sampler": [
+        "193",
+        0
+      ],
+      "sigmas": [
+        "198",
+        0
+      ],
+      "latent_image": [
+        "199",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "201": {
+    "inputs": {
+      "unet_name": "minmaxh3\\minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "202": {
+    "inputs": {
+      "clip_name": "minmaxh3\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "203": {
+    "inputs": {
+      "filename_prefix": "video/MiniMax_H3",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto",
+      "video": [
+        "196",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "204": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "197",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "数学表达式"
+    }
+  },
+  "208": {
+    "inputs": {
+      "image": "ComfyUI_00001_ (8).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "213": {
+    "inputs": {
+      "value": "生成一段5秒、16:9、2K、原生立体声的文戏短视频，以深海般幽蓝天幕、巨坑都市废墟（@图片1）与悬浮在高空中的小船（@图片1）为视觉母体，在这座仿佛沉入海底的末日城市上空加入一条缓慢飞行的巨大鱼，让一名站在高楼边缘的年轻幸存少女目睹这一幕，并在5秒内完成一次清晰的情绪变化：从紧张屏息，到被眼前奇景真正触动，最终轻声承认这个世界已经变了。\n\n0.00—0.90秒，镜头自高空俯瞰深海般幽蓝天幕、巨坑都市废墟（@图片1）缓缓前推，巨大的深渊与环形高架清晰压迫画面，年轻幸存少女站在前景楼顶边缘，身体微微绷紧，目光死死望向远方悬浮的小船（@图片1），先建立她对这座异变城市的警惕与不安。\n0.90—1.80秒，城市上空的雾蓝光层忽然轻轻波动，一条巨大鱼的阴影从远处高楼间缓缓掠过，少女下意识屏住呼吸，眼神迅速追向天空，手指在栏杆边缘微微收紧，情绪从紧张观察转入震惊确认。\n1.80—3.00秒，镜头顺着她的视线抬起，完整看见一条体型如楼宇般庞大的鱼在天空中安静游过，鱼鳍像在水中摆动，身体反射冷蓝天光，从悬浮小船（@图片1）上方缓慢穿行；少女仰头看着它，唇瓣微张，呼吸由急促转缓，脸上的戒备开始松开，明显被这不可思议的画面吸住。\n3.00—4.10秒，镜头切回中近景，少女仍望着巨鱼，眼中从惊惧转为柔软而失神的动容，她极轻地开口说：“它真的在飞。”口型清晰、声音很轻，像是在对自己确认；这句短短的低语成为她接受现实的触发点。\n4.10—5.00秒，巨大鱼继续从她头顶远远游过，带动天幕般的雾光缓慢流动，少女终于慢慢放松肩膀，手从紧抓栏杆变成轻轻扶住边缘，目光里留下安静的敬畏与微弱希望；镜头停在她仰望天空的神情上，明确呈现她从紧张不安到被奇景打动、接受世界异变的结果。\n\n剪辑与动作：整体采用克制而连续的文戏结构，动作因果依次为：少女警惕眺望废墟—察觉天空异动—发现巨大鱼影—仰头确认—低声说出感受—情绪从戒备转为敬畏。切镜围绕视线变化、天空新信息出现和情绪递进展开，不机械正反打，以俯瞰建立、仰拍奇景、中近景表情三组镜头完成关系变化；最后保留接近1秒的余韵，让她真正完成对这个新世界的接受。\n\n视觉风格：整体保持末日奇观与深海幻觉结合的电影感，深海般幽蓝天幕、巨坑都市废墟（@图片1）与悬浮小船（@图片1）完整继承原图的压迫尺度、冰冷雾感与超现实结构；巨大鱼的造型宏伟而安静，像鲸与古老深海鱼的结合体，表皮带有湿润冷光和轻微生物荧辉，飞行姿态缓慢、优雅、神秘。城市高楼残破、空气中有漂浮尘雾和冷色体积光，整体色调幽蓝、灰青、略带苍白金属质感，少女作为近景人物保持真实细腻，形成宏大世界与微小情绪的对照。\n\n声音设计：保留原生立体声，底层环境声以高空冷风、远处城市空腔回响与若有若无的低频水鸣感构成；巨大鱼掠过天空时加入沉缓而空灵的低频共振，像海中巨兽贴着头顶游过；少女的呼吸声在发现鱼影时短暂收紧，随后逐渐放松，她轻声说出的“它真的在飞。”要贴近口型、音量克制、带一点难以置信的轻颤；配乐使用极简钢琴与空灵长音铺底，在最后0.6秒仅保留风声、低频回响与少女安静的呼吸，形成温柔而震撼的结束。\n"
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Input Text (Prompt)"
+    }
+  },
+  "228": {
+    "inputs": {
+      "filename_prefix": "video/MiniMax_H3",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "253": {
+    "inputs": {
+      "model": [
+        "201",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Mem Eff Sage Attention Patch"
+    }
+  },
+  "254": {
+    "inputs": {
+      "reuse_threshold": 0.2,
+      "start_percent": 0.15,
+      "end_percent": 0.95,
+      "verbose": false,
+      "model": [
+        "255",
+        0
+      ]
+    },
+    "class_type": "EasyCache",
+    "_meta": {
+      "title": "EasyCache"
+    }
+  },
+  "255": {
+    "inputs": {
+      "mode": "Middle-36",
+      "skip_start": 8,
+      "skip_end": 42,
+      "start_percent": 0.03,
+      "end_percent": 0.97,
+      "full_refresh_interval": 4,
+      "residual_scale": 1,
+      "reuse_static": true,
+      "stability_guard": true,
+      "gain_limit": 0.12,
+      "video_drift_limit": 0.1,
+      "audio_drift_limit": 0.07,
+      "benchmark_sync": false,
+      "write_report": true,
+      "verbose": false,
+      "model": [
+        "253",
+        0
+      ]
+    },
+    "class_type": "NBH3HyperStep",
+    "_meta": {
+      "title": "NB H3 HyperStep Advanced"
+    }
+  }
+}

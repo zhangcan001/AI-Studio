@@ -95,5 +95,8 @@ pub mod workflow_onboarding_service;
 pub mod workflow_recognition_schema;
 pub mod workflow_recognition_service;
 pub mod workflow_registry_service;
+pub mod workflow_semantic_graph;
 pub mod workflow_semantic_identity;
+pub mod workflow_ui_normalizer;
+pub mod workflow_ui_serialization;
 pub mod workflow_workspace_query_service;

@@ -179,6 +179,9 @@ impl WorkflowLifecycleCoordinator {
                     "INCOMPATIBLE_INPUT_VALUES" | "COMFY_PROTOCOL_ERROR" => {
                         "INCOMPATIBLE_INPUT_VALUES"
                     }
+                    "UNKNOWN_OUTPUT_ROOT" => "UNKNOWN_OUTPUT_ROOT",
+                    "AMBIGUOUS_OUTPUT_ROOT" => "AMBIGUOUS_OUTPUT_ROOT",
+                    "PARTIALLY_SUPPORTED" => "PARTIALLY_SUPPORTED",
                     _ => "NOT_CHECKED",
                 }
                 .to_owned();
@@ -205,6 +208,9 @@ fn capability_state_name(state: CapabilityState) -> &'static str {
         CapabilityState::MissingNodes => "MISSING_NODES",
         CapabilityState::IncompatibleInputValues => "INCOMPATIBLE_INPUT_VALUES",
         CapabilityState::ComfyOffline => "COMFY_OFFLINE",
+        CapabilityState::UnknownOutputRoot => "UNKNOWN_OUTPUT_ROOT",
+        CapabilityState::AmbiguousOutputRoot => "AMBIGUOUS_OUTPUT_ROOT",
+        CapabilityState::PartiallySupported => "PARTIALLY_SUPPORTED",
     }
 }
 

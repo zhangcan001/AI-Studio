@@ -984,6 +984,13 @@ fn finalize_runtime(
             reasons.push("workflow inputs are incompatible with ComfyUI".to_owned())
         }
         "COMFY_OFFLINE" => reasons.push("ComfyUI is offline".to_owned()),
+        "UNKNOWN_OUTPUT_ROOT" => {
+            reasons.push("workflow output root could not be resolved".to_owned())
+        }
+        "AMBIGUOUS_OUTPUT_ROOT" => reasons.push("workflow has ambiguous output roots".to_owned()),
+        "PARTIALLY_SUPPORTED" => {
+            reasons.push("one or more workflow output roots are unsupported".to_owned())
+        }
         "NOT_CHECKED" => reasons.push("runtime capability has not been checked".to_owned()),
         _ => {}
     }
@@ -1007,7 +1014,12 @@ fn finalize_runtime(
         || !view.diagnostics.is_empty()
         || matches!(
             view.capability.as_str(),
-            "MISSING_NODES" | "INCOMPATIBLE_INPUT_VALUES" | "COMFY_OFFLINE"
+            "MISSING_NODES"
+                | "INCOMPATIBLE_INPUT_VALUES"
+                | "COMFY_OFFLINE"
+                | "UNKNOWN_OUTPUT_ROOT"
+                | "AMBIGUOUS_OUTPUT_ROOT"
+                | "PARTIALLY_SUPPORTED"
         );
     view.readiness = if blocked {
         "BLOCKED".to_owned()
@@ -1094,6 +1106,9 @@ fn capability_state_name(state: CapabilityState) -> &'static str {
         CapabilityState::MissingNodes => "MISSING_NODES",
         CapabilityState::IncompatibleInputValues => "INCOMPATIBLE_INPUT_VALUES",
         CapabilityState::ComfyOffline => "COMFY_OFFLINE",
+        CapabilityState::UnknownOutputRoot => "UNKNOWN_OUTPUT_ROOT",
+        CapabilityState::AmbiguousOutputRoot => "AMBIGUOUS_OUTPUT_ROOT",
+        CapabilityState::PartiallySupported => "PARTIALLY_SUPPORTED",
     }
 }
 

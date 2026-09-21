@@ -61,6 +61,9 @@ pub enum RuntimeCapabilityState {
     MissingNodes,
     Offline,
     Incompatible,
+    UnknownOutputRoot,
+    AmbiguousOutputRoot,
+    PartiallySupported,
     NotChecked,
 }
 

@@ -1,0 +1,67 @@
+{
+  "fixture_name": "kera2_t2i",
+  "fixture_kind": "real_golden_ui_api_pair",
+  "captured_at": "2026-09-20T12:16:53Z",
+  "source_environment": {
+    "endpoint": "http://127.0.0.1:8188",
+    "backend_version": "0.36.0",
+    "required_frontend_version": "1.52.7",
+    "installed_frontend_version": "1.52.7",
+    "python_version": "3.12.10",
+    "source_frontend_revision": null,
+    "source_frontend_revision_status": "not_exposed_by_local_frontend"
+  },
+  "workflow_format_version": "0.4",
+  "source_frontend_version": "1.52.7",
+  "source_frontend_version_from_workflow": "1.52.7",
+  "source_frontend_provenance": "extra.frontendVersion in real ComfyUI UI export",
+  "original_source_frontend_version": null,
+  "original_source_frontend_version_status": "not_present_in_original_local_workflow; fixture was re-exported by the real frontend",
+  "serialization_profile_version": "comfyui-frontend-export-profile-v1",
+  "normalizer_policy_version": "phase2b-normalizer-policy-v1",
+  "schema_fingerprint": "5943d25398b71b9c5732ba91dec59626218700d48419a0c828e9d5306795925b",
+  "schema_fingerprint_algorithm": "sha256(canonical_json_object_info_v1)",
+  "object_info_sha256": "97f19a63e4af8ba224dac1d356d414e168cfed32f6d211d5ba9880a8d66421b2",
+  "source_ui_workflow_path": "D:\\ComfyUI-WorkFisher-V2\\ComfyUI\\user\\default\\workflows\\kera2.json",
+  "source_ui_workflow_sha256": "480c1a59cb53803961f1a014ff2993577e1a8e81813bb4b33a2106d12b1c640f",
+  "exported_ui_sha256": "8e987ab6213d7b86f13d507bdb0c907f6a709b514e7561ad3a781cb3fdbb668f",
+  "api_export_sha256": "9235beca60397d2d5163e79a8fdc2ea3c03fae35437d9428995f07c4321f4ab3",
+  "expected_normalized_api_sha256": "9235beca60397d2d5163e79a8fdc2ea3c03fae35437d9428995f07c4321f4ab3",
+  "ui_export_method": "ComfyUI File > Export after loading the real local workflow",
+  "api_export_method": "ComfyUI File > Export (API) from the same loaded workflow session",
+  "object_info_method": "live GET /object_info from the same local ComfyUI environment",
+  "category": "image",
+  "mode": "text_to_image",
+  "output_type": "image",
+  "expected_output": {
+    "node_id": "11",
+    "class_type": "SaveImage",
+    "slot": 0,
+    "media_type": "image"
+  },
+  "expected_core_bindings": {
+    "prompt": {
+      "node_id": "13",
+      "input": "text"
+    },
+    "seed": {
+      "node_id": "2",
+      "input": "seed"
+    },
+    "width": {
+      "node_id": "10",
+      "input": "width"
+    },
+    "height": {
+      "node_id": "10",
+      "input": "height"
+    },
+    "steps": {
+      "node_id": "3",
+      "input": "steps"
+    }
+  },
+  "expected_normalized_api_policy": "byte-identical trusted API export for Task 1; canonicalization policy is documented by normalizer_policy_version",
+  "same_environment_pair": true,
+  "same_workflow_pair": true
+}

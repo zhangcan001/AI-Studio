@@ -37,6 +37,7 @@ pub struct WorkflowSourceTrace {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorkflowGraphError {
+    NoOutputRoots,
     NodeNotObject {
         node_id: String,
     },
@@ -53,6 +54,7 @@ pub enum WorkflowGraphError {
 impl fmt::Display for WorkflowGraphError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NoOutputRoots => write!(formatter, "workflow has no resolved output roots"),
             Self::NodeNotObject { node_id } => {
                 write!(formatter, "workflow node {node_id} is not an object")
             }

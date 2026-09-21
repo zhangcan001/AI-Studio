@@ -34,6 +34,12 @@ function capabilityLabel(state: string): string {
       return "已保存，当前不可运行（ComfyUI 离线）";
     case "INCOMPATIBLE_INPUT_VALUES":
       return "已保存，当前不可运行（输入待检查）";
+    case "UNKNOWN_OUTPUT_ROOT":
+      return "已保存，当前不可运行（无法确定输出节点）";
+    case "AMBIGUOUS_OUTPUT_ROOT":
+      return "已保存，当前不可运行（输出节点有歧义）";
+    case "PARTIALLY_SUPPORTED":
+      return "已保存，当前不可运行（部分输出根不可用）";
     default:
       return "已保存，待检查";
   }
