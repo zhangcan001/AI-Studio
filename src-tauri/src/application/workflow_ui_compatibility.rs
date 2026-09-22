@@ -217,6 +217,11 @@ impl ResolvedUiCompatibilityProfile {
         self.implementation_status == UiCompatibilityImplementationStatus::Implemented
     }
 
+    pub fn execution_supported(&self) -> bool {
+        self.is_implemented()
+            && self.evidence.schema_lineage.status == SchemaLineageStatus::Compatible
+    }
+
     pub fn primary_diagnostic(&self) -> Option<&str> {
         self.diagnostics.first().map(String::as_str)
     }
@@ -238,16 +243,31 @@ impl UiCompatibilityProfileResolver {
             .frontend_version
             .filter(|value| !value.trim().is_empty());
         let exact_current_version = version == Some(SUPPORTED_FRONTEND_VERSION);
+        let historical_family = if fingerprint.has_legacy_subgraph_boundary_evidence() {
+            Some(UiCompatibilityProfileFamily::LegacySubgraphBoundaryProxyV0)
+        } else if fingerprint.has_legacy_dynamic_input_evidence() {
+            Some(UiCompatibilityProfileFamily::LegacyDynamicInputV0)
+        } else if fingerprint.has_legacy_widget_slot_evidence() {
+            Some(UiCompatibilityProfileFamily::LegacyWidgetSlotV0)
+        } else {
+            None
+        };
 
-        if fingerprint.has_legacy_subgraph_boundary_evidence() {
-            if exact_current_version {
-                return conflict(fingerprint);
+        if historical_family.is_some() && exact_current_version {
+            return conflict(fingerprint);
+        }
+
+        if let Some(family) = historical_family {
+            if fingerprint.schema_lineage.status != SchemaLineageStatus::Compatible {
+                return detected_profile_with_status(
+                    fingerprint,
+                    family,
+                    confidence_for(version),
+                    UiCompatibilityImplementationStatus::EvidenceInsufficient,
+                    "object_info_schema_provenance_mismatch",
+                );
             }
-            return detected_profile(
-                fingerprint,
-                UiCompatibilityProfileFamily::LegacySubgraphBoundaryProxyV0,
-                confidence_for(version),
-            );
+            return detected_profile(fingerprint, family, confidence_for(version));
         }
 
         if fingerprint.schema_lineage.status == SchemaLineageStatus::Mismatch {
@@ -256,28 +276,6 @@ impl UiCompatibilityProfileResolver {
                 UiCompatibilityProvenanceConfidence::ProvenanceInsufficient,
                 UiCompatibilityImplementationStatus::EvidenceInsufficient,
                 "object_info_schema_provenance_mismatch",
-            );
-        }
-
-        if fingerprint.has_legacy_dynamic_input_evidence() {
-            if exact_current_version {
-                return conflict(fingerprint);
-            }
-            return detected_profile(
-                fingerprint,
-                UiCompatibilityProfileFamily::LegacyDynamicInputV0,
-                confidence_for(version),
-            );
-        }
-
-        if fingerprint.has_legacy_widget_slot_evidence() {
-            if exact_current_version {
-                return conflict(fingerprint);
-            }
-            return detected_profile(
-                fingerprint,
-                UiCompatibilityProfileFamily::LegacyWidgetSlotV0,
-                confidence_for(version),
             );
         }
 
@@ -713,12 +711,28 @@ fn detected_profile(
     family: UiCompatibilityProfileFamily,
     confidence: UiCompatibilityProvenanceConfidence,
 ) -> ResolvedUiCompatibilityProfile {
+    detected_profile_with_status(
+        fingerprint,
+        family,
+        confidence,
+        UiCompatibilityImplementationStatus::DetectedButUnsupported,
+        "historical_profile_detected_but_not_implemented",
+    )
+}
+
+fn detected_profile_with_status(
+    fingerprint: &HistoricalUiSerializationFingerprint,
+    family: UiCompatibilityProfileFamily,
+    confidence: UiCompatibilityProvenanceConfidence,
+    implementation_status: UiCompatibilityImplementationStatus,
+    diagnostic: &'static str,
+) -> ResolvedUiCompatibilityProfile {
     ResolvedUiCompatibilityProfile {
         family,
         evidence: fingerprint.clone(),
         provenance_confidence: confidence,
-        implementation_status: UiCompatibilityImplementationStatus::DetectedButUnsupported,
-        diagnostics: vec!["historical_profile_detected_but_not_implemented".to_owned()],
+        implementation_status,
+        diagnostics: vec![diagnostic.to_owned()],
     }
 }
 
@@ -1008,6 +1022,132 @@ mod tests {
             profile.primary_diagnostic(),
             Some("object_info_schema_provenance_mismatch")
         );
+    }
+
+    #[test]
+    fn historical_profile_does_not_override_schema_lineage_failure() {
+        let mut node = base_node("Target");
+        node["inputs"] = json!([{
+            "name": "required_runtime_input",
+            "type": "INT",
+            "link": 1
+        }]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.42.14"},
+                "nodes": [
+                    node,
+                    {
+                        "id": 2,
+                        "type": "subgraph",
+                        "inputs": [],
+                        "outputs": [],
+                        "properties": {"proxyWidgets": [["2", "value"]]},
+                        "widgets_values": []
+                    }
+                ],
+                "links": [[1, 1, 0, 1, 0]],
+                "definitions": {"subgraphs": [{
+                    "id": "subgraph",
+                    "inputNode": {"id": -10},
+                    "outputNode": {"id": -20},
+                    "nodes": [],
+                    "links": []
+                }]}
+            }),
+            base_schema("Target"),
+        );
+        assert_eq!(
+            profile.family,
+            UiCompatibilityProfileFamily::LegacySubgraphBoundaryProxyV0
+        );
+        assert_eq!(
+            profile.evidence.schema_lineage.status,
+            SchemaLineageStatus::Mismatch
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::EvidenceInsufficient
+        );
+        assert!(!profile.execution_supported());
+    }
+
+    #[test]
+    fn legacy_dynamic_profile_does_not_hide_unrelated_schema_mismatch() {
+        let mut node = base_node("DynamicNode");
+        node["inputs"] = json!([
+            {
+                "name": "values.item",
+                "type": "COMFY_DYNAMICCOMBO_V0",
+                "link": 1
+            },
+            {"name": "unrelated", "type": "INT", "link": 2}
+        ]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.43.1"},
+                "nodes": [node],
+                "links": [[1, 1, 0, 1, 0], [2, 1, 0, 1, 1]]
+            }),
+            json!({
+                "DynamicNode": {
+                    "input": {
+                        "required": {
+                            "values": ["COMFY_DYNAMICCOMBO_V3", {}]
+                        }
+                    },
+                    "output": []
+                }
+            }),
+        );
+        assert_eq!(
+            profile.family,
+            UiCompatibilityProfileFamily::LegacyDynamicInputV0
+        );
+        assert_eq!(
+            profile.evidence.schema_lineage.status,
+            SchemaLineageStatus::Mismatch
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::EvidenceInsufficient
+        );
+        assert!(!profile.execution_supported());
+    }
+
+    #[test]
+    fn legacy_widget_profile_does_not_override_schema_lineage_failure() {
+        let mut node = base_node("Target");
+        node["widgets_values"] = json!([1]);
+        node["inputs"] = json!([{
+            "name": "required_runtime_input",
+            "type": "INT",
+            "link": 1
+        }]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.45.15"},
+                "nodes": [node],
+                "links": [[1, 1, 0, 1, 0]]
+            }),
+            base_schema("Target"),
+        );
+        assert_eq!(
+            profile.family,
+            UiCompatibilityProfileFamily::LegacyWidgetSlotV0
+        );
+        assert_eq!(
+            profile.evidence.schema_lineage.status,
+            SchemaLineageStatus::Mismatch
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::EvidenceInsufficient
+        );
+        assert!(!profile.execution_supported());
     }
 
     #[test]

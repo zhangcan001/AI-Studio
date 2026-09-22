@@ -1866,7 +1866,7 @@ impl WorkflowOnboardingService {
                     frontend_version: initial.frontend_version.as_deref(),
                     fingerprint: &fingerprint,
                 });
-            if !resolved_profile.is_implemented() {
+            if !resolved_profile.execution_supported() {
                 let diagnostic = resolved_profile
                     .primary_diagnostic()
                     .unwrap_or("historical_serialization_fingerprint_unknown");
