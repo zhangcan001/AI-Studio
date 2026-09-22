@@ -13,7 +13,7 @@ use ai_studio_lib::application::workflow_ui_serialization::{
 };
 use serde_json::{Map, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -395,6 +395,84 @@ fn synthetic_header(nodes: Vec<Value>, links: Vec<Value>) -> Value {
     })
 }
 
+fn synthetic_subgraph_definition(
+    id: &str,
+    inputs: Value,
+    outputs: Value,
+    nodes: Vec<Value>,
+    links: Vec<Value>,
+) -> Value {
+    serde_json::json!({
+        "id": id,
+        "version": 1,
+        "revision": 0,
+        "inputNode": {"id": -10, "bounding": [0, 0, 1, 1]},
+        "outputNode": {"id": -20, "bounding": [0, 0, 1, 1]},
+        "inputs": inputs,
+        "outputs": outputs,
+        "widgets": [],
+        "nodes": nodes,
+        "links": links,
+        "groups": []
+    })
+}
+
+fn synthetic_subgraph_workflow(
+    nodes: Vec<Value>,
+    links: Vec<Value>,
+    definitions: Vec<Value>,
+) -> Value {
+    let mut value = synthetic_header(nodes, links);
+    value["definitions"] = serde_json::json!({"subgraphs": definitions});
+    value
+}
+
+fn synthetic_composite_node(
+    id: i64,
+    definition_id: &str,
+    input_link: Option<i64>,
+    output_links: Vec<i64>,
+    output_type: &str,
+) -> Value {
+    let inputs = input_link
+        .map(|link| {
+            serde_json::json!([{
+                "name": "value",
+                "type": "INT",
+                "widget": {"name": "value"},
+                "link": link
+            }])
+        })
+        .unwrap_or_else(|| serde_json::json!([]));
+    let outputs = if output_links.is_empty() {
+        serde_json::json!([])
+    } else {
+        serde_json::json!([{
+            "name": output_type,
+            "type": output_type,
+            "links": output_links
+        }])
+    };
+    serde_json::json!({
+        "id": id,
+        "type": definition_id,
+        "mode": 0,
+        "inputs": inputs,
+        "outputs": outputs,
+        "properties": {"proxyWidgets": []},
+        "widgets_values": []
+    })
+}
+
+fn synthetic_uuid_runtime_descriptor_set() -> UiSerializationDescriptorSet {
+    let mut descriptors = synthetic_descriptors(RecognitionDeclaredType::Integer, true);
+    let uuid = "00000000-0000-4000-8000-000000000099".to_owned();
+    let mut descriptor = descriptors.nodes["Source"].clone();
+    descriptor.class_type = uuid.clone();
+    descriptors.nodes.insert(uuid, descriptor);
+    descriptors
+}
+
 fn synthetic_source_node(id: i64, links: Vec<i64>) -> Value {
     serde_json::json!({
         "id": id,
@@ -534,7 +612,15 @@ fn feature_detection_is_deterministic_and_separates_support_from_detection() {
             {"id": "43", "type": "PrimitiveFloat", "mode": 0, "inputs": [], "outputs": [], "widgets_values": []}
         ],
         "links": [[7, "uuid-b", 0, 42, 0, "*", "unexpected"]],
-        "definitions": {"subgraphs": [{"id": "subgraph-1", "nodes": [], "links": []}]}
+        "definitions": {"subgraphs": [{
+            "id": "subgraph-1",
+            "inputNode": {"id": -10, "bounding": [0, 0, 1, 1]},
+            "outputNode": {"id": -20, "bounding": [0, 0, 1, 1]},
+            "inputs": [],
+            "outputs": [],
+            "nodes": [],
+            "links": []
+        }]}
     });
     let first = parse_ui_workflow_value(&source).expect("feature fixture should parse");
     let first_features = first.features.clone();
@@ -566,10 +652,10 @@ fn feature_detection_is_deterministic_and_separates_support_from_detection() {
         .observations
         .iter()
         .any(|item| item.feature == WorkflowUiFeature::UnknownLinkEncoding));
-    assert!(first_features
-        .observations
-        .iter()
-        .any(|item| item.feature == WorkflowUiFeature::DefinitionsSubgraphs));
+    assert!(first_features.observations.iter().any(|item| {
+        item.feature == WorkflowUiFeature::DefinitionsSubgraphs
+            && item.status == CompatibilityFeatureStatus::Supported
+    }));
 }
 
 #[test]
@@ -597,13 +683,21 @@ fn unsupported_ui_features_fail_before_low_level_normalization_errors() {
 }
 
 #[test]
-fn subgraphs_and_unknown_virtual_nodes_fail_as_feature_diagnostics() {
+fn subgraphs_are_flattened_and_unknown_virtual_nodes_still_fail_closed() {
     let root = fixture_root("kera2_t2i");
     let (_, descriptors) = descriptors_for_fixture("kera2_t2i");
 
     let mut subgraph_source = read_json(root.join("ui_workflow.json"));
     subgraph_source["definitions"] = serde_json::json!({
-        "subgraphs": [{"id": "subgraph-1", "nodes": [], "links": []}]
+        "subgraphs": [{
+            "id": "subgraph-1",
+            "inputNode": {"id": -10, "bounding": [0, 0, 1, 1]},
+            "outputNode": {"id": -20, "bounding": [0, 0, 1, 1]},
+            "inputs": [],
+            "outputs": [],
+            "nodes": [],
+            "links": []
+        }]
     });
     let subgraph_document = parse_ui_workflow_value(&subgraph_source).unwrap();
     assert!(subgraph_document
@@ -611,12 +705,16 @@ fn subgraphs_and_unknown_virtual_nodes_fail_as_feature_diagnostics() {
         .observations
         .iter()
         .any(|item| item.feature == WorkflowUiFeature::DefinitionsSubgraphs));
-    let subgraph_error = normalize_ui_workflow(&subgraph_document, &descriptors).unwrap_err();
-    assert_eq!(subgraph_error.code, "UNSUPPORTED_UI_FEATURE");
-    assert_eq!(
-        subgraph_error.feature,
-        Some(WorkflowUiFeature::DefinitionsSubgraphs)
-    );
+    assert!(subgraph_document
+        .features
+        .observations
+        .iter()
+        .any(
+            |item| item.feature == WorkflowUiFeature::DefinitionsSubgraphs
+                && item.status == CompatibilityFeatureStatus::Supported
+        ));
+    normalize_ui_workflow(&subgraph_document, &descriptors)
+        .expect("an unused valid definition must not block normalization");
 
     let mut virtual_source = read_json(root.join("ui_workflow.json"));
     virtual_source["nodes"][0]["type"] = Value::from("UntrustedVirtualNode");
@@ -637,16 +735,916 @@ fn subgraphs_and_unknown_virtual_nodes_fail_as_feature_diagnostics() {
     let mut composite_source = read_json(root.join("ui_workflow.json"));
     composite_source["nodes"][0]["type"] = Value::from("00000000-0000-4000-8000-000000000001");
     let composite_document = parse_ui_workflow_value(&composite_source).unwrap();
-    assert!(composite_document
+    let composite_error = normalize_ui_workflow(&composite_document, &descriptors).unwrap_err();
+    assert_eq!(composite_error.code, "UNKNOWN_NODE_CLASS");
+}
+
+#[test]
+fn subgraph_definition_shape_and_external_input_boundary_flatten_provider_neutrally() {
+    let definition_id = "definition-input";
+    let definition = synthetic_subgraph_definition(
+        definition_id,
+        serde_json::json!([{
+            "id": "input-slot",
+            "name": "value",
+            "type": "INT",
+            "linkIds": [1]
+        }]),
+        serde_json::json!([]),
+        vec![synthetic_runtime_target_node(20, Some(1))],
+        vec![serde_json::json!({
+            "id": 1,
+            "origin_id": -10,
+            "origin_slot": 0,
+            "target_id": 20,
+            "target_slot": 0,
+            "type": "INT"
+        })],
+    );
+    let source = synthetic_subgraph_workflow(
+        vec![synthetic_source_node(1, vec![10]), {
+            let mut node = synthetic_composite_node(9, definition_id, Some(10), vec![], "INT");
+            node["properties"]["proxyWidgets"] = serde_json::json!([["20", "value"]]);
+            node
+        }],
+        vec![serde_json::json!([10, 1, 0, 9, 0, "INT"])],
+        vec![definition],
+    );
+    let descriptors = synthetic_descriptors(RecognitionDeclaredType::Integer, true);
+    let document = parse_ui_workflow_value(&source).expect("verified subgraph should parse");
+    assert!(document
+        .nodes
+        .iter()
+        .all(|node| node.class_type != definition_id));
+    assert!(document
+        .nodes
+        .iter()
+        .any(|node| node.id == "subgraph/instance[9]/node/20"));
+    assert!(document
         .features
         .observations
         .iter()
-        .any(|item| item.feature == WorkflowUiFeature::UuidCompositeNodeType));
-    let composite_error = normalize_ui_workflow(&composite_document, &descriptors).unwrap_err();
-    assert_eq!(composite_error.code, "UNSUPPORTED_UI_FEATURE");
+        .any(
+            |item| item.feature == WorkflowUiFeature::DefinitionsSubgraphs
+                && item.status == CompatibilityFeatureStatus::Supported
+        ));
+    let normalized =
+        normalize_ui_workflow(&document, &descriptors).expect("flattened input should normalize");
+    let target = normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .expect("inner target should remain");
+    let connection = target["inputs"]["value"].as_array().unwrap();
+    assert_eq!(connection[0], "1");
+    assert_eq!(connection[1], 0);
+}
+
+#[test]
+fn subgraph_instance_widget_values_override_inner_defaults_only_when_unconnected() {
+    let definition = synthetic_subgraph_definition(
+        "definition-instance-widget",
+        serde_json::json!([{
+            "id": "input-slot",
+            "name": "value",
+            "type": "INT",
+            "linkIds": [1]
+        }]),
+        serde_json::json!([]),
+        vec![{
+            let mut target = synthetic_widget_target_node(20, "Target", "value", "INT", "value", 1);
+            target["widgets_values"] = serde_json::json!([5]);
+            target["widgets_values_named"] = serde_json::json!({"value": 5});
+            target
+        }],
+        vec![serde_json::json!({
+            "id": 1,
+            "origin_id": -10,
+            "origin_slot": 0,
+            "target_id": 20,
+            "target_slot": 0,
+            "type": "INT"
+        })],
+    );
+    let mut disconnected_instance =
+        synthetic_composite_node(9, "definition-instance-widget", None, vec![], "INT");
+    disconnected_instance["widgets_values"] = serde_json::json!([42]);
+    disconnected_instance["widgets_values_named"] = serde_json::json!({"value": 42});
+    let disconnected = normalize_synthetic_with(
+        synthetic_subgraph_workflow(
+            vec![disconnected_instance],
+            vec![],
+            vec![definition.clone()],
+        ),
+        &synthetic_descriptors(RecognitionDeclaredType::Integer, true),
+    )
+    .expect("disconnected promoted input should use instance value");
+    let disconnected_target = disconnected
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .expect("flattened target should remain");
+    assert_eq!(disconnected_target["inputs"]["value"], 42);
+
+    let mut connected_instance =
+        synthetic_composite_node(9, "definition-instance-widget", Some(10), vec![], "INT");
+    connected_instance["widgets_values"] = serde_json::json!([42]);
+    connected_instance["widgets_values_named"] = serde_json::json!({"value": 42});
+    let connected = normalize_synthetic_with(
+        synthetic_subgraph_workflow(
+            vec![synthetic_source_node(1, vec![10]), connected_instance],
+            vec![serde_json::json!([10, 1, 0, 9, 0, "INT"])],
+            vec![definition],
+        ),
+        &synthetic_descriptors(RecognitionDeclaredType::Integer, true),
+    )
+    .expect("connected input should remain link-authoritative");
+    let connected_target = connected
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .expect("flattened target should remain");
     assert_eq!(
-        composite_error.feature,
-        Some(WorkflowUiFeature::UuidCompositeNodeType)
+        connected_target["inputs"]["value"],
+        serde_json::json!(["1", 0])
+    );
+}
+
+#[test]
+fn subgraph_external_input_fanout_preserves_all_boundary_consumers() {
+    let definition = synthetic_subgraph_definition(
+        "definition-input-fanout",
+        serde_json::json!([{
+            "id": "input-slot",
+            "name": "value",
+            "type": "INT",
+            "linkIds": [1, 2]
+        }]),
+        serde_json::json!([]),
+        vec![
+            synthetic_runtime_target_node(20, Some(1)),
+            synthetic_runtime_target_node(30, Some(2)),
+        ],
+        vec![
+            serde_json::json!({
+                "id": 1, "origin_id": -10, "origin_slot": 0,
+                "target_id": 20, "target_slot": 0, "type": "INT"
+            }),
+            serde_json::json!({
+                "id": 2, "origin_id": -10, "origin_slot": 0,
+                "target_id": 30, "target_slot": 0, "type": "INT"
+            }),
+        ],
+    );
+    let source = synthetic_subgraph_workflow(
+        vec![
+            synthetic_source_node(1, vec![10]),
+            synthetic_composite_node(9, "definition-input-fanout", Some(10), vec![], "INT"),
+        ],
+        vec![serde_json::json!([10, 1, 0, 9, 0, "INT"])],
+        vec![definition],
+    );
+    let normalized = normalize_synthetic_with(
+        source,
+        &synthetic_descriptors(RecognitionDeclaredType::Integer, true),
+    )
+    .expect("input fan-out should normalize");
+    assert_eq!(
+        normalized
+            .api_value
+            .as_object()
+            .unwrap()
+            .values()
+            .filter(|node| node["class_type"] == "Target")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn ambiguous_proxy_widget_and_unknown_composite_definition_fail_closed() {
+    let definition_id = "definition-proxy";
+    let definition = synthetic_subgraph_definition(
+        definition_id,
+        serde_json::json!([{
+            "id": "input-slot",
+            "name": "value",
+            "type": "INT",
+            "linkIds": [1]
+        }]),
+        serde_json::json!([]),
+        vec![synthetic_runtime_target_node(20, Some(1))],
+        vec![serde_json::json!({
+            "id": 1, "origin_id": -10, "origin_slot": 0,
+            "target_id": 20, "target_slot": 0, "type": "INT"
+        })],
+    );
+    let mut ambiguous_proxy = synthetic_composite_node(9, definition_id, Some(10), vec![], "INT");
+    ambiguous_proxy["properties"]["proxyWidgets"] =
+        serde_json::json!([["20", "value"], ["20", "value"]]);
+    let proxy_source = synthetic_subgraph_workflow(
+        vec![synthetic_source_node(1, vec![10]), ambiguous_proxy],
+        vec![serde_json::json!([10, 1, 0, 9, 0, "INT"])],
+        vec![definition.clone()],
+    );
+    assert_eq!(
+        parse_ui_workflow_value(&proxy_source).unwrap_err().code,
+        "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+    );
+
+    let mut unknown = synthetic_subgraph_workflow(
+        vec![serde_json::json!({
+            "id": 9,
+            "type": "unregistered-composite",
+            "mode": 0,
+            "inputs": [],
+            "outputs": [],
+            "properties": {"proxyWidgets": [["20", "value"]]},
+            "widgets_values": []
+        })],
+        vec![],
+        vec![definition],
+    );
+    unknown["definitions"]["subgraphs"][0]["id"] = Value::from("different-definition");
+    assert_eq!(
+        parse_ui_workflow_value(&unknown).unwrap_err().code,
+        "UNKNOWN_COMPOSITE_DEFINITION"
+    );
+}
+
+#[test]
+fn subgraph_output_boundary_and_multi_output_slots_preserve_execution_edges() {
+    let single_output_definition = synthetic_subgraph_definition(
+        "definition-output",
+        serde_json::json!([]),
+        serde_json::json!([{
+            "id": "output-slot",
+            "name": "result",
+            "type": "INT",
+            "linkIds": [1]
+        }]),
+        vec![synthetic_source_node(20, vec![1])],
+        vec![serde_json::json!({
+            "id": 1,
+            "origin_id": 20,
+            "origin_slot": 0,
+            "target_id": -20,
+            "target_slot": 0,
+            "type": "INT"
+        })],
+    );
+    let source = synthetic_subgraph_workflow(
+        vec![
+            synthetic_composite_node(9, "definition-output", None, vec![12], "INT"),
+            synthetic_runtime_target_node(2, Some(12)),
+        ],
+        vec![serde_json::json!([12, 9, 0, 2, 0, "INT"])],
+        vec![single_output_definition],
+    );
+    let descriptors = synthetic_descriptors(RecognitionDeclaredType::Integer, true);
+    let document = parse_ui_workflow_value(&source).expect("output subgraph should parse");
+    let normalized =
+        normalize_ui_workflow(&document, &descriptors).expect("output boundary should normalize");
+    let target = normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .unwrap();
+    let origin_id = target["inputs"]["value"][0].as_str().unwrap();
+    assert!(origin_id.contains("0:"));
+
+    let multi_definition = synthetic_subgraph_definition(
+        "definition-multi-output",
+        serde_json::json!([]),
+        serde_json::json!([
+            {"id": "output-a", "name": "a", "type": "INT", "linkIds": [1]},
+            {"id": "output-b", "name": "b", "type": "INT", "linkIds": [2]}
+        ]),
+        vec![
+            synthetic_source_node(20, vec![1]),
+            synthetic_source_node(21, vec![2]),
+        ],
+        vec![
+            serde_json::json!({
+                "id": 1, "origin_id": 20, "origin_slot": 0,
+                "target_id": -20, "target_slot": 0, "type": "INT"
+            }),
+            serde_json::json!({
+                "id": 2, "origin_id": 21, "origin_slot": 0,
+                "target_id": -20, "target_slot": 1, "type": "INT"
+            }),
+        ],
+    );
+    let mut composite =
+        synthetic_composite_node(9, "definition-multi-output", None, vec![12, 13], "INT");
+    composite["outputs"] = serde_json::json!([
+        {"name": "a", "type": "INT", "links": [12]},
+        {"name": "b", "type": "INT", "links": [13]}
+    ]);
+    let multi_source = synthetic_subgraph_workflow(
+        vec![
+            composite,
+            synthetic_runtime_target_node(2, Some(12)),
+            synthetic_runtime_target_node(3, Some(13)),
+        ],
+        vec![
+            serde_json::json!([12, 9, 0, 2, 0, "INT"]),
+            serde_json::json!([13, 9, 1, 3, 0, "INT"]),
+        ],
+        vec![multi_definition],
+    );
+    let multi_document = parse_ui_workflow_value(&multi_source).unwrap();
+    let multi_normalized = normalize_ui_workflow(&multi_document, &descriptors).unwrap();
+    let targets = multi_normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .filter(|node| node["class_type"] == "Target")
+        .collect::<Vec<_>>();
+    assert_eq!(targets.len(), 2);
+    assert_ne!(
+        targets[0]["inputs"]["value"][0],
+        targets[1]["inputs"]["value"][0]
+    );
+}
+
+#[test]
+fn repeated_instances_get_non_colliding_hierarchical_source_ids() {
+    let definition = synthetic_subgraph_definition(
+        "definition-reused",
+        serde_json::json!([]),
+        serde_json::json!([{
+            "id": "result",
+            "name": "result",
+            "type": "INT",
+            "linkIds": [1]
+        }]),
+        vec![synthetic_source_node(20, vec![1])],
+        vec![serde_json::json!({
+            "id": 1, "origin_id": 20, "origin_slot": 0,
+            "target_id": -20, "target_slot": 0, "type": "INT"
+        })],
+    );
+    let source = synthetic_subgraph_workflow(
+        vec![
+            synthetic_composite_node(9, "definition-reused", None, vec![12], "INT"),
+            synthetic_composite_node(10, "definition-reused", None, vec![13], "INT"),
+            synthetic_runtime_target_node(2, Some(12)),
+            synthetic_runtime_target_node(3, Some(13)),
+        ],
+        vec![
+            serde_json::json!([12, 9, 0, 2, 0, "INT"]),
+            serde_json::json!([13, 10, 0, 3, 0, "INT"]),
+        ],
+        vec![definition],
+    );
+    let descriptors = synthetic_descriptors(RecognitionDeclaredType::Integer, true);
+    let document = parse_ui_workflow_value(&source).unwrap();
+    let normalized = normalize_ui_workflow(&document, &descriptors).unwrap();
+    let ids = normalized
+        .source_to_api
+        .keys()
+        .filter(|id| id.contains("subgraph/"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(ids.len(), 2);
+    assert_ne!(ids[0], ids[1]);
+    assert!(ids.iter().any(|id| id.contains("instance[9]")));
+    assert!(ids.iter().any(|id| id.contains("instance[10]")));
+}
+
+#[test]
+fn repeated_subgraph_instances_isolate_alias_scopes() {
+    let definition = synthetic_subgraph_definition(
+        "definition-alias-scope",
+        serde_json::json!([]),
+        serde_json::json!([]),
+        vec![
+            synthetic_source_node(1, vec![10]),
+            synthetic_alias_producer(2, "shared", 10, "INT"),
+            synthetic_alias_consumer(3, "shared", "INT", vec![11]),
+            synthetic_alias_target(4, "INT", 11),
+        ],
+        vec![
+            serde_json::json!([10, 1, 0, 2, 0, "INT"]),
+            serde_json::json!([11, 3, 0, 4, 0, "INT"]),
+        ],
+    );
+    let source = synthetic_subgraph_workflow(
+        vec![
+            synthetic_composite_node(9, "definition-alias-scope", None, vec![], "INT"),
+            synthetic_composite_node(10, "definition-alias-scope", None, vec![], "INT"),
+        ],
+        vec![],
+        vec![definition],
+    );
+    let normalized = normalize_synthetic(source).expect(
+        "identical alias names in separate subgraph instances must not create an ambiguous producer",
+    );
+    let target_inputs = normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .filter(|node| node["class_type"] == "Target")
+        .map(|node| node["inputs"]["value"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(target_inputs.len(), 2);
+    assert_ne!(target_inputs[0], target_inputs[1]);
+}
+
+#[test]
+fn nested_subgraphs_flatten_with_deep_deterministic_ids() {
+    let nested_definition = synthetic_subgraph_definition(
+        "definition-nested-leaf",
+        serde_json::json!([]),
+        serde_json::json!([{
+            "id": "result",
+            "name": "result",
+            "type": "INT",
+            "linkIds": [2]
+        }]),
+        vec![synthetic_source_node(20, vec![2])],
+        vec![serde_json::json!({
+            "id": 2, "origin_id": 20, "origin_slot": 0,
+            "target_id": -20, "target_slot": 0, "type": "INT"
+        })],
+    );
+    let outer_definition = synthetic_subgraph_definition(
+        "definition-nested-outer",
+        serde_json::json!([]),
+        serde_json::json!([{
+            "id": "result",
+            "name": "result",
+            "type": "INT",
+            "linkIds": [1]
+        }]),
+        vec![synthetic_composite_node(
+            50,
+            "definition-nested-leaf",
+            None,
+            vec![1],
+            "INT",
+        )],
+        vec![serde_json::json!({
+            "id": 1, "origin_id": 50, "origin_slot": 0,
+            "target_id": -20, "target_slot": 0, "type": "INT"
+        })],
+    );
+    let source = synthetic_subgraph_workflow(
+        vec![
+            synthetic_composite_node(9, "definition-nested-outer", None, vec![12], "INT"),
+            synthetic_runtime_target_node(2, Some(12)),
+        ],
+        vec![serde_json::json!([12, 9, 0, 2, 0, "INT"])],
+        vec![outer_definition, nested_definition],
+    );
+    let descriptors = synthetic_descriptors(RecognitionDeclaredType::Integer, true);
+    let first = parse_ui_workflow_value(&source).unwrap();
+    let second = parse_ui_workflow_value(&source).unwrap();
+    let first_normalized = normalize_ui_workflow(&first, &descriptors).unwrap();
+    let second_normalized = normalize_ui_workflow(&second, &descriptors).unwrap();
+    assert_eq!(first_normalized.api_value, second_normalized.api_value);
+    assert!(first_normalized
+        .source_to_api
+        .keys()
+        .any(|id| id.contains("instance[9]/instance[50]")));
+
+    let direct = synthetic_header(
+        vec![
+            synthetic_source_node(20, vec![12]),
+            synthetic_runtime_target_node(2, Some(12)),
+        ],
+        vec![serde_json::json!([12, 20, 0, 2, 0, "INT"])],
+    );
+    let direct_normalized = normalize_synthetic_with(direct, &descriptors).unwrap();
+    let direct_classes = direct_normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .filter_map(|node| node["class_type"].as_str())
+        .collect::<Vec<_>>();
+    let nested_classes = first_normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .filter_map(|node| node["class_type"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        direct_classes.iter().collect::<BTreeSet<_>>(),
+        nested_classes.iter().collect::<BTreeSet<_>>()
+    );
+    let direct_target = direct_normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .unwrap();
+    let nested_target = first_normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .unwrap();
+    assert_eq!(
+        direct_normalized.api_value[direct_target["inputs"]["value"][0].as_str().unwrap()]
+            ["class_type"],
+        first_normalized.api_value[nested_target["inputs"]["value"][0].as_str().unwrap()]
+            ["class_type"]
+    );
+}
+
+#[test]
+fn wrapped_and_direct_graphs_have_the_same_execution_shape() {
+    let descriptors = synthetic_descriptors(RecognitionDeclaredType::Integer, true);
+    let direct = synthetic_header(
+        vec![
+            synthetic_source_node(1, vec![1]),
+            synthetic_runtime_target_node(2, Some(1)),
+        ],
+        vec![serde_json::json!([1, 1, 0, 2, 0, "INT"])],
+    );
+    let direct_normalized = normalize_synthetic_with(direct, &descriptors).unwrap();
+
+    let definition = synthetic_subgraph_definition(
+        "definition-wrapped",
+        serde_json::json!([{
+            "id": "input-slot",
+            "name": "value",
+            "type": "INT",
+            "linkIds": [2]
+        }]),
+        serde_json::json!([]),
+        vec![synthetic_runtime_target_node(20, Some(2))],
+        vec![serde_json::json!({
+            "id": 2, "origin_id": -10, "origin_slot": 0,
+            "target_id": 20, "target_slot": 0, "type": "INT"
+        })],
+    );
+    let wrapped = synthetic_subgraph_workflow(
+        vec![
+            synthetic_source_node(1, vec![10]),
+            synthetic_composite_node(9, "definition-wrapped", Some(10), vec![], "INT"),
+        ],
+        vec![serde_json::json!([10, 1, 0, 9, 0, "INT"])],
+        vec![definition],
+    );
+    let wrapped_normalized = normalize_synthetic_with(wrapped, &descriptors).unwrap();
+
+    let class_types = |normalized: &NormalizedWorkflow| {
+        let mut classes = normalized
+            .api_value
+            .as_object()
+            .unwrap()
+            .values()
+            .filter_map(|node| node["class_type"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        classes.sort_unstable();
+        classes
+    };
+    assert_eq!(
+        class_types(&direct_normalized),
+        class_types(&wrapped_normalized)
+    );
+    let direct_target = direct_normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .unwrap();
+    let wrapped_target = wrapped_normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .unwrap();
+    let direct_origin = direct_target["inputs"]["value"][0].as_str().unwrap();
+    let wrapped_origin = wrapped_target["inputs"]["value"][0].as_str().unwrap();
+    assert_eq!(
+        direct_normalized.api_value[direct_origin]["class_type"],
+        wrapped_normalized.api_value[wrapped_origin]["class_type"]
+    );
+}
+
+#[test]
+fn recursive_and_ambiguous_subgraphs_fail_closed_with_origin_diagnostics() {
+    let self_recursive = synthetic_subgraph_definition(
+        "definition-self",
+        serde_json::json!([]),
+        serde_json::json!([]),
+        vec![synthetic_composite_node(
+            20,
+            "definition-self",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+    );
+    let self_source = synthetic_subgraph_workflow(
+        vec![synthetic_composite_node(
+            9,
+            "definition-self",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+        vec![self_recursive],
+    );
+    let error = parse_ui_workflow_value(&self_source).unwrap_err();
+    assert_eq!(error.code, "SUBGRAPH_RECURSION");
+    assert!(error.message.contains("instance[9]"));
+
+    let definition_a = synthetic_subgraph_definition(
+        "definition-a",
+        serde_json::json!([]),
+        serde_json::json!([]),
+        vec![synthetic_composite_node(
+            20,
+            "definition-b",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+    );
+    let definition_b = synthetic_subgraph_definition(
+        "definition-b",
+        serde_json::json!([]),
+        serde_json::json!([]),
+        vec![synthetic_composite_node(
+            30,
+            "definition-a",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+    );
+    let mutual_source = synthetic_subgraph_workflow(
+        vec![synthetic_composite_node(
+            9,
+            "definition-a",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+        vec![definition_a, definition_b],
+    );
+    assert_eq!(
+        parse_ui_workflow_value(&mutual_source).unwrap_err().code,
+        "SUBGRAPH_RECURSION"
+    );
+
+    let missing_boundary = synthetic_subgraph_definition(
+        "definition-missing",
+        serde_json::json!([{
+            "id": "input-slot",
+            "name": "value",
+            "type": "INT",
+            "linkIds": [1]
+        }]),
+        serde_json::json!([]),
+        vec![synthetic_runtime_target_node(20, None)],
+        vec![],
+    );
+    let missing_source = synthetic_subgraph_workflow(
+        vec![synthetic_composite_node(
+            9,
+            "definition-missing",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+        vec![missing_boundary],
+    );
+    assert_eq!(
+        parse_ui_workflow_value(&missing_source).unwrap_err().code,
+        "MISSING_SUBGRAPH_INPUT_BOUNDARY"
+    );
+}
+
+#[test]
+fn duplicate_definitions_and_ambiguous_output_boundaries_fail_closed() {
+    let empty_definition = synthetic_subgraph_definition(
+        "definition-duplicate",
+        serde_json::json!([]),
+        serde_json::json!([]),
+        vec![],
+        vec![],
+    );
+    let duplicate_source = synthetic_subgraph_workflow(
+        vec![],
+        vec![],
+        vec![empty_definition.clone(), empty_definition],
+    );
+    assert_eq!(
+        parse_ui_workflow_value(&duplicate_source).unwrap_err().code,
+        "DUPLICATE_SUBGRAPH_DEFINITION"
+    );
+
+    let ambiguous_definition = synthetic_subgraph_definition(
+        "definition-ambiguous-output",
+        serde_json::json!([]),
+        serde_json::json!([{
+            "id": "result",
+            "name": "result",
+            "type": "INT",
+            "linkIds": [1, 2]
+        }]),
+        vec![
+            synthetic_source_node(20, vec![1]),
+            synthetic_source_node(21, vec![2]),
+        ],
+        vec![
+            serde_json::json!({
+                "id": 1, "origin_id": 20, "origin_slot": 0,
+                "target_id": -20, "target_slot": 0, "type": "INT"
+            }),
+            serde_json::json!({
+                "id": 2, "origin_id": 21, "origin_slot": 0,
+                "target_id": -20, "target_slot": 0, "type": "INT"
+            }),
+        ],
+    );
+    let ambiguous_source = synthetic_subgraph_workflow(
+        vec![synthetic_composite_node(
+            9,
+            "definition-ambiguous-output",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+        vec![ambiguous_definition],
+    );
+    assert_eq!(
+        parse_ui_workflow_value(&ambiguous_source).unwrap_err().code,
+        "AMBIGUOUS_SUBGRAPH_OUTPUT_BOUNDARY"
+    );
+
+    let missing_output_definition = synthetic_subgraph_definition(
+        "definition-missing-output",
+        serde_json::json!([]),
+        serde_json::json!([{
+            "id": "result",
+            "name": "result",
+            "type": "INT",
+            "linkIds": []
+        }]),
+        vec![synthetic_source_node(20, vec![])],
+        vec![],
+    );
+    let missing_output_source = synthetic_subgraph_workflow(
+        vec![synthetic_composite_node(
+            9,
+            "definition-missing-output",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+        vec![missing_output_definition],
+    );
+    assert_eq!(
+        parse_ui_workflow_value(&missing_output_source)
+            .unwrap_err()
+            .code,
+        "MISSING_SUBGRAPH_OUTPUT_BOUNDARY"
+    );
+
+    let ambiguous_input_definition = synthetic_subgraph_definition(
+        "definition-ambiguous-input",
+        serde_json::json!([
+            {"id": "input-a", "name": "value", "type": "INT", "linkIds": [1]},
+            {"id": "input-b", "name": "value", "type": "INT", "linkIds": [2]}
+        ]),
+        serde_json::json!([]),
+        vec![
+            synthetic_runtime_target_node(20, Some(1)),
+            synthetic_runtime_target_node(30, Some(2)),
+        ],
+        vec![
+            serde_json::json!({
+                "id": 1, "origin_id": -10, "origin_slot": 0,
+                "target_id": 20, "target_slot": 0, "type": "INT"
+            }),
+            serde_json::json!({
+                "id": 2, "origin_id": -10, "origin_slot": 1,
+                "target_id": 30, "target_slot": 0, "type": "INT"
+            }),
+        ],
+    );
+    let mut ambiguous_input_instance =
+        synthetic_composite_node(9, "definition-ambiguous-input", Some(10), vec![], "INT");
+    ambiguous_input_instance["inputs"] = serde_json::json!([{
+        "name": "value",
+        "type": "INT",
+        "link": 10
+    }]);
+    let ambiguous_input_source = synthetic_subgraph_workflow(
+        vec![synthetic_source_node(1, vec![10]), ambiguous_input_instance],
+        vec![serde_json::json!([10, 1, 0, 9, 0, "INT"])],
+        vec![ambiguous_input_definition],
+    );
+    assert_eq!(
+        parse_ui_workflow_value(&ambiguous_input_source)
+            .unwrap_err()
+            .code,
+        "AMBIGUOUS_SUBGRAPH_INPUT_BOUNDARY"
+    );
+}
+
+#[test]
+fn uuid_looking_runtime_class_is_not_composite_by_appearance() {
+    let uuid = "00000000-0000-4000-8000-000000000099";
+    let source = synthetic_header(
+        vec![serde_json::json!({
+            "id": 1,
+            "type": uuid,
+            "mode": 0,
+            "inputs": [],
+            "outputs": [{"name": "INT", "type": "INT", "links": []}],
+            "widgets_values": []
+        })],
+        vec![],
+    );
+    let document = parse_ui_workflow_value(&source).unwrap();
+    assert!(!document
+        .features
+        .observations
+        .iter()
+        .any(|item| { item.feature == WorkflowUiFeature::UuidCompositeNodeType }));
+    normalize_ui_workflow(&document, &synthetic_uuid_runtime_descriptor_set())
+        .expect("object_info-backed UUID runtime class must remain executable");
+}
+
+#[test]
+fn foundation_presentation_node_inside_subgraph_is_normalized_by_existing_authority() {
+    let definition = synthetic_subgraph_definition(
+        "definition-foundation",
+        serde_json::json!([]),
+        serde_json::json!([{
+            "id": "result",
+            "name": "result",
+            "type": "INT",
+            "linkIds": [1]
+        }]),
+        vec![
+            synthetic_source_node(20, vec![1]),
+            serde_json::json!({
+                "id": 30,
+                "type": "Note",
+                "mode": 0,
+                "inputs": [],
+                "outputs": [],
+                "widgets_values": ["not executable"]
+            }),
+        ],
+        vec![serde_json::json!({
+            "id": 1, "origin_id": 20, "origin_slot": 0,
+            "target_id": -20, "target_slot": 0, "type": "INT"
+        })],
+    );
+    let source = synthetic_subgraph_workflow(
+        vec![
+            synthetic_composite_node(9, "definition-foundation", None, vec![12], "INT"),
+            synthetic_runtime_target_node(2, Some(12)),
+        ],
+        vec![serde_json::json!([12, 9, 0, 2, 0, "INT"])],
+        vec![definition],
+    );
+    let descriptors = synthetic_descriptors(RecognitionDeclaredType::Integer, true);
+    let document = parse_ui_workflow_value(&source).unwrap();
+    let normalized = normalize_ui_workflow(&document, &descriptors)
+        .expect("presentation foundation node should be removed safely");
+    assert_eq!(
+        normalized
+            .api_value
+            .as_object()
+            .unwrap()
+            .values()
+            .filter(|node| node["class_type"] == "Note")
+            .count(),
+        0
     );
 }
 
