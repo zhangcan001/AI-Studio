@@ -24,7 +24,9 @@ use crate::application::{
         resolve_semantic_graph, ActiveDependencyGraph, CapabilityProfile, RootDependencyClosure,
     },
     workflow_semantic_identity::semantic_workflow_sha256,
-    workflow_ui_normalizer::{normalize_ui_workflow, parse_ui_workflow},
+    workflow_ui_normalizer::{
+        normalize_ui_workflow, parse_ui_workflow, WorkflowUiFeatureObservation,
+    },
     workflow_ui_serialization::{
         canonical_schema_fingerprint, FrontendSerializationProfile,
         NormalizationCompatibilityContext, UiSerializationDescriptorSet,
@@ -78,6 +80,96 @@ pub struct WorkflowNormalizationDiagnosticView {
     pub message: String,
     pub node_id: Option<String>,
     pub input_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frontend_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_format: Option<String>,
+}
+
+impl WorkflowNormalizationDiagnosticView {
+    fn basic(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            node_id: None,
+            input_name: None,
+            feature: None,
+            feature_status: None,
+            reason: None,
+            node_type: None,
+            link_id: None,
+            frontend_version: None,
+            workflow_format: None,
+        }
+    }
+
+    fn from_feature(
+        observation: &WorkflowUiFeatureObservation,
+        frontend_version: Option<&str>,
+        workflow_format: Option<&str>,
+    ) -> Self {
+        let location = observation
+            .node_ids
+            .first()
+            .map(|node_id| format!(" 节点 {node_id}"))
+            .or_else(|| {
+                observation
+                    .link_ids
+                    .first()
+                    .map(|link_id| format!(" 链接 {link_id}"))
+            })
+            .unwrap_or_default();
+        Self {
+            code: "UNSUPPORTED_UI_FEATURE".to_owned(),
+            message: format!(
+                "当前 UI 工作流包含暂不支持的特性：{}{}。{}",
+                observation.feature.as_str(),
+                location,
+                observation.reason
+            ),
+            node_id: observation.node_ids.first().cloned(),
+            input_name: None,
+            feature: Some(observation.feature.as_str().to_owned()),
+            feature_status: Some(observation.status.as_str().to_owned()),
+            reason: Some(observation.reason.clone()),
+            node_type: observation.node_types.first().cloned(),
+            link_id: observation.link_ids.first().copied(),
+            frontend_version: frontend_version.map(str::to_owned),
+            workflow_format: workflow_format.map(str::to_owned),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowUiFeatureView {
+    pub feature: String,
+    pub status: String,
+    pub node_ids: Vec<String>,
+    pub node_types: Vec<String>,
+    pub link_ids: Vec<i64>,
+    pub reason: String,
+}
+
+fn workflow_ui_feature_view(observation: &WorkflowUiFeatureObservation) -> WorkflowUiFeatureView {
+    WorkflowUiFeatureView {
+        feature: observation.feature.as_str().to_owned(),
+        status: observation.status.as_str().to_owned(),
+        node_ids: observation.node_ids.clone(),
+        node_types: observation.node_types.clone(),
+        link_ids: observation.link_ids.clone(),
+        reason: observation.reason.clone(),
+    }
 }
 
 impl ComfyWorkflowInputFormat {
@@ -279,6 +371,7 @@ pub struct WorkflowOnboardingDraftView {
     pub frontend_version: Option<String>,
     pub normalization_state: WorkflowNormalizationState,
     pub normalization_diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
+    pub ui_features: Vec<WorkflowUiFeatureView>,
     pub node_count: usize,
     pub unique_class_count: usize,
     pub nodes: Vec<WorkflowNodeView>,
@@ -528,6 +621,7 @@ pub struct WorkflowAutoOnboardingPlanView {
     pub frontend_version: Option<String>,
     pub normalization_state: WorkflowNormalizationState,
     pub normalization_diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
+    pub ui_features: Vec<WorkflowUiFeatureView>,
     pub node_count: usize,
     pub unique_class_count: usize,
     pub metadata: WorkflowManifestView,
@@ -613,6 +707,7 @@ struct WorkflowOnboardingDraft {
     compatibility_context: Option<NormalizationCompatibilityContext>,
     normalization_state: WorkflowNormalizationState,
     normalization_diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
+    ui_features: Vec<WorkflowUiFeatureObservation>,
     nodes: Vec<WorkflowNodeView>,
     manifest: WorkflowManifest,
     recipe_id: String,
@@ -934,6 +1029,7 @@ impl WorkflowOnboardingService {
                 compatibility_context: None,
                 normalization_state: WorkflowNormalizationState::NormalizedApiReady,
                 normalization_diagnostics: Vec::new(),
+                ui_features: Vec::new(),
                 nodes,
                 manifest: WorkflowManifest {
                     schema_version: 1,
@@ -963,6 +1059,7 @@ impl WorkflowOnboardingService {
             }
         } else {
             let ui_document = ui_document.expect("UI input format must have a parsed document");
+            let ui_features = ui_document.features.observations.clone();
             let mut recognition = WorkflowRecognitionService::recognize_bytes(&bytes, &[]);
             // The format is recognized, but semantic/API recognition has not
             // run until the source is normalized against a live schema.
@@ -981,12 +1078,11 @@ impl WorkflowOnboardingService {
                 frontend_version: ui_document.frontend_version,
                 compatibility_context: None,
                 normalization_state: WorkflowNormalizationState::UiSourcePending,
-                normalization_diagnostics: vec![WorkflowNormalizationDiagnosticView {
-                    code: "UI_SOURCE_PENDING".to_owned(),
-                    message: "UI 工作流已接收，等待 ComfyUI schema 进行安全规范化。".to_owned(),
-                    node_id: None,
-                    input_name: None,
-                }],
+                normalization_diagnostics: vec![WorkflowNormalizationDiagnosticView::basic(
+                    "UI_SOURCE_PENDING",
+                    "UI 工作流已接收，等待 ComfyUI schema 进行安全规范化。",
+                )],
+                ui_features,
                 nodes: Vec::new(),
                 manifest: WorkflowManifest {
                     schema_version: 1,
@@ -1127,6 +1223,7 @@ impl WorkflowOnboardingService {
             compatibility_context: None,
             normalization_state: WorkflowNormalizationState::NormalizedApiReady,
             normalization_diagnostics: Vec::new(),
+            ui_features: Vec::new(),
             nodes: inspect_workflow(&workflow)?,
             normalized_api: Some(workflow),
             raw_bytes,
@@ -1674,8 +1771,7 @@ impl WorkflowOnboardingService {
         )>,
         WorkflowOnboardingError,
     > {
-        let pending = |code: &'static str,
-                       message: String,
+        let pending = |diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
                        state: CapabilityState|
          -> Result<
             Option<(
@@ -1685,12 +1781,6 @@ impl WorkflowOnboardingService {
             )>,
             WorkflowOnboardingError,
         > {
-            let diagnostic = WorkflowNormalizationDiagnosticView {
-                code: code.to_owned(),
-                message,
-                node_id: None,
-                input_name: None,
-            };
             let capability = CapabilityCheckView {
                 state,
                 checked_at: Some(self.clock.now().to_rfc3339()),
@@ -1703,7 +1793,7 @@ impl WorkflowOnboardingService {
                 draft.workflow_sha256 = draft.raw_sha256.clone();
                 draft.compatibility_context = None;
                 draft.normalization_state = WorkflowNormalizationState::UiSourcePending;
-                draft.normalization_diagnostics = vec![diagnostic];
+                draft.normalization_diagnostics = diagnostics;
                 draft.nodes.clear();
                 draft.analysis = None;
                 draft.capability = capability.clone();
@@ -1720,27 +1810,35 @@ impl WorkflowOnboardingService {
             Ok(object) if object.is_object() => object,
             Ok(_) => {
                 return pending(
-                    "COMFY_PROTOCOL_ERROR",
-                    "ComfyUI object_info response is not an object".to_owned(),
+                    vec![WorkflowNormalizationDiagnosticView::basic(
+                        "COMFY_PROTOCOL_ERROR",
+                        "ComfyUI object_info response is not an object",
+                    )],
                     CapabilityState::IncompatibleInputValues,
                 );
             }
             Err(ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_)) => {
                 return pending(
-                    "WAITING_FOR_COMFY_UI",
-                    "等待 ComfyUI 连接后继续解析此 UI 工作流。".to_owned(),
+                    vec![WorkflowNormalizationDiagnosticView::basic(
+                        "WAITING_FOR_COMFY_UI",
+                        "等待 ComfyUI 连接后继续解析此 UI 工作流。",
+                    )],
                     CapabilityState::ComfyOffline,
                 );
             }
             Err(error) => {
                 return pending(
-                    "COMFY_PROTOCOL_ERROR",
-                    error.to_string(),
+                    vec![WorkflowNormalizationDiagnosticView::basic(
+                        "COMFY_PROTOCOL_ERROR",
+                        error.to_string(),
+                    )],
                     CapabilityState::IncompatibleInputValues,
                 );
             }
         };
 
+        let mut feature_block: Option<WorkflowUiFeatureObservation> = None;
+        let mut normalized_features: Option<Vec<WorkflowUiFeatureObservation>> = None;
         let result = (|| -> Result<_, String> {
             let schema = RecognitionSchemaContext::parse(&object);
             let workflow_format_version = initial
@@ -1762,6 +1860,15 @@ impl WorkflowOnboardingService {
                     .map_err(|error| error.to_string())?;
             let ui_document =
                 parse_ui_workflow(&initial.raw_bytes).map_err(|error| error.to_string())?;
+            let feature_set = ui_document.features.with_schema(&ui_document, &descriptors);
+            normalized_features = Some(feature_set.observations.clone());
+            if let Some(observation) = feature_set.blocking_observation() {
+                feature_block = Some(observation.clone());
+                return Err(format!(
+                    "UNSUPPORTED_UI_FEATURE:{}",
+                    observation.feature.as_str()
+                ));
+            }
             let normalized = normalize_ui_workflow(&ui_document, &descriptors)
                 .map_err(|error| error.to_string())?;
             let mut nodes =
@@ -1793,12 +1900,25 @@ impl WorkflowOnboardingService {
                     draft.compatibility_context = Some(normalized.compatibility.clone());
                     draft.normalization_state = WorkflowNormalizationState::NormalizedApiReady;
                     draft.normalization_diagnostics.clear();
+                    if let Some(features) = normalized_features.take() {
+                        draft.ui_features = features;
+                    }
                     draft.nodes = nodes.clone();
                     Ok(())
                 })??;
                 Ok(Some((capability, nodes, analysis)))
             }
             Err(error) => {
+                if let Some(observation) = feature_block {
+                    return pending(
+                        vec![WorkflowNormalizationDiagnosticView::from_feature(
+                            &observation,
+                            initial.frontend_version.as_deref(),
+                            initial.workflow_format_version.as_deref(),
+                        )],
+                        CapabilityState::IncompatibleInputValues,
+                    );
+                }
                 let code = match error.split(':').next().unwrap_or_default() {
                     "UNKNOWN_NODE_CLASS" => "MISSING_NODES",
                     "WORKFLOW_FORMAT_VERSION_UNKNOWN" => "WORKFLOW_FORMAT_VERSION_UNKNOWN",
@@ -1811,8 +1931,7 @@ impl WorkflowOnboardingService {
                     _ => "NORMALIZATION_BLOCKED",
                 };
                 pending(
-                    code,
-                    error,
+                    vec![WorkflowNormalizationDiagnosticView::basic(code, error)],
                     if code == "MISSING_NODES" {
                         CapabilityState::MissingNodes
                     } else {
@@ -2129,6 +2248,7 @@ impl WorkflowOnboardingService {
             compatibility_context: None,
             normalization_state: WorkflowNormalizationState::NormalizedApiReady,
             normalization_diagnostics: Vec::new(),
+            ui_features: Vec::new(),
             nodes: inspect_workflow(&workflow)?,
             normalized_api: Some(workflow),
             raw_bytes,
@@ -2217,6 +2337,7 @@ impl WorkflowOnboardingService {
             compatibility_context: None,
             normalization_state: WorkflowNormalizationState::NormalizedApiReady,
             normalization_diagnostics: Vec::new(),
+            ui_features: Vec::new(),
             nodes: inspect_workflow(&workflow)?,
             normalized_api: Some(workflow),
             raw_bytes,
@@ -3439,6 +3560,11 @@ fn auto_plan_for_draft(
         frontend_version: draft.frontend_version.clone(),
         normalization_state: draft.normalization_state,
         normalization_diagnostics: draft.normalization_diagnostics.clone(),
+        ui_features: draft
+            .ui_features
+            .iter()
+            .map(workflow_ui_feature_view)
+            .collect(),
         node_count: view.node_count,
         unique_class_count: view.unique_class_count,
         metadata: view.manifest,
@@ -3913,6 +4039,11 @@ fn view_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingDraftVie
         frontend_version: draft.frontend_version.clone(),
         normalization_state: draft.normalization_state,
         normalization_diagnostics: draft.normalization_diagnostics.clone(),
+        ui_features: draft
+            .ui_features
+            .iter()
+            .map(workflow_ui_feature_view)
+            .collect(),
         node_count: draft.nodes.len(),
         unique_class_count: draft
             .nodes
@@ -4826,6 +4957,7 @@ fn runtime_check_draft(
         compatibility_context: None,
         normalization_state: WorkflowNormalizationState::NormalizedApiReady,
         normalization_diagnostics: Vec::new(),
+        ui_features: Vec::new(),
         nodes: inspect_workflow(&workflow)?,
         normalized_api: Some(workflow),
         raw_bytes,
@@ -5979,6 +6111,7 @@ mod tests {
             compatibility_context: None,
             normalization_state: WorkflowNormalizationState::NormalizedApiReady,
             normalization_diagnostics: Vec::new(),
+            ui_features: Vec::new(),
             nodes: inspect_workflow(&workflow).unwrap(),
             normalized_api: Some(workflow),
             raw_bytes,
@@ -7421,6 +7554,7 @@ outputs: []
             compatibility_context: None,
             normalization_state: WorkflowNormalizationState::NormalizedApiReady,
             normalization_diagnostics: Vec::new(),
+            ui_features: Vec::new(),
             nodes: inspect_workflow(&workflow).unwrap(),
             normalized_api: Some(workflow),
             manifest: WorkflowManifest {
@@ -7693,6 +7827,7 @@ outputs: []
                 compatibility_context: None,
                 normalization_state: WorkflowNormalizationState::NormalizedApiReady,
                 normalization_diagnostics: Vec::new(),
+                ui_features: Vec::new(),
                 nodes: Vec::new(),
                 manifest: WorkflowManifest {
                     schema_version: 1,
@@ -7752,6 +7887,7 @@ outputs: []
             compatibility_context: None,
             normalization_state: WorkflowNormalizationState::NormalizedApiReady,
             normalization_diagnostics: Vec::new(),
+            ui_features: Vec::new(),
             nodes,
             manifest: WorkflowManifest {
                 schema_version: 1,

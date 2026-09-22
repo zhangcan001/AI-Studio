@@ -281,3 +281,44 @@ async fn pending_ui_draft_cannot_publish_or_open_advanced_api_state() {
         .expect_err("pending UI source must not publish");
     assert_eq!(error.code(), "NORMALIZATION_REQUIRED");
 }
+
+#[tokio::test]
+async fn unsupported_ui_feature_reaches_onboarding_diagnostics() {
+    let harness = harness().await;
+    let mut source: Value = serde_json::from_slice(KERA2_UI).expect("fixture should parse");
+    source["nodes"][0]["type"] = Value::from("Reroute");
+    source["nodes"][0]["inputs"] = serde_json::json!([{}]);
+    let draft = harness
+        .service
+        .import_bytes(
+            serde_json::to_vec(&source).expect("mutated UI should serialize"),
+            "reroute.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("UI source should create a draft");
+
+    harness.adapter.set_object_info(
+        serde_json::from_str(KERA2_OBJECT_INFO).expect("fixture schema should be valid JSON"),
+    );
+    let blocked = harness
+        .service
+        .reanalyze_draft(&draft.draft_id)
+        .await
+        .expect("unsupported feature should remain a pending draft");
+    let diagnostic = blocked
+        .normalization_diagnostics
+        .first()
+        .expect("feature diagnostic should be exposed");
+    assert_eq!(diagnostic.code, "UNSUPPORTED_UI_FEATURE");
+    assert_eq!(diagnostic.feature.as_deref(), Some("reroute_node"));
+    assert!(diagnostic
+        .reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("Reroute")));
+    assert_eq!(diagnostic.node_id.as_deref(), Some("1"));
+    assert_eq!(
+        blocked.normalization_state,
+        WorkflowNormalizationState::UiSourcePending
+    );
+}

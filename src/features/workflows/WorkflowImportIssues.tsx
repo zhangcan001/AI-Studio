@@ -416,6 +416,18 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
             <span>前端版本<strong>{plan.frontendVersion ?? "待确认"}</strong></span>
           </div>
           <p>后端尚未生成可执行 API 工作流；当前不会创建 Recipe、身份或运行能力结论。</p>
+          {!!plan.normalizationDiagnostics?.some((diagnostic) => diagnostic.feature) && (
+            <ul className="workflow-issue-list" aria-label="暂不支持的 UI 特性">
+              {plan.normalizationDiagnostics
+                .filter((diagnostic) => diagnostic.feature)
+                .map((diagnostic, index) => (
+                  <li key={`${diagnostic.feature}-${diagnostic.nodeId ?? diagnostic.linkId ?? index}`}>
+                    当前工作流包含暂不支持的 UI 特性：{diagnostic.feature}
+                    {diagnostic.nodeId ? `（节点 ${diagnostic.nodeId}）` : ""}
+                  </li>
+                ))}
+            </ul>
+          )}
         </div>
       )}
       {!hasExistingWorkflow && !normalizationPending && (

@@ -27,6 +27,22 @@ export interface WorkflowNormalizationDiagnosticView {
   message: string;
   nodeId?: string;
   inputName?: string;
+  feature?: string;
+  featureStatus?: "SUPPORTED" | "UNSUPPORTED" | "CONDITIONALLY_SUPPORTED" | "UNKNOWN" | string;
+  reason?: string;
+  nodeType?: string;
+  linkId?: number;
+  frontendVersion?: string;
+  workflowFormat?: string;
+}
+
+export interface WorkflowUiFeatureView {
+  feature: string;
+  status: "SUPPORTED" | "UNSUPPORTED" | "CONDITIONALLY_SUPPORTED" | "UNKNOWN" | string;
+  nodeIds: string[];
+  nodeTypes: string[];
+  linkIds: number[];
+  reason: string;
 }
 
 export type WorkflowRecognitionIdentity = "NEW" | "EXACT_RAW" | "EXACT_SEMANTIC" | "STRUCTURAL_VARIANT";
@@ -365,6 +381,7 @@ export interface WorkflowOnboardingDraftView {
   frontendVersion?: string;
   normalizationState?: WorkflowNormalizationState;
   normalizationDiagnostics?: WorkflowNormalizationDiagnosticView[];
+  uiFeatures?: WorkflowUiFeatureView[];
   nodeCount: number;
   uniqueClassCount: number;
   nodes: WorkflowNodeView[];
@@ -448,6 +465,7 @@ export interface WorkflowAutoOnboardingPlanView {
   frontendVersion?: string;
   normalizationState?: WorkflowNormalizationState;
   normalizationDiagnostics?: WorkflowNormalizationDiagnosticView[];
+  uiFeatures?: WorkflowUiFeatureView[];
   nodeCount: number;
   uniqueClassCount: number;
   metadata: WorkflowManifestView;

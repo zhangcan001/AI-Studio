@@ -10,6 +10,7 @@ pub const SERIALIZATION_PROFILE_VERSION: &str = "comfyui-frontend-export-profile
 pub const NORMALIZER_POLICY_VERSION: &str = "phase2b-normalizer-policy-v1";
 pub const SUPPORTED_WORKFLOW_FORMAT_VERSION: &str = "0.4";
 pub const SUPPORTED_FRONTEND_VERSION: &str = "1.52.7";
+pub const PROFILE_SUPPORT_MODEL: &str = "FEATURE_SUBSET";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NormalizationCompatibilityContext {
@@ -89,6 +90,7 @@ pub struct FrontendSerializationProfile {
     pub frontend_version: String,
     pub workflow_format_version: String,
     pub serialization_profile_version: String,
+    pub support_model: String,
     pub source_provenance: String,
     pub frontend_source_revision: Option<String>,
 }
@@ -110,6 +112,7 @@ impl FrontendSerializationProfile {
             frontend_version: context.frontend_version.clone(),
             workflow_format_version: context.workflow_format_version.clone(),
             serialization_profile_version: context.serialization_profile_version.clone(),
+            support_model: PROFILE_SUPPORT_MODEL.to_owned(),
             source_provenance: "source extra.frontendVersion".to_owned(),
             frontend_source_revision: context.source_frontend_revision.clone(),
         })
@@ -124,6 +127,8 @@ pub enum SerializerKind {
     StandardSeed,
     WorkflowOnlyControl,
     UnsupportedCustom,
+    Dynamic,
+    Conditional,
     Unknown,
 }
 
@@ -131,9 +136,44 @@ impl SerializerKind {
     pub fn is_standard(self) -> bool {
         matches!(
             self,
-            Self::StandardDirect | Self::StandardCombo | Self::StandardUpload | Self::StandardSeed
+            Self::StandardDirect
+                | Self::StandardCombo
+                | Self::StandardUpload
+                | Self::StandardSeed
+                | Self::Dynamic
+                | Self::Conditional
         )
     }
+
+    pub fn is_frontend_control(self) -> bool {
+        matches!(self, Self::WorkflowOnlyControl)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WidgetBindingKind {
+    RuntimeInput,
+    FrontendWidget,
+    ConvertedWidget,
+    ControlWidget,
+    DynamicInput,
+    ConditionalInput,
+    UnknownWidget,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiWidgetBinding {
+    pub kind: WidgetBindingKind,
+    pub runtime_name: Option<String>,
+    pub descriptor: Option<UiInputSerializationDescriptor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiInputEvidence {
+    pub name: String,
+    pub widget_name: Option<String>,
+    pub shape: Option<i64>,
+    pub linked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -152,6 +192,7 @@ pub struct UiInputSerializationDescriptor {
     pub multiline: bool,
     pub default_value: Option<Value>,
     pub dynamic: bool,
+    pub dynamic_prefix: Option<String>,
     pub dynamic_names: Vec<String>,
 }
 
@@ -225,21 +266,28 @@ impl UiSerializationDescriptorSet {
         let base = input_name.split('.').next()?;
         let base_input = node.inputs.get(base)?;
         if base_input.dynamic || base_input.declared_type == RecognitionDeclaredType::DynamicCombo {
-            if !base_input.dynamic_names.is_empty()
-                && !base_input
+            let suffix = input_name
+                .strip_prefix(&format!("{base}."))
+                .unwrap_or_default();
+            if !base_input.dynamic_names.is_empty() {
+                if !base_input
                     .dynamic_names
                     .iter()
-                    .any(|name| input_name == format!("{base}.{name}"))
-                && !input_name.starts_with(&format!("{base}."))
-            {
+                    .any(|name| name == suffix || name == input_name)
+                {
+                    return None;
+                }
+            } else if let Some(prefix) = &base_input.dynamic_prefix {
+                if !suffix.starts_with(prefix) {
+                    return None;
+                }
+            } else {
                 return None;
             }
             let mut expanded = base_input.clone();
             expanded.name = input_name.to_owned();
             expanded.dynamic = true;
-            if base_input.declared_type == RecognitionDeclaredType::DynamicCombo {
-                expanded.serializer_kind = SerializerKind::StandardCombo;
-            }
+            expanded.serializer_kind = SerializerKind::Dynamic;
             return Some(expanded);
         }
         None
@@ -251,10 +299,47 @@ impl UiSerializationDescriptorSet {
         named_values: Option<&BTreeMap<String, Value>>,
         input_name: &str,
     ) -> Option<UiInputSerializationDescriptor> {
+        self.input_for_node_with_kind(class_type, named_values, input_name)
+            .map(|(descriptor, _)| descriptor)
+    }
+
+    fn input_for_node_with_kind(
+        &self,
+        class_type: &str,
+        named_values: Option<&BTreeMap<String, Value>>,
+        input_name: &str,
+    ) -> Option<(UiInputSerializationDescriptor, WidgetBindingKind)> {
         if let Some(input) = self.input(class_type, input_name) {
-            return Some(input);
+            let kind = if input.serializer_kind == SerializerKind::Conditional {
+                WidgetBindingKind::ConditionalInput
+            } else if input.dynamic {
+                WidgetBindingKind::DynamicInput
+            } else if input.serializer_kind.is_frontend_control() {
+                WidgetBindingKind::ControlWidget
+            } else {
+                WidgetBindingKind::RuntimeInput
+            };
+            return Some((input, kind));
         }
         let node = self.nodes.get(class_type)?;
+        if let Some((selector_name, nested_name)) = input_name.split_once('.') {
+            let Some(selected_value) = named_values
+                .and_then(|values| values.get(selector_name))
+                .and_then(Value::as_str)
+            else {
+                return None;
+            };
+            if let Some(input) = node
+                .conditional_inputs
+                .get(selector_name)
+                .and_then(|by_value| by_value.get(selected_value))
+                .and_then(|inputs| inputs.get(nested_name))
+            {
+                let mut input = input.clone();
+                input.name = input_name.to_owned();
+                return Some((input, WidgetBindingKind::ConditionalInput));
+            }
+        }
         for (selector_name, by_value) in &node.conditional_inputs {
             let Some(selected_value) = named_values
                 .and_then(|values| values.get(selector_name))
@@ -266,10 +351,289 @@ impl UiSerializationDescriptorSet {
                 .get(selected_value)
                 .and_then(|inputs| inputs.get(input_name))
             {
-                return Some(input.clone());
+                return Some((input.clone(), WidgetBindingKind::ConditionalInput));
             }
         }
         None
+    }
+
+    /// Resolve one serialized UI socket to the runtime input it represents.
+    /// This is the single authority for direct, converted, frontend-only, and
+    /// unknown widget contracts.
+    pub fn resolve_ui_input(
+        &self,
+        class_type: &str,
+        name: &str,
+        widget_name: Option<&str>,
+        shape: Option<i64>,
+        linked: bool,
+        named_values: Option<&BTreeMap<String, Value>>,
+    ) -> Result<UiWidgetBinding, SerializationDescriptorError> {
+        for candidate in [widget_name, Some(name)].into_iter().flatten() {
+            if let Some((descriptor, kind)) =
+                self.input_for_node_with_kind(class_type, named_values, candidate)
+            {
+                return Ok(UiWidgetBinding {
+                    kind,
+                    runtime_name: Some(descriptor.name.clone()),
+                    descriptor: Some(descriptor),
+                });
+            }
+        }
+
+        let mut converted = Vec::new();
+        for candidate in [widget_name, Some(name)].into_iter().flatten() {
+            let Some(base) = candidate.strip_suffix("_input") else {
+                continue;
+            };
+            if base.is_empty() {
+                continue;
+            }
+            if let Some((descriptor, _)) =
+                self.input_for_node_with_kind(class_type, named_values, base)
+            {
+                converted.push((base.to_owned(), descriptor));
+            }
+        }
+        converted.sort_by(|left, right| left.0.cmp(&right.0));
+        converted.dedup_by(|left, right| left.0 == right.0);
+        if converted.len() > 1 {
+            return Err(SerializationDescriptorError::new(
+                "AMBIGUOUS_CONVERTED_WIDGET",
+                format!(
+                    "UI socket {} on {} maps to multiple runtime inputs",
+                    name, class_type
+                ),
+            ));
+        }
+        if shape == Some(7) {
+            if let Some((runtime_name, descriptor)) = converted.pop() {
+                return Ok(UiWidgetBinding {
+                    kind: WidgetBindingKind::ConvertedWidget,
+                    runtime_name: Some(runtime_name),
+                    descriptor: Some(descriptor),
+                });
+            }
+            if !linked
+                && named_values.is_none_or(|values| {
+                    !values.contains_key(name)
+                        && widget_name.is_none_or(|widget| !values.contains_key(widget))
+                })
+            {
+                return Ok(UiWidgetBinding {
+                    kind: WidgetBindingKind::FrontendWidget,
+                    runtime_name: None,
+                    descriptor: None,
+                });
+            }
+        }
+        Err(SerializationDescriptorError::new(
+            "UNKNOWN_WIDGET_CONTRACT",
+            format!(
+                "UI socket {} on {} has no verified runtime or frontend contract",
+                name, class_type
+            ),
+        ))
+    }
+
+    /// Return runtime input names in the frontend cursor order.  Runtime
+    /// schema order remains authoritative; UI socket evidence only proves
+    /// which optional/converted inputs are present. Linked inputs without a
+    /// widget do not consume a literal cursor slot.
+    pub fn positional_input_names(
+        &self,
+        class_type: &str,
+        inputs: &[UiInputEvidence],
+        named_values: Option<&BTreeMap<String, Value>>,
+        linked_names: &std::collections::BTreeSet<String>,
+    ) -> Result<Vec<String>, SerializationDescriptorError> {
+        let node = self.nodes.get(class_type).ok_or_else(|| {
+            SerializationDescriptorError::new(
+                "UNKNOWN_NODE_CLASS",
+                format!("node class {class_type} is absent from object_info"),
+            )
+        })?;
+        let mut names = Vec::new();
+
+        let mut add = |name: &str, descriptor: &UiInputSerializationDescriptor| {
+            if descriptor.hidden || descriptor.serializer_kind.is_frontend_control() {
+                return;
+            }
+            if !names.iter().any(|existing| existing == name) {
+                names.push(name.to_owned());
+            }
+        };
+
+        for name in &node.ordered_inputs {
+            let Some((descriptor, _)) =
+                self.input_for_node_with_kind(class_type, named_values, name)
+            else {
+                continue;
+            };
+            if descriptor.hidden || descriptor.serializer_kind.is_frontend_control() {
+                continue;
+            }
+            let evidence = inputs.iter().find(|input| {
+                self.resolve_ui_input(
+                    class_type,
+                    &input.name,
+                    input.widget_name.as_deref(),
+                    input.shape,
+                    input.linked,
+                    named_values,
+                )
+                .ok()
+                .and_then(|binding| binding.runtime_name)
+                .is_some_and(|runtime_name| runtime_name == *name)
+            });
+            let has_widget = evidence.is_some_and(|input| input.widget_name.is_some());
+            let linked = linked_names.contains(name) || evidence.is_some_and(|input| input.linked);
+            let named = named_values.is_some_and(|values| values.contains_key(name));
+            if linked && !has_widget && descriptor.serializer_kind != SerializerKind::StandardSeed {
+                continue;
+            }
+            if !linked && !has_widget && !named {
+                continue;
+            }
+            add(name, &descriptor);
+        }
+
+        for input in inputs {
+            let binding = self.resolve_ui_input(
+                class_type,
+                &input.name,
+                input.widget_name.as_deref(),
+                input.shape,
+                input.linked,
+                named_values,
+            )?;
+            let Some(runtime_name) = binding.runtime_name else {
+                continue;
+            };
+            let Some(descriptor) = binding.descriptor.as_ref() else {
+                continue;
+            };
+            if binding.kind == WidgetBindingKind::FrontendWidget {
+                continue;
+            }
+            if input.linked
+                && input.widget_name.is_none()
+                && descriptor.serializer_kind != SerializerKind::StandardSeed
+            {
+                continue;
+            }
+            if !input.linked
+                && input.widget_name.is_none()
+                && !named_values.is_some_and(|values| values.contains_key(&runtime_name))
+            {
+                continue;
+            }
+            add(&runtime_name, descriptor);
+        }
+
+        if let Some(named_values) = named_values {
+            for name in named_values.keys() {
+                if let Some((descriptor, _)) =
+                    self.input_for_node_with_kind(class_type, Some(named_values), name)
+                {
+                    add(name, &descriptor);
+                }
+            }
+        }
+
+        Ok(names)
+    }
+
+    /// Consume positional values using the resolved runtime cursor. Known
+    /// frontend control tokens are explicitly removed; every other extra or
+    /// missing value fails closed.
+    pub fn consume_positional_values(
+        &self,
+        class_type: &str,
+        names: &[String],
+        values: &[Value],
+        named_values: Option<&BTreeMap<String, Value>>,
+    ) -> Result<Vec<(String, Value)>, SerializationDescriptorError> {
+        let mut cursor = 0usize;
+        let mut result = Vec::with_capacity(names.len());
+        for (index, name) in names.iter().enumerate() {
+            let descriptor = self
+                .input_for_node(class_type, named_values, name)
+                .ok_or_else(|| {
+                    SerializationDescriptorError::new(
+                        "UNKNOWN_WIDGET_CONTRACT",
+                        format!("input {name} on {class_type} has no serializer descriptor"),
+                    )
+                })?;
+            while cursor < values.len()
+                && self.is_frontend_control_value(class_type, &values[cursor], named_values)
+                && values.len().saturating_sub(cursor) > names.len() - index
+            {
+                cursor += 1;
+            }
+            let Some(value) = values.get(cursor) else {
+                return Err(SerializationDescriptorError::new(
+                    "WIDGET_CURSOR_MISMATCH",
+                    format!(
+                        "node class {class_type} has {} positional values but {} verified runtime inputs",
+                        values.len(), names.len()
+                    ),
+                ));
+            };
+            result.push((name.clone(), value.clone()));
+            cursor += 1;
+            if descriptor.serializer_kind == SerializerKind::StandardSeed
+                && values.get(cursor).is_some_and(|value| {
+                    self.is_frontend_control_value(class_type, value, named_values)
+                })
+            {
+                cursor += 1;
+            }
+        }
+        while cursor < values.len() {
+            if !self.is_frontend_control_value(class_type, &values[cursor], named_values) {
+                return Err(SerializationDescriptorError::new(
+                    "WIDGET_CURSOR_MISMATCH",
+                    format!(
+                        "node class {class_type} contains an unclassified extra positional widget value"
+                    ),
+                ));
+            }
+            cursor += 1;
+        }
+        Ok(result)
+    }
+
+    fn is_frontend_control_value(
+        &self,
+        class_type: &str,
+        value: &Value,
+        named_values: Option<&BTreeMap<String, Value>>,
+    ) -> bool {
+        if named_values.is_some_and(|values| {
+            values.iter().any(|(name, candidate)| {
+                candidate == value
+                    && self
+                        .input_for_node(class_type, Some(values), name)
+                        .is_none_or(|descriptor| {
+                            descriptor.hidden || descriptor.serializer_kind.is_frontend_control()
+                        })
+            })
+        }) {
+            return true;
+        }
+        matches!(
+            value.as_str(),
+            Some(
+                "fixed"
+                    | "randomize"
+                    | "randomize_after_generate"
+                    | "control_after_generate"
+                    | "randomize after generate"
+                    | "increment"
+                    | "decrement"
+            )
+        )
     }
 }
 
@@ -357,7 +721,11 @@ fn descriptor_for_node(node: &RecognitionNodeSchema) -> UiNodeSerializationDescr
                             by_name
                                 .iter()
                                 .map(|(name, schema)| {
-                                    (name.clone(), descriptor_for_input(schema, false))
+                                    let mut descriptor = descriptor_for_input(schema, false);
+                                    if !descriptor.serializer_kind.is_frontend_control() {
+                                        descriptor.serializer_kind = SerializerKind::Conditional;
+                                    }
+                                    (name.clone(), descriptor)
                                 })
                                 .collect(),
                         )
@@ -401,9 +769,21 @@ fn descriptor_for_input(
             RecognitionDeclaredType::Enum | RecognitionDeclaredType::DynamicCombo => {
                 SerializerKind::StandardCombo
             }
+            RecognitionDeclaredType::Unknown if schema.raw_type.eq_ignore_ascii_case("COLOR") => {
+                SerializerKind::StandardDirect
+            }
             RecognitionDeclaredType::Unknown => SerializerKind::Unknown,
             _ => SerializerKind::StandardDirect,
         }
+    };
+    let serializer_kind = if dynamic
+        || schema.dynamic_prefix.is_some()
+        || !schema.dynamic_names.is_empty()
+        || schema.declared_type == RecognitionDeclaredType::DynamicCombo
+    {
+        SerializerKind::Dynamic
+    } else {
+        serializer_kind
     };
     UiInputSerializationDescriptor {
         name: schema.name.clone(),
@@ -423,6 +803,7 @@ fn descriptor_for_input(
             || schema.dynamic_prefix.is_some()
             || !schema.dynamic_names.is_empty()
             || schema.declared_type == RecognitionDeclaredType::DynamicCombo,
+        dynamic_prefix: schema.dynamic_prefix.clone(),
         dynamic_names: schema.dynamic_names.clone(),
     }
 }
@@ -515,6 +896,6 @@ mod tests {
         )
         .unwrap();
         assert!(set.input("Node", "values.a").is_some());
-        assert!(set.input("Node", "values.unknown").is_some());
+        assert!(set.input("Node", "values.unknown").is_none());
     }
 }
