@@ -1,6 +1,6 @@
 use crate::application::workflow_ui_serialization::{
-    NormalizationCompatibilityContext, SerializerKind, UiInputEvidence,
-    UiInputSerializationDescriptor, UiSerializationDescriptorSet,
+    FrontendSerializationContract, NormalizationCompatibilityContext, SerializerKind,
+    UiInputEvidence, UiInputSerializationDescriptor, UiSerializationDescriptorSet,
 };
 use crate::compiler::WorkflowValidator;
 use crate::domain::WorkflowDocument;
@@ -4392,7 +4392,7 @@ pub fn normalize_widgets(
             }
             validate_literal(&input, value).map_err(|message| {
                 NormalizationError::new(
-                    "WIDGET_VALUE_INVALID",
+                    widget_value_error_code(descriptors),
                     format!("node {} input {}: {message}", node.id, name),
                 )
             })?;
@@ -4400,23 +4400,23 @@ pub fn normalize_widgets(
         }
     }
 
-    let positional_names = positional_widget_names(node, descriptors, links)?;
+    // Preserve the current contract's eager socket validation (including
+    // ambiguous converted-widget diagnostics) even when a node has no
+    // positional values. LegacyWidgetSlotV0 owns its own cursor evidence.
+    let current_positional_names = if descriptors.is_legacy_widget_slot() {
+        None
+    } else {
+        Some(positional_widget_names(node, descriptors, links)?)
+    };
     if !node.widgets_values.is_empty() {
-        let named_values_cover_positional = node.properties.contains_key(SUBGRAPH_SCOPE_PROPERTY)
-            && !positional_names.is_empty()
-            && node
-                .widgets_values_named
-                .as_ref()
-                .is_some_and(|named| positional_names.iter().all(|name| named.contains_key(name)));
-        let positional_values = if named_values_cover_positional
-            || (positional_names.is_empty() && node.widgets_values_named.is_some())
-        {
-            Vec::new()
-        } else {
+        let positional_values = if descriptors.is_legacy_widget_slot() {
+            let inputs = positional_widget_evidence(node);
+            let linked_names = linked_names_for_node(node, links);
             descriptors
-                .consume_positional_values(
+                .consume_legacy_positional_values(
                     &node.class_type,
-                    &positional_names,
+                    &inputs,
+                    &linked_names,
                     &node.widgets_values,
                     node.widgets_values_named.as_ref(),
                 )
@@ -4426,6 +4426,35 @@ pub fn normalize_widgets(
                         format!("node {}: {}", node.id, error.message),
                     )
                 })?
+        } else {
+            let positional_names = current_positional_names
+                .as_deref()
+                .expect("current profile has positional widget names");
+            let named_values_cover_positional =
+                node.properties.contains_key(SUBGRAPH_SCOPE_PROPERTY)
+                    && !positional_names.is_empty()
+                    && node.widgets_values_named.as_ref().is_some_and(|named| {
+                        positional_names.iter().all(|name| named.contains_key(name))
+                    });
+            if named_values_cover_positional
+                || (positional_names.is_empty() && node.widgets_values_named.is_some())
+            {
+                Vec::new()
+            } else {
+                descriptors
+                    .consume_positional_values(
+                        &node.class_type,
+                        &positional_names,
+                        &node.widgets_values,
+                        node.widgets_values_named.as_ref(),
+                    )
+                    .map_err(|error| {
+                        NormalizationError::new(
+                            error.code,
+                            format!("node {}: {}", node.id, error.message),
+                        )
+                    })?
+            }
         };
         for (name, value) in positional_values {
             let Some(input) = descriptors.input_for_node(
@@ -4465,7 +4494,7 @@ pub fn normalize_widgets(
                 }
                 validate_literal(&input, &value).map_err(|message| {
                     NormalizationError::new(
-                        "WIDGET_VALUE_INVALID",
+                        widget_value_error_code(descriptors),
                         format!("node {} input {}: {message}", node.id, name),
                     )
                 })?;
@@ -4515,21 +4544,8 @@ fn positional_widget_names(
     descriptors: &UiSerializationDescriptorSet,
     links: &NormalizedLinkMap,
 ) -> Result<Vec<String>, NormalizationError> {
-    let inputs = node
-        .inputs
-        .iter()
-        .map(|socket| UiInputEvidence {
-            name: socket.name.clone(),
-            widget_name: socket.widget_name.clone(),
-            shape: socket.shape,
-            linked: socket.link_id.is_some(),
-        })
-        .collect::<Vec<_>>();
-    let linked_names = links
-        .keys()
-        .filter(|(node_id, _)| node_id == &node.id)
-        .map(|(_, input_name)| input_name.clone())
-        .collect::<BTreeSet<_>>();
+    let inputs = positional_widget_evidence(node);
+    let linked_names = linked_names_for_node(node, links);
     descriptors
         .positional_input_names(
             &node.class_type,
@@ -4540,6 +4556,34 @@ fn positional_widget_names(
         .map_err(|error| {
             NormalizationError::new(error.code, format!("node {}: {}", node.id, error.message))
         })
+}
+
+fn positional_widget_evidence(node: &UiNode) -> Vec<UiInputEvidence> {
+    node.inputs
+        .iter()
+        .map(|socket| UiInputEvidence {
+            name: socket.name.clone(),
+            widget_name: socket.widget_name.clone(),
+            shape: socket.shape,
+            linked: socket.link_id.is_some(),
+        })
+        .collect()
+}
+
+fn linked_names_for_node(node: &UiNode, links: &NormalizedLinkMap) -> BTreeSet<String> {
+    links
+        .keys()
+        .filter(|(node_id, _)| node_id == &node.id)
+        .map(|(_, input_name)| input_name.clone())
+        .collect()
+}
+
+fn widget_value_error_code(descriptors: &UiSerializationDescriptorSet) -> &'static str {
+    if descriptors.profile.contract == FrontendSerializationContract::LegacyWidgetSlotV0 {
+        "legacy_widget_type_mismatch"
+    } else {
+        "WIDGET_VALUE_INVALID"
+    }
 }
 
 fn validate_literal(
@@ -4650,9 +4694,17 @@ pub fn normalize_ui_workflow(
             ),
         ));
     }
-    if document.frontend_version.as_deref()
-        != Some(descriptors.compatibility.frontend_version.as_str())
-    {
+    let source_frontend_version = document.frontend_version.as_deref().unwrap_or("unknown");
+    let frontend_version_matches = match descriptors.profile.contract {
+        FrontendSerializationContract::Current => {
+            document.frontend_version.as_deref()
+                == Some(descriptors.compatibility.frontend_version.as_str())
+        }
+        FrontendSerializationContract::LegacyWidgetSlotV0 => {
+            source_frontend_version == descriptors.compatibility.frontend_version
+        }
+    };
+    if !frontend_version_matches {
         return Err(NormalizationError::new(
             "FRONTEND_VERSION_UNSUPPORTED",
             "source frontendVersion is missing or not in the verified compatibility set",

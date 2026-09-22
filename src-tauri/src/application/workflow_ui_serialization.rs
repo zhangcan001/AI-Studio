@@ -4,7 +4,10 @@ use crate::application::workflow_recognition_schema::{
 };
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 pub const SERIALIZATION_PROFILE_VERSION: &str = "comfyui-frontend-export-profile-v1";
 pub const NORMALIZER_POLICY_VERSION: &str = "phase2b-normalizer-policy-v1";
@@ -44,6 +47,28 @@ impl NormalizationCompatibilityContext {
             normalizer_policy_version: NORMALIZER_POLICY_VERSION.to_owned(),
             source_frontend_revision: None,
         })
+    }
+
+    /// Build the provenance context selected by the historical fingerprint
+    /// resolver.  The current contract intentionally continues to require an
+    /// exact frontendVersion; only an already-selected historical contract may
+    /// represent missing provenance as `unknown`.
+    pub fn from_historical_source(
+        workflow_format_version: impl Into<String>,
+        frontend_version: Option<&str>,
+        schema_fingerprint: impl Into<String>,
+    ) -> Self {
+        Self {
+            workflow_format_version: workflow_format_version.into(),
+            frontend_version: frontend_version
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("unknown")
+                .to_owned(),
+            schema_fingerprint: schema_fingerprint.into(),
+            serialization_profile_version: SERIALIZATION_PROFILE_VERSION.to_owned(),
+            normalizer_policy_version: NORMALIZER_POLICY_VERSION.to_owned(),
+            source_frontend_revision: None,
+        }
     }
 }
 
@@ -85,6 +110,12 @@ impl SupportedNormalizationCompatibilitySet {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrontendSerializationContract {
+    Current,
+    LegacyWidgetSlotV0,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrontendSerializationProfile {
     pub frontend_version: String,
@@ -93,6 +124,7 @@ pub struct FrontendSerializationProfile {
     pub support_model: String,
     pub source_provenance: String,
     pub frontend_source_revision: Option<String>,
+    pub contract: FrontendSerializationContract,
 }
 
 impl FrontendSerializationProfile {
@@ -115,6 +147,29 @@ impl FrontendSerializationProfile {
             support_model: PROFILE_SUPPORT_MODEL.to_owned(),
             source_provenance: "source extra.frontendVersion".to_owned(),
             frontend_source_revision: context.source_frontend_revision.clone(),
+            contract: FrontendSerializationContract::Current,
+        })
+    }
+
+    pub fn legacy_widget_slot_v0_from_context(
+        context: &NormalizationCompatibilityContext,
+    ) -> Result<Self, SerializationDescriptorError> {
+        if context.workflow_format_version != SUPPORTED_WORKFLOW_FORMAT_VERSION
+            || context.serialization_profile_version != SERIALIZATION_PROFILE_VERSION
+        {
+            return Err(SerializationDescriptorError::new(
+                "UNSUPPORTED_LEGACY_WIDGET_SLOT_PROFILE",
+                "no verified LegacyWidgetSlotV0 profile exists for this source",
+            ));
+        }
+        Ok(Self {
+            frontend_version: context.frontend_version.clone(),
+            workflow_format_version: context.workflow_format_version.clone(),
+            serialization_profile_version: context.serialization_profile_version.clone(),
+            support_model: PROFILE_SUPPORT_MODEL.to_owned(),
+            source_provenance: "historical fingerprint LegacyWidgetSlotV0".to_owned(),
+            frontend_source_revision: context.source_frontend_revision.clone(),
+            contract: FrontendSerializationContract::LegacyWidgetSlotV0,
         })
     }
 }
@@ -174,6 +229,26 @@ pub struct UiInputEvidence {
     pub widget_name: Option<String>,
     pub shape: Option<i64>,
     pub linked: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LegacyWidgetSlotKind {
+    RuntimeInput,
+    ResidualLinkedWidget,
+    FrontendControl,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LegacyWidgetSlot {
+    pub index: usize,
+    pub target: Option<String>,
+    pub kind: LegacyWidgetSlotKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LegacyWidgetSlotContract {
+    pub class_type: String,
+    pub slots: Vec<LegacyWidgetSlot>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -252,6 +327,10 @@ impl UiSerializationDescriptorSet {
 
     pub fn node(&self, class_type: &str) -> Option<&UiNodeSerializationDescriptor> {
         self.nodes.get(class_type)
+    }
+
+    pub fn is_legacy_widget_slot(&self) -> bool {
+        self.profile.contract == FrontendSerializationContract::LegacyWidgetSlotV0
     }
 
     pub fn input(
@@ -604,6 +683,237 @@ impl UiSerializationDescriptorSet {
         Ok(result)
     }
 
+    /// Reconstruct the positional widget cursor used by the historical
+    /// LegacyWidgetSlotV0 contract.  This layer only decides which serialized
+    /// slot corresponds to which logical input; the normalizer remains the
+    /// authority for literal/type validation and runtime materialization.
+    pub fn consume_legacy_positional_values(
+        &self,
+        class_type: &str,
+        inputs: &[UiInputEvidence],
+        linked_names: &std::collections::BTreeSet<String>,
+        values: &[Value],
+        named_values: Option<&BTreeMap<String, Value>>,
+    ) -> Result<Vec<(String, Value)>, SerializationDescriptorError> {
+        if !self.is_legacy_widget_slot() {
+            return Err(SerializationDescriptorError::new(
+                "LEGACY_WIDGET_PROFILE_REQUIRED",
+                "LegacyWidgetSlotV0 cursor cannot run for the current contract",
+            ));
+        }
+        let contract =
+            self.legacy_widget_slot_contract(class_type, inputs, linked_names, named_values)?;
+        let mut cursor = 0usize;
+        let mut result = Vec::new();
+
+        for slot in &contract.slots {
+            match slot.kind {
+                LegacyWidgetSlotKind::ResidualLinkedWidget => {
+                    // A historical UI may retain the widget value even after
+                    // the corresponding runtime input became linked.  It is a
+                    // real cursor slot, but it must never become a literal.
+                    if cursor < values.len() {
+                        cursor += 1;
+                    }
+                }
+                LegacyWidgetSlotKind::FrontendControl => {
+                    if cursor < values.len() {
+                        cursor += 1;
+                    }
+                }
+                LegacyWidgetSlotKind::RuntimeInput => {
+                    let name = slot.target.as_deref().expect("runtime slot has a target");
+                    let descriptor = self
+                        .input_for_node(class_type, named_values, name)
+                        .ok_or_else(|| {
+                            SerializationDescriptorError::new(
+                                "legacy_widget_slot_ambiguous",
+                                format!(
+                                    "legacy widget slot {name} has no unique serializer target"
+                                ),
+                            )
+                        })?;
+                    while cursor < values.len()
+                        && self.is_frontend_control_value(class_type, &values[cursor], named_values)
+                    {
+                        cursor += 1;
+                    }
+                    let Some(value) = values.get(cursor) else {
+                        if descriptor.required {
+                            return Err(SerializationDescriptorError::new(
+                                "legacy_widget_slot_missing",
+                                format!("legacy widget slot for input {name} is missing"),
+                            ));
+                        }
+                        continue;
+                    };
+                    result.push((name.to_owned(), value.clone()));
+                    cursor += 1;
+                    if descriptor.serializer_kind == SerializerKind::StandardUpload
+                        && values.get(cursor).is_some_and(is_upload_presentation_value)
+                    {
+                        // Legacy upload widgets serialized their media-mode
+                        // label beside the path.  It is presentation-only,
+                        // not a second runtime input.
+                        cursor += 1;
+                    }
+                }
+            }
+        }
+
+        while cursor < values.len() {
+            if self.is_frontend_control_value(class_type, &values[cursor], named_values) {
+                cursor += 1;
+            } else {
+                return Err(SerializationDescriptorError::new(
+                    "legacy_widget_slot_extra",
+                    "legacy widgets_values contains an unclassified extra positional slot",
+                ));
+            }
+        }
+        Ok(result)
+    }
+
+    /// Build the one historical slot correspondence model.  Schema order is
+    /// the deterministic fallback only after explicit UI widget evidence and
+    /// linked-input evidence have been accounted for.
+    pub fn legacy_widget_slot_contract(
+        &self,
+        class_type: &str,
+        inputs: &[UiInputEvidence],
+        linked_names: &std::collections::BTreeSet<String>,
+        named_values: Option<&BTreeMap<String, Value>>,
+    ) -> Result<LegacyWidgetSlotContract, SerializationDescriptorError> {
+        let node = self.nodes.get(class_type).ok_or_else(|| {
+            SerializationDescriptorError::new(
+                "UNKNOWN_NODE_CLASS",
+                format!("node class {class_type} is absent from object_info"),
+            )
+        })?;
+        let mut evidence_by_target: BTreeMap<String, (bool, bool, Option<i64>)> = BTreeMap::new();
+        let mut explicit_order = Vec::new();
+        let mut explicit_targets = BTreeSet::new();
+        for input in inputs {
+            let binding = self
+                .resolve_ui_input(
+                    class_type,
+                    &input.name,
+                    input.widget_name.as_deref(),
+                    input.shape,
+                    input.linked,
+                    named_values,
+                )
+                .map_err(|error| {
+                    if input.widget_name.is_some() {
+                        SerializationDescriptorError::new(
+                            "legacy_widget_slot_ambiguous",
+                            error.message,
+                        )
+                    } else {
+                        error
+                    }
+                })?;
+            let Some(target) = binding.runtime_name else {
+                continue;
+            };
+            if input.widget_name.is_some() {
+                if evidence_by_target
+                    .get(&target)
+                    .is_some_and(|(_, explicit, _)| *explicit)
+                {
+                    return Err(SerializationDescriptorError::new(
+                        "legacy_widget_slot_ambiguous",
+                        format!("multiple historical widget slots target input {target}"),
+                    ));
+                }
+            }
+            let linked = input.linked
+                || linked_names.contains(&input.name)
+                || linked_names.contains(&target);
+            if input.widget_name.is_some() && explicit_targets.insert(target.clone()) {
+                explicit_order.push(target.clone());
+            }
+            evidence_by_target
+                .entry(target)
+                .and_modify(|entry| {
+                    entry.0 |= linked;
+                    entry.1 |= input.widget_name.is_some();
+                    if entry.2.is_none() {
+                        entry.2 = input.shape;
+                    }
+                })
+                .or_insert((linked, input.widget_name.is_some(), input.shape));
+        }
+
+        let mut ordered_names = explicit_order;
+        let mut ordered_name_set = ordered_names.iter().cloned().collect::<BTreeSet<_>>();
+        for name in &node.ordered_inputs {
+            if ordered_name_set.insert(name.clone()) {
+                ordered_names.push(name.clone());
+            }
+        }
+
+        let mut slots = Vec::new();
+        for name in ordered_names {
+            let Some(descriptor) = self.input_for_node(class_type, named_values, &name) else {
+                continue;
+            };
+            let evidence = evidence_by_target.get(&name);
+            let linked = linked_names.contains(&name) || evidence.is_some_and(|entry| entry.0);
+            let explicit_widget = evidence.is_some_and(|entry| entry.1);
+            if explicit_widget {
+                let kind = if linked {
+                    LegacyWidgetSlotKind::ResidualLinkedWidget
+                } else if descriptor.serializer_kind.is_frontend_control() {
+                    LegacyWidgetSlotKind::FrontendControl
+                } else {
+                    LegacyWidgetSlotKind::RuntimeInput
+                };
+                slots.push(LegacyWidgetSlot {
+                    index: slots.len(),
+                    target: (!descriptor.serializer_kind.is_frontend_control())
+                        .then(|| name.clone()),
+                    kind,
+                });
+                continue;
+            }
+            if descriptor.hidden {
+                continue;
+            }
+            if linked {
+                continue;
+            }
+            if evidence.is_some_and(|entry| entry.2 == Some(7)) {
+                // Unnamed shape-7 inputs are frontend presentation/conversion
+                // sockets, not proof of a serialized runtime widget.
+                continue;
+            }
+            if evidence.is_some() {
+                // An unlinked socket without widget metadata is not enough
+                // historical evidence to claim a positional runtime slot.
+                continue;
+            }
+            if descriptor.serializer_kind.is_frontend_control() {
+                continue;
+            }
+            if legacy_widget_capable(
+                descriptor.serializer_kind,
+                descriptor.declared_type,
+                descriptor.upload_media_kind.is_some(),
+            ) {
+                slots.push(LegacyWidgetSlot {
+                    index: slots.len(),
+                    target: Some(name.clone()),
+                    kind: LegacyWidgetSlotKind::RuntimeInput,
+                });
+            }
+        }
+        Ok(LegacyWidgetSlotContract {
+            class_type: class_type.to_owned(),
+            slots,
+        })
+    }
+
     fn is_frontend_control_value(
         &self,
         class_type: &str,
@@ -635,6 +945,35 @@ impl UiSerializationDescriptorSet {
             )
         )
     }
+}
+
+fn legacy_widget_capable(
+    serializer_kind: SerializerKind,
+    declared_type: RecognitionDeclaredType,
+    upload: bool,
+) -> bool {
+    upload
+        || matches!(
+            serializer_kind,
+            SerializerKind::StandardDirect
+                | SerializerKind::StandardCombo
+                | SerializerKind::StandardSeed
+                | SerializerKind::Dynamic
+                | SerializerKind::Conditional
+        ) && matches!(
+            declared_type,
+            RecognitionDeclaredType::String
+                | RecognitionDeclaredType::Integer
+                | RecognitionDeclaredType::Float
+                | RecognitionDeclaredType::Boolean
+                | RecognitionDeclaredType::Enum
+                | RecognitionDeclaredType::DynamicCombo
+                | RecognitionDeclaredType::Unknown
+        )
+}
+
+fn is_upload_presentation_value(value: &Value) -> bool {
+    matches!(value.as_str(), Some("image" | "video" | "audio"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

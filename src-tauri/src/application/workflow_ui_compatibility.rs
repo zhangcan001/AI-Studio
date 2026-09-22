@@ -711,6 +711,15 @@ fn detected_profile(
     family: UiCompatibilityProfileFamily,
     confidence: UiCompatibilityProvenanceConfidence,
 ) -> ResolvedUiCompatibilityProfile {
+    if family == UiCompatibilityProfileFamily::LegacyWidgetSlotV0 {
+        return detected_profile_with_status(
+            fingerprint,
+            family,
+            confidence,
+            UiCompatibilityImplementationStatus::Implemented,
+            "legacy_widget_slot_v0_implemented",
+        );
+    }
     detected_profile_with_status(
         fingerprint,
         family,
@@ -905,7 +914,7 @@ mod tests {
         );
         assert_eq!(
             profile.implementation_status,
-            UiCompatibilityImplementationStatus::DetectedButUnsupported
+            UiCompatibilityImplementationStatus::Implemented
         );
     }
 

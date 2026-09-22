@@ -25,8 +25,8 @@ use crate::application::{
     },
     workflow_semantic_identity::semantic_workflow_sha256,
     workflow_ui_compatibility::{
-        HistoricalUiSerializationFingerprint, UiCompatibilityProfileResolver,
-        UiCompatibilityResolutionInput,
+        HistoricalUiSerializationFingerprint, UiCompatibilityProfileFamily,
+        UiCompatibilityProfileResolver, UiCompatibilityResolutionInput,
     },
     workflow_ui_normalizer::{
         normalize_ui_workflow, parse_ui_workflow, WorkflowUiFeatureObservation,
@@ -1899,13 +1899,27 @@ impl WorkflowOnboardingService {
                     diagnostic
                 ));
             }
-            let compatibility = NormalizationCompatibilityContext::from_source(
-                workflow_format_version,
-                resolved_profile.evidence.frontend_version.as_deref(),
-                schema_fingerprint,
-            )
-            .map_err(|error| error.to_string())?;
-            let profile = FrontendSerializationProfile::from_context(&compatibility)
+            let compatibility =
+                if resolved_profile.family == UiCompatibilityProfileFamily::LegacyWidgetSlotV0 {
+                    NormalizationCompatibilityContext::from_historical_source(
+                        workflow_format_version,
+                        resolved_profile.evidence.frontend_version.as_deref(),
+                        schema_fingerprint,
+                    )
+                } else {
+                    NormalizationCompatibilityContext::from_source(
+                        workflow_format_version,
+                        resolved_profile.evidence.frontend_version.as_deref(),
+                        schema_fingerprint,
+                    )
+                    .map_err(|error| error.to_string())?
+                };
+            let profile =
+                if resolved_profile.family == UiCompatibilityProfileFamily::LegacyWidgetSlotV0 {
+                    FrontendSerializationProfile::legacy_widget_slot_v0_from_context(&compatibility)
+                } else {
+                    FrontendSerializationProfile::from_context(&compatibility)
+                }
                 .map_err(|error| error.to_string())?;
             let descriptors =
                 UiSerializationDescriptorSet::build(&schema, profile, compatibility.clone())
