@@ -24,6 +24,10 @@ use crate::application::{
         resolve_semantic_graph, ActiveDependencyGraph, CapabilityProfile, RootDependencyClosure,
     },
     workflow_semantic_identity::semantic_workflow_sha256,
+    workflow_ui_compatibility::{
+        HistoricalUiSerializationFingerprint, UiCompatibilityProfileResolver,
+        UiCompatibilityResolutionInput,
+    },
     workflow_ui_normalizer::{
         normalize_ui_workflow, parse_ui_workflow, WorkflowUiFeatureObservation,
     },
@@ -1841,16 +1845,64 @@ impl WorkflowOnboardingService {
         let mut normalized_features: Option<Vec<WorkflowUiFeatureObservation>> = None;
         let result = (|| -> Result<_, String> {
             let schema = RecognitionSchemaContext::parse(&object);
+            let source_value: Value = serde_json::from_slice(&initial.raw_bytes)
+                .map_err(|error| format!("UI_JSON_INVALID: {error}"))?;
+            let schema_fingerprint = canonical_schema_fingerprint(&object);
+            let fingerprint = HistoricalUiSerializationFingerprint::from_source_value(
+                &source_value,
+                schema_fingerprint.clone(),
+                &schema,
+            )
+            .map_err(|error| error.to_string())?;
             let workflow_format_version = initial
                 .workflow_format_version
                 .as_deref()
                 .ok_or_else(|| {
                     "WORKFLOW_FORMAT_VERSION_UNKNOWN: source UI workflow has no workflow format version provenance".to_owned()
                 })?;
+            let resolved_profile =
+                UiCompatibilityProfileResolver::resolve(UiCompatibilityResolutionInput {
+                    workflow_format_version,
+                    frontend_version: initial.frontend_version.as_deref(),
+                    fingerprint: &fingerprint,
+                });
+            if !resolved_profile.is_implemented() {
+                let diagnostic = resolved_profile
+                    .primary_diagnostic()
+                    .unwrap_or("historical_serialization_fingerprint_unknown");
+                let code = match diagnostic {
+                    "frontend_provenance_insufficient" => "FRONTEND_VERSION_UNKNOWN",
+                    "historical_profile_detected_but_not_implemented" => {
+                        "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
+                    }
+                    "object_info_schema_provenance_mismatch" => {
+                        // Preserve the existing pending-draft diagnostic for a source that has
+                        // neither frontend provenance nor a usable node-class lineage.  This
+                        // does not make the profile supported; it only keeps the actionable
+                        // pre-existing error for malformed/incomplete UI imports.
+                        if initial.frontend_version.is_none()
+                            && fingerprint.positional_widget_cursor_gap
+                            && !fingerprint.dynamic_input_evidence
+                            && !fingerprint.schema_lineage.missing_node_classes.is_empty()
+                        {
+                            "FRONTEND_VERSION_UNKNOWN"
+                        } else {
+                            "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
+                        }
+                    }
+                    "provenance_fingerprint_conflict" => "PROVENANCE_FINGERPRINT_CONFLICT",
+                    _ => "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN",
+                };
+                return Err(format!(
+                    "{code}: {} ({})",
+                    resolved_profile.family.as_str(),
+                    diagnostic
+                ));
+            }
             let compatibility = NormalizationCompatibilityContext::from_source(
                 workflow_format_version,
-                initial.frontend_version.as_deref(),
-                canonical_schema_fingerprint(&object),
+                resolved_profile.evidence.frontend_version.as_deref(),
+                schema_fingerprint,
             )
             .map_err(|error| error.to_string())?;
             let profile = FrontendSerializationProfile::from_context(&compatibility)
@@ -1924,6 +1976,16 @@ impl WorkflowOnboardingService {
                     "WORKFLOW_FORMAT_VERSION_UNKNOWN" => "WORKFLOW_FORMAT_VERSION_UNKNOWN",
                     "FRONTEND_VERSION_UNKNOWN" => "FRONTEND_VERSION_UNKNOWN",
                     "FRONTEND_VERSION_UNSUPPORTED" => "FRONTEND_VERSION_UNSUPPORTED",
+                    "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED" => {
+                        "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
+                    }
+                    "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH" => {
+                        "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
+                    }
+                    "PROVENANCE_FINGERPRINT_CONFLICT" => "PROVENANCE_FINGERPRINT_CONFLICT",
+                    "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN" => {
+                        "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN"
+                    }
                     "UNSUPPORTED_NORMALIZATION_COMPATIBILITY" => {
                         "UNSUPPORTED_NORMALIZATION_COMPATIBILITY"
                     }
