@@ -249,6 +249,7 @@ impl ResolvedUiCompatibilityProfile {
                             contract,
                             FrontendSerializationContract::LegacyWidgetSlotV0
                                 | FrontendSerializationContract::LegacyDynamicInputV0
+                                | FrontendSerializationContract::LegacySubgraphBoundaryProxyV0
                         )
                     })
             }
@@ -287,6 +288,9 @@ impl ResolvedUiCompatibilityProfile {
     }
 
     pub fn contracts_for_normalization(&self) -> Option<BTreeSet<FrontendSerializationContract>> {
+        if !self.is_implemented() {
+            return None;
+        }
         match self.serialization_evidence_status {
             SerializationEvidenceStatus::ResolvedCurrent if self.required_contracts.is_empty() => {
                 Some(BTreeSet::from([FrontendSerializationContract::Current]))
@@ -478,6 +482,7 @@ impl UiCompatibilityProfileResolver {
                 contract,
                 FrontendSerializationContract::LegacyWidgetSlotV0
                     | FrontendSerializationContract::LegacyDynamicInputV0
+                    | FrontendSerializationContract::LegacySubgraphBoundaryProxyV0
             )
         });
         resolved(
@@ -1859,9 +1864,19 @@ mod tests {
         );
         assert_eq!(
             profile.implementation_status,
-            UiCompatibilityImplementationStatus::DetectedButUnsupported
+            UiCompatibilityImplementationStatus::Implemented
         );
-        assert!(!profile.execution_supported());
+        assert!(profile.execution_supported());
+        assert_eq!(
+            profile.contracts_for_normalization(),
+            Some(profile.required_contracts.clone())
+        );
+
+        let mut partially_implemented = profile;
+        partially_implemented.implementation_status =
+            UiCompatibilityImplementationStatus::DetectedButUnsupported;
+        assert!(!partially_implemented.execution_supported());
+        assert_eq!(partially_implemented.contracts_for_normalization(), None);
     }
 
     #[test]

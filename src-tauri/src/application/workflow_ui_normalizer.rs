@@ -1,6 +1,6 @@
 use crate::application::workflow_ui_serialization::{
     FrontendSerializationContract, NormalizationCompatibilityContext, SerializerKind,
-    UiInputEvidence, UiInputSerializationDescriptor, UiSerializationDescriptorSet,
+    UiInputEvidence, UiInputSerializationDescriptor, UiSerializationDescriptorSet, UiWidgetBinding,
     WidgetBindingKind,
 };
 use crate::compiler::WorkflowValidator;
@@ -3142,6 +3142,1081 @@ fn flatten_subgraph_root(
     Ok((flattened, metadata))
 }
 
+/// Convert only historical subgraph serialization metadata to the current
+/// serialized contract. Definition indexing, instance resolution, boundary
+/// validation and recursive flattening remain owned by the existing engine.
+fn canonicalize_legacy_subgraph_contract(
+    source: &Value,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<Value, UiParseError> {
+    let mut canonical = source.clone();
+    let mut definitions = BTreeMap::new();
+    collect_subgraph_definitions(source, &mut definitions);
+    if let Some(subgraphs) = canonical
+        .as_object_mut()
+        .and_then(|root| root.get_mut("definitions"))
+        .and_then(Value::as_object_mut)
+        .and_then(|definitions| definitions.get_mut("subgraphs"))
+        .and_then(Value::as_array_mut)
+    {
+        canonicalize_subgraph_definition_tree(subgraphs, descriptors, &definitions)?;
+    }
+    let mut definitions = BTreeMap::new();
+    collect_subgraph_definitions(&canonical, &mut definitions);
+    if let Some(nodes) = canonical
+        .as_object_mut()
+        .and_then(|root| root.get_mut("nodes"))
+    {
+        canonicalize_proxy_widgets(nodes, &definitions, descriptors)?;
+    }
+    if let Some(subgraphs) = canonical
+        .as_object_mut()
+        .and_then(|root| root.get_mut("definitions"))
+        .and_then(Value::as_object_mut)
+        .and_then(|definitions| definitions.get_mut("subgraphs"))
+        .and_then(Value::as_array_mut)
+    {
+        canonicalize_nested_proxy_widgets(subgraphs, &definitions, descriptors)?;
+    }
+    Ok(canonical)
+}
+
+fn collect_subgraph_definitions(value: &Value, output: &mut BTreeMap<String, Value>) {
+    let Some(subgraphs) = value
+        .as_object()
+        .and_then(|root| root.get("definitions"))
+        .and_then(Value::as_object)
+        .and_then(|definitions| definitions.get("subgraphs"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for definition in subgraphs {
+        if let Some(id) = definition
+            .as_object()
+            .and_then(|definition| definition.get("id"))
+            .and_then(Value::as_str)
+        {
+            output.insert(id.to_owned(), definition.clone());
+        }
+        collect_subgraph_definitions(definition, output);
+    }
+}
+
+fn canonicalize_subgraph_definition_tree(
+    definitions: &mut [Value],
+    descriptors: &UiSerializationDescriptorSet,
+    known_definitions: &BTreeMap<String, Value>,
+) -> Result<(), UiParseError> {
+    for definition in definitions {
+        canonicalize_one_subgraph_definition(definition, descriptors, known_definitions)?;
+        if let Some(nested) = definition
+            .as_object_mut()
+            .and_then(|definition| definition.get_mut("definitions"))
+            .and_then(Value::as_object_mut)
+            .and_then(|definitions| definitions.get_mut("subgraphs"))
+            .and_then(Value::as_array_mut)
+        {
+            canonicalize_subgraph_definition_tree(nested, descriptors, known_definitions)?;
+        }
+    }
+    Ok(())
+}
+
+fn canonicalize_one_subgraph_definition(
+    definition: &mut Value,
+    descriptors: &UiSerializationDescriptorSet,
+    known_definitions: &BTreeMap<String, Value>,
+) -> Result<(), UiParseError> {
+    let Some(object) = definition.as_object() else {
+        return Ok(());
+    };
+    let Some(id) = object.get("id").and_then(Value::as_str).map(str::to_owned) else {
+        return Ok(());
+    };
+    let nodes = parse_raw_nodes(object.get("nodes"), &format!("definition {id}"))?;
+    let links = parse_raw_links(object.get("links"), &format!("definition {id}"))?;
+    let inputs = parse_subgraph_io(object.get("inputs"), "inputs", &format!("definition {id}"))?;
+    let outputs = parse_subgraph_io(
+        object.get("outputs"),
+        "outputs",
+        &format!("definition {id}"),
+    )?;
+    let node_ids = nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+
+    let input_node_id = match serialized_boundary_node_id(object.get("inputNode"), &id, "input")? {
+        Some(value) => value,
+        None => infer_legacy_boundary_node_id(
+            &nodes,
+            &links,
+            &inputs,
+            known_definitions,
+            descriptors,
+            "input",
+            &id,
+        )?,
+    };
+    let output_node_id = match serialized_boundary_node_id(object.get("outputNode"), &id, "output")?
+    {
+        Some(value) => value,
+        None => infer_legacy_boundary_node_id(
+            &nodes,
+            &links,
+            &outputs,
+            known_definitions,
+            descriptors,
+            "output",
+            &id,
+        )?,
+    };
+    if node_ids.contains(input_node_id.as_str()) || node_ids.contains(output_node_id.as_str()) {
+        return Err(UiParseError::new(
+            "LEGACY_SUBGRAPH_SENTINEL_ID_CONFLICT",
+            format!("definition {id} boundary metadata aliases a runtime node ID"),
+        ));
+    }
+
+    let object = definition
+        .as_object_mut()
+        .expect("definition object was checked");
+    canonicalize_boundary_metadata(object, "inputNode", &input_node_id);
+    canonicalize_boundary_metadata(object, "outputNode", &output_node_id);
+    canonicalize_interface_link_ids(object, "inputs", &input_node_id, &links, "input", &id)?;
+    canonicalize_interface_link_ids(object, "outputs", &output_node_id, &links, "output", &id)?;
+    Ok(())
+}
+
+fn serialized_boundary_node_id(
+    value: Option<&Value>,
+    definition_id: &str,
+    direction: &str,
+) -> Result<Option<String>, UiParseError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let serialized_id = match value {
+        Value::Object(object) => object.get("id").ok_or_else(|| {
+            UiParseError::new(
+                "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_INSUFFICIENT",
+                format!("definition {definition_id} {direction}Node metadata has no explicit id"),
+            )
+        })?,
+        _ => value,
+    };
+    parse_node_id(Some(serialized_id), 0)
+        .map(Some)
+        .map_err(|_| {
+            UiParseError::new(
+                "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_INSUFFICIENT",
+                format!("definition {definition_id} {direction}Node id is not a valid identity"),
+            )
+        })
+}
+
+fn canonicalize_boundary_metadata(definition: &mut Map<String, Value>, field: &str, id: &str) {
+    let mut metadata = definition
+        .get(field)
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    metadata
+        .entry("id".to_owned())
+        .or_insert_with(|| Value::String(id.to_owned()));
+    definition.insert(field.to_owned(), Value::Object(metadata));
+}
+
+fn infer_legacy_boundary_node_id(
+    nodes: &[RawUiNode],
+    links: &[RawUiLink],
+    interfaces: &[SubgraphIoContract],
+    known_definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+    direction: &str,
+    definition_id: &str,
+) -> Result<String, UiParseError> {
+    let node_ids = nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut candidates = BTreeSet::new();
+    for link in links {
+        let (candidate_id, slot_index, linked_node_id, linked_slot, boundary_type) = match direction
+        {
+            "input" if !node_ids.contains(link.origin_node_id.as_str()) => (
+                &link.origin_node_id,
+                link.origin_slot,
+                &link.target_node_id,
+                link.target_slot,
+                interfaces.get(link.origin_slot),
+            ),
+            "output" if !node_ids.contains(link.target_node_id.as_str()) => (
+                &link.target_node_id,
+                link.target_slot,
+                &link.origin_node_id,
+                link.origin_slot,
+                interfaces.get(link.target_slot),
+            ),
+            _ => continue,
+        };
+        let Some(interface) = boundary_type else {
+            continue;
+        };
+        if slot_index >= interfaces.len()
+            || !node_ids.contains(linked_node_id.as_str())
+            || !compatible_socket_types(
+                Some(&interface.declared_type),
+                link.declared_type.as_deref(),
+            )
+        {
+            continue;
+        }
+        let linked_node = nodes
+            .iter()
+            .find(|node| node.id == *linked_node_id)
+            .expect("endpoint membership was checked");
+        let schema_type = if direction == "input" {
+            inferred_input_schema_type(linked_node, linked_slot, known_definitions, descriptors)
+        } else {
+            inferred_output_schema_type(linked_node, linked_slot, known_definitions, descriptors)
+        };
+        let Some(schema_type) = schema_type else {
+            continue;
+        };
+        let serialized_socket = raw_node_socket(
+            linked_node,
+            if direction == "input" {
+                "inputs"
+            } else {
+                "outputs"
+            },
+            linked_slot,
+        );
+        let Some(serialized_type) = serialized_socket
+            .and_then(|socket| socket.get("type"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        if !compatible_socket_types(Some(&interface.declared_type), Some(serialized_type))
+            || !compatible_socket_types(Some(&interface.declared_type), Some(&schema_type))
+            || !compatible_socket_types(Some(serialized_type), Some(&schema_type))
+        {
+            continue;
+        }
+        if !interface.link_ids.is_empty() && !interface.link_ids.contains(&link.id) {
+            continue;
+        }
+        candidates.insert(candidate_id.clone());
+    }
+    match candidates.len() {
+        0 => Err(UiParseError::new(
+            "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_INSUFFICIENT",
+            format!(
+                "definition {definition_id} has no unique serialized {direction} boundary endpoint, interface slot, compatible type and schema-backed inner socket"
+            ),
+        )),
+        1 => Ok(candidates.into_iter().next().expect("one candidate")),
+        count => Err(UiParseError::new(
+            "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_AMBIGUOUS",
+            format!("definition {definition_id} has {count} candidate {direction} boundary identities"),
+        )),
+    }
+}
+
+fn inferred_input_schema_type(
+    node: &RawUiNode,
+    slot: usize,
+    known_definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Option<String> {
+    let socket = raw_node_socket(node, "inputs", slot)?;
+    let node_class = node_type(node).ok()?;
+    if let Some(definition) = known_definitions.get(&node_class) {
+        return definition
+            .get("inputs")
+            .and_then(Value::as_array)
+            .and_then(|values| values.get(slot))
+            .and_then(Value::as_object)
+            .and_then(|input| input.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+    }
+    let name = socket.get("name").and_then(Value::as_str)?;
+    let widget_name = socket
+        .get("widget")
+        .and_then(Value::as_object)
+        .and_then(|widget| widget.get("name"))
+        .and_then(Value::as_str);
+    let named_values = node
+        .object
+        .get("widgets_values_named")
+        .and_then(Value::as_object)
+        .map(|values| {
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        });
+    let binding = descriptors
+        .resolve_ui_input(
+            &node_class,
+            name,
+            widget_name,
+            socket.get("shape").and_then(Value::as_i64),
+            socket.get("link").and_then(Value::as_i64).is_some(),
+            named_values.as_ref(),
+        )
+        .ok()?;
+    binding
+        .descriptor
+        .map(|descriptor| declared_type_name(descriptor.declared_type).to_owned())
+}
+
+fn inferred_output_schema_type(
+    node: &RawUiNode,
+    slot: usize,
+    known_definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Option<String> {
+    let node_class = node_type(node).ok()?;
+    if let Some(definition) = known_definitions.get(&node_class) {
+        return definition
+            .get("outputs")
+            .and_then(Value::as_array)
+            .and_then(|values| values.get(slot))
+            .and_then(Value::as_object)
+            .and_then(|output| output.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+    }
+    descriptors
+        .node(&node_class)?
+        .output_types
+        .get(slot)
+        .copied()
+        .map(|declared_type| declared_type_name(declared_type).to_owned())
+}
+
+fn canonicalize_interface_link_ids(
+    definition: &mut Map<String, Value>,
+    field: &str,
+    boundary_node_id: &str,
+    links: &[RawUiLink],
+    direction: &str,
+    definition_id: &str,
+) -> Result<(), UiParseError> {
+    let Some(interfaces) = definition.get_mut(field).and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for (slot_index, interface) in interfaces.iter_mut().enumerate() {
+        let Some(interface_object) = interface.as_object_mut() else {
+            continue;
+        };
+        if interface_object.contains_key("linkIds") && interface_object.contains_key("link_ids") {
+            return Err(UiParseError::new(
+                "LEGACY_SUBGRAPH_INTERFACE_EVIDENCE_CONFLICT",
+                format!(
+                    "definition {definition_id} {field}[{slot_index}] has competing link ID fields"
+                ),
+            ));
+        }
+        let mut topology_ids = links
+            .iter()
+            .filter(|link| match direction {
+                "input" => {
+                    link.origin_node_id == boundary_node_id && link.origin_slot == slot_index
+                }
+                "output" => {
+                    link.target_node_id == boundary_node_id && link.target_slot == slot_index
+                }
+                _ => false,
+            })
+            .map(|link| link.id)
+            .collect::<Vec<_>>();
+        topology_ids.sort_unstable();
+        topology_ids.dedup();
+        let explicit_key = if interface_object.contains_key("linkIds") {
+            Some("linkIds")
+        } else if interface_object.contains_key("link_ids") {
+            Some("link_ids")
+        } else {
+            None
+        };
+        if let Some(key) = explicit_key {
+            let explicit = interface_object
+                .get(key)
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    UiParseError::new(
+                        "LEGACY_SUBGRAPH_INTERFACE_EVIDENCE_CONFLICT",
+                        format!("definition {definition_id} {field}[{slot_index}] {key} is not an array"),
+                    )
+                })?
+                .iter()
+                .filter_map(Value::as_i64)
+                .collect::<BTreeSet<_>>();
+            let topology = topology_ids.iter().copied().collect::<BTreeSet<_>>();
+            if explicit != topology {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_INTERFACE_EVIDENCE_CONFLICT",
+                    format!("definition {definition_id} {field}[{slot_index}] explicit link IDs conflict with exact serialized endpoints"),
+                ));
+            }
+        } else if !topology_ids.is_empty() {
+            interface_object.insert(
+                "linkIds".to_owned(),
+                Value::Array(topology_ids.into_iter().map(Value::from).collect()),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn canonicalize_nested_proxy_widgets(
+    definitions: &mut [Value],
+    known_definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<(), UiParseError> {
+    for definition in definitions {
+        if let Some(nodes) = definition
+            .as_object_mut()
+            .and_then(|definition| definition.get_mut("nodes"))
+        {
+            canonicalize_proxy_widgets(nodes, known_definitions, descriptors)?;
+        }
+        if let Some(nested) = definition
+            .as_object_mut()
+            .and_then(|definition| definition.get_mut("definitions"))
+            .and_then(Value::as_object_mut)
+            .and_then(|definitions| definitions.get_mut("subgraphs"))
+            .and_then(Value::as_array_mut)
+        {
+            canonicalize_nested_proxy_widgets(nested, known_definitions, descriptors)?;
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a proxy through exact serialized subgraph input interfaces until
+/// the existing schema-backed widget authority can identify the runtime
+/// input. Composite inputs are not object_info nodes, so their interface and
+/// next proxy edge must both be present and unique; names alone never resolve
+/// the target.
+fn resolve_proxy_control_widget_binding(
+    node: &Value,
+    widget_name: &str,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<Option<UiWidgetBinding>, UiParseError> {
+    if widget_name != "control_after_generate" {
+        return Ok(None);
+    }
+    let Some(object) = node.as_object() else {
+        return Ok(None);
+    };
+    let Some(class_type) = object.get("type").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let Some(schema_node) = descriptors.node(class_type) else {
+        return Ok(None);
+    };
+    let mut matching = Vec::new();
+    for descriptor in schema_node
+        .inputs
+        .values()
+        .filter(|input| input.serializer_kind == SerializerKind::StandardSeed && !input.hidden)
+    {
+        let sockets = object
+            .get("inputs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object)
+            .filter(|socket| {
+                socket.get("name").and_then(Value::as_str) == Some(descriptor.name.as_str())
+                    && socket
+                        .get("widget")
+                        .and_then(Value::as_object)
+                        .and_then(|widget| widget.get("name"))
+                        .and_then(Value::as_str)
+                        == Some(descriptor.name.as_str())
+            })
+            .collect::<Vec<_>>();
+        if sockets.len() > 1 {
+            return Err(UiParseError::new(
+                "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+                format!(
+                    "proxy target node {} has multiple seed input sockets for control_after_generate",
+                    object.get("id").map(Value::to_string).unwrap_or_default()
+                ),
+            ));
+        }
+        if let Some(socket) = sockets.first() {
+            let socket_type = socket.get("type").and_then(Value::as_str);
+            let schema_type = declared_type_name(descriptor.declared_type);
+            if schema_type == "UNKNOWN" || !compatible_socket_types(socket_type, Some(schema_type))
+            {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                    format!(
+                        "proxy target node {} seed control input {} conflicts with its schema type",
+                        object.get("id").map(Value::to_string).unwrap_or_default(),
+                        descriptor.name
+                    ),
+                ));
+            }
+            matching.push(descriptor.clone());
+        }
+    }
+    match matching.len() {
+        0 => Ok(None),
+        1 => Ok(Some(UiWidgetBinding {
+            kind: WidgetBindingKind::ControlWidget,
+            runtime_name: None,
+            descriptor: matching.pop(),
+        })),
+        _ => Err(UiParseError::new(
+            "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+            format!(
+                "proxy target node {} has multiple schema-backed seed controls for control_after_generate",
+                object.get("id").map(Value::to_string).unwrap_or_default()
+            ),
+        )),
+    }
+}
+
+fn resolve_proxy_widget_schema_binding(
+    node: &Value,
+    widget_name: &str,
+    expected_type: Option<&str>,
+    definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Result<Option<UiWidgetBinding>, UiParseError> {
+    let Some(object) = node.as_object() else {
+        return Ok(None);
+    };
+    let Some(class_type) = object.get("type").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let named_values = object
+        .get("widgets_values_named")
+        .and_then(Value::as_object)
+        .map(|values| {
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<BTreeMap<_, _>>()
+        });
+    if let Ok(binding) = descriptors.resolve_ui_input(
+        class_type,
+        widget_name,
+        Some(widget_name),
+        None,
+        false,
+        named_values.as_ref(),
+    ) {
+        if binding.runtime_name.is_some() && binding.descriptor.is_some() {
+            let sockets = object
+                .get("inputs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_object)
+                .filter(|socket| {
+                    socket.get("name").and_then(Value::as_str) == Some(widget_name)
+                        || socket
+                            .get("widget")
+                            .and_then(Value::as_object)
+                            .and_then(|widget| widget.get("name"))
+                            .and_then(Value::as_str)
+                            == Some(widget_name)
+                })
+                .collect::<Vec<_>>();
+            if sockets.len() != 1 {
+                return Err(UiParseError::new(
+                    if sockets.is_empty() {
+                        "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                    } else {
+                        "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                    },
+                    format!(
+                        "proxy target node {} has {} serialized inputs for widget {widget_name}",
+                        object.get("id").map(Value::to_string).unwrap_or_default(),
+                        sockets.len()
+                    ),
+                ));
+            }
+            let descriptor = binding.descriptor.as_ref().expect("schema binding checked");
+            let socket_type = sockets[0]
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    UiParseError::new(
+                        "LEGACY_SUBGRAPH_PROXY_TYPE_EVIDENCE_INSUFFICIENT",
+                        format!(
+                            "proxy target node {} widget {widget_name} has no serialized socket type",
+                            object.get("id").map(Value::to_string).unwrap_or_default()
+                        ),
+                    )
+                })?;
+            let schema_type = declared_type_name(descriptor.declared_type);
+            let combo_contract = descriptor.serializer_kind == SerializerKind::StandardCombo
+                && socket_type.eq_ignore_ascii_case("COMBO");
+            let control_contract = descriptor.serializer_kind.is_frontend_control();
+            if schema_type == "UNKNOWN"
+                && expected_type.is_none_or(|expected| {
+                    expected.eq_ignore_ascii_case("UNKNOWN")
+                        || !compatible_socket_types(Some(expected), Some(socket_type))
+                })
+            {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TYPE_EVIDENCE_INSUFFICIENT",
+                    format!(
+                        "proxy target node {} widget {widget_name} has unknown schema type and no matching serialized interface type",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                ));
+            }
+            let type_conflict = (schema_type != "UNKNOWN"
+                && !compatible_socket_types(Some(socket_type), Some(schema_type)))
+                || expected_type.is_some_and(|expected| {
+                    !compatible_socket_types(Some(expected), Some(socket_type))
+                        || (schema_type != "UNKNOWN"
+                            && !compatible_socket_types(Some(expected), Some(schema_type)))
+                });
+            if type_conflict && !combo_contract && !control_contract {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                    format!(
+                        "proxy target node {} widget {widget_name} socket type {socket_type} conflicts with schema type {schema_type}",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                ));
+            }
+            return Ok(Some(binding));
+        }
+    }
+    if let Some(binding) = resolve_proxy_control_widget_binding(node, widget_name, descriptors)? {
+        return Ok(Some(binding));
+    }
+
+    let Some(definition) = definitions.get(class_type) else {
+        return Ok(None);
+    };
+    let key = (class_type.to_owned(), widget_name.to_owned());
+    if !visited.insert(key.clone()) {
+        return Err(UiParseError::new(
+            "LEGACY_SUBGRAPH_PROXY_TARGET_CYCLE",
+            format!("composite proxy target {class_type}/{widget_name} recurses"),
+        ));
+    }
+    let result = (|| {
+        let sockets = object
+            .get("inputs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter(|(_, socket)| {
+                socket
+                    .as_object()
+                    .and_then(|socket| socket.get("name"))
+                    .and_then(Value::as_str)
+                    == Some(widget_name)
+                    && socket
+                        .as_object()
+                        .and_then(|socket| socket.get("widget"))
+                        .and_then(Value::as_object)
+                        .and_then(|widget| widget.get("name"))
+                        .and_then(Value::as_str)
+                        == Some(widget_name)
+            })
+            .collect::<Vec<_>>();
+        if sockets.len() != 1 {
+            return Err(UiParseError::new(
+                if sockets.is_empty() {
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                } else {
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                },
+                format!(
+                    "composite proxy target {} has {} exact widget input sockets for {widget_name}",
+                    object.get("id").map(Value::to_string).unwrap_or_default(),
+                    sockets.len()
+                ),
+            ));
+        }
+        let (slot, socket) = sockets[0];
+        let interface = definition
+            .get("inputs")
+            .and_then(Value::as_array)
+            .and_then(|inputs| inputs.get(slot))
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!(
+                        "composite proxy target {class_type} has no interface input slot {slot}"
+                    ),
+                )
+            })?;
+        let interface_name = interface.get("name").and_then(Value::as_str);
+        let socket_type = socket
+            .as_object()
+            .and_then(|socket| socket.get("type"))
+            .and_then(Value::as_str);
+        let interface_type = interface.get("type").and_then(Value::as_str);
+        if interface_name != Some(widget_name)
+            || !compatible_socket_types(interface_type, socket_type)
+            || expected_type.is_some_and(|expected| {
+                !compatible_socket_types(Some(expected), socket_type)
+                    || !compatible_socket_types(Some(expected), interface_type)
+            })
+        {
+            return Err(UiParseError::new(
+                "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                format!("composite proxy target {class_type} input {widget_name} conflicts with its definition interface"),
+            ));
+        }
+
+        let entries = object
+            .get("properties")
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get("proxyWidgets"))
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!(
+                        "composite proxy target {} has no serialized proxyWidgets evidence",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                )
+            })?;
+        let mut matching = Vec::new();
+        for entry in entries {
+            let pair = entry.as_array().ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!(
+                        "composite proxy target {} has a non-pair proxy entry",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                )
+            })?;
+            if pair.len() != 2 {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!(
+                        "composite proxy target {} has a proxy entry that is not a pair",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                ));
+            }
+            if pair[1].as_str() == Some(widget_name) {
+                let target_id = parse_node_id(pair.first(), 0).map_err(|_| {
+                    UiParseError::new(
+                        "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                        format!(
+                            "composite proxy target {} has an invalid inner node identity",
+                            object.get("id").map(Value::to_string).unwrap_or_default()
+                        ),
+                    )
+                })?;
+                matching.push(target_id);
+            }
+        }
+        if matching.len() != 1 {
+            return Err(UiParseError::new(
+                if matching.is_empty() {
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                } else {
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                },
+                format!("composite proxy target {class_type} has {} exact downstream proxies for {widget_name}", matching.len()),
+            ));
+        }
+        let child_nodes = definition
+            .get("nodes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!("composite proxy target {class_type} definition has no nodes"),
+                )
+            })?;
+        let targets = child_nodes
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .as_object()
+                    .and_then(|candidate| candidate.get("id"))
+                    .and_then(|id| parse_node_id(Some(id), 0).ok())
+                    .as_deref()
+                    == Some(matching[0].as_str())
+            })
+            .collect::<Vec<_>>();
+        if targets.len() != 1 {
+            return Err(UiParseError::new(
+                if targets.is_empty() {
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                } else {
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                },
+                format!(
+                    "composite proxy target {class_type} resolves inner node {} {} times",
+                    matching[0],
+                    targets.len()
+                ),
+            ));
+        }
+        let binding = resolve_proxy_widget_schema_binding(
+            targets[0],
+            widget_name,
+            interface_type,
+            definitions,
+            descriptors,
+            visited,
+        )?
+        .ok_or_else(|| UiParseError::new(
+            "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+            format!("composite proxy target {class_type} inner node {} does not resolve to a schema widget", matching[0]),
+        ))?;
+        let descriptor = binding
+            .descriptor
+            .as_ref()
+            .expect("resolved target has schema descriptor");
+        let schema_type = declared_type_name(descriptor.declared_type);
+        if schema_type != "UNKNOWN"
+            && (!compatible_socket_types(socket_type, Some(schema_type))
+                || !compatible_socket_types(interface_type, Some(schema_type)))
+        {
+            return Err(UiParseError::new(
+                "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                format!("composite proxy target {class_type} input {widget_name} conflicts with downstream schema type {schema_type}"),
+            ));
+        }
+        Ok(binding)
+    })();
+    visited.remove(&key);
+    result.map(Some)
+}
+
+fn canonicalize_proxy_widgets(
+    nodes: &mut Value,
+    definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<(), UiParseError> {
+    let Some(nodes) = nodes.as_array_mut() else {
+        return Ok(());
+    };
+    for node in nodes {
+        let Some(object) = node.as_object_mut() else {
+            continue;
+        };
+        let owner_inputs = object
+            .get("inputs")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let node_id = object
+            .get("id")
+            .and_then(|id| parse_node_id(Some(id), 0).ok())
+            .unwrap_or_else(|| "?".to_owned());
+        let node_class = object
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let Some(proxy_widgets) = object
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+            .and_then(|properties| properties.get_mut("proxyWidgets"))
+        else {
+            continue;
+        };
+        let Some(definition) = definitions.get(&node_class) else {
+            continue;
+        };
+        let entries = proxy_widgets.as_array_mut().ok_or_else(|| {
+            UiParseError::new(
+                "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                format!("composite instance {node_id} proxyWidgets is not an array"),
+            )
+        })?;
+        let mut proxy_name_counts = BTreeMap::<String, usize>::new();
+        for entry in entries.iter() {
+            if let Some(widget_name) = entry
+                .as_array()
+                .and_then(|pair| (pair.len() == 2).then(|| pair[1].as_str()).flatten())
+            {
+                *proxy_name_counts.entry(widget_name.to_owned()).or_default() += 1;
+            }
+        }
+        let inner_nodes = definition
+            .get("nodes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!("composite instance {node_id} definition has no node array"),
+                )
+            })?;
+        let mut seen = BTreeSet::new();
+        for entry in entries {
+            let pair = entry.as_array_mut().ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!("composite instance {node_id} proxy entry is not a two-item array"),
+                )
+            })?;
+            if pair.len() != 2 {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!("composite instance {node_id} proxy entry is not a two-item pair"),
+                ));
+            }
+            let inner_id = parse_node_id(pair.first(), 0).map_err(|_| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!("composite instance {node_id} proxy target identity is invalid"),
+                )
+            })?;
+            let widget_name = pair[1]
+                .as_str()
+                .filter(|name| !name.trim().is_empty())
+                .ok_or_else(|| {
+                    UiParseError::new(
+                        "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                        format!("composite instance {node_id} proxy widget identity is invalid"),
+                    )
+                })?;
+            let owner_sockets = owner_inputs
+                .iter()
+                .filter_map(Value::as_object)
+                .filter(|socket| {
+                    socket.get("name").and_then(Value::as_str) == Some(widget_name)
+                        && socket
+                            .get("widget")
+                            .and_then(Value::as_object)
+                            .and_then(|widget| widget.get("name"))
+                            .and_then(Value::as_str)
+                            == Some(widget_name)
+                })
+                .collect::<Vec<_>>();
+            if owner_sockets.len() > 1 {
+                return Err(UiParseError::new(
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+                    format!("composite instance {node_id} has multiple owner inputs for widget {widget_name}"),
+                ));
+            }
+            let owner_type = (proxy_name_counts.get(widget_name) == Some(&1))
+                .then(|| {
+                    owner_sockets
+                        .first()
+                        .and_then(|socket| socket.get("type"))
+                        .and_then(Value::as_str)
+                })
+                .flatten();
+            if !seen.insert((inner_id.clone(), widget_name.to_owned())) {
+                return Err(UiParseError::new(
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+                    format!("composite instance {node_id} repeats proxy target {inner_id}/{widget_name}"),
+                ));
+            }
+            let inner = inner_nodes.iter().find(|inner| {
+                inner
+                    .as_object()
+                    .and_then(|inner| inner.get("id"))
+                    .and_then(|id| parse_node_id(Some(id), 0).ok())
+                    .as_deref()
+                    == Some(inner_id.as_str())
+            });
+            let Some(inner) = inner else {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!(
+                        "composite instance {node_id} references missing inner node {inner_id}"
+                    ),
+                ));
+            };
+            let binding = resolve_proxy_widget_schema_binding(
+                inner,
+                widget_name,
+                owner_type,
+                definitions,
+                descriptors,
+                &mut BTreeSet::new(),
+            )?
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!(
+                        "inner node {inner_id} widget {widget_name} has no unique schema contract"
+                    ),
+                )
+            })?;
+            let descriptor = binding.descriptor.as_ref().expect("descriptor was checked");
+            let widget_sockets = inner
+                .as_object()
+                .and_then(|inner| inner.get("inputs"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_object)
+                .filter(|socket| {
+                    socket.get("name").and_then(Value::as_str) == Some(widget_name)
+                        || socket
+                            .get("widget")
+                            .and_then(Value::as_object)
+                            .and_then(|widget| widget.get("name"))
+                            .and_then(Value::as_str)
+                            == Some(widget_name)
+                })
+                .collect::<Vec<_>>();
+            if widget_sockets.len() > 1 {
+                return Err(UiParseError::new(
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+                    format!("inner node {inner_id} has multiple serialized sockets for widget {widget_name}"),
+                ));
+            }
+            if let Some(socket_type) = widget_sockets
+                .first()
+                .and_then(|socket| socket.get("type"))
+                .and_then(Value::as_str)
+            {
+                let schema_type = declared_type_name(descriptor.declared_type);
+                let combo_contract = descriptor.serializer_kind == SerializerKind::StandardCombo
+                    && socket_type.eq_ignore_ascii_case("COMBO");
+                let control_contract = descriptor.serializer_kind.is_frontend_control();
+                let type_conflict = (schema_type == "UNKNOWN"
+                    && owner_type.is_none_or(|expected| {
+                        expected.eq_ignore_ascii_case("UNKNOWN")
+                            || !compatible_socket_types(Some(expected), Some(socket_type))
+                    }))
+                    || (schema_type != "UNKNOWN"
+                        && !compatible_socket_types(Some(socket_type), Some(schema_type)))
+                    || owner_type.is_some_and(|expected| {
+                        !compatible_socket_types(Some(expected), Some(socket_type))
+                            || (schema_type != "UNKNOWN"
+                                && !compatible_socket_types(Some(expected), Some(schema_type)))
+                    });
+                if type_conflict && !combo_contract && !control_contract {
+                    return Err(UiParseError::new(
+                        "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                        format!("inner node {inner_id} widget {widget_name} conflicts with its schema input type"),
+                    ));
+                }
+            }
+            pair[0] = Value::String(inner_id);
+        }
+    }
+    Ok(())
+}
+
 /// Parse a source ComfyUI workflow without performing conversion or I/O.
 pub fn parse_ui_workflow(bytes: &[u8]) -> Result<UiWorkflowDocument, UiParseError> {
     let value: Value = serde_json::from_slice(bytes)
@@ -3313,6 +4388,34 @@ pub fn parse_ui_workflow_value(value: &Value) -> Result<UiWorkflowDocument, UiPa
         subgraph_definition_ids: subgraph_metadata.definition_ids,
         nested_subgraphs: subgraph_metadata.nested,
     })
+}
+
+/// Parse a UI workflow using the descriptor-selected serialization contracts.
+/// Only LegacySubgraphBoundaryProxyV0 runs the metadata adapter; CurrentContract
+/// continues through the exact same parser path as before.
+pub fn parse_ui_workflow_value_with_descriptors(
+    value: &Value,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<UiWorkflowDocument, UiParseError> {
+    if !descriptors
+        .profile
+        .contracts
+        .contains(&FrontendSerializationContract::LegacySubgraphBoundaryProxyV0)
+    {
+        return parse_ui_workflow_value(value);
+    }
+    if descriptors
+        .profile
+        .contracts
+        .contains(&FrontendSerializationContract::Current)
+    {
+        return Err(UiParseError::new(
+            "SERIALIZATION_CONTRACT_SET_INVALID",
+            "CurrentContract cannot be combined with LegacySubgraphBoundaryProxyV0",
+        ));
+    }
+    let canonical = canonicalize_legacy_subgraph_contract(value, descriptors)?;
+    parse_ui_workflow_value(&canonical)
 }
 
 fn parse_node_id(value: Option<&Value>, index: usize) -> Result<String, UiParseError> {

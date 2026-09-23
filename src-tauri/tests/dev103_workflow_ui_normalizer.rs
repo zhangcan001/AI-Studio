@@ -3,13 +3,14 @@ use ai_studio_lib::application::workflow_recognition_schema::{
 };
 use ai_studio_lib::application::workflow_ui_normalizer::{
     build_source_id_mapping, normalize_ui_workflow, parse_ui_workflow, parse_ui_workflow_value,
-    CompatibilityFeatureStatus, NormalizedWorkflow, WorkflowUiFeature,
+    parse_ui_workflow_value_with_descriptors, CompatibilityFeatureStatus, NormalizedWorkflow,
+    WorkflowUiFeature,
 };
 use ai_studio_lib::application::workflow_ui_serialization::{
-    canonical_schema_fingerprint, FrontendSerializationProfile, NormalizationCompatibilityContext,
-    SerializerKind, SupportedNormalizationCompatibilitySet, UiInputSerializationDescriptor,
-    UiNodeSerializationDescriptor, UiSerializationDescriptorSet, NORMALIZER_POLICY_VERSION,
-    PROFILE_SUPPORT_MODEL, SERIALIZATION_PROFILE_VERSION,
+    canonical_schema_fingerprint, FrontendSerializationContract, FrontendSerializationProfile,
+    NormalizationCompatibilityContext, SerializerKind, SupportedNormalizationCompatibilitySet,
+    UiInputSerializationDescriptor, UiNodeSerializationDescriptor, UiSerializationDescriptorSet,
+    NORMALIZER_POLICY_VERSION, PROFILE_SUPPORT_MODEL, SERIALIZATION_PROFILE_VERSION,
 };
 use serde_json::{Map, Value};
 use std::{
@@ -247,6 +248,38 @@ fn synthetic_descriptors(
         profile,
         nodes,
     }
+}
+
+fn historical_subgraph_descriptors(
+    contracts: BTreeSet<FrontendSerializationContract>,
+) -> UiSerializationDescriptorSet {
+    let current = synthetic_descriptors(RecognitionDeclaredType::Integer, true);
+    let context = NormalizationCompatibilityContext {
+        workflow_format_version: "0.4".to_owned(),
+        frontend_version: "1.42.14".to_owned(),
+        schema_fingerprint: "synthetic-legacy-subgraph".to_owned(),
+        serialization_profile_version: SERIALIZATION_PROFILE_VERSION.to_owned(),
+        normalizer_policy_version: NORMALIZER_POLICY_VERSION.to_owned(),
+        source_frontend_revision: None,
+    };
+    let profile = FrontendSerializationProfile::from_contracts_from_context(&context, contracts)
+        .expect("historical contract set should be constructible");
+    UiSerializationDescriptorSet {
+        compatibility: context,
+        profile,
+        nodes: current.nodes,
+    }
+}
+
+fn historical_subgraph_only_descriptors() -> UiSerializationDescriptorSet {
+    historical_subgraph_descriptors(BTreeSet::from([
+        FrontendSerializationContract::LegacySubgraphBoundaryProxyV0,
+    ]))
+}
+
+fn mark_historical_frontend(mut source: Value) -> Value {
+    source["extra"]["frontendVersion"] = Value::from("1.42.14");
+    source
 }
 
 fn v1b2_descriptor(
@@ -802,6 +835,477 @@ fn subgraph_definition_shape_and_external_input_boundary_flatten_provider_neutra
     let connection = target["inputs"]["value"].as_array().unwrap();
     assert_eq!(connection[0], "1");
     assert_eq!(connection[1], 0);
+}
+
+#[test]
+fn legacy_subgraph_input_boundary_uses_unique_topology_and_preserves_fanout_source_slot() {
+    let mut definition = synthetic_subgraph_definition(
+        "legacy-input-boundary",
+        serde_json::json!([{"id":"input-slot","name":"value","type":"INT"}]),
+        serde_json::json!([]),
+        vec![
+            synthetic_runtime_target_node(20, Some(1)),
+            synthetic_runtime_target_node(30, Some(2)),
+        ],
+        vec![
+            serde_json::json!({"id":1,"origin_id":-10,"origin_slot":0,"target_id":20,"target_slot":0,"type":"INT"}),
+            serde_json::json!({"id":2,"origin_id":-10,"origin_slot":0,"target_id":30,"target_slot":0,"type":"INT"}),
+        ],
+    );
+    definition.as_object_mut().unwrap().remove("inputNode");
+    let mut source_node = synthetic_source_node(1, vec![]);
+    source_node["outputs"] = serde_json::json!([
+        {"name":"unused","type":"INT","links":[]},
+        {"name":"value","type":"INT","links":[10]}
+    ]);
+    let source = mark_historical_frontend(synthetic_subgraph_workflow(
+        vec![
+            source_node,
+            synthetic_composite_node(9, "legacy-input-boundary", Some(10), vec![], "INT"),
+        ],
+        vec![serde_json::json!([10, 1, 1, 9, 0, "INT"])],
+        vec![definition],
+    ));
+    let descriptors = historical_subgraph_only_descriptors();
+    let document = parse_ui_workflow_value_with_descriptors(&source, &descriptors)
+        .expect("unique serialized endpoint topology should canonicalize the input boundary");
+    assert!(document
+        .nodes
+        .iter()
+        .all(|node| node.class_type != "legacy-input-boundary"));
+    assert_eq!(
+        document.links.len(),
+        2,
+        "input fan-out must preserve both consumers"
+    );
+    assert!(document.links.iter().all(|link| link.origin_slot == 1));
+    let mut scalar_sentinel = source.clone();
+    scalar_sentinel["definitions"]["subgraphs"][0]["inputNode"] = Value::from(-10);
+    assert!(parse_ui_workflow_value_with_descriptors(&scalar_sentinel, &descriptors).is_ok());
+    let mut descriptors = descriptors;
+    descriptors.nodes.get_mut("Source").unwrap().output_types = vec![
+        RecognitionDeclaredType::Integer,
+        RecognitionDeclaredType::Integer,
+    ];
+    descriptors.nodes.get_mut("Source").unwrap().output_names =
+        vec!["unused".to_owned(), "value".to_owned()];
+    let normalized = normalize_ui_workflow(&document, &descriptors)
+        .expect("canonicalized topology should use the existing normalizer");
+    let sources = normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .filter(|node| node["class_type"] == "Target")
+        .map(|node| node["inputs"]["value"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(sources.len(), 2);
+    assert!(sources.iter().all(|input| input[1] == 1));
+}
+
+#[test]
+fn legacy_subgraph_output_boundary_infers_each_interface_slot_without_defaulting_to_zero() {
+    let mut definition = synthetic_subgraph_definition(
+        "legacy-output-boundary",
+        serde_json::json!([]),
+        serde_json::json!([
+            {"id":"output-a","name":"a","type":"INT"},
+            {"id":"output-b","name":"b","type":"INT"}
+        ]),
+        vec![
+            synthetic_source_node(20, vec![1]),
+            synthetic_source_node(21, vec![2]),
+        ],
+        vec![
+            serde_json::json!({"id":1,"origin_id":20,"origin_slot":0,"target_id":-20,"target_slot":0,"type":"INT"}),
+            serde_json::json!({"id":2,"origin_id":21,"origin_slot":0,"target_id":-20,"target_slot":1,"type":"INT"}),
+        ],
+    );
+    definition.as_object_mut().unwrap().remove("outputNode");
+    let mut composite =
+        synthetic_composite_node(9, "legacy-output-boundary", None, vec![12, 13], "INT");
+    composite["outputs"] = serde_json::json!([
+        {"name":"a","type":"INT","links":[12]},
+        {"name":"b","type":"INT","links":[13]}
+    ]);
+    let source = mark_historical_frontend(synthetic_subgraph_workflow(
+        vec![
+            composite,
+            synthetic_runtime_target_node(2, Some(12)),
+            synthetic_runtime_target_node(3, Some(13)),
+        ],
+        vec![
+            serde_json::json!([12, 9, 0, 2, 0, "INT"]),
+            serde_json::json!([13, 9, 1, 3, 0, "INT"]),
+        ],
+        vec![definition],
+    ));
+    let descriptors = historical_subgraph_only_descriptors();
+    let document = parse_ui_workflow_value_with_descriptors(&source, &descriptors)
+        .expect("unique inner producers should canonicalize both output slots");
+    let normalized = normalize_ui_workflow(&document, &descriptors).unwrap();
+    let targets = normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .filter(|node| node["class_type"] == "Target")
+        .collect::<Vec<_>>();
+    assert_eq!(targets.len(), 2);
+    assert_ne!(
+        targets[0]["inputs"]["value"][0],
+        targets[1]["inputs"]["value"][0]
+    );
+    let source_ids = normalized
+        .source_to_api
+        .keys()
+        .map(|id| id.as_str())
+        .collect::<Vec<_>>();
+    assert!(source_ids.iter().any(|id| id.ends_with("/node/20")));
+    assert!(source_ids.iter().any(|id| id.ends_with("/node/21")));
+}
+
+#[test]
+fn legacy_subgraph_boundary_ambiguity_and_type_conflict_fail_closed() {
+    let mut ambiguous_definition = synthetic_subgraph_definition(
+        "legacy-ambiguous-boundary",
+        serde_json::json!([{"id":"input-slot","name":"value","type":"INT"}]),
+        serde_json::json!([]),
+        vec![
+            synthetic_runtime_target_node(20, Some(1)),
+            synthetic_runtime_target_node(30, Some(2)),
+        ],
+        vec![
+            serde_json::json!({"id":1,"origin_id":-10,"origin_slot":0,"target_id":20,"target_slot":0,"type":"INT"}),
+            serde_json::json!({"id":2,"origin_id":-11,"origin_slot":0,"target_id":30,"target_slot":0,"type":"INT"}),
+        ],
+    );
+    ambiguous_definition
+        .as_object_mut()
+        .unwrap()
+        .remove("inputNode");
+    let ambiguous = synthetic_subgraph_workflow(
+        vec![
+            synthetic_source_node(1, vec![10]),
+            synthetic_composite_node(9, "legacy-ambiguous-boundary", Some(10), vec![], "INT"),
+        ],
+        vec![serde_json::json!([10, 1, 0, 9, 0, "INT"])],
+        vec![ambiguous_definition],
+    );
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(
+            &ambiguous,
+            &historical_subgraph_only_descriptors()
+        )
+        .unwrap_err()
+        .code,
+        "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_AMBIGUOUS"
+    );
+
+    let conflict = synthetic_subgraph_workflow(
+        vec![
+            synthetic_source_node(1, vec![10]),
+            synthetic_composite_node(9, "legacy-type-conflict", Some(10), vec![], "INT"),
+        ],
+        vec![serde_json::json!([10, 1, 0, 9, 0, "INT"])],
+        vec![synthetic_subgraph_definition(
+            "legacy-type-conflict",
+            serde_json::json!([{"id":"input-slot","name":"value","type":"INT","linkIds":[1]}]),
+            serde_json::json!([]),
+            vec![synthetic_runtime_target_node(20, Some(1))],
+            vec![
+                serde_json::json!({"id":1,"origin_id":-10,"origin_slot":0,"target_id":20,"target_slot":0,"type":"STRING"}),
+            ],
+        )],
+    );
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(
+            &conflict,
+            &historical_subgraph_only_descriptors()
+        )
+        .unwrap_err()
+        .code,
+        "SUBGRAPH_INPUT_TYPE_CONFLICT"
+    );
+    let mut stale_interface = conflict;
+    stale_interface["definitions"]["subgraphs"][0]["inputs"][0]["linkIds"] =
+        serde_json::json!([999]);
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(
+            &stale_interface,
+            &historical_subgraph_only_descriptors()
+        )
+        .unwrap_err()
+        .code,
+        "LEGACY_SUBGRAPH_INTERFACE_EVIDENCE_CONFLICT"
+    );
+}
+
+#[test]
+fn legacy_proxy_widget_uses_schema_authority_and_rejects_unknown_or_ambiguous_targets() {
+    let definition = synthetic_subgraph_definition(
+        "legacy-proxy-widget",
+        serde_json::json!([]),
+        serde_json::json!([]),
+        vec![{
+            let mut target = synthetic_widget_target_node(20, "Target", "value", "INT", "value", 1);
+            target["inputs"][0].as_object_mut().unwrap().remove("link");
+            target["widgets_values"] = serde_json::json!([7]);
+            target["widgets_values_named"] = serde_json::json!({"value":7});
+            target
+        }],
+        vec![],
+    );
+    let mut instance = synthetic_composite_node(9, "legacy-proxy-widget", None, vec![], "INT");
+    instance["properties"]["proxyWidgets"] = serde_json::json!([[20, "value"]]);
+    let source = mark_historical_frontend(synthetic_subgraph_workflow(
+        vec![instance],
+        vec![],
+        vec![definition.clone()],
+    ));
+    let descriptors = historical_subgraph_descriptors(BTreeSet::from([
+        FrontendSerializationContract::LegacySubgraphBoundaryProxyV0,
+        FrontendSerializationContract::LegacyWidgetSlotV0,
+    ]));
+    let document = parse_ui_workflow_value_with_descriptors(&source, &descriptors)
+        .expect("exact node/widget/schema correspondence should canonicalize");
+    assert!(document
+        .nodes
+        .iter()
+        .all(|node| node.class_type != "legacy-proxy-widget"));
+    let normalized = normalize_ui_workflow(&document, &descriptors)
+        .expect("historical positional widget values should use LegacyWidgetSlotV0");
+    let target = normalized
+        .api_value
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|node| node["class_type"] == "Target")
+        .unwrap();
+    assert_eq!(target["inputs"]["value"], 7);
+
+    let mut duplicate = source.clone();
+    duplicate["nodes"][0]["properties"]["proxyWidgets"] =
+        serde_json::json!([["20", "value"], [20, "value"]]);
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(&duplicate, &descriptors)
+            .unwrap_err()
+            .code,
+        "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+    );
+
+    let mut unknown = source.clone();
+    unknown["nodes"][0]["properties"]["proxyWidgets"] =
+        serde_json::json!([{"node":"20","widget":"value"}]);
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(&unknown, &descriptors)
+            .unwrap_err()
+            .code,
+        "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED"
+    );
+
+    let mut type_conflict = source.clone();
+    type_conflict["definitions"]["subgraphs"][0]["nodes"][0]["inputs"][0]["type"] =
+        Value::from("IMAGE");
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(&type_conflict, &descriptors)
+            .unwrap_err()
+            .code,
+        "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT"
+    );
+
+    let mut stale = source;
+    stale["nodes"][0]["properties"]["proxyWidgets"] = serde_json::json!([[99, "value"]]);
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(&stale, &descriptors)
+            .unwrap_err()
+            .code,
+        "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+    );
+}
+
+#[test]
+fn legacy_proxy_widget_can_follow_exact_nested_composite_input_to_schema_authority() {
+    let mut inner_target = synthetic_widget_target_node(30, "Target", "value", "INT", "value", 10);
+    inner_target["widgets_values"] = serde_json::json!([7]);
+    inner_target["widgets_values_named"] = serde_json::json!({"value": 7});
+    let inner_definition = synthetic_subgraph_definition(
+        "v1d4-inner",
+        serde_json::json!([{"id":"inner-value","name":"value","type":"INT","linkIds":[10]}]),
+        serde_json::json!([]),
+        vec![inner_target],
+        vec![
+            serde_json::json!({"id":10,"origin_id":-10,"origin_slot":0,"target_id":30,"target_slot":0,"type":"INT"}),
+        ],
+    );
+
+    let mut inner_instance = synthetic_composite_node(21, "v1d4-inner", Some(20), vec![], "INT");
+    inner_instance["properties"]["proxyWidgets"] = serde_json::json!([[30, "value"]]);
+    let outer_definition = synthetic_subgraph_definition(
+        "v1d4-outer",
+        serde_json::json!([{"id":"outer-value","name":"value","type":"INT","linkIds":[20]}]),
+        serde_json::json!([]),
+        vec![inner_instance],
+        vec![
+            serde_json::json!({"id":20,"origin_id":-10,"origin_slot":0,"target_id":21,"target_slot":0,"type":"INT"}),
+        ],
+    );
+
+    let mut outer_instance = synthetic_composite_node(9, "v1d4-outer", None, vec![], "INT");
+    outer_instance["inputs"] = serde_json::json!([{
+        "name":"value","type":"INT","widget":{"name":"value"}
+    }]);
+    outer_instance["properties"]["proxyWidgets"] = serde_json::json!([[21, "value"]]);
+    let source = mark_historical_frontend(synthetic_subgraph_workflow(
+        vec![outer_instance],
+        vec![],
+        vec![inner_definition, outer_definition],
+    ));
+    let descriptors = historical_subgraph_descriptors(BTreeSet::from([
+        FrontendSerializationContract::LegacySubgraphBoundaryProxyV0,
+        FrontendSerializationContract::LegacyWidgetSlotV0,
+    ]));
+
+    parse_ui_workflow_value_with_descriptors(&source, &descriptors)
+        .expect("exact nested composite interface and downstream schema target should resolve");
+}
+
+#[test]
+fn legacy_proxy_widget_preserves_schema_backed_seed_control_for_widget_authority() {
+    let mut seed_inputs = BTreeMap::new();
+    seed_inputs.insert(
+        "noise_seed".to_owned(),
+        v1b2_descriptor(
+            "noise_seed",
+            RecognitionDeclaredType::Integer,
+            SerializerKind::StandardSeed,
+            true,
+        ),
+    );
+    let mut descriptors = historical_subgraph_descriptors(BTreeSet::from([
+        FrontendSerializationContract::LegacySubgraphBoundaryProxyV0,
+        FrontendSerializationContract::LegacyWidgetSlotV0,
+    ]));
+    descriptors.nodes.insert(
+        "SeedNode".to_owned(),
+        v1b2_node("SeedNode", vec!["noise_seed"], seed_inputs),
+    );
+
+    let mut seed =
+        synthetic_widget_target_node(20, "SeedNode", "noise_seed", "INT", "noise_seed", 1);
+    seed["inputs"][0].as_object_mut().unwrap().remove("link");
+    seed["widgets_values"] = serde_json::json!([17, "fixed"]);
+    let definition = synthetic_subgraph_definition(
+        "legacy-seed-control-proxy",
+        serde_json::json!([]),
+        serde_json::json!([]),
+        vec![seed],
+        vec![],
+    );
+    let mut instance =
+        synthetic_composite_node(9, "legacy-seed-control-proxy", None, vec![], "INT");
+    instance["properties"]["proxyWidgets"] = serde_json::json!([[20, "control_after_generate"]]);
+    let source = mark_historical_frontend(synthetic_subgraph_workflow(
+        vec![instance],
+        vec![],
+        vec![definition],
+    ));
+
+    parse_ui_workflow_value_with_descriptors(&source, &descriptors)
+        .expect("the explicit seed-node identity and its StandardSeed schema contract identify this UI control");
+}
+
+#[test]
+fn legacy_subgraph_current_contract_isolation_uuid_runtime_and_name_only_negative_controls() {
+    let mut definition = synthetic_subgraph_definition(
+        "legacy-no-evidence",
+        serde_json::json!([{"id":"input-slot","name":"value","type":"INT"}]),
+        serde_json::json!([]),
+        vec![synthetic_runtime_target_node(20, None)],
+        vec![],
+    );
+    definition.as_object_mut().unwrap().remove("inputNode");
+    let source = mark_historical_frontend(synthetic_subgraph_workflow(
+        vec![synthetic_composite_node(
+            9,
+            "legacy-no-evidence",
+            None,
+            vec![],
+            "INT",
+        )],
+        vec![],
+        vec![definition],
+    ));
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(&source, &historical_subgraph_only_descriptors())
+            .unwrap_err()
+            .code,
+        "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_INSUFFICIENT"
+    );
+    assert_eq!(
+        parse_ui_workflow_value_with_descriptors(
+            &source,
+            &synthetic_descriptors(RecognitionDeclaredType::Integer, true)
+        )
+        .unwrap_err()
+        .code,
+        "SUBGRAPH_INPUT_NODE_MISSING",
+        "the adapter must be isolated from the frozen CurrentContract path"
+    );
+
+    let uuid = "00000000-0000-4000-8000-000000000099";
+    let runtime = synthetic_header(
+        vec![serde_json::json!({
+            "id": 1, "type": uuid, "mode": 0, "inputs": [], "outputs": [], "widgets_values": []
+        })],
+        vec![],
+    );
+    let mut descriptors = historical_subgraph_only_descriptors();
+    descriptors.nodes.insert(
+        uuid.to_owned(),
+        synthetic_descriptors(RecognitionDeclaredType::Integer, true).nodes["Target"].clone(),
+    );
+    let document = parse_ui_workflow_value_with_descriptors(&runtime, &descriptors)
+        .expect("UUID-looking runtime class is not a composite without exact definition identity");
+    assert_eq!(document.nodes[0].class_type, uuid);
+}
+
+#[test]
+fn legacy_subgraph_multiple_instances_keep_existing_hierarchical_source_mapping() {
+    let definition = synthetic_subgraph_definition(
+        "legacy-reused-definition",
+        serde_json::json!([]),
+        serde_json::json!([{"id":"result","name":"result","type":"INT","linkIds":[1]}]),
+        vec![synthetic_source_node(20, vec![1])],
+        vec![
+            serde_json::json!({"id":1,"origin_id":20,"origin_slot":0,"target_id":-20,"target_slot":0,"type":"INT"}),
+        ],
+    );
+    let source = mark_historical_frontend(synthetic_subgraph_workflow(
+        vec![
+            synthetic_composite_node(9, "legacy-reused-definition", None, vec![12], "INT"),
+            synthetic_composite_node(10, "legacy-reused-definition", None, vec![13], "INT"),
+            synthetic_runtime_target_node(2, Some(12)),
+            synthetic_runtime_target_node(3, Some(13)),
+        ],
+        vec![
+            serde_json::json!([12, 9, 0, 2, 0, "INT"]),
+            serde_json::json!([13, 10, 0, 3, 0, "INT"]),
+        ],
+        vec![definition],
+    ));
+    let descriptors = historical_subgraph_only_descriptors();
+    let document = parse_ui_workflow_value_with_descriptors(&source, &descriptors).unwrap();
+    let normalized = normalize_ui_workflow(&document, &descriptors).unwrap();
+    let ids = normalized
+        .source_to_api
+        .keys()
+        .filter(|id| id.contains("subgraph/"))
+        .map(|id| id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.iter().any(|id| id.contains("instance[9]")));
+    assert!(ids.iter().any(|id| id.contains("instance[10]")));
 }
 
 #[test]

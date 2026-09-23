@@ -30,7 +30,8 @@ use crate::application::{
         UiCompatibilityResolutionInput,
     },
     workflow_ui_normalizer::{
-        normalize_ui_workflow, parse_ui_workflow, WorkflowUiFeatureObservation,
+        normalize_ui_workflow, parse_ui_workflow, parse_ui_workflow_value_with_descriptors,
+        WorkflowUiFeatureObservation,
     },
     workflow_ui_serialization::{
         canonical_schema_fingerprint, FrontendSerializationProfile,
@@ -987,13 +988,62 @@ impl WorkflowOnboardingService {
             ));
         }
         let input_format = detect_comfy_workflow_format(&bytes);
-        let ui_document = if input_format == ComfyWorkflowInputFormat::Ui {
-            Some(
-                parse_ui_workflow(&bytes)
-                    .map_err(|error| WorkflowOnboardingError::new(error.code, error.message))?,
-            )
+        let (ui_document, deferred_ui_error, ui_header) = if input_format
+            == ComfyWorkflowInputFormat::Ui
+        {
+            match parse_ui_workflow(&bytes) {
+                Ok(document) => {
+                    let header = (
+                        document.workflow_format_version.clone(),
+                        document.frontend_version.clone(),
+                    );
+                    (Some(document), None, Some(header))
+                }
+                Err(error) if error.code == "MISSING_SUBGRAPH_INPUT_BOUNDARY" => {
+                    let source: Value = serde_json::from_slice(&bytes).map_err(|parse_error| {
+                        WorkflowOnboardingError::new("UI_JSON_INVALID", parse_error.to_string())
+                    })?;
+                    let has_subgraphs = source
+                        .as_object()
+                        .and_then(|root| root.get("definitions"))
+                        .and_then(Value::as_object)
+                        .and_then(|definitions| definitions.get("subgraphs"))
+                        .and_then(Value::as_array)
+                        .is_some_and(|subgraphs| !subgraphs.is_empty());
+                    if !has_subgraphs || !contains_proxy_widgets_evidence(&source) {
+                        return Err(WorkflowOnboardingError::new(error.code, error.message));
+                    }
+                    let version = source
+                        .as_object()
+                        .and_then(|root| root.get("version"))
+                        .and_then(Value::as_f64)
+                        .ok_or_else(|| {
+                            WorkflowOnboardingError::new(
+                                "UI_WORKFLOW_FORMAT_VERSION_MISSING",
+                                "workflow root is missing numeric version",
+                            )
+                        })?;
+                    let format_version = if version.fract() == 0.0 {
+                        format!("{version:.0}")
+                    } else {
+                        version.to_string()
+                    };
+                    let frontend_version = source
+                        .as_object()
+                        .and_then(|root| root.get("extra"))
+                        .and_then(Value::as_object)
+                        .and_then(|extra| extra.get("frontendVersion"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .filter(|value| !value.trim().is_empty());
+                    (None, Some(error), Some((format_version, frontend_version)))
+                }
+                Err(error) => {
+                    return Err(WorkflowOnboardingError::new(error.code, error.message));
+                }
+            }
         } else {
-            None
+            (None, None, None)
         };
         let workflow = match input_format {
             ComfyWorkflowInputFormat::Api => Some(parse_import_workflow(&bytes)?),
@@ -1063,8 +1113,21 @@ impl WorkflowOnboardingService {
                 recognition,
             }
         } else {
-            let ui_document = ui_document.expect("UI input format must have a parsed document");
-            let ui_features = ui_document.features.observations.clone();
+            let ui_features = ui_document
+                .as_ref()
+                .map(|document| document.features.observations.clone())
+                .unwrap_or_default();
+            let pending_diagnostic = deferred_ui_error
+                .as_ref()
+                .map(|error| {
+                    WorkflowNormalizationDiagnosticView::basic(error.code, error.message.clone())
+                })
+                .unwrap_or_else(|| {
+                    WorkflowNormalizationDiagnosticView::basic(
+                        "UI_SOURCE_PENDING",
+                        "UI 工作流已接收，等待 ComfyUI schema 进行安全规范化。",
+                    )
+                });
             let mut recognition = WorkflowRecognitionService::recognize_bytes(&bytes, &[]);
             // The format is recognized, but semantic/API recognition has not
             // run until the source is normalized against a live schema.
@@ -1079,14 +1142,11 @@ impl WorkflowOnboardingService {
                 raw_sha256,
                 original_filename: safe_filename(&original_filename),
                 source_format: ComfyWorkflowInputFormat::Ui,
-                workflow_format_version: Some(ui_document.workflow_format_version),
-                frontend_version: ui_document.frontend_version,
+                workflow_format_version: ui_header.as_ref().map(|(version, _)| version.clone()),
+                frontend_version: ui_header.and_then(|(_, frontend)| frontend),
                 compatibility_context: None,
                 normalization_state: WorkflowNormalizationState::UiSourcePending,
-                normalization_diagnostics: vec![WorkflowNormalizationDiagnosticView::basic(
-                    "UI_SOURCE_PENDING",
-                    "UI 工作流已接收，等待 ComfyUI schema 进行安全规范化。",
-                )],
+                normalization_diagnostics: vec![pending_diagnostic],
                 ui_features,
                 nodes: Vec::new(),
                 manifest: WorkflowManifest {
@@ -1941,8 +2001,8 @@ impl WorkflowOnboardingService {
             let descriptors =
                 UiSerializationDescriptorSet::build(&schema, profile, compatibility.clone())
                     .map_err(|error| error.to_string())?;
-            let ui_document =
-                parse_ui_workflow(&initial.raw_bytes).map_err(|error| error.to_string())?;
+            let ui_document = parse_ui_workflow_value_with_descriptors(&source_value, &descriptors)
+                .map_err(|error| error.to_string())?;
             let feature_set = ui_document.features.with_schema(&ui_document, &descriptors);
             normalized_features = Some(feature_set.observations.clone());
             if let Some(observation) = feature_set.blocking_observation() {
@@ -4829,6 +4889,20 @@ pub fn detect_comfy_workflow_format(bytes: &[u8]) -> ComfyWorkflowInputFormat {
     match serde_json::from_slice::<Value>(bytes) {
         Ok(value) => detect_comfy_workflow_format_value(&value),
         Err(_) => ComfyWorkflowInputFormat::InvalidJson,
+    }
+}
+
+fn contains_proxy_widgets_evidence(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => {
+            object
+                .get("properties")
+                .and_then(Value::as_object)
+                .is_some_and(|properties| properties.contains_key("proxyWidgets"))
+                || object.values().any(contains_proxy_widgets_evidence)
+        }
+        Value::Array(values) => values.iter().any(contains_proxy_widgets_evidence),
+        _ => false,
     }
 }
 
@@ -7762,6 +7836,89 @@ outputs: []
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn legacy_missing_boundary_import_remains_one_pending_draft_until_schema_reanalysis() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("library");
+        let staging_root = directory.path().join("staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let adapter = Arc::new(StubComfyAdapter::offline());
+        let service = WorkflowOnboardingService::new(
+            source.clone(),
+            adapter.clone(),
+            Arc::new(WorkflowLibraryService::new(
+                source,
+                Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+                Arc::new(TestClock),
+            )),
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root,
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        );
+        let raw = serde_json::to_vec(&json!({
+            "version": 0.4,
+            "extra": {"frontendVersion": "1.42.14"},
+            "nodes": [{
+                "id": 9,
+                "type": "legacy-definition",
+                "mode": 0,
+                "inputs": [],
+                "outputs": [],
+                "properties": {"proxyWidgets": [["20", "prompt"]]},
+                "widgets_values": []
+            }],
+            "links": [],
+            "definitions": {"subgraphs": [{
+                "id": "legacy-definition",
+                "inputNode": {"id": -10},
+                "outputNode": {"id": -20},
+                "inputs": [{"id":"prompt-slot","name":"prompt","type":"STRING","linkIds":[1]}],
+                "outputs": [],
+                "nodes": [{
+                    "id": 20,
+                    "type": "Target",
+                    "mode": 0,
+                    "inputs": [{"name":"prompt","type":"STRING","widget":{"name":"prompt"},"link":1}],
+                    "outputs": [],
+                    "widgets_values": []
+                }],
+                "links": []
+            }]}
+        }))
+        .unwrap();
+
+        let imported = service
+            .import_bytes(raw.clone(), "legacy-boundary.json".to_owned(), None)
+            .await
+            .expect("historical boundary blocker should remain an inspectable draft");
+        assert_eq!(
+            imported.normalization_state,
+            WorkflowNormalizationState::UiSourcePending
+        );
+        assert_eq!(imported.raw_sha256, sha256(&raw));
+        assert_eq!(imported.workflow_format_version.as_deref(), Some("0.4"));
+        assert_eq!(imported.frontend_version.as_deref(), Some("1.42.14"));
+        assert_eq!(
+            imported.normalization_diagnostics[0].code,
+            "MISSING_SUBGRAPH_INPUT_BOUNDARY"
+        );
+
+        let reanalyzed = service.reanalyze_draft(&imported.draft_id).await.unwrap();
+        assert_eq!(reanalyzed.draft_id, imported.draft_id);
+        assert_eq!(reanalyzed.raw_sha256, imported.raw_sha256);
+        assert_eq!(adapter.object_info_calls(), 1);
+        assert_eq!(
+            reanalyzed.normalization_state,
+            WorkflowNormalizationState::UiSourcePending
+        );
     }
 
     #[tokio::test]
