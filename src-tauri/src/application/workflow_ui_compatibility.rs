@@ -1,6 +1,6 @@
 use crate::application::{
     workflow_recognition_schema::{RecognitionDeclaredType, RecognitionSchemaContext},
-    workflow_ui_serialization::SUPPORTED_FRONTEND_VERSION,
+    workflow_ui_serialization::{FrontendSerializationContract, SUPPORTED_FRONTEND_VERSION},
 };
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
@@ -29,6 +29,7 @@ pub struct HistoricalUiSerializationFingerprint {
     pub object_info_schema_fingerprint: String,
     pub schema_lineage: SchemaLineageEvidence,
     pub positional_widget_cursor_gap: bool,
+    pub trailing_null_widget_evidence: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -117,6 +118,7 @@ impl SubgraphBoundaryRepresentation {
 pub enum SchemaLineageStatus {
     Compatible,
     Mismatch,
+    Drift,
     Insufficient,
 }
 
@@ -125,6 +127,7 @@ impl SchemaLineageStatus {
         match self {
             Self::Compatible => "compatible",
             Self::Mismatch => "mismatch",
+            Self::Drift => "drift",
             Self::Insufficient => "insufficient",
         }
     }
@@ -136,27 +139,24 @@ pub struct SchemaLineageEvidence {
     pub missing_node_classes: Vec<String>,
     pub missing_input_slots: Vec<String>,
     pub dynamic_input_slots: Vec<String>,
+    pub drifted_input_slots: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UiCompatibilityProfileFamily {
-    CurrentContract,
-    LegacyWidgetSlotV0,
-    LegacyDynamicInputV0,
-    LegacySubgraphBoundaryProxyV0,
-    UnknownStructurallyVerified,
-    UnsupportedHistoricalFeature,
+pub enum SchemaSnapshotProvenance {
+    Paired,
+    LockedManifestMatch,
+    RecoveryUnpaired,
+    Unknown,
 }
 
-impl UiCompatibilityProfileFamily {
+impl SchemaSnapshotProvenance {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::CurrentContract => "CurrentContract",
-            Self::LegacyWidgetSlotV0 => "LegacyWidgetSlotV0",
-            Self::LegacyDynamicInputV0 => "LegacyDynamicInputV0",
-            Self::LegacySubgraphBoundaryProxyV0 => "LegacySubgraphBoundaryProxyV0",
-            Self::UnknownStructurallyVerified => "UnknownStructurallyVerified",
-            Self::UnsupportedHistoricalFeature => "UnsupportedHistoricalFeature",
+            Self::Paired => "PAIRED",
+            Self::LockedManifestMatch => "LOCKED_MANIFEST_MATCH",
+            Self::RecoveryUnpaired => "RECOVERY_UNPAIRED",
+            Self::Unknown => "UNKNOWN",
         }
     }
 }
@@ -168,6 +168,27 @@ pub enum UiCompatibilityProvenanceConfidence {
     StructurallyVerified,
     UnknownVersionStructurallyVerified,
     ProvenanceInsufficient,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SerializationEvidenceStatus {
+    ResolvedCurrent,
+    ResolvedHistorical,
+    Partial,
+    Unresolved,
+    Conflict,
+}
+
+impl SerializationEvidenceStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ResolvedCurrent => "RESOLVED_CURRENT",
+            Self::ResolvedHistorical => "RESOLVED_HISTORICAL",
+            Self::Partial => "PARTIAL",
+            Self::Unresolved => "UNRESOLVED",
+            Self::Conflict => "CONFLICT",
+        }
+    }
 }
 
 impl UiCompatibilityProvenanceConfidence {
@@ -205,25 +226,78 @@ impl UiCompatibilityImplementationStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedUiCompatibilityProfile {
-    pub family: UiCompatibilityProfileFamily,
+    pub required_contracts: BTreeSet<FrontendSerializationContract>,
+    pub serialization_evidence_status: SerializationEvidenceStatus,
     pub evidence: HistoricalUiSerializationFingerprint,
     pub provenance_confidence: UiCompatibilityProvenanceConfidence,
+    pub schema_provenance: SchemaSnapshotProvenance,
     pub implementation_status: UiCompatibilityImplementationStatus,
     pub diagnostics: Vec<String>,
 }
 
 impl ResolvedUiCompatibilityProfile {
     pub fn is_implemented(&self) -> bool {
-        self.implementation_status == UiCompatibilityImplementationStatus::Implemented
+        if self.implementation_status != UiCompatibilityImplementationStatus::Implemented {
+            return false;
+        }
+        match self.serialization_evidence_status {
+            SerializationEvidenceStatus::ResolvedCurrent => self.required_contracts.is_empty(),
+            SerializationEvidenceStatus::ResolvedHistorical => {
+                !self.required_contracts.is_empty()
+                    && self.required_contracts.iter().all(|contract| {
+                        matches!(
+                            contract,
+                            FrontendSerializationContract::LegacyWidgetSlotV0
+                                | FrontendSerializationContract::LegacyDynamicInputV0
+                        )
+                    })
+            }
+            SerializationEvidenceStatus::Partial
+            | SerializationEvidenceStatus::Unresolved
+            | SerializationEvidenceStatus::Conflict => false,
+        }
     }
 
     pub fn execution_supported(&self) -> bool {
         self.is_implemented()
+            && matches!(
+                self.serialization_evidence_status,
+                SerializationEvidenceStatus::ResolvedCurrent
+                    | SerializationEvidenceStatus::ResolvedHistorical
+            )
             && self.evidence.schema_lineage.status == SchemaLineageStatus::Compatible
+            && self.provenance_confidence
+                != UiCompatibilityProvenanceConfidence::ProvenanceInsufficient
+            && match self.schema_provenance {
+                SchemaSnapshotProvenance::Paired
+                | SchemaSnapshotProvenance::LockedManifestMatch => true,
+                SchemaSnapshotProvenance::Unknown => {
+                    self.serialization_evidence_status
+                        == SerializationEvidenceStatus::ResolvedCurrent
+                        && self.required_contracts.is_empty()
+                        && self.provenance_confidence
+                            == UiCompatibilityProvenanceConfidence::VerifiedExactVersion
+                }
+                SchemaSnapshotProvenance::RecoveryUnpaired => false,
+            }
     }
 
     pub fn primary_diagnostic(&self) -> Option<&str> {
         self.diagnostics.first().map(String::as_str)
+    }
+
+    pub fn contracts_for_normalization(&self) -> Option<BTreeSet<FrontendSerializationContract>> {
+        match self.serialization_evidence_status {
+            SerializationEvidenceStatus::ResolvedCurrent if self.required_contracts.is_empty() => {
+                Some(BTreeSet::from([FrontendSerializationContract::Current]))
+            }
+            SerializationEvidenceStatus::ResolvedHistorical
+                if !self.required_contracts.is_empty() =>
+            {
+                Some(self.required_contracts.clone())
+            }
+            _ => None,
+        }
     }
 }
 
@@ -231,6 +305,7 @@ pub struct UiCompatibilityResolutionInput<'a> {
     pub workflow_format_version: &'a str,
     pub frontend_version: Option<&'a str>,
     pub fingerprint: &'a HistoricalUiSerializationFingerprint,
+    pub schema_provenance: SchemaSnapshotProvenance,
 }
 
 /// The only historical serialization profile selection authority.
@@ -243,81 +318,184 @@ impl UiCompatibilityProfileResolver {
             .frontend_version
             .filter(|value| !value.trim().is_empty());
         let exact_current_version = version == Some(SUPPORTED_FRONTEND_VERSION);
-        let historical_family = if fingerprint.has_legacy_subgraph_boundary_evidence() {
-            Some(UiCompatibilityProfileFamily::LegacySubgraphBoundaryProxyV0)
-        } else if fingerprint.has_legacy_dynamic_input_evidence() {
-            Some(UiCompatibilityProfileFamily::LegacyDynamicInputV0)
-        } else if fingerprint.has_legacy_widget_slot_evidence() {
-            Some(UiCompatibilityProfileFamily::LegacyWidgetSlotV0)
+        let mut required_contracts = BTreeSet::new();
+        if fingerprint.has_legacy_subgraph_boundary_evidence() {
+            required_contracts.insert(FrontendSerializationContract::LegacySubgraphBoundaryProxyV0);
+        }
+        if fingerprint.has_legacy_dynamic_input_evidence() {
+            required_contracts.insert(FrontendSerializationContract::LegacyDynamicInputV0);
+        }
+        if fingerprint.has_legacy_widget_slot_evidence() {
+            required_contracts.insert(FrontendSerializationContract::LegacyWidgetSlotV0);
+        }
+
+        let confidence = if input.workflow_format_version.trim().is_empty() {
+            UiCompatibilityProvenanceConfidence::ProvenanceInsufficient
         } else {
-            None
+            confidence_for(version)
         };
-
-        if historical_family.is_some() && exact_current_version {
-            return conflict(fingerprint);
-        }
-
-        if let Some(family) = historical_family {
-            if fingerprint.schema_lineage.status != SchemaLineageStatus::Compatible {
-                return detected_profile_with_status(
-                    fingerprint,
-                    family,
-                    confidence_for(version),
-                    UiCompatibilityImplementationStatus::EvidenceInsufficient,
-                    "object_info_schema_provenance_mismatch",
-                );
-            }
-            return detected_profile(fingerprint, family, confidence_for(version));
-        }
-
-        if fingerprint.schema_lineage.status == SchemaLineageStatus::Mismatch {
-            return unsupported(
+        let has_historical_contract = !required_contracts.is_empty();
+        let serialization_evidence_status = if has_historical_contract && exact_current_version {
+            SerializationEvidenceStatus::Conflict
+        } else if !exact_current_version
+            && fingerprint.dynamic_input_evidence
+            && !fingerprint.has_legacy_dynamic_input_evidence()
+        {
+            SerializationEvidenceStatus::Unresolved
+        } else if !exact_current_version && fingerprint.trailing_null_widget_evidence {
+            SerializationEvidenceStatus::Partial
+        } else if has_historical_contract {
+            SerializationEvidenceStatus::ResolvedHistorical
+        } else if exact_current_version && fingerprint.is_current_contract_compatible() {
+            SerializationEvidenceStatus::ResolvedCurrent
+        } else {
+            SerializationEvidenceStatus::Unresolved
+        };
+        if has_historical_contract && exact_current_version {
+            return resolved(
                 fingerprint,
-                UiCompatibilityProvenanceConfidence::ProvenanceInsufficient,
+                required_contracts,
+                serialization_evidence_status,
+                confidence,
+                input.schema_provenance,
                 UiCompatibilityImplementationStatus::EvidenceInsufficient,
-                "object_info_schema_provenance_mismatch",
+                "provenance_fingerprint_conflict",
+            );
+        }
+
+        if !exact_current_version
+            && fingerprint.dynamic_input_evidence
+            && !fingerprint.has_legacy_dynamic_input_evidence()
+        {
+            return resolved(
+                fingerprint,
+                required_contracts,
+                serialization_evidence_status,
+                confidence,
+                input.schema_provenance,
+                UiCompatibilityImplementationStatus::EvidenceInsufficient,
+                "dynamic_serialization_evidence_unresolved",
+            );
+        }
+
+        if serialization_evidence_status == SerializationEvidenceStatus::Partial {
+            return resolved(
+                fingerprint,
+                required_contracts,
+                serialization_evidence_status,
+                confidence,
+                input.schema_provenance,
+                UiCompatibilityImplementationStatus::EvidenceInsufficient,
+                "serialization_evidence_partial",
+            );
+        }
+
+        if fingerprint.schema_lineage.status != SchemaLineageStatus::Compatible {
+            let diagnostic = match fingerprint.schema_lineage.status {
+                SchemaLineageStatus::Drift => "object_info_schema_lineage_drift",
+                SchemaLineageStatus::Mismatch => "object_info_schema_lineage_mismatch",
+                SchemaLineageStatus::Insufficient => "object_info_schema_lineage_insufficient",
+                SchemaLineageStatus::Compatible => unreachable!("handled above"),
+            };
+            return resolved(
+                fingerprint,
+                required_contracts,
+                serialization_evidence_status,
+                confidence,
+                input.schema_provenance,
+                UiCompatibilityImplementationStatus::EvidenceInsufficient,
+                diagnostic,
             );
         }
 
         if !fingerprint.is_structurally_known() {
-            return unsupported(
+            return resolved(
                 fingerprint,
+                required_contracts,
+                serialization_evidence_status,
                 UiCompatibilityProvenanceConfidence::ProvenanceInsufficient,
+                input.schema_provenance,
                 UiCompatibilityImplementationStatus::Unknown,
                 "historical_serialization_fingerprint_unknown",
             );
         }
 
-        if exact_current_version && fingerprint.is_current_contract_compatible() {
-            return ResolvedUiCompatibilityProfile {
-                family: UiCompatibilityProfileFamily::CurrentContract,
-                evidence: fingerprint.clone(),
-                provenance_confidence: UiCompatibilityProvenanceConfidence::VerifiedExactVersion,
-                implementation_status: UiCompatibilityImplementationStatus::Implemented,
-                diagnostics: Vec::new(),
-            };
-        }
-
-        if version.is_none() && fingerprint.is_current_contract_compatible() {
-            return ResolvedUiCompatibilityProfile {
-                family: UiCompatibilityProfileFamily::UnknownStructurallyVerified,
-                evidence: fingerprint.clone(),
-                provenance_confidence:
+        if !has_historical_contract {
+            if serialization_evidence_status == SerializationEvidenceStatus::ResolvedCurrent {
+                return ResolvedUiCompatibilityProfile {
+                    required_contracts,
+                    serialization_evidence_status,
+                    evidence: fingerprint.clone(),
+                    provenance_confidence: confidence,
+                    schema_provenance: input.schema_provenance,
+                    implementation_status: UiCompatibilityImplementationStatus::Implemented,
+                    diagnostics: Vec::new(),
+                };
+            }
+            if version.is_none() && fingerprint.is_current_contract_compatible() {
+                return resolved(
+                    fingerprint,
+                    required_contracts,
+                    SerializationEvidenceStatus::Unresolved,
                     UiCompatibilityProvenanceConfidence::UnknownVersionStructurallyVerified,
-                implementation_status: UiCompatibilityImplementationStatus::StructurallyVerified,
-                diagnostics: vec!["frontend_provenance_insufficient".to_owned()],
-            };
+                    input.schema_provenance,
+                    UiCompatibilityImplementationStatus::StructurallyVerified,
+                    "frontend_provenance_insufficient",
+                );
+            }
+            return resolved(
+                fingerprint,
+                required_contracts,
+                serialization_evidence_status,
+                confidence,
+                input.schema_provenance,
+                UiCompatibilityImplementationStatus::Unknown,
+                "frontend_provenance_insufficient",
+            );
         }
 
-        unsupported(
+        let provenance_acceptable = match input.schema_provenance {
+            SchemaSnapshotProvenance::Paired | SchemaSnapshotProvenance::LockedManifestMatch => {
+                true
+            }
+            SchemaSnapshotProvenance::RecoveryUnpaired => false,
+            SchemaSnapshotProvenance::Unknown => false,
+        };
+        if !provenance_acceptable {
+            return resolved(
+                fingerprint,
+                required_contracts,
+                serialization_evidence_status,
+                confidence,
+                input.schema_provenance,
+                UiCompatibilityImplementationStatus::EvidenceInsufficient,
+                "schema_snapshot_provenance_insufficient",
+            );
+        }
+
+        let missing_implementation = required_contracts.iter().any(|contract| {
+            !matches!(
+                contract,
+                FrontendSerializationContract::LegacyWidgetSlotV0
+                    | FrontendSerializationContract::LegacyDynamicInputV0
+            )
+        });
+        resolved(
             fingerprint,
-            if input.workflow_format_version.trim().is_empty() {
-                UiCompatibilityProvenanceConfidence::ProvenanceInsufficient
+            required_contracts,
+            serialization_evidence_status,
+            confidence,
+            input.schema_provenance,
+            if missing_implementation {
+                UiCompatibilityImplementationStatus::DetectedButUnsupported
             } else {
-                confidence_for(version)
+                UiCompatibilityImplementationStatus::Implemented
             },
-            UiCompatibilityImplementationStatus::Unknown,
-            "frontend_provenance_insufficient",
+            if missing_implementation {
+                "historical_profile_detected_but_not_implemented"
+            } else {
+                "historical_contracts_implemented"
+            },
         )
     }
 }
@@ -426,6 +604,7 @@ impl HistoricalUiSerializationFingerprint {
             object_info_schema_fingerprint: schema_fingerprint.into(),
             schema_lineage,
             positional_widget_cursor_gap: evidence.positional_widget_cursor_gap,
+            trailing_null_widget_evidence: evidence.trailing_null_widget_evidence,
         })
     }
 
@@ -482,6 +661,7 @@ struct RawSerializationEvidence {
     subgraph_boundary_representation: SubgraphBoundaryRepresentation,
     proxy_widgets_representation: bool,
     positional_widget_cursor_gap: bool,
+    trailing_null_widget_evidence: bool,
     subgraph_definition_ids: BTreeSet<String>,
     nodes: Vec<RawNodeEvidence>,
 }
@@ -489,7 +669,11 @@ struct RawSerializationEvidence {
 #[derive(Clone, Debug)]
 struct RawNodeEvidence {
     class_type: String,
+    source_revision: Option<String>,
     ui_only: bool,
+    positional_widgets_present: bool,
+    named_widgets_present: bool,
+    positional_widget_values: Vec<Value>,
     inputs: Vec<RawInputEvidence>,
 }
 
@@ -566,18 +750,29 @@ fn collect_node_evidence(node: &Map<String, Value>, evidence: &mut RawSerializat
         .and_then(Value::as_object)
         .is_some_and(|properties| properties.contains_key("proxyWidgets"));
 
-    let positional_count = node
+    let positional_widget_values = node
         .get("widgets_values")
         .and_then(Value::as_array)
-        .map_or(0, Vec::len);
+        .cloned()
+        .unwrap_or_default();
+    let positional_count = positional_widget_values.len();
+    evidence.trailing_null_widget_evidence |=
+        positional_widget_values.last().is_some_and(Value::is_null);
     let node_named_widgets = node
         .get("widgets_values_named")
         .is_some_and(Value::is_object);
+    let source_revision = node
+        .get("properties")
+        .and_then(Value::as_object)
+        .and_then(|properties| properties.get("ver"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     evidence.positional_widgets_present |= positional_count > 0;
     evidence.named_widgets_present |= node_named_widgets;
 
     let mut widget_input_count = 0;
     let mut node_has_control = false;
+    let mut node_has_dynamic_input = false;
     let mut inputs = Vec::new();
     if let Some(raw_inputs) = node.get("inputs").and_then(Value::as_array) {
         for input in raw_inputs {
@@ -607,6 +802,7 @@ fn collect_node_evidence(node: &Map<String, Value>, evidence: &mut RawSerializat
                     .as_deref()
                     .is_some_and(|value| value.to_ascii_uppercase().contains("DYNAMIC"));
             evidence.dynamic_input_evidence |= dynamic;
+            node_has_dynamic_input |= dynamic;
             evidence.conditional_input_evidence |= input.contains_key("conditional")
                 || input.contains_key("lazy")
                 || input.contains_key("rawLink");
@@ -623,10 +819,15 @@ fn collect_node_evidence(node: &Map<String, Value>, evidence: &mut RawSerializat
     evidence.positional_widget_cursor_gap |= positional_count > widget_input_count
         && !node_has_control
         && !node_named_widgets
-        && !ui_only;
+        && !ui_only
+        && !node_has_dynamic_input;
     evidence.nodes.push(RawNodeEvidence {
         class_type,
+        source_revision,
         ui_only,
+        positional_widgets_present: positional_count > 0,
+        named_widgets_present: node_named_widgets,
+        positional_widget_values,
         inputs,
     });
 }
@@ -643,11 +844,13 @@ fn schema_lineage(
             missing_node_classes: Vec::new(),
             missing_input_slots: Vec::new(),
             dynamic_input_slots: Vec::new(),
+            drifted_input_slots: Vec::new(),
         };
     }
     let mut missing_node_classes = BTreeSet::new();
     let mut missing_input_slots = BTreeSet::new();
     let mut dynamic_input_slots = BTreeSet::new();
+    let mut drifted_input_slots = BTreeSet::new();
     for node in nodes {
         if node.ui_only || subgraph_definition_ids.contains(&node.class_type) {
             continue;
@@ -656,6 +859,38 @@ fn schema_lineage(
             missing_node_classes.insert(node.class_type.clone());
             continue;
         };
+        if node.source_revision.as_deref().is_some_and(is_git_revision) {
+            let unrepresented_inputs = node_schema
+                .ordered_inputs
+                .iter()
+                .filter(|name| !node.inputs.iter().any(|input| input.name == **name))
+                .collect::<Vec<_>>();
+            if let Some((input_name, input_schema)) = node
+                .positional_widget_values
+                .len()
+                .checked_sub(1)
+                .and_then(|index| unrepresented_inputs.get(index))
+                .and_then(|name| {
+                    node_schema
+                        .inputs
+                        .get(name.as_str())
+                        .map(|input| (*name, input))
+                })
+            {
+                let trailing_value = node.positional_widget_values.last();
+                let default_is_declared = input_schema
+                    .default_value
+                    .as_ref()
+                    .is_some_and(|value| input_schema.enum_values.contains(value));
+                if !input_schema.required
+                    && input_schema.declared_type == RecognitionDeclaredType::Enum
+                    && default_is_declared
+                    && trailing_value.is_some_and(|value| !input_schema.enum_values.contains(value))
+                {
+                    drifted_input_slots.insert(format!("{}:{}", node.class_type, input_name));
+                }
+            }
+        }
         for input in &node.inputs {
             let base_name = input.name.split('.').next().unwrap_or(&input.name);
             if input.name.is_empty()
@@ -668,11 +903,6 @@ fn schema_lineage(
             {
                 continue;
             }
-            let dynamic = input.name.contains('.')
-                || input
-                    .raw_type
-                    .as_deref()
-                    .is_some_and(|value| value.to_ascii_uppercase().contains("DYNAMIC"));
             let schema_declares_dynamic_base =
                 node_schema.inputs.get(base_name).is_some_and(|base| {
                     base.dynamic_prefix.is_some() || !base.dynamic_names.is_empty()
@@ -683,17 +913,53 @@ fn schema_lineage(
                         base.declared_type != RecognitionDeclaredType::DynamicCombo
                             || current_control_evidence
                     });
-            if dynamic && (schema_declares_dynamic_base || schema_declares_conditional_base) {
+            let raw_dynamic_evidence = input
+                .raw_type
+                .as_deref()
+                .is_some_and(|value| value.to_ascii_uppercase().contains("DYNAMIC"));
+            let positional_combo_socket = input.name.contains('.')
+                && node.positional_widgets_present
+                && !node.named_widgets_present
+                && node_schema.inputs.get(base_name).is_some_and(|base| {
+                    base.declared_type == RecognitionDeclaredType::DynamicCombo
+                })
+                && node_schema
+                    .conditional_inputs
+                    .get(base_name)
+                    .is_some_and(|options| !options.is_empty());
+            let dynamic = raw_dynamic_evidence
+                || (input.name.contains('.')
+                    && (schema_declares_dynamic_base
+                        || schema_declares_conditional_base
+                        || positional_combo_socket));
+            let incomplete_combo_base = node_schema.inputs.get(base_name).is_some_and(|base| {
+                base.declared_type == RecognitionDeclaredType::DynamicCombo
+                    && base.dynamic_prefix.is_none()
+                    && base.dynamic_names.is_empty()
+            }) && !node_schema
+                .conditional_inputs
+                .get(base_name)
+                .is_some_and(|options| !options.is_empty());
+            let missing_dynamic_base = !node_schema.inputs.contains_key(base_name);
+            if dynamic && incomplete_combo_base {
+                missing_input_slots.insert(format!("{}:{}", node.class_type, input.name));
+            } else if dynamic && missing_dynamic_base {
+                let evidence = format!("{}:{}", node.class_type, input.name);
+                dynamic_input_slots.insert(evidence.clone());
+                missing_input_slots.insert(evidence);
+            } else if dynamic && (schema_declares_dynamic_base || schema_declares_conditional_base)
+            {
                 continue;
-            }
-            if dynamic {
+            } else if dynamic {
                 dynamic_input_slots.insert(format!("{}:{}", node.class_type, input.name));
             } else if input.linked {
                 missing_input_slots.insert(format!("{}:{}", node.class_type, input.name));
             }
         }
     }
-    let status = if missing_node_classes.is_empty() && missing_input_slots.is_empty() {
+    let status = if !drifted_input_slots.is_empty() {
+        SchemaLineageStatus::Drift
+    } else if missing_node_classes.is_empty() && missing_input_slots.is_empty() {
         SchemaLineageStatus::Compatible
     } else {
         SchemaLineageStatus::Mismatch
@@ -703,70 +969,31 @@ fn schema_lineage(
         missing_node_classes: missing_node_classes.into_iter().collect(),
         missing_input_slots: missing_input_slots.into_iter().collect(),
         dynamic_input_slots: dynamic_input_slots.into_iter().collect(),
+        drifted_input_slots: drifted_input_slots.into_iter().collect(),
     }
 }
 
-fn detected_profile(
-    fingerprint: &HistoricalUiSerializationFingerprint,
-    family: UiCompatibilityProfileFamily,
-    confidence: UiCompatibilityProvenanceConfidence,
-) -> ResolvedUiCompatibilityProfile {
-    if family == UiCompatibilityProfileFamily::LegacyWidgetSlotV0 {
-        return detected_profile_with_status(
-            fingerprint,
-            family,
-            confidence,
-            UiCompatibilityImplementationStatus::Implemented,
-            "legacy_widget_slot_v0_implemented",
-        );
-    }
-    detected_profile_with_status(
-        fingerprint,
-        family,
-        confidence,
-        UiCompatibilityImplementationStatus::DetectedButUnsupported,
-        "historical_profile_detected_but_not_implemented",
-    )
+fn is_git_revision(revision: &str) -> bool {
+    revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn detected_profile_with_status(
+fn resolved(
     fingerprint: &HistoricalUiSerializationFingerprint,
-    family: UiCompatibilityProfileFamily,
+    required_contracts: BTreeSet<FrontendSerializationContract>,
+    serialization_evidence_status: SerializationEvidenceStatus,
     confidence: UiCompatibilityProvenanceConfidence,
+    schema_provenance: SchemaSnapshotProvenance,
     implementation_status: UiCompatibilityImplementationStatus,
     diagnostic: &'static str,
 ) -> ResolvedUiCompatibilityProfile {
     ResolvedUiCompatibilityProfile {
-        family,
+        required_contracts,
+        serialization_evidence_status,
         evidence: fingerprint.clone(),
         provenance_confidence: confidence,
+        schema_provenance,
         implementation_status,
         diagnostics: vec![diagnostic.to_owned()],
-    }
-}
-
-fn unsupported(
-    fingerprint: &HistoricalUiSerializationFingerprint,
-    confidence: UiCompatibilityProvenanceConfidence,
-    implementation_status: UiCompatibilityImplementationStatus,
-    diagnostic: &'static str,
-) -> ResolvedUiCompatibilityProfile {
-    ResolvedUiCompatibilityProfile {
-        family: UiCompatibilityProfileFamily::UnsupportedHistoricalFeature,
-        evidence: fingerprint.clone(),
-        provenance_confidence: confidence,
-        implementation_status,
-        diagnostics: vec![diagnostic.to_owned()],
-    }
-}
-
-fn conflict(fingerprint: &HistoricalUiSerializationFingerprint) -> ResolvedUiCompatibilityProfile {
-    ResolvedUiCompatibilityProfile {
-        family: UiCompatibilityProfileFamily::UnsupportedHistoricalFeature,
-        evidence: fingerprint.clone(),
-        provenance_confidence: UiCompatibilityProvenanceConfidence::ProvenanceInsufficient,
-        implementation_status: UiCompatibilityImplementationStatus::EvidenceInsufficient,
-        diagnostics: vec!["provenance_fingerprint_conflict".to_owned()],
     }
 }
 
@@ -843,6 +1070,14 @@ mod tests {
     }
 
     fn resolve(source: Value, schema_value: Value) -> ResolvedUiCompatibilityProfile {
+        resolve_with_provenance(source, schema_value, SchemaSnapshotProvenance::Paired)
+    }
+
+    fn resolve_with_provenance(
+        source: Value,
+        schema_value: Value,
+        schema_provenance: SchemaSnapshotProvenance,
+    ) -> ResolvedUiCompatibilityProfile {
         let schema = schema(schema_value);
         let fingerprint = HistoricalUiSerializationFingerprint::from_source_value(
             &source,
@@ -854,7 +1089,15 @@ mod tests {
             workflow_format_version: fingerprint.workflow_format_version.as_deref().unwrap_or(""),
             frontend_version: fingerprint.frontend_version.as_deref(),
             fingerprint: &fingerprint,
+            schema_provenance,
         })
+    }
+
+    fn requires(
+        profile: &ResolvedUiCompatibilityProfile,
+        contract: FrontendSerializationContract,
+    ) -> bool {
+        profile.required_contracts.contains(&contract)
     }
 
     fn base_node(class_type: &str) -> Value {
@@ -871,8 +1114,55 @@ mod tests {
         json!({class_type: {"input": {"required": {}}, "output": []}})
     }
 
+    fn composed_workflow(dynamic_first: bool) -> Value {
+        let widget = json!({
+            "id": 1,
+            "type": "NodeAlpha",
+            "inputs": [],
+            "outputs": [],
+            "widgets_values": [7]
+        });
+        let dynamic = json!({
+            "id": 2,
+            "type": "NodeBeta",
+            "inputs": [{"name": "select.item", "type": "COMFY_DYNAMICCOMBO_V0", "link": 1}],
+            "outputs": [],
+            "widgets_values": ["1"]
+        });
+        let nodes = if dynamic_first {
+            vec![dynamic, widget]
+        } else {
+            vec![widget, dynamic]
+        };
+        json!({
+            "version": 0.4,
+            "extra": {"frontendVersion": "1.43.1"},
+            "nodes": nodes,
+            "links": [[1, 3, 0, 2, 0]]
+        })
+    }
+
+    fn composed_schema() -> Value {
+        json!({
+            "NodeAlpha": {
+                "input": {"required": {"value": ["INT", {}]}},
+                "output": []
+            },
+            "NodeBeta": {
+                "input": {"required": {"select": ["COMFY_DYNAMICCOMBO_V3", {
+                    "options": [{"key": "1", "inputs": {"required": {"item": ["IMAGE", {}]}}}]
+                }]}},
+                "output": []
+            }
+        })
+    }
+
+    fn composed_profile(dynamic_first: bool) -> ResolvedUiCompatibilityProfile {
+        resolve(composed_workflow(dynamic_first), composed_schema())
+    }
+
     #[test]
-    fn current_fingerprint_resolves_current_profile() {
+    fn empty_contract_set_with_resolved_current_evidence_selects_current() {
         let mut node = base_node("Target");
         node["widgets_values"] = json!([1]);
         node["widgets_values_named"] = json!({"value": 1});
@@ -890,9 +1180,15 @@ mod tests {
             }),
             json!({"Target": {"input": {"required": {"value": ["INT", {}]}}}}),
         );
+        assert!(profile.required_contracts.is_empty());
         assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::CurrentContract
+            profile.serialization_evidence_status,
+            SerializationEvidenceStatus::ResolvedCurrent
+        );
+        assert!(profile.execution_supported());
+        assert_eq!(
+            profile.contracts_for_normalization(),
+            Some(BTreeSet::from([FrontendSerializationContract::Current]))
         );
         assert_eq!(
             profile.implementation_status,
@@ -908,10 +1204,10 @@ mod tests {
             json!({"version": 0.4, "nodes": [node], "links": []}),
             base_schema("Target"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::LegacyWidgetSlotV0
-        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyWidgetSlotV0
+        ));
         assert_eq!(
             profile.implementation_status,
             UiCompatibilityImplementationStatus::Implemented
@@ -926,14 +1222,119 @@ mod tests {
             json!({"version": 0.4, "nodes": [node], "links": []}),
             base_schema("Target"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::LegacyWidgetSlotV0
-        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyWidgetSlotV0
+        ));
         assert_eq!(
             profile.provenance_confidence,
             UiCompatibilityProvenanceConfidence::UnknownVersionStructurallyVerified
         );
+    }
+
+    #[test]
+    fn locked_manifest_schema_does_not_override_proven_schema_lineage_drift() {
+        // The revision represents a verified older node implementation that predates
+        // `added_option`; the locked manifest independently supplies the newer schema.
+        let node = json!({
+            "id": 1,
+            "type": "NodeAlpha",
+            "properties": {"ver": "0123456789abcdef0123456789abcdef01234567"},
+            "inputs": [],
+            "outputs": [],
+            "widgets_values": [""]
+        });
+        let profile = resolve_with_provenance(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.45.15"},
+                "nodes": [node],
+                "links": []
+            }),
+            json!({
+                "NodeAlpha": {
+                    "input": {
+                        "required": {},
+                        "optional": {
+                            "added_option": ["COMBO", {
+                                "default": "none",
+                                "options": ["none", "model"]
+                            }]
+                        }
+                    },
+                    "input_order": {"required": [], "optional": ["added_option"]},
+                    "output": []
+                }
+            }),
+            SchemaSnapshotProvenance::LockedManifestMatch,
+        );
+
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyWidgetSlotV0
+        ));
+        assert_eq!(
+            profile.schema_provenance,
+            SchemaSnapshotProvenance::LockedManifestMatch
+        );
+        assert_eq!(profile.evidence.schema_lineage.status.as_str(), "drift");
+        assert!(!profile.execution_supported());
+    }
+
+    #[test]
+    fn empty_contract_set_with_unresolved_serialization_evidence_fails_closed() {
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.45.15"},
+                "nodes": [{
+                    "id": 1,
+                    "type": "DynamicNode",
+                    "inputs": [{"name": "select.item", "type": "IMAGE", "link": 1}],
+                    "outputs": [],
+                    "widgets_values": ["1"]
+                }],
+                "links": [[1, 2, 0, 1, 0]]
+            }),
+            json!({
+                "DynamicNode": {
+                    "input": {"required": {"select": ["COMFY_DYNAMICCOMBO_V3", {}]}},
+                    "output": []
+                }
+            }),
+        );
+
+        assert!(profile.required_contracts.is_empty());
+        assert_eq!(
+            profile.serialization_evidence_status,
+            SerializationEvidenceStatus::Unresolved
+        );
+        assert!(!profile.execution_supported());
+    }
+
+    #[test]
+    fn trailing_null_widget_evidence_stays_partial_and_fails_closed() {
+        let mut node = base_node("Target");
+        node["widgets_values"] = json!([true, 6, "fixed", 1, null]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.42.14"},
+                "nodes": [node],
+                "links": []
+            }),
+            base_schema("Target"),
+        );
+
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyWidgetSlotV0
+        ));
+        assert_eq!(
+            profile.serialization_evidence_status,
+            SerializationEvidenceStatus::Partial
+        );
+        assert!(!profile.execution_supported());
     }
 
     #[test]
@@ -948,10 +1349,47 @@ mod tests {
             json!({"version": 0.4, "extra": {"frontendVersion": "1.43.1"}, "nodes": [node], "links": [[1, 2, 0, 1, 0]]}),
             base_schema("DynamicNode"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::LegacyDynamicInputV0
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyDynamicInputV0
+        ));
+    }
+
+    #[test]
+    fn current_version_with_schema_declared_dynamic_socket_resolves_current_contract() {
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.52.7"},
+                "nodes": [{
+                    "id": 1,
+                    "type": "DynamicNode",
+                    "inputs": [{"name": "items", "type": "COMFY_DYNAMICCOMBO_V3", "link": 1}],
+                    "outputs": [],
+                    "widgets_values": []
+                }],
+                "links": [[1, 2, 0, 1, 0]]
+            }),
+            json!({
+                "DynamicNode": {
+                    "input": {"required": {"items": ["COMFY_DYNAMICCOMBO_V3", {}]}},
+                    "output": []
+                }
+            }),
         );
+
+        assert!(profile.evidence.dynamic_input_evidence);
+        assert!(profile
+            .evidence
+            .schema_lineage
+            .dynamic_input_slots
+            .is_empty());
+        assert_eq!(profile.required_contracts, BTreeSet::new());
+        assert_eq!(
+            profile.serialization_evidence_status,
+            SerializationEvidenceStatus::ResolvedCurrent
+        );
+        assert!(profile.execution_supported());
     }
 
     #[test]
@@ -981,10 +1419,10 @@ mod tests {
             }),
             base_schema("subgraph"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::LegacySubgraphBoundaryProxyV0
-        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacySubgraphBoundaryProxyV0
+        ));
     }
 
     #[test]
@@ -997,10 +1435,7 @@ mod tests {
             }),
             base_schema("Target"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::UnsupportedHistoricalFeature
-        );
+        assert!(profile.required_contracts.is_empty());
         assert_eq!(
             profile.implementation_status,
             UiCompatibilityImplementationStatus::Unknown
@@ -1019,17 +1454,14 @@ mod tests {
             json!({"version": 0.4, "nodes": [node], "links": [[1, 2, 0, 1, 0]]}),
             base_schema("Target"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::UnsupportedHistoricalFeature
-        );
+        assert!(profile.required_contracts.is_empty());
         assert_eq!(
             profile.implementation_status,
             UiCompatibilityImplementationStatus::EvidenceInsufficient
         );
         assert_eq!(
             profile.primary_diagnostic(),
-            Some("object_info_schema_provenance_mismatch")
+            Some("object_info_schema_lineage_mismatch")
         );
     }
 
@@ -1067,10 +1499,10 @@ mod tests {
             }),
             base_schema("Target"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::LegacySubgraphBoundaryProxyV0
-        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacySubgraphBoundaryProxyV0
+        ));
         assert_eq!(
             profile.evidence.schema_lineage.status,
             SchemaLineageStatus::Mismatch
@@ -1083,7 +1515,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_dynamic_profile_does_not_hide_unrelated_schema_mismatch() {
+    fn detected_contract_does_not_override_schema_lineage_mismatch() {
         let mut node = base_node("DynamicNode");
         node["inputs"] = json!([
             {
@@ -1093,12 +1525,62 @@ mod tests {
             },
             {"name": "unrelated", "type": "INT", "link": 2}
         ]);
-        let profile = resolve(
+        let profile = resolve_with_provenance(
             json!({
                 "version": 0.4,
                 "extra": {"frontendVersion": "1.43.1"},
                 "nodes": [node],
                 "links": [[1, 1, 0, 1, 0], [2, 1, 0, 1, 1]]
+            }),
+            json!({
+                "DynamicNode": {
+                    "input": {
+                        "required": {
+                            "values": ["COMFY_DYNAMICCOMBO_V3", {
+                                "options": [{
+                                    "key": "1",
+                                    "inputs": {
+                                        "required": {"item": ["IMAGE", {}]}
+                                    }
+                                }]
+                            }]
+                        }
+                    },
+                    "output": []
+                }
+            }),
+            SchemaSnapshotProvenance::LockedManifestMatch,
+        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyDynamicInputV0
+        ));
+        assert_eq!(
+            profile.evidence.schema_lineage.status,
+            SchemaLineageStatus::Mismatch
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::EvidenceInsufficient
+        );
+        assert!(!profile.execution_supported());
+    }
+
+    #[test]
+    fn missing_dynamic_schema_contract_is_not_classified_as_legacy_dynamic() {
+        let mut node = base_node("DynamicNode");
+        node["widgets_values"] = json!(["1"]);
+        node["inputs"] = json!([{
+            "name": "values.item",
+            "type": "IMAGE",
+            "link": 1
+        }]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.43.1"},
+                "nodes": [node],
+                "links": [[1, 1, 0, 1, 0]]
             }),
             json!({
                 "DynamicNode": {
@@ -1111,10 +1593,7 @@ mod tests {
                 }
             }),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::LegacyDynamicInputV0
-        );
+        assert!(profile.required_contracts.is_empty());
         assert_eq!(
             profile.evidence.schema_lineage.status,
             SchemaLineageStatus::Mismatch
@@ -1124,6 +1603,97 @@ mod tests {
             UiCompatibilityImplementationStatus::EvidenceInsufficient
         );
         assert!(!profile.execution_supported());
+    }
+
+    #[test]
+    fn positional_dynamic_combo_schema_and_serialized_member_select_legacy_profile() {
+        let mut node = base_node("DynamicNode");
+        node["widgets_values"] = json!(["1"]);
+        node["inputs"] = json!([{
+            "name": "values.item",
+            "type": "IMAGE",
+            "link": 1
+        }]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.43.1"},
+                "nodes": [node],
+                "links": [[1, 1, 0, 1, 0]]
+            }),
+            json!({
+                "DynamicNode": {
+                    "input": {
+                        "required": {
+                            "values": ["COMFY_DYNAMICCOMBO_V3", {
+                                "options": [{
+                                    "key": "1",
+                                    "inputs": {"required": {"item": ["IMAGE", {}]}}
+                                }]
+                            }]
+                        }
+                    },
+                    "output": []
+                }
+            }),
+        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyDynamicInputV0
+        ));
+        assert_eq!(
+            profile.evidence.schema_lineage.status,
+            SchemaLineageStatus::Compatible
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::Implemented
+        );
+    }
+
+    #[test]
+    fn unknown_version_positional_dynamic_combo_resolves_from_fingerprint() {
+        let mut node = base_node("DynamicNode");
+        node["widgets_values"] = json!(["1"]);
+        node["inputs"] = json!([{
+            "name": "values.item",
+            "type": "IMAGE",
+            "link": 1
+        }]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "nodes": [node],
+                "links": [[1, 1, 0, 1, 0]]
+            }),
+            json!({
+                "DynamicNode": {
+                    "input": {
+                        "required": {
+                            "values": ["COMFY_DYNAMICCOMBO_V3", {
+                                "options": [{
+                                    "key": "1",
+                                    "inputs": {"required": {"item": ["IMAGE", {}]}}
+                                }]
+                            }]
+                        }
+                    },
+                    "output": []
+                }
+            }),
+        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyDynamicInputV0
+        ));
+        assert_eq!(
+            profile.provenance_confidence,
+            UiCompatibilityProvenanceConfidence::UnknownVersionStructurallyVerified
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::Implemented
+        );
     }
 
     #[test]
@@ -1144,10 +1714,10 @@ mod tests {
             }),
             base_schema("Target"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::LegacyWidgetSlotV0
-        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyWidgetSlotV0
+        ));
         assert_eq!(
             profile.evidence.schema_lineage.status,
             SchemaLineageStatus::Mismatch
@@ -1172,10 +1742,10 @@ mod tests {
             }),
             base_schema("Target"),
         );
-        assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::UnsupportedHistoricalFeature
-        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyWidgetSlotV0
+        ));
         assert_eq!(
             profile.primary_diagnostic(),
             Some("provenance_fingerprint_conflict")
@@ -1192,13 +1762,179 @@ mod tests {
             }),
             base_schema("Target"),
         );
+        assert!(profile.required_contracts.is_empty());
         assert_eq!(
-            profile.family,
-            UiCompatibilityProfileFamily::UnknownStructurallyVerified
+            profile.serialization_evidence_status,
+            SerializationEvidenceStatus::Unresolved
         );
         assert_eq!(
             profile.implementation_status,
             UiCompatibilityImplementationStatus::StructurallyVerified
         );
+    }
+
+    #[test]
+    fn multiple_historical_contracts_detected_together() {
+        let profile = composed_profile(false);
+        assert_eq!(
+            profile.required_contracts,
+            BTreeSet::from([
+                FrontendSerializationContract::LegacyWidgetSlotV0,
+                FrontendSerializationContract::LegacyDynamicInputV0,
+            ])
+        );
+        assert!(profile.execution_supported());
+    }
+
+    #[test]
+    fn contract_set_order_independent() {
+        assert_eq!(
+            composed_profile(false).required_contracts,
+            composed_profile(true).required_contracts
+        );
+    }
+
+    #[test]
+    fn contract_set_deterministic() {
+        let expected = composed_profile(false).required_contracts;
+        for _ in 0..4 {
+            assert_eq!(composed_profile(false).required_contracts, expected);
+        }
+    }
+
+    #[test]
+    fn current_contract_is_never_combined_with_historical_delta() {
+        let mut widget = base_node("Target");
+        widget["widgets_values"] = json!([7]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.52.7"},
+                "nodes": [widget],
+                "links": []
+            }),
+            json!({"Target": {"input": {"required": {"value": ["INT", {}]}}, "output": []}}),
+        );
+        assert_eq!(
+            profile.required_contracts,
+            BTreeSet::from([FrontendSerializationContract::LegacyWidgetSlotV0])
+        );
+        assert!(!profile.execution_supported());
+        assert_eq!(
+            profile.primary_diagnostic(),
+            Some("provenance_fingerprint_conflict")
+        );
+    }
+
+    #[test]
+    fn partially_implemented_contract_set_fails_closed() {
+        let mut widget = base_node("NodeAlpha");
+        widget["widgets_values"] = json!([7]);
+        let profile = resolve(
+            json!({
+                "version": 0.4,
+                "extra": {"frontendVersion": "1.43.1"},
+                "nodes": [widget, {
+                    "id": 2,
+                    "type": "subgraph",
+                    "inputs": [],
+                    "outputs": [],
+                    "properties": {"proxyWidgets": [["2", "value"]]},
+                    "widgets_values": []
+                }],
+                "links": [],
+                "definitions": {"subgraphs": [{
+                    "id": "subgraph", "inputNode": {"id": -10}, "outputNode": {"id": -20},
+                    "nodes": [], "links": []
+                }]}
+            }),
+            json!({"NodeAlpha": {"input": {"required": {"value": ["INT", {}]}}, "output": []}}),
+        );
+        assert_eq!(
+            profile.required_contracts,
+            BTreeSet::from([
+                FrontendSerializationContract::LegacyWidgetSlotV0,
+                FrontendSerializationContract::LegacySubgraphBoundaryProxyV0,
+            ])
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::DetectedButUnsupported
+        );
+        assert!(!profile.execution_supported());
+    }
+
+    #[test]
+    fn recovery_schema_provenance_is_not_paired() {
+        let mut widget = base_node("Target");
+        widget["widgets_values"] = json!([7]);
+        let profile = resolve_with_provenance(
+            json!({"version": 0.4, "nodes": [widget], "links": []}),
+            json!({"Target": {"input": {"required": {"value": ["INT", {}]}}, "output": []}}),
+            SchemaSnapshotProvenance::RecoveryUnpaired,
+        );
+        assert!(!profile.execution_supported());
+        assert_eq!(
+            profile.schema_provenance,
+            SchemaSnapshotProvenance::RecoveryUnpaired
+        );
+        assert_eq!(
+            profile.primary_diagnostic(),
+            Some("schema_snapshot_provenance_insufficient")
+        );
+    }
+
+    #[test]
+    fn schema_lineage_failure_overrides_implemented_contract_set() {
+        let mut workflow = composed_workflow(false);
+        workflow["nodes"][1]["inputs"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"name": "unrelated", "type": "INT", "link": 9}));
+        workflow["links"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!([9, 3, 0, 2, 1]));
+        let profile = resolve(workflow, composed_schema());
+        assert_eq!(
+            profile.required_contracts,
+            BTreeSet::from([
+                FrontendSerializationContract::LegacyWidgetSlotV0,
+                FrontendSerializationContract::LegacyDynamicInputV0,
+            ])
+        );
+        assert_eq!(
+            profile.evidence.schema_lineage.status,
+            SchemaLineageStatus::Mismatch
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::EvidenceInsufficient
+        );
+        assert!(!profile.execution_supported());
+    }
+
+    #[test]
+    fn detected_legacy_contract_plus_unrelated_schema_mismatch_fails_closed() {
+        let mut widget = base_node("Target");
+        widget["widgets_values"] = json!([7]);
+        widget["inputs"] = json!([{"name": "missing", "type": "INT", "link": 9}]);
+        let profile = resolve(
+            json!({"version": 0.4, "nodes": [widget], "links": [[9, 2, 0, 1, 0]]}),
+            json!({"Target": {"input": {"required": {"value": ["INT", {}]}}, "output": []}}),
+        );
+        assert!(requires(
+            &profile,
+            FrontendSerializationContract::LegacyWidgetSlotV0
+        ));
+        assert_eq!(
+            profile.evidence.schema_lineage.status,
+            SchemaLineageStatus::Mismatch
+        );
+        assert_eq!(
+            profile.implementation_status,
+            UiCompatibilityImplementationStatus::EvidenceInsufficient
+        );
+        assert!(!profile.execution_supported());
     }
 }

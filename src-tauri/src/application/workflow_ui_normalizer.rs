@@ -1,6 +1,7 @@
 use crate::application::workflow_ui_serialization::{
     FrontendSerializationContract, NormalizationCompatibilityContext, SerializerKind,
     UiInputEvidence, UiInputSerializationDescriptor, UiSerializationDescriptorSet,
+    WidgetBindingKind,
 };
 use crate::compiler::WorkflowValidator;
 use crate::domain::WorkflowDocument;
@@ -4367,6 +4368,87 @@ pub fn normalize_widgets(
         )
     })?;
     let mut inputs = Map::new();
+    let uses_legacy_dynamic_input = if descriptors.is_legacy_dynamic_input() {
+        node.inputs.iter().try_fold(false, |found, socket| {
+            if found {
+                return Ok(true);
+            }
+            if socket.name.contains('.')
+                || socket
+                    .declared_type
+                    .as_deref()
+                    .is_some_and(|value| value.to_ascii_uppercase().contains("DYNAMIC"))
+            {
+                return Ok(true);
+            }
+            descriptors
+                .legacy_dynamic_input_target(&node.class_type, &socket.name)
+                .map(|target| target.is_some())
+                .map_err(|error| {
+                    NormalizationError::new(
+                        error.code,
+                        format!("node {} input {}: {}", node.id, socket.name, error.message),
+                    )
+                })
+        })?
+    } else {
+        false
+    };
+    let uses_legacy_widget_slot = descriptors.is_legacy_widget_slot() && !uses_legacy_dynamic_input;
+    if uses_legacy_dynamic_input {
+        for socket in &node.inputs {
+            let binding = descriptors
+                .resolve_ui_input(
+                    &node.class_type,
+                    &socket.name,
+                    socket.widget_name.as_deref(),
+                    socket.shape,
+                    socket.link_id.is_some(),
+                    node.widgets_values_named.as_ref(),
+                )
+                .map_err(|error| {
+                    NormalizationError::new(
+                        error.code,
+                        format!("node {} input {}: {}", node.id, socket.name, error.message),
+                    )
+                })?;
+            if binding.kind != WidgetBindingKind::DynamicInput {
+                continue;
+            }
+            let (Some(raw_type), Some(input)) =
+                (socket.declared_type.as_deref(), binding.descriptor.as_ref())
+            else {
+                continue;
+            };
+            if !compatible_socket_types(
+                Some(raw_type),
+                Some(declared_type_name(input.declared_type)),
+            ) {
+                return Err(NormalizationError::new(
+                    "legacy_dynamic_type_mismatch",
+                    format!(
+                        "node {} dynamic input {} declares type {}, schema requires {}",
+                        node.id,
+                        binding.runtime_name.as_deref().unwrap_or(&socket.name),
+                        raw_type,
+                        declared_type_name(input.declared_type)
+                    ),
+                ));
+            }
+        }
+        if let Some(named_values) = &node.widgets_values_named {
+            for name in named_values.keys() {
+                descriptors
+                    .legacy_dynamic_input_target(&node.class_type, name)
+                    .map_err(|error| {
+                        NormalizationError::new(
+                            error.code,
+                            format!("node {} input {}: {}", node.id, name, error.message),
+                        )
+                    })?;
+            }
+        }
+    }
     if let Some(named) = &node.widgets_values_named {
         for (name, value) in named {
             let Some(input) = descriptors.input_for_node(
@@ -4402,18 +4484,35 @@ pub fn normalize_widgets(
 
     // Preserve the current contract's eager socket validation (including
     // ambiguous converted-widget diagnostics) even when a node has no
-    // positional values. LegacyWidgetSlotV0 owns its own cursor evidence.
-    let current_positional_names = if descriptors.is_legacy_widget_slot() {
+    // positional values. The legacy slot profiles own their own cursor evidence.
+    let current_positional_names = if uses_legacy_widget_slot || uses_legacy_dynamic_input {
         None
     } else {
         Some(positional_widget_names(node, descriptors, links)?)
     };
-    if !node.widgets_values.is_empty() {
-        let positional_values = if descriptors.is_legacy_widget_slot() {
+    if !node.widgets_values.is_empty() || uses_legacy_dynamic_input {
+        let positional_values = if uses_legacy_widget_slot {
             let inputs = positional_widget_evidence(node);
             let linked_names = linked_names_for_node(node, links);
             descriptors
                 .consume_legacy_positional_values(
+                    &node.class_type,
+                    &inputs,
+                    &linked_names,
+                    &node.widgets_values,
+                    node.widgets_values_named.as_ref(),
+                )
+                .map_err(|error| {
+                    NormalizationError::new(
+                        error.code,
+                        format!("node {}: {}", node.id, error.message),
+                    )
+                })?
+        } else if uses_legacy_dynamic_input {
+            let inputs = positional_widget_evidence(node);
+            let linked_names = linked_names_for_node(node, links);
+            descriptors
+                .consume_legacy_dynamic_positional_values(
                     &node.class_type,
                     &inputs,
                     &linked_names,
@@ -4456,12 +4555,21 @@ pub fn normalize_widgets(
                     })?
             }
         };
+        let mut resolved_named_values = node.widgets_values_named.clone().unwrap_or_default();
+        if uses_legacy_dynamic_input {
+            for (name, value) in &positional_values {
+                if descriptor.inputs.get(name).is_some_and(|input| {
+                    input.declared_type
+                        == crate::application::workflow_recognition_schema::RecognitionDeclaredType::DynamicCombo
+                }) {
+                    resolved_named_values.insert(name.clone(), value.clone());
+                }
+            }
+        }
         for (name, value) in positional_values {
-            let Some(input) = descriptors.input_for_node(
-                &node.class_type,
-                node.widgets_values_named.as_ref(),
-                &name,
-            ) else {
+            let Some(input) =
+                descriptors.input_for_node(&node.class_type, Some(&resolved_named_values), &name)
+            else {
                 continue;
             };
             if input.serializer_kind == SerializerKind::WorkflowOnlyControl {
@@ -4579,7 +4687,11 @@ fn linked_names_for_node(node: &UiNode, links: &NormalizedLinkMap) -> BTreeSet<S
 }
 
 fn widget_value_error_code(descriptors: &UiSerializationDescriptorSet) -> &'static str {
-    if descriptors.profile.contract == FrontendSerializationContract::LegacyWidgetSlotV0 {
+    if descriptors
+        .profile
+        .contracts
+        .contains(&FrontendSerializationContract::LegacyWidgetSlotV0)
+    {
         "legacy_widget_type_mismatch"
     } else {
         "WIDGET_VALUE_INVALID"
@@ -4695,14 +4807,15 @@ pub fn normalize_ui_workflow(
         ));
     }
     let source_frontend_version = document.frontend_version.as_deref().unwrap_or("unknown");
-    let frontend_version_matches = match descriptors.profile.contract {
-        FrontendSerializationContract::Current => {
-            document.frontend_version.as_deref()
-                == Some(descriptors.compatibility.frontend_version.as_str())
-        }
-        FrontendSerializationContract::LegacyWidgetSlotV0 => {
-            source_frontend_version == descriptors.compatibility.frontend_version
-        }
+    let frontend_version_matches = if descriptors
+        .profile
+        .contracts
+        .contains(&FrontendSerializationContract::Current)
+    {
+        document.frontend_version.as_deref()
+            == Some(descriptors.compatibility.frontend_version.as_str())
+    } else {
+        source_frontend_version == descriptors.compatibility.frontend_version
     };
     if !frontend_version_matches {
         return Err(NormalizationError::new(

@@ -110,10 +110,23 @@ impl SupportedNormalizationCompatibilitySet {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FrontendSerializationContract {
     Current,
     LegacyWidgetSlotV0,
+    LegacyDynamicInputV0,
+    LegacySubgraphBoundaryProxyV0,
+}
+
+impl FrontendSerializationContract {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "CurrentContract",
+            Self::LegacyWidgetSlotV0 => "LegacyWidgetSlotV0",
+            Self::LegacyDynamicInputV0 => "LegacyDynamicInputV0",
+            Self::LegacySubgraphBoundaryProxyV0 => "LegacySubgraphBoundaryProxyV0",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,7 +137,7 @@ pub struct FrontendSerializationProfile {
     pub support_model: String,
     pub source_provenance: String,
     pub frontend_source_revision: Option<String>,
-    pub contract: FrontendSerializationContract,
+    pub contracts: BTreeSet<FrontendSerializationContract>,
 }
 
 impl FrontendSerializationProfile {
@@ -140,15 +153,10 @@ impl FrontendSerializationProfile {
                 "no verified frontend serialization profile exists for this source",
             ));
         }
-        Ok(Self {
-            frontend_version: context.frontend_version.clone(),
-            workflow_format_version: context.workflow_format_version.clone(),
-            serialization_profile_version: context.serialization_profile_version.clone(),
-            support_model: PROFILE_SUPPORT_MODEL.to_owned(),
-            source_provenance: "source extra.frontendVersion".to_owned(),
-            frontend_source_revision: context.source_frontend_revision.clone(),
-            contract: FrontendSerializationContract::Current,
-        })
+        Self::from_contracts_from_context(
+            context,
+            BTreeSet::from([FrontendSerializationContract::Current]),
+        )
     }
 
     pub fn legacy_widget_slot_v0_from_context(
@@ -162,14 +170,76 @@ impl FrontendSerializationProfile {
                 "no verified LegacyWidgetSlotV0 profile exists for this source",
             ));
         }
+        Self::from_contracts_from_context(
+            context,
+            BTreeSet::from([FrontendSerializationContract::LegacyWidgetSlotV0]),
+        )
+    }
+
+    pub fn legacy_dynamic_input_v0_from_context(
+        context: &NormalizationCompatibilityContext,
+    ) -> Result<Self, SerializationDescriptorError> {
+        if context.workflow_format_version != SUPPORTED_WORKFLOW_FORMAT_VERSION
+            || context.serialization_profile_version != SERIALIZATION_PROFILE_VERSION
+        {
+            return Err(SerializationDescriptorError::new(
+                "UNSUPPORTED_LEGACY_DYNAMIC_INPUT_PROFILE",
+                "no verified LegacyDynamicInputV0 profile exists for this source",
+            ));
+        }
+        Self::from_contracts_from_context(
+            context,
+            BTreeSet::from([FrontendSerializationContract::LegacyDynamicInputV0]),
+        )
+    }
+
+    pub fn from_contracts_from_context(
+        context: &NormalizationCompatibilityContext,
+        contracts: BTreeSet<FrontendSerializationContract>,
+    ) -> Result<Self, SerializationDescriptorError> {
+        if contracts.is_empty()
+            || (contracts.contains(&FrontendSerializationContract::Current) && contracts.len() > 1)
+        {
+            return Err(SerializationDescriptorError::new(
+                "SERIALIZATION_CONTRACT_SET_INVALID",
+                "a contract set must be non-empty and Current cannot be combined with historical contracts",
+            ));
+        }
+        if context.workflow_format_version != SUPPORTED_WORKFLOW_FORMAT_VERSION
+            || context.serialization_profile_version != SERIALIZATION_PROFILE_VERSION
+        {
+            return Err(SerializationDescriptorError::new(
+                "UNSUPPORTED_HISTORICAL_SERIALIZATION_PROFILE",
+                "no verified serialization profile exists for this source",
+            ));
+        }
+        let is_current = contracts.contains(&FrontendSerializationContract::Current);
+        if is_current && context.frontend_version != SUPPORTED_FRONTEND_VERSION {
+            return Err(SerializationDescriptorError::new(
+                "UNSUPPORTED_FRONTEND_SERIALIZATION_PROFILE",
+                "no verified current frontend serialization profile exists for this source",
+            ));
+        }
+        let source_provenance = if is_current {
+            "source extra.frontendVersion".to_owned()
+        } else {
+            format!(
+                "historical fingerprint {}",
+                contracts
+                    .iter()
+                    .map(|contract| contract.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
         Ok(Self {
             frontend_version: context.frontend_version.clone(),
             workflow_format_version: context.workflow_format_version.clone(),
             serialization_profile_version: context.serialization_profile_version.clone(),
             support_model: PROFILE_SUPPORT_MODEL.to_owned(),
-            source_provenance: "historical fingerprint LegacyWidgetSlotV0".to_owned(),
+            source_provenance,
             frontend_source_revision: context.source_frontend_revision.clone(),
-            contract: FrontendSerializationContract::LegacyWidgetSlotV0,
+            contracts,
         })
     }
 }
@@ -269,6 +339,25 @@ pub struct UiInputSerializationDescriptor {
     pub dynamic: bool,
     pub dynamic_prefix: Option<String>,
     pub dynamic_names: Vec<String>,
+    pub dynamic_value_type: Option<RecognitionDeclaredType>,
+}
+
+/// One schema-backed historical dynamic instance.  This is deliberately
+/// independent of provider and class names; the base and member identity come
+/// from serialized input evidence and the object_info contract.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LegacyDynamicInputTarget {
+    pub base_name: String,
+    pub serialized_name: String,
+    pub instance_name: String,
+    pub descriptor: UiInputSerializationDescriptor,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LegacyDynamicInputExpansion {
+    pub base_name: String,
+    pub selected_option: String,
+    pub member_names: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -330,7 +419,15 @@ impl UiSerializationDescriptorSet {
     }
 
     pub fn is_legacy_widget_slot(&self) -> bool {
-        self.profile.contract == FrontendSerializationContract::LegacyWidgetSlotV0
+        self.profile
+            .contracts
+            .contains(&FrontendSerializationContract::LegacyWidgetSlotV0)
+    }
+
+    pub fn is_legacy_dynamic_input(&self) -> bool {
+        self.profile
+            .contracts
+            .contains(&FrontendSerializationContract::LegacyDynamicInputV0)
     }
 
     pub fn input(
@@ -382,12 +479,247 @@ impl UiSerializationDescriptorSet {
             .map(|(descriptor, _)| descriptor)
     }
 
+    /// Resolve historical dotted dynamic-combo members and formally declared
+    /// dynamic sockets.  This is the sole LegacyDynamicInputV0 authority;
+    /// current-contract resolution intentionally remains in `input()` and
+    /// the conditional-input path below.
+    fn resolve_legacy_dynamic_input(
+        &self,
+        class_type: &str,
+        input_name: &str,
+    ) -> Result<Option<LegacyDynamicInputTarget>, SerializationDescriptorError> {
+        let Some(node) = self.nodes.get(class_type) else {
+            return Err(SerializationDescriptorError::new(
+                "UNKNOWN_NODE_CLASS",
+                format!("node class {class_type} is absent from object_info"),
+            ));
+        };
+        let (base_name, instance_name) = if let Some((base_name, instance_name)) =
+            input_name.split_once('.')
+        {
+            if base_name.is_empty() || instance_name.is_empty() || instance_name.contains('.') {
+                return Ok(None);
+            }
+            (base_name, instance_name)
+        } else {
+            let matches = node
+                .inputs
+                .iter()
+                .filter(|(_, base)| {
+                    base.dynamic_names.iter().any(|name| name == input_name)
+                        || base
+                            .dynamic_prefix
+                            .as_deref()
+                            .is_some_and(|prefix| input_name.starts_with(prefix))
+                })
+                .map(|(base_name, _)| base_name.as_str())
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [] => return Ok(None),
+                [base_name] => (*base_name, input_name),
+                _ => {
+                    return Err(SerializationDescriptorError::new(
+                        "legacy_dynamic_ambiguous_base",
+                        format!(
+                            "dynamic socket {input_name} on {class_type} matches multiple schema bases"
+                        ),
+                    ));
+                }
+            }
+        };
+        let target = |descriptor| LegacyDynamicInputTarget {
+            base_name: base_name.to_owned(),
+            serialized_name: input_name.to_owned(),
+            instance_name: instance_name.to_owned(),
+            descriptor,
+        };
+        let Some(base) = node.inputs.get(base_name) else {
+            return Ok(None);
+        };
+
+        let dynamic_combo_options = node
+            .conditional_inputs
+            .get(base_name)
+            .filter(|options| !options.is_empty());
+        if base.declared_type == RecognitionDeclaredType::DynamicCombo
+            && dynamic_combo_options.is_some()
+        {
+            let Some(options) = dynamic_combo_options else {
+                return Err(SerializationDescriptorError::new(
+                    "legacy_dynamic_unknown_base",
+                    format!(
+                        "dynamic combo base {base_name} on {class_type} has no option contract"
+                    ),
+                ));
+            };
+            let mut candidates = options
+                .values()
+                .filter_map(|inputs| inputs.get(instance_name))
+                .cloned()
+                .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                return Err(SerializationDescriptorError::new(
+                    "legacy_dynamic_unknown_instance",
+                    format!(
+                        "dynamic instance {input_name} is absent from the {base_name} option contract"
+                    ),
+                ));
+            }
+            candidates.sort_by_key(|candidate| {
+                (
+                    format!("{:?}", candidate.declared_type),
+                    candidate.name.clone(),
+                )
+            });
+            candidates.dedup_by(|left, right| left.declared_type == right.declared_type);
+            if candidates.len() > 1 {
+                return Err(SerializationDescriptorError::new(
+                    "legacy_dynamic_type_mismatch",
+                    format!(
+                        "dynamic instance {input_name} has inconsistent schema types across options"
+                    ),
+                ));
+            }
+            let mut descriptor = candidates.pop().expect("non-empty dynamic candidate list");
+            descriptor.name = input_name.to_owned();
+            descriptor.dynamic = true;
+            descriptor.serializer_kind = SerializerKind::Dynamic;
+            return Ok(Some(target(descriptor)));
+        }
+
+        let formally_named = base
+            .dynamic_names
+            .iter()
+            .any(|name| name == instance_name || name == input_name);
+        let formally_prefixed = base
+            .dynamic_prefix
+            .as_deref()
+            .is_some_and(|prefix| instance_name.starts_with(prefix));
+        if !formally_named && !formally_prefixed {
+            if base.declared_type == RecognitionDeclaredType::DynamicCombo {
+                return Err(SerializationDescriptorError::new(
+                    "legacy_dynamic_unknown_base",
+                    format!(
+                        "dynamic combo base {base_name} on {class_type} has no option contract"
+                    ),
+                ));
+            }
+            return Ok(None);
+        }
+        let mut descriptor = base.clone();
+        descriptor.name = input_name.to_owned();
+        descriptor.declared_type = descriptor
+            .dynamic_value_type
+            .unwrap_or(descriptor.declared_type);
+        descriptor.dynamic = true;
+        descriptor.serializer_kind = SerializerKind::Dynamic;
+        Ok(Some(target(descriptor)))
+    }
+
+    pub fn legacy_dynamic_input_target(
+        &self,
+        class_type: &str,
+        input_name: &str,
+    ) -> Result<Option<LegacyDynamicInputTarget>, SerializationDescriptorError> {
+        self.resolve_legacy_dynamic_input(class_type, input_name)
+    }
+
+    fn legacy_dynamic_combo_option_inputs(
+        &self,
+        class_type: &str,
+        base_name: &str,
+        selected_option: &str,
+    ) -> Result<&BTreeMap<String, UiInputSerializationDescriptor>, SerializationDescriptorError>
+    {
+        let node = self.nodes.get(class_type).ok_or_else(|| {
+            SerializationDescriptorError::new(
+                "UNKNOWN_NODE_CLASS",
+                format!("node class {class_type} is absent from object_info"),
+            )
+        })?;
+        let base = node.inputs.get(base_name).ok_or_else(|| {
+            SerializationDescriptorError::new(
+                "legacy_dynamic_unknown_base",
+                format!("dynamic base {base_name} is absent from object_info"),
+            )
+        })?;
+        if base.declared_type != RecognitionDeclaredType::DynamicCombo {
+            return Err(SerializationDescriptorError::new(
+                "legacy_dynamic_contract_mismatch",
+                format!("input {base_name} is not a DynamicCombo contract"),
+            ));
+        }
+        node.conditional_inputs
+            .get(base_name)
+            .and_then(|options| options.get(selected_option))
+            .ok_or_else(|| {
+                SerializationDescriptorError::new(
+                    "legacy_dynamic_unknown_option",
+                    format!("dynamic base {base_name} has no serialized option {selected_option}"),
+                )
+            })
+    }
+
+    fn legacy_dynamic_combo_member_descriptor(
+        &self,
+        class_type: &str,
+        base_name: &str,
+        selected_option: &str,
+        member_name: &str,
+    ) -> Result<UiInputSerializationDescriptor, SerializationDescriptorError> {
+        let descriptor = self
+            .legacy_dynamic_combo_option_inputs(class_type, base_name, selected_option)?
+            .get(member_name)
+            .cloned()
+            .ok_or_else(|| {
+                SerializationDescriptorError::new(
+                    "legacy_dynamic_unknown_instance",
+                    format!(
+                        "dynamic instance {base_name}.{member_name} is absent from option {selected_option}"
+                    ),
+                )
+            })?;
+        let mut descriptor = descriptor;
+        descriptor.name = format!("{base_name}.{member_name}");
+        descriptor.dynamic = true;
+        descriptor.serializer_kind = SerializerKind::Dynamic;
+        Ok(descriptor)
+    }
+
+    pub fn legacy_dynamic_combo_expansion(
+        &self,
+        class_type: &str,
+        base_name: &str,
+        selected_option: &str,
+    ) -> Result<LegacyDynamicInputExpansion, SerializationDescriptorError> {
+        let option =
+            self.legacy_dynamic_combo_option_inputs(class_type, base_name, selected_option)?;
+        let mut members = option
+            .iter()
+            .map(|(name, descriptor)| (name.clone(), descriptor.clone()))
+            .collect::<Vec<_>>();
+        members.sort_by(|left, right| {
+            (!left.1.required, left.0.as_str()).cmp(&(!right.1.required, right.0.as_str()))
+        });
+        let member_names = members.into_iter().map(|(name, _)| name).collect();
+        Ok(LegacyDynamicInputExpansion {
+            base_name: base_name.to_owned(),
+            selected_option: selected_option.to_owned(),
+            member_names,
+        })
+    }
+
     fn input_for_node_with_kind(
         &self,
         class_type: &str,
         named_values: Option<&BTreeMap<String, Value>>,
         input_name: &str,
     ) -> Option<(UiInputSerializationDescriptor, WidgetBindingKind)> {
+        if self.is_legacy_dynamic_input() && !input_name.ends_with("_input") {
+            if let Ok(Some(target)) = self.resolve_legacy_dynamic_input(class_type, input_name) {
+                return Some((target.descriptor, WidgetBindingKind::DynamicInput));
+            }
+        }
         if let Some(input) = self.input(class_type, input_name) {
             let kind = if input.serializer_kind == SerializerKind::Conditional {
                 WidgetBindingKind::ConditionalInput
@@ -449,6 +781,16 @@ impl UiSerializationDescriptorSet {
         named_values: Option<&BTreeMap<String, Value>>,
     ) -> Result<UiWidgetBinding, SerializationDescriptorError> {
         for candidate in [widget_name, Some(name)].into_iter().flatten() {
+            if self.is_legacy_dynamic_input() && !candidate.ends_with("_input") {
+                if let Some(target) = self.resolve_legacy_dynamic_input(class_type, candidate)? {
+                    let descriptor = target.descriptor;
+                    return Ok(UiWidgetBinding {
+                        kind: WidgetBindingKind::DynamicInput,
+                        runtime_name: Some(descriptor.name.clone()),
+                        descriptor: Some(descriptor),
+                    });
+                }
+            }
             if let Some((descriptor, kind)) =
                 self.input_for_node_with_kind(class_type, named_values, candidate)
             {
@@ -636,14 +978,41 @@ impl UiSerializationDescriptorSet {
         let mut cursor = 0usize;
         let mut result = Vec::with_capacity(names.len());
         for (index, name) in names.iter().enumerate() {
-            let descriptor = self
-                .input_for_node(class_type, named_values, name)
-                .ok_or_else(|| {
-                    SerializationDescriptorError::new(
-                        "UNKNOWN_WIDGET_CONTRACT",
-                        format!("input {name} on {class_type} has no serializer descriptor"),
-                    )
-                })?;
+            let selected_dynamic_member = if self.is_legacy_dynamic_input() {
+                name.split_once('.').and_then(|(base_name, member_name)| {
+                    named_values
+                        .and_then(|values| values.get(base_name))
+                        .and_then(Value::as_str)
+                        .filter(|selected| {
+                            self.nodes
+                                .get(class_type)
+                                .and_then(|node| node.conditional_inputs.get(base_name))
+                                .and_then(|options| options.get(*selected))
+                                .is_some_and(|members| members.contains_key(member_name))
+                        })
+                        .map(|selected| (base_name, member_name, selected))
+                })
+            } else {
+                None
+            };
+            let descriptor = if let Some((base_name, member_name, selected)) =
+                selected_dynamic_member
+            {
+                self.legacy_dynamic_combo_member_descriptor(
+                    class_type,
+                    base_name,
+                    selected,
+                    member_name,
+                )?
+            } else {
+                self.input_for_node(class_type, named_values, name)
+                    .ok_or_else(|| {
+                        SerializationDescriptorError::new(
+                            "UNKNOWN_WIDGET_CONTRACT",
+                            format!("input {name} on {class_type} has no serializer descriptor"),
+                        )
+                    })?
+            };
             while cursor < values.len()
                 && self.is_frontend_control_value(class_type, &values[cursor], named_values)
                 && values.len().saturating_sub(cursor) > names.len() - index
@@ -681,6 +1050,206 @@ impl UiSerializationDescriptorSet {
             cursor += 1;
         }
         Ok(result)
+    }
+
+    /// Expand one historical DynamicCombo selection into the exact schema
+    /// members exposed by that option, then delegate cursor materialization
+    /// to the common positional serializer.
+    pub fn consume_legacy_dynamic_positional_values(
+        &self,
+        class_type: &str,
+        inputs: &[UiInputEvidence],
+        linked_names: &BTreeSet<String>,
+        values: &[Value],
+        named_values: Option<&BTreeMap<String, Value>>,
+    ) -> Result<Vec<(String, Value)>, SerializationDescriptorError> {
+        if !self.is_legacy_dynamic_input() {
+            return Err(SerializationDescriptorError::new(
+                "LEGACY_DYNAMIC_PROFILE_REQUIRED",
+                "LegacyDynamicInputV0 expansion cannot run for the current contract",
+            ));
+        }
+        let node = self.nodes.get(class_type).ok_or_else(|| {
+            SerializationDescriptorError::new(
+                "UNKNOWN_NODE_CLASS",
+                format!("node class {class_type} is absent from object_info"),
+            )
+        })?;
+        let ordinary_names =
+            self.positional_input_names(class_type, inputs, named_values, linked_names)?;
+        let mut dynamic_combo_bases = BTreeSet::new();
+        let mut selected_options = BTreeMap::new();
+        let mut names = Vec::new();
+        let mut cursor = 0usize;
+
+        for name in &node.ordered_inputs {
+            let Some(base) = node.inputs.get(name) else {
+                continue;
+            };
+            let is_dynamic_combo = base.declared_type == RecognitionDeclaredType::DynamicCombo
+                && node
+                    .conditional_inputs
+                    .get(name)
+                    .is_some_and(|options| !options.is_empty());
+            if !is_dynamic_combo {
+                if ordinary_names.iter().any(|candidate| candidate == name)
+                    && named_values.is_none_or(|named| !named.contains_key(name))
+                {
+                    names.push(name.clone());
+                    cursor += 1;
+                }
+                continue;
+            }
+
+            dynamic_combo_bases.insert(name.clone());
+            let selected_option = if let Some(value) =
+                named_values.and_then(|values| values.get(name))
+            {
+                value.as_str().ok_or_else(|| {
+                    SerializationDescriptorError::new(
+                        "legacy_dynamic_selector_invalid",
+                        format!("dynamic selector {name} on {class_type} must be a string"),
+                    )
+                })?
+            } else {
+                let value = values.get(cursor).ok_or_else(|| {
+                    SerializationDescriptorError::new(
+                        "legacy_dynamic_selector_missing",
+                        format!("dynamic selector {name} on {class_type} has no positional value"),
+                    )
+                })?;
+                value.as_str().ok_or_else(|| {
+                    SerializationDescriptorError::new(
+                        "legacy_dynamic_selector_invalid",
+                        format!("dynamic selector {name} on {class_type} must be a string"),
+                    )
+                })?
+            };
+            selected_options.insert(name.clone(), selected_option.to_owned());
+            let expansion =
+                self.legacy_dynamic_combo_expansion(class_type, name, selected_option)?;
+            if named_values.is_none_or(|values| !values.contains_key(name)) {
+                names.push(name.clone());
+                cursor += 1;
+            }
+
+            for member_name in expansion.member_names {
+                let descriptor = self.legacy_dynamic_combo_member_descriptor(
+                    class_type,
+                    name,
+                    selected_option,
+                    &member_name,
+                )?;
+                if descriptor.hidden
+                    || descriptor.serializer_kind == SerializerKind::WorkflowOnlyControl
+                {
+                    continue;
+                }
+                let serialized_name = format!("{name}.{member_name}");
+                let mut matching_evidence = Vec::new();
+                for input in inputs {
+                    let binding = self.resolve_ui_input(
+                        class_type,
+                        &input.name,
+                        input.widget_name.as_deref(),
+                        input.shape,
+                        input.linked,
+                        named_values,
+                    )?;
+                    if binding.runtime_name.as_deref() == Some(serialized_name.as_str()) {
+                        matching_evidence.push(input);
+                    }
+                }
+                if matching_evidence.len() > 1 {
+                    return Err(SerializationDescriptorError::new(
+                        "legacy_dynamic_duplicate_instance",
+                        format!("multiple serialized sockets map to {serialized_name}"),
+                    ));
+                }
+                let evidence = matching_evidence.first().copied();
+                let linked = linked_names.contains(&serialized_name)
+                    || evidence.is_some_and(|input| input.linked);
+                let has_widget = evidence.is_some_and(|input| input.widget_name.is_some());
+                if linked && !has_widget {
+                    continue;
+                }
+                if named_values.is_some_and(|named| named.contains_key(&serialized_name)) {
+                    continue;
+                }
+                if !descriptor.serializer_kind.is_standard() {
+                    return Err(SerializationDescriptorError::new(
+                        "UNSUPPORTED_SERIALIZER",
+                        format!("dynamic instance {serialized_name} has no verified serializer"),
+                    ));
+                }
+                // Every member of the selected schema option is active. A
+                // linked member without a residual widget was excluded above;
+                // all remaining members occupy their schema-defined cursor.
+                names.push(serialized_name);
+                cursor += 1;
+            }
+        }
+
+        let mut other_dynamic_names = Vec::new();
+        for name in &ordinary_names {
+            if named_values.is_some_and(|named| named.contains_key(name)) {
+                continue;
+            }
+            if self
+                .legacy_dynamic_input_target(class_type, name)?
+                .is_some_and(|target| !dynamic_combo_bases.contains(&target.base_name))
+            {
+                other_dynamic_names.push(name.clone());
+            }
+        }
+        other_dynamic_names.sort();
+        for name in other_dynamic_names {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+
+        // A serialized dynamic-combo member must belong to the selected option;
+        // schema from another option is not sufficient authority.
+        for input in inputs {
+            let mut target = None;
+            for candidate in [input.widget_name.as_deref(), Some(input.name.as_str())]
+                .into_iter()
+                .flatten()
+            {
+                target = self.legacy_dynamic_input_target(class_type, candidate)?;
+                if target.is_some() {
+                    break;
+                }
+            }
+            let Some(target) = target else {
+                continue;
+            };
+            if !dynamic_combo_bases.contains(&target.base_name) {
+                continue;
+            }
+            let Some(selected) = selected_options.get(&target.base_name) else {
+                continue;
+            };
+            if !self
+                .legacy_dynamic_combo_option_inputs(class_type, &target.base_name, selected)?
+                .contains_key(&target.instance_name)
+            {
+                return Err(SerializationDescriptorError::new(
+                    "legacy_dynamic_unknown_instance",
+                    format!(
+                        "serialized dynamic instance {} is not present in selected option {selected}",
+                        target.serialized_name
+                    ),
+                ));
+            }
+        }
+
+        let mut selected_named_values = named_values.cloned().unwrap_or_default();
+        for (base_name, selected_option) in selected_options {
+            selected_named_values.insert(base_name, Value::String(selected_option));
+        }
+        self.consume_positional_values(class_type, &names, values, Some(&selected_named_values))
     }
 
     /// Reconstruct the positional widget cursor used by the historical
@@ -1144,6 +1713,7 @@ fn descriptor_for_input(
             || schema.declared_type == RecognitionDeclaredType::DynamicCombo,
         dynamic_prefix: schema.dynamic_prefix.clone(),
         dynamic_names: schema.dynamic_names.clone(),
+        dynamic_value_type: schema.dynamic_value_type,
     }
 }
 

@@ -25,8 +25,9 @@ use crate::application::{
     },
     workflow_semantic_identity::semantic_workflow_sha256,
     workflow_ui_compatibility::{
-        HistoricalUiSerializationFingerprint, UiCompatibilityProfileFamily,
-        UiCompatibilityProfileResolver, UiCompatibilityResolutionInput,
+        HistoricalUiSerializationFingerprint, SchemaSnapshotProvenance,
+        SerializationEvidenceStatus, UiCompatibilityProfileResolver,
+        UiCompatibilityResolutionInput,
     },
     workflow_ui_normalizer::{
         normalize_ui_workflow, parse_ui_workflow, WorkflowUiFeatureObservation,
@@ -1865,6 +1866,7 @@ impl WorkflowOnboardingService {
                     workflow_format_version,
                     frontend_version: initial.frontend_version.as_deref(),
                     fingerprint: &fingerprint,
+                    schema_provenance: SchemaSnapshotProvenance::Unknown,
                 });
             if !resolved_profile.execution_supported() {
                 let diagnostic = resolved_profile
@@ -1875,7 +1877,8 @@ impl WorkflowOnboardingService {
                     "historical_profile_detected_but_not_implemented" => {
                         "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
                     }
-                    "object_info_schema_provenance_mismatch" => {
+                    "object_info_schema_lineage_mismatch"
+                    | "object_info_schema_provenance_mismatch" => {
                         // Preserve the existing pending-draft diagnostic for a source that has
                         // neither frontend provenance nor a usable node-class lineage.  This
                         // does not make the profile supported; it only keeps the actionable
@@ -1890,37 +1893,51 @@ impl WorkflowOnboardingService {
                             "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
                         }
                     }
+                    "object_info_schema_lineage_drift" => "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT",
+                    "schema_snapshot_provenance_insufficient" => {
+                        "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
+                    }
+                    "serialization_evidence_partial" => "SERIALIZATION_EVIDENCE_PARTIAL",
                     "provenance_fingerprint_conflict" => "PROVENANCE_FINGERPRINT_CONFLICT",
                     _ => "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN",
                 };
                 return Err(format!(
-                    "{code}: {} ({})",
-                    resolved_profile.family.as_str(),
+                    "{code}: contracts=[{}] serialization_evidence={} schema_provenance={} ({})",
+                    resolved_profile
+                        .required_contracts
+                        .iter()
+                        .map(|contract| contract.as_str())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    resolved_profile.serialization_evidence_status.as_str(),
+                    resolved_profile.schema_provenance.as_str(),
                     diagnostic
                 ));
             }
-            let compatibility =
-                if resolved_profile.family == UiCompatibilityProfileFamily::LegacyWidgetSlotV0 {
-                    NormalizationCompatibilityContext::from_historical_source(
-                        workflow_format_version,
-                        resolved_profile.evidence.frontend_version.as_deref(),
-                        schema_fingerprint,
-                    )
-                } else {
-                    NormalizationCompatibilityContext::from_source(
-                        workflow_format_version,
-                        resolved_profile.evidence.frontend_version.as_deref(),
-                        schema_fingerprint,
-                    )
-                    .map_err(|error| error.to_string())?
-                };
-            let profile =
-                if resolved_profile.family == UiCompatibilityProfileFamily::LegacyWidgetSlotV0 {
-                    FrontendSerializationProfile::legacy_widget_slot_v0_from_context(&compatibility)
-                } else {
-                    FrontendSerializationProfile::from_context(&compatibility)
-                }
-                .map_err(|error| error.to_string())?;
+            let normalization_contracts = resolved_profile
+                .contracts_for_normalization()
+                .ok_or_else(|| "SERIALIZATION_EVIDENCE_NOT_RESOLVED".to_owned())?;
+            let is_historical = resolved_profile.serialization_evidence_status
+                == SerializationEvidenceStatus::ResolvedHistorical;
+            let compatibility = if is_historical {
+                NormalizationCompatibilityContext::from_historical_source(
+                    workflow_format_version,
+                    resolved_profile.evidence.frontend_version.as_deref(),
+                    schema_fingerprint,
+                )
+            } else {
+                NormalizationCompatibilityContext::from_source(
+                    workflow_format_version,
+                    resolved_profile.evidence.frontend_version.as_deref(),
+                    schema_fingerprint,
+                )
+                .map_err(|error| error.to_string())?
+            };
+            let profile = FrontendSerializationProfile::from_contracts_from_context(
+                &compatibility,
+                normalization_contracts,
+            )
+            .map_err(|error| error.to_string())?;
             let descriptors =
                 UiSerializationDescriptorSet::build(&schema, profile, compatibility.clone())
                     .map_err(|error| error.to_string())?;
@@ -1993,6 +2010,8 @@ impl WorkflowOnboardingService {
                     "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED" => {
                         "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
                     }
+                    "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT" => "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT",
+                    "SERIALIZATION_EVIDENCE_PARTIAL" => "SERIALIZATION_EVIDENCE_PARTIAL",
                     "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH" => {
                         "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
                     }

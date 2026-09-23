@@ -136,6 +136,7 @@ fn synthetic_descriptors(
             dynamic: false,
             dynamic_prefix: None,
             dynamic_names: Vec::new(),
+            dynamic_value_type: None,
         };
     let mut nodes = BTreeMap::new();
     nodes.insert(
@@ -271,6 +272,7 @@ fn v1b2_descriptor(
         dynamic: false,
         dynamic_prefix: None,
         dynamic_names: Vec::new(),
+        dynamic_value_type: None,
     }
 }
 

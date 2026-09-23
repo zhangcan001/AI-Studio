@@ -61,6 +61,12 @@ fn descriptors_from_schema(
         FrontendSerializationContract::LegacyWidgetSlotV0 => {
             FrontendSerializationProfile::legacy_widget_slot_v0_from_context(&context).unwrap()
         }
+        FrontendSerializationContract::LegacyDynamicInputV0 => {
+            FrontendSerializationProfile::legacy_dynamic_input_v0_from_context(&context).unwrap()
+        }
+        FrontendSerializationContract::LegacySubgraphBoundaryProxyV0 => {
+            panic!("LegacySubgraphBoundaryProxyV0 has no normalization profile")
+        }
     };
     UiSerializationDescriptorSet::build(&schema, profile, context).unwrap()
 }
