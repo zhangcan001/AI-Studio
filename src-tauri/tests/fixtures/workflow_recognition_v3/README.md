@@ -15,11 +15,12 @@ cargo test --lib application::workflow_recognition_v3_replay::replay_synthetic_v
 cargo test --lib application::workflow_recognition_v3_replay::replay_all_verified --jobs 2 -- --nocapture
 ```
 
-These are the `real`, `synthetic-verified`, and `all-verified` modes. A
-`synthetic-baseline-complete` mode is intentionally not registered because
-historical synthetic membership remains 69/72. The runner has no network, GPU,
-live ComfyUI, or live `/object_info` dependency. It loads only these locked
-fixtures and calls the production analysis / semantic-graph code.
+These are the `real`, `synthetic-verified`, and `all-verified` modes. The
+`synthetic-verified` mode covers the current authoritative 69-case baseline.
+No `synthetic-baseline-complete` mode asserts the unavailable legacy 72-member
+set. The runner has no network, GPU, live ComfyUI, or live `/object_info`
+dependency. It loads only these locked fixtures and calls the production
+analysis / semantic-graph code.
 
 ## Real corpus and golden policy
 
@@ -52,11 +53,13 @@ fixtures and calls the production analysis / semantic-graph code.
 
 `synthetic_registry.json` contains 69 stable, name-based identities: 57
 explicit Phase2A/2B/2C/readiness contracts plus 12 explicitly named Phase1
-contracts. Phase1's historical expected total remains 15; membership is not
-complete and the V1 historical total remains 72. Existing tests are called
-through small `#[cfg(test)]` dispatchers; the replay does not copy the
-recognition algorithm. Test-binary discovery must match the registered wrapper
-set exactly, deterministically.
+contracts. Phase1's reported total is 15, but only 12 Phase1 identities are
+explicitly verified. The legacy overall reported count is 72 without a
+reconstructible member list; the current authoritative corpus is 69, with
+69/69 passing. The legacy count is retained for provenance only, not as an
+acceptance criterion. Existing tests are called through small `#[cfg(test)]`
+dispatchers; the replay does not copy the recognition algorithm. Test-binary
+discovery must match the registered wrapper set exactly, deterministically.
 
 Three later terminal-media tests remain separate V2-delta candidates, not V1
 identities:
@@ -68,7 +71,7 @@ identities:
 | `generic_serialized_terminal_media_sink_is_output_root` | `dacafca3ef1f7ba0900d4507555641c0bf10bfd7` | No | No | Unproven |
 
 Their common presence/grouping in one commit does not prove Phase1 membership.
-Do not report 69 as 72/72 or 75 as a V1 baseline.
+Do not report a 72/72 member set or 75 as a V1 baseline.
 
 ## Self-tests and evidence separation
 
@@ -93,7 +96,8 @@ failures, and one expected evidence conflict (R11). R02, R04, R09, R12, and
 R13 now match their original hard goldens without changing fixture bytes or
 expected modes. R11 remains excluded from semantic pass/failure counting.
 
-All 69 verified synthetic cases pass. Historical synthetic membership remains
-69/72 verified; the remaining three identities are provenance debt, so replay
-infrastructure is partially closed. The Recognition V3 semantic baseline is
-replayed, but production/runtime validation is not complete.
+All 69 currently verifiable synthetic cases pass. The legacy reported count
+is 72, but its member set is unavailable; the difference of three is a
+provenance exception, not three identified missing cases. Replay infrastructure
+is closed with this legacy provenance exception. The Recognition V3 architecture
+has a replayed baseline; production/runtime validation is not claimed by the replay.
