@@ -471,7 +471,14 @@ fn parse_dynamic_metadata(
     let dynamic_value_type = template
         .and_then(|template| template.get("input"))
         .and_then(Value::as_object)
-        .and_then(|input| input.values().next())
+        .and_then(|input| {
+            input
+                .get("required")
+                .or_else(|| input.get("optional"))
+                .and_then(Value::as_object)
+                .or(Some(input))
+        })
+        .and_then(|inputs| inputs.values().next())
         .and_then(Value::as_array)
         .and_then(|spec| spec.first())
         .and_then(Value::as_str)
@@ -667,5 +674,34 @@ mod tests {
                 .upload_media_kind,
             None
         );
+    }
+
+    #[test]
+    fn parses_dynamic_member_type_from_nested_template_input_groups() {
+        let context = RecognitionSchemaContext::parse(&json!({
+            "DynamicNode": {
+                "input": {"optional": {
+                    "reference_images": ["COMFY_AUTOGROW_V3", {
+                        "template": {
+                            "input": {"required": {
+                                "ref_image": ["IMAGE", {}]
+                            }},
+                            "prefix": "ref_image_"
+                        }
+                    }]
+                }}
+            }
+        }));
+
+        let parent = context
+            .node("DynamicNode")
+            .unwrap()
+            .input("reference_images")
+            .unwrap();
+        assert_eq!(
+            parent.dynamic_value_type,
+            Some(RecognitionDeclaredType::Image)
+        );
+        assert_eq!(parent.dynamic_prefix.as_deref(), Some("ref_image_"));
     }
 }

@@ -94,6 +94,8 @@ pub mod workflow_manifest;
 pub mod workflow_onboarding_service;
 pub mod workflow_recognition_schema;
 pub mod workflow_recognition_service;
+#[cfg(test)]
+mod workflow_recognition_v3_replay;
 pub mod workflow_registry_service;
 pub mod workflow_semantic_graph;
 pub mod workflow_semantic_identity;

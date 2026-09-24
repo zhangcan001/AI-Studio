@@ -30,3 +30,12 @@
 *.zip binary
 *.exe binary
 *.dll binary
+
+# Repository-owned replay evidence must retain its original bytes in Git.
+src-tauri/tests/fixtures/workflow_recognition_v3/** -text
+
+# Keep original CRLF evidence out of Git's text whitespace check; SHA audits
+# still verify every staged and committed replay-data blob byte-for-byte.
+src-tauri/tests/fixtures/workflow_recognition_v3/real/*/provenance.json -diff
+src-tauri/tests/fixtures/workflow_recognition_v3/real/manifest.json -diff
+src-tauri/tests/fixtures/workflow_recognition_v3/synthetic_registry.json -diff

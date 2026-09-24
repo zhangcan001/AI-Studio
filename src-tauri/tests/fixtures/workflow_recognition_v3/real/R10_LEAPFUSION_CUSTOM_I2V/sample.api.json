@@ -1,0 +1,308 @@
+{
+  "42": {
+    "inputs": {
+      "add_noise": true,
+      "noise_seed": 6,
+      "cfg": 1,
+      "model": [
+        "54",
+        0
+      ],
+      "positive": [
+        "62",
+        0
+      ],
+      "negative": [
+        "55",
+        0
+      ],
+      "sampler": [
+        "51",
+        0
+      ],
+      "sigmas": [
+        "52",
+        0
+      ],
+      "latent_image": [
+        "53",
+        0
+      ]
+    },
+    "class_type": "SamplerCustom",
+    "_meta": {
+      "title": "自定义采样器"
+    }
+  },
+  "44": {
+    "inputs": {
+      "unet_name": "hyvideo\\hunyuan_video_720_fp8_e4m3fn.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "45": {
+    "inputs": {
+      "text": "woman puts on sunglasses",
+      "clip": [
+        "47",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "47": {
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "llava_llama3_fp16.safetensors",
+      "type": "hunyuan_video",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "双CLIP加载器"
+    }
+  },
+  "49": {
+    "inputs": {
+      "vae_name": "hyvid\\hunyuan_video_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "50": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "hyvidcomfy",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": false,
+      "images": [
+        "57",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "51": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "52": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 20,
+      "denoise": 1,
+      "model": [
+        "54",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "53": {
+    "inputs": {
+      "width": [
+        "66",
+        1
+      ],
+      "height": [
+        "66",
+        2
+      ],
+      "length": 65,
+      "batch_size": 1
+    },
+    "class_type": "EmptyHunyuanLatentVideo",
+    "_meta": {
+      "title": "空Latent视频（Hunyuan）"
+    }
+  },
+  "54": {
+    "inputs": {
+      "shift": 9,
+      "model": [
+        "74",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "采样算法（SD3）"
+    }
+  },
+  "55": {
+    "inputs": {
+      "conditioning": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "57": {
+    "inputs": {
+      "tile_size": 128,
+      "overlap": 64,
+      "temporal_size": 64,
+      "temporal_overlap": 8,
+      "samples": [
+        "84",
+        0
+      ],
+      "vae": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeTiled",
+    "_meta": {
+      "title": "VAE解码（分块）"
+    }
+  },
+  "59": {
+    "inputs": {
+      "lora_name": "hyvid\\musubi-tuner\\img2vid544p.safetensors",
+      "strength_model": 1,
+      "model": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "62": {
+    "inputs": {
+      "guidance": 6,
+      "conditioning": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "Flux引导"
+    }
+  },
+  "64": {
+    "inputs": {
+      "pixels": [
+        "86",
+        0
+      ],
+      "vae": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "65": {
+    "inputs": {
+      "image": "Mona-Lisa-oil-wood-panel-Leonardo-da.webp"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "66": {
+    "inputs": {
+      "width": 960,
+      "height": 640,
+      "upscale_method": "lanczos",
+      "keep_proportion": false,
+      "divisible_by": 2,
+      "crop": 0,
+      "image": [
+        "65",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJ",
+    "_meta": {
+      "title": "Resize Image (deprecated)"
+    }
+  },
+  "74": {
+    "inputs": {
+      "index": 0,
+      "start_percent": 0,
+      "end_percent": 1,
+      "strength": 0.8,
+      "model": [
+        "59",
+        0
+      ],
+      "latent": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "LeapfusionHunyuanI2VPatcher",
+    "_meta": {
+      "title": "Leapfusion Hunyuan I2V Patcher"
+    }
+  },
+  "84": {
+    "inputs": {
+      "start_index": 1,
+      "num_frames": -1,
+      "latents": [
+        "42",
+        1
+      ]
+    },
+    "class_type": "GetLatentRangeFromBatch",
+    "_meta": {
+      "title": "Get Latent Range From Batch"
+    }
+  },
+  "86": {
+    "inputs": {
+      "noise_aug_strength": 0.05,
+      "seed": 123,
+      "image": [
+        "66",
+        0
+      ]
+    },
+    "class_type": "ImageNoiseAugmentation",
+    "_meta": {
+      "title": "Image Noise Augmentation"
+    }
+  }
+}

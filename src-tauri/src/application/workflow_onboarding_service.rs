@@ -6036,7 +6036,7 @@ fn sha256(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::application::{
         generation_input_preparer::GenerationInputValue, preset_service::PresetService,
@@ -6062,6 +6062,15 @@ mod tests {
     use serde_json::json;
     use std::{collections::BTreeMap, sync::Arc};
     use tempfile::tempdir;
+
+    pub(crate) fn run_replay_test(name: &str) {
+        match name {
+            "LEGACY_SUGGESTION_CONSUMES_CANONICAL_HINTS" => {
+                LEGACY_SUGGESTION_CONSUMES_CANONICAL_HINTS()
+            }
+            _ => panic!("unregistered workflow-onboarding replay test: {name}"),
+        }
+    }
 
     fn workflow_with_titles(titles: &[&str]) -> WorkflowDocument {
         WorkflowDocument::parse(Value::Object(

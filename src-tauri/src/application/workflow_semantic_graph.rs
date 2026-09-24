@@ -1006,6 +1006,10 @@ pub struct SemanticNodeInput {
     pub raw_type: Option<String>,
     pub explicit_reference: bool,
     pub semantic_evidence: Vec<CanonicalSemanticEvidence>,
+    #[serde(skip)]
+    dynamic_parent_semantic: Option<CanonicalSemantic>,
+    #[serde(skip)]
+    dynamic_member_expected_type: Option<RecognitionDeclaredType>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -1148,6 +1152,11 @@ pub fn resolve_semantic_graph(
     }
 
     resolve_dynamic_types(schema, &active.active_edges, &mut nodes);
+    for (node_id, node) in &mut nodes {
+        if let Some(node_schema) = schema.node(&node.class_type) {
+            apply_frame_index_roles(workflow.inputs(node_id), node_schema, &mut node.inputs);
+        }
+    }
     collect_active_dependency_issues(workflow, &active, &nodes, &mut unknown_active_dependencies);
 
     for node_id in &active.disconnected_nodes {
@@ -1196,6 +1205,9 @@ fn resolve_node(
 
     for input_name in input_names {
         let input_schema = resolve_node_input_schema(schema, workflow_inputs, &input_name);
+        let dynamic_parent_semantic = input_schema
+            .as_ref()
+            .and_then(|_| dynamic_parent_semantic(schema, &input_name));
         let value = workflow_inputs.and_then(|inputs| inputs.get(&input_name));
         if value.is_none()
             && schema
@@ -1211,6 +1223,43 @@ fn resolve_node(
             .map(|input| resolve_schema_input(input, hint))
             .unwrap_or_else(|| resolve_semantic_input(None, &input_name, hint));
         let mut semantic_evidence = resolution.evidence.clone();
+        let (semantic_key, explicit_reference, dynamic_member_expected_type) =
+            if let (Some(parent_semantic), Some(input_schema)) =
+                (dynamic_parent_semantic, input_schema.as_ref())
+            {
+                if input_schema.dynamic_value_type == Some(RecognitionDeclaredType::Image) {
+                    if let Some(role) = dynamic_image_member_role(parent_semantic) {
+                        semantic_evidence.push(CanonicalSemanticEvidence {
+                            semantic: role,
+                            source: SemanticEvidenceSource::GraphContext,
+                            confidence: SemanticHintConfidence::Medium,
+                        });
+                        (
+                            Some(role.semantic_key().to_owned()),
+                            role.is_reference(),
+                            input_schema.dynamic_value_type,
+                        )
+                    } else {
+                        (
+                            resolution.semantic_key.clone(),
+                            resolution.explicit_reference,
+                            None,
+                        )
+                    }
+                } else {
+                    (
+                        resolution.semantic_key.clone(),
+                        resolution.explicit_reference,
+                        None,
+                    )
+                }
+            } else {
+                (
+                    resolution.semantic_key.clone(),
+                    resolution.explicit_reference,
+                    None,
+                )
+            };
         if connected && resolution.semantic != CanonicalSemantic::Unknown {
             semantic_evidence.push(CanonicalSemanticEvidence {
                 semantic: resolution.semantic,
@@ -1224,7 +1273,6 @@ fn resolve_node(
             .as_ref()
             .map(|input| input.raw_type.clone())
             .or_else(|| resolution.type_resolution.raw_type().map(str::to_owned));
-        let explicit_reference = resolution.explicit_reference;
         inputs.push(SemanticNodeInput {
             name: input_name,
             semantic_type,
@@ -1235,10 +1283,12 @@ fn resolve_node(
             match_template: input_schema
                 .as_ref()
                 .and_then(|input| input.match_template.clone()),
-            semantic_key: resolution.semantic_key,
+            semantic_key,
             raw_type,
             explicit_reference,
             semantic_evidence,
+            dynamic_parent_semantic,
+            dynamic_member_expected_type,
         });
     }
 
@@ -1298,6 +1348,85 @@ fn resolve_node(
         outputs,
         output_match_types: schema.output_match_types.clone(),
         evidence,
+    }
+}
+
+fn dynamic_parent_semantic(
+    schema: &RecognitionNodeSchema,
+    input_name: &str,
+) -> Option<CanonicalSemantic> {
+    schema.inputs.values().find_map(|parent| {
+        if parent.name == input_name || !dynamic_input_name_matches(schema, parent, input_name) {
+            return None;
+        }
+        canonical_semantic_hint(&parent.name).map(|hint| hint.semantic)
+    })
+}
+
+fn dynamic_image_member_role(parent: CanonicalSemantic) -> Option<CanonicalSemantic> {
+    match parent {
+        CanonicalSemantic::ReferenceImageList => Some(CanonicalSemantic::ReferenceImage),
+        CanonicalSemantic::ImageList => Some(CanonicalSemantic::Image),
+        _ => None,
+    }
+}
+
+fn apply_frame_index_roles(
+    workflow_inputs: Option<&serde_json::Map<String, Value>>,
+    schema: &RecognitionNodeSchema,
+    inputs: &mut [SemanticNodeInput],
+) {
+    let Some(workflow_inputs) = workflow_inputs else {
+        return;
+    };
+    let frame_roles = workflow_inputs
+        .iter()
+        .filter_map(|(name, value)| {
+            let normalized = normalize_input_name(name);
+            if !matches!(normalized.as_str(), "frame_idx" | "frame_index")
+                || schema.input(name).map_or(true, |input| {
+                    input.declared_type != RecognitionDeclaredType::Integer
+                })
+            {
+                return None;
+            }
+            match value.as_i64()? {
+                0 => Some(CanonicalSemantic::FirstFrame),
+                -1 => Some(CanonicalSemantic::LastFrame),
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    if frame_roles.len() != 1 {
+        return;
+    }
+    let role = frame_roles[0];
+    let mut image_inputs = inputs.iter_mut().filter(|input| {
+        input.connected
+            && input.semantic_type == SemanticType::Image
+            && matches!(
+                input.canonical_semantic,
+                CanonicalSemantic::Image
+                    | CanonicalSemantic::SourceImage
+                    | CanonicalSemantic::ReferenceImage
+            )
+    });
+    let Some(image_input) = image_inputs.next() else {
+        return;
+    };
+    if image_inputs.next().is_some() {
+        return;
+    }
+    image_input
+        .semantic_evidence
+        .push(CanonicalSemanticEvidence {
+            semantic: role,
+            source: SemanticEvidenceSource::GraphContext,
+            confidence: SemanticHintConfidence::Medium,
+        });
+    if !image_input.explicit_reference {
+        image_input.canonical_semantic = role;
+        image_input.semantic_key = Some(role.semantic_key().to_owned());
     }
 }
 
@@ -1459,6 +1588,26 @@ fn resolve_dynamic_input_from_source(
     ) {
         return false;
     }
+    if input
+        .dynamic_member_expected_type
+        .is_some_and(|expected| !source_matches_declared_type(expected, source))
+    {
+        let raw_type = input
+            .type_resolution
+            .raw_type()
+            .unwrap_or_default()
+            .to_owned();
+        input.type_resolution = SchemaTypeResolution::Conflict {
+            raw_type,
+            message: "connected source type conflicts with the dynamic member value type"
+                .to_owned(),
+        };
+        input.semantic_type = SemanticType::Unknown;
+        input.canonical_semantic = CanonicalSemantic::Unknown;
+        input.semantic_key = None;
+        input.explicit_reference = false;
+        return true;
+    }
     match &source.type_resolution {
         SchemaTypeResolution::KnownSemantic { .. }
         | SchemaTypeResolution::DynamicResolved { .. } => {
@@ -1516,6 +1665,24 @@ fn resolve_dynamic_input_from_source(
         SchemaTypeResolution::DynamicUnresolved { .. }
         | SchemaTypeResolution::Unresolved
         | SchemaTypeResolution::Conflict { .. } => false,
+    }
+}
+
+fn source_matches_declared_type(
+    declared: RecognitionDeclaredType,
+    source: &SemanticNodeOutput,
+) -> bool {
+    match declared {
+        RecognitionDeclaredType::Image => source.semantic_type == SemanticType::Image,
+        RecognitionDeclaredType::Video => source.semantic_type == SemanticType::Video,
+        RecognitionDeclaredType::Audio => source.semantic_type == SemanticType::Audio,
+        RecognitionDeclaredType::Mask => source.semantic_type == SemanticType::Mask,
+        RecognitionDeclaredType::Latent => source.semantic_type == SemanticType::Latent,
+        RecognitionDeclaredType::Model => source.semantic_type == SemanticType::Model,
+        RecognitionDeclaredType::VideoModel => source.semantic_type == SemanticType::VideoModel,
+        RecognitionDeclaredType::Conditioning => source.semantic_type == SemanticType::Conditioning,
+        RecognitionDeclaredType::String => source.semantic_type == SemanticType::Text,
+        _ => true,
     }
 }
 
@@ -2109,6 +2276,54 @@ fn is_external_media_source(role: SemanticNodeRole) -> bool {
     )
 }
 
+fn frame_input_has_external_image_ancestor(
+    closure: &RootDependencyClosure,
+    semantic: &SemanticGraph,
+    target_node_id: &str,
+    target_input: &str,
+) -> bool {
+    let mut pending = closure
+        .active_edges
+        .iter()
+        .filter(|edge| edge.target_node_id == target_node_id && edge.target_input == target_input)
+        .map(|edge| edge.source_node_id.clone())
+        .collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+
+    while let Some(node_id) = pending.pop() {
+        if !visited.insert(node_id.clone()) {
+            continue;
+        }
+        let Some(node) = semantic.nodes.get(&node_id) else {
+            continue;
+        };
+        if node.role == SemanticNodeRole::ImageSource {
+            return true;
+        }
+        if node.role != SemanticNodeRole::GenericTransform {
+            continue;
+        }
+        for input in node.inputs.iter().filter(|input| {
+            input.connected
+                && matches!(
+                    input.semantic_type,
+                    SemanticType::Image | SemanticType::ImageList
+                )
+        }) {
+            pending.extend(
+                closure
+                    .active_edges
+                    .iter()
+                    .filter(|edge| {
+                        edge.target_node_id == node_id && edge.target_input == input.name
+                    })
+                    .map(|edge| edge.source_node_id.clone()),
+            );
+        }
+    }
+    false
+}
+
 pub fn build_root_capability_profile(
     analysis: &WorkflowAnalysisReport,
     semantic: &SemanticGraph,
@@ -2121,7 +2336,8 @@ pub fn build_root_capability_profile(
     let mut has_explicit_reference = false;
     let mut has_video = false;
     let mut has_audio = false;
-    let mut has_first_or_last = false;
+    let mut has_first_frame = false;
+    let mut has_last_frame = false;
 
     for node_id in &closure.active_nodes {
         let Some(node) = semantic.nodes.get(node_id) else {
@@ -2145,17 +2361,38 @@ pub fn build_root_capability_profile(
                             .get(&link.source_node_id)
                             .is_some_and(|source| is_external_media_source(source.role))
                 });
+                let has_first_role = input.canonical_semantic == CanonicalSemantic::FirstFrame
+                    || input
+                        .semantic_evidence
+                        .iter()
+                        .any(|evidence| evidence.semantic == CanonicalSemantic::FirstFrame);
+                let has_last_role = input.canonical_semantic == CanonicalSemantic::LastFrame
+                    || input
+                        .semantic_evidence
+                        .iter()
+                        .any(|evidence| evidence.semantic == CanonicalSemantic::LastFrame);
+                let frame_has_external_ancestor = (has_first_role || has_last_role)
+                    && input.semantic_type == SemanticType::Image
+                    && frame_input_has_external_image_ancestor(
+                        closure,
+                        semantic,
+                        &node.node_id,
+                        &input.name,
+                    );
                 if !source_is_external {
+                    if frame_has_external_ancestor {
+                        has_explicit_reference |= input.explicit_reference;
+                        has_first_frame |= has_first_role;
+                        has_last_frame |= has_last_role;
+                    }
                     continue;
                 }
                 match input.semantic_type {
                     SemanticType::Image | SemanticType::ImageList => {
                         has_image = true;
                         has_explicit_reference |= input.explicit_reference;
-                        has_first_or_last |= matches!(
-                            input.semantic_key.as_deref(),
-                            Some("first_frame" | "last_frame")
-                        );
+                        has_first_frame |= has_first_role;
+                        has_last_frame |= has_last_role;
                     }
                     SemanticType::Video | SemanticType::VideoList => {
                         has_video = true;
@@ -2198,8 +2435,13 @@ pub fn build_root_capability_profile(
             output_type: output.output_type.clone(),
         })
         .collect::<Vec<_>>();
+    let frame_reference_conflict = (has_first_frame || has_last_frame) && has_explicit_reference;
     let primary_capability = match root.output_type.as_str() {
-        "video" if has_first_or_last => Some("image_to_video".to_owned()),
+        "video" if frame_reference_conflict => None,
+        "video" if has_first_frame && has_last_frame => {
+            Some("first_last_frame_to_video".to_owned())
+        }
+        "video" if has_first_frame || has_last_frame => Some("image_to_video".to_owned()),
         "video" if has_video || has_audio || has_explicit_reference => {
             Some("reference_to_video".to_owned())
         }
@@ -2318,18 +2560,21 @@ pub fn build_capability_profile_for_roots(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    let primary_capability = selected_root_id
-        .and_then(|selected| {
-            roots
-                .iter()
-                .find(|profile| profile.root_id == selected || profile.root_node_id == selected)
-                .and_then(|profile| profile.primary_capability.clone())
-        })
-        .or_else(|| {
-            (aggregate_capabilities.len() == 1)
-                .then(|| aggregate_capabilities.first().cloned())
-                .flatten()
-        });
+    let primary_capability = if let Some(selected) = selected_root_id {
+        roots
+            .iter()
+            .find(|profile| profile.root_id == selected || profile.root_node_id == selected)
+            .and_then(|profile| profile.primary_capability.clone())
+    } else if !roots.is_empty()
+        && roots
+            .iter()
+            .all(|profile| profile.primary_capability.is_some())
+        && aggregate_capabilities.len() == 1
+    {
+        aggregate_capabilities.first().cloned()
+    } else {
+        None
+    };
 
     let secondary_capabilities = roots
         .iter()
@@ -2431,7 +2676,7 @@ pub fn build_capability_profile_for_roots(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{
         build_capability_profile_for_roots, canonical_semantic_hint,
         canonical_suggestion_for_input, resolve_semantic_graph, resolve_semantic_input,
@@ -2450,6 +2695,117 @@ mod tests {
         domain::WorkflowDocument,
     };
     use serde_json::{json, Value};
+
+    pub(crate) fn run_replay_test(name: &str) {
+        match name {
+            "active_dependency_graph_excludes_disconnected_nodes_and_keeps_multiple_roots" => {
+                active_dependency_graph_excludes_disconnected_nodes_and_keeps_multiple_roots()
+            }
+            "semantic_resolver_prefers_schema_types_for_an_unknown_generator" => {
+                semantic_resolver_prefers_schema_types_for_an_unknown_generator()
+            }
+            "disconnected_missing_schema_is_noncritical_but_active_missing_schema_blocks" => {
+                disconnected_missing_schema_is_noncritical_but_active_missing_schema_blocks()
+            }
+            "capability_uses_active_image_connection_not_optional_schema_presence" => {
+                capability_uses_active_image_connection_not_optional_schema_presence()
+            }
+            "generic_reference_media_is_distinct_from_generic_image_to_video" => {
+                generic_reference_media_is_distinct_from_generic_image_to_video()
+            }
+            "active_unknown_critical_socket_fails_closed_without_provider_rules" => {
+                active_unknown_critical_socket_fails_closed_without_provider_rules()
+            }
+            "PER_ROOT_CLOSURE_DOES_NOT_UNION_INPUTS" => PER_ROOT_CLOSURE_DOES_NOT_UNION_INPUTS(),
+            "TWO_COMPATIBLE_VIDEO_ROOTS" => TWO_COMPATIBLE_VIDEO_ROOTS(),
+            "TWO_DIFFERENT_CAPABILITY_ROOTS" => TWO_DIFFERENT_CAPABILITY_ROOTS(),
+            "ROOT_A_READY_ROOT_B_UNSUPPORTED" => ROOT_A_READY_ROOT_B_UNSUPPORTED(),
+            "IMAGE_INPUT_DOES_NOT_LEAK_ACROSS_ROOTS" => IMAGE_INPUT_DOES_NOT_LEAK_ACROSS_ROOTS(),
+            "REFERENCE_SEMANTIC_DOES_NOT_LEAK_ACROSS_ROOTS" => {
+                REFERENCE_SEMANTIC_DOES_NOT_LEAK_ACROSS_ROOTS()
+            }
+            "SHARED_UPSTREAM_CAN_BELONG_TO_MULTIPLE_ROOTS" => {
+                SHARED_UPSTREAM_CAN_BELONG_TO_MULTIPLE_ROOTS()
+            }
+            "INTERNAL_GENERATED_MEDIA_IS_NOT_EXTERNAL_INPUT" => {
+                INTERNAL_GENERATED_MEDIA_IS_NOT_EXTERNAL_INPUT()
+            }
+            "ROOT_UNKNOWN_DEPENDENCY_IS_SCOPED" => ROOT_UNKNOWN_DEPENDENCY_IS_SCOPED(),
+            "EXPLICIT_SELECTED_ROOT_CONTROLS_PRIMARY_WITHOUT_DROPPING_OTHER_ROOTS" => {
+                EXPLICIT_SELECTED_ROOT_CONTROLS_PRIMARY_WITHOUT_DROPPING_OTHER_ROOTS()
+            }
+            "PER_ROOT_OUTPUT_TYPES_ARE_PRESERVED" => PER_ROOT_OUTPUT_TYPES_ARE_PRESERVED(),
+            "PER_ROOT_CAPABILITY_IS_ORDER_INDEPENDENT" => {
+                PER_ROOT_CAPABILITY_IS_ORDER_INDEPENDENT()
+            }
+            "SCHEMA_TYPE_OVERRIDES_ALIAS_NAME" => SCHEMA_TYPE_OVERRIDES_ALIAS_NAME(),
+            "CLASS_TITLE_CANNOT_OVERRIDE_SCHEMA_TYPE" => CLASS_TITLE_CANNOT_OVERRIDE_SCHEMA_TYPE(),
+            "SPARSE_SCHEMA_T2V" => SPARSE_SCHEMA_T2V(),
+            "SPARSE_SCHEMA_I2V" => SPARSE_SCHEMA_I2V(),
+            "UNKNOWN_ROLE_KNOWN_TYPES_NONBLOCKING" => UNKNOWN_ROLE_KNOWN_TYPES_NONBLOCKING(),
+            "UNKNOWN_TRANSFORM_WITH_KNOWN_MEDIA_TYPES" => {
+                UNKNOWN_TRANSFORM_WITH_KNOWN_MEDIA_TYPES()
+            }
+            "UNKNOWN_SOURCE_WITH_KNOWN_IMAGE_OUTPUT" => UNKNOWN_SOURCE_WITH_KNOWN_IMAGE_OUTPUT(),
+            "UNKNOWN_SINK_WITH_KNOWN_VIDEO_INPUT" => UNKNOWN_SINK_WITH_KNOWN_VIDEO_INPUT(),
+            "UNKNOWN_REQUIRED_CUSTOM_TYPE_FAILS_CLOSED" => {
+                UNKNOWN_REQUIRED_CUSTOM_TYPE_FAILS_CLOSED()
+            }
+            "REFERENCE_LIST_SCHEMA_IS_REFERENCE" => REFERENCE_LIST_SCHEMA_IS_REFERENCE(),
+            "REFERENCE_INDEXED_SLOTS_ARE_REFERENCE" => REFERENCE_INDEXED_SLOTS_ARE_REFERENCE(),
+            "MULTIPLE_IMAGE_INPUTS_NOT_REFERENCE" => MULTIPLE_IMAGE_INPUTS_NOT_REFERENCE(),
+            "REFERENCE_ALIAS_CANNOT_OVERRIDE_NON_IMAGE_SCHEMA" => {
+                REFERENCE_ALIAS_CANNOT_OVERRIDE_NON_IMAGE_SCHEMA()
+            }
+            "CANONICAL_PROMPT_HINT_IS_SHARED" => CANONICAL_PROMPT_HINT_IS_SHARED(),
+            "CANONICAL_MEDIA_HINT_IS_SHARED" => CANONICAL_MEDIA_HINT_IS_SHARED(),
+            "INTERNAL_GENERATED_MEDIA_REMAINS_INTERNAL" => {
+                INTERNAL_GENERATED_MEDIA_REMAINS_INTERNAL()
+            }
+            "REFERENCE_SEMANTIC_REMAINS_ROOT_SCOPED" => REFERENCE_SEMANTIC_REMAINS_ROOT_SCOPED(),
+            "CANONICAL_RESOLUTION_IS_ORDER_INDEPENDENT" => {
+                CANONICAL_RESOLUTION_IS_ORDER_INDEPENDENT()
+            }
+            "SCHEMA_TYPE_LAYERING_PRESERVES_RAW_CUSTOM_TYPES" => {
+                SCHEMA_TYPE_LAYERING_PRESERVES_RAW_CUSTOM_TYPES()
+            }
+            "OPAQUE_CUSTOM_CONTROL_NONBLOCKING" => OPAQUE_CUSTOM_CONTROL_NONBLOCKING(),
+            "ARBITRARY_OPAQUE_TYPES_DO_NOT_REQUIRE_ADAPTER" => {
+                ARBITRARY_OPAQUE_TYPES_DO_NOT_REQUIRE_ADAPTER()
+            }
+            "OPAQUE_EXTERNAL_MEDIA_BOUNDARY_FAILS_CLOSED" => {
+                OPAQUE_EXTERNAL_MEDIA_BOUNDARY_FAILS_CLOSED()
+            }
+            "OPAQUE_OUTPUT_BOUNDARY_FAILS_CLOSED" => OPAQUE_OUTPUT_BOUNDARY_FAILS_CLOSED(),
+            "OPAQUE_MEDIA_SINK_OUTPUT_IS_NONBLOCKING" => OPAQUE_MEDIA_SINK_OUTPUT_IS_NONBLOCKING(),
+            "WILDCARD_RESOLVES_FROM_KNOWN_SOURCE" => WILDCARD_RESOLVES_FROM_KNOWN_SOURCE(),
+            "WILDCARD_RESOLVES_FROM_KNOWN_TARGET" => WILDCARD_RESOLVES_FROM_KNOWN_TARGET(),
+            "UNCONSTRAINED_WILDCARD_CAPABILITY_BOUNDARY_FAILS_CLOSED" => {
+                UNCONSTRAINED_WILDCARD_CAPABILITY_BOUNDARY_FAILS_CLOSED()
+            }
+            "UNCONSTRAINED_WILDCARD_AUXILIARY_NONBLOCKING" => {
+                UNCONSTRAINED_WILDCARD_AUXILIARY_NONBLOCKING()
+            }
+            "MATCHTYPE_PROPAGATES_KNOWN_MEDIA" => MATCHTYPE_PROPAGATES_KNOWN_MEDIA(),
+            "MATCHTYPE_UNRESOLVED_CRITICAL_FAILS_CLOSED" => {
+                MATCHTYPE_UNRESOLVED_CRITICAL_FAILS_CLOSED()
+            }
+            "AUTOGROW_INPUT_RESOLVES_FROM_KNOWN_SOURCE" => {
+                AUTOGROW_INPUT_RESOLVES_FROM_KNOWN_SOURCE()
+            }
+            "CONDITIONAL_INPUT_RESOLVES_SELECTED_OPTION" => {
+                CONDITIONAL_INPUT_RESOLVES_SELECTED_OPTION()
+            }
+            "AUTOGROW_PREFIX_INPUT_RESOLVES_FROM_KNOWN_SOURCE" => {
+                AUTOGROW_PREFIX_INPUT_RESOLVES_FROM_KNOWN_SOURCE()
+            }
+            "CUSTOM_TYPE_NAME_DOES_NOT_CHANGE_CAPABILITY" => {
+                CUSTOM_TYPE_NAME_DOES_NOT_CHANGE_CAPABILITY()
+            }
+            "OPAQUE_TYPE_ORDER_INDEPENDENT" => OPAQUE_TYPE_ORDER_INDEPENDENT(),
+            _ => panic!("unregistered semantic-graph replay test: {name}"),
+        }
+    }
 
     fn schema() -> RecognitionSchemaContext {
         RecognitionSchemaContext::parse(&json!({
@@ -2542,6 +2898,60 @@ mod tests {
                 "input": {"required": {"video": ["VIDEO", {}]}}
             }
         }))
+    }
+
+    fn dynamic_image_collection_schema() -> RecognitionSchemaContext {
+        RecognitionSchemaContext::parse(&dynamic_image_collection_schema_value())
+    }
+
+    fn dynamic_image_collection_schema_value() -> Value {
+        json!({
+            "TextSource": {
+                "output": ["CONDITIONING"],
+                "input": {"required": {"text": ["STRING", {}]}}
+            },
+            "ImageSource": {
+                "output": ["IMAGE"],
+                "input": {"required": {"file": ["COMBO", {"image_upload": true}]}}
+            },
+            "VideoSource": {
+                "output": ["VIDEO"],
+                "input": {"required": {"file": ["COMBO", {"video_upload": true}]}}
+            },
+            "NeutralDynamicMediaConsumer": {
+                "output": ["VIDEO"],
+                "input": {
+                    "required": {"prompt": ["STRING", {}]},
+                    "optional": {
+                        "reference_images": ["COMFY_AUTOGROW_V3", {
+                            "template": {
+                                "input": {"required": {"ref_image": ["IMAGE", {}]}},
+                                "prefix": "ref_image_",
+                                "min": 0,
+                                "max": 9
+                            }
+                        }],
+                        "images": ["COMFY_AUTOGROW_V3", {
+                            "template": {
+                                "input": {"required": {"image": ["IMAGE", {}]}},
+                                "prefix": "image_",
+                                "min": 0,
+                                "max": 9
+                            }
+                        }]
+                    }
+                }
+            },
+            "VideoGenerator": {
+                "output": ["VIDEO"],
+                "input": {"required": {"conditioning": ["CONDITIONING", {}]}}
+            },
+            "VideoOutput": {
+                "output": ["VIDEO"],
+                "output_node": true,
+                "input": {"required": {"video": ["VIDEO", {}]}}
+            }
+        })
     }
 
     fn root_selection(node_id: &str, output_type: &str) -> OutputRootSelection {
@@ -3501,6 +3911,7 @@ mod tests {
             profile.readiness,
             WorkflowCapabilityReadiness::PartiallySupported
         );
+        assert_eq!(profile.primary_capability, None);
         assert_eq!(
             profile
                 .roots
@@ -4467,6 +4878,273 @@ mod tests {
         ));
         assert!(semantic.unknown_active_dependencies.is_empty());
         assert!(profile.usable);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn AUTOGROW_REFERENCE_PARENT_PROPAGATES_REFERENCE_TO_MEMBER() {
+        let (_, semantic, profile) = profile_with_schema(
+            json!({
+                "1": {"class_type": "ImageSource", "inputs": {"file": "ref.png"}},
+                "2": {"class_type": "NeutralDynamicMediaConsumer", "inputs": {
+                    "prompt": "make a video",
+                    "reference_images.ref_image_0": ["1", 0]
+                }},
+                "3": {"class_type": "VideoOutput", "inputs": {"video": ["2", 0]}}
+            }),
+            json!({
+                "ImageSource": {
+                    "output": ["IMAGE"],
+                    "input": {"required": {"file": ["COMBO", {"image_upload": true}]}}
+                },
+                "NeutralDynamicMediaConsumer": {
+                    "output": ["VIDEO"],
+                    "input": {
+                        "required": {"prompt": ["STRING", {}]},
+                        "optional": {"reference_images": ["COMFY_AUTOGROW_V3", {
+                            "template": {
+                                "input": {"required": {"ref_image": ["IMAGE", {}]}},
+                                "prefix": "ref_image_", "min": 0, "max": 9
+                            }
+                        }]}
+                    }
+                },
+                "VideoOutput": {
+                    "output": ["VIDEO"],
+                    "output_node": true,
+                    "input": {"required": {"video": ["VIDEO", {}]}}
+                }
+            }),
+        );
+        let member = semantic.nodes["2"]
+            .inputs
+            .iter()
+            .find(|input| input.name == "reference_images.ref_image_0")
+            .unwrap();
+
+        assert_eq!(member.canonical_semantic, CanonicalSemantic::ReferenceImage);
+        assert_eq!(member.semantic_key.as_deref(), Some("reference_image"));
+        assert!(member.explicit_reference);
+        assert_eq!(
+            profile.primary_capability.as_deref(),
+            Some("reference_to_video")
+        );
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn NESTED_DYNAMIC_REFERENCE_MEMBER_REMAINS_REFERENCE() {
+        let (_, semantic, _) = profile_with_schema(
+            json!({
+                "1": {"class_type": "ImageSource", "inputs": {"file": "ref.png"}},
+                "2": {"class_type": "NeutralDynamicMediaConsumer", "inputs": {
+                    "prompt": "make a video",
+                    "reference_images.ref_image_0": ["1", 0]
+                }},
+                "3": {"class_type": "VideoOutput", "inputs": {"video": ["2", 0]}}
+            }),
+            dynamic_image_collection_schema_value(),
+        );
+        let member = semantic.nodes["2"]
+            .inputs
+            .iter()
+            .find(|input| input.name == "reference_images.ref_image_0")
+            .unwrap();
+
+        assert_eq!(member.canonical_semantic, CanonicalSemantic::ReferenceImage);
+        assert!(member.explicit_reference);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn AUTOGROW_GENERIC_IMAGE_PARENT_REMAINS_GENERIC_IMAGE() {
+        let (_, semantic, profile) = profile_with_schema(
+            json!({
+                "1": {"class_type": "ImageSource", "inputs": {"file": "input.png"}},
+                "2": {"class_type": "NeutralDynamicMediaConsumer", "inputs": {
+                    "prompt": "make a video",
+                    "images.image_0": ["1", 0]
+                }},
+                "3": {"class_type": "VideoOutput", "inputs": {"video": ["2", 0]}}
+            }),
+            dynamic_image_collection_schema_value(),
+        );
+        let member = semantic.nodes["2"]
+            .inputs
+            .iter()
+            .find(|input| input.name == "images.image_0")
+            .unwrap();
+
+        assert_eq!(member.canonical_semantic, CanonicalSemantic::Image);
+        assert_eq!(member.semantic_key.as_deref(), Some("image"));
+        assert!(!member.explicit_reference);
+        assert_eq!(
+            profile.primary_capability.as_deref(),
+            Some("image_to_video")
+        );
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn REFERENCE_SEMANTIC_DOES_NOT_LEAK_TO_SIBLING_DYNAMIC_GROUP() {
+        let (_, semantic, _) = profile_with_schema(
+            json!({
+                "1": {"class_type": "ImageSource", "inputs": {"file": "ref.png"}},
+                "2": {"class_type": "ImageSource", "inputs": {"file": "ordinary.png"}},
+                "3": {"class_type": "NeutralDynamicMediaConsumer", "inputs": {
+                    "prompt": "make a video",
+                    "reference_images.ref_image_0": ["1", 0],
+                    "images.image_0": ["2", 0]
+                }},
+                "4": {"class_type": "VideoOutput", "inputs": {"video": ["3", 0]}}
+            }),
+            dynamic_image_collection_schema_value(),
+        );
+        let inputs = &semantic.nodes["3"].inputs;
+        let reference = inputs
+            .iter()
+            .find(|input| input.name == "reference_images.ref_image_0")
+            .unwrap();
+        let generic = inputs
+            .iter()
+            .find(|input| input.name == "images.image_0")
+            .unwrap();
+
+        assert_eq!(
+            reference.canonical_semantic,
+            CanonicalSemantic::ReferenceImage
+        );
+        assert!(reference.explicit_reference);
+        assert_eq!(generic.canonical_semantic, CanonicalSemantic::Image);
+        assert!(!generic.explicit_reference);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn DYNAMIC_REFERENCE_SEMANTIC_DOES_NOT_LEAK_ACROSS_ROOTS() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {"class_type": "ImageSource", "inputs": {"file": "ref.png"}},
+            "2": {"class_type": "NeutralDynamicMediaConsumer", "inputs": {
+                "prompt": "make a video",
+                "reference_images.ref_image_0": ["1", 0]
+            }},
+            "3": {"class_type": "VideoOutput", "inputs": {"video": ["2", 0]}},
+            "4": {"class_type": "TextSource", "inputs": {"text": "hello"}},
+            "5": {"class_type": "VideoGenerator", "inputs": {"conditioning": ["4", 0]}},
+            "6": {"class_type": "VideoOutput", "inputs": {"video": ["5", 0]}}
+        }))
+        .expect("workflow should parse");
+        let schema = dynamic_image_collection_schema();
+        let bytes = serde_json::to_vec(workflow.value()).unwrap();
+        let selections = [root_selection("3", "video"), root_selection("6", "video")];
+        let analysis = WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
+            &workflow,
+            &bytes,
+            Some(&schema),
+            &selections,
+        );
+        let roots = analysis.output_root_resolution.roots();
+        let graph = WorkflowGraph::from_document(&workflow).unwrap();
+        let root_nodes = roots
+            .iter()
+            .map(|root| root.node_id.clone())
+            .collect::<Vec<_>>();
+        let active = ActiveDependencyGraph::from_graph(&graph, &root_nodes).unwrap();
+        let semantic = resolve_semantic_graph(&workflow, &schema, active);
+        let closures = roots
+            .iter()
+            .map(|root| {
+                RootDependencyClosure::from_graph(&graph, root.output_id.clone(), &root.node_id)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let profile = build_capability_profile_for_roots(
+            &analysis,
+            &semantic,
+            &closures,
+            roots,
+            analysis.selected_root_id.as_deref(),
+        );
+        let reference_root = profile
+            .roots
+            .iter()
+            .find(|root| root.root_node_id == "3")
+            .unwrap();
+        let text_root = profile
+            .roots
+            .iter()
+            .find(|root| root.root_node_id == "6")
+            .unwrap();
+
+        assert_eq!(
+            reference_root.primary_capability.as_deref(),
+            Some("reference_to_video")
+        );
+        assert_eq!(
+            text_root.primary_capability.as_deref(),
+            Some("text_to_video")
+        );
+        assert_eq!(profile.primary_capability, None);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn DYNAMIC_REFERENCE_MEMBER_TYPE_MISMATCH_FAILS_CLOSED() {
+        let (_, semantic, profile) = profile_with_schema(
+            json!({
+                "1": {"class_type": "VideoSource", "inputs": {"file": "ref.mp4"}},
+                "2": {"class_type": "NeutralDynamicMediaConsumer", "inputs": {
+                    "prompt": "make a video",
+                    "reference_images.ref_image_0": ["1", 0]
+                }},
+                "3": {"class_type": "VideoOutput", "inputs": {"video": ["2", 0]}}
+            }),
+            dynamic_image_collection_schema_value(),
+        );
+        let member = semantic.nodes["2"]
+            .inputs
+            .iter()
+            .find(|input| input.name == "reference_images.ref_image_0")
+            .unwrap();
+
+        assert!(matches!(
+            member.type_resolution,
+            SchemaTypeResolution::Conflict { .. }
+        ));
+        assert_eq!(member.canonical_semantic, CanonicalSemantic::Unknown);
+        assert!(!member.explicit_reference);
+        assert!(!profile.usable);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn DYNAMIC_REFERENCE_MEMBER_ORDER_INDEPENDENT() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {"class_type": "ImageSource", "inputs": {"file": "a.png"}},
+            "2": {"class_type": "ImageSource", "inputs": {"file": "b.png"}},
+            "3": {"class_type": "NeutralDynamicMediaConsumer", "inputs": {
+                "prompt": "make a video",
+                "reference_images.ref_image_0": ["1", 0],
+                "reference_images.ref_image_1": ["2", 0]
+            }},
+            "4": {"class_type": "VideoOutput", "inputs": {"video": ["3", 0]}}
+        }))
+        .expect("dynamic reference workflow should parse");
+        let schema = dynamic_image_collection_schema();
+        let graph = WorkflowGraph::from_document(&workflow).expect("graph should build");
+        let active = ActiveDependencyGraph::from_graph(&graph, &["4".to_owned()])
+            .expect("active graph should build");
+        let forward = resolve_semantic_graph(&workflow, &schema, active.clone());
+        let mut reversed_active = active;
+        reversed_active.active_edges.reverse();
+        let reverse = resolve_semantic_graph(&workflow, &schema, reversed_active);
+
+        assert_eq!(forward.nodes, reverse.nodes);
+        assert!(forward.nodes["3"]
+            .inputs
+            .iter()
+            .filter(|input| input.name.starts_with("reference_images.ref_image_"))
+            .all(|input| input.explicit_reference));
     }
 
     #[test]

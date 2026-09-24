@@ -16,8 +16,9 @@ use crate::{
             WorkflowRecognitionFormat,
         },
         workflow_semantic_graph::{
-            canonical_semantic_hint, linked_target_semantic, semantic_field_type,
-            semantic_media_family, CanonicalSemantic, SemanticInputHint,
+            build_capability_profile_for_roots, canonical_semantic_hint, linked_target_semantic,
+            resolve_semantic_graph, semantic_field_type, semantic_media_family,
+            ActiveDependencyGraph, CanonicalSemantic, RootDependencyClosure, SemanticInputHint,
         },
         workflow_semantic_identity::semantic_workflow_sha256,
     },
@@ -416,7 +417,7 @@ pub fn analyze_workflow_with_schema_and_output_roots(
     } else {
         "unknown".to_owned()
     };
-    report(
+    let mut analysis = report(
         raw_sha256,
         semantic_sha256,
         structural_sha256,
@@ -429,7 +430,62 @@ pub fn analyze_workflow_with_schema_and_output_roots(
         category,
         mode,
         issues,
-    )
+    );
+    if let Some(schema) = schema {
+        analysis.mode = project_mode_from_root_semantics(workflow, schema, &analysis)
+            .unwrap_or_else(|| "unknown".to_owned());
+    }
+    analysis
+}
+
+fn project_mode_from_root_semantics(
+    workflow: &WorkflowDocument,
+    schema: &RecognitionSchemaContext,
+    analysis: &WorkflowAnalysisReport,
+) -> Option<String> {
+    let roots = analysis.output_root_resolution.roots();
+    if roots.is_empty() {
+        return Some("unknown".to_owned());
+    }
+    let graph = WorkflowGraph::from_document(workflow).ok()?;
+    let root_node_ids = roots
+        .iter()
+        .map(|root| root.node_id.clone())
+        .collect::<Vec<_>>();
+    let active = ActiveDependencyGraph::from_graph(&graph, &root_node_ids).ok()?;
+    let semantic = resolve_semantic_graph(workflow, schema, active);
+    let closures = roots
+        .iter()
+        .map(|root| {
+            RootDependencyClosure::from_graph(&graph, root.output_id.clone(), &root.node_id).ok()
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let profile = build_capability_profile_for_roots(
+        analysis,
+        &semantic,
+        &closures,
+        roots,
+        analysis.selected_root_id.as_deref(),
+    );
+    let canonical_mode = profile.primary_capability.clone().or_else(|| {
+        let modes = profile
+            .roots
+            .iter()
+            .filter_map(|root| root.primary_capability.as_deref())
+            .collect::<BTreeSet<_>>();
+        let all_image_roots_are_resolved = !profile.roots.is_empty()
+            && profile.roots.iter().all(|root| {
+                root.output_type == "image" && root.usable && root.primary_capability.is_some()
+            });
+        // Preserve the pre-existing whole-workflow image-mode aggregate only when
+        // no root was explicitly selected. An explicit selection never falls back
+        // to a different root's mode.
+        (analysis.selected_root_id.is_none()
+            && all_image_roots_are_resolved
+            && modes == BTreeSet::from(["image_to_image", "text_to_image"]))
+        .then(|| "image_to_image".to_owned())
+    });
+    Some(canonical_mode.unwrap_or_else(|| "unknown".to_owned()))
 }
 
 #[derive(Clone)]
@@ -2542,10 +2598,33 @@ fn sha256(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::application::workflow_recognition_schema::RecognitionSchemaContext;
     use serde_json::json;
+
+    pub(crate) fn run_replay_test(name: &str) {
+        match name {
+            "no_root_returns_unknown_not_full_graph" => no_root_returns_unknown_not_full_graph(),
+            "ambiguous_root_returns_ambiguous" => ambiguous_root_returns_ambiguous(),
+            "strong_root_beats_weak_preview" => strong_root_beats_weak_preview(),
+            "explicit_output_mapping_resolves_unknown" => {
+                explicit_output_mapping_resolves_unknown()
+            }
+            "invalid_explicit_output_mapping_fails_safe" => {
+                invalid_explicit_output_mapping_fails_safe()
+            }
+            "terminal_input_node_is_not_output_root" => terminal_input_node_is_not_output_root(),
+            "weak_class_title_hint_alone_does_not_resolve_root" => {
+                weak_class_title_hint_alone_does_not_resolve_root()
+            }
+            "two_compatible_strong_roots_remain_resolved" => {
+                two_compatible_strong_roots_remain_resolved()
+            }
+            "root_resolution_is_order_independent" => root_resolution_is_order_independent(),
+            _ => panic!("unregistered workflow-analysis replay test: {name}"),
+        }
+    }
 
     const AITUDOU_8STEP: &str = include_str!(
         "../../runtime_packages/aitudou_minimax_h3_lightx2v_8step_fast_1_0_0/workflow_api.json"
@@ -2613,6 +2692,81 @@ mod tests {
     ) -> WorkflowAnalysisReport {
         let workflow = WorkflowDocument::parse(value).expect("synthetic workflow should parse");
         let schema = phase2a_schema();
+        let bytes = serde_json::to_vec(workflow.value()).expect("workflow should serialize");
+        WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
+            &workflow,
+            &bytes,
+            Some(&schema),
+            explicit_roots,
+        )
+    }
+
+    fn root_mode_schema() -> RecognitionSchemaContext {
+        RecognitionSchemaContext::parse(&json!({
+            "NeutralMediaLoader": {"output": ["IMAGE"]},
+            "NeutralImageMerge": {
+                "output": ["IMAGE"],
+                "input": {"required": {
+                    "background_pixels": ["IMAGE", {}],
+                    "overlay_pixels": ["IMAGE", {}]
+                }}
+            },
+            "NeutralImageGenerator": {
+                "output": ["IMAGE"],
+                "input": {"required": {"prompt": ["STRING", {}]}}
+            },
+            "NeutralVideoGenerator": {
+                "output": ["VIDEO"],
+                "input": {"required": {"prompt": ["STRING", {}]}}
+            },
+            "NeutralGuide": {
+                "output": ["VIDEO"],
+                "input": {"required": {
+                    "image": ["IMAGE", {}],
+                    "frame_idx": ["INT", {}]
+                }}
+            },
+            "NeutralReferenceGuide": {
+                "output": ["VIDEO"],
+                "input": {"required": {
+                    "reference_image": ["IMAGE", {}],
+                    "frame_idx": ["INT", {}]
+                }}
+            },
+            "NeutralVideoMerge": {
+                "output": ["VIDEO"],
+                "input": {"required": {
+                    "video_a": ["VIDEO", {}],
+                    "video_b": ["VIDEO", {}]
+                }}
+            },
+            "NeutralIndexedGuide": {
+                "output": ["VIDEO"],
+                "input": {"required": {
+                    "image": ["IMAGE", {}],
+                    "index": ["INT", {}]
+                }}
+            },
+            "NeutralPromptSource": {"input": {"required": {"text": ["STRING", {}]}}},
+            "ImageSink": {
+                "output": ["IMAGE"],
+                "output_node": true,
+                "input": {"required": {"pixels": ["IMAGE", {}]}}
+            },
+            "VideoSink": {
+                "output": ["VIDEO"],
+                "output_node": true,
+                "input": {"required": {"video": ["VIDEO", {}]}}
+            }
+        }))
+    }
+
+    fn root_mode_report(
+        value: Value,
+        explicit_roots: &[OutputRootSelection],
+    ) -> WorkflowAnalysisReport {
+        let workflow = WorkflowDocument::parse(value).expect("root-mode workflow should parse");
+        let schema = root_mode_schema();
         let bytes = serde_json::to_vec(workflow.value()).expect("workflow should serialize");
         WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
             &workflow,
@@ -3025,7 +3179,7 @@ mod tests {
             Some(&schema),
         );
 
-        assert_eq!(report.mode, "image_to_video");
+        assert_eq!(report.mode, "first_last_frame_to_video");
         assert!(report.issues.iter().all(|issue| {
             issue.code != "AMBIGUOUS_INPUT"
                 || !matches!(
@@ -3608,5 +3762,386 @@ mod tests {
             report.output_root_resolution,
             OutputRootResolution::Resolved { ref roots } if roots.len() == 2
         ));
+    }
+
+    #[test]
+    fn single_i2i_root_projects_to_analysis_mode() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}},
+            "2": {"class_type": "NeutralImageMerge", "inputs": {
+                "background_pixels": ["1", 0],
+                "overlay_pixels": ["1", 0]
+            }},
+            "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}}
+        }))
+        .expect("neutral image workflow should parse");
+        let schema = RecognitionSchemaContext::parse(&json!({
+            "NeutralMediaLoader": {"output": ["IMAGE"]},
+            "NeutralImageMerge": {
+                "output": ["IMAGE"],
+                "input": {"required": {
+                    "background_pixels": ["IMAGE", {}],
+                    "overlay_pixels": ["IMAGE", {}]
+                }}
+            },
+            "ImageSink": {
+                "output": ["IMAGE"],
+                "output_node": true,
+                "input": {"required": {"pixels": ["IMAGE", {}]}}
+            }
+        }));
+        let bytes = serde_json::to_vec(workflow.value()).expect("workflow should serialize");
+
+        let report =
+            WorkflowAnalysisService::analyze_workflow_with_schema(&workflow, &bytes, Some(&schema));
+
+        assert!(
+            report.inputs.is_empty(),
+            "mode fixture should have no legacy candidates: {:?}",
+            report.inputs
+        );
+        assert_eq!(report.mode, "image_to_image");
+    }
+
+    #[test]
+    fn multiple_i2i_roots_consensus_projects_to_analysis_mode() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}},
+                "2": {"class_type": "NeutralImageMerge", "inputs": {
+                    "background_pixels": ["1", 0], "overlay_pixels": ["1", 0]
+                }},
+                "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}},
+                "4": {"class_type": "NeutralImageMerge", "inputs": {
+                    "background_pixels": ["1", 0], "overlay_pixels": ["1", 0]
+                }},
+                "5": {"class_type": "ImageSink", "inputs": {"pixels": ["4", 0]}}
+            }),
+            &[],
+        );
+
+        assert_eq!(report.output_root_resolution.roots().len(), 2);
+        assert_eq!(report.mode, "image_to_image");
+    }
+
+    #[test]
+    fn mode_projection_is_order_independent() {
+        let roots = [
+            OutputRootSelection {
+                node_id: "3".to_owned(),
+                output_type: "image".to_owned(),
+            },
+            OutputRootSelection {
+                node_id: "5".to_owned(),
+                output_type: "image".to_owned(),
+            },
+        ];
+        let forward = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}},
+                "2": {"class_type": "NeutralImageMerge", "inputs": {
+                    "background_pixels": ["1", 0], "overlay_pixels": ["1", 0]
+                }},
+                "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}},
+                "4": {"class_type": "NeutralImageMerge", "inputs": {
+                    "background_pixels": ["1", 0], "overlay_pixels": ["1", 0]
+                }},
+                "5": {"class_type": "ImageSink", "inputs": {"pixels": ["4", 0]}}
+            }),
+            &roots,
+        );
+        let reverse = root_mode_report(
+            json!({
+                "5": {"class_type": "ImageSink", "inputs": {"pixels": ["4", 0]}},
+                "4": {"class_type": "NeutralImageMerge", "inputs": {
+                    "overlay_pixels": ["1", 0], "background_pixels": ["1", 0]
+                }},
+                "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}},
+                "2": {"class_type": "NeutralImageMerge", "inputs": {
+                    "overlay_pixels": ["1", 0], "background_pixels": ["1", 0]
+                }},
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}}
+            }),
+            &roots.into_iter().rev().collect::<Vec<_>>(),
+        );
+
+        assert_eq!(forward.mode, reverse.mode);
+        assert_eq!(forward.mode, "image_to_image");
+    }
+
+    #[test]
+    fn selected_root_controls_analysis_mode() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}},
+                "2": {"class_type": "NeutralImageMerge", "inputs": {
+                    "background_pixels": ["1", 0], "overlay_pixels": ["1", 0]
+                }},
+                "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}},
+                "4": {"class_type": "NeutralPromptSource", "inputs": {"text": "prompt"}},
+                "5": {"class_type": "NeutralVideoGenerator", "inputs": {"prompt": ["4", 0]}},
+                "6": {"class_type": "VideoSink", "inputs": {"video": ["5", 0]}}
+            }),
+            &[OutputRootSelection {
+                node_id: "3".to_owned(),
+                output_type: "image".to_owned(),
+            }],
+        );
+
+        assert_eq!(report.output_root_resolution.roots().len(), 2);
+        assert_eq!(report.mode, "image_to_image");
+    }
+
+    #[test]
+    fn different_root_modes_do_not_union_to_a_synthetic_mode() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}},
+                "2": {"class_type": "NeutralImageMerge", "inputs": {
+                    "background_pixels": ["1", 0], "overlay_pixels": ["1", 0]
+                }},
+                "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}},
+                "4": {"class_type": "NeutralPromptSource", "inputs": {"text": "prompt"}},
+                "5": {"class_type": "NeutralVideoGenerator", "inputs": {"prompt": ["4", 0]}},
+                "6": {"class_type": "VideoSink", "inputs": {"video": ["5", 0]}}
+            }),
+            &[],
+        );
+
+        assert!(matches!(
+            &report.output_root_resolution,
+            OutputRootResolution::Ambiguous { .. }
+        ));
+        assert_eq!(report.mode, "unknown");
+    }
+
+    #[test]
+    fn same_category_image_roots_use_existing_safe_aggregate() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}},
+                "2": {"class_type": "NeutralImageMerge", "inputs": {
+                    "background_pixels": ["1", 0], "overlay_pixels": ["1", 0]
+                }},
+                "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}},
+                "4": {"class_type": "NeutralPromptSource", "inputs": {"text": "prompt"}},
+                "5": {"class_type": "NeutralImageGenerator", "inputs": {"prompt": ["4", 0]}},
+                "6": {"class_type": "ImageSink", "inputs": {"pixels": ["5", 0]}}
+            }),
+            &[
+                OutputRootSelection {
+                    node_id: "3".to_owned(),
+                    output_type: "image".to_owned(),
+                },
+                OutputRootSelection {
+                    node_id: "6".to_owned(),
+                    output_type: "image".to_owned(),
+                },
+            ],
+        );
+
+        assert_eq!(report.mode, "image_to_image");
+    }
+
+    #[test]
+    fn external_image_outside_root_does_not_change_analysis_mode() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralPromptSource", "inputs": {"text": "prompt"}},
+                "2": {"class_type": "NeutralImageGenerator", "inputs": {"prompt": ["1", 0]}},
+                "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}},
+                "99": {"class_type": "NeutralMediaLoader", "inputs": {"path": "unused.png"}}
+            }),
+            &[],
+        );
+
+        assert_eq!(report.mode, "text_to_image");
+    }
+
+    #[test]
+    fn internal_generated_image_does_not_create_i2i_mode() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralPromptSource", "inputs": {"text": "prompt"}},
+                "2": {"class_type": "NeutralImageGenerator", "inputs": {"prompt": ["1", 0]}},
+                "3": {"class_type": "ImageSink", "inputs": {"pixels": ["2", 0]}}
+            }),
+            &[],
+        );
+
+        assert_eq!(report.mode, "text_to_image");
+    }
+
+    #[test]
+    fn internal_generated_image_frame_guide_remains_internal() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralPromptSource", "inputs": {"text": "prompt"}},
+                "2": {"class_type": "NeutralImageGenerator", "inputs": {"prompt": ["1", 0]}},
+                "3": {"class_type": "NeutralGuide", "inputs": {
+                    "image": ["2", 0], "frame_idx": 0
+                }},
+                "4": {"class_type": "VideoSink", "inputs": {"video": ["3", 0]}}
+            }),
+            &[],
+        );
+
+        assert_eq!(report.mode, "text_to_video");
+    }
+
+    #[test]
+    fn first_and_last_frame_project_to_flf_mode() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "first.png"}},
+                "2": {"class_type": "NeutralMediaLoader", "inputs": {"path": "last.png"}},
+                "3": {"class_type": "NeutralGuide", "inputs": {
+                    "image": ["1", 0], "frame_idx": 0
+                }},
+                "4": {"class_type": "NeutralGuide", "inputs": {
+                    "image": ["2", 0], "frame_idx": -1
+                }},
+                "5": {"class_type": "NeutralVideoMerge", "inputs": {
+                    "video_a": ["3", 0], "video_b": ["4", 0]
+                }},
+                "6": {"class_type": "VideoSink", "inputs": {"video": ["5", 0]}}
+            }),
+            &[],
+        );
+
+        assert_eq!(report.mode, "first_last_frame_to_video");
+    }
+
+    #[test]
+    fn first_frame_only_projects_to_i2v() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "first.png"}},
+                "2": {"class_type": "NeutralGuide", "inputs": {
+                    "image": ["1", 0], "frame_idx": 0
+                }},
+                "3": {"class_type": "VideoSink", "inputs": {"video": ["2", 0]}}
+            }),
+            &[],
+        );
+
+        assert_eq!(report.mode, "image_to_video");
+    }
+
+    #[test]
+    fn last_frame_only_projects_to_i2v() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "last.png"}},
+                "2": {"class_type": "NeutralGuide", "inputs": {
+                    "image": ["1", 0], "frame_idx": -1
+                }},
+                "3": {"class_type": "VideoSink", "inputs": {"video": ["2", 0]}}
+            }),
+            &[],
+        );
+
+        assert_eq!(report.mode, "image_to_video");
+    }
+
+    #[test]
+    fn unrelated_integer_index_does_not_create_frame_role() {
+        let workflow = WorkflowDocument::parse(json!({
+            "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}},
+            "2": {"class_type": "NeutralIndexedGuide", "inputs": {
+                "image": ["1", 0], "index": -1
+            }},
+            "3": {"class_type": "VideoSink", "inputs": {"video": ["2", 0]}}
+        }))
+        .expect("neutral workflow should parse");
+        let schema = root_mode_schema();
+        let bytes = serde_json::to_vec(workflow.value()).expect("workflow should serialize");
+        let report =
+            WorkflowAnalysisService::analyze_workflow_with_schema(&workflow, &bytes, Some(&schema));
+        let graph = WorkflowGraph::from_document(&workflow).expect("graph should build");
+        let active = ActiveDependencyGraph::from_graph(&graph, &["3".to_owned()])
+            .expect("active graph should build");
+        let semantic = resolve_semantic_graph(&workflow, &schema, active);
+        let guide = semantic.nodes.get("2").expect("guide should resolve");
+        let image = guide
+            .inputs
+            .iter()
+            .find(|input| input.name == "image")
+            .unwrap();
+
+        assert_eq!(image.canonical_semantic, CanonicalSemantic::Image);
+        assert_eq!(report.mode, "image_to_video");
+    }
+
+    #[test]
+    fn frame_semantic_does_not_leak_across_roots() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "input.png"}},
+                "2": {"class_type": "NeutralGuide", "inputs": {
+                    "image": ["1", 0], "frame_idx": 0
+                }},
+                "3": {"class_type": "VideoSink", "inputs": {"video": ["2", 0]}},
+                "4": {"class_type": "NeutralPromptSource", "inputs": {"text": "prompt"}},
+                "5": {"class_type": "NeutralVideoGenerator", "inputs": {"prompt": ["4", 0]}},
+                "6": {"class_type": "VideoSink", "inputs": {"video": ["5", 0]}}
+            }),
+            &[
+                OutputRootSelection {
+                    node_id: "3".to_owned(),
+                    output_type: "video".to_owned(),
+                },
+                OutputRootSelection {
+                    node_id: "6".to_owned(),
+                    output_type: "video".to_owned(),
+                },
+            ],
+        );
+        assert_eq!(report.mode, "unknown");
+        assert_eq!(report.output_root_resolution.roots().len(), 2);
+    }
+
+    #[test]
+    fn flf_and_reference_conflict_fails_safe() {
+        let report = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "reference.png"}},
+                "2": {"class_type": "NeutralReferenceGuide", "inputs": {
+                    "reference_image": ["1", 0], "frame_idx": 0
+                }},
+                "3": {"class_type": "VideoSink", "inputs": {"video": ["2", 0]}}
+            }),
+            &[],
+        );
+
+        assert_eq!(report.mode, "unknown");
+    }
+
+    #[test]
+    fn frame_role_resolution_and_mode_projection_are_order_independent() {
+        let forward = root_mode_report(
+            json!({
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "first.png"}},
+                "2": {"class_type": "NeutralMediaLoader", "inputs": {"path": "last.png"}},
+                "3": {"class_type": "NeutralGuide", "inputs": {"image": ["1", 0], "frame_idx": 0}},
+                "4": {"class_type": "NeutralGuide", "inputs": {"image": ["2", 0], "frame_idx": -1}},
+                "5": {"class_type": "NeutralVideoMerge", "inputs": {"video_a": ["3", 0], "video_b": ["4", 0]}},
+                "6": {"class_type": "VideoSink", "inputs": {"video": ["5", 0]}}
+            }),
+            &[],
+        );
+        let reverse = root_mode_report(
+            json!({
+                "6": {"class_type": "VideoSink", "inputs": {"video": ["5", 0]}},
+                "5": {"class_type": "NeutralVideoMerge", "inputs": {"video_b": ["4", 0], "video_a": ["3", 0]}},
+                "4": {"class_type": "NeutralGuide", "inputs": {"frame_idx": -1, "image": ["2", 0]}},
+                "3": {"class_type": "NeutralGuide", "inputs": {"frame_idx": 0, "image": ["1", 0]}},
+                "2": {"class_type": "NeutralMediaLoader", "inputs": {"path": "last.png"}},
+                "1": {"class_type": "NeutralMediaLoader", "inputs": {"path": "first.png"}}
+            }),
+            &[],
+        );
+        assert_eq!(forward.mode, reverse.mode);
+        assert_eq!(forward.mode, "first_last_frame_to_video");
     }
 }

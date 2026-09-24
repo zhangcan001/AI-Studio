@@ -1,0 +1,128 @@
+{
+  "1": {
+    "inputs": {
+      "image": "512x512bkgd (3).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "512x512 (5).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "4": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "6": {
+    "inputs": {
+      "invert_mask": true,
+      "blend_mode": "subtract",
+      "opacity": 31,
+      "background_image": [
+        "1",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ],
+      "layer_mask": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend",
+    "_meta": {
+      "title": "图层工具：图像混合"
+    }
+  },
+  "7": {
+    "inputs": {
+      "invert_mask": true,
+      "blend_mode": "lighter",
+      "opacity": 100,
+      "background_image": [
+        "1",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ],
+      "layer_mask": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend",
+    "_meta": {
+      "title": "图层工具：图像混合"
+    }
+  },
+  "8": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "9": {
+    "inputs": {
+      "invert_mask": true,
+      "blend_mode": "multply",
+      "opacity": 68,
+      "background_image": [
+        "1",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ],
+      "layer_mask": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend",
+    "_meta": {
+      "title": "图层工具：图像混合"
+    }
+  },
+  "10": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  }
+}
