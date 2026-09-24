@@ -1,5 +1,6 @@
 use crate::application::{
     workflow_recognition_schema::{RecognitionDeclaredType, RecognitionSchemaContext},
+    workflow_ui_normalizer::source_graph_frontend_only_node_ids,
     workflow_ui_serialization::{FrontendSerializationContract, SUPPORTED_FRONTEND_VERSION},
 };
 use serde_json::{Map, Value};
@@ -538,7 +539,7 @@ impl HistoricalUiSerializationFingerprint {
             HistoricalFingerprintError::new("UI_ROOT_INVALID", "workflow root must be an object")
         })?;
         let mut evidence = RawSerializationEvidence::default();
-        collect_graph_evidence(root, &mut evidence);
+        collect_graph_evidence(root, schema, &mut evidence);
         let definitions = root
             .get("definitions")
             .and_then(Value::as_object)
@@ -557,7 +558,7 @@ impl HistoricalUiSerializationFingerprint {
                 }
                 complete &=
                     definition.get("inputNode").is_some() && definition.get("outputNode").is_some();
-                collect_nested_definition_evidence(definition, &mut evidence);
+                collect_nested_definition_evidence(definition, schema, &mut evidence);
             }
             evidence.subgraph_boundary_representation = if complete {
                 SubgraphBoundaryRepresentation::ExplicitInputOutputNodes
@@ -689,13 +690,23 @@ struct RawInputEvidence {
     linked: bool,
 }
 
-fn collect_graph_evidence(root: &Map<String, Value>, evidence: &mut RawSerializationEvidence) {
+fn collect_graph_evidence(
+    root: &Map<String, Value>,
+    schema: &RecognitionSchemaContext,
+    evidence: &mut RawSerializationEvidence,
+) {
+    let frontend_only_node_ids = source_graph_frontend_only_node_ids(root, &schema.nodes);
     if let Some(nodes) = root.get("nodes").and_then(Value::as_array) {
         for node in nodes {
             let Some(node) = node.as_object() else {
                 continue;
             };
-            collect_node_evidence(node, evidence);
+            let node_id = node
+                .get("id")
+                .and_then(serialized_node_id)
+                .unwrap_or_default();
+            let ui_only = frontend_only_node_ids.contains(&node_id);
+            collect_node_evidence(node, ui_only, evidence);
         }
     }
     if let Some(links) = root.get("links").and_then(Value::as_array) {
@@ -716,12 +727,13 @@ fn collect_graph_evidence(root: &Map<String, Value>, evidence: &mut RawSerializa
 
 fn collect_nested_definition_evidence(
     definition: &Map<String, Value>,
+    schema: &RecognitionSchemaContext,
     evidence: &mut RawSerializationEvidence,
 ) {
     if let Some(id) = definition.get("id").and_then(Value::as_str) {
         evidence.subgraph_definition_ids.insert(id.to_owned());
     }
-    collect_graph_evidence(definition, evidence);
+    collect_graph_evidence(definition, schema, evidence);
     if let Some(nested) = definition
         .get("definitions")
         .and_then(Value::as_object)
@@ -732,12 +744,24 @@ fn collect_nested_definition_evidence(
             let Some(nested_definition) = nested_definition.as_object() else {
                 continue;
             };
-            collect_nested_definition_evidence(nested_definition, evidence);
+            collect_nested_definition_evidence(nested_definition, schema, evidence);
         }
     }
 }
 
-fn collect_node_evidence(node: &Map<String, Value>, evidence: &mut RawSerializationEvidence) {
+fn serialized_node_id(value: &Value) -> Option<String> {
+    match value {
+        Value::Number(value) => Some(value.to_string()),
+        Value::String(value) if !value.trim().is_empty() => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn collect_node_evidence(
+    node: &Map<String, Value>,
+    ui_only: bool,
+    evidence: &mut RawSerializationEvidence,
+) {
     if let Some(id) = node.get("id") {
         if let Some(representation) = node_id_representation(id) {
             evidence.node_id_representations.insert(representation);
@@ -748,7 +772,6 @@ fn collect_node_evidence(node: &Map<String, Value>, evidence: &mut RawSerializat
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
-    let ui_only = is_presentation_or_virtual_type(&class_type, node);
     evidence.presentation_virtual_node_evidence |= ui_only;
     evidence.proxy_widgets_representation |= node
         .get("properties")
@@ -1039,22 +1062,6 @@ fn looks_like_uuid(value: &str) -> bool {
         && parts
             .iter()
             .all(|part| part.chars().all(|character| character.is_ascii_hexdigit()))
-}
-
-fn is_presentation_or_virtual_type(class_type: &str, node: &Map<String, Value>) -> bool {
-    let lower = class_type.to_ascii_lowercase();
-    lower == "note"
-        || lower.contains("markdownnote")
-        || lower == "label (rgthree)"
-        || lower == "fast groups bypasser (rgthree)"
-        || lower == "reroute"
-        || lower.starts_with("primitive")
-        || lower == "setnode"
-        || lower == "getnode"
-        || node
-            .get("properties")
-            .and_then(Value::as_object)
-            .is_some_and(|properties| properties.contains_key("proxyWidgets"))
 }
 
 fn format_number(value: f64) -> String {
