@@ -1,4 +1,8 @@
-import type { WorkflowAutoOnboardingPlanView } from "../../types/workflowOnboarding";
+import type {
+  RuntimeImportStatus,
+  SemanticCapabilityStatus,
+  WorkflowAutoOnboardingPlanView,
+} from "../../types/workflowOnboarding";
 
 interface Props {
   plan: WorkflowAutoOnboardingPlanView;
@@ -24,24 +28,29 @@ function workflowPurposeLabel(category: string, kind: string): string {
   return workflowTypeLabel(kind);
 }
 
-function capabilityLabel(state: string): string {
+function semanticCapabilityLabel(state: SemanticCapabilityStatus): string {
   switch (state) {
     case "READY":
-      return "当前可运行";
-    case "MISSING_NODES":
-      return "已保存，当前不可运行（缺少节点）";
-    case "COMFY_OFFLINE":
-      return "已保存，当前不可运行（ComfyUI 离线）";
-    case "INCOMPATIBLE_INPUT_VALUES":
-      return "已保存，当前不可运行（输入待检查）";
-    case "UNKNOWN_OUTPUT_ROOT":
-      return "已保存，当前不可运行（无法确定输出节点）";
-    case "AMBIGUOUS_OUTPUT_ROOT":
-      return "已保存，当前不可运行（输出节点有歧义）";
-    case "PARTIALLY_SUPPORTED":
-      return "已保存，当前不可运行（部分输出根不可用）";
+      return "已识别并支持";
+    case "NEEDS_REVIEW":
+      return "部分能力需要确认";
+    case "UNSUPPORTED":
+      return "当前不支持";
     default:
-      return "已保存，待检查";
+      return "尚未评估";
+  }
+}
+
+function runtimeImportLabel(state: RuntimeImportStatus): string {
+  switch (state) {
+    case "READY":
+      return "当前环境可运行";
+    case "NEEDS_REVIEW":
+      return "可保存，运行前需处理";
+    case "BLOCKED":
+      return "当前环境阻止运行";
+    default:
+      return "当前环境尚未验证";
   }
 }
 
@@ -74,9 +83,11 @@ export function WorkflowImportResult({ plan, projectId, onOpenAdvanced, onOpenSt
           <span>输入<strong>{inputLabels}</strong></span>
           <span>输出<strong>{outputLabels}</strong></span>
           <span>导入状态<strong>可加入工作流库</strong></span>
-          <span>运行状态<strong>{capabilityLabel(plan.capability.state)}</strong></span>
+          <span>语义能力<strong>{semanticCapabilityLabel(plan.semanticCapabilityStatus)}</strong></span>
+          <span>运行导入<strong>{runtimeImportLabel(plan.runtimeImportStatus)}</strong></span>
+          {plan.runtimeImportBlockers.length > 0 && <span>运行阻塞项<strong>{plan.runtimeImportBlockers.length} 项</strong></span>}
         </div>
-        {plan.capability.state === "COMFY_OFFLINE" && <p className="workflow-import-result-warning">⚠ ComfyUI 当前离线，但工作流已经保存。连接 ComfyUI 后可重新检查并运行。</p>}
+        {plan.runtimeImportStatus === "NOT_EVALUATED" && <p className="workflow-import-result-warning">⚠ 当前运行环境尚未完成验证；连接 ComfyUI 后可重新检查。</p>}
         {!!missingNodes.length && <p className="workflow-import-result-warning">⚠ 当前 ComfyUI 缺少 {missingNodes.length} 个节点：{missingNodes.join("、")}。工作流已经保存，安装节点后即可运行。</p>}
         <div className="workflow-smart-actions">
           {projectId && onUseInProject && <button type="button" onClick={() => onUseInProject(published.workflowId, published.recipeId)}>用于当前项目</button>}

@@ -5,9 +5,25 @@ import type {
   WorkflowAutoOnboardingPlanView,
   WorkflowImportCommitAction,
   WorkflowOnboardingDraftView,
+  SemanticCapabilityStatus,
+  RuntimeImportStatus,
 } from "../../types/workflowOnboarding";
 
 export type WorkflowImportErrorKind = "UI_FORMAT" | "NOT_API_FORMAT" | "INVALID_JSON" | "UNKNOWN_FORMAT" | "IMPORT_FAILED";
+
+const semanticCapabilityLabels: Record<SemanticCapabilityStatus, string> = {
+  NOT_EVALUATED: "尚未评估",
+  READY: "已识别并支持",
+  NEEDS_REVIEW: "部分能力需要确认",
+  UNSUPPORTED: "当前不支持",
+};
+
+const runtimeImportLabels: Record<RuntimeImportStatus, string> = {
+  NOT_EVALUATED: "当前环境尚未验证",
+  READY: "当前环境可运行",
+  NEEDS_REVIEW: "运行前需处理",
+  BLOCKED: "当前环境阻止运行",
+};
 
 export interface WorkflowImportErrorView {
   kind: WorkflowImportErrorKind;
@@ -439,7 +455,9 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
             <span>模式<strong>{plan.metadata.mode}</strong></span>
             <span>识别输入<strong>{analysisInputLabels(plan)}</strong></span>
             <span>输出<strong>{analysisOutputLabels(plan)}</strong></span>
-            <span>运行能力<strong>{plan.capability.state === "READY" ? "当前可运行" : "可保存，运行前需处理"}</strong></span>
+            <span>语义能力<strong>{semanticCapabilityLabels[plan.semanticCapabilityStatus]}</strong></span>
+            <span>运行导入<strong>{runtimeImportLabels[plan.runtimeImportStatus]}</strong></span>
+            {plan.runtimeImportBlockers.length > 0 && <span>运行阻塞项<strong>{plan.runtimeImportBlockers.length} 项</strong></span>}
           </div>
         </div>
       )}

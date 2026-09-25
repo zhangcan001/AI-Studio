@@ -406,6 +406,11 @@ impl std::error::Error for ComfyAdapterError {}
 
 #[async_trait]
 pub trait ComfyAdapter: Send + Sync {
+    /// Provenance of object_info for diagnostics; does not affect inference.
+    fn object_info_source(&self) -> &'static str {
+        "LIVE_COMFYUI"
+    }
+
     async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError>;
 
     async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError>;
@@ -538,6 +543,10 @@ impl ComfyAdapterHandle {
 
 #[async_trait]
 impl ComfyAdapter for ComfyAdapterHandle {
+    fn object_info_source(&self) -> &'static str {
+        self.current().object_info_source()
+    }
+
     async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
         self.current().health_check().await
     }

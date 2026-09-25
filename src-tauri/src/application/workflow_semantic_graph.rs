@@ -1076,6 +1076,7 @@ pub enum RootCapabilityReadiness {
     Unsupported,
 }
 
+/// Semantic support profile readiness; it does not evaluate active ComfyUI input values.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum WorkflowCapabilityReadiness {
@@ -1098,6 +1099,7 @@ pub struct RootCapabilityProfile {
     pub outputs: Vec<CapabilityOutput>,
     pub unknown_dependencies: Vec<SemanticDependencyIssue>,
     pub warnings: Vec<String>,
+    /// Readiness of the semantic capability profile for this root, not runtime import status.
     pub readiness: RootCapabilityReadiness,
     pub usable: bool,
     pub reason: Option<String>,
@@ -1108,6 +1110,7 @@ pub struct RootCapabilityProfile {
 pub struct CapabilityProfile {
     pub roots: Vec<RootCapabilityProfile>,
     pub aggregate_capabilities: Vec<String>,
+    /// Legacy profile-scoped alias for semantic capability readiness.
     pub readiness: WorkflowCapabilityReadiness,
     pub selected_root_id: Option<String>,
     pub primary_capability: Option<String>,

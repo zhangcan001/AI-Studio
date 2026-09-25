@@ -10,6 +10,17 @@ export type CapabilityState =
   | "AMBIGUOUS_OUTPUT_ROOT"
   | "PARTIALLY_SUPPORTED";
 
+export type SemanticCapabilityStatus = "NOT_EVALUATED" | "READY" | "NEEDS_REVIEW" | "UNSUPPORTED";
+export type RuntimeImportStatus = "NOT_EVALUATED" | "READY" | "NEEDS_REVIEW" | "BLOCKED";
+
+export interface RuntimeImportBlockerView {
+  code: string;
+  classType?: string;
+  nodeId?: string;
+  affectedNodeIds: string[];
+  inputName?: string;
+}
+
 export type WorkflowAutoOnboardingState =
   | "AUTO_PUBLISHED"
   | "WORKFLOW_NOT_API_FORMAT"
@@ -186,6 +197,7 @@ export interface WorkflowRecognitionReportView {
   inputs?: WorkflowRecognitionInputView[];
   outputs?: WorkflowRecognitionOutputView[];
   recipeStatus?: WorkflowRecipeStatus;
+  /** Legacy detailed runtime check; prefer the normalized plan-level status. */
   runtimeCapability?: WorkflowRuntimeCapability;
   capabilityIssues?: string[];
   issues?: WorkflowRecognitionIssueView[];
@@ -275,6 +287,7 @@ export interface RootCapabilityProfileView {
 export interface CapabilityProfileView {
   roots: RootCapabilityProfileView[];
   aggregateCapabilities: string[];
+  /** Semantic graph readiness; the explicit plan field is preferred in UI contracts. */
   readiness: WorkflowCapabilityReadiness;
   selectedRootId?: string;
   primaryCapability?: string;
@@ -290,6 +303,7 @@ export interface CapabilityProfileView {
 }
 
 export interface CapabilityCheckView {
+  /** Legacy detailed runtime capability enum; use plan.runtimeImportStatus for contract decisions. */
   state: CapabilityState;
   checkedAt?: string;
   issues: CapabilityIssueView[];
@@ -445,6 +459,7 @@ export interface WorkflowAutoOnboardingPlanView {
   analysisId?: string;
   analysis?: WorkflowAnalysisReportView;
   commitRequired?: boolean;
+  /** Import/onboarding lifecycle state, not either readiness status. */
   state: WorkflowAutoOnboardingState;
   /** Optional until the native onboarding response exposes format detection. */
   format?: WorkflowImportFormat;
@@ -469,6 +484,10 @@ export interface WorkflowAutoOnboardingPlanView {
   nodeCount: number;
   uniqueClassCount: number;
   metadata: WorkflowManifestView;
+  semanticCapabilityStatus: SemanticCapabilityStatus;
+  runtimeImportStatus: RuntimeImportStatus;
+  runtimeImportBlockers: RuntimeImportBlockerView[];
+  /** Legacy runtime validation result, retained for existing integrations. */
   capability: CapabilityCheckView;
   inputMappings: WorkflowInputMappingView[];
   outputMappings: WorkflowOutputMappingView[];
@@ -501,6 +520,7 @@ export interface WorkflowWorkspaceView {
   workflowSha256: string;
   nodeCount: number;
   uniqueClassCount: number;
+  /** Legacy detailed current-runtime check. */
   capability: CapabilityState;
   capabilityIssues: CapabilityIssueView[];
   inputMappings: WorkflowInputMappingView[];

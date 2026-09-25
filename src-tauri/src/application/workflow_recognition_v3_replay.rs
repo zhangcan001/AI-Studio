@@ -626,8 +626,11 @@ fn replay_real(root: &Path) -> RealReplayCounts {
             .collect::<Vec<_>>();
         let observed = json!({
             "evidence": "OBSERVED_ONLY",
+            "readiness_scope": "SEMANTIC_CAPABILITY",
             "actual_root_ids": actual_root_ids,
             "actual_capabilities": capability_profile.as_ref().map(|p| &p.aggregate_capabilities),
+            "semantic_capability_status": capability_profile.as_ref().map(|p| p.readiness),
+            // Retained as an observed-only compatibility alias; it never means runtime import readiness.
             "actual_readiness": capability_profile.as_ref().map(|p| p.readiness),
             "analysis_mode": analysis.mode,
             "capability_mode": capability_profile.as_ref().and_then(|p| p.primary_capability.as_deref()),

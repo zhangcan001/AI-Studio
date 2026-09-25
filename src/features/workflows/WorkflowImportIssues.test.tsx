@@ -47,6 +47,9 @@ function planWithIssues(
       mode: "IMAGE",
       recipeId: "recipe-1",
     },
+    semanticCapabilityStatus: "READY",
+    runtimeImportStatus: "READY",
+    runtimeImportBlockers: [],
     capability: { state: "READY", issues: [] },
     inputMappings: [],
     outputMappings: [],
@@ -105,6 +108,37 @@ function draftWithOptions(plan: WorkflowAutoOnboardingPlanView): WorkflowOnboard
 }
 
 describe("WorkflowImportIssues", () => {
+  it("分别展示语义支持与当前运行导入状态", () => {
+    const plan = planWithIssues([], {
+      semanticCapabilityStatus: "READY",
+      runtimeImportStatus: "NEEDS_REVIEW",
+      runtimeImportBlockers: [{
+        code: "INPUT_OPTION_UNAVAILABLE",
+        classType: "CheckpointLoaderSimple",
+        nodeId: "17",
+        affectedNodeIds: [],
+        inputName: "ckpt_name",
+      }],
+      capability: {
+        state: "INCOMPATIBLE_INPUT_VALUES",
+        issues: [],
+      },
+    });
+    render(
+      <WorkflowImportIssues
+        plan={plan}
+        loading={false}
+        onResolve={vi.fn()}
+        onResume={vi.fn()}
+        onOpenAdvanced={vi.fn()}
+        onOpenExisting={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("已识别并支持", { selector: "strong" })).toBeTruthy();
+    expect(screen.getByText("运行前需处理", { selector: "strong" })).toBeTruthy();
+  });
+
   it("把非 API 格式与未知格式分开说明，并提供导出指引", () => {
     render(
       <WorkflowImportFormatIssue

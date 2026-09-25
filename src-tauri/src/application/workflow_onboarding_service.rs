@@ -22,6 +22,7 @@ use crate::application::{
     workflow_semantic_graph::{
         build_capability_profile_for_roots, canonical_suggestion_for_input, linked_target_semantic,
         resolve_semantic_graph, ActiveDependencyGraph, CapabilityProfile, RootDependencyClosure,
+        WorkflowCapabilityReadiness,
     },
     workflow_semantic_identity::semantic_workflow_sha256,
     workflow_ui_compatibility::{
@@ -270,6 +271,7 @@ impl SemanticFieldType {
     }
 }
 
+/// Legacy detailed ComfyUI validation state; use the normalized plan status for contract decisions.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CapabilityState {
@@ -283,6 +285,27 @@ pub enum CapabilityState {
     PartiallySupported,
 }
 
+/// Semantic support independent of the active ComfyUI runtime's import checks.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SemanticCapabilityStatus {
+    NotEvaluated,
+    Ready,
+    NeedsReview,
+    Unsupported,
+}
+
+/// Whether the current runtime can accept this import without intervention.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RuntimeImportStatus {
+    NotEvaluated,
+    Ready,
+    NeedsReview,
+    Blocked,
+}
+
+/// Overall import/onboarding flow state; it is not either readiness contract.
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum WorkflowAutoOnboardingState {
@@ -419,6 +442,8 @@ pub struct WorkflowInputView {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityCheckView {
+    /// Legacy runtime capability state. Prefer the explicit status fields on
+    /// `WorkflowAutoOnboardingPlanView` when interpreting onboarding results.
     pub state: CapabilityState,
     pub checked_at: Option<String>,
     pub issues: Vec<CapabilityIssueView>,
@@ -443,6 +468,67 @@ pub struct CapabilityIssueView {
     pub input_name: Option<String>,
     pub current_value: Option<String>,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeImportBlockerView {
+    pub code: String,
+    pub class_type: Option<String>,
+    pub node_id: Option<String>,
+    pub affected_node_ids: Vec<String>,
+    pub input_name: Option<String>,
+}
+
+fn semantic_capability_status(
+    readiness: Option<WorkflowCapabilityReadiness>,
+) -> SemanticCapabilityStatus {
+    match readiness {
+        Some(WorkflowCapabilityReadiness::Ready) => SemanticCapabilityStatus::Ready,
+        Some(WorkflowCapabilityReadiness::PartiallySupported) => {
+            SemanticCapabilityStatus::NeedsReview
+        }
+        Some(WorkflowCapabilityReadiness::Unsupported) => SemanticCapabilityStatus::Unsupported,
+        None => SemanticCapabilityStatus::NotEvaluated,
+    }
+}
+
+fn runtime_import_status(state: CapabilityState) -> RuntimeImportStatus {
+    match state {
+        CapabilityState::Ready => RuntimeImportStatus::Ready,
+        CapabilityState::IncompatibleInputValues => RuntimeImportStatus::NeedsReview,
+        CapabilityState::MissingNodes
+        | CapabilityState::UnknownOutputRoot
+        | CapabilityState::AmbiguousOutputRoot
+        | CapabilityState::PartiallySupported => RuntimeImportStatus::Blocked,
+        CapabilityState::NotChecked | CapabilityState::ComfyOffline => {
+            RuntimeImportStatus::NotEvaluated
+        }
+    }
+}
+
+fn runtime_import_blockers(capability: &CapabilityCheckView) -> Vec<RuntimeImportBlockerView> {
+    let mut blockers = capability
+        .issues
+        .iter()
+        .map(|issue| RuntimeImportBlockerView {
+            code: issue.code.clone(),
+            class_type: issue.class_type.clone(),
+            node_id: issue.node_id.clone(),
+            affected_node_ids: issue.affected_node_ids.clone(),
+            input_name: issue.input_name.clone(),
+        })
+        .collect::<Vec<_>>();
+    if capability.state == CapabilityState::ComfyOffline && blockers.is_empty() {
+        blockers.push(RuntimeImportBlockerView {
+            code: "CONNECTION_UNAVAILABLE".to_owned(),
+            class_type: None,
+            node_id: None,
+            affected_node_ids: Vec::new(),
+            input_name: None,
+        });
+    }
+    blockers
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -617,6 +703,7 @@ pub struct WorkflowAutoOnboardingPlanView {
     pub analysis_id: Option<String>,
     pub analysis: Option<WorkflowAnalysisReport>,
     pub commit_required: bool,
+    /// Import/onboarding lifecycle state, not semantic or runtime readiness.
     pub state: WorkflowAutoOnboardingState,
     pub workflow_kind: String,
     pub workflow_sha256: String,
@@ -631,6 +718,12 @@ pub struct WorkflowAutoOnboardingPlanView {
     pub node_count: usize,
     pub unique_class_count: usize,
     pub metadata: WorkflowManifestView,
+    /// Semantic graph support, independent of current runtime input values.
+    pub semantic_capability_status: SemanticCapabilityStatus,
+    /// Current ComfyUI import compatibility; this is not V3 semantic readiness.
+    pub runtime_import_status: RuntimeImportStatus,
+    pub runtime_import_blockers: Vec<RuntimeImportBlockerView>,
+    /// Legacy nested runtime check retained for older callers.
     pub capability: CapabilityCheckView,
     pub input_mappings: Vec<WorkflowInputMappingView>,
     pub output_mappings: Vec<WorkflowOutputMappingView>,
@@ -666,6 +759,7 @@ pub struct WorkflowWorkspaceView {
     pub workflow_sha256: String,
     pub node_count: usize,
     pub unique_class_count: usize,
+    /// Legacy detailed current-runtime check for this workspace workflow.
     pub capability: CapabilityState,
     pub capability_issues: Vec<CapabilityIssueView>,
     pub input_mappings: Vec<WorkflowInputMappingView>,
@@ -1215,14 +1309,18 @@ impl WorkflowOnboardingService {
         &self,
         draft_id: &str,
     ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
-        self.auto_confirm_internal(draft_id, false, false).await
+        let plan = self.auto_confirm_internal(draft_id, false, false).await?;
+        log_recognition_plan(&plan);
+        Ok(plan)
     }
 
     pub async fn reanalyze_draft(
         &self,
         draft_id: &str,
     ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
-        self.auto_confirm_internal(draft_id, false, true).await
+        let plan = self.auto_confirm_internal(draft_id, false, true).await?;
+        log_recognition_plan(&plan);
+        Ok(plan)
     }
 
     /// Re-read one logical Workflow from the Registry and create a fresh,
@@ -1675,6 +1773,9 @@ impl WorkflowOnboardingService {
         draft_id: &str,
         preserve_user_metadata: bool,
     ) -> Result<(AutoInferenceResult, WorkflowOnboardingDraft), WorkflowOnboardingError> {
+        let recognition_request_id = Uuid::new_v4().to_string();
+        let mut schema_source = "NONE";
+        let mut schema_sha256 = None;
         let initial = self.with_registry(|registry| registry.get(draft_id))??;
         let pending_result = if initial.normalized_api.is_none() {
             Some(self.normalize_pending_ui_draft(draft_id, &initial).await?)
@@ -1686,6 +1787,12 @@ impl WorkflowOnboardingService {
         if current_after_normalization.normalized_api.is_none() {
             return Ok((AutoInferenceResult::default(), current_after_normalization));
         }
+        if pending_result.is_some() {
+            if let Some(context) = &current_after_normalization.compatibility_context {
+                schema_source = self.comfy_adapter.object_info_source();
+                schema_sha256 = Some(context.schema_fingerprint.clone());
+            }
+        }
 
         let current_workflow = current_after_normalization.normalized_workflow()?;
         let current_api_bytes = current_after_normalization.normalized_api_bytes()?;
@@ -1696,6 +1803,8 @@ impl WorkflowOnboardingService {
             Some(None) => unreachable!("pending normalization without a normalized workflow"),
             None => match self.comfy_adapter.get_object_info().await {
                 Ok(object) if object.is_object() => {
+                    schema_source = self.comfy_adapter.object_info_source();
+                    schema_sha256 = Some(canonical_schema_fingerprint(&object));
                     let schema = RecognitionSchemaContext::parse(&object);
                     let mut nodes = current_after_normalization.nodes.clone();
                     enrich_nodes_with_schema(&mut nodes, &schema);
@@ -1821,6 +1930,60 @@ impl WorkflowOnboardingService {
             Ok(())
         })??;
         let current = self.with_registry(|registry| registry.get(draft_id))??;
+        if let Some(analysis) = &current.analysis {
+            let root_nodes = analysis
+                .output_root_resolution
+                .roots()
+                .iter()
+                .map(|root| root.node_id.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            let runtime_import_blockers = runtime_import_blockers(&current.capability);
+            tracing::info!(
+                recognition_request_id = %recognition_request_id,
+                recognition_entrypoint = "workflow_onboarding.run_current_inference",
+                draft_id,
+                workflow_sha256 = %current.workflow_sha256,
+                workflow_version_id = ?analysis.existing_workflow_version_id,
+                recipe_id = %current.recipe_id,
+                schema_source,
+                schema_sha256 = schema_sha256.as_deref().unwrap_or("unavailable"),
+                recognized_type = %analysis.category,
+                recognized_mode = %analysis.mode,
+                semantic_capability_status = ?semantic_capability_status(
+                    current.capability.profile.as_ref().map(|profile| profile.readiness)
+                ),
+                runtime_import_status = ?runtime_import_status(current.capability.state),
+                runtime_import_blockers = %json!(runtime_import_blockers),
+                root_nodes,
+                recognition_evidence_count = analysis.inputs.iter().map(|input| input.evidence.len()).sum::<usize>()
+                    + analysis.outputs.iter().map(|output| output.evidence.len()).sum::<usize>(),
+                final_status = if current.recognition.recognized { "RECOGNIZED" } else { "UNRECOGNIZED" },
+                "workflow recognition completed"
+            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                let evidence = analysis
+                    .inputs
+                    .iter()
+                    .map(|input| json!({
+                        "node_id": input.node_id,
+                        "input_name": input.input_name,
+                        "semantic_key": input.semantic_key,
+                        "evidence": input.evidence.iter().map(|item| json!({"kind": item.kind, "weight": item.weight})).collect::<Vec<_>>()
+                    }))
+                    .chain(analysis.outputs.iter().map(|output| json!({
+                        "node_id": output.node_id,
+                        "output_id": output.output_id,
+                        "evidence": output.evidence.iter().map(|item| json!({"kind": item.kind, "weight": item.weight})).collect::<Vec<_>>()
+                    })))
+                    .collect::<Vec<_>>();
+                tracing::debug!(
+                    recognition_request_id = %recognition_request_id,
+                    recognition_evidence = %json!(evidence),
+                    "workflow recognition evidence"
+                );
+            }
+        }
         Ok((inference, current))
     }
 
@@ -3697,6 +3860,14 @@ fn auto_plan_for_draft(
 ) -> WorkflowAutoOnboardingPlanView {
     let view = view_for_draft(draft);
     let workflow_kind = workflow_kind_for_outputs(&draft.output_mappings);
+    let semantic_capability_status = semantic_capability_status(
+        view.capability
+            .profile
+            .as_ref()
+            .map(|profile| profile.readiness),
+    );
+    let runtime_import_status = runtime_import_status(view.capability.state);
+    let runtime_import_blockers = runtime_import_blockers(&view.capability);
     WorkflowAutoOnboardingPlanView {
         draft_id: draft.draft_id.clone(),
         analysis_id: draft
@@ -3723,6 +3894,9 @@ fn auto_plan_for_draft(
         node_count: view.node_count,
         unique_class_count: view.unique_class_count,
         metadata: view.manifest,
+        semantic_capability_status,
+        runtime_import_status,
+        runtime_import_blockers,
         capability: view.capability,
         input_mappings: view.input_mappings,
         output_mappings: view.output_mappings,
@@ -6031,6 +6205,23 @@ fn safe_filename(value: &str) -> String {
         .to_owned()
 }
 
+fn log_recognition_plan(plan: &WorkflowAutoOnboardingPlanView) {
+    let plan_issue_codes = plan
+        .issues
+        .iter()
+        .map(|issue| issue.code.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    tracing::info!(
+        draft_id = %plan.draft_id,
+        final_status = ?plan.state,
+        semantic_capability_status = ?plan.semantic_capability_status,
+        runtime_import_status = ?plan.runtime_import_status,
+        plan_issue_codes,
+        "workflow recognition plan completed"
+    );
+}
+
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -6062,6 +6253,102 @@ pub(crate) mod tests {
     use serde_json::json;
     use std::{collections::BTreeMap, sync::Arc};
     use tempfile::tempdir;
+
+    #[test]
+    fn readiness_contract_keeps_semantic_and_runtime_states_independent() {
+        let semantic_ready = semantic_capability_status(Some(WorkflowCapabilityReadiness::Ready));
+        assert_eq!(semantic_ready, SemanticCapabilityStatus::Ready);
+        assert_eq!(
+            runtime_import_status(CapabilityState::Ready),
+            RuntimeImportStatus::Ready
+        );
+        assert_eq!(
+            runtime_import_status(CapabilityState::IncompatibleInputValues),
+            RuntimeImportStatus::NeedsReview
+        );
+        assert_eq!(
+            (
+                semantic_ready,
+                runtime_import_status(CapabilityState::IncompatibleInputValues)
+            ),
+            (
+                SemanticCapabilityStatus::Ready,
+                RuntimeImportStatus::NeedsReview
+            )
+        );
+        assert_eq!(
+            runtime_import_status(CapabilityState::MissingNodes),
+            RuntimeImportStatus::Blocked
+        );
+        assert_eq!(
+            (
+                semantic_ready,
+                runtime_import_status(CapabilityState::MissingNodes)
+            ),
+            (
+                SemanticCapabilityStatus::Ready,
+                RuntimeImportStatus::Blocked
+            )
+        );
+        assert_eq!(
+            runtime_import_status(CapabilityState::ComfyOffline),
+            RuntimeImportStatus::NotEvaluated
+        );
+        assert_eq!(
+            runtime_import_status(CapabilityState::NotChecked),
+            RuntimeImportStatus::NotEvaluated
+        );
+        let unsupported =
+            semantic_capability_status(Some(WorkflowCapabilityReadiness::Unsupported));
+        assert_eq!(unsupported, SemanticCapabilityStatus::Unsupported);
+        assert_eq!(
+            (
+                unsupported,
+                runtime_import_status(CapabilityState::ComfyOffline)
+            ),
+            (
+                SemanticCapabilityStatus::Unsupported,
+                RuntimeImportStatus::NotEvaluated
+            )
+        );
+        assert_eq!(
+            semantic_capability_status(None),
+            SemanticCapabilityStatus::NotEvaluated
+        );
+
+        let input_issue = CapabilityIssueView {
+            code: "INPUT_OPTION_UNAVAILABLE".to_owned(),
+            class_type: Some("CheckpointLoaderSimple".to_owned()),
+            node_id: Some("17".to_owned()),
+            affected_node_ids: Vec::new(),
+            input_name: Some("ckpt_name".to_owned()),
+            current_value: Some("private-model-name.safetensors".to_owned()),
+            message: "Current ComfyUI does not offer this workflow value.".to_owned(),
+        };
+        let capability = CapabilityCheckView {
+            state: CapabilityState::IncompatibleInputValues,
+            checked_at: None,
+            issues: vec![input_issue],
+            profile: None,
+        };
+        let blockers = runtime_import_blockers(&capability);
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0].code, "INPUT_OPTION_UNAVAILABLE");
+        assert!(!serde_json::to_string(&blockers)
+            .unwrap()
+            .contains("private-model-name"));
+
+        let offline = CapabilityCheckView {
+            state: CapabilityState::ComfyOffline,
+            checked_at: None,
+            issues: Vec::new(),
+            profile: None,
+        };
+        assert_eq!(
+            runtime_import_blockers(&offline)[0].code,
+            "CONNECTION_UNAVAILABLE"
+        );
+    }
 
     pub(crate) fn run_replay_test(name: &str) {
         match name {
@@ -7171,6 +7458,7 @@ outputs: []
             Arc::new(TestClock),
         ));
         let adapter = Arc::new(StubComfyAdapter {
+            schema_source: "TEST_SCHEMA",
             object_info: Ok(json!({
                 "Sampler": {"input": {"required": {
                     "prompt": ["STRING", {}],
@@ -8234,15 +8522,169 @@ outputs: []
     }
 
     struct StubComfyAdapter {
+        schema_source: &'static str,
         object_info: Result<serde_json::Value, ComfyAdapterError>,
         object_info_calls: std::sync::atomic::AtomicUsize,
         submit_calls: std::sync::atomic::AtomicUsize,
         upload_calls: std::sync::atomic::AtomicUsize,
     }
 
+    #[tokio::test]
+    async fn v3_same_schema_runtime_and_controlled_replay_match() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/workflow_recognition_v3/real");
+        let frozen: Value =
+            serde_json::from_slice(&std::fs::read(root.join("object_info.json")).unwrap()).unwrap();
+        let mut schemas = vec![("FROZEN_REPLAY", frozen)];
+        if let Ok(path) = std::env::var("AI_STUDIO_V3_LIVE_SCHEMA_PATH") {
+            let live: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            schemas.push(("LIVE_COMFYUI_CAPTURE", live));
+        }
+        let cases = [
+            "R01_LTX23_T2V",
+            "R08_ZIMAGE_T2I",
+            "R09_CUSTOM_IMAGE_BLEND",
+            "R11_WF26_IMAGE",
+            "R15_BLEND_MODE_V2",
+        ];
+        let mut frozen_outputs = BTreeMap::new();
+        for (source_name, object_info) in schemas {
+            let directory = tempdir().unwrap();
+            let library_root = directory.path().join("library");
+            let staging_root = directory.path().join("staging");
+            tokio::fs::create_dir_all(&library_root).await.unwrap();
+            tokio::fs::create_dir_all(&staging_root).await.unwrap();
+            let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+            let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+            let adapter = Arc::new(StubComfyAdapter {
+                schema_source: source_name,
+                object_info: Ok(object_info.clone()),
+                object_info_calls: std::sync::atomic::AtomicUsize::new(0),
+                submit_calls: std::sync::atomic::AtomicUsize::new(0),
+                upload_calls: std::sync::atomic::AtomicUsize::new(0),
+            });
+            let service = WorkflowOnboardingService::new(
+                source.clone(),
+                adapter.clone(),
+                Arc::new(WorkflowLibraryService::new(
+                    source,
+                    Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+                    Arc::new(TestClock),
+                )),
+                Arc::new(StubRunRepository),
+                Arc::new(FileSystemWorkflowPackageStore::new(
+                    library_root,
+                    staging_root,
+                )),
+                Arc::new(TestClock),
+            );
+            let schema = RecognitionSchemaContext::parse(&object_info);
+            let schema_sha256 = canonical_schema_fingerprint(&object_info);
+            for case_id in cases {
+                let raw = std::fs::read(root.join(case_id).join("sample.api.json")).unwrap();
+                let workflow =
+                    WorkflowDocument::parse(serde_json::from_slice(&raw).unwrap()).unwrap();
+                let controlled = WorkflowAnalysisService::analyze_workflow_with_schema(
+                    &workflow,
+                    &raw,
+                    Some(&schema),
+                );
+                let imported = service
+                    .import_bytes(raw, format!("{case_id}.json"), None)
+                    .await
+                    .unwrap();
+                let mut nodes = imported.nodes.clone();
+                enrich_nodes_with_schema(&mut nodes, &schema);
+                let controlled_capability = evaluate_capability_with_schema_and_analysis(
+                    &workflow,
+                    &nodes,
+                    &schema,
+                    &BTreeSet::new(),
+                    &controlled,
+                );
+                let plan = service.analyze_draft(&imported.draft_id).await.unwrap();
+                let actual = plan.analysis.as_ref().expect("runtime analysis");
+                assert_eq!(actual, &controlled, "{source_name} {case_id} analysis");
+                assert_eq!(
+                    plan.capability.state, controlled_capability.state,
+                    "{source_name} {case_id} readiness"
+                );
+                assert_eq!(
+                    plan.capability.profile, controlled_capability.profile,
+                    "{source_name} {case_id} capability profile"
+                );
+                assert_eq!(
+                    serde_json::to_value(&plan.capability.issues).unwrap(),
+                    serde_json::to_value(&controlled_capability.issues).unwrap(),
+                    "{source_name} {case_id} readiness blockers",
+                );
+                assert_eq!(plan.metadata.recipe_id, imported.manifest.recipe_id);
+                assert_eq!(plan.workflow_sha256, imported.workflow_sha256);
+                assert_eq!(
+                    plan.semantic_capability_status,
+                    SemanticCapabilityStatus::Ready,
+                    "{source_name} {case_id} semantic contract"
+                );
+                assert_eq!(
+                    plan.runtime_import_status,
+                    RuntimeImportStatus::NeedsReview,
+                    "{source_name} {case_id} runtime import contract"
+                );
+                let comparison = json!({
+                    "analysis": actual,
+                    "semantic_capability_status": plan.semantic_capability_status,
+                    "runtime_import_status": plan.runtime_import_status,
+                    "runtime_import_blockers": plan.runtime_import_blockers,
+                    "capability_state": plan.capability.state,
+                    "capability_profile": plan.capability.profile,
+                    "capability_issues": plan.capability.issues,
+                    "plan_state": plan.state,
+                    "plan_issue_codes": plan.issues.iter().map(|issue| issue.code.as_str()).collect::<Vec<_>>(),
+                });
+                if source_name == "FROZEN_REPLAY" {
+                    frozen_outputs.insert(case_id, comparison.clone());
+                } else {
+                    assert_eq!(
+                        frozen_outputs.get(case_id),
+                        Some(&comparison),
+                        "schema option ordering/drift changed contract for {case_id}"
+                    );
+                    println!(
+                        "V3_LIVE_VS_FROZEN {}",
+                        json!({"case": case_id, "full_comparison_equal": true})
+                    );
+                }
+                let blockers = plan.capability.issues.iter().map(|issue| {
+                    json!({"code": issue.code, "node_id": issue.node_id, "input_name": issue.input_name})
+                }).collect::<Vec<_>>();
+                println!(
+                    "V3_SAME_SCHEMA {}",
+                    json!({
+                        "source": source_name,
+                        "schema_sha256": schema_sha256,
+                        "case": case_id,
+                        "category": actual.category,
+                        "mode": actual.mode,
+                        "root_nodes": actual.output_root_resolution.roots().iter().map(|root| &root.node_id).collect::<Vec<_>>(),
+                        "readiness": plan.capability.state,
+                        "semantic_capability_status": plan.semantic_capability_status,
+                        "runtime_import_status": plan.runtime_import_status,
+                        "runtime_import_blockers": plan.runtime_import_blockers,
+                        "blockers": blockers,
+                        "plan_state": plan.state,
+                        "plan_issue_codes": plan.issues.iter().map(|issue| issue.code.as_str()).collect::<Vec<_>>(),
+                        "equivalent": true,
+                    })
+                );
+            }
+            assert_eq!(adapter.object_info_calls(), cases.len());
+        }
+    }
+
     impl StubComfyAdapter {
         fn ready() -> Self {
             Self {
+                schema_source: "TEST_SCHEMA",
                 object_info: Ok(json!({
                     "Sampler": {"input": {"required": {"prompt": ["STRING", {}]} }},
                     "SaveImage": {"output_node": true, "input": {"required": {}}}
@@ -8255,6 +8697,7 @@ outputs: []
 
         fn offline() -> Self {
             Self {
+                schema_source: "TEST_SCHEMA",
                 object_info: Err(ComfyAdapterError::Offline("test offline".to_owned())),
                 object_info_calls: std::sync::atomic::AtomicUsize::new(0),
                 submit_calls: std::sync::atomic::AtomicUsize::new(0),
@@ -8278,6 +8721,10 @@ outputs: []
 
     #[async_trait]
     impl ComfyAdapter for StubComfyAdapter {
+        fn object_info_source(&self) -> &'static str {
+            self.schema_source
+        }
+
         async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
             Err(ComfyAdapterError::Offline("test".to_owned()))
         }

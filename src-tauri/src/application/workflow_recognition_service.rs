@@ -130,6 +130,7 @@ pub struct WorkflowRecognitionReport {
     pub inputs: Vec<WorkflowRecognitionInput>,
     pub outputs: Vec<WorkflowRecognitionOutput>,
     pub recipe_status: RecipeFreshness,
+    /// Legacy detailed runtime enum, distinct from semantic profile readiness.
     pub runtime_capability: RuntimeCapabilityState,
     pub capability_issues: Vec<String>,
     pub issues: Vec<WorkflowRecognitionIssue>,
