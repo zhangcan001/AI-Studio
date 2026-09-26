@@ -130,6 +130,7 @@ export {
   duplicateWorkflowRecipe,
   exportWorkflowPackage,
   getOnboardingDraft,
+  getSavedWorkflowVersionDetails,
   importWorkflowPackageBackup,
   inspectWorkflowDeletion,
   inspectWorkflowPurge,

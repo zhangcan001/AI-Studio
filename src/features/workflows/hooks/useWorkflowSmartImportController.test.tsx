@@ -315,6 +315,59 @@ describe("useWorkflowSmartImportController", () => {
     expect(result.current.plan?.state).toBe("AUTO_PUBLISHED");
   });
 
+  it("prevents a second in-flight save from issuing another commit", async () => {
+    serviceMocks.analyzeWorkflowImport.mockResolvedValue(plan());
+    let resolveCommit: ((value: unknown) => void) | undefined;
+    serviceMocks.commitWorkflowImport.mockImplementation(() => new Promise((resolve) => { resolveCommit = resolve; }));
+    const { result } = renderHook(() => useWorkflowSmartImportController(options()));
+    await act(async () => { await result.current.smartImport(); });
+
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = result.current.commit("NEW_WORKFLOW");
+      second = result.current.commit("NEW_WORKFLOW");
+    });
+    expect(serviceMocks.commitWorkflowImport).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveCommit?.({
+        workflowId: "workflow-new",
+        workflowVersion: "1.0.0",
+        workflowVersionId: "version-new",
+        recipeId: "recipe-new",
+        packageName: "Demo Workflow",
+        workflowSha256: "sha-1",
+        refreshed: { packagesFound: 1, valid: 1, invalid: 0, inserted: 1, reused: 0, errors: [] },
+      });
+      await Promise.all([first, second]);
+    });
+    expect(serviceMocks.commitWorkflowImport).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists user review metadata separately and reanalyzes the same draft", async () => {
+    const reviewedDraft = { ...draft, manifest: { ...draft.manifest, name: "Reviewed", category: "IMAGE", mode: "T2I" } };
+    serviceMocks.analyzeWorkflowImport.mockResolvedValue(plan());
+    serviceMocks.reanalyzeWorkflowImport.mockResolvedValue(plan({ metadata: reviewedDraft.manifest }));
+    serviceMocks.getOnboardingDraft.mockResolvedValueOnce(draft).mockResolvedValueOnce(reviewedDraft);
+    const { result } = renderHook(() => useWorkflowSmartImportController(options()));
+    await act(async () => { await result.current.smartImport(); });
+
+    await act(async () => {
+      await result.current.updateReviewMetadata({ name: "Reviewed", category: "IMAGE", mode: "T2I" });
+    });
+
+    expect(serviceMocks.setOnboardingMetadata).toHaveBeenCalledWith("draft-1", {
+      workflowId: "workflow-existing",
+      name: "Reviewed",
+      workflowVersion: "1.0.0",
+      recipeVersion: "1.0.0",
+      category: "IMAGE",
+      mode: "T2I",
+    });
+    expect(serviceMocks.reanalyzeWorkflowImport).toHaveBeenCalledWith("draft-1");
+    expect(result.current.plan?.metadata.mode).toBe("T2I");
+  });
+
   it("routes Advanced editing through the Workspace callback without owning its view state", async () => {
     serviceMocks.analyzeWorkflowImport.mockResolvedValue(plan({ existingWorkflowId: "workflow-existing", existingWorkflowVersion: "1.0.0" }));
     const hookOptions = options();

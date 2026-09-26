@@ -1184,6 +1184,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_registry::workflow_commit_import,
             commands::workflow_registry::workflow_list_registry,
             commands::workflow_registry::workflow_get_registry,
+            commands::workflow_registry::workflow_get_saved_version_details,
             commands::workflow_registry::workflow_rename,
             commands::workflow_registry::workflow_set_current_version,
             commands::workflow_registry::workflow_promote_recipe,

@@ -7,6 +7,8 @@ pub struct WorkflowPackageBytes {
     pub manifest_yaml: Vec<u8>,
     pub recipe_yaml: Vec<u8>,
     pub workflow_api_json: Vec<u8>,
+    pub source_workflow_json: Option<Vec<u8>>,
+    pub recognition_metadata_json: Option<Vec<u8>>,
 }
 
 impl WorkflowPackageBytes {
@@ -15,7 +17,19 @@ impl WorkflowPackageBytes {
             manifest_yaml,
             recipe_yaml,
             workflow_api_json,
+            source_workflow_json: None,
+            recognition_metadata_json: None,
         }
+    }
+
+    pub fn with_recognition_data(
+        mut self,
+        source_workflow_json: Option<Vec<u8>>,
+        recognition_metadata_json: Option<Vec<u8>>,
+    ) -> Self {
+        self.source_workflow_json = source_workflow_json;
+        self.recognition_metadata_json = recognition_metadata_json;
+        self
     }
 }
 

@@ -73,6 +73,17 @@ impl FileSystemWorkflowPackageStore {
             fs::write(path.join("recipe.yaml"), &package.recipe_yaml).map_err(io_error)?;
             fs::write(path.join("workflow_api.json"), &package.workflow_api_json)
                 .map_err(io_error)?;
+            if let Some(source_workflow_json) = &package.source_workflow_json {
+                fs::write(path.join("workflow_source.json"), source_workflow_json)
+                    .map_err(io_error)?;
+            }
+            if let Some(recognition_metadata_json) = &package.recognition_metadata_json {
+                fs::write(
+                    path.join("workflow_recognition.json"),
+                    recognition_metadata_json,
+                )
+                .map_err(io_error)?;
+            }
             Ok(())
         })();
         if result.is_err() {
@@ -85,10 +96,19 @@ impl FileSystemWorkflowPackageStore {
         if !path.is_dir() {
             return Err(store_error("workflow package is unavailable"));
         }
+        let optional_file = |name: &str| match fs::read(path.join(name)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io_error(error)),
+        };
         Ok(WorkflowPackageBytes::new(
             fs::read(path.join("manifest.yaml")).map_err(io_error)?,
             fs::read(path.join("recipe.yaml")).map_err(io_error)?,
             fs::read(path.join("workflow_api.json")).map_err(io_error)?,
+        )
+        .with_recognition_data(
+            optional_file("workflow_source.json")?,
+            optional_file("workflow_recognition.json")?,
         ))
     }
 }

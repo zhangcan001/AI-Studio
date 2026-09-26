@@ -429,7 +429,7 @@ describe("DEV-079 添加工作流前端 UAT", () => {
 
     await user.click(screen.getByRole("button", { name: "+ 添加工作流" }));
     await screen.findByRole("heading", { name: "识别完成" });
-    await user.click(screen.getByRole("button", { name: "添加工作流" }));
+    await user.click(screen.getByRole("button", { name: "保存到工作流库" }));
     await screen.findByRole("heading", { name: "✓ 工作流已添加" });
     await waitFor(() => expect(serviceMocks.analyzeWorkflowImport).toHaveBeenCalledTimes(1));
     expect(serviceMocks.commitWorkflowImport).toHaveBeenCalledWith({
@@ -468,7 +468,7 @@ describe("DEV-079 添加工作流前端 UAT", () => {
 
     await user.click(screen.getByRole("button", { name: "+ 添加工作流" }));
     await screen.findByRole("heading", { name: "识别完成" });
-    await user.click(screen.getByRole("button", { name: "添加工作流" }));
+    await user.click(screen.getByRole("button", { name: "保存到工作流库" }));
     await screen.findByRole("heading", { name: "✓ 工作流已添加" });
     await waitFor(() => expect(onCatalogChanged).toHaveBeenCalledTimes(1));
 

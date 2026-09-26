@@ -223,6 +223,8 @@ fn fixture_package() -> WorkflowPackageFiles {
         manifest_yaml: "schema_version: 1\nid: wfl_dev052_fixture\nname: DEV-052 Fixture\nworkflow_version: 1.0.0\nrecipe_version: 1.0.0\ncategory: image\nmode: t2i\n".to_owned(),
         recipe_yaml: RECIPE_YAML.to_owned(),
         workflow_json: WORKFLOW_JSON.to_owned(),
+        source_workflow_json: None,
+        recognition_metadata_json: None,
     }
 }
 
@@ -240,6 +242,8 @@ fn shared_recipe_packages() -> Vec<WorkflowPackageFiles> {
         ),
         recipe_yaml: recipe_yaml.to_owned(),
         workflow_json: WORKFLOW_JSON.to_owned(),
+        source_workflow_json: None,
+        recognition_metadata_json: None,
     })
     .collect()
 }
@@ -2313,14 +2317,14 @@ async fn runtime_500_shot_project_admits_exactly_100_ready_without_starting() {
 }
 
 #[tokio::test]
-async fn runtime_database_is_fresh_migrated_through_038() {
+async fn runtime_database_is_fresh_migrated_through_039() {
     let harness = harness().await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
             .fetch_one(&harness.pool)
             .await
             .unwrap(),
-        38
+        39
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")

@@ -9,6 +9,7 @@ use crate::{
         workflow_registry_service::{
             WorkflowPurgeInspection, WorkflowRegistryMutationResult, WorkflowRegistryPurgeResult,
             WorkflowRegistryRestoreResult, WorkflowRegistryServiceError, WorkflowRegistryView,
+            WorkflowSavedVersionDetailsView,
         },
     },
     error::AppError,
@@ -153,6 +154,19 @@ pub async fn workflow_get_registry(
         .workflow
         .registry
         .get(&workflow_id)
+        .await
+        .map_err(map_registry_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_get_saved_version_details(
+    state: State<'_, AppState>,
+    workflow_version_id: String,
+) -> Result<WorkflowSavedVersionDetailsView, AppError> {
+    state
+        .workflow
+        .registry
+        .get_saved_version_details(&workflow_version_id)
         .await
         .map_err(map_registry_error)
 }

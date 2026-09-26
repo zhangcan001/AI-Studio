@@ -80,6 +80,8 @@ export function WorkflowImportResult({ plan, projectId, onOpenAdvanced, onOpenSt
           <span>类型<strong>{workflowTypeLabel(plan.workflowKind)}</strong></span>
           <span>用途<strong>{workflowPurposeLabel(plan.metadata.category, plan.workflowKind)}</strong></span>
           <span>工作流版本<strong>{plan.metadata.workflowVersion}</strong></span>
+          <span>工作流 ID<strong><code>{published.workflowId}</code></strong></span>
+          <span>WorkflowVersion ID<strong><code>{published.workflowVersionId ?? "未返回版本 ID"}</code></strong></span>
           <span>输入<strong>{inputLabels}</strong></span>
           <span>输出<strong>{outputLabels}</strong></span>
           <span>导入状态<strong>可加入工作流库</strong></span>
@@ -87,6 +89,7 @@ export function WorkflowImportResult({ plan, projectId, onOpenAdvanced, onOpenSt
           <span>运行导入<strong>{runtimeImportLabel(plan.runtimeImportStatus)}</strong></span>
           {plan.runtimeImportBlockers.length > 0 && <span>运行阻塞项<strong>{plan.runtimeImportBlockers.length} 项</strong></span>}
         </div>
+        {!published.workflowVersionId && <p className="workflow-import-result-warning">⚠ 工作流已写入，但版本 ID 未返回；请勿重复保存，请刷新工作流库确认记录状态。</p>}
         {plan.runtimeImportStatus === "NOT_EVALUATED" && <p className="workflow-import-result-warning">⚠ 当前运行环境尚未完成验证；连接 ComfyUI 后可重新检查。</p>}
         {!!missingNodes.length && <p className="workflow-import-result-warning">⚠ 当前 ComfyUI 缺少 {missingNodes.length} 个节点：{missingNodes.join("、")}。工作流已经保存，安装节点后即可运行。</p>}
         <div className="workflow-smart-actions">

@@ -88,7 +88,13 @@ function isArchivedDuplicate(plan: WorkflowAutoOnboardingPlanView): boolean {
   return plan.state === "ALREADY_EXISTS_ARCHIVED" || state === "REMOVED";
 }
 
+function hasUnresolvedRequiredInput(plan: WorkflowAutoOnboardingPlanView): boolean {
+  return plan.issues.some((issue) => issue.code === "AMBIGUOUS_INPUT"
+    && issue.field !== "negative_prompt" && issue.candidates.length > 0);
+}
+
 function canCommitImport(plan: WorkflowAutoOnboardingPlanView): boolean {
+  if (hasUnresolvedRequiredInput(plan)) return false;
   return Boolean(
     plan.normalizationState !== "UI_SOURCE_PENDING"
       && (plan.autoPublishable
@@ -141,6 +147,7 @@ interface Props {
   onRegenerateRecipe?: () => void;
   onRestoreExisting?: () => void;
   onCommitImport?: (action: WorkflowImportCommitAction) => void;
+  onSaveReviewMetadata?: (metadata: { name: string; category: string; mode: string }) => void;
   onCancel?: () => void;
   draft?: WorkflowOnboardingDraftView;
 }
@@ -310,8 +317,11 @@ function issueCapabilityDetails(plan: WorkflowAutoOnboardingPlanView, issue: Wor
   };
 }
 
-export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onOpenExistingVersion, onUseInProject, onRegenerateRecipe, onRestoreExisting, onCommitImport, onCancel }: Props) {
+export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onOpenExistingVersion, onUseInProject, onRegenerateRecipe, onRestoreExisting, onCommitImport, onSaveReviewMetadata, onCancel }: Props) {
   const [selected, setSelected] = useState<Record<string, number>>({});
+  const [reviewName, setReviewName] = useState(plan.metadata.name);
+  const [reviewCategory, setReviewCategory] = useState(plan.metadata.category);
+  const [reviewMode, setReviewMode] = useState(plan.metadata.mode);
   const normalizationPending = plan.normalizationState === "UI_SOURCE_PENDING";
   const waiting = plan.state === "WAITING_FOR_COMFY_UI" || normalizationPending;
   const outdated = isExistingRecipeOutdated(plan);
@@ -324,6 +334,23 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
   const matchType = matchTypeLabel(plan.existingMatchType);
   const issueFingerprint = plan.issues.map((issue, issueIndex) => workflowIssueSelectionKey(issue, issueIndex)).join("|");
   useEffect(() => setSelected({}), [plan.draftId, plan.state, issueFingerprint]);
+  useEffect(() => {
+    setReviewName(plan.metadata.name);
+    setReviewCategory(plan.metadata.category);
+    setReviewMode(plan.metadata.mode);
+  }, [plan.draftId, plan.metadata.category, plan.metadata.mode, plan.metadata.name]);
+  const reviewMetadataDirty = reviewName !== plan.metadata.name
+    || reviewCategory !== plan.metadata.category
+    || reviewMode !== plan.metadata.mode;
+  const analysis = plan.analysis;
+  const rootResolution = analysis?.outputRootResolution;
+  const roots = rootResolution?.state === "RESOLVED"
+    ? rootResolution.roots
+    : rootResolution?.state === "AMBIGUOUS" ? rootResolution.candidates : [];
+  const evidenceSummary = [
+    ...(analysis?.inputs ?? []).flatMap((input) => (input.evidence ?? []).map((evidence) => `${evidence.kind} · ${input.semanticKey} · ${evidence.weight}`)),
+    ...(analysis?.outputs ?? []).flatMap((output) => (output.evidence ?? []).map((evidence) => `${evidence.kind} · ${output.outputId} · ${evidence.weight}`)),
+  ].slice(0, 8);
   return (
     <section className="workflow-smart-issues" aria-label="工作流导入问题">
       <div className="workflow-smart-issues-heading">
@@ -393,8 +420,9 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
                 {!!issue.candidates.length && (
                   <fieldset>
                     <legend>请选择候选项</legend>
-                    {issue.candidates.map((candidate, candidateIndex) => (
-                      <label key={`${candidate.label}-${candidateIndex}`}>
+                    {issue.candidates.map((candidate, candidateIndex) => {
+                      const node = draft?.nodes.find((item) => item.nodeId === candidate.nodeId);
+                      return <label key={`${candidate.label}-${candidateIndex}`}>
                         <input
                           type="radio"
                           name={issueKey}
@@ -403,8 +431,12 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
                         />
                         <span>{candidate.label}</span>
                         {(candidate.nodeId || candidate.inputName || candidate.outputType) && <small>{[candidate.nodeId && `节点 ${candidate.nodeId}`, candidate.inputName && `输入 ${candidate.inputName}`, candidate.outputType && `输出类型 ${candidate.outputType}`].filter(Boolean).join(" · ")}</small>}
-                      </label>
-                    ))}
+                        {node && <small>节点名称 {node.title} · 节点类型 {node.classType}</small>}
+                        {candidate.fieldType && <small>输入类型 {candidate.fieldType}</small>}
+                        {candidate.reason && <small>候选依据 {candidate.reason}</small>}
+                        {candidate.evidence?.map((evidence, evidenceIndex) => <small key={`${evidence.kind}:${evidenceIndex}`}>{evidence.kind} · {evidence.reason} · 权重 {evidence.weight}</small>)}
+                      </label>;
+                    })}
                   </fieldset>
                 )}
                 {!!issue.candidates.length && (
@@ -446,9 +478,9 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
           )}
         </div>
       )}
-      {!hasExistingWorkflow && !normalizationPending && (
+      {!normalizationPending && (
         <div className="workflow-import-guidance" aria-label="工作流识别结果">
-          <strong>识别完成</strong>
+          <strong>识别与复核结果</strong>
           <div className="workflow-detail-grid">
             <span>名称<strong>{plan.metadata.name}</strong></span>
             <span>类型<strong>{plan.workflowKind}</strong></span>
@@ -457,19 +489,33 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
             <span>输出<strong>{analysisOutputLabels(plan)}</strong></span>
             <span>语义能力<strong>{semanticCapabilityLabels[plan.semanticCapabilityStatus]}</strong></span>
             <span>运行导入<strong>{runtimeImportLabels[plan.runtimeImportStatus]}</strong></span>
-            {plan.runtimeImportBlockers.length > 0 && <span>运行阻塞项<strong>{plan.runtimeImportBlockers.length} 项</strong></span>}
+            <span>Schema 来源<strong>{plan.schemaSource ?? draft?.schemaSource ?? "STATIC_ANALYSIS"}</strong></span>
+            <span>输出根<strong>{rootResolution?.state === "UNKNOWN" ? "未识别" : roots.map((root) => `${root.outputId} · 节点 ${root.nodeId}`).join("；") || "无输出根候选"}</strong></span>
           </div>
+          {!!evidenceSummary.length && <div className="workflow-review-evidence"><strong>识别证据摘要</strong><ul>{evidenceSummary.map((evidence, index) => <li key={`${evidence}-${index}`}>{evidence}</li>)}</ul></div>}
+          {!!plan.issues.length && <div className="workflow-review-evidence"><strong>待处理问题</strong><ul>{plan.issues.map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.code} · {issue.message}</li>)}</ul></div>}
+          {!!plan.runtimeImportBlockers.length && <div className="workflow-review-evidence"><strong>运行阻塞项</strong><ul>{plan.runtimeImportBlockers.map((blocker, index) => <li key={`${blocker.code}-${blocker.nodeId ?? ""}-${index}`}>{blocker.code}{blocker.classType ? ` · ${blocker.classType}` : ""}{blocker.nodeId ? ` · 节点 ${blocker.nodeId}` : ""}{blocker.inputName ? ` · 输入 ${blocker.inputName}` : ""}</li>)}</ul></div>}
         </div>
+      )}
+      {!normalizationPending && !exactActive && onSaveReviewMetadata && (
+        <fieldset className="workflow-review-metadata" disabled={loading}>
+          <legend>复核与修正</legend>
+          <label>工作流名称<input aria-label="复核工作流名称" value={reviewName} onChange={(event) => setReviewName(event.target.value)} /></label>
+          <label>类型 / 分类<input aria-label="复核工作流类型" value={reviewCategory} onChange={(event) => setReviewCategory(event.target.value)} /></label>
+          <label>模式<input aria-label="复核工作流模式" value={reviewMode} onChange={(event) => setReviewMode(event.target.value)} /></label>
+          <p className="disabled-note">类型和模式如有修正，将以 USER_OVERRIDE 与原始 V3 推断分别保存，不会改变识别引擎结果。</p>
+          <button type="button" className="quiet-button" disabled={!reviewMetadataDirty || loading || !reviewName.trim() || !reviewCategory.trim() || !reviewMode.trim()} onClick={() => onSaveReviewMetadata({ name: reviewName.trim(), category: reviewCategory.trim(), mode: reviewMode.trim() })}>应用修正并重新识别</button>
+        </fieldset>
       )}
       <div className="workflow-smart-actions">
         {waiting && <button type="button" onClick={onResume} disabled={loading}>{loading ? "正在检查..." : "继续检查"}</button>}
         {exactActive && <button type="button" onClick={onOpenExisting}>打开工作流</button>}
         {exactActive && plan.existingWorkflowId && onUseInProject && <button type="button" onClick={() => onUseInProject(plan.existingWorkflowId!, plan.existingRecipes?.[0]?.recipeId ?? plan.metadata.recipeId)}>用于当前项目</button>}
-        {structuralVariant && <button type="button" onClick={() => onCommitImport ? onCommitImport("NEW_WORKFLOW") : onOpenAdvanced()}>添加为新工作流</button>}
-        {structuralVariant && (onCommitImport || onOpenExistingVersion) && <button type="button" className="quiet-button" onClick={() => onCommitImport ? onCommitImport("NEW_VERSION") : onOpenExistingVersion?.()}>作为新版本添加</button>}
+        {structuralVariant && <button type="button" disabled={loading || reviewMetadataDirty || hasUnresolvedRequiredInput(plan)} onClick={() => onCommitImport ? onCommitImport("NEW_WORKFLOW") : onOpenAdvanced()}>添加为新工作流</button>}
+        {structuralVariant && (onCommitImport || onOpenExistingVersion) && <button type="button" className="quiet-button" disabled={loading || reviewMetadataDirty || hasUnresolvedRequiredInput(plan)} onClick={() => onCommitImport ? onCommitImport("NEW_VERSION") : onOpenExistingVersion?.()}>作为新版本添加</button>}
         {outdated && onRegenerateRecipe && <button type="button" onClick={onRegenerateRecipe} disabled={loading}>更新工作流配置</button>}
         {archivedDuplicate && onRestoreExisting && <button type="button" onClick={onRestoreExisting} disabled={loading}>恢复工作流</button>}
-        {!exactDuplicate && !structuralVariant && !archivedDuplicate && onCommitImport && <button type="button" onClick={() => onCommitImport("NEW_WORKFLOW")} disabled={loading || !importable}>添加工作流</button>}
+        {!exactDuplicate && !structuralVariant && !archivedDuplicate && onCommitImport && <button type="button" onClick={() => onCommitImport("NEW_WORKFLOW")} disabled={loading || !importable || reviewMetadataDirty}>{loading ? "正在保存…" : "保存到工作流库"}</button>}
         {!normalizationPending && <button type="button" className="quiet-button" onClick={onOpenAdvanced}>高级编辑</button>}
         {onCancel && <button type="button" className="quiet-button" onClick={onCancel} disabled={loading}>取消添加</button>}
       </div>

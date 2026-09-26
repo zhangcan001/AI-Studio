@@ -11,6 +11,13 @@ use crate::application::{
     workflow_graph_analysis::WorkflowGraph,
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
+    workflow_recognition_provenance::{
+        WorkflowRecognitionEvidenceSummary, WorkflowRecognitionInputMappingDecision,
+        WorkflowRecognitionMappingTarget, WorkflowRecognitionOverrideValue,
+        WorkflowRecognitionProvenance, WorkflowRecognitionRoot, WorkflowRecognitionUserOverride,
+        WorkflowRuntimeBlockerSummary, WORKFLOW_RECOGNITION_ENGINE,
+        WORKFLOW_RECOGNITION_ENGINE_VERSION,
+    },
     workflow_recognition_schema::RecognitionSchemaContext,
     workflow_recognition_service::{
         structural_workflow_sha256, RuntimeCapabilityState, RuntimeCapabilitySummary,
@@ -396,6 +403,11 @@ pub struct WorkflowOnboardingDraftView {
     pub raw_sha256: String,
     pub original_filename: String,
     pub source_format: String,
+    pub schema_source: String,
+    pub schema_fingerprint: Option<String>,
+    pub recognized_at: Option<String>,
+    pub inferred_type: String,
+    pub inferred_mode: String,
     pub workflow_format_version: Option<String>,
     pub frontend_version: Option<String>,
     pub normalization_state: WorkflowNormalizationState,
@@ -710,6 +722,11 @@ pub struct WorkflowAutoOnboardingPlanView {
     pub raw_sha256: String,
     pub original_filename: String,
     pub source_format: String,
+    pub schema_source: String,
+    pub schema_fingerprint: Option<String>,
+    pub recognized_at: Option<String>,
+    pub inferred_type: String,
+    pub inferred_mode: String,
     pub workflow_format_version: Option<String>,
     pub frontend_version: Option<String>,
     pub normalization_state: WorkflowNormalizationState,
@@ -782,6 +799,26 @@ struct InputMapping {
     target_node: String,
     target_input: String,
     item_index: Option<usize>,
+    source: InputMappingSource,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum InputMappingSource {
+    ModelInferred,
+    UserConfirmed,
+    UserOverridden,
+    ReusedRecipe,
+}
+
+impl InputMappingSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ModelInferred => "MODEL_INFERRED",
+            Self::UserConfirmed => "USER_CONFIRMED",
+            Self::UserOverridden => "USER_OVERRIDDEN",
+            Self::ReusedRecipe => "REUSED_RECIPE",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -802,6 +839,9 @@ struct WorkflowOnboardingDraft {
     raw_sha256: String,
     original_filename: String,
     source_format: ComfyWorkflowInputFormat,
+    schema_source: String,
+    schema_fingerprint: Option<String>,
+    recognized_at: Option<String>,
     workflow_format_version: Option<String>,
     frontend_version: Option<String>,
     compatibility_context: Option<NormalizationCompatibilityContext>,
@@ -849,17 +889,28 @@ impl WorkflowOnboardingDraft {
 struct WorkflowOnboardingRegistry {
     order: VecDeque<String>,
     drafts: BTreeMap<String, WorkflowOnboardingDraft>,
+    committed_imports: BTreeMap<String, WorkflowOnboardingCommitCache>,
+}
+
+#[derive(Clone)]
+struct WorkflowOnboardingCommitCache {
+    action: WorkflowImportCommitAction,
+    workflow_id: Option<String>,
+    set_current: bool,
+    published: WorkflowOnboardingPublishView,
 }
 
 impl WorkflowOnboardingRegistry {
     fn insert(&mut self, draft: WorkflowOnboardingDraft) {
         let id = draft.draft_id.clone();
+        self.committed_imports.remove(&id);
         self.drafts.insert(id.clone(), draft);
         self.order.retain(|candidate| candidate != &id);
         self.order.push_back(id);
         while self.order.len() > MAX_ONBOARDING_DRAFTS {
             if let Some(oldest) = self.order.pop_front() {
                 self.drafts.remove(&oldest);
+                self.committed_imports.remove(&oldest);
             }
         }
     }
@@ -877,6 +928,7 @@ impl WorkflowOnboardingRegistry {
         &mut self,
         draft_id: &str,
     ) -> Result<&mut WorkflowOnboardingDraft, WorkflowOnboardingError> {
+        self.committed_imports.remove(draft_id);
         self.drafts.get_mut(draft_id).ok_or_else(|| {
             WorkflowOnboardingError::new(
                 "WORKFLOW_ONBOARDING_DRAFT_NOT_FOUND",
@@ -886,6 +938,7 @@ impl WorkflowOnboardingRegistry {
     }
 
     fn remove(&mut self, draft_id: &str) -> Result<(), WorkflowOnboardingError> {
+        self.committed_imports.remove(draft_id);
         if self.drafts.remove(draft_id).is_none() {
             return Err(WorkflowOnboardingError::new(
                 "WORKFLOW_ONBOARDING_DRAFT_NOT_FOUND",
@@ -894,6 +947,36 @@ impl WorkflowOnboardingRegistry {
         }
         self.order.retain(|candidate| candidate != draft_id);
         Ok(())
+    }
+
+    fn cached_commit(
+        &self,
+        request: &WorkflowImportCommitRequest,
+    ) -> Option<WorkflowOnboardingPublishView> {
+        self.committed_imports
+            .get(&request.draft_id)
+            .filter(|cached| {
+                cached.action == request.action
+                    && cached.workflow_id == request.workflow_id
+                    && cached.set_current == request.set_current
+            })
+            .map(|cached| cached.published.clone())
+    }
+
+    fn cache_commit(
+        &mut self,
+        request: &WorkflowImportCommitRequest,
+        published: WorkflowOnboardingPublishView,
+    ) {
+        self.committed_imports.insert(
+            request.draft_id.clone(),
+            WorkflowOnboardingCommitCache {
+                action: request.action,
+                workflow_id: request.workflow_id.clone(),
+                set_current: request.set_current,
+                published,
+            },
+        );
     }
 }
 
@@ -961,6 +1044,8 @@ fn identity_candidate_files(candidate: WorkflowRegistryIdentityCandidate) -> Wor
             .expect("workflow registry identity manifest should serialize"),
         recipe_yaml: candidate.recipe_yaml,
         workflow_json: candidate.api_workflow_json,
+        source_workflow_json: None,
+        recognition_metadata_json: None,
     }
 }
 
@@ -1001,6 +1086,7 @@ pub struct WorkflowOnboardingService {
     state_repository: Option<Arc<dyn WorkflowRuntimeStateRepository>>,
     registry_service: Option<Arc<WorkflowRegistryService>>,
     registry: Mutex<WorkflowOnboardingRegistry>,
+    commit_gate: tokio::sync::Mutex<()>,
 }
 
 impl WorkflowOnboardingService {
@@ -1023,6 +1109,7 @@ impl WorkflowOnboardingService {
             state_repository: None,
             registry_service: None,
             registry: Mutex::new(WorkflowOnboardingRegistry::default()),
+            commit_gate: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1173,6 +1260,9 @@ impl WorkflowOnboardingService {
                 raw_sha256,
                 original_filename: safe_filename(&original_filename),
                 source_format: ComfyWorkflowInputFormat::Api,
+                schema_source: "NONE".to_owned(),
+                schema_fingerprint: None,
+                recognized_at: None,
                 workflow_format_version: None,
                 frontend_version: None,
                 compatibility_context: None,
@@ -1236,6 +1326,9 @@ impl WorkflowOnboardingService {
                 raw_sha256,
                 original_filename: safe_filename(&original_filename),
                 source_format: ComfyWorkflowInputFormat::Ui,
+                schema_source: "NONE".to_owned(),
+                schema_fingerprint: None,
+                recognized_at: None,
                 workflow_format_version: ui_header.as_ref().map(|(version, _)| version.clone()),
                 frontend_version: ui_header.and_then(|(_, frontend)| frontend),
                 compatibility_context: None,
@@ -1381,6 +1474,9 @@ impl WorkflowOnboardingService {
             raw_sha256: sha256(&raw_bytes),
             original_filename: safe_filename(&format!("{}.json", workflow_view.name)),
             source_format: ComfyWorkflowInputFormat::Api,
+            schema_source: "NONE".to_owned(),
+            schema_fingerprint: None,
+            recognized_at: None,
             workflow_format_version: None,
             frontend_version: None,
             compatibility_context: None,
@@ -1715,6 +1811,12 @@ impl WorkflowOnboardingService {
         &self,
         request: WorkflowImportCommitRequest,
     ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
+        let _commit_guard = self.commit_gate.lock().await;
+        if let Some(published) =
+            self.with_registry(|registry| Ok(registry.cached_commit(&request)))??
+        {
+            return Ok(published);
+        }
         let draft = self.with_registry(|registry| registry.get(&request.draft_id))??;
         draft.normalized_workflow()?;
         match request.action {
@@ -1734,6 +1836,24 @@ impl WorkflowOnboardingService {
                 })?;
                 let workflow_id = validate_workflow_id(workflow_id)?;
                 let draft = self.with_registry(|registry| registry.get(&request.draft_id))??;
+                if matches!(request.action, WorkflowImportCommitAction::NewVersion) {
+                    if let Some(runtime_repository) = &self.runtime_repository {
+                        let versions =
+                            runtime_repository.list_versions().await.map_err(|error| {
+                                WorkflowOnboardingError::new("DATABASE_ERROR", error.to_string())
+                            })?;
+                        if versions.iter().any(|version| {
+                            version.workflow_id == workflow_id
+                                && version.is_current
+                                && version.workflow_sha256 == draft.workflow_sha256
+                        }) {
+                            return Err(WorkflowOnboardingError::new(
+                                "WORKFLOW_VERSION_UNCHANGED",
+                                "the current workflow definition is unchanged; create a new recipe version for mapping-only changes",
+                            ));
+                        }
+                    }
+                }
                 let workflow_version =
                     if matches!(request.action, WorkflowImportCommitAction::NewVersion) {
                         self.next_workflow_version(&workflow_id).await?
@@ -1760,7 +1880,13 @@ impl WorkflowOnboardingService {
                 })??;
             }
         }
-        let published = self.publish(&request.draft_id).await?;
+        // Explicitly saved imports may be structurally valid even when the
+        // current ComfyUI cannot run them; persist those versions disabled.
+        let published = self.publish_importable(&request.draft_id).await?;
+        self.with_registry(|registry| {
+            registry.cache_commit(&request, published.clone());
+            Ok(())
+        })??;
         if request.set_current {
             // The command layer owns the Registry repository and will perform
             // the explicit current-version mutation after this publish.
@@ -1774,7 +1900,7 @@ impl WorkflowOnboardingService {
         preserve_user_metadata: bool,
     ) -> Result<(AutoInferenceResult, WorkflowOnboardingDraft), WorkflowOnboardingError> {
         let recognition_request_id = Uuid::new_v4().to_string();
-        let mut schema_source = "NONE";
+        let mut schema_source = "STATIC_ANALYSIS";
         let mut schema_sha256 = None;
         let initial = self.with_registry(|registry| registry.get(draft_id))??;
         let pending_result = if initial.normalized_api.is_none() {
@@ -1879,6 +2005,9 @@ impl WorkflowOnboardingService {
             let draft = registry.get_mut(draft_id)?;
             draft.capability = capability.clone();
             draft.analysis = Some(analysis);
+            draft.schema_source = schema_source.to_owned();
+            draft.schema_fingerprint = schema_sha256.clone();
+            draft.recognized_at = Some(self.clock.now().to_rfc3339());
             draft.recognition = draft
                 .recognition
                 .clone()
@@ -2561,6 +2690,9 @@ impl WorkflowOnboardingService {
             raw_sha256: sha256(&raw_bytes),
             original_filename: safe_filename(&format!("{}.json", next_manifest.name)),
             source_format: ComfyWorkflowInputFormat::Api,
+            schema_source: "NONE".to_owned(),
+            schema_fingerprint: None,
+            recognized_at: None,
             workflow_format_version: None,
             frontend_version: None,
             compatibility_context: None,
@@ -2650,6 +2782,9 @@ impl WorkflowOnboardingService {
             raw_sha256: sha256(&raw_bytes),
             original_filename: safe_filename(&format!("{}.json", manifest.name)),
             source_format: ComfyWorkflowInputFormat::Api,
+            schema_source: "NONE".to_owned(),
+            schema_fingerprint: None,
+            recognized_at: None,
             workflow_format_version: None,
             frontend_version: None,
             compatibility_context: None,
@@ -2898,6 +3033,18 @@ impl WorkflowOnboardingService {
                     ));
                 }
             }
+            let source = if draft.analysis.as_ref().is_some_and(|analysis| {
+                analysis.inputs.iter().any(|input| {
+                    input.semantic_key == request.semantic_key
+                        && input.item_index == request.item_index
+                        && (input.node_id != request.target_node
+                            || input.input_name != request.target_input)
+                })
+            }) {
+                InputMappingSource::UserOverridden
+            } else {
+                InputMappingSource::UserConfirmed
+            };
             let mapping = InputMapping {
                 semantic_key: request.semantic_key,
                 field_type,
@@ -2912,6 +3059,7 @@ impl WorkflowOnboardingService {
                 target_node: request.target_node,
                 target_input: request.target_input,
                 item_index: request.item_index,
+                source,
             };
             draft.input_mappings.retain(|existing| {
                 (existing.semantic_key.clone(), existing.item_index) != key
@@ -3199,7 +3347,24 @@ impl WorkflowOnboardingService {
         &self,
         draft_id: &str,
     ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
-        self.publish_internal(draft_id, false).await
+        let _commit_guard = self.commit_gate.lock().await;
+        let request = WorkflowImportCommitRequest {
+            draft_id: draft_id.to_owned(),
+            action: WorkflowImportCommitAction::NewWorkflow,
+            workflow_id: None,
+            set_current: false,
+        };
+        if let Some(published) =
+            self.with_registry(|registry| Ok(registry.cached_commit(&request)))??
+        {
+            return Ok(published);
+        }
+        let published = self.publish_internal(draft_id, false).await?;
+        self.with_registry(|registry| {
+            registry.cache_commit(&request, published.clone());
+            Ok(())
+        })??;
+        Ok(published)
     }
 
     async fn publish_importable(
@@ -3232,6 +3397,21 @@ impl WorkflowOnboardingService {
                 validation.issues.join("; "),
             ));
         }
+        if draft.analysis.as_ref().is_some_and(|analysis| {
+            let inference = auto_inference_from_analysis(&draft, analysis);
+            unresolved_inference_issues(&draft, &inference.issues)
+                .iter()
+                .any(|issue| {
+                    issue.code == "AMBIGUOUS_INPUT"
+                        && issue.field.as_deref() != Some("negative_prompt")
+                        && !issue.candidates.is_empty()
+                })
+        }) {
+            return Err(WorkflowOnboardingError::new(
+                "WORKFLOW_REQUIRED_INPUT_MAPPING_UNRESOLVED",
+                "confirm the ambiguous primary input before saving",
+            ));
+        }
 
         let existing_packages = self
             .existing_packages_for_identity(&draft.workflow_sha256, workflow)
@@ -3253,6 +3433,17 @@ impl WorkflowOnboardingService {
             .manifest
             .to_yaml()
             .map_err(|message| WorkflowOnboardingError::new("MANIFEST_INVALID", message))?;
+        let recognized_at = draft
+            .recognized_at
+            .clone()
+            .unwrap_or_else(|| self.clock.now().to_rfc3339());
+        let provenance = workflow_recognition_provenance(&draft, recognized_at);
+        let recognition_metadata_json = serde_json::to_vec(&provenance).map_err(|error| {
+            WorkflowOnboardingError::new(
+                "WORKFLOW_RECOGNITION_METADATA_FAILED",
+                format!("recognition metadata could not be serialized: {error}"),
+            )
+        })?;
         let package_name = if draft.allow_existing_workflow_sha {
             package_directory_name_with_recipe(
                 &draft.manifest,
@@ -3267,6 +3458,10 @@ impl WorkflowOnboardingService {
             manifest_yaml.into_bytes(),
             recipe_yaml.into_bytes(),
             workflow_bytes,
+        )
+        .with_recognition_data(
+            Some(draft.raw_bytes.clone()),
+            Some(recognition_metadata_json),
         );
         self.package_store
             .stage(&staging_name, &package)
@@ -3882,6 +4077,19 @@ fn auto_plan_for_draft(
         raw_sha256: draft.raw_sha256.clone(),
         original_filename: draft.original_filename.clone(),
         source_format: draft.source_format.as_str().to_owned(),
+        schema_source: draft.schema_source.clone(),
+        schema_fingerprint: draft.schema_fingerprint.clone(),
+        recognized_at: draft.recognized_at.clone(),
+        inferred_type: draft
+            .analysis
+            .as_ref()
+            .map(|analysis| analysis.category.clone())
+            .unwrap_or_else(|| draft.recognition.category.clone()),
+        inferred_mode: draft
+            .analysis
+            .as_ref()
+            .map(|analysis| analysis.mode.clone())
+            .unwrap_or_else(|| draft.recognition.mode.clone()),
         workflow_format_version: draft.workflow_format_version.clone(),
         frontend_version: draft.frontend_version.clone(),
         normalization_state: draft.normalization_state,
@@ -3918,6 +4126,194 @@ fn auto_plan_for_draft(
         expected_inference: Vec::new(),
         recognition: draft.recognition.clone(),
         message,
+    }
+}
+
+fn workflow_recognition_provenance(
+    draft: &WorkflowOnboardingDraft,
+    recognized_at: String,
+) -> WorkflowRecognitionProvenance {
+    let analysis = draft.analysis.as_ref();
+    let inferred_type = analysis
+        .map(|analysis| analysis.category.clone())
+        .unwrap_or_else(|| draft.recognition.category.clone());
+    let inferred_mode = analysis
+        .map(|analysis| analysis.mode.clone())
+        .unwrap_or_else(|| draft.recognition.mode.clone());
+    let type_override = (!inferred_type
+        .trim()
+        .eq_ignore_ascii_case(draft.manifest.category.trim()))
+    .then(|| WorkflowRecognitionOverrideValue {
+        inferred_value: inferred_type.clone(),
+        selected_value: draft.manifest.category.clone(),
+    });
+    let mode_override = (!inferred_mode
+        .trim()
+        .eq_ignore_ascii_case(draft.manifest.mode.trim()))
+    .then(|| WorkflowRecognitionOverrideValue {
+        inferred_value: inferred_mode.clone(),
+        selected_value: draft.manifest.mode.clone(),
+    });
+    let user_override = (type_override.is_some() || mode_override.is_some()).then(|| {
+        WorkflowRecognitionUserOverride {
+            status: "USER_OVERRIDE".to_owned(),
+            workflow_type: type_override,
+            mode: mode_override,
+        }
+    });
+
+    let (output_root_state, roots) = match analysis.map(|analysis| &analysis.output_root_resolution)
+    {
+        Some(OutputRootResolution::Resolved { roots }) => (
+            "RESOLVED",
+            roots
+                .iter()
+                .map(|root| WorkflowRecognitionRoot {
+                    output_id: root.output_id.clone(),
+                    output_type: root.output_type.clone(),
+                    node_id: root.node_id.clone(),
+                    label: root.label.clone(),
+                    evidence_tier: root.evidence_tier,
+                })
+                .collect(),
+        ),
+        Some(OutputRootResolution::Ambiguous { candidates, .. }) => (
+            "AMBIGUOUS",
+            candidates
+                .iter()
+                .map(|root| WorkflowRecognitionRoot {
+                    output_id: root.output_id.clone(),
+                    output_type: root.output_type.clone(),
+                    node_id: root.node_id.clone(),
+                    label: root.label.clone(),
+                    evidence_tier: root.evidence_tier,
+                })
+                .collect(),
+        ),
+        Some(OutputRootResolution::Unknown { .. }) | None => ("UNKNOWN", Vec::new()),
+    };
+
+    let mut evidence_summary = analysis
+        .into_iter()
+        .flat_map(|analysis| {
+            analysis.inputs.iter().flat_map(|input| {
+                input
+                    .evidence
+                    .iter()
+                    .map(move |evidence| WorkflowRecognitionEvidenceSummary {
+                        source: "INPUT".to_owned(),
+                        node_id: input.node_id.clone(),
+                        target: format!("{}.{}", input.semantic_key, input.input_name),
+                        kind: format!("{:?}", evidence.kind),
+                        weight: evidence.weight,
+                    })
+            })
+        })
+        .collect::<Vec<_>>();
+    evidence_summary.extend(analysis.into_iter().flat_map(|analysis| {
+        analysis.outputs.iter().flat_map(|output| {
+            output
+                .evidence
+                .iter()
+                .map(move |evidence| WorkflowRecognitionEvidenceSummary {
+                    source: "OUTPUT".to_owned(),
+                    node_id: output.node_id.clone(),
+                    target: output.output_id.clone(),
+                    kind: format!("{:?}", evidence.kind),
+                    weight: evidence.weight,
+                })
+        })
+    }));
+
+    let semantic_status = match semantic_capability_status(
+        draft
+            .capability
+            .profile
+            .as_ref()
+            .map(|profile| profile.readiness),
+    ) {
+        SemanticCapabilityStatus::NotEvaluated => "NOT_EVALUATED",
+        SemanticCapabilityStatus::Ready => "READY",
+        SemanticCapabilityStatus::NeedsReview => "NEEDS_REVIEW",
+        SemanticCapabilityStatus::Unsupported => "UNSUPPORTED",
+    }
+    .to_owned();
+    let runtime_status = match runtime_import_status(draft.capability.state) {
+        RuntimeImportStatus::NotEvaluated => "NOT_EVALUATED",
+        RuntimeImportStatus::Ready => "READY",
+        RuntimeImportStatus::NeedsReview => "NEEDS_REVIEW",
+        RuntimeImportStatus::Blocked => "BLOCKED",
+    }
+    .to_owned();
+    let mut issue_codes = analysis
+        .into_iter()
+        .flat_map(|analysis| analysis.issues.iter().map(|issue| issue.code.clone()))
+        .collect::<BTreeSet<_>>();
+    issue_codes.extend(
+        draft
+            .recognition
+            .issues
+            .iter()
+            .map(|issue| issue.code.clone()),
+    );
+
+    let input_mapping_decisions = draft
+        .input_mappings
+        .iter()
+        .map(|mapping| {
+            let inferred_mapping = analysis
+                .and_then(|analysis| {
+                    analysis.inputs.iter().find(|input| {
+                        input.semantic_key == mapping.semantic_key
+                            && input.item_index == mapping.item_index
+                    })
+                })
+                .map(|input| WorkflowRecognitionMappingTarget {
+                    node_id: input.node_id.clone(),
+                    input_name: input.input_name.clone(),
+                });
+            WorkflowRecognitionInputMappingDecision {
+                semantic_key: mapping.semantic_key.clone(),
+                item_index: mapping.item_index,
+                inferred_mapping,
+                final_mapping: WorkflowRecognitionMappingTarget {
+                    node_id: mapping.target_node.clone(),
+                    input_name: mapping.target_input.clone(),
+                },
+                mapping_source: mapping.source.as_str().to_owned(),
+            }
+        })
+        .collect();
+
+    WorkflowRecognitionProvenance {
+        recognition_engine: WORKFLOW_RECOGNITION_ENGINE.to_owned(),
+        recognition_engine_version: WORKFLOW_RECOGNITION_ENGINE_VERSION.to_owned(),
+        recognized_at,
+        source_format: draft.source_format.as_str().to_owned(),
+        schema_source: draft.schema_source.clone(),
+        schema_fingerprint: draft.schema_fingerprint.clone(),
+        inferred_type,
+        inferred_mode,
+        final_type: draft.manifest.category.clone(),
+        final_mode: draft.manifest.mode.clone(),
+        user_override,
+        semantic_capability_status: semantic_status,
+        runtime_import_status: runtime_status,
+        output_root_state: output_root_state.to_owned(),
+        selected_root_id: analysis.and_then(|analysis| analysis.selected_root_id.clone()),
+        roots,
+        evidence_summary,
+        input_mapping_decisions,
+        issue_codes: issue_codes.into_iter().collect(),
+        runtime_blockers: runtime_import_blockers(&draft.capability)
+            .into_iter()
+            .map(|blocker| WorkflowRuntimeBlockerSummary {
+                code: blocker.code,
+                class_type: blocker.class_type,
+                node_id: blocker.node_id,
+                input_name: blocker.input_name,
+            })
+            .collect(),
     }
 }
 
@@ -4161,6 +4557,7 @@ fn analysis_input_mapping(
         target_node: input.node_id.clone(),
         target_input: input.input_name.clone(),
         item_index: input.item_index,
+        source: InputMappingSource::ModelInferred,
     })
 }
 
@@ -4364,6 +4761,19 @@ fn view_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingDraftVie
         raw_sha256: draft.raw_sha256.clone(),
         original_filename: draft.original_filename.clone(),
         source_format: draft.source_format.as_str().to_owned(),
+        schema_source: draft.schema_source.clone(),
+        schema_fingerprint: draft.schema_fingerprint.clone(),
+        recognized_at: draft.recognized_at.clone(),
+        inferred_type: draft
+            .analysis
+            .as_ref()
+            .map(|analysis| analysis.category.clone())
+            .unwrap_or_else(|| draft.recognition.category.clone()),
+        inferred_mode: draft
+            .analysis
+            .as_ref()
+            .map(|analysis| analysis.mode.clone())
+            .unwrap_or_else(|| draft.recognition.mode.clone()),
         workflow_format_version: draft.workflow_format_version.clone(),
         frontend_version: draft.frontend_version.clone(),
         normalization_state: draft.normalization_state,
@@ -4972,6 +5382,7 @@ fn input_mappings_from_recipe(
                 target_node: binding.target.node.clone(),
                 target_input: binding.target.input.clone(),
                 item_index: binding.item_index,
+                source: InputMappingSource::ReusedRecipe,
             })
         })
         .collect()
@@ -5295,6 +5706,9 @@ fn runtime_check_draft(
         raw_sha256: sha256(&raw_bytes),
         original_filename: "runtime.json".to_owned(),
         source_format: ComfyWorkflowInputFormat::Api,
+        schema_source: "NONE".to_owned(),
+        schema_fingerprint: None,
+        recognized_at: None,
         workflow_format_version: None,
         frontend_version: None,
         compatibility_context: None,
@@ -6243,8 +6657,9 @@ pub(crate) mod tests {
         infrastructure::{
             database::{
                 initialize, SqliteAssetRepository, SqliteGenerationDefinitionRepository,
-                SqlitePresetRepository, SqliteWorkflowLibraryRepository,
-                SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
+                SqlitePresetRepository, SqliteProjectWorkflowBindingRepository,
+                SqliteWorkflowLibraryRepository, SqliteWorkflowRuntimeRepository,
+                SqliteWorkflowRuntimeStateRepository,
             },
             filesystem::{FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore},
         },
@@ -6571,6 +6986,9 @@ pub(crate) mod tests {
             raw_sha256: sha256(&raw_bytes),
             original_filename: "test_graph.json".to_owned(),
             source_format: ComfyWorkflowInputFormat::Api,
+            schema_source: "NONE".to_owned(),
+            schema_fingerprint: None,
+            recognized_at: None,
             workflow_format_version: None,
             frontend_version: None,
             compatibility_context: None,
@@ -7221,12 +7639,13 @@ outputs: []
             )),
             Arc::new(TestClock),
         )
-        .with_runtime_state(runtime_repository.clone(), runtime_state_repository);
+        .with_runtime_state(runtime_repository.clone(), runtime_state_repository.clone());
         let raw = br#"{"1":{"inputs":{"prompt":"hello"},"class_type":"Sampler"},"2":{"inputs":{"image":["1",0],"filename_prefix":"ComfyUI"},"class_type":"SaveImage"}}"#.to_vec();
-        let draft = service
-            .import_bytes(raw, "onboarded_t2i.json".to_owned(), None)
+        let analyzed = service
+            .analyze_import_bytes(raw.clone(), "onboarded_t2i.json".to_owned(), None)
             .await
             .unwrap();
+        let draft = service.get(&analyzed.draft_id).unwrap();
         let capability = service.check_capability(&draft.draft_id).await.unwrap();
         assert_eq!(capability.state, CapabilityState::Ready);
         let linked_error = service
@@ -7304,10 +7723,36 @@ outputs: []
                 },
             )
             .unwrap();
+        service
+            .set_metadata(
+                &draft.draft_id,
+                WorkflowOnboardingMetadataRequest {
+                    workflow_id: Some(draft.manifest.workflow_id.clone()),
+                    name: "Reviewed onboarding workflow".to_owned(),
+                    workflow_version: draft.manifest.workflow_version.clone(),
+                    recipe_version: draft.manifest.recipe_version.clone(),
+                    category: "image_override".to_owned(),
+                    mode: "t2i_override".to_owned(),
+                },
+            )
+            .unwrap();
         let validation = service.validate(&draft.draft_id).unwrap();
         assert!(validation.ready_to_publish);
-        let published = service.publish(&draft.draft_id).await.unwrap();
+        let commit_request = WorkflowImportCommitRequest {
+            draft_id: draft.draft_id.clone(),
+            action: WorkflowImportCommitAction::NewWorkflow,
+            workflow_id: None,
+            set_current: false,
+        };
+        let published = service.commit_import(commit_request.clone()).await.unwrap();
+        let duplicate_commit = service.commit_import(commit_request).await.unwrap();
         assert!(!published.package_name.is_empty());
+        assert!(published.workflow_version_id.is_some());
+        assert_eq!(
+            published.workflow_version_id,
+            duplicate_commit.workflow_version_id
+        );
+        assert_eq!(published.package_name, duplicate_commit.package_name);
         assert!(published
             .package_name
             .ends_with(&published.workflow_sha256[..8]));
@@ -7328,10 +7773,99 @@ outputs: []
         assert_eq!(published.recipe_id, definitions[0].recipe_id);
         let versions = runtime_repository.list_versions().await.unwrap();
         assert_eq!(versions.len(), 1);
+        assert_eq!(
+            published.workflow_version_id.as_deref(),
+            Some(versions[0].workflow_version_id.as_str())
+        );
         assert_eq!(versions[0].workflow_sha256, draft.workflow_sha256);
         assert_eq!(versions[0].recipes.len(), 1);
         assert_eq!(versions[0].recipes[0].version, "1.0.0");
         assert_eq!(versions[0].recipes[0].recipe_id, published.recipe_id);
+        let persisted_source = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT source_workflow_json FROM workflow_versions WHERE id = ?1",
+        )
+        .bind(&versions[0].workflow_version_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            persisted_source.as_deref(),
+            Some(std::str::from_utf8(&raw).unwrap())
+        );
+        let persisted_recognition = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT recognition_metadata_json FROM workflow_versions WHERE id = ?1",
+        )
+        .bind(&versions[0].workflow_version_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .expect("recognition provenance should be persisted on the saved version");
+        let provenance: WorkflowRecognitionProvenance =
+            serde_json::from_str(&persisted_recognition).unwrap();
+        assert_eq!(provenance.recognition_engine, WORKFLOW_RECOGNITION_ENGINE);
+        assert_eq!(provenance.schema_source, "TEST_SCHEMA");
+        assert_eq!(provenance.final_type, "image_override");
+        assert_eq!(provenance.final_mode, "t2i_override");
+        assert_eq!(
+            provenance.user_override.as_ref().unwrap().status,
+            "USER_OVERRIDE"
+        );
+        assert_eq!(
+            provenance
+                .user_override
+                .as_ref()
+                .unwrap()
+                .workflow_type
+                .as_ref()
+                .unwrap()
+                .selected_value,
+            "image_override"
+        );
+        assert_eq!(
+            provenance
+                .user_override
+                .as_ref()
+                .unwrap()
+                .mode
+                .as_ref()
+                .unwrap()
+                .selected_value,
+            "t2i_override"
+        );
+        let object_info_calls_before_reopen = adapter
+            .object_info_calls
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let registry_service = WorkflowRegistryService::new(
+            runtime_repository.clone(),
+            runtime_state_repository,
+            Arc::new(SqliteProjectWorkflowBindingRepository::new(pool.clone())),
+            Arc::new(TestClock),
+        );
+        let reopened = registry_service
+            .get_saved_version_details(&versions[0].workflow_version_id)
+            .await
+            .unwrap();
+        assert_eq!(reopened.workflow_id, published.workflow_id);
+        assert_eq!(
+            reopened.workflow_version_id,
+            versions[0].workflow_version_id
+        );
+        assert_eq!(reopened.name, "Reviewed onboarding workflow");
+        assert_eq!(reopened.category, "image_override");
+        assert_eq!(reopened.mode, "t2i_override");
+        assert!(reopened.source_workflow_preserved);
+        assert_eq!(
+            reopened.source_workflow_json,
+            serde_json::from_slice::<Value>(&raw).unwrap()
+        );
+        assert_eq!(reopened.recognition, Some(provenance));
+        assert_eq!(
+            adapter
+                .object_info_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            object_info_calls_before_reopen,
+            "reopening a persisted version must not contact the runtime"
+        );
 
         let duplicate = service
             .duplicate_recipe_draft(&published.workflow_id, "1.0.0", Some("1.0.0"), None)
@@ -7440,6 +7974,429 @@ outputs: []
                 .len(),
             1
         );
+
+        let unchanged_version = service
+            .commit_import(WorkflowImportCommitRequest {
+                draft_id: duplicate.draft_id.clone(),
+                action: WorkflowImportCommitAction::NewVersion,
+                workflow_id: Some(published.workflow_id.clone()),
+                set_current: false,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(unchanged_version.code(), "WORKFLOW_VERSION_UNCHANGED");
+        assert_eq!(runtime_repository.list_versions().await.unwrap().len(), 1);
+
+        let changed_raw = String::from_utf8(raw.clone())
+            .unwrap()
+            .replace("hello", "revised prompt");
+        let changed_draft = service
+            .import_bytes(
+                changed_raw.clone().into_bytes(),
+                "onboarded_t2i_v2.json".to_owned(),
+                None,
+            )
+            .await
+            .unwrap();
+        service
+            .check_capability(&changed_draft.draft_id)
+            .await
+            .unwrap();
+        service
+            .set_input_mapping(
+                &changed_draft.draft_id,
+                WorkflowOnboardingInputMappingRequest {
+                    semantic_key: "prompt".to_owned(),
+                    field_type: "textarea".to_owned(),
+                    label: "Prompt".to_owned(),
+                    required: true,
+                    default_value: Some("revised prompt".to_owned()),
+                    min_value: None,
+                    max_value: None,
+                    step: None,
+                    min_items: None,
+                    max_items: None,
+                    target_node: "1".to_owned(),
+                    target_input: "prompt".to_owned(),
+                    item_index: None,
+                },
+            )
+            .unwrap();
+        service
+            .set_output_mapping(
+                &changed_draft.draft_id,
+                WorkflowOnboardingOutputMappingRequest {
+                    output_id: "generated_image".to_owned(),
+                    label: "Generated image".to_owned(),
+                    output_type: "image".to_owned(),
+                    node_id: "2".to_owned(),
+                    required: true,
+                },
+            )
+            .unwrap();
+        assert!(
+            service
+                .validate(&changed_draft.draft_id)
+                .unwrap()
+                .ready_to_publish
+        );
+        let new_version_request = WorkflowImportCommitRequest {
+            draft_id: changed_draft.draft_id.clone(),
+            action: WorkflowImportCommitAction::NewVersion,
+            workflow_id: Some(published.workflow_id.clone()),
+            set_current: true,
+        };
+        let published_v2 = service
+            .commit_import(new_version_request.clone())
+            .await
+            .unwrap();
+        let duplicate_v2 = service.commit_import(new_version_request).await.unwrap();
+        assert_eq!(published_v2.workflow_id, published.workflow_id);
+        assert_ne!(
+            published_v2.workflow_version_id,
+            published.workflow_version_id
+        );
+        assert_ne!(published_v2.workflow_version, published.workflow_version);
+        assert_eq!(
+            published_v2.workflow_version_id,
+            duplicate_v2.workflow_version_id
+        );
+        assert_eq!(runtime_repository.list_versions().await.unwrap().len(), 2);
+        let reopened_v1 = registry_service
+            .get_saved_version_details(&versions[0].workflow_version_id)
+            .await
+            .unwrap();
+        let reopened_v2 = registry_service
+            .get_saved_version_details(published_v2.workflow_version_id.as_deref().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened_v1.workflow_version_id,
+            versions[0].workflow_version_id
+        );
+        assert_eq!(
+            reopened_v1.source_workflow_json,
+            serde_json::from_slice::<Value>(&raw).unwrap()
+        );
+        assert_eq!(reopened_v2.workflow_id, published.workflow_id);
+        assert_eq!(reopened_v2.workflow_version, published_v2.workflow_version);
+        assert_eq!(
+            reopened_v2.source_workflow_json,
+            serde_json::from_str::<Value>(&changed_raw).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_commit_saves_importable_workflow_with_unavailable_runtime_option() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("workflow_library");
+        let staging_root = directory.path().join("workflow_staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let library_service = Arc::new(WorkflowLibraryService::new(
+            source.clone(),
+            Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
+            Arc::new(TestClock),
+        ));
+        let mut adapter = StubComfyAdapter::ready();
+        adapter.object_info = Ok(json!({
+            "Sampler": {"input": {"required": {
+                "prompt": ["STRING", {}],
+                "sampler": [["euler"], {}]
+            }}},
+            "SaveImage": {"output_node": true, "input": {"required": {}}}
+        }));
+        let adapter = Arc::new(adapter);
+        let runtime_repository = Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
+        let runtime_state_repository =
+            Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
+        let service = WorkflowOnboardingService::new(
+            source,
+            adapter.clone(),
+            library_service,
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root.clone(),
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        )
+        .with_runtime_state(runtime_repository, runtime_state_repository.clone());
+        let raw = br#"{"1":{"inputs":{"prompt":"hello","sampler":"absent"},"class_type":"Sampler"},"2":{"inputs":{"image":["1",0],"filename_prefix":"ComfyUI"},"class_type":"SaveImage"}}"#.to_vec();
+        let analyzed = service
+            .analyze_import_bytes(raw, "unavailable_option.json".to_owned(), None)
+            .await
+            .unwrap();
+        let draft = service.get(&analyzed.draft_id).unwrap();
+        assert_eq!(
+            draft.capability.state,
+            CapabilityState::IncompatibleInputValues
+        );
+        let validation = service.validate(&draft.draft_id).unwrap();
+        assert!(!validation.ready_to_publish);
+        assert!(importable_validation(&validation));
+
+        let published = service
+            .commit_import(WorkflowImportCommitRequest {
+                draft_id: draft.draft_id,
+                action: WorkflowImportCommitAction::NewWorkflow,
+                workflow_id: None,
+                set_current: false,
+            })
+            .await
+            .unwrap();
+        let version_id = published.workflow_version_id.unwrap();
+        assert!(library_root.join(&published.package_name).is_dir());
+        assert!(!runtime_state_repository
+            .is_enabled(&version_id)
+            .await
+            .unwrap());
+        assert_eq!(adapter.submit_calls(), 0);
+
+        let ambiguous = service
+            .analyze_import_bytes(
+                include_bytes!("../../tests/fixtures/workflow_recognition_v3/real/R09_CUSTOM_IMAGE_BLEND/sample.api.json").to_vec(),
+                "r09.api.json".to_owned(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(ambiguous.issues.iter().any(|issue| {
+            issue.code == "AMBIGUOUS_INPUT" && issue.field.as_deref() == Some("image")
+        }));
+        let rejected = service
+            .commit_import(WorkflowImportCommitRequest {
+                draft_id: ambiguous.draft_id.clone(),
+                action: WorkflowImportCommitAction::NewWorkflow,
+                workflow_id: None,
+                set_current: false,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            rejected.code(),
+            "WORKFLOW_REQUIRED_INPUT_MAPPING_UNRESOLVED"
+        );
+        service
+            .set_input_mapping(
+                &ambiguous.draft_id,
+                WorkflowOnboardingInputMappingRequest {
+                    semantic_key: "image".to_owned(),
+                    field_type: "image".to_owned(),
+                    label: "Input image".to_owned(),
+                    required: true,
+                    default_value: None,
+                    min_value: None,
+                    max_value: None,
+                    step: None,
+                    min_items: None,
+                    max_items: None,
+                    target_node: "2".to_owned(),
+                    target_input: "image".to_owned(),
+                    item_index: None,
+                },
+            )
+            .unwrap();
+        let resolved = service.reanalyze_draft(&ambiguous.draft_id).await.unwrap();
+        assert!(!resolved.issues.iter().any(|issue| {
+            issue.code == "AMBIGUOUS_INPUT" && issue.field.as_deref() == Some("image")
+        }));
+        let saved = service
+            .commit_import(WorkflowImportCommitRequest {
+                draft_id: ambiguous.draft_id,
+                action: WorkflowImportCommitAction::NewWorkflow,
+                workflow_id: None,
+                set_current: false,
+            })
+            .await
+            .unwrap();
+        let registry = WorkflowRegistryService::new(
+            Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone())),
+            runtime_state_repository,
+            Arc::new(SqliteProjectWorkflowBindingRepository::new(pool)),
+            Arc::new(TestClock),
+        );
+        let reopened = registry
+            .get_saved_version_details(saved.workflow_version_id.as_deref().unwrap())
+            .await
+            .unwrap();
+        let provenance = serde_json::to_value(reopened.recognition.unwrap()).unwrap();
+        assert_eq!(
+            provenance["inputMappingDecisions"][0]["semanticKey"],
+            "image"
+        );
+        assert_eq!(
+            provenance["inputMappingDecisions"][0]["finalMapping"]["nodeId"],
+            "2"
+        );
+        assert_eq!(
+            provenance["inputMappingDecisions"][0]["mappingSource"],
+            "USER_CONFIRMED"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_commit_requires_primary_r11_mapping() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("workflow_library");
+        let staging_root = directory.path().join("workflow_staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let library_service = Arc::new(WorkflowLibraryService::new(
+            source.clone(),
+            Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
+            Arc::new(TestClock),
+        ));
+        let mut adapter = StubComfyAdapter::ready();
+        adapter.object_info = Ok(serde_json::from_slice(include_bytes!(
+            "../../tests/fixtures/workflow_recognition_v3/real/object_info.json"
+        ))
+        .unwrap());
+        let service = WorkflowOnboardingService::new(
+            source,
+            Arc::new(adapter),
+            library_service,
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root,
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        )
+        .with_runtime_state(
+            Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone())),
+            Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool)),
+        );
+        let r11 = service
+            .analyze_import_bytes(
+                include_bytes!("../../tests/fixtures/workflow_recognition_v3/real/R11_WF26_IMAGE/sample.api.json").to_vec(),
+                "r11.api.json".to_owned(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            r11.issues.iter().any(|issue| {
+                issue.code == "AMBIGUOUS_INPUT" && issue.field.as_deref() == Some("prompt")
+            }),
+            "{:?}",
+            r11.issues
+        );
+        let rejected = service
+            .commit_import(WorkflowImportCommitRequest {
+                draft_id: r11.draft_id,
+                action: WorkflowImportCommitAction::NewWorkflow,
+                workflow_id: None,
+                set_current: false,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            rejected.code(),
+            "WORKFLOW_REQUIRED_INPUT_MAPPING_UNRESOLVED"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_package_write_or_database_registration_leaves_no_saved_version() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("workflow_library");
+        let staging_root = directory.path().join("workflow_staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let library_service = Arc::new(WorkflowLibraryService::new(
+            source.clone(),
+            Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
+            Arc::new(TestClock),
+        ));
+        let mut adapter = StubComfyAdapter::ready();
+        adapter.object_info = Ok(json!({
+            "Sampler": {"input": {"required": {"prompt": ["STRING", {}]}}},
+            "SaveImage": {"output_node": true, "input": {"required": {}}}
+        }));
+        let service = WorkflowOnboardingService::new(
+            source,
+            Arc::new(adapter),
+            library_service,
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root.clone(),
+                staging_root.clone(),
+            )),
+            Arc::new(TestClock),
+        );
+        let analyzed = service
+            .analyze_import_bytes(
+                br#"{"1":{"inputs":{"prompt":"hello"},"class_type":"Sampler"},"2":{"inputs":{"images":["1",0]},"class_type":"SaveImage"}}"#.to_vec(),
+                "failure_injection.json".to_owned(),
+                None,
+            )
+            .await
+            .unwrap();
+        let request = WorkflowImportCommitRequest {
+            draft_id: analyzed.draft_id,
+            action: WorkflowImportCommitAction::NewWorkflow,
+            workflow_id: None,
+            set_current: false,
+        };
+
+        tokio::fs::write(&staging_root, b"not a directory")
+            .await
+            .unwrap();
+        let write_error = service.commit_import(request.clone()).await.unwrap_err();
+        assert_eq!(write_error.code(), "WORKFLOW_PACKAGE_PUBLISH_FAILED");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(tokio::fs::read_dir(&library_root)
+            .await
+            .unwrap()
+            .next_entry()
+            .await
+            .unwrap()
+            .is_none());
+
+        tokio::fs::remove_file(&staging_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        sqlx::query(
+            "CREATE TRIGGER fail_workflow_version_insert BEFORE INSERT ON workflow_versions
+             BEGIN SELECT RAISE(ABORT, 'forced registration failure'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let register_error = service.commit_import(request).await.unwrap_err();
+        assert_eq!(register_error.code(), "WORKFLOW_PACKAGE_PUBLISH_FAILED");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(tokio::fs::read_dir(&library_root)
+            .await
+            .unwrap()
+            .next_entry()
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -8015,6 +8972,9 @@ outputs: []
             raw_sha256: sha256(video),
             original_filename: "video.json".to_owned(),
             source_format: ComfyWorkflowInputFormat::Api,
+            schema_source: "NONE".to_owned(),
+            schema_fingerprint: None,
+            recognized_at: None,
             workflow_format_version: None,
             frontend_version: None,
             compatibility_context: None,
@@ -8371,6 +9331,9 @@ outputs: []
                 raw_sha256: "sha".to_owned(),
                 original_filename: "test.json".to_owned(),
                 source_format: ComfyWorkflowInputFormat::Api,
+                schema_source: "NONE".to_owned(),
+                schema_fingerprint: None,
+                recognized_at: None,
                 workflow_format_version: None,
                 frontend_version: None,
                 compatibility_context: None,
@@ -8431,6 +9394,9 @@ outputs: []
             raw_sha256: sha256(br#"sample"#),
             original_filename: "sample.json".to_owned(),
             source_format: ComfyWorkflowInputFormat::Api,
+            schema_source: "NONE".to_owned(),
+            schema_fingerprint: None,
+            recognized_at: None,
             workflow_format_version: None,
             frontend_version: None,
             compatibility_context: None,
@@ -8470,6 +9436,7 @@ outputs: []
                     target_node: "1".to_owned(),
                     target_input: "prompt".to_owned(),
                     item_index: None,
+                    source: InputMappingSource::ModelInferred,
                 },
                 InputMapping {
                     semantic_key: "seed".to_owned(),
@@ -8485,6 +9452,7 @@ outputs: []
                     target_node: "1".to_owned(),
                     target_input: "seed".to_owned(),
                     item_index: None,
+                    source: InputMappingSource::ModelInferred,
                 },
             ],
             output_mappings: vec![OutputMapping {

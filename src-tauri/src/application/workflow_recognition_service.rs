@@ -674,6 +674,8 @@ mod tests {
             manifest_yaml: BUILTIN_MANIFEST.to_owned(),
             recipe_yaml: BUILTIN_RECIPE.to_owned(),
             workflow_json: BUILTIN_WORKFLOW.to_owned(),
+            source_workflow_json: None,
+            recognition_metadata_json: None,
         }
     }
 
@@ -781,6 +783,8 @@ mod tests {
             manifest_yaml: "schema_version: 1\nid: wfl_fixture\nname: Fixture\nworkflow_version: 1.0.0\nrecipe_version: 1.0.0\ncategory: video\nmode: text_to_video\n".to_owned(),
             recipe_yaml: "schema_version: 1\nid: rcp_fixture\nname: Fixture\nworkflow:\n  file: workflow.json\ninputs: {}\nbindings: []\noutputs: []\n".to_owned(),
             workflow_json: serde_json::to_string_pretty(&workflow).unwrap(),
+            source_workflow_json: None,
+            recognition_metadata_json: None,
         };
         assert_eq!(
             recognize_workflow(&raw, &[package.clone()]).identity,

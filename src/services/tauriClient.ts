@@ -253,6 +253,7 @@ import type {
   WorkflowRegistryMutationResult,
   WorkflowRegistryRestoreResult,
   WorkflowRegistryView,
+  WorkflowSavedVersionDetailsView,
   WorkflowVersionDiffView,
   WorkflowWorkspaceView,
 } from "../types/workflowOnboarding";
@@ -620,6 +621,10 @@ export function listWorkflowRegistry(): Promise<WorkflowRegistryView[]> {
 
 export function getWorkflowRegistry(workflowId: string): Promise<WorkflowRegistryView> {
   return invoke<WorkflowRegistryView>("workflow_get_registry", { workflowId });
+}
+
+export function getSavedWorkflowVersionDetails(workflowVersionId: string): Promise<WorkflowSavedVersionDetailsView> {
+  return invoke<WorkflowSavedVersionDetailsView>("workflow_get_saved_version_details", { workflowVersionId });
 }
 
 export function renameWorkflow(workflowId: string, name: string): Promise<WorkflowRegistryMutationResult> {

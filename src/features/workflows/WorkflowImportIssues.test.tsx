@@ -108,6 +108,44 @@ function draftWithOptions(plan: WorkflowAutoOnboardingPlanView): WorkflowOnboard
 }
 
 describe("WorkflowImportIssues", () => {
+  it("requires an explicit media-input choice and shows candidate evidence before save", async () => {
+    const user = userEvent.setup();
+    const onResolve = vi.fn();
+    const plan = planWithIssues([{
+      code: "AMBIGUOUS_INPUT",
+      field: "image",
+      message: "请选择输入图片",
+      candidates: [
+        { label: "节点 1 · image", nodeId: "1", inputName: "image", fieldType: "image", reason: "背景图候选", evidence: [{ kind: "CLASS_HINT", reason: "LoadImage node", weight: 8 }] },
+        { label: "节点 2 · image", nodeId: "2", inputName: "image", fieldType: "image", reason: "另一图片候选", evidence: [{ kind: "CLASS_HINT", reason: "LoadImage node", weight: 8 }] },
+      ],
+    }], { importability: "IMPORTABLE" });
+    const draft = draftWithOptions(plan);
+    draft.nodes = [
+      { nodeId: "1", classType: "LoadImage", title: "背景图", isOutputNode: false, inputs: [] },
+      { nodeId: "2", classType: "LoadImage", title: "另一图像", isOutputNode: false, inputs: [] },
+    ];
+    render(<WorkflowImportIssues plan={plan} draft={draft} loading={false} onResolve={onResolve} onResume={vi.fn()} onOpenAdvanced={vi.fn()} onOpenExisting={vi.fn()} onCommitImport={vi.fn()} />);
+
+    expect(screen.getByText(/节点名称 背景图/)).toBeTruthy();
+    expect(screen.getByText(/节点名称 另一图像/)).toBeTruthy();
+    expect(screen.getAllByText(/CLASS_HINT.*LoadImage node/)).toHaveLength(2);
+    expect((screen.getByRole("button", { name: "保存到工作流库" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(screen.getByRole("radio", { name: /节点 2/ }));
+    await user.click(screen.getByRole("button", { name: "确认这项并继续" }));
+    expect(onResolve).toHaveBeenCalledWith(plan.issues[0], plan.issues[0].candidates[1]);
+  });
+  it("blocks unresolved primary text input but allows an optional negative prompt to remain unexposed", () => {
+    const candidate = (nodeId: string) => ({ label: `节点 ${nodeId}`, nodeId, inputName: "text", fieldType: "textarea" });
+    const promptIssue: WorkflowAutoIssueView = { code: "AMBIGUOUS_INPUT", field: "prompt", message: "请选择主提示词", candidates: [candidate("1"), candidate("2")] };
+    const optionalIssue: WorkflowAutoIssueView = { code: "AMBIGUOUS_INPUT", field: "negative_prompt", message: "可选负面提示词", candidates: [candidate("3"), candidate("4")] };
+    const props = { loading: false, onResolve: vi.fn(), onResume: vi.fn(), onOpenAdvanced: vi.fn(), onOpenExisting: vi.fn(), onCommitImport: vi.fn() };
+    const { rerender } = render(<WorkflowImportIssues {...props} plan={planWithIssues([promptIssue, optionalIssue], { importability: "IMPORTABLE" })} />);
+    expect((screen.getByRole("button", { name: "保存到工作流库" }) as HTMLButtonElement).disabled).toBe(true);
+    rerender(<WorkflowImportIssues {...props} plan={planWithIssues([optionalIssue], { importability: "IMPORTABLE" })} />);
+    expect((screen.getByRole("button", { name: "保存到工作流库" }) as HTMLButtonElement).disabled).toBe(false);
+  });
   it("分别展示语义支持与当前运行导入状态", () => {
     const plan = planWithIssues([], {
       semanticCapabilityStatus: "READY",
@@ -137,6 +175,58 @@ describe("WorkflowImportIssues", () => {
 
     expect(screen.getByText("已识别并支持", { selector: "strong" })).toBeTruthy();
     expect(screen.getByText("运行前需处理", { selector: "strong" })).toBeTruthy();
+  });
+
+  it("renders schema/root/evidence review and applies user metadata before saving", async () => {
+    const user = userEvent.setup();
+    const onSaveReviewMetadata = vi.fn();
+    const plan = planWithIssues([], {
+      schemaSource: "TEST_SCHEMA",
+      analysis: {
+        format: "API",
+        identity: "NEW",
+        category: "image",
+        mode: "T2I",
+        outputRootResolution: {
+          state: "RESOLVED",
+          roots: [{ outputId: "generated_image", type: "image", nodeId: "42", required: true, confidence: "HIGH", evidenceTier: 2 }],
+        },
+        outputs: [{
+          outputId: "generated_image",
+          type: "image",
+          nodeId: "42",
+          required: true,
+          confidence: "HIGH",
+          evidence: [{ kind: "GRAPH_OUTPUT_PATH", reason: "terminal output", weight: 5 }],
+        }],
+      },
+      runtimeImportBlockers: [{ code: "MISSING_NODE", classType: "CustomNode", nodeId: "42", affectedNodeIds: [], inputName: "image" }],
+    });
+    render(
+      <WorkflowImportIssues
+        plan={plan}
+        draft={draftWithOptions(plan)}
+        loading={false}
+        onResolve={vi.fn()}
+        onResume={vi.fn()}
+        onOpenAdvanced={vi.fn()}
+        onOpenExisting={vi.fn()}
+        onCommitImport={vi.fn()}
+        onSaveReviewMetadata={onSaveReviewMetadata}
+      />,
+    );
+    expect(screen.getByText("TEST_SCHEMA", { selector: "strong" })).toBeTruthy();
+    expect(screen.getByText(/generated_image · 节点 42/)).toBeTruthy();
+    expect(screen.getByText(/GRAPH_OUTPUT_PATH/)).toBeTruthy();
+    expect(screen.getByText(/MISSING_NODE · CustomNode · 节点 42/)).toBeTruthy();
+
+    await user.clear(screen.getByRole("textbox", { name: "复核工作流名称" }));
+    await user.type(screen.getByRole("textbox", { name: "复核工作流名称" }), "Reviewed Workflow");
+    await user.clear(screen.getByRole("textbox", { name: "复核工作流类型" }));
+    await user.type(screen.getByRole("textbox", { name: "复核工作流类型" }), "video");
+    await user.click(screen.getByRole("button", { name: "应用修正并重新识别" }));
+    expect(onSaveReviewMetadata).toHaveBeenCalledWith({ name: "Reviewed Workflow", category: "video", mode: "IMAGE" });
+    expect((screen.getByRole("button", { name: "保存到工作流库" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("把非 API 格式与未知格式分开说明，并提供导出指引", () => {

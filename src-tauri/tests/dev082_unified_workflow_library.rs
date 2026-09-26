@@ -94,6 +94,8 @@ fn semantic_package(workflow_json: &str) -> WorkflowPackageFiles {
         manifest_yaml: "schema_version: 1\nid: wfl_dev082_existing\nname: DEV-082 Existing\nworkflow_version: 1.0.0\nrecipe_version: 1.0.0\ncategory: video\nmode: text_to_video\n".to_owned(),
         recipe_yaml: "schema_version: 1\nid: rcp_dev082_existing\nname: DEV-082 Existing\nworkflow:\n  file: workflow_api.json\ninputs: {}\nbindings: []\noutputs: []\n".to_owned(),
         workflow_json: workflow_json.to_owned(),
+        source_workflow_json: None,
+        recognition_metadata_json: None,
     }
 }
 
@@ -322,6 +324,8 @@ fn dev082_aitudou_and_three_item_package_fixtures_are_product_safe() {
             manifest_yaml: AITUDOU_MANIFEST.to_owned(),
             recipe_yaml: AITUDOU_RECIPE.to_owned(),
             workflow_json: AITUDOU_WORKFLOW.to_owned(),
+            source_workflow_json: None,
+            recognition_metadata_json: None,
         }],
     );
     assert_eq!(product_report.identity, WorkflowIdentity::ExactRaw);

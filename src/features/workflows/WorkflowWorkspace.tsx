@@ -48,6 +48,7 @@ import type {
   WorkflowRegistryVersionView,
   WorkflowRegistryRecipeView,
   WorkflowDeletionResult,
+  WorkflowSavedVersionDetailsView,
   WorkflowVersionDiffView,
 } from "../../types/workflowOnboarding";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
@@ -64,7 +65,7 @@ import {
   type OutputDraft,
 } from "./hooks/useWorkflowAdvancedOnboardingController";
 import { useWorkflowParameterExposureController } from "./hooks/useWorkflowParameterExposureController";
-import { getWorkflowRecipeHistory } from "../../services/workflowClient";
+import { getSavedWorkflowVersionDetails, getWorkflowRecipeHistory } from "../../services/workflowClient";
 import type { WorkflowRecipeHistoryView } from "../../types/workflowHistory";
 import { RecipeHistoryPane } from "./RecipeHistoryPane";
 import { WorkflowDeleteDialog, type WorkflowDeletionMode } from "./WorkflowDeleteDialog";
@@ -157,6 +158,9 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [recipeHistoryTarget, setRecipeHistoryTarget] = useState<{ workflowVersionId: string; recipeId: string }>();
   const [recipeHistoryLoading, setRecipeHistoryLoading] = useState(false);
   const [recipeHistoryError, setRecipeHistoryError] = useState<string>();
+  const [savedVersionDetails, setSavedVersionDetails] = useState<WorkflowSavedVersionDetailsView>();
+  const [savedVersionDetailsLoadingId, setSavedVersionDetailsLoadingId] = useState<string>();
+  const [savedVersionDetailsError, setSavedVersionDetailsError] = useState<string>();
   const recipeHistoryRequestRef = useRef(0);
   const draft = useWorkflowOnboardingStore((state) => state.draft);
   const step = useWorkflowOnboardingStore((state) => state.step);
@@ -235,6 +239,19 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     setRecipeHistory(undefined);
     setRecipeHistoryError(undefined);
     setRecipeHistoryLoading(false);
+  }, []);
+
+  const openSavedVersionDetails = useCallback(async (workflowVersionId: string) => {
+    setSavedVersionDetails(undefined);
+    setSavedVersionDetailsError(undefined);
+    setSavedVersionDetailsLoadingId(workflowVersionId);
+    try {
+      setSavedVersionDetails(await getSavedWorkflowVersionDetails(workflowVersionId));
+    } catch (detailsError: unknown) {
+      setSavedVersionDetailsError(toUserMessage(detailsError));
+    } finally {
+      setSavedVersionDetailsLoadingId(undefined);
+    }
   }, []);
 
   useEffect(() => {
@@ -905,6 +922,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onRegenerateRecipe={() => void smartImportController.regenerateRecipe()}
         onRestoreExisting={() => void restoreExistingArchivedWorkflow()}
         onCommitImport={(action) => void smartImportController.commit(action)}
+        onSaveReviewMetadata={(metadata) => void smartImportController.updateReviewMetadata(metadata)}
         onOpenStudio={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
         onRetry={() => void smartImportController.smartImport()}
         onReturnToList={() => void returnToWorkflowList()}
@@ -940,6 +958,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onPurge={(item) => void inspectForPurge(item)}
         onRepairBuiltinPackage={(item) => void repairBuiltinPackage(item)}
         onSetCurrentVersion={(item, version) => void setCurrentVersion(item, version)}
+        onViewSavedVersion={(workflowVersionId) => void openSavedVersionDetails(workflowVersionId)}
         onPromoteRecipe={(item, recipe) => void promoteRecipe(item, recipe)}
         onClearPromotion={(item, recipe) => void clearRecipePromotion(item, recipe)}
         onArchiveRecipe={(item, recipe) => void archiveRecipe(item, recipe)}
@@ -947,6 +966,10 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onCleanStaging={(stagingId) => void cleanWorkflowStaging(stagingId)}
       />
       {diff && <VersionDiffPane diff={diff} onClose={() => setDiff(undefined)} />}
+
+      {savedVersionDetailsLoadingId && <p className="loading-state" role="status">正在从工作流库读取版本 {savedVersionDetailsLoadingId}…</p>}
+      {savedVersionDetailsError && <p className="error-message" role="alert">{savedVersionDetailsError}</p>}
+      {savedVersionDetails && <SavedVersionDetailsPane details={savedVersionDetails} onClose={() => setSavedVersionDetails(undefined)} />}
 
       {parameterExposureController.draft && parameterExposureController.item && (
         <ParameterExposurePane
@@ -1368,6 +1391,46 @@ function PublishPane({ draft, published, loading, onPublish, onOpenStudio }: { d
       {published && <div className="workflow-published-result"><strong>发布成功</strong><span>刷新目录后即可在创作工作台使用该运行包。</span><button type="button" onClick={onOpenStudio}>在创作工作台中打开</button></div>}
     </div>
   );
+}
+
+function SavedVersionDetailsPane({ details, onClose }: { details: WorkflowSavedVersionDetailsView; onClose: () => void }) {
+  const recognition = details.recognition;
+  return (
+    <section className="workflow-saved-details workflow-diff-panel" role="region" aria-label="已保存工作流版本详情">
+      <div className="workflow-smart-issues-heading">
+        <div><span className="section-label">工作流库 · 已保存版本</span><h3>{details.name}</h3></div>
+        <button type="button" className="quiet-button" onClick={onClose}>关闭</button>
+      </div>
+      <div className="workflow-detail-grid">
+        <span>Workflow ID<strong><code>{details.workflowId}</code></strong></span>
+        <span>WorkflowVersion ID<strong><code>{details.workflowVersionId}</code></strong></span>
+        <span>版本<strong>{details.workflowVersion}</strong></span>
+        <span>类型 / 分类<strong>{details.category}</strong></span>
+        <span>模式<strong>{details.mode}</strong></span>
+        <span>Workflow SHA-256<strong>{details.workflowSha256}</strong></span>
+        <span>节点数量<strong>{storedWorkflowNodeCount(details.workflowJson)}</strong></span>
+        <span>原始导入 payload<strong>{details.sourceWorkflowPreserved ? "已保留" : "旧版本无独立原始副本"}</strong></span>
+        <span>识别引擎<strong>{recognition ? `${recognition.recognitionEngine} v${recognition.recognitionEngineVersion}` : "旧版本无识别元数据"}</strong></span>
+        {recognition && <span>识别时间<strong>{formatDateTime(recognition.recognizedAt)}</strong></span>}
+        {recognition && <span>Schema 来源<strong>{recognition.schemaSource}</strong></span>}
+        {recognition && <span>语义就绪<strong>{recognition.semanticCapabilityStatus}</strong></span>}
+        {recognition && <span>运行就绪<strong>{recognition.runtimeImportStatus}</strong></span>}
+        {recognition && <span>输出根状态<strong>{recognition.outputRootState}</strong></span>}
+      </div>
+      {recognition?.roots.length ? <section className="workflow-registry-nested"><h4>输出根</h4><ul>{recognition.roots.map((root) => <li key={`${root.outputId}:${root.nodeId}`}>{root.outputId} · {root.outputType} · 节点 {root.nodeId} · 证据层级 {root.evidenceTier}</li>)}</ul></section> : null}
+      {recognition?.evidenceSummary.length ? <section className="workflow-registry-nested"><h4>识别证据摘要</h4><ul>{recognition.evidenceSummary.map((evidence, index) => <li key={`${evidence.source}:${evidence.nodeId}:${evidence.target}:${index}`}>{evidence.source} · {evidence.kind} · {evidence.target} · 权重 {evidence.weight}</li>)}</ul></section> : null}
+      {recognition?.inputMappingDecisions?.length ? <section className="workflow-registry-nested"><h4>输入映射确认</h4><ul>{recognition.inputMappingDecisions.map((decision) => <li key={`${decision.semanticKey}:${decision.itemIndex ?? 0}`}>{decision.semanticKey}{decision.itemIndex != null ? ` #${decision.itemIndex + 1}` : ""} · {decision.mappingSource} · {decision.inferredMapping ? `推断 节点 ${decision.inferredMapping.nodeId}.${decision.inferredMapping.inputName} → ` : ""}最终 节点 {decision.finalMapping.nodeId}.{decision.finalMapping.inputName}</li>)}</ul></section> : null}
+      {recognition?.userOverride && <section className="workflow-registry-nested"><h4>用户确认 / 覆盖</h4><p>{recognition.userOverride.status}</p><ul>{recognition.userOverride.workflowType && <li>类型：{recognition.userOverride.workflowType.inferredValue} → {recognition.userOverride.workflowType.selectedValue}</li>}{recognition.userOverride.mode && <li>模式：{recognition.userOverride.mode.inferredValue} → {recognition.userOverride.mode.selectedValue}</li>}</ul></section>}
+      {recognition?.runtimeBlockers.length ? <section className="workflow-registry-nested"><h4>运行阻塞项</h4><ul>{recognition.runtimeBlockers.map((blocker, index) => <li key={`${blocker.code}:${blocker.nodeId ?? ""}:${index}`}>{blocker.code}{blocker.classType ? ` · ${blocker.classType}` : ""}{blocker.nodeId ? ` · 节点 ${blocker.nodeId}` : ""}{blocker.inputName ? ` · 输入 ${blocker.inputName}` : ""}</li>)}</ul></section> : null}
+      <p className="disabled-note">版本详情从本地工作流库读取；无需在线 ComfyUI。工作流 JSON 已加载用于复用，但为避免泄露参数内容，此处不展示原始 JSON。</p>
+    </section>
+  );
+}
+
+function storedWorkflowNodeCount(workflow: unknown): number {
+  return workflow && typeof workflow === "object" && !Array.isArray(workflow)
+    ? Object.keys(workflow).length
+    : 0;
 }
 
 function VersionDiffPane({ diff, onClose }: { diff: WorkflowVersionDiffView; onClose: () => void }) {

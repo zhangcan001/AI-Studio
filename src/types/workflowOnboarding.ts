@@ -391,6 +391,11 @@ export interface WorkflowOnboardingDraftView {
   rawSha256?: string;
   originalFilename: string;
   sourceFormat?: WorkflowImportFormat | string;
+  schemaSource?: string;
+  schemaFingerprint?: string;
+  recognizedAt?: string;
+  inferredType?: string;
+  inferredMode?: string;
   workflowFormatVersion?: string;
   frontendVersion?: string;
   normalizationState?: WorkflowNormalizationState;
@@ -476,6 +481,11 @@ export interface WorkflowAutoOnboardingPlanView {
   rawSha256?: string;
   originalFilename: string;
   sourceFormat?: WorkflowImportFormat | string;
+  schemaSource?: string;
+  schemaFingerprint?: string;
+  recognizedAt?: string;
+  inferredType?: string;
+  inferredMode?: string;
   workflowFormatVersion?: string;
   frontendVersion?: string;
   normalizationState?: WorkflowNormalizationState;
@@ -508,6 +518,58 @@ export interface WorkflowAutoOnboardingPlanView {
   expectedInference?: WorkflowAutoInferenceView[];
   suggestedRecipeVersion?: string;
   message: string;
+}
+
+export interface WorkflowRecognitionOverrideValueView {
+  inferredValue: string;
+  selectedValue: string;
+}
+
+export interface WorkflowRecognitionProvenanceView {
+  recognitionEngine: string;
+  recognitionEngineVersion: string;
+  recognizedAt: string;
+  sourceFormat: string;
+  schemaSource: string;
+  schemaFingerprint?: string;
+  inferredType: string;
+  inferredMode: string;
+  finalType: string;
+  finalMode: string;
+  userOverride?: {
+    status: string;
+    workflowType?: WorkflowRecognitionOverrideValueView;
+    mode?: WorkflowRecognitionOverrideValueView;
+  };
+  semanticCapabilityStatus: string;
+  runtimeImportStatus: string;
+  outputRootState: string;
+  selectedRootId?: string;
+  roots: Array<{ outputId: string; outputType: string; nodeId: string; label: string; evidenceTier: number }>;
+  evidenceSummary: Array<{ source: string; nodeId: string; target: string; kind: string; weight: number }>;
+  inputMappingDecisions?: Array<{
+    semanticKey: string;
+    itemIndex?: number;
+    inferredMapping?: { nodeId: string; inputName: string };
+    finalMapping: { nodeId: string; inputName: string };
+    mappingSource: string;
+  }>;
+  issueCodes: string[];
+  runtimeBlockers: Array<{ code: string; classType?: string; nodeId?: string; inputName?: string }>;
+}
+
+export interface WorkflowSavedVersionDetailsView {
+  workflowId: string;
+  workflowVersionId: string;
+  workflowVersion: string;
+  name: string;
+  category: string;
+  mode: string;
+  workflowSha256: string;
+  workflowJson: unknown;
+  sourceWorkflowJson: unknown;
+  sourceWorkflowPreserved: boolean;
+  recognition?: WorkflowRecognitionProvenanceView;
 }
 
 export interface WorkflowWorkspaceView {

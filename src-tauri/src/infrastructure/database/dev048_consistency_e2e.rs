@@ -390,6 +390,14 @@ async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
         .execute(pool)
         .await
         .expect("024 table should be removable in isolated fixture");
+    sqlx::query("ALTER TABLE workflow_versions DROP COLUMN recognition_metadata_json")
+        .execute(pool)
+        .await
+        .expect("039 recognition metadata column should be removable in isolated fixture");
+    sqlx::query("ALTER TABLE workflow_versions DROP COLUMN source_workflow_json")
+        .execute(pool)
+        .await
+        .expect("039 source workflow column should be removable in isolated fixture");
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 24")
         .execute(pool)
         .await
@@ -594,7 +602,7 @@ fn reference_binding(
 }
 
 #[tokio::test]
-async fn dev048_fresh_migration_001_to_038_creates_only_the_frozen_tables() {
+async fn dev048_fresh_migration_001_to_039_creates_only_the_frozen_tables() {
     let directory = tempdir().unwrap();
     let pool = initialize(&directory.path().join("fresh.db"))
         .await
@@ -604,7 +612,7 @@ async fn dev048_fresh_migration_001_to_038_creates_only_the_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        38
+        39
     );
     let required_tables = [
         "profile_revisions",
@@ -655,7 +663,7 @@ async fn dev048_fresh_migration_001_to_038_creates_only_the_frozen_tables() {
 }
 
 #[tokio::test]
-async fn dev048_021_to_038_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
+async fn dev048_021_to_039_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
     let (directory, pool) = setup().await;
     insert_legacy_sentinels(&pool).await;
     let before = legacy_counts(&pool).await;
@@ -670,7 +678,7 @@ async fn dev048_021_to_038_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        38
+        39
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -725,7 +733,7 @@ async fn dev048_021_to_038_preserves_all_legacy_sentinels_and_leaves_new_tables_
 }
 
 #[tokio::test]
-async fn dev052_existing_023_to_038_creates_preparation_snapshot_table() {
+async fn dev052_existing_023_to_039_creates_preparation_snapshot_table() {
     let (directory, pool) = setup().await;
     remove_024_for_upgrade_fixture(&pool).await;
     pool.close().await;
@@ -738,7 +746,7 @@ async fn dev052_existing_023_to_038_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        38
+        39
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1551,7 +1559,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 38)
+            .is_some_and(|version| version <= 39)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"2.0.0-personal\""));
