@@ -10,6 +10,28 @@ export type ProductionBatchItemStatus =
   | "CANCELLED"
   | "SKIPPED";
 
+export type ExecutionValueSource = "WORKFLOW_DEFAULT" | "USER_INPUT" | "RUNTIME_RESOLVED";
+
+export interface ExecutionInputSummary {
+  semanticField: string;
+  targets: Array<{ node: string; input: string }>;
+  valueType: string;
+  valueSummary: string;
+  source: ExecutionValueSource;
+}
+
+export interface ExecutionSummary {
+  workflowId: string;
+  workflowVersionId: string;
+  workflowVersion: string;
+  recipeId: string;
+  recipeVersion: string;
+  createdAt: string;
+  runtimeSchemaSource: string;
+  preflightStatus: string;
+  inputs: ExecutionInputSummary[];
+}
+
 export interface ProductionBatchSummary {
   id: string;
   projectId: string;
@@ -33,6 +55,7 @@ export interface ProductionBatchItemView {
   errorMessage?: string;
   promptText?: string;
   seed?: string;
+  executionSummary?: ExecutionSummary;
   createdAt?: string;
   updatedAt?: string;
 }

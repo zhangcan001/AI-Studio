@@ -25,8 +25,9 @@ use ai_studio_lib::application::{
     },
     production_preparation_service::ProductionPreparationService,
     production_queue_service::{
-        CreateDirectGenerationBatchItem, CreateDirectGenerationBatchRequest,
-        CreateDirectGenerationRequest, CreateProductionBatchItem, CreateProductionBatchRequest,
+        execution_summary_from_json, CreateDirectGenerationBatchItem,
+        CreateDirectGenerationBatchRequest, CreateDirectGenerationRequest,
+        CreateProductionBatchItem, CreateProductionBatchRequest, ExecutionValueSource,
         ProductionQueueError, ProductionQueueService,
     },
     production_start_admission_service::{
@@ -48,7 +49,7 @@ use ai_studio_lib::domain::{
     AssetId, BindingRole, ComfyCapabilityEvidence, ContextSourceScope, PreparationSnapshotRecord,
     PreparationSnapshotV1, ProductionBatch, ProductionBatchItem, ProductionBatchItemId,
     ProductionBatchItemStatus, ProductionBatchStatus, ResolvedReferenceAsset, ResolvedShotContext,
-    ResolvedStageInput, ShotStage, Task, TaskError, TaskStatus,
+    ResolvedStageInput, ShotStage, Task, TaskError, TaskId, TaskStatus,
 };
 use ai_studio_lib::infrastructure::database::repositories::SqliteConsistencyScopeRepository;
 use ai_studio_lib::infrastructure::{
@@ -873,6 +874,7 @@ fn direct_generation_request(
         tool_version_id: None,
         submission_idempotency_key: submission_idempotency_key.map(str::to_owned),
         parent_task_id: parent_task_id.map(str::to_owned),
+        execution_input_sources: None,
     }
 }
 
@@ -902,6 +904,7 @@ fn direct_generation_batch_request(
                 tool_version_id: None,
                 submission_idempotency_key: Some(format!("direct-batch-item-{index}")),
                 parent_task_id: None,
+                execution_input_sources: None,
             })
             .collect(),
     }
@@ -966,23 +969,32 @@ async fn create_failed_parent_task(
 #[tokio::test]
 async fn direct_generation_submission_creates_no_task_or_comfy_submit_before_queue_start() {
     let harness = harness().await;
-    let request = direct_generation_request(
+    let mut request = direct_generation_request(
         &harness,
         "Queue-controlled image prompt",
         Some("direct-generation-single"),
         None,
     );
+    request.execution_input_sources = Some(BTreeMap::from([(
+        "prompt".to_owned(),
+        ExecutionValueSource::UserInput,
+    )]));
 
-    let first = harness
-        .queue
-        .create_direct_generation(request.clone())
-        .await
-        .expect("direct generation should create a pending queue item");
-    let duplicate = harness
-        .queue
-        .create_direct_generation(request)
-        .await
-        .expect("a repeated idempotent submission should return its queue item");
+    let first_queue = harness.queue.clone();
+    let first_request = request.clone();
+    let first_create = async move {
+        let _admission = first_queue.acquire_interactive_admission().await?;
+        first_queue.create_direct_generation(first_request).await
+    };
+    let second_queue = harness.queue.clone();
+    let second_create = async move {
+        let _admission = second_queue.acquire_interactive_admission().await?;
+        second_queue.create_direct_generation(request).await
+    };
+    let (first, duplicate) = tokio::join!(first_create, second_create);
+    let first = first.expect("direct generation should create a pending queue item");
+    let duplicate =
+        duplicate.expect("a concurrent idempotent submission should return its queue item");
 
     assert_eq!(first.batch.id, duplicate.batch.id);
     assert_eq!(count(&harness.pool, "production_batches").await, 1);
@@ -1018,7 +1030,170 @@ async fn direct_generation_submission_creates_no_task_or_comfy_submit_before_que
     assert_eq!(count(&harness.pool, "tasks").await, 1);
     assert_eq!(count(&harness.pool, "generation_snapshots").await, 1);
     assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+    let task_id = started.items[0].task_id.as_deref().unwrap();
+    let summary = harness
+        .queue
+        .execution_summary_for_task(PROJECT_ID, task_id)
+        .await
+        .expect("summary lookup is project-scoped")
+        .expect("history reload should recover its execution summary");
+    assert_eq!(
+        summary.inputs[0].value_summary,
+        "Queue-controlled image prompt"
+    );
+    assert_eq!(summary.inputs[0].targets[0].node, "6");
     harness.comfy.release_submission();
+}
+
+#[tokio::test]
+async fn execution_summary_is_persisted_with_exact_recipe_targets_and_reloaded() {
+    let harness = harness().await;
+    let mut request = direct_generation_request(&harness, "persisted summary prompt", None, None);
+    request.execution_input_sources = Some(BTreeMap::from([(
+        "prompt".to_owned(),
+        ExecutionValueSource::UserInput,
+    )]));
+    let created = harness
+        .queue
+        .create_direct_generation(request)
+        .await
+        .expect("validated workflow execution should create one pending item");
+    let summary = execution_summary_from_json(&created.items[0].values_json)
+        .expect("execution summary should be stored alongside existing queue values");
+
+    assert_eq!(summary.workflow_id, "wfl_dev052_fixture");
+    assert_eq!(summary.workflow_version_id, harness.workflow_version_id);
+    assert_eq!(summary.recipe_id, harness.recipe_id);
+    assert_eq!(summary.runtime_schema_source, "LIVE_COMFYUI");
+    assert_eq!(summary.preflight_status, "READY");
+    let prompt = summary
+        .inputs
+        .iter()
+        .find(|input| input.semantic_field == "prompt")
+        .expect("prompt summary should be stored");
+    assert_eq!(prompt.targets[0].node, "6");
+    assert_eq!(prompt.targets[0].input, "text");
+    assert_eq!(prompt.value_summary, "persisted summary prompt");
+    assert_eq!(prompt.source, ExecutionValueSource::UserInput);
+
+    let reloaded = harness
+        .queue
+        .get(PROJECT_ID, created.batch.id.as_str())
+        .await
+        .expect("queue item should be readable after persistence");
+    assert_eq!(
+        execution_summary_from_json(&reloaded.items[0].values_json),
+        Some(summary)
+    );
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn deterministic_submit_validation_failure_persists_failed_task_and_queue_item() {
+    let harness = harness().await;
+    harness.comfy.reject_submission_as_validation_error();
+    let created = harness
+        .queue
+        .create_direct_generation(direct_generation_request(
+            &harness,
+            "safe deterministic failure case",
+            Some("failure-lifecycle-one-shot"),
+            None,
+        ))
+        .await
+        .expect("failure E2E must first create exactly one Production Queue item");
+    harness
+        .admission
+        .start(PROJECT_ID, created.batch.id.as_str())
+        .await
+        .expect("the queue should submit the configured deterministic failure");
+    wait_for_dispatch_counts(&harness, 1, 1).await;
+
+    let failed = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let detail = harness
+                .queue
+                .get(PROJECT_ID, created.batch.id.as_str())
+                .await
+                .expect("failed queue history remains readable");
+            if detail.items[0].status == ProductionBatchItemStatus::Failed {
+                break detail;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("deterministic submit error should become a terminal FAILED item");
+    let failed_item = &failed.items[0];
+    let task_id = failed_item
+        .task_id
+        .as_deref()
+        .expect("failed item must retain its Task reference");
+    assert_eq!(
+        failed_item.error_code.as_deref(),
+        Some("WORKFLOW_VALIDATION_FAILED")
+    );
+    assert!(failed_item
+        .error_message
+        .as_deref()
+        .is_some_and(|message| message.contains("DEV-052 deterministic validation rejection")));
+
+    let task_repository = SqliteTaskRepository::new(harness.pool.clone());
+    let task = task_repository
+        .find_by_id(&TaskId::parse(task_id.to_owned()).unwrap())
+        .await
+        .expect("failed task should reload from persistence")
+        .expect("failed queue item must reference a stored Task");
+    assert_eq!(task.status, TaskStatus::Failed);
+    assert_eq!(
+        task.error.as_ref().map(|error| error.code.as_str()),
+        Some("WORKFLOW_VALIDATION_FAILED")
+    );
+
+    let persisted_repository = SqliteProductionQueueRepository::new(harness.pool.clone());
+    let reopened = persisted_repository
+        .find_detail(PROJECT_ID, &created.batch.id)
+        .await
+        .expect("failed queue item should reload through a fresh repository")
+        .expect("failed queue batch should persist");
+    assert_eq!(reopened.items[0].status, ProductionBatchItemStatus::Failed);
+    assert_eq!(
+        reopened.items[0].error_code.as_deref(),
+        Some("WORKFLOW_VALIDATION_FAILED")
+    );
+
+    harness
+        .queue
+        .recover_and_resume()
+        .await
+        .expect("startup recovery should leave terminal failed work untouched");
+    let after_recovery = harness
+        .queue
+        .get(PROJECT_ID, created.batch.id.as_str())
+        .await
+        .expect("failed execution history should remain readable after recovery");
+    assert_eq!(
+        after_recovery.items[0].status,
+        ProductionBatchItemStatus::Failed
+    );
+    let task_after_recovery = task_repository
+        .find_by_id(&TaskId::parse(task_id.to_owned()).unwrap())
+        .await
+        .expect("failed task should reload after recovery")
+        .expect("recovery must preserve the failed task");
+    assert_eq!(task_after_recovery.status, TaskStatus::Failed);
+
+    assert_eq!(count(&harness.pool, "production_batches").await, 1);
+    assert_eq!(count(&harness.pool, "production_batch_items").await, 1);
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    let success_assets =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM assets WHERE source_task_id = ?")
+            .bind(task_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("failure result asset count should be readable");
+    assert_eq!(success_assets, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -1112,6 +1287,7 @@ async fn shot_generation_submission_keeps_linkage_pending_until_queue_start() {
             tool_version_id: None,
             submission_idempotency_key: prepared.submission_idempotency_key,
             parent_task_id: prepared.parent_task_id,
+            execution_input_sources: None,
         })
         .await
         .expect("Shot generation should create an existing queue item and binding");

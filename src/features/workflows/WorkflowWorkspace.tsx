@@ -76,6 +76,7 @@ import {
 } from "./workflowWorkspaceAdapters";
 import { WorkflowRegistryActions } from "./WorkflowRegistryActions";
 import { WorkflowWorkspaceList } from "./WorkflowWorkspaceList";
+import { WorkflowExecutionConfiguration } from "./WorkflowExecutionConfiguration";
 import { WorkflowCenterOverview } from "./WorkflowCenterOverview";
 import { buildProductionProfiles, buildWorkflowCenterSummary } from "./workflowCenterModel";
 import {
@@ -159,6 +160,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [recipeHistoryLoading, setRecipeHistoryLoading] = useState(false);
   const [recipeHistoryError, setRecipeHistoryError] = useState<string>();
   const [savedVersionDetails, setSavedVersionDetails] = useState<WorkflowSavedVersionDetailsView>();
+  const [showExecutionConfig, setShowExecutionConfig] = useState(false);
   const [savedVersionDetailsLoadingId, setSavedVersionDetailsLoadingId] = useState<string>();
   const [savedVersionDetailsError, setSavedVersionDetailsError] = useState<string>();
   const recipeHistoryRequestRef = useRef(0);
@@ -243,6 +245,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
 
   const openSavedVersionDetails = useCallback(async (workflowVersionId: string) => {
     setSavedVersionDetails(undefined);
+    setShowExecutionConfig(false);
     setSavedVersionDetailsError(undefined);
     setSavedVersionDetailsLoadingId(workflowVersionId);
     try {
@@ -969,7 +972,15 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
 
       {savedVersionDetailsLoadingId && <p className="loading-state" role="status">正在从工作流库读取版本 {savedVersionDetailsLoadingId}…</p>}
       {savedVersionDetailsError && <p className="error-message" role="alert">{savedVersionDetailsError}</p>}
-      {savedVersionDetails && <SavedVersionDetailsPane details={savedVersionDetails} onClose={() => setSavedVersionDetails(undefined)} />}
+      {savedVersionDetails && <SavedVersionDetailsPane details={savedVersionDetails} onClose={() => { setSavedVersionDetails(undefined); setShowExecutionConfig(false); }} onRun={() => setShowExecutionConfig(true)} />}
+      {savedVersionDetails && showExecutionConfig && <WorkflowExecutionConfiguration
+        key={savedVersionDetails.workflowVersionId}
+        details={savedVersionDetails}
+        catalog={catalog}
+        projectId={projectId}
+        comfyConnected={comfyConnected}
+        onOpenTask={onOpenTask}
+      />}
 
       {parameterExposureController.draft && parameterExposureController.item && (
         <ParameterExposurePane
@@ -1393,13 +1404,13 @@ function PublishPane({ draft, published, loading, onPublish, onOpenStudio }: { d
   );
 }
 
-function SavedVersionDetailsPane({ details, onClose }: { details: WorkflowSavedVersionDetailsView; onClose: () => void }) {
+function SavedVersionDetailsPane({ details, onClose, onRun }: { details: WorkflowSavedVersionDetailsView; onClose: () => void; onRun: () => void }) {
   const recognition = details.recognition;
   return (
     <section className="workflow-saved-details workflow-diff-panel" role="region" aria-label="已保存工作流版本详情">
       <div className="workflow-smart-issues-heading">
         <div><span className="section-label">工作流库 · 已保存版本</span><h3>{details.name}</h3></div>
-        <button type="button" className="quiet-button" onClick={onClose}>关闭</button>
+        <div><button type="button" onClick={onRun}>运行工作流</button><button type="button" className="quiet-button" onClick={onClose}>关闭</button></div>
       </div>
       <div className="workflow-detail-grid">
         <span>Workflow ID<strong><code>{details.workflowId}</code></strong></span>

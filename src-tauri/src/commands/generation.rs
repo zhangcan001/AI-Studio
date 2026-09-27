@@ -4,13 +4,14 @@ use crate::{
         generation_input_preparer::GenerationInputValue,
         production_queue_service::{
             CreateDirectGenerationBatchItem, CreateDirectGenerationBatchRequest,
-            CreateDirectGenerationRequest, CreateProductionBatchItem,
+            CreateDirectGenerationRequest, CreateProductionBatchItem, ExecutionValueSource,
         },
     },
     domain::SeedValue,
     error::AppError,
 };
 use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use tauri::State;
 
@@ -33,6 +34,8 @@ pub struct GenerationCreateRequest {
     pub submission_idempotency_key: Option<String>,
     #[serde(default)]
     pub parent_task_id: Option<String>,
+    #[serde(default)]
+    pub input_sources: Option<BTreeMap<String, ExecutionValueSource>>,
 }
 
 const MAX_BATCH_ITEMS: usize = 100;
@@ -220,8 +223,101 @@ impl GenerationCreateRequest {
             tool_version_id: self.tool_version_id,
             submission_idempotency_key: self.submission_idempotency_key,
             parent_task_id: self.parent_task_id,
+            execution_input_sources: self.input_sources,
         })
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowExecutionPreflightView {
+    pub status: &'static str,
+    pub code: Option<String>,
+    pub target: Option<String>,
+}
+
+/// Read-only, exact-pair preflight. A blocked outcome never creates a queue item.
+#[tauri::command]
+pub async fn workflow_execution_preflight(
+    state: State<'_, AppState>,
+    request: GenerationCreateRequest,
+) -> Result<WorkflowExecutionPreflightView, AppError> {
+    let request = request.into_application()?;
+    let result = state
+        .production
+        .queue
+        .preflight_direct_generation(&request.project_id, &request.item)
+        .await;
+    Ok(match result {
+        Ok(()) => WorkflowExecutionPreflightView {
+            status: "READY",
+            code: None,
+            target: None,
+        },
+        Err(error) => {
+            let (code, target) = match error {
+                crate::application::generation_service::GenerationServiceError::ExecutionFailed {
+                    code,
+                    message,
+                } => (code, Some(message)),
+                crate::application::generation_service::GenerationServiceError::Compile(_) => {
+                    ("EXECUTION_INPUT_INVALID".to_owned(), None)
+                }
+                crate::application::generation_service::GenerationServiceError::InputPrepare(_) => {
+                    ("EXECUTION_ASSET_UNAVAILABLE".to_owned(), None)
+                }
+                _ => ("EXECUTION_PREFLIGHT_FAILED".to_owned(), None),
+            };
+            WorkflowExecutionPreflightView {
+                status: if code == "INPUT_OPTION_UNAVAILABLE"
+                    || code == "RUNTIME_PREFLIGHT_NEEDS_REVIEW"
+                {
+                    "NEEDS_REVIEW"
+                } else {
+                    "BLOCKED"
+                },
+                code: Some(code),
+                target,
+            }
+        }
+    })
+}
+
+/// Saved-version entrypoint: rechecks values and live runtime under queue
+/// admission immediately before persisting the single queue item.
+#[tauri::command]
+pub async fn workflow_execution_create(
+    state: State<'_, AppState>,
+    request: GenerationCreateRequest,
+) -> Result<super::production_queue::ProductionBatchDetailView, AppError> {
+    let request = request.into_application()?;
+    let _admission = state
+        .production
+        .queue
+        .acquire_interactive_admission()
+        .await
+        .map_err(super::production_queue::map_queue_error)?;
+    state
+        .production
+        .queue
+        .preflight_direct_generation(&request.project_id, &request.item)
+        .await
+        .map_err(|error| AppError::workflow_onboarding(format!(
+            "WORKFLOW_EXECUTION_PREFLIGHT_BLOCKED: {}",
+            match error {
+                crate::application::generation_service::GenerationServiceError::ExecutionFailed { code, .. } => code,
+                crate::application::generation_service::GenerationServiceError::Compile(_) => "EXECUTION_INPUT_INVALID".to_owned(),
+                crate::application::generation_service::GenerationServiceError::InputPrepare(_) => "EXECUTION_ASSET_UNAVAILABLE".to_owned(),
+                _ => "EXECUTION_PREFLIGHT_FAILED".to_owned(),
+            }
+        )))?;
+    state
+        .production
+        .queue
+        .create_direct_generation(request)
+        .await
+        .map(Into::into)
+        .map_err(super::production_queue::map_queue_error)
 }
 
 impl GenerationBatchItemRequest {
@@ -246,6 +342,7 @@ impl GenerationBatchItemRequest {
             tool_version_id: self.tool_version_id,
             submission_idempotency_key: None,
             parent_task_id: None,
+            execution_input_sources: None,
         })
     }
 }

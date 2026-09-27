@@ -209,6 +209,8 @@ import type {
   ProductionBatchCreateItem,
   ProductionBatchDetail,
   ProductionBatchSummary,
+  ExecutionSummary,
+  ExecutionValueSource,
   ProductionAdmissionStatus,
   ProductionPartialResumePlan,
   ProductionPartialResumeResult,
@@ -748,6 +750,26 @@ export function submitGeneration(request: {
   parentTaskId?: string;
 }): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("generation_create", { request });
+}
+
+export function preflightWorkflowExecution(request: {
+  projectId: string;
+  workflowVersionId: string;
+  recipeId: string;
+  values: GenerationValues;
+}): Promise<{ status: "READY" | "NEEDS_REVIEW" | "BLOCKED"; code?: string; target?: string }> {
+  return invoke("workflow_execution_preflight", { request });
+}
+
+export function createWorkflowExecution(request: {
+  projectId: string;
+  workflowVersionId: string;
+  recipeId: string;
+  values: GenerationValues;
+  submissionIdempotencyKey: string;
+  inputSources: Record<string, ExecutionValueSource>;
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("workflow_execution_create", { request });
 }
 
 export function previewWorkflowBenchmark(
@@ -1327,6 +1349,10 @@ export function getProductionAdmissionStatus(): Promise<ProductionAdmissionStatu
 
 export function getProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("production_queue_get", { projectId, batchId });
+}
+
+export function getWorkflowExecutionSummary(projectId: string, taskId: string): Promise<ExecutionSummary | null> {
+  return invoke<ExecutionSummary | null>("production_queue_execution_summary_for_task", { projectId, taskId });
 }
 
 export function getProductionBatchArtifacts(projectId: string, batchId: string): Promise<ProductionBatchArtifactsDto> {

@@ -267,6 +267,148 @@ impl Drop for GenerationExecutionLease {
 }
 
 impl GenerationService {
+    /// Read-only execution admission for one saved WorkflowVersion/Recipe pair.
+    /// No Task, queue item, upload, or remote prompt is created here.
+    pub async fn preflight_saved_version(
+        &self,
+        project_id: &str,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), GenerationServiceError> {
+        if let Some(admission) = &self.new_generation_admission {
+            if !admission
+                .is_available_for_new_generation(workflow_version_id, recipe_id)
+                .await?
+            {
+                return Err(GenerationServiceError::ExecutionFailed {
+                    code: WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION.to_owned(),
+                    message: "saved workflow version and recipe are unavailable".to_owned(),
+                });
+            }
+        }
+        let definition = self
+            .definition_repository
+            .find(workflow_version_id, recipe_id)
+            .await?
+            .ok_or_else(|| GenerationServiceError::DefinitionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+                recipe_id: recipe_id.to_owned(),
+            })?;
+        let recipe = RecipeParser::parse(&definition.recipe_yaml)
+            .map_err(|error| GenerationServiceError::Compile(CompileError::from(error)))?;
+        let workflow = crate::domain::WorkflowDocument::parse(definition.workflow_json.clone())
+            .map_err(|error| GenerationServiceError::Compile(CompileError::from(error)))?;
+        let compatibility = self
+            .workflow_compatibility_service
+            .as_ref()
+            .ok_or_else(|| GenerationServiceError::ExecutionFailed {
+                code: "RUNTIME_PREFLIGHT_UNAVAILABLE".to_owned(),
+                message: "runtime compatibility service is unavailable".to_owned(),
+            })?;
+        let object_info = self.comfy_adapter.get_object_info().await.map_err(|_| {
+            GenerationServiceError::ExecutionFailed {
+                code: "COMFYUI_CONNECTION_UNAVAILABLE".to_owned(),
+                message: "live schema could not be read".to_owned(),
+            }
+        })?;
+        let capability = compatibility
+            .check_runtime_workflow_with_recipe_and_object_info(
+                &definition.workflow_json.to_string(),
+                &recipe,
+                &object_info,
+            )
+            .map_err(|error| GenerationServiceError::ExecutionFailed {
+                code: error.code().to_owned(),
+                message: "runtime capability check failed".to_owned(),
+            })?;
+        if capability.state != CapabilityState::Ready {
+            let issue = capability.issues.first();
+            return Err(GenerationServiceError::ExecutionFailed {
+                code: if capability.state == CapabilityState::ComfyOffline {
+                    "COMFYUI_CONNECTION_UNAVAILABLE".to_owned()
+                } else {
+                    issue
+                        .map(|issue| issue.code.clone())
+                        .unwrap_or_else(|| "RUNTIME_PREFLIGHT_NEEDS_REVIEW".to_owned())
+                },
+                // Diagnostics identify the target, never the workflow/input value.
+                message: issue
+                    .map(|issue| {
+                        format!(
+                            "node={} input={}",
+                            issue.node_id.as_deref().unwrap_or("?"),
+                            issue.input_name.as_deref().unwrap_or("?"),
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        format!("runtime capability state is {:?}", capability.state)
+                    }),
+            });
+        }
+        let compiled = self
+            .compiler
+            .compile(
+                &workflow,
+                &recipe,
+                &CompileRequest::new(GenerationInputPreparer::preflight_values(values)),
+            )
+            .map_err(GenerationServiceError::Compile)?;
+        let mut resolved_check_recipe = recipe.clone();
+        // Media filenames are assigned only after upload. Keep those targets
+        // dynamic, while checking every other resolved value against live enum
+        // options instead of silently choosing a replacement.
+        resolved_check_recipe.bindings.retain(|binding| {
+            matches!(
+                recipe.inputs.get(&binding.source),
+                Some(
+                    crate::domain::InputDefinition::Image { .. }
+                        | crate::domain::InputDefinition::Images { .. }
+                        | crate::domain::InputDefinition::Video { .. }
+                        | crate::domain::InputDefinition::Videos { .. }
+                        | crate::domain::InputDefinition::Audio { .. }
+                        | crate::domain::InputDefinition::Audios { .. }
+                )
+            )
+        });
+        let resolved_capability = compatibility
+            .check_runtime_workflow_with_recipe_and_object_info(
+                &compiled.workflow.to_string(),
+                &resolved_check_recipe,
+                &object_info,
+            )
+            .map_err(|error| GenerationServiceError::ExecutionFailed {
+                code: error.code().to_owned(),
+                message: "resolved workflow capability check failed".to_owned(),
+            })?;
+        if resolved_capability.state != CapabilityState::Ready {
+            let issue = resolved_capability.issues.first();
+            return Err(GenerationServiceError::ExecutionFailed {
+                code: issue
+                    .map(|issue| issue.code.clone())
+                    .unwrap_or_else(|| "RUNTIME_PREFLIGHT_NEEDS_REVIEW".to_owned()),
+                message: issue
+                    .map(|issue| {
+                        format!(
+                            "node={} input={}",
+                            issue.node_id.as_deref().unwrap_or("?"),
+                            issue.input_name.as_deref().unwrap_or("?"),
+                        )
+                    })
+                    .unwrap_or_else(|| "resolved workflow is incompatible".to_owned()),
+            });
+        }
+        self.generation_input_preparer
+            .validate_asset_references(project_id, values)
+            .await
+            .map_err(GenerationServiceError::InputPrepare)?;
+        self.generation_input_preparer
+            .validate_local_asset_files(project_id, values)
+            .await
+            .map_err(GenerationServiceError::InputPrepare)?;
+        Ok(())
+    }
+
     pub fn new(
         task_repository: Arc<dyn TaskRepository>,
         snapshot_repository: Arc<dyn GenerationSnapshotRepository>,

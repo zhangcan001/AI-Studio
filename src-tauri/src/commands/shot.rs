@@ -276,6 +276,7 @@ pub async fn shot_generate(
             tool_version_id: None,
             submission_idempotency_key: prepared.submission_idempotency_key,
             parent_task_id: prepared.parent_task_id,
+            execution_input_sources: None,
         })
         .await
         .map(Into::into)

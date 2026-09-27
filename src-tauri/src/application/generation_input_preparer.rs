@@ -307,6 +307,71 @@ impl GenerationInputPreparer {
         Ok(())
     }
 
+    /// Read-only local-file check for the saved-version execution preflight.
+    /// Keep filesystem paths out of returned diagnostics.
+    pub async fn validate_local_asset_files(
+        &self,
+        project_id: &str,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), GenerationInputPrepareError> {
+        if !values.values().any(|value| {
+            matches!(
+                value,
+                GenerationInputValue::ImageAsset(_)
+                    | GenerationInputValue::ImageAssets(_)
+                    | GenerationInputValue::VideoAsset(_)
+                    | GenerationInputValue::VideoAssets(_)
+                    | GenerationInputValue::AudioAsset(_)
+                    | GenerationInputValue::AudioAssets(_)
+            )
+        }) {
+            return Ok(());
+        }
+        let root = self
+            .project_repository
+            .get_storage_root(project_id)
+            .await
+            .map_err(repository_error)?
+            .ok_or_else(|| {
+                GenerationInputPrepareError::Repository(
+                    "project storage root is unavailable".to_owned(),
+                )
+            })?;
+        for value in values.values() {
+            let ids: Vec<&AssetId> = match value {
+                GenerationInputValue::ImageAsset(id)
+                | GenerationInputValue::VideoAsset(id)
+                | GenerationInputValue::AudioAsset(id) => vec![id],
+                GenerationInputValue::ImageAssets(ids)
+                | GenerationInputValue::VideoAssets(ids)
+                | GenerationInputValue::AudioAssets(ids) => ids.iter().collect(),
+                _ => Vec::new(),
+            };
+            for id in ids {
+                let asset = self
+                    .asset_repository
+                    .find_by_id(id)
+                    .await
+                    .map_err(repository_error)?
+                    .ok_or_else(|| GenerationInputPrepareError::AssetNotFound {
+                        asset_id: id.as_str().to_owned(),
+                    })?;
+                if asset.project_id != project_id
+                    || crate::application::ports::validate_asset_read_path(
+                        &root,
+                        std::path::Path::new(&asset.storage_path),
+                    )
+                    .is_err()
+                {
+                    return Err(GenerationInputPrepareError::Repository(
+                        "referenced local input file is unavailable".to_owned(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn prepare(
         &self,
         project_id: &str,
@@ -1292,6 +1357,29 @@ mod tests {
             1
         );
         assert!(filenames.iter().any(|name| name.contains("_02.mp4")));
+    }
+
+    #[tokio::test]
+    async fn saved_version_preflight_rejects_missing_local_asset_file_without_leaking_path() {
+        let mut missing = video_asset("ast_missing_local", "project-1");
+        missing.storage_path = "missing-phase2a-input-file.mp4".to_owned();
+        let preparer = preparer(vec![missing], RecordingAdapter::default());
+        let values = BTreeMap::from([(
+            "video".to_owned(),
+            GenerationInputValue::VideoAsset(AssetId::parse("ast_missing_local").unwrap()),
+        )]);
+        let error = preparer
+            .validate_local_asset_files("project-1", &values)
+            .await
+            .unwrap_err();
+        assert!(!error.to_string().contains("missing-phase2a-input-file.mp4"));
+        assert!(error
+            .to_string()
+            .contains("referenced local input file is unavailable"));
+        preparer
+            .validate_local_asset_files("project-1", &BTreeMap::new())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
