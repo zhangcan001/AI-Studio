@@ -35,6 +35,7 @@ import {
   resolutionPresetsForRecipe,
 } from "../runtime/resolutionPresets";
 import { AssetCard } from "../assets/AssetCard";
+import { batchPromptField } from "../workflows/workflowExecutionBatch";
 
 type NumericRecipeField = Extract<RecipeField, { type: "integer" | "number" }>;
 
@@ -74,8 +75,9 @@ function firstField(recipe: RecipeViewModel | undefined, predicate: (field: Reci
 }
 
 function h3PromptKey(recipe: RecipeViewModel | undefined): string | undefined {
-  return firstField(recipe, (field) => field.type === "textarea" && /prompt/i.test(field.key))?.key
-    ?? firstField(recipe, (field) => field.type === "textarea")?.key;
+  // W-06: never pick negative_prompt/system_prompt as the H3 prompt field.
+  return (recipe ? batchPromptField(recipe)?.key : undefined)
+    ?? firstField(recipe, (field) => field.type === "textarea" && !/(negative|neg_|system)/i.test(field.key))?.key;
 }
 
 type H3Profile = "H3_FAST" | "H3_QUALITY";

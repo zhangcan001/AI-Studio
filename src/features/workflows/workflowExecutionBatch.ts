@@ -23,7 +23,7 @@ export function materializeWorkflowExecutionBatch(
   imageAssetIds: string[],
 ): MaterializedWorkflowExecutionBatch {
   const errors: string[] = [];
-  const promptField = recipe.fields.find((field) => field.type === "textarea" && /prompt/i.test(field.key));
+  const promptField = batchPromptField(recipe);
   const seedField = recipe.fields.find((field) => field.type === "seed");
   const imageField = recipe.fields.find((field) => (
     field.type === "image" || (field.type === "images" && field.minItems <= 1 && field.maxItems >= 1)
@@ -97,14 +97,29 @@ export function workflowExecutionBatchFields(recipe: RecipeViewModel): {
   image?: Extract<RecipeField, { type: "image" | "images" }>;
 } {
   return {
-    prompt: recipe.fields.find((field): field is Extract<RecipeField, { type: "textarea" }> => (
-      field.type === "textarea" && /prompt/i.test(field.key)
-    )),
+    prompt: batchPromptField(recipe),
     seed: recipe.fields.find((field): field is Extract<RecipeField, { type: "seed" }> => field.type === "seed"),
     image: recipe.fields.find((field): field is Extract<RecipeField, { type: "image" | "images" }> => (
       field.type === "image" || (field.type === "images" && field.minItems <= 1 && field.maxItems >= 1)
     )),
   };
+}
+
+const BATCH_PROMPT_KEYS = ["prompt", "positive_prompt"];
+
+/**
+ * W-06: batch prompt lines replace only the positive prompt. Matching
+ * `/prompt/i` also hit `negative_prompt` (or `system_prompt`) and overwrote it
+ * when that field came first in the recipe.
+ */
+export function batchPromptField(recipe: RecipeViewModel): Extract<RecipeField, { type: "textarea" }> | undefined {
+  for (const key of BATCH_PROMPT_KEYS) {
+    const field = recipe.fields.find((candidate): candidate is Extract<RecipeField, { type: "textarea" }> => (
+      candidate.type === "textarea" && candidate.key.toLowerCase() === key
+    ));
+    if (field) return field;
+  }
+  return undefined;
 }
 
 function incrementSeed(value: string, offset: number): string | undefined {
