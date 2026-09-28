@@ -996,6 +996,11 @@ struct OutputMapping {
     required: bool,
 }
 
+fn is_workflow_version_conflict(error: &WorkflowOnboardingError) -> bool {
+    let message = error.message.to_ascii_uppercase();
+    message.contains("UNIQUE") && message.contains("VERSION")
+}
+
 #[derive(Clone, Debug)]
 struct WorkflowOnboardingDraft {
     draft_id: String,
@@ -1018,6 +1023,9 @@ struct WorkflowOnboardingDraft {
     manifest: WorkflowManifest,
     recipe_id: String,
     allow_existing_workflow_sha: bool,
+    /// W-19: a new version of an existing workflow receives its version
+    /// number when it is committed, not when the draft is created.
+    allocate_version_at_commit: bool,
     capability: CapabilityCheckView,
     input_mappings: Vec<InputMapping>,
     output_mappings: Vec<OutputMapping>,
@@ -1451,6 +1459,7 @@ impl WorkflowOnboardingService {
                 },
                 recipe_id,
                 allow_existing_workflow_sha: is_new_version,
+                allocate_version_at_commit: is_new_version,
                 capability: CapabilityCheckView {
                     state: CapabilityState::NotChecked,
                     checked_at: None,
@@ -1517,6 +1526,7 @@ impl WorkflowOnboardingService {
                 },
                 recipe_id,
                 allow_existing_workflow_sha: is_new_version,
+                allocate_version_at_commit: is_new_version,
                 capability: CapabilityCheckView {
                     state: CapabilityState::NotChecked,
                     checked_at: None,
@@ -1663,6 +1673,7 @@ impl WorkflowOnboardingService {
             },
             recipe_id: candidate.recipe_id,
             allow_existing_workflow_sha: true,
+            allocate_version_at_commit: false,
             capability: CapabilityCheckView {
                 state: CapabilityState::NotChecked,
                 checked_at: None,
@@ -2042,6 +2053,8 @@ impl WorkflowOnboardingService {
                     draft.manifest.workflow_version = workflow_version;
                     draft.manifest.recipe_version = recipe_version;
                     draft.allow_existing_workflow_sha = true;
+                    draft.allocate_version_at_commit =
+                        matches!(request.action, WorkflowImportCommitAction::NewVersion);
                     Ok(())
                 })??;
             }
@@ -2924,6 +2937,7 @@ impl WorkflowOnboardingService {
             manifest: next_manifest,
             recipe_id: format!("rcp_{}", Uuid::new_v4()),
             allow_existing_workflow_sha: true,
+            allocate_version_at_commit: false,
             capability: CapabilityCheckView {
                 state: CapabilityState::NotChecked,
                 checked_at: None,
@@ -3016,6 +3030,7 @@ impl WorkflowOnboardingService {
             manifest,
             recipe_id: format!("rcp_{}", Uuid::new_v4()),
             allow_existing_workflow_sha: true,
+            allocate_version_at_commit: false,
             capability: CapabilityCheckView {
                 state: CapabilityState::NotChecked,
                 checked_at: None,
@@ -3597,6 +3612,52 @@ impl WorkflowOnboardingService {
     }
 
     async fn publish_internal(
+        &self,
+        draft_id: &str,
+        allow_unready_capability: bool,
+        disable_unready_version: bool,
+    ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
+        // W-19: versions of existing workflows are allocated here, under the
+        // commit gate, and re-allocated when another writer won the race for
+        // UNIQUE(workflow_id, version).
+        const MAX_VERSION_ALLOCATION_ATTEMPTS: usize = 3;
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let allocates = self.allocate_commit_version(draft_id).await?;
+            match self
+                .publish_internal_once(draft_id, allow_unready_capability, disable_unready_version)
+                .await
+            {
+                Err(error)
+                    if allocates
+                        && attempt < MAX_VERSION_ALLOCATION_ATTEMPTS
+                        && is_workflow_version_conflict(&error) =>
+                {
+                    continue;
+                }
+                result => return result,
+            }
+        }
+    }
+
+    async fn allocate_commit_version(
+        &self,
+        draft_id: &str,
+    ) -> Result<bool, WorkflowOnboardingError> {
+        let draft = self.with_registry(|registry| registry.get(draft_id))??;
+        if !draft.allocate_version_at_commit {
+            return Ok(false);
+        }
+        let workflow_version = self.next_workflow_version(&draft.manifest.id).await?;
+        self.with_registry(|registry| {
+            registry.get_mut(draft_id)?.manifest.workflow_version = workflow_version;
+            Ok(())
+        })??;
+        Ok(true)
+    }
+
+    async fn publish_internal_once(
         &self,
         draft_id: &str,
         allow_unready_capability: bool,
@@ -6104,6 +6165,7 @@ fn runtime_check_draft(
         },
         recipe_id: "rcp_runtime_check".to_owned(),
         allow_existing_workflow_sha: true,
+        allocate_version_at_commit: false,
         capability: CapabilityCheckView {
             state: CapabilityState::NotChecked,
             checked_at: None,
@@ -7400,6 +7462,7 @@ pub(crate) mod tests {
             },
             recipe_id: "rcp_test_graph".to_owned(),
             allow_existing_workflow_sha: false,
+            allocate_version_at_commit: false,
             capability: CapabilityCheckView {
                 state: CapabilityState::Ready,
                 checked_at: None,
@@ -8797,6 +8860,100 @@ outputs: []
     }
 
     #[tokio::test]
+    async fn w19_two_drafts_commit_sequentially_get_distinct_versions() {
+        let directory = tempdir().unwrap();
+        let data_root = directory.path().join("AIStudioData");
+        let library_root = data_root.join("workflow_library");
+        let staging_root = data_root.join("workflow_staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&data_root.join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let library_service = Arc::new(WorkflowLibraryService::new(
+            source.clone(),
+            Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
+            Arc::new(TestClock),
+        ));
+        let adapter = Arc::new(StubComfyAdapter {
+            schema_source: "TEST_SCHEMA",
+            object_info: Ok(json!({
+                "Sampler": {"input": {"required": {
+                    "prompt": ["STRING", {}],
+                    "seed": ["INT", {"min": 0, "max": 999999, "step": 1}],
+                    "width": ["INT", {"min": 64, "max": 2048, "step": 64}],
+                    "height": ["INT", {"min": 64, "max": 2048, "step": 64}]
+                }}},
+                "SaveImage": {"output_node": true, "input": {"required": {}}}
+            })),
+            object_info_calls: std::sync::atomic::AtomicUsize::new(0),
+            submit_calls: std::sync::atomic::AtomicUsize::new(0),
+            upload_calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let service = WorkflowOnboardingService::new(
+            source,
+            adapter.clone(),
+            library_service,
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root.clone(),
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        );
+        let raw = br#"{
+            "1":{"inputs":{"prompt":"hello","seed":7,"width":512,"height":512},"class_type":"Sampler"},
+            "2":{"inputs":{"images":["1",0]},"class_type":"SaveImage"}
+        }"#
+        .to_vec();
+        let first = service
+            .auto_onboard_bytes(raw.clone(), "w19.json".to_owned(), None)
+            .await
+            .unwrap();
+        let workflow_id = first.published.as_ref().unwrap().workflow_id.clone();
+        let variant = |prompt: &str| {
+            String::from_utf8(raw.clone())
+                .unwrap()
+                .replace("hello", prompt)
+                .into_bytes()
+        };
+        let draft_a = service
+            .analyze_import_bytes(
+                variant("draft a"),
+                "w19.json".to_owned(),
+                Some(workflow_id.clone()),
+            )
+            .await
+            .unwrap();
+        let draft_b = service
+            .analyze_import_bytes(
+                variant("draft b"),
+                "w19.json".to_owned(),
+                Some(workflow_id.clone()),
+            )
+            .await
+            .unwrap();
+        // Both drafts only show a provisional number until they are committed.
+        assert_eq!(draft_a.metadata.workflow_version, "1.0.1");
+        assert_eq!(draft_b.metadata.workflow_version, "1.0.1");
+
+        let published_a = service.publish(&draft_a.draft_id).await.unwrap();
+        let published_b = service.publish(&draft_b.draft_id).await.unwrap();
+
+        assert_eq!(published_a.workflow_id, workflow_id);
+        assert_eq!(published_b.workflow_id, workflow_id);
+        assert_eq!(published_a.workflow_version, "1.0.1");
+        assert_eq!(published_b.workflow_version, "1.0.2");
+        let versions: Vec<String> = sqlx::query_scalar(
+            "SELECT version FROM workflow_versions WHERE workflow_id = ? ORDER BY version",
+        )
+        .bind(&workflow_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(versions, vec!["1.0.0", "1.0.1", "1.0.2"]);
+    }
+
+    #[tokio::test]
     async fn auto_onboarding_publishes_t2i_without_gpu_submission() {
         let directory = tempdir().unwrap();
         let data_root = directory.path().join("AIStudioData");
@@ -9391,6 +9548,7 @@ outputs: []
             },
             recipe_id: "rcp_video".to_owned(),
             allow_existing_workflow_sha: false,
+            allocate_version_at_commit: false,
             capability: CapabilityCheckView {
                 state: CapabilityState::Ready,
                 checked_at: None,
@@ -9750,6 +9908,7 @@ outputs: []
                 },
                 recipe_id: "rcp_test".to_owned(),
                 allow_existing_workflow_sha: false,
+                allocate_version_at_commit: false,
                 capability: CapabilityCheckView {
                     state: CapabilityState::NotChecked,
                     checked_at: None,
@@ -9813,6 +9972,7 @@ outputs: []
             },
             recipe_id: "rcp_sample".to_owned(),
             allow_existing_workflow_sha: false,
+            allocate_version_at_commit: false,
             capability: CapabilityCheckView {
                 state: CapabilityState::Ready,
                 checked_at: None,

@@ -79,7 +79,7 @@ export function WorkflowImportResult({ plan, projectId, onOpenAdvanced, onOpenSt
           <span>名称<strong>{plan.metadata.name}</strong></span>
           <span>类型<strong>{workflowTypeLabel(plan.workflowKind)}</strong></span>
           <span>用途<strong>{workflowPurposeLabel(plan.metadata.category, plan.workflowKind)}</strong></span>
-          <span>工作流版本<strong>{plan.metadata.workflowVersion}</strong></span>
+          <span>工作流版本<strong>{published.workflowVersion || plan.metadata.workflowVersion}</strong></span>
           <span>工作流 ID<strong><code>{published.workflowId}</code></strong></span>
           <span>WorkflowVersion ID<strong><code>{published.workflowVersionId ?? "未返回版本 ID"}</code></strong></span>
           <span>输入<strong>{inputLabels}</strong></span>
