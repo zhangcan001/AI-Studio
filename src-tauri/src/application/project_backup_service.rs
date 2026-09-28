@@ -1096,6 +1096,14 @@ pub(crate) struct BackupWorkflowVersion {
     pub(crate) package_name: Option<String>,
     pub(crate) package_source_path: Option<String>,
     pub(crate) created_at: String,
+    /// W-04: optional provenance carried since Backup v20.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) recognition_provenance_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workflow_source_json: Option<String>,
+    /// Alias for workflow_sha256 used when matching across installs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) content_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -8526,6 +8534,396 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn w04_backup_workflow_version_serde_defaults_provenance() {
+        #[allow(unused_imports)]
+        use super::{
+            BackupProjectWorkflowBinding, BackupWorkflow, BackupWorkflowRecipe,
+            BackupWorkflowRegistry, BackupWorkflowRuntimeArtifact, BackupWorkflowVersion,
+        };
+        let raw = r#"{"id":"wv1","workflowId":"wfl1","version":"1.0.0","apiWorkflowJson":"{}","workflowSha256":"abc","packageName":null,"packageSourcePath":null,"createdAt":"2026-01-01T00:00:00Z"}"#;
+        let version: BackupWorkflowVersion = serde_json::from_str(raw).unwrap();
+        assert!(version.recognition_provenance_json.is_none());
+        assert!(version.workflow_source_json.is_none());
+        assert!(version.content_hash.is_none());
+        let with_prov = BackupWorkflowVersion {
+            recognition_provenance_json: Some(r#"{"recognitionEngine":"V3"}"#.into()),
+            workflow_source_json: Some(r#"{"nodes":[]}"#.into()),
+            content_hash: Some("abc".into()),
+            ..version
+        };
+        let encoded = serde_json::to_value(&with_prov).unwrap();
+        assert_eq!(encoded["contentHash"], "abc");
+        assert_eq!(encoded["workflowSourceJson"], r#"{"nodes":[]}"#);
+    }
+
+    #[tokio::test]
+    async fn w04_v20_roundtrip_preserves_provenance() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+             VALUES ('prj_w04', 'W04', NULL, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(
+            data_dirs
+                .projects
+                .join("prj_w04")
+                .to_string_lossy()
+                .to_string(),
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, source_kind, library_state, current_version_id, created_at, updated_at)
+             VALUES ('wfl_w04', 'W04', 'image', 'text_to_image', 'USER', 'ACTIVE', 'wv_w04',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, package_name,
+              created_at, source_workflow_json, recognition_metadata_json)
+             VALUES ('wv_w04', 'wfl_w04', '1.0.0', '{}',
+                     'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+                     'pkg_w04', '2026-01-01T00:00:00Z', '{\"nodes\":[]}',
+                     '{\"recognitionEngine\":\"WORKFLOW_RECOGNITION_V3\"}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('rcp_w04', 'wv_w04', '1.0.0', 1, 'schema_version: 1\ninputs: {}\n',
+                     'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO project_workflow_bindings
+             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             VALUES ('prj_w04', 'IMAGE', 'DEFAULT', 'wv_w04', 'rcp_w04',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
+        let archive = directory.path().join("w04.aiarchive");
+        service.export("prj_w04", archive.clone()).await.unwrap();
+        let (_, document, _) = inspect_archive(&archive).unwrap();
+        let version = &document.workflow_registry.as_ref().unwrap().versions[0];
+        assert_eq!(
+            version.workflow_source_json.as_deref(),
+            Some(r#"{"nodes":[]}"#)
+        );
+        assert!(version
+            .recognition_provenance_json
+            .as_deref()
+            .unwrap()
+            .contains("WORKFLOW_RECOGNITION_V3"));
+        assert_eq!(
+            version.content_hash.as_deref(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+        let preview = service.inspect(archive).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let row: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT source_workflow_json, recognition_metadata_json
+             FROM workflow_versions WHERE workflow_id = 'wfl_w04' AND version = '1.0.0'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0.as_deref(), Some(r#"{"nodes":[]}"#));
+        assert!(row
+            .1
+            .as_deref()
+            .unwrap()
+            .contains("WORKFLOW_RECOGNITION_V3"));
+        let _ = restored;
+    }
+
+    #[tokio::test]
+    async fn w04_cross_install_restore_remaps_version_ids() {
+        #[allow(unused_imports)]
+        use super::{
+            BackupProjectWorkflowBinding, BackupWorkflow, BackupWorkflowRecipe,
+            BackupWorkflowRegistry, BackupWorkflowRuntimeArtifact, BackupWorkflowVersion,
+        };
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        // Local install already has the same logical version under a different id.
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, source_kind, library_state, current_version_id, created_at, updated_at)
+             VALUES ('wfl_cross', 'Cross', 'image', 'text_to_image', 'USER', 'ACTIVE', 'wv_local',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('wv_local', 'wfl_cross', '1.0.0', '{}',
+                     'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('rcp_local', 'wv_local', '1.0.0', 1, 'schema_version: 1\ninputs: {}\n',
+                     'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut document = empty_archive_document("prj_cross", "Cross");
+        document.project_workflow_bindings = vec![BackupProjectWorkflowBinding {
+            stage: "IMAGE".into(),
+            mode: "DEFAULT".into(),
+            workflow_id: Some("wfl_cross".into()),
+            workflow_version_id: "wv_remote".into(),
+            recipe_id: "rcp_remote".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }];
+        document.workflow_registry = Some(BackupWorkflowRegistry {
+            workflows: vec![BackupWorkflow {
+                id: "wfl_cross".into(),
+                name: "Cross".into(),
+                category: "image".into(),
+                mode: "text_to_image".into(),
+                source_kind: "USER".into(),
+                library_state: "ACTIVE".into(),
+                current_version_id: Some("wv_remote".into()),
+                removed_at: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            }],
+            versions: vec![BackupWorkflowVersion {
+                id: "wv_remote".into(),
+                workflow_id: "wfl_cross".into(),
+                version: "1.0.0".into(),
+                api_workflow_json: "{}".into(),
+                workflow_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .into(),
+                package_name: None,
+                package_source_path: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                recognition_provenance_json: None,
+                workflow_source_json: None,
+                content_hash: Some(
+                    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+                ),
+            }],
+            recipes: vec![BackupWorkflowRecipe {
+                id: "rcp_remote".into(),
+                workflow_version_id: "wv_remote".into(),
+                version: "1.0.0".into(),
+                schema_version: 1,
+                recipe_yaml: "schema_version: 1\ninputs: {}\n".into(),
+                recipe_sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    .into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+            }],
+            runtime_artifacts: vec![],
+        });
+        let archive = directory.path().join("cross.aiarchive");
+        write_zip_to_path(&document, &[], &archive).unwrap();
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
+        let preview = service.inspect(archive).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let binding: (String, String) = sqlx::query_as(
+            "SELECT workflow_version_id, recipe_id FROM project_workflow_bindings WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(binding.0, "wv_local");
+        assert_eq!(binding.1, "rcp_local");
+        let version_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM workflow_versions WHERE workflow_id = 'wfl_cross' AND version = '1.0.0'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(version_count, 1);
+    }
+
+    #[tokio::test]
+    async fn w04_artifact_matched_by_package_name_hash() {
+        #[allow(unused_imports)]
+        use super::{
+            BackupProjectWorkflowBinding, BackupWorkflow, BackupWorkflowRecipe,
+            BackupWorkflowRegistry, BackupWorkflowRuntimeArtifact, BackupWorkflowVersion,
+        };
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, source_kind, library_state, current_version_id, created_at, updated_at)
+             VALUES ('wfl_art', 'Art', 'image', 'text_to_image', 'USER', 'ACTIVE', 'wv_art_local',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('wv_art_local', 'wfl_art', '1.0.0', '{}',
+                     'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('rcp_art_local', 'wv_art_local', '1.0.0', 1, 'schema_version: 1\ninputs: {}\n',
+                     'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO workflow_runtime_artifacts
+             (id, workflow_version_id, recipe_id, package_name, source_kind,
+              package_source_path, workflow_sha256, recipe_sha256, created_at)
+             VALUES ('art_local', 'wv_art_local', 'rcp_art_local', 'pkg_art', 'USER', NULL,
+                     'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+                     'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut document = empty_archive_document("prj_art", "Art");
+        document.workflow_registry = Some(BackupWorkflowRegistry {
+            workflows: vec![BackupWorkflow {
+                id: "wfl_art".into(),
+                name: "Art".into(),
+                category: "image".into(),
+                mode: "text_to_image".into(),
+                source_kind: "USER".into(),
+                library_state: "ACTIVE".into(),
+                current_version_id: Some("wv_art_remote".into()),
+                removed_at: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            }],
+            versions: vec![BackupWorkflowVersion {
+                id: "wv_art_remote".into(),
+                workflow_id: "wfl_art".into(),
+                version: "1.0.0".into(),
+                api_workflow_json: "{}".into(),
+                workflow_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .into(),
+                package_name: Some("pkg_art".into()),
+                package_source_path: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                recognition_provenance_json: None,
+                workflow_source_json: None,
+                content_hash: None,
+            }],
+            recipes: vec![BackupWorkflowRecipe {
+                id: "rcp_art_remote".into(),
+                workflow_version_id: "wv_art_remote".into(),
+                version: "1.0.0".into(),
+                schema_version: 1,
+                recipe_yaml: "schema_version: 1\ninputs: {}\n".into(),
+                recipe_sha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    .into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+            }],
+            runtime_artifacts: vec![BackupWorkflowRuntimeArtifact {
+                id: "art_remote".into(),
+                workflow_version_id: "wv_art_remote".into(),
+                recipe_id: "rcp_art_remote".into(),
+                package_name: "pkg_art".into(),
+                source_kind: "USER".into(),
+                package_source_path: None,
+                workflow_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .into(),
+                recipe_sha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    .into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+            }],
+        });
+        let archive = directory.path().join("art.aiarchive");
+        write_zip_to_path(&document, &[], &archive).unwrap();
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
+        let preview = service.inspect(archive).await.unwrap();
+        service.restore(&preview.inspection_id).await.unwrap();
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM workflow_runtime_artifacts WHERE package_name = 'pkg_art'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn w04_v19_backup_still_restores() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let project: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/backup/v19_minimal.json"))
+                .unwrap();
+        let archive = directory.path().join("v19_minimal.zip");
+        let file = File::create(&archive).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let manifest = json!({
+            "format": "ai-studio-project-backup",
+            "version": 19,
+            "createdBy": "2.0.0",
+            "project": {"id": "prj_v19_minimal", "name": "V19 Minimal"}
+        });
+        writer.start_file("manifest.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&manifest).unwrap().as_bytes())
+            .unwrap();
+        writer.start_file("project.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&project).unwrap().as_bytes())
+            .unwrap();
+        writer.finish().unwrap();
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
+        let preview = service.inspect(archive).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert_eq!(restored.backup_version, 19);
+        let versions: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM workflow_versions WHERE workflow_id = 'wfl_v19'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(versions, 1);
+    }
+
     fn inspect_accepts_historical_v18_zip_without_provenance() {
         let directory = tempdir().unwrap();
         let archive_path = directory.path().join("legacy-v18.zip");

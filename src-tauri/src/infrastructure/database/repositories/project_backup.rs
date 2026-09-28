@@ -1197,6 +1197,10 @@ fn collect_exact_asset_id_references(value: &Value, known: &HashSet<String>) -> 
         Value::Bool(_) | Value::Number(_) | Value::Null | Value::String(_) => Vec::new(),
     }
 }
+fn resolve_mapped_id(map: &HashMap<String, String>, id: &str) -> String {
+    map.get(id).cloned().unwrap_or_else(|| id.to_owned())
+}
+
 fn remap_exact_string_ids(value: &mut Value, ids: &HashMap<String, String>) {
     match value {
         Value::String(text) => {
@@ -1595,7 +1599,9 @@ async fn query_workflow_registry_snapshot(
 
     let all_versions = sqlx::query_as::<_, BackupWorkflowVersion>(
         "SELECT id, workflow_id, version, api_workflow_json, workflow_sha256,
-                package_name, package_source_path, created_at
+                package_name, package_source_path, created_at,
+                recognition_metadata_json AS recognition_provenance_json,
+                source_workflow_json AS workflow_source_json
          FROM workflow_versions ORDER BY workflow_id, version, id",
     )
     .fetch_all(&mut **transaction)
@@ -2872,9 +2878,11 @@ async fn restore_rows_in_transaction(
     .await
     .map_err(|error| RepositoryError::database(error.to_string()))?;
 
-    if let Some(registry) = &document.workflow_registry {
-        restore_workflow_registry(transaction, registry).await?;
-    }
+    let workflow_version_id_map = if let Some(registry) = &document.workflow_registry {
+        restore_workflow_registry(transaction, registry).await?
+    } else {
+        HashMap::new()
+    };
 
     let (model_version_map, unresolved_model_version_ids) =
         restore_model_registry(transaction, document).await?;
@@ -2894,8 +2902,14 @@ async fn restore_rows_in_transaction(
         .bind(&project.id)
         .bind(&binding.stage)
         .bind(&binding.mode)
-        .bind(&binding.workflow_version_id)
-        .bind(&binding.recipe_id)
+        .bind(resolve_mapped_id(
+            &workflow_version_id_map,
+            &binding.workflow_version_id,
+        ))
+        .bind(resolve_mapped_id(
+            &workflow_version_id_map,
+            &binding.recipe_id,
+        ))
         .bind(&binding.created_at)
         .bind(&binding.updated_at)
         .execute(&mut **transaction)
@@ -2954,7 +2968,15 @@ async fn restore_rows_in_transaction(
     }
 
     for reference in &document.workflow_refs {
-        ensure_workflow_dependency(transaction, reference).await?;
+        let reference = WorkflowReference {
+            workflow_id: reference.workflow_id.clone(),
+            workflow_version_id: resolve_mapped_id(
+                &workflow_version_id_map,
+                &reference.workflow_version_id,
+            ),
+            recipe_id: resolve_mapped_id(&workflow_version_id_map, &reference.recipe_id),
+        };
+        ensure_workflow_dependency(transaction, &reference).await?;
     }
     for task in &document.tasks {
         let new_task_id = task_ids
@@ -2992,8 +3014,8 @@ async fn restore_rows_in_transaction(
         .bind(new_task_id)
         .bind(&project.id)
         .bind(&task.workflow_id)
-        .bind(&task.workflow_version_id)
-        .bind(&task.recipe_id)
+        .bind(resolve_mapped_id(&workflow_version_id_map, &task.workflow_version_id))
+        .bind(resolve_mapped_id(&workflow_version_id_map, &task.recipe_id))
         .bind(&task.app_version)
         .bind(&task.build_commit)
         .bind(&task.workflow_version)
@@ -3525,12 +3547,12 @@ async fn restore_rows_in_transaction(
         };
         ensure_version_recipe_dependency(
             transaction,
-            &preset.workflow_version_id,
-            &preset.recipe_id,
+            &resolve_mapped_id(&workflow_version_id_map, &preset.workflow_version_id),
+            &resolve_mapped_id(&workflow_version_id_map, &preset.recipe_id),
         )
         .await?;
         sqlx::query("INSERT INTO presets (id, project_id, workflow_version_id, recipe_id, name, values_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(preset_id).bind(&project.id).bind(&preset.workflow_version_id).bind(&preset.recipe_id).bind(&preset.name).bind(preset.values.to_string()).bind(&preset.created_at).bind(&preset.updated_at)
+            .bind(preset_id).bind(&project.id).bind(resolve_mapped_id(&workflow_version_id_map, &preset.workflow_version_id)).bind(resolve_mapped_id(&workflow_version_id_map, &preset.recipe_id)).bind(&preset.name).bind(preset.values.to_string()).bind(&preset.created_at).bind(&preset.updated_at)
             .execute(&mut **transaction).await.map_err(|error| RepositoryError::database(error.to_string()))?;
     }
     for batch in &document.batches {
@@ -3552,8 +3574,12 @@ async fn restore_rows_in_transaction(
         else {
             continue;
         };
-        ensure_version_recipe_dependency(transaction, &item.workflow_version_id, &item.recipe_id)
-            .await?;
+        ensure_version_recipe_dependency(
+            transaction,
+            &resolve_mapped_id(&workflow_version_id_map, &item.workflow_version_id),
+            &resolve_mapped_id(&workflow_version_id_map, &item.recipe_id),
+        )
+        .await?;
         let linked_task = item.task_id.as_ref().and_then(|id| task_ids.get(id));
         let terminal = matches!(
             item.status.as_str(),
@@ -3575,7 +3601,7 @@ async fn restore_rows_in_transaction(
             Some("恢复时未自动重新提交生产队列项目。".to_owned())
         };
         sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, error_code, error_message, created_at, updated_at, retry_of_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(item_id).bind(batch_id).bind(item.ordinal).bind(&item.workflow_version_id).bind(&item.recipe_id).bind(item.values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
+            .bind(item_id).bind(batch_id).bind(item.ordinal).bind(resolve_mapped_id(&workflow_version_id_map, &item.workflow_version_id)).bind(resolve_mapped_id(&workflow_version_id_map, &item.recipe_id)).bind(item.values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
             .execute(&mut **transaction).await.map_err(|error| RepositoryError::database(error.to_string()))?;
     }
     for template in &document.production_run_templates {
@@ -3583,16 +3609,20 @@ async fn restore_rows_in_transaction(
             continue;
         };
         if let (Some(workflow_version_id), Some(recipe_id)) = (
-            template.krea2_workflow_version_id.as_deref(),
+            template.krea2_workflow_version_id.as_ref(),
             template.krea2_recipe_id.as_deref(),
         ) {
-            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
+            let remapped = resolve_mapped_id(&workflow_version_id_map, workflow_version_id);
+            let remapped_recipe = resolve_mapped_id(&workflow_version_id_map, recipe_id);
+            ensure_version_recipe_dependency(transaction, &remapped, &remapped_recipe).await?;
         }
         if let (Some(workflow_version_id), Some(recipe_id)) = (
-            template.h3_workflow_version_id.as_deref(),
+            template.h3_workflow_version_id.as_ref(),
             template.h3_recipe_id.as_deref(),
         ) {
-            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
+            let remapped = resolve_mapped_id(&workflow_version_id_map, workflow_version_id);
+            let remapped_recipe = resolve_mapped_id(&workflow_version_id_map, recipe_id);
+            ensure_version_recipe_dependency(transaction, &remapped, &remapped_recipe).await?;
         }
         sqlx::query(
             "INSERT INTO production_run_templates
@@ -3604,8 +3634,18 @@ async fn restore_rows_in_transaction(
         .bind(template_id)
         .bind(&project.id)
         .bind(&template.name)
-        .bind(&template.krea2_workflow_version_id)
-        .bind(&template.krea2_recipe_id)
+        .bind(
+            template
+                .krea2_workflow_version_id
+                .as_ref()
+                .map(|id| resolve_mapped_id(&workflow_version_id_map, id)),
+        )
+        .bind(
+            template
+                .krea2_recipe_id
+                .as_ref()
+                .map(|id| resolve_mapped_id(&workflow_version_id_map, id)),
+        )
         .bind(
             template
                 .krea2_preset_id
@@ -3613,8 +3653,18 @@ async fn restore_rows_in_transaction(
                 .and_then(|id| preset_ids.get(id)),
         )
         .bind(template.default_image_count)
-        .bind(&template.h3_workflow_version_id)
-        .bind(&template.h3_recipe_id)
+        .bind(
+            template
+                .h3_workflow_version_id
+                .as_ref()
+                .map(|id| resolve_mapped_id(&workflow_version_id_map, id)),
+        )
+        .bind(
+            template
+                .h3_recipe_id
+                .as_ref()
+                .map(|id| resolve_mapped_id(&workflow_version_id_map, id)),
+        )
         .bind(&template.h3_profile)
         .bind(template.default_duration_seconds)
         .bind(template.default_width)
@@ -3666,10 +3716,12 @@ async fn restore_rows_in_transaction(
             continue;
         };
         if let (Some(workflow_version_id), Some(recipe_id)) = (
-            stage.workflow_version_id.as_deref(),
+            stage.workflow_version_id.as_ref(),
             stage.recipe_id.as_deref(),
         ) {
-            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
+            let remapped = resolve_mapped_id(&workflow_version_id_map, workflow_version_id);
+            let remapped_recipe = resolve_mapped_id(&workflow_version_id_map, recipe_id);
+            ensure_version_recipe_dependency(transaction, &remapped, &remapped_recipe).await?;
         }
         let status = if stage.status == "RUNNING" {
             "FAILED"
@@ -3690,8 +3742,18 @@ async fn restore_rows_in_transaction(
         .bind(stage.ordinal)
         .bind(&stage.stage_type)
         .bind(status)
-        .bind(&stage.workflow_version_id)
-        .bind(&stage.recipe_id)
+        .bind(
+            stage
+                .workflow_version_id
+                .as_ref()
+                .map(|id| resolve_mapped_id(&workflow_version_id_map, id)),
+        )
+        .bind(
+            stage
+                .recipe_id
+                .as_ref()
+                .map(|id| resolve_mapped_id(&workflow_version_id_map, id)),
+        )
         .bind(
             stage
                 .production_batch_id
@@ -3871,8 +3933,8 @@ async fn restore_rows_in_transaction(
             .ok_or_else(|| RepositoryError::integrity("Benchmark 候选缺少实验映射"))?;
         ensure_version_recipe_dependency(
             transaction,
-            &candidate.workflow_version_id,
-            &candidate.recipe_id,
+            &resolve_mapped_id(&workflow_version_id_map, &candidate.workflow_version_id),
+            &resolve_mapped_id(&workflow_version_id_map, &candidate.recipe_id),
         )
         .await?;
         let mut values = candidate.values.clone();
@@ -3893,8 +3955,14 @@ async fn restore_rows_in_transaction(
         .bind(candidate_id)
         .bind(experiment_id)
         .bind(candidate.position)
-        .bind(&candidate.workflow_version_id)
-        .bind(&candidate.recipe_id)
+        .bind(resolve_mapped_id(
+            &workflow_version_id_map,
+            &candidate.workflow_version_id,
+        ))
+        .bind(resolve_mapped_id(
+            &workflow_version_id_map,
+            &candidate.recipe_id,
+        ))
         .bind(
             candidate
                 .preset_id
@@ -4439,12 +4507,14 @@ async fn restore_rows_in_transaction(
         let shot_id = shot_ids
             .get(&config.shot_id)
             .ok_or_else(|| RepositoryError::integrity("镜头阶段配置缺少镜头映射"))?;
+        let config_workflow_version_id =
+            resolve_mapped_id(&workflow_version_id_map, &config.workflow_version_id);
         ensure_workflow_dependency(
             transaction,
             &WorkflowReference {
                 workflow_id: config.workflow_id.clone(),
-                workflow_version_id: config.workflow_version_id.clone(),
-                recipe_id: config.recipe_id.clone(),
+                workflow_version_id: config_workflow_version_id.clone(),
+                recipe_id: resolve_mapped_id(&workflow_version_id_map, &config.recipe_id),
             },
         )
         .await?;
@@ -4455,8 +4525,11 @@ async fn restore_rows_in_transaction(
         )
         .bind(shot_id)
         .bind(&config.stage)
-        .bind(&config.workflow_version_id)
-        .bind(&config.recipe_id)
+        .bind(&config_workflow_version_id)
+        .bind(resolve_mapped_id(
+            &workflow_version_id_map,
+            &config.recipe_id,
+        ))
         .bind(config.scalar_values.to_string())
         .bind(&config.updated_at)
         .execute(&mut **transaction)
@@ -4774,7 +4847,10 @@ async fn ensure_workflow_dependency(
 async fn restore_workflow_registry(
     transaction: &mut Transaction<'_, Sqlite>,
     snapshot: &BackupWorkflowRegistry,
-) -> Result<(), RepositoryError> {
+) -> Result<HashMap<String, String>, RepositoryError> {
+    // Maps backup workflow-version ids and recipe ids to local ids.
+    let mut version_id_map = HashMap::new();
+
     for workflow in &snapshot.workflows {
         let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
             .bind(&workflow.id)
@@ -4805,29 +4881,64 @@ async fn restore_workflow_registry(
     }
 
     for version in &snapshot.versions {
+        let content_hash = version
+            .content_hash
+            .clone()
+            .unwrap_or_else(|| version.workflow_sha256.clone());
+        // W-04: match by (workflow_id, version), not by the locally unique id.
         let existing = sqlx::query_as::<_, (String, String)>(
-            "SELECT workflow_id, workflow_sha256 FROM workflow_versions WHERE id = ?",
+            "SELECT id, workflow_sha256 FROM workflow_versions
+             WHERE workflow_id = ? AND version = ?",
         )
-        .bind(&version.id)
+        .bind(&version.workflow_id)
+        .bind(&version.version)
         .fetch_optional(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
-        if let Some((workflow_id, workflow_sha256)) = existing {
-            if workflow_id != version.workflow_id || workflow_sha256 != version.workflow_sha256 {
+        if let Some((local_id, local_hash)) = existing {
+            if local_hash != content_hash && local_hash != version.workflow_sha256 {
                 return Err(RepositoryError::integrity(format!(
-                    "工作流版本 {} 的不可变身份与当前数据库冲突",
-                    version.id
+                    "工作流 {} 版本 {} 的内容哈希与当前数据库冲突",
+                    version.workflow_id, version.version
                 )));
             }
+            version_id_map.insert(version.id.clone(), local_id.clone());
+            // Write-once provenance backfill.
+            sqlx::query(
+                "UPDATE workflow_versions
+                 SET source_workflow_json = COALESCE(source_workflow_json, ?),
+                     recognition_metadata_json = COALESCE(recognition_metadata_json, ?)
+                 WHERE id = ?",
+            )
+            .bind(&version.workflow_source_json)
+            .bind(&version.recognition_provenance_json)
+            .bind(&local_id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?;
             continue;
         }
+
+        let insert_id =
+            if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions WHERE id = ?")
+                .bind(&version.id)
+                .fetch_one(&mut **transaction)
+                .await
+                .map_err(|error| RepositoryError::database(error.to_string()))?
+                == 0
+            {
+                version.id.clone()
+            } else {
+                format!("wv_{}", Uuid::new_v4())
+            };
+        version_id_map.insert(version.id.clone(), insert_id.clone());
         sqlx::query(
             "INSERT INTO workflow_versions
              (id, workflow_id, version, api_workflow_json, workflow_sha256, package_name,
-              package_source_path, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              package_source_path, created_at, source_workflow_json, recognition_metadata_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(&version.id)
+        .bind(&insert_id)
         .bind(&version.workflow_id)
         .bind(&version.version)
         .bind(&version.api_workflow_json)
@@ -4835,38 +4946,77 @@ async fn restore_workflow_registry(
         .bind(&version.package_name)
         .bind(&version.package_source_path)
         .bind(&version.created_at)
+        .bind(&version.workflow_source_json)
+        .bind(&version.recognition_provenance_json)
         .execute(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
     }
 
+    for workflow in &snapshot.workflows {
+        let Some(current_version_id) = &workflow.current_version_id else {
+            continue;
+        };
+        if let Some(local_id) = version_id_map.get(current_version_id) {
+            if local_id != current_version_id {
+                sqlx::query(
+                    "UPDATE workflows SET current_version_id = ?
+                     WHERE id = ? AND current_version_id = ?",
+                )
+                .bind(local_id)
+                .bind(&workflow.id)
+                .bind(current_version_id)
+                .execute(&mut **transaction)
+                .await
+                .map_err(|error| RepositoryError::database(error.to_string()))?;
+            }
+        }
+    }
+
     for recipe in &snapshot.recipes {
+        let workflow_version_id = version_id_map
+            .get(&recipe.workflow_version_id)
+            .cloned()
+            .unwrap_or_else(|| recipe.workflow_version_id.clone());
         let existing = sqlx::query_as::<_, (String, String)>(
-            "SELECT workflow_version_id, recipe_sha256 FROM recipes WHERE id = ?",
+            "SELECT id, recipe_sha256 FROM recipes
+             WHERE workflow_version_id = ? AND version = ?",
         )
-        .bind(&recipe.id)
+        .bind(&workflow_version_id)
+        .bind(&recipe.version)
         .fetch_optional(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
-        if let Some((workflow_version_id, recipe_sha256)) = existing {
-            if workflow_version_id != recipe.workflow_version_id
-                || recipe_sha256 != recipe.recipe_sha256
-            {
+        if let Some((local_id, recipe_sha256)) = existing {
+            if recipe_sha256 != recipe.recipe_sha256 {
                 return Err(RepositoryError::integrity(format!(
                     "Recipe {} 的不可变身份与当前数据库冲突",
                     recipe.id
                 )));
             }
+            version_id_map.insert(recipe.id.clone(), local_id);
             continue;
         }
+        let insert_id = if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes WHERE id = ?")
+            .bind(&recipe.id)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?
+            == 0
+        {
+            recipe.id.clone()
+        } else {
+            format!("rcp_{}", Uuid::new_v4())
+        };
+        version_id_map.insert(recipe.id.clone(), insert_id.clone());
         sqlx::query(
             "INSERT INTO recipes
              (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256,
               created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(&recipe.id)
-        .bind(&recipe.workflow_version_id)
+        .bind(&insert_id)
+        .bind(&workflow_version_id)
         .bind(&recipe.version)
         .bind(recipe.schema_version)
         .bind(&recipe.recipe_yaml)
@@ -4878,39 +5028,48 @@ async fn restore_workflow_registry(
     }
 
     for artifact in &snapshot.runtime_artifacts {
+        let workflow_version_id = version_id_map
+            .get(&artifact.workflow_version_id)
+            .cloned()
+            .unwrap_or_else(|| artifact.workflow_version_id.clone());
+        // W-04: match artifacts by package_name + content hashes, not by local id.
         let existing = sqlx::query_as::<_, BackupWorkflowRuntimeArtifact>(
             "SELECT id, workflow_version_id, recipe_id, package_name, source_kind,
                     package_source_path, workflow_sha256, recipe_sha256, created_at
              FROM workflow_runtime_artifacts
-             WHERE package_name = ?",
+             WHERE package_name = ? AND workflow_sha256 = ? AND recipe_sha256 = ?",
         )
         .bind(&artifact.package_name)
+        .bind(&artifact.workflow_sha256)
+        .bind(&artifact.recipe_sha256)
         .fetch_optional(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
-        if let Some(existing) = existing {
-            if existing.id != artifact.id
-                || existing.workflow_version_id != artifact.workflow_version_id
-                || existing.recipe_id != artifact.recipe_id
-                || existing.workflow_sha256 != artifact.workflow_sha256
-                || existing.recipe_sha256 != artifact.recipe_sha256
-            {
-                return Err(RepositoryError::integrity(format!(
-                    "Runtime Artifact {} 的精确映射与当前数据库冲突",
-                    artifact.package_name
-                )));
-            }
+        if existing.is_some() {
             continue;
         }
+        let insert_id = if sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM workflow_runtime_artifacts WHERE id = ?",
+        )
+        .bind(&artifact.id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?
+            == 0
+        {
+            artifact.id.clone()
+        } else {
+            format!("art_{}", Uuid::new_v4())
+        };
         sqlx::query(
             "INSERT INTO workflow_runtime_artifacts
              (id, workflow_version_id, recipe_id, package_name, source_kind,
               package_source_path, workflow_sha256, recipe_sha256, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(&artifact.id)
-        .bind(&artifact.workflow_version_id)
-        .bind(&artifact.recipe_id)
+        .bind(&insert_id)
+        .bind(&workflow_version_id)
+        .bind(resolve_mapped_id(&version_id_map, &artifact.recipe_id))
         .bind(&artifact.package_name)
         .bind(&artifact.source_kind)
         .bind(&artifact.package_source_path)
@@ -4921,7 +5080,7 @@ async fn restore_workflow_registry(
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
     }
-    Ok(())
+    Ok(version_id_map)
 }
 
 async fn ensure_version_recipe_dependency(
@@ -4986,6 +5145,13 @@ impl<'r> FromRow<'r, sqlx::sqlite::SqliteRow> for BackupWorkflowVersion {
             package_name: row.try_get("package_name")?,
             package_source_path: row.try_get("package_source_path")?,
             created_at: row.try_get("created_at")?,
+            recognition_provenance_json: row
+                .try_get::<Option<String>, _>("recognition_provenance_json")
+                .unwrap_or(None),
+            workflow_source_json: row
+                .try_get::<Option<String>, _>("workflow_source_json")
+                .unwrap_or(None),
+            content_hash: Some(row.try_get::<String, _>("workflow_sha256")?),
         })
     }
 }

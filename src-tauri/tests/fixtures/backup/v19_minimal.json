@@ -1,0 +1,68 @@
+{
+  "project": {"id": "prj_v19_minimal", "name": "V19 Minimal"},
+  "description": null,
+  "createdAt": "2026-01-01T00:00:00Z",
+  "updatedAt": "2026-01-01T00:00:00Z",
+  "activeTasksExcluded": 0,
+  "incompleteTasksExcluded": 0,
+  "tasks": [],
+  "taskEvents": [],
+  "assets": [],
+  "mappings": [],
+  "snapshots": [],
+  "presets": [],
+  "batches": [],
+  "items": [],
+  "workflowRefs": [],
+  "projectWorkflowBindings": [
+    {
+      "stage": "IMAGE",
+      "mode": "DEFAULT",
+      "workflowId": "wfl_v19",
+      "workflowVersionId": "wv_v19",
+      "recipeId": "rcp_v19",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "workflowRegistry": {
+    "workflows": [
+      {
+        "id": "wfl_v19",
+        "name": "V19 Workflow",
+        "category": "image",
+        "mode": "text_to_image",
+        "sourceKind": "USER",
+        "libraryState": "ACTIVE",
+        "currentVersionId": "wv_v19",
+        "removedAt": null,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "versions": [
+      {
+        "id": "wv_v19",
+        "workflowId": "wfl_v19",
+        "version": "1.0.0",
+        "apiWorkflowJson": "{}",
+        "workflowSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "packageName": null,
+        "packageSourcePath": null,
+        "createdAt": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "recipes": [
+      {
+        "id": "rcp_v19",
+        "workflowVersionId": "wv_v19",
+        "version": "1.0.0",
+        "schemaVersion": 1,
+        "recipeYaml": "schema_version: 1\ninputs: {}\n",
+        "recipeSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "createdAt": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "runtimeArtifacts": []
+  }
+}
