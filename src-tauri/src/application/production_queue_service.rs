@@ -10,7 +10,7 @@ use crate::application::ordered_reference_binding::{
 use crate::application::ports::{
     ActiveProductionItem, Clock, GenerationDefinition, GenerationDefinitionRepository,
     ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
-    TaskRepository,
+    TaskRepository, TerminalItemTransition,
 };
 use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::compiler::{RecipeParser, RecipeValidator, SeedResolver};
@@ -1508,37 +1508,25 @@ impl ProductionQueueService {
                 _ => None,
             };
             if let Some((status, code, message)) = terminal {
+                // A batch that is already paused only drains its in-flight
+                // item; the item outcome must not re-pause it, so it can
+                // complete once every item is terminal.
+                let pause_batch = record.batch.status != ProductionBatchStatus::Paused
+                    && should_pause_after_terminal(status, code, record.batch.continue_on_failure);
                 self.repository
-                    .finish_item(&record.item.id, status, code, message, self.clock.now())
+                    .finish_item_and_settle_batch(
+                        &record.batch.project_id,
+                        &record.batch.id,
+                        TerminalItemTransition {
+                            item_id: &record.item.id,
+                            status,
+                            error_code: code,
+                            error_message: message,
+                        },
+                        pause_batch,
+                        self.clock.now(),
+                    )
                     .await?;
-                if should_pause_after_terminal(status, code, record.batch.continue_on_failure) {
-                    self.repository
-                        .set_batch_status(
-                            &record.batch.project_id,
-                            &record.batch.id,
-                            ProductionBatchStatus::Paused,
-                            self.clock.now(),
-                        )
-                        .await?;
-                }
-                if record.batch.status == ProductionBatchStatus::Paused {
-                    if let Some(detail) = self
-                        .repository
-                        .find_detail(&record.batch.project_id, &record.batch.id)
-                        .await?
-                    {
-                        if detail.items.iter().all(|item| item.status.is_terminal()) {
-                            self.repository
-                                .set_batch_status(
-                                    &record.batch.project_id,
-                                    &record.batch.id,
-                                    ProductionBatchStatus::Completed,
-                                    self.clock.now(),
-                                )
-                                .await?;
-                        }
-                    }
-                }
             }
         }
         active = self.repository.list_active_items().await?;
@@ -1697,39 +1685,29 @@ impl ProductionQueueService {
                     _ => None,
                 };
                 if let Some((status, code, message)) = terminal {
-                    self.repository
-                        .finish_item(&active.id, status, code, message, self.clock.now())
-                        .await?;
+                    let already_paused = detail.batch.status == ProductionBatchStatus::Paused;
+                    let pause_batch = !already_paused
+                        && should_pause_after_terminal(
+                            status,
+                            code,
+                            detail.batch.continue_on_failure,
+                        );
+                    self.finish_item_and_settle_batch(
+                        &detail,
+                        TerminalItemTransition {
+                            item_id: &active.id,
+                            status,
+                            error_code: code,
+                            error_message: message,
+                        },
+                        pause_batch,
+                    )
+                    .await?;
                     self.recovery_tasks
                         .lock()
                         .expect("production recovery task registry mutex poisoned")
                         .remove(task_id.as_str());
-                    if detail.batch.status == ProductionBatchStatus::Paused {
-                        if let Some(updated) =
-                            self.repository.find_detail(project_id, batch_id).await?
-                        {
-                            if updated.items.iter().all(|item| item.status.is_terminal()) {
-                                self.repository
-                                    .set_batch_status(
-                                        project_id,
-                                        batch_id,
-                                        ProductionBatchStatus::Completed,
-                                        self.clock.now(),
-                                    )
-                                    .await?;
-                            }
-                        }
-                        return Ok(());
-                    }
-                    if should_pause_after_terminal(status, code, detail.batch.continue_on_failure) {
-                        self.repository
-                            .set_batch_status(
-                                project_id,
-                                batch_id,
-                                ProductionBatchStatus::Paused,
-                                self.clock.now(),
-                            )
-                            .await?;
+                    if already_paused || pause_batch {
                         return Ok(());
                     }
                     continue;
@@ -1806,28 +1784,23 @@ impl ProductionQueueService {
                     Ok(prepared) => prepared,
                     Err(error) => {
                         let message = error.to_string();
-                        self.repository
-                            .finish_item(
-                                &next.id,
-                                ProductionBatchItemStatus::Failed,
-                                Some("QUEUE_VALUES_INVALID"),
-                                Some(&message),
-                                self.clock.now(),
-                            )
-                            .await?;
-                        if should_pause_after_terminal(
+                        let pause_batch = should_pause_after_terminal(
                             ProductionBatchItemStatus::Failed,
                             Some("QUEUE_VALUES_INVALID"),
                             detail.batch.continue_on_failure,
-                        ) {
-                            self.repository
-                                .set_batch_status(
-                                    project_id,
-                                    batch_id,
-                                    ProductionBatchStatus::Paused,
-                                    self.clock.now(),
-                                )
-                                .await?;
+                        );
+                        self.finish_item_and_settle_batch(
+                            &detail,
+                            TerminalItemTransition {
+                                item_id: &next.id,
+                                status: ProductionBatchItemStatus::Failed,
+                                error_code: Some("QUEUE_VALUES_INVALID"),
+                                error_message: Some(&message),
+                            },
+                            pause_batch,
+                        )
+                        .await?;
+                        if pause_batch {
                             return Ok(());
                         }
                         continue;
@@ -1840,28 +1813,23 @@ impl ProductionQueueService {
                     Ok(manifest) => manifest,
                     Err(error) => {
                         let message = error.to_string();
-                        self.repository
-                            .finish_item(
-                                &next.id,
-                                ProductionBatchItemStatus::Failed,
-                                Some("QUEUE_VALUES_INVALID"),
-                                Some(&message),
-                                self.clock.now(),
-                            )
-                            .await?;
-                        if should_pause_after_terminal(
+                        let pause_batch = should_pause_after_terminal(
                             ProductionBatchItemStatus::Failed,
                             Some("QUEUE_VALUES_INVALID"),
                             detail.batch.continue_on_failure,
-                        ) {
-                            self.repository
-                                .set_batch_status(
-                                    project_id,
-                                    batch_id,
-                                    ProductionBatchStatus::Paused,
-                                    self.clock.now(),
-                                )
-                                .await?;
+                        );
+                        self.finish_item_and_settle_batch(
+                            &detail,
+                            TerminalItemTransition {
+                                item_id: &next.id,
+                                status: ProductionBatchItemStatus::Failed,
+                                error_code: Some("QUEUE_VALUES_INVALID"),
+                                error_message: Some(&message),
+                            },
+                            pause_batch,
+                        )
+                        .await?;
+                        if pause_batch {
                             return Ok(());
                         }
                         continue;
@@ -1952,28 +1920,23 @@ impl ProductionQueueService {
                     Err(error) => {
                         let code = generation_start_error_code(&error);
                         let message = error.to_string();
-                        self.repository
-                            .finish_item(
-                                &next.id,
-                                ProductionBatchItemStatus::Failed,
-                                Some(code),
-                                Some(&message),
-                                self.clock.now(),
-                            )
-                            .await?;
-                        if should_pause_after_terminal(
+                        let pause_batch = should_pause_after_terminal(
                             ProductionBatchItemStatus::Failed,
                             Some(code),
                             detail.batch.continue_on_failure,
-                        ) {
-                            self.repository
-                                .set_batch_status(
-                                    project_id,
-                                    batch_id,
-                                    ProductionBatchStatus::Paused,
-                                    self.clock.now(),
-                                )
-                                .await?;
+                        );
+                        self.finish_item_and_settle_batch(
+                            &detail,
+                            TerminalItemTransition {
+                                item_id: &next.id,
+                                status: ProductionBatchItemStatus::Failed,
+                                error_code: Some(code),
+                                error_message: Some(&message),
+                            },
+                            pause_batch,
+                        )
+                        .await?;
+                        if pause_batch {
                             return Ok(());
                         }
                         continue;
@@ -1997,6 +1960,28 @@ impl ProductionQueueService {
 
             sleep(Duration::from_millis(750)).await;
         }
+    }
+
+    /// Single write path for terminal item transitions driven by the queue
+    /// worker. The repository settles the parent batch (PAUSED on a pausing
+    /// failure, otherwise COMPLETED once every item is terminal) in the same
+    /// transaction as the item update.
+    async fn finish_item_and_settle_batch(
+        &self,
+        detail: &ProductionBatchDetail,
+        transition: TerminalItemTransition<'_>,
+        pause_batch: bool,
+    ) -> Result<bool, ProductionQueueError> {
+        Ok(self
+            .repository
+            .finish_item_and_settle_batch(
+                &detail.batch.project_id,
+                &detail.batch.id,
+                transition,
+                pause_batch,
+                self.clock.now(),
+            )
+            .await?)
     }
 
     async fn retry_identity(

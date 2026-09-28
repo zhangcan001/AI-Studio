@@ -5,6 +5,7 @@ use super::{
 use crate::application::ports::{
     ActiveProductionItem, ActiveShotBatchBinding, ProductionBatchShotLink,
     ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
+    TerminalItemTransition,
 };
 use crate::application::production_batch_runbook_service::{
     ProductionBatchRunbookRepository, ProductionBatchRunbookSourceRow,
@@ -205,16 +206,22 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         project_id: &str,
         batch_id: &ProductionBatchId,
     ) -> Result<Option<ProductionBatchDetail>, RepositoryError> {
+        // Read the batch row and its items from one SQLite snapshot. Terminal
+        // item transitions settle the batch status in the same write
+        // transaction, so two independent reads could otherwise observe a
+        // torn state (old batch status next to newly terminal items).
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
         let batch = sqlx::query_as::<_, BatchRow>(
             "SELECT id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at
              FROM production_batches WHERE project_id = ? AND id = ?",
         )
         .bind(project_id)
         .bind(batch_id.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
         let Some(batch) = batch else {
+            transaction.commit().await.map_err(map_sqlx_error)?;
             return Ok(None);
         };
         let items = sqlx::query_as::<_, ItemRow>(
@@ -223,9 +230,10 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
              FROM production_batch_items WHERE batch_id = ? ORDER BY ordinal ASC",
         )
         .bind(batch_id.as_str())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
+        transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(Some(ProductionBatchDetail {
             batch: batch.try_into_domain()?,
             items: items
@@ -404,6 +412,67 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    async fn finish_item_and_settle_batch(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        transition: TerminalItemTransition<'_>,
+        pause_batch: bool,
+        updated_at: DateTime<Utc>,
+    ) -> Result<bool, RepositoryError> {
+        let TerminalItemTransition {
+            item_id,
+            status,
+            error_code,
+            error_message,
+        } = transition;
+        if !status.is_terminal() {
+            return Err(RepositoryError::integrity(
+                "production queue finish_item requires terminal status",
+            ));
+        }
+        let at = format_datetime(updated_at);
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let finished = sqlx::query(
+            "UPDATE production_batch_items
+             SET status = ?, error_code = ?, error_message = ?, updated_at = ?
+             WHERE id = ? AND batch_id = ? AND status IN ('DISPATCHING', 'DISPATCHED')
+               AND EXISTS (
+                   SELECT 1 FROM production_batches
+                   WHERE id = ? AND project_id = ?
+               )",
+        )
+        .bind(status.as_str())
+        .bind(error_code)
+        .bind(error_message)
+        .bind(&at)
+        .bind(item_id.as_str())
+        .bind(batch_id.as_str())
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected()
+            > 0;
+        if pause_batch {
+            sqlx::query(
+                "UPDATE production_batches SET status = 'PAUSED', updated_at = ?
+                 WHERE project_id = ? AND id = ?",
+            )
+            .bind(&at)
+            .bind(project_id)
+            .bind(batch_id.as_str())
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        } else {
+            settle_completed_batch(&mut transaction, project_id, batch_id, &at).await?;
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(finished)
+    }
+
     async fn set_item_skipped(
         &self,
         item_id: &ProductionBatchItemId,
@@ -509,6 +578,7 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
             return Ok(Vec::new());
         }
         let at = format_datetime(updated_at);
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
         for batch_id in &rows {
             sqlx::query(
                 "UPDATE production_batch_items
@@ -519,7 +589,7 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
             )
             .bind(&at)
             .bind(batch_id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .map_err(map_sqlx_error)?;
             sqlx::query(
@@ -527,10 +597,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
             )
             .bind(&at)
             .bind(batch_id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .map_err(map_sqlx_error)?;
         }
+        transaction.commit().await.map_err(map_sqlx_error)?;
         rows.into_iter()
             .map(|id| {
                 ProductionBatchId::parse(id)
@@ -1133,6 +1204,35 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
             })
             .collect())
     }
+}
+
+/// Completes a `RUNNING`/`PAUSED` batch once none of its items can still make
+/// progress. Must run inside the transaction that wrote the item transition so
+/// "all items terminal" and "batch COMPLETED" become visible together.
+async fn settle_completed_batch(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+    batch_id: &ProductionBatchId,
+    updated_at: &str,
+) -> Result<bool, RepositoryError> {
+    let result = sqlx::query(
+        "UPDATE production_batches
+         SET status = 'COMPLETED', updated_at = ?
+         WHERE project_id = ? AND id = ?
+           AND status IN ('RUNNING', 'PAUSED')
+           AND NOT EXISTS (
+               SELECT 1 FROM production_batch_items
+               WHERE batch_id = ? AND status IN ('PENDING', 'DISPATCHING', 'DISPATCHED')
+           )",
+    )
+    .bind(updated_at)
+    .bind(project_id)
+    .bind(batch_id.as_str())
+    .bind(batch_id.as_str())
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(result.rows_affected() > 0)
 }
 
 fn validate_prepared_insert(
@@ -1777,6 +1877,7 @@ mod tests {
     use super::SqliteProductionQueueRepository;
     use crate::application::ports::{
         ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
+        TerminalItemTransition,
     };
     use crate::domain::production_preparation::{
         PreparationSnapshotPrompt, PreparationSnapshotReadiness, PreparationSnapshotRecord,
@@ -2390,6 +2491,197 @@ mod tests {
         assert_eq!(detail.items[0].id, dispatched.id);
         assert_eq!(detail.items[1].status, ProductionBatchItemStatus::Cancelled);
         assert_eq!(detail.items[1].id, pending.id);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn finish_item_and_settle_batch_completes_batch_in_same_transaction() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("finish-settle.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 9, 28, 10, 0, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let failed = fixture_item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Failed,
+            None,
+            json!({"prompt": "already failed"}),
+        );
+        let dispatching = fixture_item(
+            &batch_id,
+            1,
+            ProductionBatchItemStatus::Dispatching,
+            None,
+            json!({"prompt": "start-time validation failure"}),
+        );
+        let dispatched = fixture_item(
+            &batch_id,
+            2,
+            ProductionBatchItemStatus::Dispatched,
+            None,
+            json!({"prompt": "last item"}),
+        );
+        repository
+            .insert(
+                &fixture_batch(&batch_id, ProductionBatchStatus::Running, now),
+                &[failed, dispatching.clone(), dispatched.clone()],
+            )
+            .await
+            .unwrap();
+        fn failure(item_id: &ProductionBatchItemId) -> TerminalItemTransition<'_> {
+            TerminalItemTransition {
+                item_id,
+                status: ProductionBatchItemStatus::Failed,
+                error_code: Some("QUEUE_VALUES_INVALID"),
+                error_message: Some("invalid"),
+            }
+        }
+
+        assert!(!repository
+            .finish_item_and_settle_batch(
+                "project-2",
+                &batch_id,
+                failure(&dispatching.id),
+                false,
+                now
+            )
+            .await
+            .unwrap());
+        assert!(repository
+            .finish_item_and_settle_batch(
+                "project-1",
+                &batch_id,
+                failure(&dispatching.id),
+                false,
+                now
+            )
+            .await
+            .unwrap());
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Running);
+        assert_eq!(detail.items[1].status, ProductionBatchItemStatus::Failed);
+
+        assert!(repository
+            .finish_item_and_settle_batch(
+                "project-1",
+                &batch_id,
+                failure(&dispatched.id),
+                false,
+                now
+            )
+            .await
+            .unwrap());
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(detail.items.iter().all(|item| item.status.is_terminal()));
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Completed);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn finish_item_and_settle_batch_keeps_pause_semantics() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("finish-settle-pause.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 9, 28, 10, 5, 0).unwrap();
+
+        // A pausing failure wins even when it is the last item.
+        let pausing_id = ProductionBatchId::new();
+        let last = fixture_item(
+            &pausing_id,
+            0,
+            ProductionBatchItemStatus::Dispatched,
+            None,
+            json!({"prompt": "offline"}),
+        );
+        repository
+            .insert(
+                &fixture_batch(&pausing_id, ProductionBatchStatus::Running, now),
+                std::slice::from_ref(&last),
+            )
+            .await
+            .unwrap();
+        repository
+            .finish_item_and_settle_batch(
+                "project-1",
+                &pausing_id,
+                TerminalItemTransition {
+                    item_id: &last.id,
+                    status: ProductionBatchItemStatus::Failed,
+                    error_code: Some("COMFY_OFFLINE"),
+                    error_message: Some("offline"),
+                },
+                true,
+                now,
+            )
+            .await
+            .unwrap();
+        let detail = repository
+            .find_detail("project-1", &pausing_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Paused);
+
+        // A paused (or cancelled) batch keeps waiting for pending work, then
+        // completes when its in-flight item drains.
+        let paused_id = ProductionBatchId::new();
+        let in_flight = fixture_item(
+            &paused_id,
+            0,
+            ProductionBatchItemStatus::Dispatched,
+            None,
+            json!({"prompt": "in flight"}),
+        );
+        let pending = fixture_item(
+            &paused_id,
+            1,
+            ProductionBatchItemStatus::Pending,
+            None,
+            json!({"prompt": "pending"}),
+        );
+        repository
+            .insert(
+                &fixture_batch(&paused_id, ProductionBatchStatus::Paused, now),
+                &[in_flight.clone(), pending],
+            )
+            .await
+            .unwrap();
+        repository
+            .finish_item_and_settle_batch(
+                "project-1",
+                &paused_id,
+                TerminalItemTransition {
+                    item_id: &in_flight.id,
+                    status: ProductionBatchItemStatus::Succeeded,
+                    error_code: None,
+                    error_message: None,
+                },
+                false,
+                now,
+            )
+            .await
+            .unwrap();
+        let detail = repository
+            .find_detail("project-1", &paused_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Paused);
         pool.close().await;
     }
 

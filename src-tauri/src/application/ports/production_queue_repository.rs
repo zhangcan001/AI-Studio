@@ -14,6 +14,15 @@ pub struct ActiveProductionItem {
     pub item: ProductionBatchItem,
 }
 
+/// One terminal production item outcome recorded by the queue worker.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerminalItemTransition<'a> {
+    pub item_id: &'a ProductionBatchItemId,
+    pub status: ProductionBatchItemStatus,
+    pub error_code: Option<&'a str>,
+    pub error_message: Option<&'a str>,
+}
+
 #[async_trait]
 pub trait ProductionQueueRepository: Send + Sync {
     async fn insert(
@@ -120,6 +129,62 @@ pub trait ProductionQueueRepository: Send + Sync {
         error_message: Option<&str>,
         updated_at: DateTime<Utc>,
     ) -> Result<bool, RepositoryError>;
+
+    /// Records one terminal item transition and settles its parent batch in the
+    /// same repository transaction when supported by the concrete repository.
+    ///
+    /// Batch settlement rules:
+    /// - `pause_batch == true` moves the batch to `PAUSED` (stop-on-failure or
+    ///   safety-blocking failures), matching the previous follow-up write.
+    /// - otherwise, when every item of the batch is terminal and the batch is
+    ///   still `RUNNING` or `PAUSED`, the batch becomes `COMPLETED` (even when
+    ///   every item failed). Batches with remaining work keep their status.
+    ///
+    /// The default keeps lightweight test repositories source-compatible; SQLite
+    /// overrides it with a real transaction so readers never observe all items
+    /// terminal while the batch is still `RUNNING`.
+    async fn finish_item_and_settle_batch(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        transition: TerminalItemTransition<'_>,
+        pause_batch: bool,
+        updated_at: DateTime<Utc>,
+    ) -> Result<bool, RepositoryError> {
+        let finished = self
+            .finish_item(
+                transition.item_id,
+                transition.status,
+                transition.error_code,
+                transition.error_message,
+                updated_at,
+            )
+            .await?;
+        if pause_batch {
+            self.set_batch_status(
+                project_id,
+                batch_id,
+                ProductionBatchStatus::Paused,
+                updated_at,
+            )
+            .await?;
+        } else if let Some(detail) = self.find_detail(project_id, batch_id).await? {
+            if matches!(
+                detail.batch.status,
+                ProductionBatchStatus::Running | ProductionBatchStatus::Paused
+            ) && detail.items.iter().all(|item| item.status.is_terminal())
+            {
+                self.set_batch_status(
+                    project_id,
+                    batch_id,
+                    ProductionBatchStatus::Completed,
+                    updated_at,
+                )
+                .await?;
+            }
+        }
+        Ok(finished)
+    }
 
     async fn set_item_skipped(
         &self,
