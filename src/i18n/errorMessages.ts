@@ -119,6 +119,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   PROJECT_CONTEXT_CHANGED: "当前任务属于其他项目，请先切换到对应项目。",
   WORKFLOW_RUNTIME_NOT_FOUND: "找不到对应的工作流运行包，请刷新工作流列表。",
   WORKFLOW_VERSION_NOT_FOUND: "找不到对应的工作流版本，请刷新工作流列表。",
+  WORKFLOW_VERSION_UNAVAILABLE: "该工作流版本已归档、已停用或所属工作流已删除，不能设为当前版本。",
   WORKFLOW_REMOVED_RESTORE_WORKFLOW_FIRST: "该工作流已删除，请先恢复整个工作流，再恢复单个版本。",
   PROJECT_NOT_FOUND: "找不到该项目，请刷新项目列表。",
   TASK_NOT_FOUND: "找不到该任务，请刷新任务历史。",

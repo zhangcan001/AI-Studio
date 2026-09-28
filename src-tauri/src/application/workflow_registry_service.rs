@@ -835,16 +835,67 @@ impl WorkflowRegistryService {
         self.get(workflow_id).await
     }
 
+    /// W-27: only an available version (not archived, enabled) of an ACTIVE
+    /// workflow may become current. Serialized with remove/restore/purge.
     pub async fn set_current_version(
         &self,
         workflow_id: &str,
         workflow_version_id: &str,
+    ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        self.set_current_version_checked(workflow_id, workflow_version_id, true)
+            .await
+    }
+
+    /// Import commit variant: a freshly published version may still be
+    /// disabled while its capability is unchecked (for example ComfyUI is
+    /// offline), but it must never be archived or belong to a REMOVED
+    /// workflow.
+    pub async fn set_current_version_after_import(
+        &self,
+        workflow_id: &str,
+        workflow_version_id: &str,
+    ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        self.set_current_version_checked(workflow_id, workflow_version_id, false)
+            .await
+    }
+
+    async fn set_current_version_checked(
+        &self,
+        workflow_id: &str,
+        workflow_version_id: &str,
+        require_enabled: bool,
     ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
         let Some(repository) = &self.registry_repository else {
             return Err(WorkflowRegistryServiceError::Repository(
                 RepositoryError::database("workflow registry repository is not configured"),
             ));
         };
+        let _guard = self.lifecycle_gate.lock().await;
+        let record = repository.get(workflow_id).await?.ok_or_else(|| {
+            WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned())
+        })?;
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+            .filter(|version| version.workflow_id == workflow_id)
+            .ok_or_else(|| WorkflowRegistryServiceError::VersionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+            })?;
+        let state = self
+            .state_repository
+            .find_state(&version.workflow_version_id)
+            .await?;
+        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let enabled = state.as_ref().is_none_or(|state| state.enabled);
+        if record.library_state != WORKFLOW_LIBRARY_ACTIVE
+            || archived
+            || (require_enabled && !enabled)
+        {
+            return Err(WorkflowRegistryServiceError::VersionUnavailable {
+                workflow_version_id: workflow_version_id.to_owned(),
+            });
+        }
         repository
             .set_current_version(workflow_id, workflow_version_id, self.clock.now())
             .await?;

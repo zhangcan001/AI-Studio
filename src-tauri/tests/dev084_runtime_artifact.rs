@@ -2439,3 +2439,72 @@ async fn w03_restore_version_on_active_workflow() {
         Some(current_version_id.as_str())
     );
 }
+
+#[tokio::test]
+async fn w27_set_current_to_archived_version_rejected() {
+    let (harness, current_version_id, older_version_id) =
+        w03_harness_with_older_version("w27_set_current").await;
+    let now = Utc::now();
+    let states = SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone());
+    states
+        .set_archived(&older_version_id, true, false, Some(now), now)
+        .await
+        .unwrap();
+    let error = harness
+        .registry
+        .set_current_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect_err("an archived version must not become current");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_UNAVAILABLE");
+
+    // Disabled (not archived) is rejected as well.
+    states
+        .set_archived(&older_version_id, false, false, None, now)
+        .await
+        .unwrap();
+    let error = harness
+        .registry
+        .set_current_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect_err("a disabled version must not become current");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_UNAVAILABLE");
+
+    // An enabled version of a REMOVED workflow is rejected.
+    states
+        .set_archived(&older_version_id, false, true, None, now)
+        .await
+        .unwrap();
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .unwrap();
+    let error = harness
+        .registry
+        .set_current_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect_err("a removed workflow cannot change its current version");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_UNAVAILABLE");
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
+            .await
+            .unwrap()
+            .current_version_id
+            .as_deref(),
+        Some(current_version_id.as_str())
+    );
+
+    // After restore, the available version can become current.
+    harness
+        .registry
+        .restore_workflow(&harness.workflow_id)
+        .await
+        .unwrap();
+    harness
+        .registry
+        .set_current_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect("an available version of an active workflow becomes current");
+}

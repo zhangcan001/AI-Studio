@@ -135,7 +135,7 @@ pub async fn workflow_commit_import(
             state
                 .workflow
                 .registry
-                .set_current_version(&published.workflow_id, version_id)
+                .set_current_version_after_import(&published.workflow_id, version_id)
                 .await
                 .map_err(map_registry_error)?;
         }
