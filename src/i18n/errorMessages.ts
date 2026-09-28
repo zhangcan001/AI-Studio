@@ -104,6 +104,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   MISSING_NODE: "当前 ComfyUI 缺少该工作流需要的节点。",
   WORKFLOW_LINK_SLOT_OUT_OF_RANGE: "工作流连线引用了节点不存在的输出槽，请在 ComfyUI 中修复连线后重新导入。",
   WORKFLOW_LINK_TYPE_MISMATCH: "工作流连线两端类型不一致，请在 ComfyUI 中修复连线后重新导入。",
+  WORKFLOW_LINK_INVALID: "工作流存在无效连线，无法保存。请在 ComfyUI 中修复后重新导入。",
+  INPUT_MAPPING_TYPE_MISMATCH: "文本字段不能绑定到下拉选项输入，请重新选择绑定目标。",
   INPUT_OPTION_UNAVAILABLE: "当前 ComfyUI 中缺少工作流所需的模型或选项。",
   INPUT_REQUIRED: "请先填写必填输入项。",
   INPUT_TYPE_MISMATCH: "输入值类型不符合要求。",

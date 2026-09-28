@@ -3615,6 +3615,20 @@ impl WorkflowOnboardingService {
                 "confirm the ambiguous primary input before saving",
             ));
         }
+        // W-07: manual publish uses the same structural gate as auto-publish.
+        // Broken links cannot be resolved by a mapping choice.
+        if let Some(issue) = draft.analysis.as_ref().and_then(|analysis| {
+            analysis
+                .issues
+                .iter()
+                .find(|issue| is_structural_link_issue(&issue.code))
+                .cloned()
+        }) {
+            return Err(WorkflowOnboardingError::new(
+                "WORKFLOW_LINK_INVALID",
+                format!("{}: {}", issue.code, issue.message),
+            ));
+        }
 
         let existing_packages = self
             .existing_packages_for_identity(&draft.workflow_sha256, workflow)
@@ -5020,6 +5034,13 @@ fn view_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingDraftVie
     }
 }
 
+fn is_structural_link_issue(code: &str) -> bool {
+    matches!(
+        code,
+        "WORKFLOW_LINK_SLOT_OUT_OF_RANGE" | "WORKFLOW_LINK_TYPE_MISMATCH"
+    )
+}
+
 fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingValidationView {
     if draft.normalized_api.is_none() {
         let mut issues = draft
@@ -5107,6 +5128,18 @@ fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingVa
         ) {
             mapping_bounds_valid = false;
             issues.push(error.to_string());
+        }
+        // W-07 type guard: free text must never be written into a COMBO
+        // input (checkpoint names, sampler names, ...). ComfyUI would reject
+        // the prompt value at execution time.
+        if mapping.field_type == SemanticFieldType::Textarea
+            && input.is_some_and(|input| !input.allowed_options.is_empty())
+        {
+            mapping_bounds_valid = false;
+            issues.push(format!(
+                "INPUT_MAPPING_TYPE_MISMATCH: text field {} cannot target combo input {}.{}",
+                mapping.semantic_key, mapping.target_node, mapping.target_input
+            ));
         }
     }
     let dry_run = recipe_result
@@ -9891,6 +9924,53 @@ outputs: []
             .find(|mapping| mapping.semantic_key == "prompt")
             .expect("prompt mapping");
         assert_eq!(prompt.default_value.as_deref(), Some(long_prompt.as_str()));
+    }
+
+    #[test]
+    fn w07_textarea_mapping_on_combo_input_blocks_publish() {
+        let mut draft = test_draft(json!({
+            "1": {"inputs": {"ckpt_name": "a.safetensors", "prompt": "x"}, "class_type": "ImageSampler"},
+            "2": {"inputs": {"images": ["1", 0]}, "class_type": "SaveImage"}
+        }));
+        for node in draft.nodes.iter_mut().filter(|node| node.node_id == "1") {
+            for input in node
+                .inputs
+                .iter_mut()
+                .filter(|input| input.name == "ckpt_name")
+            {
+                input.allowed_options = vec!["a.safetensors".to_owned()];
+            }
+        }
+        draft.input_mappings = vec![InputMapping {
+            semantic_key: "prompt".to_owned(),
+            field_type: SemanticFieldType::Textarea,
+            label: "Prompt".to_owned(),
+            required: true,
+            default_value: Some("a.safetensors".to_owned()),
+            min_value: None,
+            max_value: None,
+            step: None,
+            min_items: None,
+            max_items: None,
+            target_node: "1".to_owned(),
+            target_input: "ckpt_name".to_owned(),
+            item_index: None,
+            source: InputMappingSource::UserConfirmed,
+        }];
+        let validation = validation_for_draft(&draft);
+        assert!(!validation.ready_to_publish);
+        assert!(!importable_validation(&validation));
+        assert!(validation
+            .issues
+            .iter()
+            .any(|issue| issue.starts_with("INPUT_MAPPING_TYPE_MISMATCH")));
+    }
+
+    #[test]
+    fn w07_structural_link_issues_are_recognized() {
+        assert!(is_structural_link_issue("WORKFLOW_LINK_SLOT_OUT_OF_RANGE"));
+        assert!(is_structural_link_issue("WORKFLOW_LINK_TYPE_MISMATCH"));
+        assert!(!is_structural_link_issue("AMBIGUOUS_INPUT"));
     }
 
     #[test]
