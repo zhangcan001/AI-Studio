@@ -450,7 +450,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     clock.clone(),
                 )
                 .with_registry_repository(workflow_registry_repository)
-                .with_recipe_promotion_repository(workflow_recipe_promotion_repository)
+                .with_recipe_promotion_repository(workflow_recipe_promotion_repository.clone())
                 .with_recipe_runtime_state_repository(
                     workflow_recipe_runtime_state_repository.clone(),
                 )
@@ -938,7 +938,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     database_pool.clone(),
                 )),
                 clock.clone(),
-                Vec::new(),
+                application::repair_jobs::recipe_jobs::RecipeRepairJob::all(
+                    workflow_onboarding_service.clone(),
+                    Some(workflow_recipe_promotion_repository.clone()),
+                    Some(project_workflow_binding_repository.clone()),
+                    clock.clone(),
+                ),
             ));
             let startup_repair_jobs = repair_job_runner.clone();
             let startup_recovery = task_recovery_service.clone();

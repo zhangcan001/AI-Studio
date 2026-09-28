@@ -3562,7 +3562,7 @@ impl WorkflowOnboardingService {
         {
             return Ok(published);
         }
-        let published = self.publish_internal(draft_id, false).await?;
+        let published = self.publish_internal(draft_id, false, true).await?;
         self.with_registry(|registry| {
             registry.cache_commit(&request, published.clone());
             Ok(())
@@ -3574,13 +3574,14 @@ impl WorkflowOnboardingService {
         &self,
         draft_id: &str,
     ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
-        self.publish_internal(draft_id, true).await
+        self.publish_internal(draft_id, true, true).await
     }
 
     async fn publish_internal(
         &self,
         draft_id: &str,
         allow_unready_capability: bool,
+        disable_unready_version: bool,
     ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
         // Always recheck the live capability before publishing. A previous
         // READY result is only a snapshot and cannot authorize a stale draft.
@@ -3778,7 +3779,12 @@ impl WorkflowOnboardingService {
             (None, draft.recipe_id.clone())
         };
 
-        if allow_unready_capability && draft.capability.state != CapabilityState::Ready {
+        // A repair republishes an already-registered workflow version; it must
+        // not disable that version just because ComfyUI is offline at startup.
+        if allow_unready_capability
+            && disable_unready_version
+            && draft.capability.state != CapabilityState::Ready
+        {
             if let (Some(runtime_repository), Some(state_repository)) =
                 (&self.runtime_repository, &self.state_repository)
             {
@@ -10182,3 +10188,7 @@ outputs: []
         }
     }
 }
+
+#[path = "workflow_onboarding_recipe_repair.rs"]
+mod recipe_repair;
+pub use recipe_repair::{RecipeRepairCandidate, RecipeRepairKind, RecipeRepairOutcome};

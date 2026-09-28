@@ -15,6 +15,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub mod recipe_jobs;
+
 /// One unit of work found by a job's read-only planning pass.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +25,14 @@ pub struct RepairItem {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub reason: String,
+    /// Semantic workflow version (for example `1.2.0`) of the package.
+    #[serde(default)]
+    pub workflow_version: String,
+    /// Recipe version of the package being repaired.
+    #[serde(default)]
+    pub recipe_version: String,
+    #[serde(default)]
+    pub package_name: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

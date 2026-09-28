@@ -3,6 +3,9 @@ export interface RepairItem {
   workflowVersionId: string;
   recipeId: string;
   reason: string;
+  workflowVersion?: string;
+  recipeVersion?: string;
+  packageName?: string;
 }
 
 export interface RepairFailure {
