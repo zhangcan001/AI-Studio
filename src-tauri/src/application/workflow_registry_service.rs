@@ -651,7 +651,7 @@ impl WorkflowRegistryService {
         let record = repository.get(workflow_id).await?.ok_or_else(|| {
             WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned())
         })?;
-        let (all_versions, states) = self.load_runtime().await?;
+        let (all_versions, _states) = self.load_runtime().await?;
         let versions = all_versions
             .into_iter()
             .filter(|version| version.workflow_id == workflow_id)
@@ -676,13 +676,8 @@ impl WorkflowRegistryService {
         if record.library_state != WORKFLOW_LIBRARY_REMOVED {
             blocking_reasons.push("workflow must be REMOVED before purge".to_owned());
         }
-        if versions
-            .iter()
-            .any(|version| !state_for(&states, &version.workflow_version_id).archived)
-        {
-            blocking_reasons
-                .push("every workflow version must be archived before purge".to_owned());
-        }
+        // W-03: REMOVED is the logical purge precondition; versions keep their
+        // own runtime state and are no longer bulk-archived on removal.
         append_purge_reference_reasons(&references, &mut blocking_reasons);
         if self.runtime_artifact_repository.is_none() {
             blocking_reasons.push("runtime artifact repository is not configured".to_owned());
@@ -1546,14 +1541,6 @@ impl WorkflowRegistryService {
                     "workflow must be REMOVED before purge".to_owned(),
                 ));
             }
-            if versions
-                .iter()
-                .any(|version| !state_for(&states, &version.workflow_version_id).archived)
-            {
-                return Err(WorkflowRegistryServiceError::PurgeBlocked(
-                    "every workflow version must be archived before purge".to_owned(),
-                ));
-            }
             let references = repository
                 .inspect_purge(workflow_id)
                 .await?
@@ -2346,6 +2333,22 @@ pub enum WorkflowRegistryServiceError {
     },
     Blocked(String),
     NotRemoved(String),
+    /// W-03: a single version of a REMOVED workflow cannot be restored on
+    /// its own; the whole workflow must be restored first.
+    RemovedRestoreWorkflowFirst(String),
+    /// W-27: the target version is archived/disabled or the workflow is not
+    /// ACTIVE, so it cannot become the current version.
+    VersionUnavailable {
+        workflow_version_id: String,
+    },
+    /// W-20: the current version cannot be deleted on its own.
+    VersionIsCurrent {
+        workflow_version_id: String,
+    },
+    /// W-20: a production batch still references the version.
+    VersionInUse {
+        workflow_version_id: String,
+    },
     PurgeBlocked(String),
     PurgePackage(String),
     PurgeCompensationFailed {
@@ -2377,6 +2380,10 @@ impl WorkflowRegistryServiceError {
             Self::LastActiveRecipeGuard { .. } => "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD",
             Self::Blocked(_) => "WORKFLOW_DELETE_BLOCKED_ACTIVE_TASKS",
             Self::NotRemoved(_) => "WORKFLOW_NOT_REMOVED",
+            Self::RemovedRestoreWorkflowFirst(_) => "WORKFLOW_REMOVED_RESTORE_WORKFLOW_FIRST",
+            Self::VersionUnavailable { .. } => "WORKFLOW_VERSION_UNAVAILABLE",
+            Self::VersionIsCurrent { .. } => "WORKFLOW_VERSION_IS_CURRENT",
+            Self::VersionInUse { .. } => "WORKFLOW_VERSION_IN_USE",
             Self::PurgeBlocked(_) => "WORKFLOW_PURGE_BLOCKED",
             Self::PurgePackage(_) => "WORKFLOW_PURGE_PACKAGE_ERROR",
             Self::PurgeCompensationFailed { .. } => "WORKFLOW_PURGE_COMPENSATION_FAILED",
@@ -2462,6 +2469,28 @@ impl fmt::Display for WorkflowRegistryServiceError {
             } => write!(
                 formatter,
                 "WORKFLOW_REGISTRY_COMPENSATION_FAILED: {operation} failed ({cause}); compensation failed ({compensation})"
+            ),
+            Self::RemovedRestoreWorkflowFirst(workflow_id) => write!(
+                formatter,
+                "WORKFLOW_REMOVED_RESTORE_WORKFLOW_FIRST: workflow {workflow_id} is removed; restore the workflow first"
+            ),
+            Self::VersionUnavailable {
+                workflow_version_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_VERSION_UNAVAILABLE: workflow version {workflow_version_id} is archived, disabled or belongs to a removed workflow"
+            ),
+            Self::VersionIsCurrent {
+                workflow_version_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_VERSION_IS_CURRENT: workflow version {workflow_version_id} is the current version"
+            ),
+            Self::VersionInUse {
+                workflow_version_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_VERSION_IN_USE: workflow version {workflow_version_id} is referenced by production batches"
             ),
         }
     }

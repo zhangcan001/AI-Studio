@@ -176,8 +176,9 @@ pub use workflow_recipe_runtime_state_repository::{
     WorkflowRecipeRuntimeState, WorkflowRecipeRuntimeStateRepository,
 };
 pub use workflow_registry_repository::{
-    WorkflowPurgeReferenceCounts, WorkflowRegistryRecord, WorkflowRegistryRepository,
-    WORKFLOW_SOURCE_PRODUCT, WORKFLOW_SOURCE_USER, WORKFLOW_STATE_ACTIVE, WORKFLOW_STATE_REMOVED,
+    RegistryRepairRepository, RegistryVersionStateRecord, WorkflowPurgeReferenceCounts,
+    WorkflowRegistryRecord, WorkflowRegistryRepository, WORKFLOW_SOURCE_PRODUCT,
+    WORKFLOW_SOURCE_USER, WORKFLOW_STATE_ACTIVE, WORKFLOW_STATE_REMOVED,
 };
 pub use workflow_run_repository::WorkflowRunRepository;
 pub use workflow_runtime_artifact_repository::{

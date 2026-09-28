@@ -34,6 +34,7 @@ impl SqliteWorkflowRuntimeRepository {
                 wv.api_workflow_json,
                 wv.package_name,
                 CASE WHEN w.current_version_id = wv.id THEN 1 ELSE 0 END AS is_current,
+                CASE WHEN w.library_state = 'REMOVED' THEN 1 ELSE 0 END AS library_removed,
                 r.id AS recipe_id,
                 r.version AS recipe_version,
                 r.schema_version AS recipe_schema_version,
@@ -78,6 +79,7 @@ impl SqliteWorkflowRuntimeRepository {
                     has_successful_run: row.successful_tasks > 0,
                     latest_success_at: row.latest_success_at.clone(),
                     latest_failure_at: row.latest_failure_at.clone(),
+                    library_removed: row.library_removed != 0,
                 });
             if let (
                 Some(recipe_id),
@@ -307,6 +309,7 @@ struct RuntimeWorkflowRow {
     api_workflow_json: String,
     package_name: Option<String>,
     is_current: i64,
+    library_removed: i64,
     recipe_id: Option<String>,
     recipe_version: Option<String>,
     recipe_schema_version: Option<i64>,

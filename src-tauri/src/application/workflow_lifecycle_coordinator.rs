@@ -6,7 +6,7 @@ use crate::application::{
     workflow_onboarding_service::CapabilityState,
     workflow_registry_service::{
         WorkflowRegistryMutationResult, WorkflowRegistryPurgeResult, WorkflowRegistryRestoreResult,
-        WorkflowRegistryService, WorkflowRegistryServiceError,
+        WorkflowRegistryService, WorkflowRegistryServiceError, WORKFLOW_LIBRARY_ACTIVE,
     },
 };
 use std::{error::Error, fmt, sync::Arc};
@@ -136,16 +136,19 @@ impl WorkflowLifecycleCoordinator {
                 .await
                 .map_err(Into::into);
         };
-        let restored = self.restore_workflow_inner(&workflow_id).await?;
-        Ok(WorkflowRestoreResult {
-            workflow_version_id: restored
-                .current_version_id
-                .unwrap_or_else(|| workflow_version_id.to_owned()),
-            archived: false,
-            enabled: restored.enabled,
-            capability: restored.capability,
-            readiness: restored.readiness,
-        })
+        // W-03: restoring a version never restores the whole workflow. On an
+        // ACTIVE workflow only this version is un-archived; a REMOVED
+        // workflow must be restored explicitly first.
+        let workflow = self.registry.get(&workflow_id).await?;
+        if workflow.library_state != WORKFLOW_LIBRARY_ACTIVE {
+            return Err(
+                WorkflowRegistryServiceError::RemovedRestoreWorkflowFirst(workflow_id).into(),
+            );
+        }
+        self.lifecycle
+            .restore_version(workflow_version_id)
+            .await
+            .map_err(Into::into)
     }
 
     async fn restore_workflow_inner(

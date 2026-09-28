@@ -94,3 +94,34 @@ pub trait WorkflowRegistryRepository: Send + Sync {
 
     async fn purge(&self, workflow_id: &str) -> Result<bool, RepositoryError>;
 }
+
+/// W-03 repair input: one workflow version of an ACTIVE workflow together
+/// with its raw runtime state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RegistryVersionStateRecord {
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub workflow_version: String,
+    pub is_current: bool,
+    pub archived: bool,
+    pub enabled: bool,
+    /// Raw stored `archived_at` text so timestamps compare exactly.
+    pub archived_at: Option<String>,
+}
+
+/// Narrow repair port for `registry_stranded_versions_v1`.
+#[async_trait]
+pub trait RegistryRepairRepository: Send + Sync {
+    /// Every version of every ACTIVE workflow with its runtime state.
+    async fn list_active_version_states(
+        &self,
+    ) -> Result<Vec<RegistryVersionStateRecord>, RepositoryError>;
+
+    /// Un-archive and re-enable exactly the given versions (only rows that
+    /// are still archived=1 AND enabled=0). Returns the updated row count.
+    async fn unarchive_versions(
+        &self,
+        workflow_version_ids: &[String],
+        updated_at: DateTime<Utc>,
+    ) -> Result<u64, RepositoryError>;
+}

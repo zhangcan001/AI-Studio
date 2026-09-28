@@ -51,6 +51,16 @@ pub(super) fn map_registry_error(error: WorkflowRegistryServiceError) -> AppErro
         ),
         WorkflowRegistryServiceError::Blocked(message)
         | WorkflowRegistryServiceError::NotRemoved(message)
+        | WorkflowRegistryServiceError::RemovedRestoreWorkflowFirst(message)
+        | WorkflowRegistryServiceError::VersionUnavailable {
+            workflow_version_id: message,
+        }
+        | WorkflowRegistryServiceError::VersionIsCurrent {
+            workflow_version_id: message,
+        }
+        | WorkflowRegistryServiceError::VersionInUse {
+            workflow_version_id: message,
+        }
         | WorkflowRegistryServiceError::PurgeBlocked(message)
         | WorkflowRegistryServiceError::PurgePackage(message)
         | WorkflowRegistryServiceError::CompensationFailed {

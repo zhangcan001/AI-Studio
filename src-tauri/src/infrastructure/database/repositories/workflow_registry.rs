@@ -1,8 +1,8 @@
 use super::{format_datetime, map_sqlx_error, parse_datetime, parse_optional_datetime};
 use crate::application::ports::{
-    RepositoryError, WorkflowPurgeReferenceCounts, WorkflowRegistryRecord,
-    WorkflowRegistryRepository, WORKFLOW_SOURCE_USER, WORKFLOW_STATE_ACTIVE,
-    WORKFLOW_STATE_REMOVED,
+    RegistryRepairRepository, RegistryVersionStateRecord, RepositoryError,
+    WorkflowPurgeReferenceCounts, WorkflowRegistryRecord, WorkflowRegistryRepository,
+    WORKFLOW_SOURCE_USER, WORKFLOW_STATE_ACTIVE, WORKFLOW_STATE_REMOVED,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -154,26 +154,10 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
             ));
         }
 
-        sqlx::query(
-            "INSERT INTO workflow_runtime_states (
-                 workflow_version_id, enabled, updated_at, archived, archived_at
-             )
-             SELECT wv.id, 0, ?, 1, ?
-             FROM workflow_versions wv
-             WHERE wv.workflow_id = ?
-             ON CONFLICT(workflow_version_id) DO UPDATE SET
-                 enabled = 0,
-                 updated_at = excluded.updated_at,
-                 archived = 1,
-                 archived_at = excluded.archived_at",
-        )
-        .bind(format_datetime(removed_at))
-        .bind(format_datetime(removed_at))
-        .bind(workflow_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_sqlx_error)?;
-
+        // W-03: removal is a logical library state only. Per-version runtime
+        // state (archived/enabled) is left untouched so that restore brings
+        // every version back exactly as it was; REMOVED already blocks
+        // production admission (is_available / library_state checks).
         sqlx::query(
             "UPDATE workflows
              SET library_state = ?, removed_at = ?, updated_at = ?
@@ -211,6 +195,31 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
         updated_at: DateTime<Utc>,
     ) -> Result<Option<WorkflowRegistryRecord>, RepositoryError> {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        // W-03 legacy: workflows removed before this fix had every version
+        // archived at exactly `removed_at`. Un-archive exactly those rows
+        // while the removal timestamp is still known; versions archived at
+        // any other time were archived deliberately and stay archived.
+        sqlx::query(
+            "UPDATE workflow_runtime_states
+             SET archived = 0, archived_at = NULL, enabled = 1, updated_at = ?
+             WHERE archived = 1
+               AND enabled = 0
+               AND archived_at IS NOT NULL
+               AND archived_at = (
+                   SELECT removed_at FROM workflows
+                   WHERE id = ? AND library_state = ?
+               )
+               AND workflow_version_id IN (
+                   SELECT id FROM workflow_versions WHERE workflow_id = ?
+               )",
+        )
+        .bind(format_datetime(updated_at))
+        .bind(workflow_id)
+        .bind(WORKFLOW_STATE_REMOVED)
+        .bind(workflow_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE workflows
              SET library_state = ?, removed_at = NULL, updated_at = ?
@@ -578,6 +587,76 @@ impl WorkflowReferenceCounts {
     }
 }
 
+#[async_trait]
+impl RegistryRepairRepository for SqliteWorkflowRegistryRepository {
+    async fn list_active_version_states(
+        &self,
+    ) -> Result<Vec<RegistryVersionStateRecord>, RepositoryError> {
+        let rows = sqlx::query_as::<_, (String, String, String, i64, i64, i64, Option<String>)>(
+            "SELECT w.id, wv.id, wv.version,
+                    CASE WHEN w.current_version_id = wv.id THEN 1 ELSE 0 END,
+                    COALESCE(wrs.archived, 0), COALESCE(wrs.enabled, 1), wrs.archived_at
+             FROM workflows w
+             INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
+             LEFT JOIN workflow_runtime_states wrs ON wrs.workflow_version_id = wv.id
+             WHERE w.library_state = ?
+             ORDER BY w.id ASC, wv.version ASC, wv.id ASC",
+        )
+        .bind(WORKFLOW_STATE_ACTIVE)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    workflow_id,
+                    workflow_version_id,
+                    workflow_version,
+                    current,
+                    archived,
+                    enabled,
+                    archived_at,
+                )| {
+                    RegistryVersionStateRecord {
+                        workflow_id,
+                        workflow_version_id,
+                        workflow_version,
+                        is_current: current != 0,
+                        archived: archived != 0,
+                        enabled: enabled != 0,
+                        archived_at,
+                    }
+                },
+            )
+            .collect())
+    }
+
+    async fn unarchive_versions(
+        &self,
+        workflow_version_ids: &[String],
+        updated_at: DateTime<Utc>,
+    ) -> Result<u64, RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut updated = 0;
+        for workflow_version_id in workflow_version_ids {
+            updated += sqlx::query(
+                "UPDATE workflow_runtime_states
+                 SET archived = 0, archived_at = NULL, enabled = 1, updated_at = ?
+                 WHERE workflow_version_id = ? AND archived = 1 AND enabled = 0",
+            )
+            .bind(format_datetime(updated_at))
+            .bind(workflow_version_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?
+            .rows_affected();
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(updated)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SqliteWorkflowRegistryRepository;
@@ -786,5 +865,227 @@ mod tests {
             "ACTIVE"
         );
         assert_eq!(WORKFLOW_SOURCE_USER, "USER");
+    }
+
+    async fn w03_add_version(pool: &SqlitePool, id: &str, version: &str) {
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES (?, 'registry-workflow', ?, '{}', ?, '2026-01-01T00:00:00Z')",
+        )
+        .bind(id)
+        .bind(version)
+        .bind(format!("{id}-sha"))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn w03_set_state(
+        pool: &SqlitePool,
+        id: &str,
+        archived: bool,
+        enabled: bool,
+        at: Option<&str>,
+    ) {
+        sqlx::query(
+            "INSERT INTO workflow_runtime_states
+             (workflow_version_id, enabled, updated_at, archived, archived_at)
+             VALUES (?, ?, '2026-01-01T00:00:00Z', ?, ?)
+             ON CONFLICT(workflow_version_id) DO UPDATE SET
+               enabled = excluded.enabled, archived = excluded.archived,
+               archived_at = excluded.archived_at",
+        )
+        .bind(id)
+        .bind(i64::from(enabled))
+        .bind(i64::from(archived))
+        .bind(at)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn w03_archived(pool: &SqlitePool, id: &str) -> bool {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE((SELECT archived FROM workflow_runtime_states
+                              WHERE workflow_version_id = ?), 0)",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+            != 0
+    }
+
+    #[tokio::test]
+    async fn w03_remove_restore_keeps_all_versions() {
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
+        let timestamp = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
+        w03_add_version(&pool, "registry-version-2", "2.0.0").await;
+        repository
+            .set_current_version("registry-workflow", "registry-version-2", timestamp)
+            .await
+            .unwrap();
+        // A deliberately archived version must survive remove/restore as is.
+        w03_add_version(&pool, "registry-version-3", "3.0.0").await;
+        w03_set_state(
+            &pool,
+            "registry-version-3",
+            true,
+            false,
+            Some("2025-12-01T00:00:00Z"),
+        )
+        .await;
+
+        repository
+            .remove("registry-workflow", timestamp)
+            .await
+            .unwrap();
+        assert!(!w03_archived(&pool, "registry-version").await);
+        assert!(!w03_archived(&pool, "registry-version-2").await);
+        let restored = repository
+            .restore("registry-workflow", timestamp)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored.library_state, "ACTIVE");
+        assert!(!w03_archived(&pool, "registry-version").await);
+        assert!(!w03_archived(&pool, "registry-version-2").await);
+        assert!(w03_archived(&pool, "registry-version-3").await);
+    }
+
+    #[tokio::test]
+    async fn w03_restore_unarchives_legacy_removal_batch_only() {
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
+        let removed_at = "2026-02-01T00:00:00Z";
+        w03_add_version(&pool, "registry-version-2", "2.0.0").await;
+        w03_add_version(&pool, "registry-version-3", "3.0.0").await;
+        sqlx::query(
+            "UPDATE workflows SET library_state = 'REMOVED', removed_at = ?,
+             current_version_id = 'registry-version-2' WHERE id = 'registry-workflow'",
+        )
+        .bind(removed_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+        w03_set_state(&pool, "registry-version", true, false, Some(removed_at)).await;
+        w03_set_state(&pool, "registry-version-2", true, false, Some(removed_at)).await;
+        w03_set_state(
+            &pool,
+            "registry-version-3",
+            true,
+            false,
+            Some("2025-12-01T00:00:00Z"),
+        )
+        .await;
+
+        repository
+            .restore(
+                "registry-workflow",
+                Utc.with_ymd_and_hms(2026, 3, 1, 0, 0, 0).unwrap(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!w03_archived(&pool, "registry-version").await);
+        assert!(!w03_archived(&pool, "registry-version-2").await);
+        assert!(w03_archived(&pool, "registry-version-3").await);
+    }
+
+    struct W03Clock;
+    impl crate::application::ports::Clock for W03Clock {
+        fn now(&self) -> chrono::DateTime<Utc> {
+            Utc.with_ymd_and_hms(2026, 9, 28, 0, 0, 0).unwrap()
+        }
+    }
+
+    #[tokio::test]
+    async fn w03_stranded_versions_repaired_once() {
+        use crate::application::repair_jobs::{
+            registry_jobs::RegistryStrandedVersionsJob, RepairJob, RepairJobRunner,
+        };
+        use crate::infrastructure::database::SqliteRepairJobRepository;
+        use std::sync::Arc;
+
+        let Fixture { _dir, pool, .. } = setup().await;
+        let stranded_at = "2026-02-01T00:00:00Z";
+        w03_add_version(&pool, "registry-version-2", "2.0.0").await;
+        w03_add_version(&pool, "registry-version-3", "3.0.0").await;
+        sqlx::query(
+            "UPDATE workflows SET current_version_id = 'registry-version-3'
+             WHERE id = 'registry-workflow'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Old remove archived all three at `stranded_at`; old restore only
+        // brought back the current version.
+        w03_set_state(&pool, "registry-version", true, false, Some(stranded_at)).await;
+        w03_set_state(&pool, "registry-version-2", true, false, Some(stranded_at)).await;
+        w03_set_state(&pool, "registry-version-3", false, true, None).await;
+
+        // A second ACTIVE workflow whose versions were archived individually
+        // must only be reported.
+        sqlx::query(
+            "INSERT INTO workflows (id, name, category, mode, current_version_id, created_at, updated_at)
+             VALUES ('other-workflow', 'Other', 'image', 'text_to_image', 'other-v2',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (id, version) in [
+            ("other-v1", "1.0.0"),
+            ("other-v2", "2.0.0"),
+            ("other-v3", "3.0.0"),
+        ] {
+            sqlx::query(
+                "INSERT INTO workflow_versions
+                 (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+                 VALUES (?, 'other-workflow', ?, '{}', ?, '2026-01-01T00:00:00Z')",
+            )
+            .bind(id)
+            .bind(version)
+            .bind(format!("{id}-sha"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        w03_set_state(&pool, "other-v1", true, false, Some("2026-01-05T00:00:00Z")).await;
+        w03_set_state(&pool, "other-v3", true, false, Some("2026-01-06T00:00:00Z")).await;
+
+        let job: Arc<dyn RepairJob> = Arc::new(RegistryStrandedVersionsJob::new(
+            Arc::new(SqliteWorkflowRegistryRepository::new(pool.clone())),
+            Arc::new(W03Clock),
+        ));
+        let runner = RepairJobRunner::new(
+            Arc::new(SqliteRepairJobRepository::new(pool.clone())),
+            Arc::new(W03Clock),
+            vec![job],
+        );
+        let outcomes = runner.run_pending().await;
+        assert_eq!(outcomes.len(), 1);
+        let summary = outcomes[0].summary.clone().unwrap();
+        assert_eq!(summary.repaired, 2);
+        assert_eq!(summary.needs_review.len(), 2);
+        assert!(summary
+            .needs_review
+            .iter()
+            .all(|item| item.workflow_id == "other-workflow"));
+        assert!(!w03_archived(&pool, "registry-version").await);
+        assert!(!w03_archived(&pool, "registry-version-2").await);
+        assert!(w03_archived(&pool, "other-v1").await);
+        assert!(w03_archived(&pool, "other-v3").await);
+
+        // Completed jobs never run again.
+        assert!(runner.run_pending().await.is_empty());
     }
 }

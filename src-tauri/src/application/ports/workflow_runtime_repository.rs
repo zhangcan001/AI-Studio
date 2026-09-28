@@ -31,6 +31,9 @@ pub struct RuntimeWorkflowVersionRecord {
     pub has_successful_run: bool,
     pub latest_success_at: Option<String>,
     pub latest_failure_at: Option<String>,
+    /// W-03: the logical workflow is REMOVED. Removal no longer archives
+    /// every version, so runtime views must treat this as unavailable.
+    pub library_removed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

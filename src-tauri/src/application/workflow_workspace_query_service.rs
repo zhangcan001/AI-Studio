@@ -1177,6 +1177,7 @@ mod tests {
             has_successful_run: false,
             latest_success_at: None,
             latest_failure_at: None,
+            library_removed: false,
         }
     }
 

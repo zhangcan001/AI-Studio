@@ -938,12 +938,26 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     database_pool.clone(),
                 )),
                 clock.clone(),
-                application::repair_jobs::recipe_jobs::RecipeRepairJob::all(
-                    workflow_onboarding_service.clone(),
-                    Some(workflow_recipe_promotion_repository.clone()),
-                    Some(project_workflow_binding_repository.clone()),
-                    clock.clone(),
-                ),
+                {
+                    // W-03: un-strand versions first so the recipe jobs see
+                    // the restored versions.
+                    let mut jobs: Vec<Arc<dyn application::repair_jobs::RepairJob>> =
+                        vec![Arc::new(
+                            application::repair_jobs::registry_jobs::RegistryStrandedVersionsJob::new(
+                                Arc::new(infrastructure::database::SqliteWorkflowRegistryRepository::new(
+                                    database_pool.clone(),
+                                )),
+                                clock.clone(),
+                            ),
+                        )];
+                    jobs.extend(application::repair_jobs::recipe_jobs::RecipeRepairJob::all(
+                        workflow_onboarding_service.clone(),
+                        Some(workflow_recipe_promotion_repository.clone()),
+                        Some(project_workflow_binding_repository.clone()),
+                        clock.clone(),
+                    ));
+                    jobs
+                },
             ));
             let startup_repair_jobs = repair_job_runner.clone();
             let startup_recovery = task_recovery_service.clone();

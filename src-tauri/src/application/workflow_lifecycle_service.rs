@@ -369,7 +369,7 @@ impl WorkflowLifecycleService {
                 fast_view_for_version(
                     version,
                     enabled,
-                    archived,
+                    archived || version.library_removed,
                     archived_at.map(|value| value.to_rfc3339()),
                     cached_views.get(&version.workflow_version_id),
                     capabilities.get(&version.workflow_version_id),
@@ -495,7 +495,8 @@ impl WorkflowLifecycleService {
                 .await
                 .map_err(db_error)?;
             let enabled = state.as_ref().map_or(true, |state| state.enabled);
-            let archived = state.as_ref().is_some_and(|state| state.archived);
+            let archived =
+                state.as_ref().is_some_and(|state| state.archived) || version.library_removed;
             let archived_at = state
                 .as_ref()
                 .and_then(|state| state.archived_at)
@@ -1250,7 +1251,8 @@ impl WorkflowLifecycleService {
             .await
             .map_err(db_error)?;
         let enabled = state.as_ref().map_or(true, |state| state.enabled);
-        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let archived =
+            state.as_ref().is_some_and(|state| state.archived) || version.library_removed;
         let recipe_archived = match &self.recipe_state_repository {
             Some(repository) => repository
                 .find_state(workflow_version_id, recipe_id)
@@ -1799,7 +1801,8 @@ impl WorkflowLifecycleService {
             .await
             .map_err(db_error)?;
         let enabled = state.as_ref().map_or(true, |state| state.enabled);
-        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let archived =
+            state.as_ref().is_some_and(|state| state.archived) || version.library_removed;
         let archived_at = state
             .as_ref()
             .and_then(|state| state.archived_at)
@@ -3371,6 +3374,7 @@ outputs: []
             has_successful_run: false,
             latest_success_at: None,
             latest_failure_at: None,
+            library_removed: false,
         };
         let runtime: Arc<dyn WorkflowRuntimeRepository> =
             Arc::new(ExactRuntimeRepository { version });
@@ -3740,6 +3744,7 @@ outputs: []
             has_successful_run: false,
             latest_success_at: None,
             latest_failure_at: None,
+            library_removed: false,
         };
 
         let view = fast_view_for_version(&version, true, false, None, None, None);
