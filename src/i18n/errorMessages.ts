@@ -120,6 +120,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   WORKFLOW_RUNTIME_NOT_FOUND: "找不到对应的工作流运行包，请刷新工作流列表。",
   WORKFLOW_VERSION_NOT_FOUND: "找不到对应的工作流版本，请刷新工作流列表。",
   WORKFLOW_VERSION_UNAVAILABLE: "该工作流版本已归档、已停用或所属工作流已删除，不能设为当前版本。",
+  PACKAGE_ID_CONFLICT: "该工作流 ID 已存在且内容不同。请使用新的 ID 另存为新工作流，或先删除本地冲突版本。",
   PACKAGE_ARCHIVE_ENTRY_TOO_LARGE: "工作流包中的单个文件超过 16 MiB 上限，已拒绝导入。",
   PACKAGE_ARCHIVE_COMPRESSION_RATIO_EXCEEDED: "工作流包压缩比异常（超过 100:1），可能是恶意压缩包，已拒绝导入。",
   PACKAGE_ARCHIVE_UNSAFE_PATH: "工作流包包含不安全的文件路径（.. 或绝对路径），已拒绝导入。",

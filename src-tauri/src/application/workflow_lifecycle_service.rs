@@ -1665,30 +1665,40 @@ impl WorkflowLifecycleService {
                 && version.workflow_version == manifest.workflow_version
         }) {
             if existing.workflow_sha256 != workflow_sha {
+                // W-18: same identity with different content is not overwritten.
+                // Callers may regenerate the workflow id and restore as a new copy.
                 return Err(WorkflowLifecycleError::new(
-                    "WORKFLOW_VERSION_CONFLICT",
-                    "workflow version already exists with different content",
+                    "PACKAGE_ID_CONFLICT",
+                    "workflow id already exists with different content; restore as a new workflow with a regenerated id",
                 ));
             }
-            if let Some(recipe) = existing
+            if let Some(existing_recipe) = existing
                 .recipes
                 .iter()
-                .find(|recipe| recipe.version == manifest.recipe_version)
+                .find(|candidate| candidate.version == manifest.recipe_version)
             {
-                if recipe.recipe_sha256 == recipe_sha {
+                if existing_recipe.recipe_sha256 == recipe_sha {
                     let state = self
                         .state_repository
                         .find_state(&existing.workflow_version_id)
                         .await
                         .map_err(db_error)?;
+                    // W-18: never claim READY without a live capability check.
+                    let capability = self
+                        .onboarding_service
+                        .check_runtime_workflow_with_recipe(&workflow_json, &recipe)
+                        .await
+                        .map_err(|error| {
+                            WorkflowLifecycleError::new(error.code(), error.to_string())
+                        })?;
                     return Ok(WorkflowRestoreView {
                         status: "ALREADY_INSTALLED".to_owned(),
                         package_name: String::new(),
                         workflow_id: manifest.id,
                         workflow_version: manifest.workflow_version,
-                        recipe_id: Some(recipe.recipe_id.clone()),
-                        enabled: state.as_ref().map_or(true, |value| value.enabled),
-                        capability: "READY".to_owned(),
+                        recipe_id: Some(existing_recipe.recipe_id.clone()),
+                        enabled: state.as_ref().map_or(false, |value| value.enabled),
+                        capability: capability_state(&capability),
                     });
                 }
                 return Err(WorkflowLifecycleError::new(
@@ -1703,8 +1713,9 @@ impl WorkflowLifecycleService {
             .check_runtime_workflow_with_recipe(&workflow_json, &recipe)
             .await
             .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
-        let enabled = capability.state
-            == crate::application::workflow_onboarding_service::CapabilityState::Ready;
+        // W-18: restored packages enter a review state. Production use still
+        // requires an explicit enable / recipe promotion.
+        let enabled = false;
         let package_name = format!(
             "{}_{}_{}_{}_{}",
             safe_identifier(&manifest.id),
@@ -3799,6 +3810,68 @@ outputs: []
         assert!(restored.source_workflow_json.is_none());
         assert!(restored.recognition_metadata_json.is_none());
         assert_eq!(restored.workflow_api_json, b"{}");
+    }
+
+    fn w18_restore_archive() -> Vec<u8> {
+        let package = WorkflowPackageBytes::new(
+            br#"schema_version: 1
+id: wfl_exact_shared
+name: Exact Shared
+workflow_version: 1.0.0
+recipe_version: 1.0.0
+category: image
+mode: text_to_image
+"#
+            .to_vec(),
+            EXACT_RECIPE_A_YAML.as_bytes().to_vec(),
+            EXACT_WORKFLOW_JSON.as_bytes().to_vec(),
+        );
+        build_archive(&package).unwrap()
+    }
+
+    #[tokio::test]
+    async fn w18_restore_does_not_mark_ready_without_check() {
+        let (service, _source, _state) = exact_service_with_options(
+            false,
+            Some(WorkflowRuntimeState {
+                workflow_version_id: "wv-exact-shared".to_owned(),
+                enabled: true,
+                archived: false,
+                archived_at: None,
+                updated_at: Utc::now(),
+            }),
+            // TestNode is missing from the live schema.
+            json!({}),
+            None,
+        );
+        let view = service
+            .restore_package(w18_restore_archive())
+            .await
+            .unwrap();
+        assert_eq!(view.status, "ALREADY_INSTALLED");
+        assert_ne!(view.capability, "READY");
+        assert!(view.enabled);
+    }
+
+    #[tokio::test]
+    async fn w18_id_conflict_with_different_hash_rejected() {
+        let (service, _source) = exact_service();
+        let package = WorkflowPackageBytes::new(
+            br#"schema_version: 1
+id: wfl_exact_shared
+name: Exact Shared
+workflow_version: 1.0.0
+recipe_version: 1.0.0
+category: image
+mode: text_to_image
+"#
+            .to_vec(),
+            EXACT_RECIPE_A_YAML.as_bytes().to_vec(),
+            br#"{"1":{"class_type":"TestNode","inputs":{"mode":"other"}},"2":{"class_type":"SaveImage","inputs":{"images":["1",0]}}}"#.to_vec(),
+        );
+        let archive = build_archive(&package).unwrap();
+        let error = service.restore_package(archive).await.unwrap_err();
+        assert_eq!(error.code(), "PACKAGE_ID_CONFLICT");
     }
 
     #[test]

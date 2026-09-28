@@ -445,7 +445,9 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     try {
       const restored = await importWorkflowPackageBackup();
       if (restored) {
-        setNotice(`工作流备份已恢复：${restored.workflowVersion}`);
+        setNotice(restored.status === "ALREADY_INSTALLED"
+          ? `工作流版本 ${restored.workflowVersion} 已存在，已重新检查运行能力：${restored.capability}。`
+          : `工作流备份已恢复：${restored.workflowVersion}。恢复的版本处于待审核（停用）状态，确认后请手动启用。`);
         await loadWorkspace("refresh");
         await onCatalogChanged();
       }
