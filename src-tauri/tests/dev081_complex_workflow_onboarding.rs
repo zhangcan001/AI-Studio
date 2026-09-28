@@ -706,9 +706,15 @@ async fn dev081_fixture_auto_onboarding_infers_production_bindings() {
     assert!(mapping(&plan, "duration_seconds").required);
     assert_eq!(mapping(&plan, "seed").target_node, "2");
     assert_eq!(mapping(&plan, "seed").target_input, "noise_seed");
+    // W-22: the literal seed is kept as the default; the fixture is API
+    // format (no control_after_generate), so the mode stays random.
     assert_eq!(
         mapping(&plan, "seed").default_value.as_deref(),
-        Some("random")
+        Some("123456789")
+    );
+    assert_eq!(
+        mapping(&plan, "seed").seed_mode,
+        Some(ai_studio_lib::application::workflow_onboarding_service::SeedMode::Random)
     );
 
     for (key, default) in [("steps", "8"), ("denoise", "1"), ("fps", "24")] {
