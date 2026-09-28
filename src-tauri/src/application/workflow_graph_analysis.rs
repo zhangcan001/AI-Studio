@@ -8,9 +8,10 @@
 use crate::{application::workflow_onboarding_service::possible_link, domain::WorkflowDocument};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     error::Error,
     fmt,
+    sync::{Arc, Mutex},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -75,6 +76,34 @@ impl fmt::Display for WorkflowGraphError {
 
 impl Error for WorkflowGraphError {}
 
+type TraceKey = (String, String);
+
+/// W-09: memoized derived queries. The graph is immutable after construction,
+/// so cached answers never go stale. The cache is not part of graph identity.
+#[derive(Default)]
+struct GraphQueryCache {
+    traces: Mutex<HashMap<TraceKey, Arc<Vec<WorkflowSourceTrace>>>>,
+    upstream_closures: Mutex<HashMap<String, Arc<BTreeSet<String>>>>,
+}
+
+impl Clone for GraphQueryCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl fmt::Debug for GraphQueryCache {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("GraphQueryCache")
+    }
+}
+
+impl PartialEq for GraphQueryCache {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WorkflowGraph {
     pub nodes: BTreeSet<String>,
@@ -83,25 +112,19 @@ pub struct WorkflowGraph {
     /// Outgoing links indexed by source node.
     pub downstream: BTreeMap<String, Vec<WorkflowLink>>,
     literal_inputs: BTreeMap<String, BTreeMap<String, Value>>,
+    cache: GraphQueryCache,
 }
 
 impl WorkflowGraph {
     pub fn from_document(document: &WorkflowDocument) -> Result<Self, WorkflowGraphError> {
         let Some(workflow) = document.value().as_object() else {
-            return Ok(Self {
-                nodes: BTreeSet::new(),
-                upstream: BTreeMap::new(),
-                downstream: BTreeMap::new(),
-                literal_inputs: BTreeMap::new(),
-            });
+            return Ok(Self::default());
         };
 
         let nodes = workflow.keys().cloned().collect::<BTreeSet<_>>();
         let mut graph = Self {
             nodes,
-            upstream: BTreeMap::new(),
-            downstream: BTreeMap::new(),
-            literal_inputs: BTreeMap::new(),
+            ..Self::default()
         };
 
         for (target_node_id, node) in workflow {
@@ -180,7 +203,25 @@ impl WorkflowGraph {
 
     /// Returns the node itself and every node reachable through incoming links.
     pub fn upstream_closure(&self, node_id: &str) -> BTreeSet<String> {
-        self.closure(node_id, true)
+        self.upstream_closure_shared(node_id).as_ref().clone()
+    }
+
+    /// Memoized upstream closure (W-09).
+    pub fn upstream_closure_shared(&self, node_id: &str) -> Arc<BTreeSet<String>> {
+        if let Some(cached) = self
+            .cache
+            .upstream_closures
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(node_id).cloned())
+        {
+            return cached;
+        }
+        let computed = Arc::new(self.closure(node_id, true));
+        if let Ok(mut cache) = self.cache.upstream_closures.lock() {
+            cache.insert(node_id.to_owned(), computed.clone());
+        }
+        computed
     }
 
     /// Returns the node itself and every node reachable through outgoing links.
@@ -189,7 +230,42 @@ impl WorkflowGraph {
     }
 
     /// Traces primitive literal leaves for a linked or literal input.
+    ///
+    /// W-09: results are memoized per (node, input); the traversal itself keeps
+    /// a visited set so cycles terminate.
     pub fn trace_sources(
+        &self,
+        target_node_id: &str,
+        target_input: &str,
+    ) -> Vec<WorkflowSourceTrace> {
+        self.trace_sources_shared(target_node_id, target_input)
+            .as_ref()
+            .clone()
+    }
+
+    pub fn trace_sources_shared(
+        &self,
+        target_node_id: &str,
+        target_input: &str,
+    ) -> Arc<Vec<WorkflowSourceTrace>> {
+        let key = (target_node_id.to_owned(), target_input.to_owned());
+        if let Some(cached) = self
+            .cache
+            .traces
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&key).cloned())
+        {
+            return cached;
+        }
+        let computed = Arc::new(self.trace_sources_uncached(target_node_id, target_input));
+        if let Ok(mut cache) = self.cache.traces.lock() {
+            cache.insert(key, computed.clone());
+        }
+        computed
+    }
+
+    fn trace_sources_uncached(
         &self,
         target_node_id: &str,
         target_input: &str,
@@ -275,9 +351,10 @@ impl WorkflowGraph {
         target_node_id: &str,
         target_input: &str,
     ) -> Vec<WorkflowSourceTrace> {
-        self.trace_sources(target_node_id, target_input)
-            .into_iter()
+        self.trace_sources_shared(target_node_id, target_input)
+            .iter()
             .filter(|trace| trace.source.value.is_number())
+            .cloned()
             .collect()
     }
 
@@ -300,7 +377,8 @@ impl WorkflowGraph {
     /// `node_id` is on the selected output's dependency path, including the
     /// output node itself.
     pub fn is_on_output_path(&self, node_id: &str, output_node_id: &str) -> bool {
-        self.upstream_closure(output_node_id).contains(node_id)
+        self.upstream_closure_shared(output_node_id)
+            .contains(node_id)
     }
 
     fn closure(&self, start: &str, upstream: bool) -> BTreeSet<String> {
@@ -382,6 +460,77 @@ mod tests {
                 .map(str::to_owned)
                 .collect::<BTreeSet<_>>()
         );
+    }
+
+    #[test]
+    fn w09_trace_sources_memoized_equivalence() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/workflow_recognition_v3/real");
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(&root).unwrap() {
+            let path = entry.unwrap().path().join("sample.api.json");
+            if !path.exists() {
+                continue;
+            }
+            let value: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let Ok(document) = WorkflowDocument::parse(value) else {
+                continue;
+            };
+            let Ok(graph) = WorkflowGraph::from_document(&document) else {
+                continue;
+            };
+            let object = document.value().as_object().unwrap();
+            for (node_id, node) in object {
+                let Some(inputs) = node.get("inputs").and_then(Value::as_object) else {
+                    continue;
+                };
+                for input in inputs.keys() {
+                    let expected = graph.trace_sources_uncached(node_id, input);
+                    assert_eq!(graph.trace_sources(node_id, input), expected);
+                    // Second call is served from the cache and must be identical.
+                    assert_eq!(graph.trace_sources(node_id, input), expected);
+                    assert_eq!(
+                        graph.upstream_closure(node_id),
+                        graph.closure(node_id, true)
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 100, "only {checked} inputs checked");
+    }
+
+    #[test]
+    fn w09_large_graph_under_budget() {
+        let mut nodes = serde_json::Map::new();
+        nodes.insert(
+            "0".to_owned(),
+            json!({"class_type": "Seed", "inputs": {"value": 1, "text": "leaf"}}),
+        );
+        for index in 1..800 {
+            nodes.insert(
+                index.to_string(),
+                json!({"class_type": "Relay", "inputs": {
+                    "value": [(index - 1).to_string(), 0],
+                    "scale": 2
+                }}),
+            );
+        }
+        let document = WorkflowDocument::parse(Value::Object(nodes)).unwrap();
+        let graph = WorkflowGraph::from_document(&document).unwrap();
+        let started = std::time::Instant::now();
+        // Repeated per-input queries (as analysis does for every mapping
+        // candidate) are served from the memo instead of re-running the DFS.
+        for _ in 0..50 {
+            let _ = graph.trace_sources_shared("799", "value");
+        }
+        for index in 0..800 {
+            assert!(graph.is_on_output_path(&index.to_string(), "799"));
+        }
+        let elapsed = started.elapsed();
+        // Target 500 ms; allow 2 s on slow CI runners.
+        assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+        assert_eq!(graph.trace_scalar_sources("799", "value").len(), 799);
     }
 
     #[test]
