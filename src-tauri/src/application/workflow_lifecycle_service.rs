@@ -34,7 +34,7 @@ use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 pub const MAX_WORKFLOW_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_WORKFLOW_ARCHIVE_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
-pub const MAX_WORKFLOW_ARCHIVE_FILES: usize = 4;
+pub const MAX_WORKFLOW_ARCHIVE_FILES: usize = 6;
 /// W-17: hard cap for one decompressed archive entry. The declared size in
 /// the zip header is untrusted, so reads are bounded by this cap.
 pub const MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
@@ -2360,11 +2360,20 @@ fn validate_exact_runtime_package(
 fn build_archive(package: &WorkflowPackageBytes) -> Result<Vec<u8>, WorkflowLifecycleError> {
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    for (name, bytes) in [
+    let package_info = br#"{"format_version":2}"#.to_vec();
+    let mut files: Vec<(&str, &[u8])> = vec![
         ("manifest.yaml", &package.manifest_yaml),
         ("recipe.yaml", &package.recipe_yaml),
         ("workflow_api.json", &package.workflow_api_json),
-    ] {
+        ("package_info.json", &package_info),
+    ];
+    if let Some(source) = &package.source_workflow_json {
+        files.push(("workflow_source.json", source));
+    }
+    if let Some(recognition) = &package.recognition_metadata_json {
+        files.push(("workflow_recognition.json", recognition));
+    }
+    for (name, bytes) in files {
         writer
             .start_file(name, options)
             .map_err(|error| archive_error(error.to_string()))?;
@@ -2415,6 +2424,8 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
         "recipe.yaml",
         "workflow_api.json",
         "package_info.json",
+        "workflow_source.json",
+        "workflow_recognition.json",
     ];
     let mut entries = BTreeMap::new();
     let mut compressed_total = 0u64;
@@ -2501,7 +2512,25 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
             "workflow_api.json is required",
         )
     })?;
-    Ok(WorkflowPackageBytes::new(manifest, recipe, workflow))
+    let _package_info = entries.remove("package_info.json");
+    let source = entries.remove("workflow_source.json");
+    let recognition = match entries.remove("workflow_recognition.json") {
+        Some(bytes) => {
+            // R-10: tolerate partial/older recognition metadata so packages
+            // from other builds still restore.
+            let _: crate::application::workflow_recognition_provenance::WorkflowRecognitionProvenance =
+                serde_json::from_slice(&bytes).map_err(|error| {
+                    WorkflowLifecycleError::new(
+                        "PACKAGE_ARCHIVE_INVALID_RECOGNITION",
+                        format!("workflow_recognition.json is invalid: {error}"),
+                    )
+                })?;
+            Some(bytes)
+        }
+        None => None,
+    };
+    Ok(WorkflowPackageBytes::new(manifest, recipe, workflow)
+        .with_recognition_data(source, recognition))
 }
 
 fn diff_workflow(
@@ -2798,6 +2827,7 @@ mod tests {
     use super::{
         build_archive, deletion_action, diff_workflow, fast_view_for_version, parse_archive,
         readiness_for, sha256, WorkflowDiagnosticView, WorkflowLifecycleService,
+        MAX_WORKFLOW_ARCHIVE_FILES,
     };
     use crate::application::{
         ports::{
@@ -2826,7 +2856,7 @@ mod tests {
             Arc, Mutex,
         },
     };
-    use zip::{write::FileOptions, ZipWriter};
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
     const EXACT_WORKFLOW_JSON: &str = r#"{
   "1": {"class_type": "TestNode", "inputs": {"mode": "bad"}},
@@ -3706,6 +3736,69 @@ outputs: []
             WorkflowPackageBytes::new(b"manifest".to_vec(), b"recipe".to_vec(), b"{}".to_vec());
         let archive = build_archive(&package).unwrap();
         assert_eq!(parse_archive(&archive).unwrap(), package);
+    }
+
+    #[test]
+    fn w16_package_roundtrip_preserves_provenance() {
+        let recognition = serde_json::to_vec(&json!({
+            "recognitionEngine": "WORKFLOW_RECOGNITION_V3",
+            "recognitionEngineVersion": "3",
+            "recognizedAt": "2026-01-01T00:00:00Z",
+            "sourceFormat": "API",
+            "schemaSource": "STATIC_ANALYSIS",
+            "inferredType": "IMAGE",
+            "inferredMode": "text_to_image",
+            "finalType": "IMAGE",
+            "finalMode": "text_to_image",
+            "semanticCapabilityStatus": "READY",
+            "runtimeImportStatus": "READY",
+            "outputRootState": "RESOLVED",
+        }))
+        .unwrap();
+        let package =
+            WorkflowPackageBytes::new(b"manifest".to_vec(), b"recipe".to_vec(), b"{}".to_vec())
+                .with_recognition_data(
+                    Some(br#"{"nodes":[]}"#.to_vec()),
+                    Some(recognition.clone()),
+                );
+        let archive = build_archive(&package).unwrap();
+        let restored = parse_archive(&archive).unwrap();
+        assert_eq!(
+            restored.source_workflow_json.as_deref(),
+            Some(br#"{"nodes":[]}"#.as_slice())
+        );
+        assert_eq!(
+            restored.recognition_metadata_json.as_deref(),
+            Some(recognition.as_slice())
+        );
+        let names: Vec<_> = {
+            let mut zip = ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
+            (0..zip.len())
+                .map(|i| zip.by_index(i).unwrap().name().to_owned())
+                .collect()
+        };
+        assert!(names.contains(&"package_info.json".to_owned()));
+        assert!(names.contains(&"workflow_source.json".to_owned()));
+        assert!(names.contains(&"workflow_recognition.json".to_owned()));
+        assert!(names.len() <= MAX_WORKFLOW_ARCHIVE_FILES);
+    }
+
+    #[test]
+    fn w16_v1_package_still_restores() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, bytes) in [
+            ("manifest.yaml", b"manifest".as_slice()),
+            ("recipe.yaml", b"recipe".as_slice()),
+            ("workflow_api.json", b"{}".as_slice()),
+        ] {
+            writer.start_file(name, FileOptions::default()).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+        let archive = writer.finish().unwrap().into_inner();
+        let restored = parse_archive(&archive).unwrap();
+        assert!(restored.source_workflow_json.is_none());
+        assert!(restored.recognition_metadata_json.is_none());
+        assert_eq!(restored.workflow_api_json, b"{}");
     }
 
     #[test]
