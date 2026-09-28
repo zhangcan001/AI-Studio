@@ -99,7 +99,7 @@ export function supportedParameterFieldType(input: WorkflowInputView): WorkflowF
 export function isExposableWorkflowInput(input: WorkflowInputView): boolean {
   const linkedSemantic = input.suggestedSemanticKey?.toLowerCase();
   const graphSemantic = [
-    "prompt", "negative_prompt", "width", "height", "duration_seconds", "seed",
+    "prompt", "negative_prompt", "width", "height", "duration_seconds", "frame_count", "seed",
     "reference_image", "reference_video", "reference_audio",
   ].includes(linkedSemantic ?? "");
   return (input.bindable || (input.isLinked && graphSemantic))

@@ -59,6 +59,7 @@ const FIELD_LABELS: Record<string, string> = {
   duration: "时长（秒）",
   duration_seconds: "时长（秒）",
   length: "帧数",
+  frame_count: "帧数",
   first_frame: "首帧图片",
   last_frame: "尾帧图片",
   reference_image: "参考图片",

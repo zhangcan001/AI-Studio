@@ -184,7 +184,10 @@ impl CanonicalSemantic {
             Self::Seed => "seed",
             Self::Width => "width",
             Self::Height => "height",
-            Self::Frames | Self::Duration => "duration_seconds",
+            // R-01: frame counts are not seconds. Only a proven duration
+            // expression (seconds * fps + 1) is exposed as duration_seconds.
+            Self::Frames => "frame_count",
+            Self::Duration => "duration_seconds",
             Self::Fps => "fps",
             Self::Model | Self::ImageModel => "model",
             Self::VideoModel => "video_model",
@@ -381,8 +384,12 @@ pub fn canonical_semantic_hint(input_name: &str) -> Option<SemanticInputHint> {
         "width" => CanonicalSemantic::Width,
         "height" => CanonicalSemantic::Height,
         "seed" | "noise_seed" | "random_seed" => CanonicalSemantic::Seed,
-        "length" | "duration" | "duration_seconds" | "seconds" => CanonicalSemantic::Duration,
-        "frames" | "num_frames" | "frame_count" | "duration_frames" => CanonicalSemantic::Frames,
+        "duration" | "duration_seconds" | "seconds" => CanonicalSemantic::Duration,
+        // ComfyUI video latent nodes (EmptyHunyuanLatentVideo, WanImageToVideo,
+        // EmptyLTXVLatentVideo, ...) name their frame count `length`.
+        "length" | "frames" | "num_frames" | "frame_count" | "duration_frames" | "video_length" => {
+            CanonicalSemantic::Frames
+        }
         "fps" | "frame_rate" | "framerate" => CanonicalSemantic::Fps,
         "steps" | "num_steps" | "sampling_steps" => CanonicalSemantic::Steps,
         "cfg" | "cfg_scale" => CanonicalSemantic::Cfg,

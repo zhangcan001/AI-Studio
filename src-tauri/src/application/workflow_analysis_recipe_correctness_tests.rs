@@ -288,3 +288,37 @@ fn r06_seed_and_steps_bind_to_primary_sampler() {
         Some(("3".into(), "steps".into()))
     );
 }
+
+#[test]
+fn r01_frames_map_to_frame_count_not_seconds() {
+    assert_eq!(CanonicalSemantic::Frames.semantic_key(), "frame_count");
+    assert_eq!(
+        CanonicalSemantic::Duration.semantic_key(),
+        "duration_seconds"
+    );
+    assert_eq!(
+        canonical_semantic_hint("length").map(|hint| hint.semantic_key),
+        Some("frame_count")
+    );
+    assert_eq!(semantic_field_type("frame_count"), "integer");
+}
+
+#[test]
+fn r01_video_latent_length_literal_is_exposed_as_frame_count() {
+    let mut workflow = basic_t2i();
+    workflow["5"] = json!({"class_type": "EmptyHunyuanLatentVideo", "inputs": {
+        "width": 848, "height": 480, "length": 81, "batch_size": 1}});
+    let report = analyze_real(workflow);
+    assert_eq!(
+        binding(&report, "frame_count"),
+        Some(("5".into(), "length".into()))
+    );
+    assert!(binding(&report, "duration_seconds").is_none());
+    let frames = report
+        .inputs
+        .iter()
+        .find(|input| input.semantic_key == "frame_count")
+        .unwrap();
+    assert_eq!(frames.value, Some(json!(81)));
+    assert_eq!(frames.field_type, "integer");
+}

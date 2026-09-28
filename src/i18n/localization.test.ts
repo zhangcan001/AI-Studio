@@ -125,3 +125,11 @@ describe("evidenceKindLabel", () => {
     expect(evidenceKindLabel("UNKNOWN_KIND")).toBe("UNKNOWN_KIND");
   });
 });
+
+describe("frame_count field label (R-01)", () => {
+  it("labels frame counts as frames, not seconds", async () => {
+    const { fieldLabel } = await import("./statusLabels");
+    expect(fieldLabel("frame_count")).toBe("帧数");
+    expect(fieldLabel("duration_seconds")).toBe("时长（秒）");
+  });
+});

@@ -1357,6 +1357,31 @@ fn infer_linked_input(
         return;
     }
 
+    // R-01: a linked frame count (`length`) driven by a proven
+    // `seconds * fps + 1` expression is exposed as duration_seconds on the
+    // seconds leaf; otherwise the frame count is traced like any other number.
+    if semantic_key == "frame_count" {
+        if let Some(candidate) =
+            infer_duration_candidate(workflow, graph, target_node, target_input)
+        {
+            append_candidate(candidates, candidate);
+            return;
+        }
+        let driven_by_expression = graph
+            .incoming_source(target_node, target_input)
+            .and_then(|source| workflow.class_type(source))
+            .is_some_and(is_arithmetic_node);
+        if driven_by_expression {
+            issues.push(WorkflowAnalysisIssue {
+                code: "AMBIGUOUS_DURATION_SOURCE".to_owned(),
+                message: "无法自动确认视频时长来源，请选择唯一的动态数值源。".to_owned(),
+                field: Some("duration_seconds".to_owned()),
+                candidates: Vec::new(),
+            });
+            return;
+        }
+    }
+
     if semantic_key == "duration_seconds" {
         if let Some(candidate) =
             infer_duration_candidate(workflow, graph, target_node, target_input)
