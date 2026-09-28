@@ -12,7 +12,7 @@ import {
   compareWorkflowVersions,
   discardOnboarding,
   deleteWorkflow,
-  deleteWorkflowVersion,
+  deleteWorkflowVersionOf,
   duplicateWorkflowRecipe,
   exportWorkflowPackage,
   importWorkflowPackageBackup,
@@ -553,11 +553,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       if (item.registryBacked && item.workflowId) {
         result = [await removeWorkflow(item.workflowId)];
       } else if (item.workflowId) {
-        try {
-          result = await deleteWorkflow(item.workflowId);
-        } catch {
-          result = item.workflowVersionId ? [await deleteWorkflowVersion(item.workflowVersionId)] : [];
-        }
+        result = await deleteWorkflow(item.workflowId);
       } else {
         result = [];
       }
@@ -647,6 +643,20 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       await loadWorkspace("refresh");
       await onCatalogChanged();
       setNotice(`已将版本 ${version.version ?? version.workflowVersion ?? "—"} 设为当前版本；已有项目绑定保持不变。`);
+    } catch (actionError: unknown) {
+      setWorkspaceError(toUserMessage(actionError));
+    }
+  }
+
+  async function deleteVersion(item: WorkflowWorkspaceItem, version: WorkflowRegistryVersionView) {
+    if (!item.registryBacked || !item.workflowId || !version.workflowVersionId || version.workflowVersionId === item.currentVersionId) return;
+    const label = version.version ?? version.workflowVersion ?? "—";
+    if (!window.confirm(`确定删除版本 ${label}？工作流及其他版本将保留。`)) return;
+    try {
+      await deleteWorkflowVersionOf(item.workflowId, version.workflowVersionId);
+      await loadWorkspace("refresh");
+      await onCatalogChanged();
+      setNotice(`已删除版本 ${label}；工作流及其他版本保持不变。`);
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     }
@@ -961,6 +971,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onPurge={(item) => void inspectForPurge(item)}
         onRepairBuiltinPackage={(item) => void repairBuiltinPackage(item)}
         onSetCurrentVersion={(item, version) => void setCurrentVersion(item, version)}
+        onDeleteVersion={(item, version) => void deleteVersion(item, version)}
         onViewSavedVersion={(workflowVersionId) => void openSavedVersionDetails(workflowVersionId)}
         onPromoteRecipe={(item, recipe) => void promoteRecipe(item, recipe)}
         onClearPromotion={(item, recipe) => void clearRecipePromotion(item, recipe)}

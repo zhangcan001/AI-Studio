@@ -44,6 +44,7 @@ export interface WorkflowWorkspaceListProps {
   onPurge: (item: WorkflowWorkspaceItem) => void;
   onRepairBuiltinPackage: (item: WorkflowWorkspaceItem) => void;
   onSetCurrentVersion: (item: WorkflowWorkspaceItem, version: WorkflowRegistryVersionView) => void;
+  onDeleteVersion?: (item: WorkflowWorkspaceItem, version: WorkflowRegistryVersionView) => void;
   onViewSavedVersion: (workflowVersionId: string) => void;
   onPromoteRecipe: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
   onClearPromotion: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
@@ -82,6 +83,7 @@ export function WorkflowWorkspaceList({
   onPurge,
   onRepairBuiltinPackage,
   onSetCurrentVersion,
+  onDeleteVersion,
   onViewSavedVersion,
   onPromoteRecipe,
   onClearPromotion,
@@ -192,6 +194,7 @@ export function WorkflowWorkspaceList({
                       <span>{(version.recipes ?? []).length} 个 Recipe</span>
                       {item.registryBacked && <button type="button" className="quiet-button" onClick={() => onViewSavedVersion(version.workflowVersionId)}>重新打开保存版本</button>}
                       {item.registryBacked && !removed && version.workflowVersionId !== currentVersionId && <button type="button" className="quiet-button" onClick={() => onSetCurrentVersion(item, version)}>设为当前版本</button>}
+                      {onDeleteVersion && item.registryBacked && !removed && version.workflowVersionId !== currentVersionId && <button type="button" className="quiet-button danger-button" onClick={() => onDeleteVersion(item, version)}>删除此版本</button>}
                     </div>
                   ))}
                 </section>

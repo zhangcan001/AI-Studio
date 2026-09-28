@@ -120,6 +120,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   WORKFLOW_RUNTIME_NOT_FOUND: "找不到对应的工作流运行包，请刷新工作流列表。",
   WORKFLOW_VERSION_NOT_FOUND: "找不到对应的工作流版本，请刷新工作流列表。",
   WORKFLOW_VERSION_UNAVAILABLE: "该工作流版本已归档、已停用或所属工作流已删除，不能设为当前版本。",
+  WORKFLOW_VERSION_IS_CURRENT: "不能删除当前版本，请先将其他版本设为当前版本。",
+  WORKFLOW_VERSION_IN_USE: "该版本仍被生产批次或队列任务引用，不能删除。",
   WORKFLOW_REMOVED_RESTORE_WORKFLOW_FIRST: "该工作流已删除，请先恢复整个工作流，再恢复单个版本。",
   PROJECT_NOT_FOUND: "找不到该项目，请刷新项目列表。",
   TASK_NOT_FOUND: "找不到该任务，请刷新任务历史。",
