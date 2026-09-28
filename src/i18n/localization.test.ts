@@ -115,3 +115,11 @@ describe("用户可见错误信息", () => {
   });
 
 });
+
+describe("evidenceKindLabel", () => {
+  it("renders a Chinese label and keeps the raw evidence code", async () => {
+    const { evidenceKindLabel } = await import("./statusLabels");
+    expect(evidenceKindLabel("GRAPH_OUTPUT_PATH")).toBe("位于输出路径（GRAPH_OUTPUT_PATH）");
+    expect(evidenceKindLabel("UNKNOWN_KIND")).toBe("UNKNOWN_KIND");
+  });
+});

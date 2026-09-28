@@ -50,9 +50,11 @@ const MEDIUM_CONFIDENCE_MIN_SCORE: i32 = 25;
 const REQUIRED_SELECTION_MARGIN: i32 = 15;
 const AMBIGUITY_MARGIN: i32 = 12;
 
+// Variant names are already SCREAMING_SNAKE_CASE and serialize verbatim. A
+// `rename_all = "SCREAMING_SNAKE_CASE"` here would split every capital letter
+// (`GRAPH_OUTPUT_PATH` -> `G_R_A_P_H__O_U_T_P_U_T__P_A_T_H`).
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvidenceKind {
     EXPLICIT_OUTPUT_MAPPING,
     EXACT_INPUT_NAME,
@@ -4145,3 +4147,7 @@ pub(crate) mod tests {
         assert_eq!(forward.mode, "first_last_frame_to_video");
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_analysis_recipe_correctness_tests.rs"]
+mod recipe_correctness_tests;

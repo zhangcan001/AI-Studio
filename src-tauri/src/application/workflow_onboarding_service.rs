@@ -110,6 +110,156 @@ pub struct WorkflowNormalizationDiagnosticView {
     pub workflow_format: Option<String>,
 }
 
+/// Typed failure of UI-source normalization. Codes produced in this module are
+/// never packed into strings; only errors surfaced by lower layers (whose
+/// Display starts with `CODE:`) are classified from their prefix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingNormalizationCode {
+    MissingNodes,
+    WorkflowFormatVersionUnknown,
+    FrontendVersionUnknown,
+    FrontendVersionUnsupported,
+    HistoricalProfileDetectedButNotImplemented,
+    ObjectInfoSchemaLineageDrift,
+    SerializationEvidencePartial,
+    ObjectInfoSchemaProvenanceMismatch,
+    ProvenanceFingerprintConflict,
+    HistoricalSerializationFingerprintUnknown,
+    UnsupportedNormalizationCompatibility,
+    SchemaUnavailable,
+    UnsupportedUiFeature,
+    NormalizationBlocked,
+}
+
+impl PendingNormalizationCode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingNodes => "MISSING_NODES",
+            Self::WorkflowFormatVersionUnknown => "WORKFLOW_FORMAT_VERSION_UNKNOWN",
+            Self::FrontendVersionUnknown => "FRONTEND_VERSION_UNKNOWN",
+            Self::FrontendVersionUnsupported => "FRONTEND_VERSION_UNSUPPORTED",
+            Self::HistoricalProfileDetectedButNotImplemented => {
+                "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
+            }
+            Self::ObjectInfoSchemaLineageDrift => "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT",
+            Self::SerializationEvidencePartial => "SERIALIZATION_EVIDENCE_PARTIAL",
+            Self::ObjectInfoSchemaProvenanceMismatch => "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH",
+            Self::ProvenanceFingerprintConflict => "PROVENANCE_FINGERPRINT_CONFLICT",
+            Self::HistoricalSerializationFingerprintUnknown => {
+                "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN"
+            }
+            Self::UnsupportedNormalizationCompatibility => {
+                "UNSUPPORTED_NORMALIZATION_COMPATIBILITY"
+            }
+            Self::SchemaUnavailable => "SCHEMA_UNAVAILABLE",
+            Self::UnsupportedUiFeature => "UNSUPPORTED_UI_FEATURE",
+            Self::NormalizationBlocked => "NORMALIZATION_BLOCKED",
+        }
+    }
+
+    /// Classify the `CODE` prefix of an error produced by a lower layer.
+    fn from_lower_layer_prefix(prefix: &str) -> Self {
+        match prefix.trim() {
+            "UNKNOWN_NODE_CLASS" => Self::MissingNodes,
+            "WORKFLOW_FORMAT_VERSION_UNKNOWN" => Self::WorkflowFormatVersionUnknown,
+            "FRONTEND_VERSION_UNKNOWN" => Self::FrontendVersionUnknown,
+            "FRONTEND_VERSION_UNSUPPORTED" => Self::FrontendVersionUnsupported,
+            "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED" => {
+                Self::HistoricalProfileDetectedButNotImplemented
+            }
+            "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT" => Self::ObjectInfoSchemaLineageDrift,
+            "SERIALIZATION_EVIDENCE_PARTIAL" => Self::SerializationEvidencePartial,
+            "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH" => Self::ObjectInfoSchemaProvenanceMismatch,
+            "PROVENANCE_FINGERPRINT_CONFLICT" => Self::ProvenanceFingerprintConflict,
+            "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN" => {
+                Self::HistoricalSerializationFingerprintUnknown
+            }
+            "UNSUPPORTED_NORMALIZATION_COMPATIBILITY" => {
+                Self::UnsupportedNormalizationCompatibility
+            }
+            "SCHEMA_EMPTY" => Self::SchemaUnavailable,
+            _ => Self::NormalizationBlocked,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PendingNormalizationError {
+    code: PendingNormalizationCode,
+    message: String,
+    missing_classes: Vec<String>,
+    legacy_frontend_unknown: bool,
+}
+
+impl PendingNormalizationError {
+    fn new(code: PendingNormalizationCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            missing_classes: Vec::new(),
+            legacy_frontend_unknown: false,
+        }
+    }
+
+    fn missing_nodes(missing_classes: Vec<String>, legacy_frontend_unknown: bool) -> Self {
+        Self {
+            message: format!(
+                "MISSING_NODES: ComfyUI is missing node classes [{}]",
+                missing_classes.join(", ")
+            ),
+            code: PendingNormalizationCode::MissingNodes,
+            missing_classes,
+            legacy_frontend_unknown,
+        }
+    }
+
+    fn from_lower_layer(message: String) -> Self {
+        let prefix = message
+            .split_once(':')
+            .map(|(prefix, _)| prefix)
+            .unwrap_or(message.as_str());
+        Self::new(
+            PendingNormalizationCode::from_lower_layer_prefix(prefix),
+            message.clone(),
+        )
+    }
+}
+
+/// Map UI-format node classes to their node ids (for MISSING_NODE issues).
+fn ui_node_ids_by_class(raw_bytes: &[u8]) -> BTreeMap<String, Vec<String>> {
+    let mut result = BTreeMap::<String, Vec<String>>::new();
+    let Ok(value) = serde_json::from_slice::<Value>(raw_bytes) else {
+        return result;
+    };
+    let mut stack = vec![&value];
+    while let Some(current) = stack.pop() {
+        if let Some(nodes) = current.get("nodes").and_then(Value::as_array) {
+            for node in nodes {
+                let Some(class_type) = node.get("type").and_then(Value::as_str) else {
+                    continue;
+                };
+                let node_id = match node.get("id") {
+                    Some(Value::String(id)) => id.clone(),
+                    Some(Value::Number(id)) => id.to_string(),
+                    _ => continue,
+                };
+                result
+                    .entry(class_type.to_owned())
+                    .or_default()
+                    .push(node_id);
+            }
+        }
+        if let Some(subgraphs) = current
+            .get("definitions")
+            .and_then(|definitions| definitions.get("subgraphs"))
+            .and_then(Value::as_array)
+        {
+            stack.extend(subgraphs.iter());
+        }
+    }
+    result
+}
+
 impl WorkflowNormalizationDiagnosticView {
     fn basic(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -2128,8 +2278,9 @@ impl WorkflowOnboardingService {
         )>,
         WorkflowOnboardingError,
     > {
-        let pending = |diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
-                       state: CapabilityState|
+        let pending_with_issues = |diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
+                                   state: CapabilityState,
+                                   issues: Vec<CapabilityIssueView>|
          -> Result<
             Option<(
                 CapabilityCheckView,
@@ -2141,7 +2292,7 @@ impl WorkflowOnboardingService {
             let capability = CapabilityCheckView {
                 state,
                 checked_at: Some(self.clock.now().to_rfc3339()),
-                issues: Vec::new(),
+                issues,
                 profile: None,
             };
             self.with_registry(|registry| {
@@ -2161,6 +2312,10 @@ impl WorkflowOnboardingService {
                 Ok(())
             })??;
             Ok(None)
+        };
+        let pending = |diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
+                       state: CapabilityState| {
+            pending_with_issues(diagnostics, state, Vec::new())
         };
 
         let object = match self.comfy_adapter.get_object_info().await {
@@ -2196,22 +2351,45 @@ impl WorkflowOnboardingService {
 
         let mut feature_block: Option<WorkflowUiFeatureObservation> = None;
         let mut normalized_features: Option<Vec<WorkflowUiFeatureObservation>> = None;
-        let result = (|| -> Result<_, String> {
+        let lower = |error: &dyn std::fmt::Display| {
+            PendingNormalizationError::from_lower_layer(error.to_string())
+        };
+        let result = (|| -> Result<_, PendingNormalizationError> {
             let schema = RecognitionSchemaContext::parse(&object);
-            let source_value: Value = serde_json::from_slice(&initial.raw_bytes)
-                .map_err(|error| format!("UI_JSON_INVALID: {error}"))?;
+            let source_value: Value =
+                serde_json::from_slice(&initial.raw_bytes).map_err(|error| {
+                    PendingNormalizationError::new(
+                        PendingNormalizationCode::NormalizationBlocked,
+                        format!("UI_JSON_INVALID: {error}"),
+                    )
+                })?;
             let schema_fingerprint = canonical_schema_fingerprint(&object);
             let fingerprint = HistoricalUiSerializationFingerprint::from_source_value(
                 &source_value,
                 schema_fingerprint.clone(),
                 &schema,
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| lower(&error))?;
+            // Missing node classes are the actionable root cause: the UI source
+            // cannot be normalized without their schemas, so report them before
+            // profile resolution folds them into a generic provenance mismatch.
+            if !fingerprint.schema_lineage.missing_node_classes.is_empty() {
+                let legacy_frontend_unknown = initial.frontend_version.is_none()
+                    && fingerprint.positional_widget_cursor_gap
+                    && !fingerprint.dynamic_input_evidence;
+                return Err(PendingNormalizationError::missing_nodes(
+                    fingerprint.schema_lineage.missing_node_classes.clone(),
+                    legacy_frontend_unknown,
+                ));
+            }
             let workflow_format_version = initial
                 .workflow_format_version
                 .as_deref()
                 .ok_or_else(|| {
-                    "WORKFLOW_FORMAT_VERSION_UNKNOWN: source UI workflow has no workflow format version provenance".to_owned()
+                    PendingNormalizationError::new(
+                        PendingNormalizationCode::WorkflowFormatVersionUnknown,
+                        "WORKFLOW_FORMAT_VERSION_UNKNOWN: source UI workflow has no workflow format version provenance",
+                    )
                 })?;
             let resolved_profile =
                 UiCompatibilityProfileResolver::resolve(UiCompatibilityResolutionInput {
@@ -2225,50 +2403,53 @@ impl WorkflowOnboardingService {
                     .primary_diagnostic()
                     .unwrap_or("historical_serialization_fingerprint_unknown");
                 let code = match diagnostic {
-                    "frontend_provenance_insufficient" => "FRONTEND_VERSION_UNKNOWN",
+                    "frontend_provenance_insufficient" => {
+                        PendingNormalizationCode::FrontendVersionUnknown
+                    }
                     "historical_profile_detected_but_not_implemented" => {
-                        "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
+                        PendingNormalizationCode::HistoricalProfileDetectedButNotImplemented
                     }
                     "object_info_schema_lineage_mismatch"
-                    | "object_info_schema_provenance_mismatch" => {
-                        // Preserve the existing pending-draft diagnostic for a source that has
-                        // neither frontend provenance nor a usable node-class lineage.  This
-                        // does not make the profile supported; it only keeps the actionable
-                        // pre-existing error for malformed/incomplete UI imports.
-                        if initial.frontend_version.is_none()
-                            && fingerprint.positional_widget_cursor_gap
-                            && !fingerprint.dynamic_input_evidence
-                            && !fingerprint.schema_lineage.missing_node_classes.is_empty()
-                        {
-                            "FRONTEND_VERSION_UNKNOWN"
-                        } else {
-                            "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
-                        }
+                    | "object_info_schema_provenance_mismatch"
+                    | "schema_snapshot_provenance_insufficient" => {
+                        PendingNormalizationCode::ObjectInfoSchemaProvenanceMismatch
                     }
-                    "object_info_schema_lineage_drift" => "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT",
-                    "schema_snapshot_provenance_insufficient" => {
-                        "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
+                    "object_info_schema_lineage_drift" => {
+                        PendingNormalizationCode::ObjectInfoSchemaLineageDrift
                     }
-                    "serialization_evidence_partial" => "SERIALIZATION_EVIDENCE_PARTIAL",
-                    "provenance_fingerprint_conflict" => "PROVENANCE_FINGERPRINT_CONFLICT",
-                    _ => "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN",
+                    "serialization_evidence_partial" => {
+                        PendingNormalizationCode::SerializationEvidencePartial
+                    }
+                    "provenance_fingerprint_conflict" => {
+                        PendingNormalizationCode::ProvenanceFingerprintConflict
+                    }
+                    _ => PendingNormalizationCode::HistoricalSerializationFingerprintUnknown,
                 };
-                return Err(format!(
-                    "{code}: contracts=[{}] serialization_evidence={} schema_provenance={} ({})",
-                    resolved_profile
-                        .required_contracts
-                        .iter()
-                        .map(|contract| contract.as_str())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                    resolved_profile.serialization_evidence_status.as_str(),
-                    resolved_profile.schema_provenance.as_str(),
-                    diagnostic
+                return Err(PendingNormalizationError::new(
+                    code,
+                    format!(
+                        "{}: contracts=[{}] serialization_evidence={} schema_provenance={} ({})",
+                        code.as_str(),
+                        resolved_profile
+                            .required_contracts
+                            .iter()
+                            .map(|contract| contract.as_str())
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        resolved_profile.serialization_evidence_status.as_str(),
+                        resolved_profile.schema_provenance.as_str(),
+                        diagnostic
+                    ),
                 ));
             }
             let normalization_contracts = resolved_profile
                 .contracts_for_normalization()
-                .ok_or_else(|| "SERIALIZATION_EVIDENCE_NOT_RESOLVED".to_owned())?;
+                .ok_or_else(|| {
+                    PendingNormalizationError::new(
+                        PendingNormalizationCode::NormalizationBlocked,
+                        "SERIALIZATION_EVIDENCE_NOT_RESOLVED",
+                    )
+                })?;
             let is_historical = resolved_profile.serialization_evidence_status
                 == SerializationEvidenceStatus::ResolvedHistorical;
             let compatibility = if is_historical {
@@ -2283,31 +2464,31 @@ impl WorkflowOnboardingService {
                     resolved_profile.evidence.frontend_version.as_deref(),
                     schema_fingerprint,
                 )
-                .map_err(|error| error.to_string())?
+                .map_err(|error| lower(&error))?
             };
             let profile = FrontendSerializationProfile::from_contracts_from_context(
                 &compatibility,
                 normalization_contracts,
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| lower(&error))?;
             let descriptors =
                 UiSerializationDescriptorSet::build(&schema, profile, compatibility.clone())
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| lower(&error))?;
             let ui_document = parse_ui_workflow_value_with_descriptors(&source_value, &descriptors)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| lower(&error))?;
             let feature_set = ui_document.features.with_schema(&ui_document, &descriptors);
             normalized_features = Some(feature_set.observations.clone());
             if let Some(observation) = feature_set.blocking_observation() {
                 feature_block = Some(observation.clone());
-                return Err(format!(
-                    "UNSUPPORTED_UI_FEATURE:{}",
-                    observation.feature.as_str()
+                return Err(PendingNormalizationError::new(
+                    PendingNormalizationCode::UnsupportedUiFeature,
+                    format!("UNSUPPORTED_UI_FEATURE:{}", observation.feature.as_str()),
                 ));
             }
-            let normalized = normalize_ui_workflow(&ui_document, &descriptors)
-                .map_err(|error| error.to_string())?;
+            let normalized =
+                normalize_ui_workflow(&ui_document, &descriptors).map_err(|error| lower(&error))?;
             let mut nodes =
-                inspect_workflow(&normalized.workflow).map_err(|error| error.to_string())?;
+                inspect_workflow(&normalized.workflow).map_err(|error| lower(&error))?;
             enrich_nodes_with_schema(&mut nodes, &schema);
             let output_roots = output_root_selections_from_mappings(&initial.output_mappings);
             let analysis = WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
@@ -2354,36 +2535,58 @@ impl WorkflowOnboardingService {
                         CapabilityState::IncompatibleInputValues,
                     );
                 }
-                let code = match error.split(':').next().unwrap_or_default() {
-                    "UNKNOWN_NODE_CLASS" => "MISSING_NODES",
-                    "WORKFLOW_FORMAT_VERSION_UNKNOWN" => "WORKFLOW_FORMAT_VERSION_UNKNOWN",
-                    "FRONTEND_VERSION_UNKNOWN" => "FRONTEND_VERSION_UNKNOWN",
-                    "FRONTEND_VERSION_UNSUPPORTED" => "FRONTEND_VERSION_UNSUPPORTED",
-                    "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED" => {
-                        "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
+                if error.code == PendingNormalizationCode::MissingNodes
+                    && error.missing_classes.is_empty()
+                {
+                    return pending(
+                        vec![WorkflowNormalizationDiagnosticView::basic(
+                            error.code.as_str(),
+                            error.message,
+                        )],
+                        CapabilityState::MissingNodes,
+                    );
+                }
+                if error.code == PendingNormalizationCode::MissingNodes {
+                    let node_ids_by_class = ui_node_ids_by_class(&initial.raw_bytes);
+                    let mut diagnostics = Vec::new();
+                    let mut issues = Vec::new();
+                    for class_type in &error.missing_classes {
+                        let node_ids = node_ids_by_class
+                            .get(class_type)
+                            .cloned()
+                            .unwrap_or_default();
+                        let message = format!("缺少 ComfyUI 节点类型：{class_type}");
+                        let mut diagnostic =
+                            WorkflowNormalizationDiagnosticView::basic("MISSING_NODE", &message);
+                        diagnostic.node_type = Some(class_type.clone());
+                        diagnostic.node_id = node_ids.first().cloned();
+                        diagnostics.push(diagnostic);
+                        issues.push(CapabilityIssueView {
+                            code: "MISSING_NODE".to_owned(),
+                            class_type: Some(class_type.clone()),
+                            node_id: None,
+                            affected_node_ids: node_ids,
+                            input_name: None,
+                            current_value: None,
+                            message: format!("Missing ComfyUI node class {class_type}"),
+                        });
                     }
-                    "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT" => "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT",
-                    "SERIALIZATION_EVIDENCE_PARTIAL" => "SERIALIZATION_EVIDENCE_PARTIAL",
-                    "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH" => {
-                        "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
+                    if error.legacy_frontend_unknown {
+                        // Keep the pre-existing actionable provenance hint for
+                        // UI sources without frontend provenance.
+                        diagnostics.push(WorkflowNormalizationDiagnosticView::basic(
+                            PendingNormalizationCode::FrontendVersionUnknown.as_str(),
+                            error.message.clone(),
+                        ));
                     }
-                    "PROVENANCE_FINGERPRINT_CONFLICT" => "PROVENANCE_FINGERPRINT_CONFLICT",
-                    "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN" => {
-                        "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN"
-                    }
-                    "UNSUPPORTED_NORMALIZATION_COMPATIBILITY" => {
-                        "UNSUPPORTED_NORMALIZATION_COMPATIBILITY"
-                    }
-                    "SCHEMA_EMPTY" => "SCHEMA_UNAVAILABLE",
-                    _ => "NORMALIZATION_BLOCKED",
-                };
+                    return pending_with_issues(diagnostics, CapabilityState::MissingNodes, issues);
+                }
                 pending(
-                    vec![WorkflowNormalizationDiagnosticView::basic(code, error)],
-                    if code == "MISSING_NODES" {
-                        CapabilityState::MissingNodes
-                    } else {
-                        CapabilityState::IncompatibleInputValues
-                    },
+                    vec![WorkflowNormalizationDiagnosticView::basic(
+                        error.code.as_str(),
+                        error.message,
+                    )],
+                    CapabilityState::IncompatibleInputValues,
                 )
             }
         }
@@ -9647,6 +9850,114 @@ outputs: []
             }
             assert_eq!(adapter.object_info_calls(), cases.len());
         }
+    }
+
+    #[test]
+    fn r09_pending_error_message_with_colon_keeps_code() {
+        let error = PendingNormalizationError::from_lower_layer(
+            "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT: node 7: widget `a:b` drifted".to_owned(),
+        );
+        assert_eq!(
+            error.code,
+            PendingNormalizationCode::ObjectInfoSchemaLineageDrift
+        );
+        assert_eq!(error.code.as_str(), "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT");
+        assert!(error.message.contains("widget `a:b` drifted"));
+
+        let unknown = PendingNormalizationError::from_lower_layer("no code here".to_owned());
+        assert_eq!(unknown.code, PendingNormalizationCode::NormalizationBlocked);
+        let schema = PendingNormalizationError::from_lower_layer("SCHEMA_EMPTY".to_owned());
+        assert_eq!(schema.code.as_str(), "SCHEMA_UNAVAILABLE");
+    }
+
+    #[test]
+    fn r09_missing_nodes_error_carries_classes() {
+        let error = PendingNormalizationError::missing_nodes(
+            vec!["BlendCustom".to_owned(), "Other:Node".to_owned()],
+            false,
+        );
+        assert_eq!(error.code, PendingNormalizationCode::MissingNodes);
+        assert_eq!(error.missing_classes, vec!["BlendCustom", "Other:Node"]);
+    }
+
+    #[test]
+    fn r02_ui_node_ids_by_class_includes_subgraph_nodes() {
+        let raw = serde_json::to_vec(&json!({
+            "nodes": [{"id": 3, "type": "BlendCustom"}, {"id": "4", "type": "SaveImage"}],
+            "definitions": {"subgraphs": [{"nodes": [{"id": 9, "type": "BlendCustom"}]}]}
+        }))
+        .unwrap();
+        let by_class = ui_node_ids_by_class(&raw);
+        assert_eq!(by_class["BlendCustom"], vec!["3", "9"]);
+        assert_eq!(by_class["SaveImage"], vec!["4"]);
+    }
+
+    #[tokio::test]
+    async fn r02_ui_workflow_missing_custom_node_reports_missing_node() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("library");
+        let staging_root = directory.path().join("staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let service = WorkflowOnboardingService::new(
+            source.clone(),
+            Arc::new(StubComfyAdapter::ready()),
+            Arc::new(WorkflowLibraryService::new(
+                source,
+                Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+                Arc::new(TestClock),
+            )),
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root,
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        );
+        let raw = serde_json::to_vec(&json!({
+            "version": 0.4,
+            "extra": {"frontendVersion": "1.42.14"},
+            "nodes": [
+                {"id": 1, "type": "Sampler", "mode": 0, "inputs": [], "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [1]}], "widgets_values": ["a cat"]},
+                {"id": 2, "type": "BlendCustomNode", "mode": 0, "inputs": [{"name": "image", "type": "IMAGE", "link": 1}], "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [2]}], "widgets_values": [0.5]},
+                {"id": 3, "type": "SaveImage", "mode": 0, "inputs": [{"name": "images", "type": "IMAGE", "link": 2}], "outputs": [], "widgets_values": ["out"]}
+            ],
+            "links": [[1, 1, 0, 2, 0, "IMAGE"], [2, 2, 0, 3, 0, "IMAGE"]]
+        }))
+        .unwrap();
+        let imported = service
+            .import_bytes(raw, "missing-custom.json".to_owned(), None)
+            .await
+            .expect("UI workflow with a missing custom node should remain a draft");
+        let plan = service.reanalyze_draft(&imported.draft_id).await.unwrap();
+        assert_eq!(
+            plan.normalization_state,
+            WorkflowNormalizationState::UiSourcePending
+        );
+        let codes = plan
+            .normalization_diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            !codes.contains(&"OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"),
+            "missing nodes must not be reported as a provenance mismatch: {codes:?}"
+        );
+        let missing = plan
+            .normalization_diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "MISSING_NODE")
+            .expect("a MISSING_NODE diagnostic per missing class");
+        assert_eq!(missing.node_type.as_deref(), Some("BlendCustomNode"));
+        assert_eq!(missing.node_id.as_deref(), Some("2"));
+        assert_eq!(plan.capability.state, CapabilityState::MissingNodes);
+        assert!(plan.capability.issues.iter().any(|issue| {
+            issue.code == "MISSING_NODE"
+                && issue.class_type.as_deref() == Some("BlendCustomNode")
+                && issue.affected_node_ids == vec!["2".to_owned()]
+        }));
     }
 
     impl StubComfyAdapter {

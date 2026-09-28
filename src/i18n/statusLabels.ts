@@ -221,3 +221,36 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
+
+const EVIDENCE_KIND_LABELS: Record<string, string> = {
+  EXPLICIT_OUTPUT_MAPPING: "显式输出映射",
+  EXACT_INPUT_NAME: "输入名完全匹配",
+  INPUT_NAME_ALIAS: "输入名别名",
+  GRAPH_DIRECT_SINK: "图直接汇入",
+  GRAPH_OUTPUT_PATH: "位于输出路径",
+  GRAPH_CONDITIONING_ROLE: "采样器正/负向条件",
+  GRAPH_PRIMARY_SAMPLER: "主采样器",
+  SCHEMA_TYPE_MATCH: "Schema 类型匹配",
+  SCHEMA_TYPE_CONFLICT: "Schema 类型冲突",
+  SCHEMA_MEDIA_UPLOAD: "Schema 媒体上传",
+  SCHEMA_MEDIA_OUTPUT: "Schema 媒体输出",
+  MEDIA_TYPE_MATCH: "媒体类型匹配",
+  CLASS_TYPE_HINT: "节点类型提示",
+  NODE_TITLE_HINT: "节点标题提示",
+  LITERAL_TYPE_MATCH: "取值类型匹配",
+  NUMERIC_RANGE_MATCH: "数值范围匹配",
+  PRIMITIVE_SOURCE_NODE: "独立输入节点",
+  SYSTEM_PROMPT_HINT: "系统提示词（降权）",
+  OFF_OUTPUT_PATH: "不在输出路径",
+  UTILITY_NODE: "工具节点",
+  OUTPUT_NODE_FLAG: "输出节点",
+  TERMINAL_OUTPUT: "终端输出",
+  PREVIEW_OUTPUT: "预览输出",
+  AUXILIARY_OUTPUT: "辅助输出",
+};
+
+/** Chinese label for a recognition evidence kind; the raw code stays visible. */
+export function evidenceKindLabel(kind: string): string {
+  const label = EVIDENCE_KIND_LABELS[kind];
+  return label ? `${label}（${kind}）` : kind;
+}
