@@ -519,6 +519,19 @@ pub struct WorkflowOnboardingInputMappingRequest {
     pub target_input: String,
     #[serde(default)]
     pub item_index: Option<usize>,
+    /// W-22: explicit seed default mode. Missing keeps the legacy
+    /// interpretation of `default_value` (numeric = fixed, else random).
+    #[serde(default)]
+    pub seed_mode: Option<SeedMode>,
+}
+
+/// W-22: whether a seed field starts from the workflow's literal seed
+/// (`fixed`) or draws a new random seed per run (`random`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SeedMode {
+    Fixed,
+    Random,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -709,6 +722,8 @@ pub struct WorkflowInputMappingView {
     pub target_node: String,
     pub target_input: String,
     pub item_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed_mode: Option<SeedMode>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -949,6 +964,7 @@ struct InputMapping {
     target_node: String,
     target_input: String,
     item_index: Option<usize>,
+    seed_mode: Option<SeedMode>,
     source: InputMappingSource,
 }
 
@@ -3262,6 +3278,9 @@ impl WorkflowOnboardingService {
                 target_node: request.target_node,
                 target_input: request.target_input,
                 item_index: request.item_index,
+                seed_mode: (field_type == SemanticFieldType::Seed)
+                    .then_some(request.seed_mode)
+                    .flatten(),
                 source,
             };
             draft.input_mappings.retain(|existing| {
@@ -3935,6 +3954,7 @@ impl WorkflowOnboardingService {
                             target_node: binding.target.node.clone(),
                             target_input: binding.target.input.clone(),
                             item_index: binding.item_index,
+                            seed_mode: recipe.inputs.get(&binding.source).and_then(input_seed_mode),
                         })
                         .collect(),
                     recipe.outputs.iter().map(output_view).collect(),
@@ -4726,9 +4746,25 @@ fn analysis_input_mapping(
         SemanticFieldType::Textarea | SemanticFieldType::Integer | SemanticFieldType::Number => {
             input.value.as_ref().and_then(raw_default_value)
         }
-        SemanticFieldType::Seed => Some("random".to_owned()),
+        // W-22: the literal integer seed from the workflow becomes the
+        // default; the mode decides whether it is used as-is or replaced by
+        // a random seed per run.
+        SemanticFieldType::Seed => input
+            .value
+            .as_ref()
+            .and_then(Value::as_u64)
+            .map(|value| value.to_string()),
         _ => None,
     };
+    let seed_mode = (field_type == SemanticFieldType::Seed).then(|| {
+        if default_value.is_some()
+            && ui_seed_control_is_fixed(draft, &input.node_id, input.value.as_ref())
+        {
+            SeedMode::Fixed
+        } else {
+            SeedMode::Random
+        }
+    });
     let (min_value, max_value, step) = match field_type {
         SemanticFieldType::Integer => (
             node_input
@@ -4780,8 +4816,86 @@ fn analysis_input_mapping(
         target_node: input.node_id.clone(),
         target_input: input.input_name.clone(),
         item_index: input.item_index,
+        seed_mode,
         source: InputMappingSource::ModelInferred,
     })
+}
+
+/// W-22: inspect the UI-format source for the seed widget's
+/// `control_after_generate` value. Only an explicit `fixed` control next to
+/// the literal seed counts as fixed; API-format workflows carry no control
+/// widget and therefore stay random.
+fn ui_seed_control_is_fixed(
+    draft: &WorkflowOnboardingDraft,
+    node_id: &str,
+    seed_value: Option<&Value>,
+) -> bool {
+    if draft.source_format == ComfyWorkflowInputFormat::Api {
+        return false;
+    }
+    let Some(seed) = seed_value.and_then(Value::as_u64) else {
+        return false;
+    };
+    let Ok(document) = serde_json::from_slice::<Value>(&draft.raw_bytes) else {
+        return false;
+    };
+    ui_seed_control_in_nodes(&document, node_id, seed).unwrap_or(false)
+}
+
+fn ui_seed_control_in_nodes(document: &Value, node_id: &str, seed: u64) -> Option<bool> {
+    // Subgraph-expanded API ids look like "outer:inner"; the widget lives on
+    // the innermost node id.
+    let local_id = node_id.rsplit(':').next().unwrap_or(node_id);
+    let mut node_lists = vec![document.get("nodes")?];
+    if let Some(subgraphs) = document
+        .get("definitions")
+        .and_then(|value| value.get("subgraphs"))
+        .and_then(Value::as_array)
+    {
+        node_lists.extend(subgraphs.iter().filter_map(|graph| graph.get("nodes")));
+    }
+    for nodes in node_lists {
+        let Some(nodes) = nodes.as_array() else {
+            continue;
+        };
+        for node in nodes {
+            let id = match node.get("id") {
+                Some(Value::Number(number)) => number.to_string(),
+                Some(Value::String(text)) => text.clone(),
+                _ => continue,
+            };
+            if id != local_id {
+                continue;
+            }
+            match node.get("widgets_values") {
+                Some(Value::Array(values)) => {
+                    let found = values.windows(2).find_map(|pair| {
+                        (pair[0].as_u64() == Some(seed))
+                            .then(|| pair[1].as_str())
+                            .flatten()
+                            .filter(|control| {
+                                matches!(
+                                    *control,
+                                    "fixed" | "increment" | "decrement" | "randomize"
+                                )
+                            })
+                    });
+                    if let Some(control) = found {
+                        return Some(control == "fixed");
+                    }
+                }
+                Some(Value::Object(values)) => {
+                    if let Some(control) =
+                        values.get("control_after_generate").and_then(Value::as_str)
+                    {
+                        return Some(control == "fixed");
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 fn normalize_inferred_plural_bounds(mappings: &mut [InputMapping]) {
@@ -5272,9 +5386,16 @@ impl InputMapping {
             }),
             SemanticFieldType::Seed => Ok(InputDefinition::Seed {
                 label: self.label.clone(),
-                default: match default.as_deref() {
-                    None | Some("") | Some("random") => SeedDefault::Random,
-                    Some(value) => SeedDefault::Fixed(value.parse().map_err(|_| {
+                default: match (self.seed_mode, default.as_deref()) {
+                    (Some(SeedMode::Random), _) => SeedDefault::Random,
+                    (Some(SeedMode::Fixed), None | Some("") | Some("random")) => {
+                        return Err(WorkflowOnboardingError::new(
+                            "MAPPING_INVALID",
+                            "fixed seed mode requires an unsigned integer default",
+                        ));
+                    }
+                    (None, None | Some("") | Some("random")) => SeedDefault::Random,
+                    (_, Some(value)) => SeedDefault::Fixed(value.parse().map_err(|_| {
                         WorkflowOnboardingError::new(
                             "MAPPING_INVALID",
                             format!("seed default {value} is not an unsigned integer"),
@@ -5566,6 +5687,7 @@ fn input_mapping_view(mapping: &InputMapping) -> WorkflowInputMappingView {
         target_node: mapping.target_node.clone(),
         target_input: mapping.target_input.clone(),
         item_index: mapping.item_index,
+        seed_mode: mapping.seed_mode,
     }
 }
 
@@ -5623,6 +5745,7 @@ fn input_mappings_from_recipe(
                 max_items: input_max_items(definition),
                 target_node: binding.target.node.clone(),
                 target_input: binding.target.input.clone(),
+                seed_mode: input_seed_mode(definition),
                 item_index: binding.item_index,
                 source: InputMappingSource::ReusedRecipe,
             })
@@ -5652,6 +5775,16 @@ fn input_required(definition: &InputDefinition) -> bool {
         | InputDefinition::Videos { required, .. }
         | InputDefinition::Audios { required, .. } => *required,
         InputDefinition::Seed { .. } => true,
+    }
+}
+
+fn input_seed_mode(definition: &InputDefinition) -> Option<SeedMode> {
+    match definition {
+        InputDefinition::Seed { default, .. } => Some(match default {
+            SeedDefault::Random => SeedMode::Random,
+            SeedDefault::Fixed(_) => SeedMode::Fixed,
+        }),
+        _ => None,
     }
 }
 
@@ -7737,6 +7870,7 @@ outputs: []
             allowed_options: Vec::new(),
         };
         let request = WorkflowOnboardingInputMappingRequest {
+            seed_mode: None,
             semantic_key: "steps".to_owned(),
             field_type: "integer".to_owned(),
             label: "Steps".to_owned(),
@@ -7910,6 +8044,7 @@ outputs: []
             .set_input_mapping(
                 &draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "unrelated_media".to_owned(),
                     field_type: "image".to_owned(),
                     label: "Reference image".to_owned(),
@@ -7931,6 +8066,7 @@ outputs: []
             .set_input_mapping(
                 &draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "output_prefix".to_owned(),
                     field_type: "textarea".to_owned(),
                     label: "Output prefix".to_owned(),
@@ -7952,6 +8088,7 @@ outputs: []
             .set_input_mapping(
                 &draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "prompt".to_owned(),
                     field_type: "textarea".to_owned(),
                     label: "Prompt".to_owned(),
@@ -8264,6 +8401,7 @@ outputs: []
             .set_input_mapping(
                 &changed_draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "prompt".to_owned(),
                     field_type: "textarea".to_owned(),
                     label: "Prompt".to_owned(),
@@ -8441,6 +8579,7 @@ outputs: []
             .set_input_mapping(
                 &ambiguous.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "image".to_owned(),
                     field_type: "image".to_owned(),
                     label: "Input image".to_owned(),
@@ -9476,6 +9615,7 @@ outputs: []
             .any(|issue| issue.code == "AMBIGUOUS_INPUT"));
 
         let mapping = |target_input: &str| WorkflowOnboardingInputMappingRequest {
+            seed_mode: None,
             semantic_key: "prompt".to_owned(),
             field_type: "textarea".to_owned(),
             label: "Prompt".to_owned(),
@@ -9694,6 +9834,7 @@ outputs: []
                     target_node: "1".to_owned(),
                     target_input: "prompt".to_owned(),
                     item_index: None,
+                    seed_mode: None,
                     source: InputMappingSource::ModelInferred,
                 },
                 InputMapping {
@@ -9710,6 +9851,7 @@ outputs: []
                     target_node: "1".to_owned(),
                     target_input: "seed".to_owned(),
                     item_index: None,
+                    seed_mode: None,
                     source: InputMappingSource::ModelInferred,
                 },
             ],
@@ -9961,6 +10103,7 @@ outputs: []
             target_node: "1".to_owned(),
             target_input: "ckpt_name".to_owned(),
             item_index: None,
+            seed_mode: None,
             source: InputMappingSource::UserConfirmed,
         }];
         let validation = validation_for_draft(&draft);
@@ -10186,6 +10329,102 @@ outputs: []
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Err(ComfyAdapterError::Incompatible("test".to_owned()))
         }
+    }
+
+    fn w22_seed_draft(ui_control: Option<&str>) -> WorkflowOnboardingDraft {
+        let mut draft = test_draft(json!({
+            "3": {"inputs": {"seed": 424242, "steps": 20}, "class_type": "KSampler"}
+        }));
+        if let Some(control) = ui_control {
+            draft.source_format = ComfyWorkflowInputFormat::Ui;
+            draft.raw_bytes = serde_json::to_vec(&json!({
+                "nodes": [{"id": 3, "type": "KSampler", "widgets_values": [424242, control, 20, 7, "euler", "normal", 1]}],
+                "links": []
+            }))
+            .unwrap();
+        }
+        draft
+    }
+
+    fn w22_seed_input() -> crate::application::workflow_analysis_service::WorkflowAnalysisInput {
+        crate::application::workflow_analysis_service::WorkflowAnalysisInput {
+            semantic_key: "seed".to_owned(),
+            field_type: "seed".to_owned(),
+            label: "Seed".to_owned(),
+            required: false,
+            value: Some(json!(424242)),
+            node_id: "3".to_owned(),
+            input_name: "seed".to_owned(),
+            item_index: None,
+            confidence:
+                crate::application::workflow_recognition_service::RecognitionConfidence::High,
+            source: "test".to_owned(),
+            score: 100,
+            evidence: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn w22_seed_default_uses_literal_when_fixed() {
+        let draft = w22_seed_draft(Some("fixed"));
+        let mapping = analysis_input_mapping(&draft, &w22_seed_input()).unwrap();
+        assert_eq!(mapping.default_value.as_deref(), Some("424242"));
+        assert_eq!(mapping.seed_mode, Some(SeedMode::Fixed));
+        match mapping.to_definition().unwrap() {
+            InputDefinition::Seed { default, .. } => {
+                assert_eq!(default, SeedDefault::Fixed(424242))
+            }
+            other => panic!("unexpected definition {other:?}"),
+        }
+        let view = serde_json::to_value(input_mapping_view(&mapping)).unwrap();
+        assert_eq!(view["seedMode"], "fixed");
+        assert_eq!(view["defaultValue"], "424242");
+    }
+
+    #[test]
+    fn w22_seed_default_random_when_control_randomizes_or_api_format() {
+        for draft in [w22_seed_draft(Some("randomize")), w22_seed_draft(None)] {
+            let mapping = analysis_input_mapping(&draft, &w22_seed_input()).unwrap();
+            assert_eq!(mapping.default_value.as_deref(), Some("424242"));
+            assert_eq!(mapping.seed_mode, Some(SeedMode::Random));
+            match mapping.to_definition().unwrap() {
+                InputDefinition::Seed { default, .. } => assert_eq!(default, SeedDefault::Random),
+                other => panic!("unexpected definition {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn w22_missing_seed_mode_keeps_legacy_default_semantics() {
+        let draft = w22_seed_draft(None);
+        let mut mapping = analysis_input_mapping(&draft, &w22_seed_input()).unwrap();
+        mapping.seed_mode = None;
+        assert!(matches!(
+            mapping.to_definition().unwrap(),
+            InputDefinition::Seed {
+                default: SeedDefault::Fixed(424242),
+                ..
+            }
+        ));
+        mapping.default_value = Some("random".to_owned());
+        assert!(matches!(
+            mapping.to_definition().unwrap(),
+            InputDefinition::Seed {
+                default: SeedDefault::Random,
+                ..
+            }
+        ));
+        mapping.seed_mode = Some(SeedMode::Fixed);
+        assert_eq!(
+            mapping.to_definition().unwrap_err().code(),
+            "MAPPING_INVALID"
+        );
+        let request: WorkflowOnboardingInputMappingRequest = serde_json::from_value(json!({
+            "semanticKey": "seed", "fieldType": "seed", "label": "Seed",
+            "targetNode": "3", "targetInput": "seed", "seedMode": "random"
+        }))
+        .unwrap();
+        assert_eq!(request.seed_mode, Some(SeedMode::Random));
     }
 }
 

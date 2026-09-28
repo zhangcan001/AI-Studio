@@ -1,4 +1,5 @@
 import type {
+  SeedMode,
   WorkflowFieldType,
   WorkflowInputMappingView,
   WorkflowInputView,
@@ -30,6 +31,13 @@ export interface MappingDraft {
   maxItems: string;
   itemIndex: string;
   step: string;
+  /** W-22: "" keeps the legacy interpretation of the default value. */
+  seedMode?: "" | SeedMode;
+}
+
+/** W-22: only seed fields carry an explicit mode in mapping requests. */
+export function seedModeRequest(draft: Pick<MappingDraft, "fieldType" | "seedMode">): SeedMode | undefined {
+  return draft.fieldType === "seed" && draft.seedMode ? draft.seedMode : undefined;
 }
 
 export type ParameterMappingEdit = {
@@ -50,6 +58,7 @@ export function mappingToDraft(mapping: WorkflowInputMappingView): MappingDraft 
     maxItems: mapping.maxItems?.toString() ?? "",
     itemIndex: mapping.itemIndex?.toString() ?? "",
     step: mapping.step ?? "",
+    seedMode: mapping.seedMode ?? "",
   };
 }
 

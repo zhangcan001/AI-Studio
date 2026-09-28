@@ -1212,6 +1212,7 @@ function ParameterExposurePane({
                 <label>类型<select value={edit.fieldType} onChange={(event) => patchMapping(mapping, { fieldType: event.target.value as WorkflowFieldType })}>{parameterFieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
                 <label className="checkbox-label"><input type="checkbox" checked={edit.required} onChange={(event) => patchMapping(mapping, { required: event.target.checked })} /> 必填</label>
                 {(edit.fieldType === "textarea" || edit.fieldType === "integer" || edit.fieldType === "number" || edit.fieldType === "seed") && <label>默认值<input value={edit.defaultValue} onChange={(event) => patchMapping(mapping, { defaultValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : undefined} /></label>}
+                {edit.fieldType === "seed" && <SeedModeSelect value={edit.seedMode} defaultValue={edit.defaultValue} onChange={(seedMode) => patchMapping(mapping, { seedMode })} />}
                 {(edit.fieldType === "integer" || edit.fieldType === "number" || edit.fieldType === "seed") && <>
                   <label>最小值<input value={edit.minValue} onChange={(event) => patchMapping(mapping, { minValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>
                   <label>最大值<input value={edit.maxValue} onChange={(event) => patchMapping(mapping, { maxValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>
@@ -1318,6 +1319,7 @@ function InputsPane({
                   <label className="checkbox-label"><input type="checkbox" checked={mapping.required} onChange={(event) => onPatch(key, { required: event.target.checked })} /> 必填</label>
                   {mapping.fieldType === "integer" || mapping.fieldType === "number" || mapping.fieldType === "seed" ? <>
                     <label>默认值<input value={mapping.defaultValue} onChange={(event) => onPatch(key, { defaultValue: event.target.value })} /></label>
+                    {mapping.fieldType === "seed" && <SeedModeSelect value={mapping.seedMode} defaultValue={mapping.defaultValue} onChange={(seedMode) => onPatch(key, { seedMode })} />}
                     <label>最小值<input value={mapping.minValue} onChange={(event) => onPatch(key, { minValue: event.target.value })} inputMode={mapping.fieldType === "number" ? "decimal" : "numeric"} /></label>
                     <label>最大值<input value={mapping.maxValue} onChange={(event) => onPatch(key, { maxValue: event.target.value })} inputMode={mapping.fieldType === "number" ? "decimal" : "numeric"} /></label>
                   </> : null}
@@ -1534,4 +1536,15 @@ function fieldTypeLabel(value: WorkflowFieldType): string {
     audio: "音频",
     audios: "多个音频",
   }[value];
+}
+
+/** W-22: fixed reuses the literal seed as default; random draws a new seed per run. */
+export function SeedModeSelect({ value, defaultValue, onChange }: { value?: MappingDraft["seedMode"]; defaultValue: string; onChange: (value: MappingDraft["seedMode"]) => void }) {
+  const effective = value || (/^\d+$/.test(defaultValue.trim()) ? "fixed" : "random");
+  return (
+    <label>种子模式<select aria-label="种子模式" value={effective} onChange={(event) => onChange(event.target.value as MappingDraft["seedMode"])}>
+      <option value="fixed">固定（使用默认值）</option>
+      <option value="random">随机（每次生成新种子）</option>
+    </select></label>
+  );
 }

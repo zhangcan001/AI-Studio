@@ -756,6 +756,7 @@ mod tests {
             target_node: node.to_owned(),
             target_input: input.to_owned(),
             item_index: None,
+            seed_mode: None,
             source: InputMappingSource::ReusedRecipe,
         }
     }

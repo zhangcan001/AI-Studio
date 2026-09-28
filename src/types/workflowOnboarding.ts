@@ -328,7 +328,12 @@ export interface WorkflowInputMappingView {
   targetNode: string;
   targetInput: string;
   itemIndex?: number;
+  /** W-22: absent on legacy data; treat as random unless a numeric default is set. */
+  seedMode?: SeedMode;
 }
+
+/** W-22: fixed = reuse the workflow's literal seed; random = new seed per run. */
+export type SeedMode = "fixed" | "random";
 
 export interface WorkflowOutputMappingView {
   outputId: string;
@@ -882,6 +887,7 @@ export interface WorkflowOnboardingInputMappingRequest {
   targetNode: string;
   targetInput: string;
   itemIndex?: number;
+  seedMode?: SeedMode;
 }
 
 export interface WorkflowOnboardingOutputMappingRequest {
