@@ -240,6 +240,10 @@ function issueTitle(code: string): string {
       return "当前环境缺少节点";
     case "INPUT_OPTION_UNAVAILABLE":
       return "输入选项不可用";
+    case "WORKFLOW_LINK_SLOT_OUT_OF_RANGE":
+      return "连线引用了不存在的输出槽";
+    case "WORKFLOW_LINK_TYPE_MISMATCH":
+      return "连线类型不一致";
     case "AMBIGUOUS_OUTPUT":
       return "检测到多个输出节点";
     case "AMBIGUOUS_OUTPUT_ROOT":

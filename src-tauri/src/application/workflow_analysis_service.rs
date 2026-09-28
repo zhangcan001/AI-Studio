@@ -409,6 +409,9 @@ pub fn analyze_workflow_with_schema_and_output_roots(
 
     let (inputs, _bindings, input_issues) = resolve_candidates(candidates);
     issues.extend(input_issues);
+    if let Some(schema) = schema {
+        issues.extend(validate_links_against_schema(workflow, schema));
+    }
     let category = if output_analysis.resolution.is_resolved() {
         category_for_outputs(&output_analysis.outputs)
     } else {
@@ -2537,6 +2540,114 @@ fn number_starting_at(chars: &[char], start: usize) -> Option<f64> {
         end += 1;
     }
     chars[start..end].iter().collect::<String>().parse().ok()
+}
+
+/// R-08: validate every link against the live ComfyUI schema.
+///
+/// * `WORKFLOW_LINK_SLOT_OUT_OF_RANGE` — the link references an output slot the
+///   source node class does not declare (ComfyUI would fail at execution).
+/// * `WORKFLOW_LINK_TYPE_MISMATCH` — both sides declare a concrete, simple type
+///   and they differ (ComfyUI `validate_inputs` rejects this as well). Wildcards,
+///   unions, combo lists and MatchType templates are never reported.
+///
+/// Nodes whose class is unknown to the schema or whose outputs are not declared
+/// are skipped; missing classes are reported elsewhere.
+pub(crate) fn validate_links_against_schema(
+    workflow: &WorkflowDocument,
+    schema: &RecognitionSchemaContext,
+) -> Vec<WorkflowAnalysisIssue> {
+    let mut issues = Vec::new();
+    let Some(nodes) = workflow.value().as_object() else {
+        return issues;
+    };
+    for (node_id, node) in nodes {
+        let Some(node) = node.as_object() else {
+            continue;
+        };
+        let target_class = node
+            .get("class_type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(inputs) = node.get("inputs").and_then(Value::as_object) else {
+            continue;
+        };
+        for (input_name, value) in inputs {
+            if !is_link(value) {
+                continue;
+            }
+            let link = value.as_array().expect("checked link");
+            let source_id = link[0].as_str().unwrap_or_default();
+            let slot = link[1].as_u64().unwrap_or_default() as usize;
+            let Some(source_class) = nodes
+                .get(source_id)
+                .and_then(|source| source.get("class_type"))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let Some(source_schema) = schema.nodes.get(source_class) else {
+                continue;
+            };
+            let output_count = source_schema.raw_output_types.len();
+            if output_count == 0 {
+                continue;
+            }
+            let field = Some(format!("{node_id}.{input_name}"));
+            if slot >= output_count {
+                issues.push(WorkflowAnalysisIssue {
+                    code: "WORKFLOW_LINK_SLOT_OUT_OF_RANGE".to_owned(),
+                    message: format!(
+                        "节点 {node_id}（{target_class}）的输入 {input_name} 连接到节点 {source_id}（{source_class}）的输出槽 {slot}，但该节点只有 {output_count} 个输出。"
+                    ),
+                    field,
+                    candidates: Vec::new(),
+                });
+                continue;
+            }
+            if source_schema
+                .output_match_types
+                .get(slot)
+                .is_some_and(Option::is_some)
+            {
+                continue;
+            }
+            let Some(input_schema) = schema
+                .nodes
+                .get(target_class)
+                .and_then(|target| target.input(input_name))
+            else {
+                continue;
+            };
+            if input_schema.match_template.is_some() {
+                continue;
+            }
+            let output_type = source_schema.raw_output_types[slot].as_str();
+            let input_type = input_schema.raw_type.trim();
+            if is_simple_link_type(output_type)
+                && is_simple_link_type(input_type)
+                && !output_type.eq_ignore_ascii_case(input_type)
+            {
+                issues.push(WorkflowAnalysisIssue {
+                    code: "WORKFLOW_LINK_TYPE_MISMATCH".to_owned(),
+                    message: format!(
+                        "节点 {node_id}（{target_class}）的输入 {input_name} 需要 {input_type}，但连接的节点 {source_id}（{source_class}）输出槽 {slot} 类型为 {output_type}。"
+                    ),
+                    field,
+                    candidates: Vec::new(),
+                });
+            }
+        }
+    }
+    issues
+}
+
+fn is_simple_link_type(raw: &str) -> bool {
+    !raw.is_empty()
+        && raw != "*"
+        && !raw.eq_ignore_ascii_case("COMBO")
+        && raw.chars().all(|character| {
+            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+        })
 }
 
 fn is_link(value: &Value) -> bool {

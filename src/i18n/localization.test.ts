@@ -57,6 +57,8 @@ describe("用户可见错误信息", () => {
   it("maps known backend error codes to Chinese", () => {
     expect(toUserMessage({ code: "COMFY_OFFLINE", message: "connection refused" })).toContain("ComfyUI");
     expect(errorMessageForCode("TASK_NOT_CANCELLABLE")).toBe("当前任务状态不支持取消。");
+    expect(errorMessageForCode("WORKFLOW_LINK_SLOT_OUT_OF_RANGE")).toContain("输出槽");
+    expect(errorMessageForCode("WORKFLOW_LINK_TYPE_MISMATCH")).toContain("类型不一致");
   });
 
   it("keeps runtime admission identity in the user-visible start error", () => {
