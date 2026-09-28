@@ -4704,7 +4704,7 @@ fn analysis_input_mapping(
     let field_type = SemanticFieldType::parse(&input.field_type).ok()?;
     let default_value = match field_type {
         SemanticFieldType::Textarea | SemanticFieldType::Integer | SemanticFieldType::Number => {
-            input.value.as_ref().map(current_value_summary)
+            input.value.as_ref().and_then(raw_default_value)
         }
         SemanticFieldType::Seed => Some("random".to_owned()),
         _ => None,
@@ -6498,6 +6498,22 @@ fn value_kind(value: &Value, linked: bool) -> &'static str {
         "object"
     } else {
         "null"
+    }
+}
+
+/// W-01: recipe defaults keep the workflow's literal value verbatim. The
+/// display summary (`current_value_summary`) trims, truncates to 120 chars and
+/// strips path-like prefixes, which silently corrupted long prompts. Links are
+/// never defaults.
+fn raw_default_value(value: &Value) -> Option<String> {
+    if possible_link(value).is_some() {
+        return None;
+    }
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
     }
 }
 
@@ -9850,6 +9866,31 @@ outputs: []
             }
             assert_eq!(adapter.object_info_calls(), cases.len());
         }
+    }
+
+    #[test]
+    fn w01_default_keeps_long_prompt_verbatim() {
+        let long_prompt = format!("  /leading slash kept {}  ", "cinematic light, ".repeat(20));
+        assert!(long_prompt.chars().count() > 120);
+        assert_eq!(
+            raw_default_value(&json!(long_prompt)).as_deref(),
+            Some(long_prompt.as_str())
+        );
+        assert_eq!(raw_default_value(&json!(8)).as_deref(), Some("8"));
+        assert_eq!(raw_default_value(&json!(0.75)).as_deref(), Some("0.75"));
+        assert_eq!(raw_default_value(&json!(["3", 0])), None);
+
+        let draft = test_draft(json!({
+            "1": {"inputs": {"prompt": long_prompt, "seed": 7, "steps": 30}, "class_type": "ImageSampler"},
+            "2": {"inputs": {"images": ["1", 0]}, "class_type": "SaveImage"}
+        }));
+        let result = infer_auto_onboarding(&draft);
+        let prompt = result
+            .input_mappings
+            .iter()
+            .find(|mapping| mapping.semantic_key == "prompt")
+            .expect("prompt mapping");
+        assert_eq!(prompt.default_value.as_deref(), Some(long_prompt.as_str()));
     }
 
     #[test]
