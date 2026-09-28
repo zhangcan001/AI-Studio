@@ -375,7 +375,8 @@ pub fn canonical_semantic_hint(input_name: &str) -> Option<SemanticInputHint> {
     let semantic = match name.as_str() {
         "prompt" | "text" => CanonicalSemantic::PromptText,
         "positive" | "positive_prompt" => CanonicalSemantic::PositivePrompt,
-        "negative" | "negative_prompt" => CanonicalSemantic::NegativePrompt,
+        "negative" | "negative_prompt" | "neg" | "neg_prompt" | "negative_text" | "neg_text"
+        | "uncond" | "unconditional" => CanonicalSemantic::NegativePrompt,
         "description" => CanonicalSemantic::PromptText,
         "width" => CanonicalSemantic::Width,
         "height" => CanonicalSemantic::Height,
@@ -422,6 +423,11 @@ pub fn canonical_semantic_hint(input_name: &str) -> Option<SemanticInputHint> {
         }
         _ if indexed_slot(&name, AUDIO_SLOT_PREFIXES).is_some() => {
             CanonicalSemantic::ReferenceAudioList
+        }
+        // R-05: system prompts steer an LLM; they are never the user prompt.
+        _ if name.contains("system") => return None,
+        _ if name.starts_with("negative_") || name.starts_with("neg_") => {
+            CanonicalSemantic::NegativePrompt
         }
         _ if name.starts_with("prompt_") || name.ends_with("_prompt") => {
             CanonicalSemantic::PromptText

@@ -49,6 +49,9 @@ const HIGH_CONFIDENCE_MIN_SCORE: i32 = 45;
 const MEDIUM_CONFIDENCE_MIN_SCORE: i32 = 25;
 const REQUIRED_SELECTION_MARGIN: i32 = 15;
 const AMBIGUITY_MARGIN: i32 = 12;
+const SCORE_GRAPH_CONDITIONING_ROLE: i32 = 60;
+const SCORE_PRIMITIVE_SOURCE_NODE: i32 = 20;
+const PENALTY_SYSTEM_PROMPT_HINT: i32 = -40;
 
 // Variant names are already SCREAMING_SNAKE_CASE and serialize verbatim. A
 // `rename_all = "SCREAMING_SNAKE_CASE"` here would split every capital letter
@@ -76,6 +79,13 @@ pub enum EvidenceKind {
     TERMINAL_OUTPUT,
     PREVIEW_OUTPUT,
     AUXILIARY_OUTPUT,
+    /// The text leaf feeds exactly one sampler conditioning role
+    /// (positive/negative) that matches the candidate field.
+    GRAPH_CONDITIONING_ROLE,
+    /// The text leaf is a Primitive* node, the usual user-facing entry point.
+    PRIMITIVE_SOURCE_NODE,
+    /// The node title or input name marks the text as a system prompt.
+    SYSTEM_PROMPT_HINT,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -407,6 +417,9 @@ pub fn analyze_workflow_with_schema_and_output_roots(
         }
     }
 
+    let roles = sampler_conditioning_roles(workflow, &graph, schema);
+    apply_conditioning_roles(&mut candidates, &roles, schema.is_some());
+
     let (inputs, _bindings, input_issues) = resolve_candidates(candidates);
     issues.extend(input_issues);
     if let Some(schema) = schema {
@@ -596,6 +609,9 @@ fn evidence_weight(kind: EvidenceKind) -> i32 {
         EvidenceKind::TERMINAL_OUTPUT => 25,
         EvidenceKind::PREVIEW_OUTPUT => -60,
         EvidenceKind::AUXILIARY_OUTPUT => -40,
+        EvidenceKind::GRAPH_CONDITIONING_ROLE => SCORE_GRAPH_CONDITIONING_ROLE,
+        EvidenceKind::PRIMITIVE_SOURCE_NODE => SCORE_PRIMITIVE_SOURCE_NODE,
+        EvidenceKind::SYSTEM_PROMPT_HINT => PENALTY_SYSTEM_PROMPT_HINT,
     }
 }
 
@@ -730,15 +746,16 @@ fn schema_literal_guess(
             return Some(schema_media_guess(media_kind, input.required));
         }
     }
+    // W-02: a prompt is free text. COMBO/Enum inputs (checkpoint names,
+    // sampler names, ...) are never prompt candidates.
     if value.is_string()
-        && matches!(
-            input.declared_type,
-            RecognitionDeclaredType::String | RecognitionDeclaredType::Enum
-        )
+        && input.declared_type == RecognitionDeclaredType::String
         && is_prompt_like_name(&name, &class)
     {
         return Some(Guess {
-            semantic_key: if name.contains("negative") {
+            semantic_key: if canonical_semantic_hint(&name)
+                .is_some_and(|hint| hint.semantic == CanonicalSemantic::NegativePrompt)
+            {
                 "negative_prompt"
             } else {
                 "prompt"
@@ -925,6 +942,9 @@ fn schema_linked_guess(
 }
 
 fn is_prompt_like_name(name: &str, class_type: &str) -> bool {
+    if is_system_prompt_name(name) || is_text_separator_input(name) {
+        return false;
+    }
     canonical_semantic_hint(name).is_some_and(|hint| {
         matches!(
             hint.semantic,
@@ -939,10 +959,8 @@ fn is_prompt_like_name(name: &str, class_type: &str) -> bool {
 
 fn declared_type_for_field(field_type: &str) -> &'static [RecognitionDeclaredType] {
     match field_type {
-        "textarea" => &[
-            RecognitionDeclaredType::String,
-            RecognitionDeclaredType::Enum,
-        ],
+        // W-02 type guard: COMBO/Enum values are never free text.
+        "textarea" => &[RecognitionDeclaredType::String],
         "integer" | "seed" => &[RecognitionDeclaredType::Integer],
         "number" => &[
             RecognitionDeclaredType::Integer,
@@ -1033,7 +1051,9 @@ fn compact_source(evidence: &[RecognitionEvidence]) -> String {
             EvidenceKind::EXACT_INPUT_NAME | EvidenceKind::INPUT_NAME_ALIAS => {
                 parts.insert("NAME");
             }
-            EvidenceKind::GRAPH_DIRECT_SINK | EvidenceKind::GRAPH_OUTPUT_PATH => {
+            EvidenceKind::GRAPH_DIRECT_SINK
+            | EvidenceKind::GRAPH_OUTPUT_PATH
+            | EvidenceKind::GRAPH_CONDITIONING_ROLE => {
                 parts.insert("GRAPH");
             }
             EvidenceKind::SCHEMA_TYPE_MATCH
@@ -1045,7 +1065,10 @@ fn compact_source(evidence: &[RecognitionEvidence]) -> String {
             EvidenceKind::MEDIA_TYPE_MATCH => {
                 parts.insert("MEDIA");
             }
-            EvidenceKind::CLASS_TYPE_HINT | EvidenceKind::NODE_TITLE_HINT => {
+            EvidenceKind::CLASS_TYPE_HINT
+            | EvidenceKind::NODE_TITLE_HINT
+            | EvidenceKind::PRIMITIVE_SOURCE_NODE
+            | EvidenceKind::SYSTEM_PROMPT_HINT => {
                 parts.insert("HINT");
             }
             EvidenceKind::LITERAL_TYPE_MATCH | EvidenceKind::NUMERIC_RANGE_MATCH => {
@@ -1248,6 +1271,29 @@ fn enrich_candidate_with_context(
         }
     }
 
+    if candidate.field_type == "textarea" {
+        if class_type.to_ascii_lowercase().starts_with("primitive") {
+            push_evidence(
+                candidate,
+                evidence(
+                    EvidenceKind::PRIMITIVE_SOURCE_NODE,
+                    "text originates from a primitive input node",
+                ),
+            );
+        }
+        if is_system_prompt_name(&normalize(title))
+            || is_system_prompt_name(&normalize(&candidate.input_name))
+        {
+            push_evidence(
+                candidate,
+                evidence(
+                    EvidenceKind::SYSTEM_PROMPT_HINT,
+                    "node title or input name marks a system prompt",
+                ),
+            );
+        }
+    }
+
     candidate.score = candidate.evidence.iter().map(|item| item.weight).sum();
     candidate.confidence = if candidate.has_schema_conflict {
         RecognitionConfidence::Low
@@ -1323,6 +1369,9 @@ fn infer_linked_input(
             continue;
         }
         let leaf = trace.source;
+        if is_text_separator_input(&normalize(&leaf.input)) {
+            continue;
+        }
         let class_type = workflow.class_type(&leaf.node_id).unwrap_or_default();
         let Some(guess) = literal_guess(class_type, &leaf.input, &leaf.value)
             .or_else(|| {
@@ -1433,6 +1482,18 @@ fn linked_source_guess(
 ) -> Option<Guess> {
     if source_guess.semantic_key == target_semantic.semantic_key {
         return Some(source_guess);
+    }
+    // W-02: a generic text/prompt leaf traced from a negative conditioning
+    // sink is the negative prompt (e.g. CLIPTextEncode.text -> KSampler.negative).
+    if target_semantic.semantic_key == "negative_prompt"
+        && source_guess.semantic_key == "prompt"
+        && source_guess.field_type == "textarea"
+    {
+        return Some(Guess {
+            semantic_key: "negative_prompt",
+            required: false,
+            ..source_guess
+        });
     }
     if target_semantic.force_media_source
         && media_family(target_semantic.semantic_key) == media_family(source_guess.semantic_key)
@@ -2418,7 +2479,8 @@ fn is_ignored_input(name: &str) -> bool {
             | "megapixels"
             | "pix_fmt"
             | "crf"
-    ) || name.contains("model")
+    ) || is_text_separator_input(name)
+        || name.contains("model")
         || name.contains("vae")
         || name.contains("clip")
         || name.contains("lora")
@@ -2540,6 +2602,220 @@ fn number_starting_at(chars: &[char], start: usize) -> Option<f64> {
         end += 1;
     }
     chars[start..end].iter().collect::<String>().parse().ok()
+}
+
+/// Conditioning role of a text leaf as seen from a sampler/guider.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum PromptRole {
+    Positive,
+    Negative,
+}
+
+impl PromptRole {
+    fn semantic_key(self) -> &'static str {
+        match self {
+            Self::Positive => "prompt",
+            Self::Negative => "negative_prompt",
+        }
+    }
+}
+
+type ConditioningRoles = BTreeMap<(String, String), BTreeSet<PromptRole>>;
+
+/// W-02 / R-03 / R-04: walk upstream from every node that consumes
+/// `positive`/`negative` conditioning (samplers, guiders) and record which
+/// string literal leaves feed which role.
+///
+/// * `ConditioningZeroOut` stops the walk (it discards the text).
+/// * Conditioning routers that themselves take `positive`/`negative` (for
+///   example ControlNetApplyAdvanced) are followed by output slot: slot 0 is
+///   the positive branch, slot 1 the negative branch.
+/// * model/clip/vae/image style inputs are not followed, so loader combos never
+///   become prompt leaves; delimiter-like inputs and COMBO/Enum inputs are
+///   never recorded.
+pub(crate) fn sampler_conditioning_roles(
+    workflow: &WorkflowDocument,
+    graph: &WorkflowGraph,
+    schema: Option<&RecognitionSchemaContext>,
+) -> ConditioningRoles {
+    let mut roles = ConditioningRoles::new();
+    for node_id in &graph.nodes {
+        let upstream = graph.upstream_of(node_id);
+        for (role, name) in [
+            (PromptRole::Positive, "positive"),
+            (PromptRole::Negative, "negative"),
+        ] {
+            for link in upstream.iter().filter(|link| link.target_input == name) {
+                let mut visited = BTreeSet::new();
+                walk_conditioning_role(
+                    workflow,
+                    graph,
+                    schema,
+                    &link.source_node_id,
+                    link.source_output_index,
+                    role,
+                    &mut visited,
+                    &mut roles,
+                );
+            }
+        }
+    }
+    roles
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_conditioning_role(
+    workflow: &WorkflowDocument,
+    graph: &WorkflowGraph,
+    schema: Option<&RecognitionSchemaContext>,
+    node_id: &str,
+    output_slot: u64,
+    role: PromptRole,
+    visited: &mut BTreeSet<(String, u64)>,
+    roles: &mut ConditioningRoles,
+) {
+    if !visited.insert((node_id.to_owned(), output_slot)) {
+        return;
+    }
+    let class_type = workflow.class_type(node_id).unwrap_or_default();
+    if class_type.to_ascii_lowercase().contains("zeroout") {
+        return;
+    }
+    let upstream = graph.upstream_of(node_id);
+    let is_router = upstream.iter().any(|link| link.target_input == "positive")
+        && upstream.iter().any(|link| link.target_input == "negative");
+    if is_router {
+        let branch = match output_slot {
+            0 => "positive",
+            1 => "negative",
+            _ => return,
+        };
+        for link in upstream.iter().filter(|link| link.target_input == branch) {
+            walk_conditioning_role(
+                workflow,
+                graph,
+                schema,
+                &link.source_node_id,
+                link.source_output_index,
+                role,
+                visited,
+                roles,
+            );
+        }
+        return;
+    }
+    if let Some(inputs) = workflow.inputs(node_id) {
+        for (input_name, value) in inputs {
+            if !value.is_string() || is_text_separator_input(&normalize(input_name)) {
+                continue;
+            }
+            let declared = schema
+                .and_then(|schema| schema.node(class_type))
+                .and_then(|node| node.input(input_name))
+                .map(|input| input.declared_type);
+            if declared.is_some_and(|declared| declared != RecognitionDeclaredType::String) {
+                continue;
+            }
+            roles
+                .entry((node_id.to_owned(), input_name.clone()))
+                .or_default()
+                .insert(role);
+        }
+    }
+    for link in upstream {
+        if !follows_conditioning_text(&link.target_input) {
+            continue;
+        }
+        walk_conditioning_role(
+            workflow,
+            graph,
+            schema,
+            &link.source_node_id,
+            link.source_output_index,
+            role,
+            visited,
+            roles,
+        );
+    }
+}
+
+fn follows_conditioning_text(input_name: &str) -> bool {
+    let name = normalize(input_name);
+    !(is_ignored_input(&name)
+        || matches!(
+            name.as_str(),
+            "image"
+                | "images"
+                | "pixels"
+                | "mask"
+                | "latent"
+                | "latent_image"
+                | "samples"
+                | "control_net"
+                | "style_model"
+                | "unet"
+        ))
+}
+
+/// Boost prompt candidates whose leaf feeds exactly the matching role and
+/// drop candidates that only feed the opposite role.
+fn apply_conditioning_roles(
+    candidates: &mut BTreeMap<(String, Option<usize>), Vec<Candidate>>,
+    roles: &ConditioningRoles,
+    compact_sources: bool,
+) {
+    if roles.is_empty() {
+        return;
+    }
+    for ((semantic_key, _), choices) in candidates.iter_mut() {
+        let expected = match semantic_key.as_str() {
+            "prompt" => PromptRole::Positive,
+            "negative_prompt" => PromptRole::Negative,
+            _ => continue,
+        };
+        choices.retain_mut(|candidate| {
+            let Some(leaf_roles) =
+                roles.get(&(candidate.node_id.clone(), candidate.input_name.clone()))
+            else {
+                return true;
+            };
+            if leaf_roles.len() != 1 {
+                return true;
+            }
+            if !leaf_roles.contains(&expected) {
+                return false;
+            }
+            push_evidence(
+                candidate,
+                evidence(
+                    EvidenceKind::GRAPH_CONDITIONING_ROLE,
+                    format!(
+                        "text feeds only the sampler {} conditioning",
+                        expected.semantic_key()
+                    ),
+                ),
+            );
+            candidate.score = candidate.evidence.iter().map(|item| item.weight).sum();
+            if !candidate.has_schema_conflict {
+                candidate.confidence = confidence_from_score(candidate.score);
+            }
+            if compact_sources {
+                candidate.source = compact_source(&candidate.evidence);
+            }
+            true
+        });
+    }
+    candidates.retain(|_, choices| !choices.is_empty());
+}
+
+fn is_system_prompt_name(name: &str) -> bool {
+    name.contains("system")
+}
+
+/// R-03: string-join helpers (StringConcatenate.delimiter, ...) are never
+/// prompt text.
+fn is_text_separator_input(name: &str) -> bool {
+    matches!(name, "delimiter" | "separator" | "joiner" | "sep")
 }
 
 /// R-08: validate every link against the live ComfyUI schema.

@@ -107,3 +107,152 @@ fn r08_output_type_mismatch_is_reported() {
         .expect("type mismatch should be reported");
     assert_eq!(issue.field.as_deref(), Some("3.model"));
 }
+
+fn real_sample(sample: &str) -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("workflow_recognition_v3")
+        .join("real")
+        .join(sample)
+        .join("sample.api.json");
+    serde_json::from_slice(&std::fs::read(path).expect("sample should exist")).unwrap()
+}
+
+fn all_candidate_targets(report: &WorkflowAnalysisReport, key: &str) -> Vec<(String, String)> {
+    let mut targets = report
+        .inputs
+        .iter()
+        .filter(|input| input.semantic_key == key)
+        .map(|input| (input.node_id.clone(), input.input_name.clone()))
+        .collect::<Vec<_>>();
+    for issue in report
+        .issues
+        .iter()
+        .filter(|issue| issue.field.as_deref() == Some(key))
+    {
+        for candidate in &issue.candidates {
+            if let (Some(node), Some(input)) = (&candidate.node_id, &candidate.input_name) {
+                targets.push((node.clone(), input.clone()));
+            }
+        }
+    }
+    targets
+}
+
+#[test]
+fn w02_basic_t2i_binds_positive_and_negative_by_sampler_role() {
+    let report = analyze_real(basic_t2i());
+    assert_eq!(
+        binding(&report, "prompt"),
+        Some(("6".into(), "text".into()))
+    );
+    assert_eq!(
+        binding(&report, "negative_prompt"),
+        Some(("7".into(), "text".into()))
+    );
+    let negative = report
+        .inputs
+        .iter()
+        .find(|input| input.semantic_key == "negative_prompt")
+        .unwrap();
+    assert!(negative
+        .evidence
+        .iter()
+        .any(|item| item.kind == EvidenceKind::GRAPH_CONDITIONING_ROLE));
+}
+
+#[test]
+fn w02_combo_input_is_never_a_prompt_candidate() {
+    let report = analyze_real(basic_t2i());
+    for key in ["prompt", "negative_prompt"] {
+        assert!(
+            !all_candidate_targets(&report, key)
+                .iter()
+                .any(|(_, input)| input == "ckpt_name"),
+            "{key} must not consider the checkpoint combo"
+        );
+    }
+    let text_on_combo = declared_type_for_field("textarea");
+    assert!(!text_on_combo.contains(&RecognitionDeclaredType::Enum));
+}
+
+#[test]
+fn w02_negative_prompt_aliases_resolve_to_negative() {
+    for name in [
+        "neg",
+        "neg_prompt",
+        "negative_text",
+        "neg_text",
+        "uncond",
+        "unconditional",
+    ] {
+        assert_eq!(
+            canonical_semantic_hint(name).map(|hint| hint.semantic),
+            Some(CanonicalSemantic::NegativePrompt),
+            "{name}"
+        );
+    }
+    assert!(canonical_semantic_hint("system_prompt").is_none());
+}
+
+#[test]
+fn r03_delimiter_is_never_a_prompt_candidate_and_user_prompt_wins() {
+    let report = analyze_real(real_sample("R05_KREA2_T2I"));
+    assert!(!all_candidate_targets(&report, "prompt")
+        .iter()
+        .any(|(_, input)| input == "delimiter"));
+    assert_eq!(
+        binding(&report, "prompt"),
+        Some(("30:19".into(), "value".into())),
+        "issues: {:?}",
+        report.issues
+    );
+}
+
+#[test]
+fn r05_system_prompt_is_not_selected_and_negative_zero_out_has_no_text() {
+    let report = analyze_real(real_sample("R05_KREA2_T2I"));
+    assert_ne!(
+        binding(&report, "prompt"),
+        Some(("30:18".into(), "value".into()))
+    );
+    // KSampler.negative comes from ConditioningZeroOut(positive), so no text
+    // leaf may be exposed as the negative prompt.
+    assert!(binding(&report, "negative_prompt").is_none());
+}
+
+#[test]
+fn r04_controlnet_router_keeps_positive_and_negative_branches_apart() {
+    let mut workflow = basic_t2i();
+    workflow["10"] =
+        json!({"class_type": "ControlNetLoader", "inputs": {"control_net_name": "cn.safetensors"}});
+    workflow["11"] = json!({"class_type": "LoadImage", "inputs": {"image": "pose.png"}});
+    workflow["12"] = json!({"class_type": "ControlNetApplyAdvanced", "inputs": {
+        "positive": ["6", 0], "negative": ["7", 0], "control_net": ["10", 0], "image": ["11", 0],
+        "strength": 1.0, "start_percent": 0.0, "end_percent": 1.0}});
+    workflow["3"]["inputs"]["positive"] = json!(["12", 0]);
+    workflow["3"]["inputs"]["negative"] = json!(["12", 1]);
+    let report = analyze_real(workflow.clone());
+    assert_eq!(
+        binding(&report, "prompt"),
+        Some(("6".into(), "text".into()))
+    );
+    assert_eq!(
+        binding(&report, "negative_prompt"),
+        Some(("7".into(), "text".into()))
+    );
+
+    let document = WorkflowDocument::parse(workflow).unwrap();
+    let graph = WorkflowGraph::from_document(&document).unwrap();
+    let roles = sampler_conditioning_roles(&document, &graph, Some(real_schema()));
+    assert_eq!(
+        roles.get(&("6".to_owned(), "text".to_owned())),
+        Some(&BTreeSet::from([PromptRole::Positive]))
+    );
+    assert_eq!(
+        roles.get(&("7".to_owned(), "text".to_owned())),
+        Some(&BTreeSet::from([PromptRole::Negative]))
+    );
+    assert!(!roles.contains_key(&("4".to_owned(), "ckpt_name".to_owned())));
+}

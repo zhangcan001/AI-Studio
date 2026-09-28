@@ -82,6 +82,9 @@ export type WorkflowRecognitionEvidenceKind =
   | "TERMINAL_OUTPUT"
   | "PREVIEW_OUTPUT"
   | "AUXILIARY_OUTPUT"
+  | "GRAPH_CONDITIONING_ROLE"
+  | "PRIMITIVE_SOURCE_NODE"
+  | "SYSTEM_PROMPT_HINT"
   | string;
 
 export interface WorkflowRecognitionEvidenceView {
