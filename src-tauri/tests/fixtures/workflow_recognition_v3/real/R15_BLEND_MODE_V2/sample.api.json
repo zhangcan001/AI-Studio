@@ -1,0 +1,997 @@
+{
+  "2": {
+    "inputs": {
+      "size": "custom",
+      "custom_width": 512,
+      "custom_height": 512,
+      "angle": 0,
+      "start_color": [
+        "7",
+        0
+      ],
+      "end_color": [
+        "6",
+        0
+      ],
+      "size_as": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: GradientImage V2",
+    "_meta": {
+      "title": "图层工具：渐变图像 V2"
+    }
+  },
+  "3": {
+    "inputs": {
+      "image": "1344x768_beach (27).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "6": {
+    "inputs": {
+      "color": "#fff700",
+      "mode": "HEX"
+    },
+    "class_type": "LayerUtility: ColorPicker",
+    "_meta": {
+      "title": "图层工具：取色器"
+    }
+  },
+  "7": {
+    "inputs": {
+      "color": "#c800ff",
+      "mode": "HEX"
+    },
+    "class_type": "LayerUtility: ColorPicker",
+    "_meta": {
+      "title": "图层工具：取色器"
+    }
+  },
+  "22": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "normal",
+      "opacity": 50,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "24": {
+    "inputs": {
+      "images": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "27": {
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "30": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "dissolve",
+      "opacity": 50,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "31": {
+    "inputs": {
+      "images": [
+        "30",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "32": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "darken",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "33": {
+    "inputs": {
+      "images": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "34": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "multiply",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "35": {
+    "inputs": {
+      "images": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "36": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "color burn",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "37": {
+    "inputs": {
+      "images": [
+        "36",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "38": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "linear burn",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "39": {
+    "inputs": {
+      "images": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "40": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "darker color",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "41": {
+    "inputs": {
+      "images": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "42": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "lighten",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "43": {
+    "inputs": {
+      "images": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "44": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "screen",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "45": {
+    "inputs": {
+      "images": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "46": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "color dodge",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "47": {
+    "inputs": {
+      "images": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "48": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "linear dodge(add)",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "49": {
+    "inputs": {
+      "images": [
+        "48",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "50": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "lighter color",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "51": {
+    "inputs": {
+      "images": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "52": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "dodge",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "53": {
+    "inputs": {
+      "images": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "54": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "overlay",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "55": {
+    "inputs": {
+      "images": [
+        "54",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "56": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "soft light",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "57": {
+    "inputs": {
+      "images": [
+        "56",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "58": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "hard light",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "59": {
+    "inputs": {
+      "images": [
+        "58",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "60": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "vivid light",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "61": {
+    "inputs": {
+      "images": [
+        "60",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "62": {
+    "inputs": {
+      "invert_mask": true,
+      "blend_mode": "linear light",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "63": {
+    "inputs": {
+      "images": [
+        "62",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "64": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "pin light",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "65": {
+    "inputs": {
+      "images": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "66": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "hard mix",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "67": {
+    "inputs": {
+      "images": [
+        "66",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "68": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "difference",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "69": {
+    "inputs": {
+      "images": [
+        "68",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "70": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "exclusion",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "71": {
+    "inputs": {
+      "images": [
+        "70",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "72": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "subtract",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "73": {
+    "inputs": {
+      "images": [
+        "72",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "74": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "divide",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "75": {
+    "inputs": {
+      "images": [
+        "74",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "76": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "hue",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "77": {
+    "inputs": {
+      "images": [
+        "76",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "78": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "saturation",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "79": {
+    "inputs": {
+      "images": [
+        "78",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "80": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "color",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "81": {
+    "inputs": {
+      "images": [
+        "80",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "82": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "luminosity",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "83": {
+    "inputs": {
+      "images": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "84": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "grain extract",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "85": {
+    "inputs": {
+      "images": [
+        "84",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "86": {
+    "inputs": {
+      "invert_mask": false,
+      "blend_mode": "grain merge",
+      "opacity": 100,
+      "background_image": [
+        "3",
+        0
+      ],
+      "layer_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageBlend V2",
+    "_meta": {
+      "title": "图层工具：图像混合 V2"
+    }
+  },
+  "87": {
+    "inputs": {
+      "images": [
+        "86",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  }
+}

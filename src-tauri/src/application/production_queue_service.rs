@@ -8,8 +8,9 @@ use crate::application::ordered_reference_binding::{
     ref2va_image_bounds, reference_manifest, validate_ordered_reference_ids,
 };
 use crate::application::ports::{
-    ActiveProductionItem, Clock, GenerationDefinitionRepository, ProductionQueueRepository,
-    RepositoryError, ShotBatchBinding, ShotBatchRepository, TaskRepository,
+    ActiveProductionItem, Clock, GenerationDefinition, GenerationDefinitionRepository,
+    ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
+    TaskRepository,
 };
 use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::compiler::{RecipeParser, RecipeValidator, SeedResolver};
@@ -64,6 +65,7 @@ pub struct CreateDirectGenerationRequest {
     pub tool_version_id: Option<String>,
     pub submission_idempotency_key: Option<String>,
     pub parent_task_id: Option<String>,
+    pub execution_input_sources: Option<BTreeMap<String, ExecutionValueSource>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +79,7 @@ pub struct CreateDirectGenerationBatchItem {
     pub tool_version_id: Option<String>,
     pub submission_idempotency_key: Option<String>,
     pub parent_task_id: Option<String>,
+    pub execution_input_sources: Option<BTreeMap<String, ExecutionValueSource>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -88,6 +91,45 @@ pub struct CreateDirectGenerationBatchRequest {
 }
 
 const DIRECT_GENERATION_CONTEXT_KEY: &str = "__ai_studio_direct_generation_context";
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ExecutionValueSource {
+    WorkflowDefault,
+    UserInput,
+    RuntimeResolved,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionInputTarget {
+    pub node: String,
+    pub input: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionInputSummary {
+    pub semantic_field: String,
+    pub targets: Vec<ExecutionInputTarget>,
+    pub value_type: String,
+    pub value_summary: String,
+    pub source: ExecutionValueSource,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionSummary {
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub workflow_version: String,
+    pub recipe_id: String,
+    pub recipe_version: String,
+    pub created_at: String,
+    pub runtime_schema_source: String,
+    pub preflight_status: String,
+    pub inputs: Vec<ExecutionInputSummary>,
+}
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
@@ -101,6 +143,8 @@ struct DirectGenerationContext {
     tool_version_id: Option<String>,
     submission_idempotency_key: Option<String>,
     parent_task_id: Option<String>,
+    execution_input_sources: Option<BTreeMap<String, ExecutionValueSource>>,
+    execution_summary: Option<ExecutionSummary>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -117,6 +161,13 @@ pub struct ProductionQueueOverview {
     pub failed_items: usize,
     pub cancelled_items: usize,
     pub skipped_items: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionBatchPreflightIssue {
+    pub item_number: usize,
+    pub code: String,
+    pub target: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -263,6 +314,7 @@ impl ProductionQueueService {
             tool_version_id,
             submission_idempotency_key,
             parent_task_id,
+            execution_input_sources,
         } = request;
         self.create_direct_generation_batch(CreateDirectGenerationBatchRequest {
             project_id,
@@ -278,9 +330,108 @@ impl ProductionQueueService {
                 tool_version_id,
                 submission_idempotency_key,
                 parent_task_id,
+                execution_input_sources,
             }],
         })
         .await
+    }
+
+    pub async fn preflight_direct_generation(
+        &self,
+        project_id: &str,
+        item: &CreateProductionBatchItem,
+    ) -> Result<(), crate::application::generation_service::GenerationServiceError> {
+        self.generation_service
+            .preflight_saved_version(
+                project_id,
+                &item.workflow_version_id,
+                &item.recipe_id,
+                &item.values,
+            )
+            .await
+    }
+
+    /// Validate persisted saved-version batch items immediately before queue
+    /// start. Items share the current schema lookup by exact WorkflowVersion /
+    /// Recipe identity; values and media references are still checked per item.
+    pub async fn preflight_saved_execution_batch(
+        &self,
+        project_id: &str,
+        detail: &ProductionBatchDetail,
+    ) -> Result<Vec<ProductionBatchPreflightIssue>, ProductionQueueError> {
+        let mut groups = BTreeMap::<
+            (String, String),
+            Vec<(usize, BTreeMap<String, GenerationInputValue>)>,
+        >::new();
+        for (index, item) in detail.items.iter().enumerate() {
+            if item.status != ProductionBatchItemStatus::Pending {
+                continue;
+            }
+            let context = direct_generation_context_from_json(&item.values_json)
+                .map_err(ProductionQueueError::InvalidInput)?;
+            let Some(context) = context else {
+                continue;
+            };
+            // Phase 2A single-item execution is already preflighted before its
+            // queue item is created. Restrict this additional admission pass to
+            // the explicit saved-execution batch request contract.
+            if context.execution_summary.is_none()
+                || !context
+                    .submission_idempotency_key
+                    .as_deref()
+                    .is_some_and(|key| key.starts_with("workflow-execution-batch:"))
+            {
+                continue;
+            }
+            let values = generation_values_from_json(&item.values_json)
+                .map_err(ProductionQueueError::InvalidInput)?;
+            groups
+                .entry((item.workflow_version_id.clone(), item.recipe_id.clone()))
+                .or_default()
+                .push((index + 1, values));
+        }
+
+        let mut issues = Vec::new();
+        for ((workflow_version_id, recipe_id), items) in groups {
+            let values = items
+                .iter()
+                .map(|(_, values)| values.clone())
+                .collect::<Vec<_>>();
+            match self
+                .generation_service
+                .preflight_saved_version_batch(
+                    project_id,
+                    &workflow_version_id,
+                    &recipe_id,
+                    &values,
+                )
+                .await
+            {
+                Ok(results) => {
+                    for ((item_number, _), result) in items.into_iter().zip(results) {
+                        if let Err(error) = result {
+                            let (code, target) = execution_preflight_issue(&error);
+                            issues.push(ProductionBatchPreflightIssue {
+                                item_number,
+                                code,
+                                target,
+                            });
+                        }
+                    }
+                }
+                Err(error) => {
+                    let (code, target) = execution_preflight_issue(&error);
+                    issues.extend(items.into_iter().map(|(item_number, _)| {
+                        ProductionBatchPreflightIssue {
+                            item_number,
+                            code: code.clone(),
+                            target: target.clone(),
+                        }
+                    }));
+                }
+            }
+        }
+        Ok(issues)
     }
 
     pub async fn create_direct_generation_batch(
@@ -324,6 +475,8 @@ impl ProductionQueueService {
                     direct_item.parent_task_id,
                     "parent task id",
                 )?,
+                execution_input_sources: direct_item.execution_input_sources,
+                execution_summary: None,
             };
             if context.shot_id.is_some() != context.stage.is_some() {
                 return Err(ProductionQueueError::InvalidInput(
@@ -367,28 +520,56 @@ impl ProductionQueueService {
                 "direct generation batch contains duplicate submission idempotency keys".to_owned(),
             ));
         }
-        if let [context] = contexts.as_slice() {
-            if let Some(key) = context.submission_idempotency_key.as_deref() {
-                for batch in self.repository.list(&request.project_id).await? {
-                    let Some(detail) = self
-                        .repository
-                        .find_detail(&request.project_id, &batch.id)
-                        .await?
-                    else {
-                        continue;
-                    };
-                    let already_submitted = detail.items.iter().any(|item| {
+        let requested_keys = contexts
+            .iter()
+            .filter_map(|context| context.submission_idempotency_key.as_deref())
+            .collect::<Vec<_>>();
+        if contexts.len() > 1
+            && !requested_keys.is_empty()
+            && requested_keys.len() != contexts.len()
+        {
+            return Err(ProductionQueueError::InvalidInput(
+                "direct generation batch idempotency keys must cover every item".to_owned(),
+            ));
+        }
+        if !requested_keys.is_empty() {
+            for batch in self.repository.list(&request.project_id).await? {
+                let Some(detail) = self
+                    .repository
+                    .find_detail(&request.project_id, &batch.id)
+                    .await?
+                else {
+                    continue;
+                };
+                let existing_keys = detail
+                    .items
+                    .iter()
+                    .filter_map(|item| {
                         direct_generation_context_from_json(&item.values_json)
                             .ok()
                             .flatten()
                             .and_then(|context| context.submission_idempotency_key)
-                            .as_deref()
-                            == Some(key)
-                    });
-                    if already_submitted {
-                        return Ok(detail);
-                    }
+                    })
+                    .collect::<Vec<_>>();
+                let overlaps = existing_keys
+                    .iter()
+                    .any(|existing| requested_keys.contains(&existing.as_str()));
+                if !overlaps {
+                    continue;
                 }
+                let exact_batch_match = detail.items.len() == requested_keys.len()
+                    && existing_keys.len() == requested_keys.len()
+                    && existing_keys
+                        .iter()
+                        .zip(&requested_keys)
+                        .all(|(existing, requested)| existing == requested);
+                if exact_batch_match || contexts.len() == 1 {
+                    return Ok(detail);
+                }
+                return Err(ProductionQueueError::InvalidInput(
+                    "direct generation batch idempotency key conflicts with an existing batch"
+                        .to_owned(),
+                ));
             }
         }
         self.create_internal(
@@ -481,7 +662,26 @@ impl ProductionQueueService {
                 .as_ref()
                 .and_then(|contexts| contexts.get(index))
             {
-                direct_context_values_json(&values, context)
+                let mut context = context.clone();
+                if let Some(input_sources) = context.execution_input_sources.take() {
+                    let definition = self
+                        .definition_repository
+                        .find(&item.workflow_version_id, &item.recipe_id)
+                        .await?
+                        .ok_or_else(|| {
+                            ProductionQueueError::InvalidInput(
+                                "generation Recipe is unavailable for execution summary".to_owned(),
+                            )
+                        })?;
+                    context.execution_summary = Some(build_execution_summary(
+                        &definition,
+                        &recipe,
+                        &values,
+                        &input_sources,
+                        now,
+                    ));
+                }
+                direct_context_values_json(&values, &context)
             } else {
                 generation_values_to_json(&values)
             };
@@ -629,6 +829,30 @@ impl ProductionQueueService {
         crate::domain::validate_project_id(project_id)
             .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
         Ok(self.repository.list(project_id).await?)
+    }
+
+    pub async fn execution_summary_for_task(
+        &self,
+        project_id: &str,
+        task_id: &str,
+    ) -> Result<Option<ExecutionSummary>, ProductionQueueError> {
+        crate::domain::validate_project_id(project_id)
+            .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
+        let task_id = TaskId::parse(task_id.to_owned())
+            .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
+        for batch in self.repository.list(project_id).await? {
+            let Some(detail) = self.repository.find_detail(project_id, &batch.id).await? else {
+                continue;
+            };
+            if let Some(item) = detail
+                .items
+                .iter()
+                .find(|item| item.task_id.as_deref() == Some(task_id.as_str()))
+            {
+                return Ok(execution_summary_from_json(&item.values_json));
+            }
+        }
+        Ok(None)
     }
 
     pub async fn overview(
@@ -838,18 +1062,6 @@ impl ProductionQueueService {
         if detail.batch.archived_at.is_some() {
             return Err(ProductionQueueError::InvalidState(
                 "archived production batches must be restored before cancellation".to_owned(),
-            ));
-        }
-        if detail.batch.status == ProductionBatchStatus::Running
-            || detail.items.iter().any(|item| {
-                matches!(
-                    item.status,
-                    ProductionBatchItemStatus::Dispatching | ProductionBatchItemStatus::Dispatched
-                )
-            })
-        {
-            return Err(ProductionQueueError::InvalidState(
-                "production batches with active work cannot be cancelled; pause and wait for the active task to finish".to_owned(),
             ));
         }
         if detail.batch.status == ProductionBatchStatus::Completed {
@@ -1309,6 +1521,24 @@ impl ProductionQueueService {
                         )
                         .await?;
                 }
+                if record.batch.status == ProductionBatchStatus::Paused {
+                    if let Some(detail) = self
+                        .repository
+                        .find_detail(&record.batch.project_id, &record.batch.id)
+                        .await?
+                    {
+                        if detail.items.iter().all(|item| item.status.is_terminal()) {
+                            self.repository
+                                .set_batch_status(
+                                    &record.batch.project_id,
+                                    &record.batch.id,
+                                    ProductionBatchStatus::Completed,
+                                    self.clock.now(),
+                                )
+                                .await?;
+                        }
+                    }
+                }
             }
         }
         active = self.repository.list_active_items().await?;
@@ -1475,6 +1705,20 @@ impl ProductionQueueService {
                         .expect("production recovery task registry mutex poisoned")
                         .remove(task_id.as_str());
                     if detail.batch.status == ProductionBatchStatus::Paused {
+                        if let Some(updated) =
+                            self.repository.find_detail(project_id, batch_id).await?
+                        {
+                            if updated.items.iter().all(|item| item.status.is_terminal()) {
+                                self.repository
+                                    .set_batch_status(
+                                        project_id,
+                                        batch_id,
+                                        ProductionBatchStatus::Completed,
+                                        self.clock.now(),
+                                    )
+                                    .await?;
+                            }
+                        }
                         return Ok(());
                     }
                     if should_pause_after_terminal(status, code, detail.batch.continue_on_failure) {
@@ -2262,6 +2506,21 @@ fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
     }
 }
 
+fn execution_preflight_issue(error: &GenerationServiceError) -> (String, Option<String>) {
+    match error {
+        GenerationServiceError::ExecutionFailed { code, message } => (
+            code.clone(),
+            message.starts_with("node=").then(|| message.clone()),
+        ),
+        GenerationServiceError::Compile(_) => ("EXECUTION_INPUT_INVALID".to_owned(), None),
+        GenerationServiceError::InputPrepare(_) => ("EXECUTION_ASSET_UNAVAILABLE".to_owned(), None),
+        GenerationServiceError::DefinitionNotFound { .. } => {
+            ("WORKFLOW_RECIPE_NOT_FOUND".to_owned(), None)
+        }
+        _ => ("EXECUTION_PREFLIGHT_FAILED".to_owned(), None),
+    }
+}
+
 pub(crate) fn generation_values_to_json(values: &BTreeMap<String, GenerationInputValue>) -> Value {
     let mut object = Map::new();
     for (key, value) in values {
@@ -2355,6 +2614,93 @@ fn direct_generation_context_from_json(
     serde_json::from_value(context.clone())
         .map(Some)
         .map_err(|error| format!("direct generation context is invalid: {error}"))
+}
+
+pub fn execution_summary_from_json(values_json: &Value) -> Option<ExecutionSummary> {
+    direct_generation_context_from_json(values_json)
+        .ok()
+        .flatten()?
+        .execution_summary
+}
+
+fn build_execution_summary(
+    definition: &GenerationDefinition,
+    recipe: &Recipe,
+    values: &BTreeMap<String, GenerationInputValue>,
+    sources: &BTreeMap<String, ExecutionValueSource>,
+    created_at: chrono::DateTime<chrono::Utc>,
+) -> ExecutionSummary {
+    let inputs = values
+        .iter()
+        .map(|(semantic_field, value)| {
+            let (value_type, value_summary) = execution_value_summary(value);
+            let targets = recipe
+                .bindings
+                .iter()
+                .filter(|binding| binding.source == *semantic_field)
+                .map(|binding| ExecutionInputTarget {
+                    node: binding.target.node.clone(),
+                    input: binding.target.input.clone(),
+                })
+                .collect();
+            ExecutionInputSummary {
+                semantic_field: semantic_field.clone(),
+                targets,
+                value_type: value_type.to_owned(),
+                value_summary,
+                source: sources
+                    .get(semantic_field)
+                    .copied()
+                    .unwrap_or(ExecutionValueSource::WorkflowDefault),
+            }
+        })
+        .collect();
+
+    ExecutionSummary {
+        workflow_id: definition.workflow_id.clone(),
+        workflow_version_id: definition.workflow_version_id.clone(),
+        workflow_version: definition.workflow_version.clone(),
+        recipe_id: definition.recipe_id.clone(),
+        recipe_version: definition.recipe_version.clone(),
+        created_at: created_at.to_rfc3339(),
+        runtime_schema_source: "LIVE_COMFYUI".to_owned(),
+        preflight_status: "READY".to_owned(),
+        inputs,
+    }
+}
+
+fn execution_value_summary(value: &GenerationInputValue) -> (&'static str, String) {
+    match value {
+        GenerationInputValue::Text(value) => ("string", value.clone()),
+        GenerationInputValue::Integer(value) => ("integer", value.to_string()),
+        GenerationInputValue::Number(value) => ("number", value.to_string()),
+        GenerationInputValue::Seed(SeedValue::Random) => ("seed", "Random".to_owned()),
+        GenerationInputValue::Seed(SeedValue::Fixed(value)) => ("seed", value.to_string()),
+        GenerationInputValue::ImageAsset(id) => ("image_asset", format!("Asset {}", id.as_str())),
+        GenerationInputValue::ImageAssets(ids) => (
+            "image_assets",
+            ids.iter()
+                .map(|id| format!("Asset {}", id.as_str()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        GenerationInputValue::VideoAsset(id) => ("video_asset", format!("Asset {}", id.as_str())),
+        GenerationInputValue::AudioAsset(id) => ("audio_asset", format!("Asset {}", id.as_str())),
+        GenerationInputValue::VideoAssets(ids) => (
+            "video_assets",
+            ids.iter()
+                .map(|id| format!("Asset {}", id.as_str()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        GenerationInputValue::AudioAssets(ids) => (
+            "audio_assets",
+            ids.iter()
+                .map(|id| format!("Asset {}", id.as_str()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    }
 }
 
 pub(crate) fn freeze_random_seed_values(
@@ -2742,6 +3088,8 @@ mod tests {
             tool_version_id: Some("tool-version-1".to_owned()),
             submission_idempotency_key: Some("submission-1".to_owned()),
             parent_task_id: Some("task-parent".to_owned()),
+            execution_input_sources: None,
+            execution_summary: None,
         };
         let encoded = direct_context_values_json(&values, &context);
 

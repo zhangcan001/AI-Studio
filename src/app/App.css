@@ -928,6 +928,15 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .workflow-detail-grid { display: grid; grid-template-columns: minmax(0, 2fr) repeat(4, minmax(90px, 0.5fr)); gap: 8px; margin-top: 9px; }
 .workflow-detail-grid span { min-width: 0; padding: 8px; border-radius: 7px; color: #8997ad; background: #171d28; font-size: 0.74rem; }
 .workflow-detail-grid strong { display: block; overflow: hidden; margin-top: 3px; color: #d5deec; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-review-metadata { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 12px; border: 1px solid #4d658f; border-radius: 8px; background: #111f31; }
+.workflow-review-metadata legend { padding: 0 6px; color: #d5deec; font-weight: 650; }
+.workflow-review-metadata label { display: grid; gap: 5px; color: #aebbd0; font-size: 0.82rem; }
+.workflow-review-metadata input { min-width: 0; }
+.workflow-review-metadata .disabled-note, .workflow-review-metadata button { grid-column: 1 / -1; }
+.workflow-review-evidence { margin-top: 10px; color: #b9c8df; }
+.workflow-review-evidence ul { margin: 5px 0 0; padding-left: 20px; }
+.workflow-saved-details { margin-top: 16px; }
+.workflow-saved-details .workflow-smart-issues-heading { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
 .workflow-capability { display: inline-block; color: #b9c8df; }
 .workflow-capability-ready, .workflow-check-pass { color: #b9f5cd; }
 .workflow-capability-comfy_offline, .workflow-capability-missing_nodes, .workflow-capability-incompatible_input_values, .workflow-check-fail { color: #ffcf9e; }
@@ -1128,7 +1137,7 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   .h3-safety-card .resolution-control { min-width: 0; width: 100%; box-sizing: border-box; }
   .resolution-control-grid { grid-template-columns: 1fr; }
   .resolution-control-current { white-space: normal; text-align: right; }
-  .workflow-stats, .workflow-validation-grid, .workflow-mapping-form, .workflow-output-form, .workflow-metadata-form { grid-template-columns: 1fr; }
+  .workflow-stats, .workflow-validation-grid, .workflow-mapping-form, .workflow-output-form, .workflow-metadata-form, .workflow-review-metadata { grid-template-columns: 1fr; }
   .workflow-catalog-header { display: none; }
   .workflow-catalog-row { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workflow-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

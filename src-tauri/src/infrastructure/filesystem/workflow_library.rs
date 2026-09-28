@@ -24,27 +24,46 @@ impl FileSystemWorkflowLibrarySource {
             fs::read_to_string(package_path.join(name))
                 .map_err(|error| format!("read {name}: {error}"))
         };
+        let read_optional = |name: &str| match fs::read_to_string(package_path.join(name)) {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("read {name}: {error}")),
+        };
 
         match (
             read("manifest.yaml"),
             read("recipe.yaml"),
             read("workflow_api.json"),
+            read_optional("workflow_source.json"),
+            read_optional("workflow_recognition.json"),
         ) {
-            (Ok(manifest_yaml), Ok(recipe_yaml), Ok(workflow_json)) => {
-                WorkflowPackageLoad::Loaded(WorkflowPackageFiles {
-                    package_name,
-                    package_source_path: Some(package_path.to_string_lossy().to_string()),
-                    manifest_yaml,
-                    recipe_yaml,
-                    workflow_json,
-                })
-            }
-            (manifest, recipe, workflow) => {
-                let message = [manifest.err(), recipe.err(), workflow.err()]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join("; ");
+            (
+                Ok(manifest_yaml),
+                Ok(recipe_yaml),
+                Ok(workflow_json),
+                Ok(source_workflow_json),
+                Ok(recognition_metadata_json),
+            ) => WorkflowPackageLoad::Loaded(WorkflowPackageFiles {
+                package_name,
+                package_source_path: Some(package_path.to_string_lossy().to_string()),
+                manifest_yaml,
+                recipe_yaml,
+                workflow_json,
+                source_workflow_json,
+                recognition_metadata_json,
+            }),
+            (manifest, recipe, workflow, source, recognition) => {
+                let message = [
+                    manifest.err(),
+                    recipe.err(),
+                    workflow.err(),
+                    source.err(),
+                    recognition.err(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("; ");
                 WorkflowPackageLoad::Invalid {
                     package_name,
                     message,

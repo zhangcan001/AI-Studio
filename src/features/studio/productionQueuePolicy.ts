@@ -18,11 +18,13 @@ export function isSafeProductionQueueRequeue(item: ProductionBatchItemView): boo
 export function canCancelPendingProductionQueue(
   detail: Pick<ProductionBatchDetail, "status" | "archivedAt" | "pending" | "running">,
 ): boolean {
+  const statusAllowsCancellation = detail.status === "READY"
+    ? detail.running === 0
+    : (detail.status === "RUNNING" || detail.status === "PAUSED") && detail.running <= 1;
   return (
     !detail.archivedAt &&
-    (detail.status === "READY" || detail.status === "PAUSED") &&
-    detail.pending > 0 &&
-    detail.running === 0
+    statusAllowsCancellation &&
+    detail.pending > 0
   );
 }
 

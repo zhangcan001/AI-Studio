@@ -56,6 +56,7 @@ export function useWorkflowSmartImportController({
   const [plan, setPlan] = useState<WorkflowAutoOnboardingPlanView>();
   const [importError, setImportError] = useState<ReturnType<typeof workflowImportErrorView>>();
   const internalBusyRef = useRef(false);
+  const commitBusyRef = useRef(false);
   const busyRef = externalBusyRef ?? internalBusyRef;
 
   const draft = useWorkflowOnboardingStore((state) => state.draft);
@@ -214,37 +215,60 @@ export function useWorkflowSmartImportController({
   }, [draft, plan, runDraftAction, setDraft, setNotice]);
 
   const commit = useCallback(async (action: WorkflowImportCommitAction = "NEW_WORKFLOW") => {
-    if (!plan?.draftId) return;
-    await runDraftAction(async () => {
-      const result = await commitWorkflowImport({
-        draftId: plan.draftId,
-        action,
-        workflowId: action === "NEW_VERSION" || action === "NEW_RECIPE" ? plan.existingWorkflowId : undefined,
-        setCurrent: action === "NEW_VERSION",
+    if (!plan?.draftId || commitBusyRef.current) return;
+    commitBusyRef.current = true;
+    try {
+      await runDraftAction(async () => {
+        const result = await commitWorkflowImport({
+          draftId: plan.draftId,
+          action,
+          workflowId: action === "NEW_VERSION" || action === "NEW_RECIPE" ? plan.existingWorkflowId : undefined,
+          setCurrent: action === "NEW_VERSION",
+        });
+        const publishedResult = result as typeof result & { workflowId?: string; recipeId?: string };
+        const workflowId = publishedResult.workflowId ?? plan.existingWorkflowId ?? plan.metadata.workflowId;
+        const recipeId = publishedResult.recipeId ?? plan.metadata.recipeId;
+        onPublished({ workflowId, recipeId });
+        setPlan({
+          ...plan,
+          state: "AUTO_PUBLISHED",
+          commitRequired: false,
+          published: {
+            ...result,
+            workflowId,
+            recipeId,
+            workflowVersion: result.workflowVersion ?? plan.metadata.workflowVersion,
+            packageName: result.packageName ?? plan.metadata.name,
+            workflowSha256: result.workflowSha256 ?? plan.workflowSha256,
+            refreshed: result.refreshed ?? { packagesFound: 0, valid: 0, invalid: 0, inserted: 0, reused: 0, errors: [] },
+          },
+        });
+        setNotice(action === "NEW_VERSION" ? "已添加为新版本；已有项目绑定保持不变。" : "工作流已添加到工作流库。只有明确点击添加后才会写入。" );
+        await onLoadWorkspace("refresh");
+        await onCatalogChanged();
       });
-      const publishedResult = result as typeof result & { workflowId?: string; recipeId?: string };
-      const workflowId = publishedResult.workflowId ?? plan.existingWorkflowId ?? plan.metadata.workflowId;
-      const recipeId = publishedResult.recipeId ?? plan.metadata.recipeId;
-      onPublished({ workflowId, recipeId });
-      setPlan({
-        ...plan,
-        state: "AUTO_PUBLISHED",
-        commitRequired: false,
-        published: {
-          ...result,
-          workflowId,
-          recipeId,
-          workflowVersion: result.workflowVersion ?? plan.metadata.workflowVersion,
-          packageName: result.packageName ?? plan.metadata.name,
-          workflowSha256: result.workflowSha256 ?? plan.workflowSha256,
-          refreshed: result.refreshed ?? { packagesFound: 0, valid: 0, invalid: 0, inserted: 0, reused: 0, errors: [] },
-        },
-      });
-      setNotice(action === "NEW_VERSION" ? "已添加为新版本；已有项目绑定保持不变。" : "工作流已添加到工作流库。只有明确点击添加后才会写入。" );
-      await onLoadWorkspace("refresh");
-      await onCatalogChanged();
-    });
+    } finally {
+      commitBusyRef.current = false;
+    }
   }, [onCatalogChanged, onLoadWorkspace, onPublished, plan, runDraftAction, setNotice]);
+
+  const updateReviewMetadata = useCallback(async (metadata: { name: string; category: string; mode: string }) => {
+    if (!plan?.draftId || !draft) return;
+    await runDraftAction(async () => {
+      await setOnboardingMetadata(plan.draftId, {
+        workflowId: draft.manifest.workflowId,
+        name: metadata.name,
+        workflowVersion: draft.manifest.workflowVersion,
+        recipeVersion: draft.manifest.recipeVersion,
+        category: metadata.category,
+        mode: metadata.mode,
+      });
+      const nextPlan = await reanalyzeWorkflowImport(plan.draftId);
+      setPlan(nextPlan);
+      setDraft(await getOnboardingDraft(nextPlan.draftId));
+      setNotice("已保存你的名称、类型和模式选择；类型/模式修正将作为用户覆盖保留，V3 推断不变。请复核后再保存到工作流库。");
+    });
+  }, [draft, plan?.draftId, runDraftAction, setDraft, setNotice]);
 
   const openAdvanced = useCallback(async () => {
     let nextDraft: WorkflowOnboardingDraftView | undefined;
@@ -314,6 +338,7 @@ export function useWorkflowSmartImportController({
     resolveIssue,
     regenerateRecipe,
     commit,
+    updateReviewMetadata,
     openAdvanced,
     openExisting,
     openExistingVersion,

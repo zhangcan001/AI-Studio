@@ -10,9 +10,11 @@ use crate::application::{
         WorkflowRuntimeState, WorkflowRuntimeStateRepository,
     },
     workflow_manifest::WorkflowManifest,
+    workflow_recognition_provenance::WorkflowRecognitionProvenance,
 };
 use crate::compiler::RecipeParser;
 use serde::Serialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -106,6 +108,22 @@ pub struct WorkflowRegistryView {
     pub recipes: Vec<WorkflowRegistryRecipeView>,
     pub project_usage_count: u64,
     pub history_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowSavedVersionDetailsView {
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub workflow_version: String,
+    pub name: String,
+    pub category: String,
+    pub mode: String,
+    pub workflow_sha256: String,
+    pub workflow_json: Value,
+    pub source_workflow_json: Value,
+    pub source_workflow_preserved: bool,
+    pub recognition: Option<WorkflowRecognitionProvenance>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -563,6 +581,62 @@ impl WorkflowRegistryService {
             .into_iter()
             .find(|workflow| workflow.workflow_id == workflow_id)
             .ok_or_else(|| WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned()))
+    }
+
+    pub async fn get_saved_version_details(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<WorkflowSavedVersionDetailsView, WorkflowRegistryServiceError> {
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+            .ok_or_else(|| WorkflowRegistryServiceError::VersionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+            })?;
+        let product_data = self
+            .runtime_repository
+            .find_version_provenance(workflow_version_id)
+            .await?
+            .unwrap_or_default();
+        let source_workflow_preserved = product_data.source_workflow_json.is_some();
+        let workflow_json: Value =
+            serde_json::from_str(&version.api_workflow_json).map_err(|_| {
+                WorkflowRegistryServiceError::Repository(RepositoryError::integrity(
+                    "persisted workflow JSON is malformed",
+                ))
+            })?;
+        let source_workflow_json = match product_data.source_workflow_json {
+            Some(source) => serde_json::from_str::<Value>(&source).map_err(|_| {
+                WorkflowRegistryServiceError::Repository(RepositoryError::integrity(
+                    "persisted source workflow JSON is malformed",
+                ))
+            })?,
+            None => workflow_json.clone(),
+        };
+        let recognition = product_data
+            .recognition_metadata_json
+            .map(|metadata| serde_json::from_str(&metadata))
+            .transpose()
+            .map_err(|_| {
+                WorkflowRegistryServiceError::Repository(RepositoryError::integrity(
+                    "persisted workflow recognition metadata is malformed",
+                ))
+            })?;
+
+        Ok(WorkflowSavedVersionDetailsView {
+            workflow_id: version.workflow_id,
+            workflow_version_id: version.workflow_version_id,
+            workflow_version: version.workflow_version,
+            name: version.name,
+            category: version.category,
+            mode: version.mode,
+            workflow_sha256: version.workflow_sha256,
+            workflow_json,
+            source_workflow_json,
+            source_workflow_preserved,
+            recognition,
+        })
     }
 
     pub async fn inspect_purge(

@@ -15,6 +15,8 @@ pub struct WorkflowPackageRecord {
     pub workflow_version: String,
     pub workflow_json: Value,
     pub workflow_sha256: String,
+    pub source_workflow_json: Option<String>,
+    pub recognition_metadata_json: Option<String>,
     pub recipe_version: String,
     pub recipe_schema_version: u32,
     pub recipe_yaml: String,

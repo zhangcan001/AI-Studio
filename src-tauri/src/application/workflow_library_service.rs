@@ -5,6 +5,7 @@ use crate::application::ports::{
     RUNTIME_ARTIFACT_CONFLICT,
 };
 use crate::application::workflow_manifest::WorkflowManifest;
+use crate::application::workflow_recognition_provenance::WorkflowRecognitionProvenance;
 use crate::compiler::{BindingValidator, RecipeParser, RecipeValidator, WorkflowValidator};
 use crate::domain::WorkflowDocument;
 use serde::Serialize;
@@ -130,6 +131,22 @@ impl WorkflowLibraryService {
             ));
         }
 
+        if let Some(source_workflow_json) = &files.source_workflow_json {
+            serde_json::from_str::<serde_json::Value>(source_workflow_json).map_err(|error| {
+                WorkflowPackageServiceError::Invalid(format!(
+                    "invalid workflow_source.json: {error}"
+                ))
+            })?;
+        }
+        if let Some(recognition_metadata_json) = &files.recognition_metadata_json {
+            serde_json::from_str::<WorkflowRecognitionProvenance>(recognition_metadata_json)
+                .map_err(|error| {
+                    WorkflowPackageServiceError::Invalid(format!(
+                        "invalid workflow_recognition.json: {error}"
+                    ))
+                })?;
+        }
+
         let package = WorkflowPackageRecord {
             workflow_id: manifest.id,
             source_kind: if is_builtin_package_name(&files.package_name) {
@@ -145,6 +162,8 @@ impl WorkflowLibraryService {
             workflow_version: manifest.workflow_version,
             workflow_json: workflow_value,
             workflow_sha256: sha256(files.workflow_json.as_bytes()),
+            source_workflow_json: files.source_workflow_json,
+            recognition_metadata_json: files.recognition_metadata_json,
             recipe_version: manifest.recipe_version,
             recipe_schema_version: recipe.schema_version,
             recipe_yaml: files.recipe_yaml.clone(),
@@ -275,6 +294,8 @@ mod tests {
             manifest_yaml: "schema_version: 1\nid: wfl_simple\nname: Simple\nworkflow_version: 1.0.0\nrecipe_version: 1.0.0\ncategory: image\nmode: text_to_image\n".to_owned(),
             recipe_yaml: "schema_version: 1\nid: simple\nname: Simple\nworkflow:\n  file: workflow_api.json\ninputs: {}\nbindings: []\noutputs: []\n".to_owned(),
             workflow_json: "{\"3\":{\"inputs\":{},\"class_type\":\"KSampler\"}}".to_owned(),
+            source_workflow_json: None,
+            recognition_metadata_json: None,
         }
     }
 

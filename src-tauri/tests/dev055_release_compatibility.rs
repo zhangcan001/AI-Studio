@@ -942,6 +942,14 @@ async fn remove_migration_028_schema(pool: &SqlitePool) {
             .await
             .expect("028 workflow registry columns should be removable from the isolated fixture");
     }
+    sqlx::query("ALTER TABLE workflow_versions DROP COLUMN recognition_metadata_json")
+        .execute(pool)
+        .await
+        .expect("039 recognition metadata column should be removable from the isolated fixture");
+    sqlx::query("ALTER TABLE workflow_versions DROP COLUMN source_workflow_json")
+        .execute(pool)
+        .await
+        .expect("039 source workflow column should be removable from the isolated fixture");
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 28")
         .execute(pool)
         .await
@@ -1256,8 +1264,8 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 38);
-    assert_eq!(migration_marker_count(pool, 38).await, 1);
+    assert_eq!(max_migration(pool).await, 39);
+    assert_eq!(migration_marker_count(pool, 39).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1419,10 +1427,10 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_038() {
+async fn dev055_migration_matrix_reaches_039() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(38));
+    assert_eq!(versions.last().copied(), Some(39));
     assert!(
         versions.contains(&33),
         "repository must contain migration 033"
@@ -1532,7 +1540,7 @@ async fn dev055_migration_matrix_reaches_038() {
 }
 
 #[tokio::test]
-async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_038() {
+async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_039() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("published-1-0-project")).await;
     insert_published_1_0_post_legacy_rows(&pool).await;
@@ -1542,7 +1550,7 @@ async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_038() {
     pool.close().await;
     let upgraded = initialize(&directory.path().join("app.db"))
         .await
-        .expect("reconstructed 1.0 database should upgrade through migration 038");
+        .expect("reconstructed 1.0 database should upgrade through migration 039");
     assert_current_migration_gate(&upgraded).await;
 
     assert_eq!(
@@ -1663,7 +1671,7 @@ async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_038() {
 }
 
 #[tokio::test]
-async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_038() {
+async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_039() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("published-1-1-project")).await;
     remove_migration_035_schema(&pool).await;
@@ -1684,6 +1692,14 @@ async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_038() {
         .execute(&pool)
         .await
         .expect("isolated 033 asset version table should drop");
+    sqlx::query("ALTER TABLE workflow_versions DROP COLUMN recognition_metadata_json")
+        .execute(&pool)
+        .await
+        .expect("039 recognition metadata column should drop from the isolated 1.1 fixture");
+    sqlx::query("ALTER TABLE workflow_versions DROP COLUMN source_workflow_json")
+        .execute(&pool)
+        .await
+        .expect("039 source workflow column should drop from the isolated 1.1 fixture");
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 32")
         .execute(&pool)
         .await
@@ -1693,7 +1709,7 @@ async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_038() {
 
     let upgraded = initialize(&directory.path().join("app.db"))
         .await
-        .expect("reconstructed 1.1 database should upgrade through migration 038");
+        .expect("reconstructed 1.1 database should upgrade through migration 039");
     assert_current_migration_gate(&upgraded).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = ?")

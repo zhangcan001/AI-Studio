@@ -342,10 +342,16 @@ export function ProductionQueuePanel({
   }
 
   async function cancelPendingQueue(batchId: string) {
-    if (!window.confirm("确定取消这个待启动的生产队列吗？尚未提交的项目会标记为已取消，不会启动 GPU 任务；已有任务和资产不受影响。")) return;
+    const hasActiveItem = detail?.id === batchId && detail.running > 0;
+    const confirmation = hasActiveItem
+      ? "确定取消此批次剩余项目吗？尚未派发的项目会标记为已取消；当前已派发任务会继续运行到结束，不会再派发新任务。"
+      : "确定取消这个生产队列吗？尚未提交的项目会标记为已取消，不会启动 GPU 任务；已有任务和资产不受影响。";
+    if (!window.confirm(confirmation)) return;
     await runMutation(async () => {
       const updated = await cancelPendingProductionQueue(projectId, batchId);
-      commitDetail(updated, "队列已取消，未提交 GPU 任务。已有任务和资产未受影响。");
+      commitDetail(updated, updated.status === "PAUSED"
+        ? "已取消剩余项目；当前已派发任务会继续运行，队列不会再派发新任务。"
+        : "队列已取消，未提交 GPU 任务。已有任务和资产未受影响。");
       try {
         await onAdmissionChanged();
       } catch {
@@ -637,9 +643,9 @@ export function ProductionQueuePanel({
                   className="quiet-button danger-button"
                   onClick={() => void cancelPendingQueue(detail.id)}
                   disabled={busy}
-                  title="取消所有尚未提交的队列项目，不会启动 GPU 任务"
+                  title={detail.running > 0 ? "取消所有未派发项目；当前任务会继续，且不会再派发新任务" : "取消所有尚未提交的队列项目，不会启动 GPU 任务"}
                 >
-                  取消待启动
+                  {detail.running > 0 ? "取消剩余项" : "取消待启动"}
                 </button>
               )}
               <small>{detail.id}</small>

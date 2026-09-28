@@ -10,6 +10,17 @@ export type CapabilityState =
   | "AMBIGUOUS_OUTPUT_ROOT"
   | "PARTIALLY_SUPPORTED";
 
+export type SemanticCapabilityStatus = "NOT_EVALUATED" | "READY" | "NEEDS_REVIEW" | "UNSUPPORTED";
+export type RuntimeImportStatus = "NOT_EVALUATED" | "READY" | "NEEDS_REVIEW" | "BLOCKED";
+
+export interface RuntimeImportBlockerView {
+  code: string;
+  classType?: string;
+  nodeId?: string;
+  affectedNodeIds: string[];
+  inputName?: string;
+}
+
 export type WorkflowAutoOnboardingState =
   | "AUTO_PUBLISHED"
   | "WORKFLOW_NOT_API_FORMAT"
@@ -186,6 +197,7 @@ export interface WorkflowRecognitionReportView {
   inputs?: WorkflowRecognitionInputView[];
   outputs?: WorkflowRecognitionOutputView[];
   recipeStatus?: WorkflowRecipeStatus;
+  /** Legacy detailed runtime check; prefer the normalized plan-level status. */
   runtimeCapability?: WorkflowRuntimeCapability;
   capabilityIssues?: string[];
   issues?: WorkflowRecognitionIssueView[];
@@ -275,6 +287,7 @@ export interface RootCapabilityProfileView {
 export interface CapabilityProfileView {
   roots: RootCapabilityProfileView[];
   aggregateCapabilities: string[];
+  /** Semantic graph readiness; the explicit plan field is preferred in UI contracts. */
   readiness: WorkflowCapabilityReadiness;
   selectedRootId?: string;
   primaryCapability?: string;
@@ -290,6 +303,7 @@ export interface CapabilityProfileView {
 }
 
 export interface CapabilityCheckView {
+  /** Legacy detailed runtime capability enum; use plan.runtimeImportStatus for contract decisions. */
   state: CapabilityState;
   checkedAt?: string;
   issues: CapabilityIssueView[];
@@ -377,6 +391,11 @@ export interface WorkflowOnboardingDraftView {
   rawSha256?: string;
   originalFilename: string;
   sourceFormat?: WorkflowImportFormat | string;
+  schemaSource?: string;
+  schemaFingerprint?: string;
+  recognizedAt?: string;
+  inferredType?: string;
+  inferredMode?: string;
   workflowFormatVersion?: string;
   frontendVersion?: string;
   normalizationState?: WorkflowNormalizationState;
@@ -445,6 +464,7 @@ export interface WorkflowAutoOnboardingPlanView {
   analysisId?: string;
   analysis?: WorkflowAnalysisReportView;
   commitRequired?: boolean;
+  /** Import/onboarding lifecycle state, not either readiness status. */
   state: WorkflowAutoOnboardingState;
   /** Optional until the native onboarding response exposes format detection. */
   format?: WorkflowImportFormat;
@@ -461,6 +481,11 @@ export interface WorkflowAutoOnboardingPlanView {
   rawSha256?: string;
   originalFilename: string;
   sourceFormat?: WorkflowImportFormat | string;
+  schemaSource?: string;
+  schemaFingerprint?: string;
+  recognizedAt?: string;
+  inferredType?: string;
+  inferredMode?: string;
   workflowFormatVersion?: string;
   frontendVersion?: string;
   normalizationState?: WorkflowNormalizationState;
@@ -469,6 +494,10 @@ export interface WorkflowAutoOnboardingPlanView {
   nodeCount: number;
   uniqueClassCount: number;
   metadata: WorkflowManifestView;
+  semanticCapabilityStatus: SemanticCapabilityStatus;
+  runtimeImportStatus: RuntimeImportStatus;
+  runtimeImportBlockers: RuntimeImportBlockerView[];
+  /** Legacy runtime validation result, retained for existing integrations. */
   capability: CapabilityCheckView;
   inputMappings: WorkflowInputMappingView[];
   outputMappings: WorkflowOutputMappingView[];
@@ -491,6 +520,58 @@ export interface WorkflowAutoOnboardingPlanView {
   message: string;
 }
 
+export interface WorkflowRecognitionOverrideValueView {
+  inferredValue: string;
+  selectedValue: string;
+}
+
+export interface WorkflowRecognitionProvenanceView {
+  recognitionEngine: string;
+  recognitionEngineVersion: string;
+  recognizedAt: string;
+  sourceFormat: string;
+  schemaSource: string;
+  schemaFingerprint?: string;
+  inferredType: string;
+  inferredMode: string;
+  finalType: string;
+  finalMode: string;
+  userOverride?: {
+    status: string;
+    workflowType?: WorkflowRecognitionOverrideValueView;
+    mode?: WorkflowRecognitionOverrideValueView;
+  };
+  semanticCapabilityStatus: string;
+  runtimeImportStatus: string;
+  outputRootState: string;
+  selectedRootId?: string;
+  roots: Array<{ outputId: string; outputType: string; nodeId: string; label: string; evidenceTier: number }>;
+  evidenceSummary: Array<{ source: string; nodeId: string; target: string; kind: string; weight: number }>;
+  inputMappingDecisions?: Array<{
+    semanticKey: string;
+    itemIndex?: number;
+    inferredMapping?: { nodeId: string; inputName: string };
+    finalMapping: { nodeId: string; inputName: string };
+    mappingSource: string;
+  }>;
+  issueCodes: string[];
+  runtimeBlockers: Array<{ code: string; classType?: string; nodeId?: string; inputName?: string }>;
+}
+
+export interface WorkflowSavedVersionDetailsView {
+  workflowId: string;
+  workflowVersionId: string;
+  workflowVersion: string;
+  name: string;
+  category: string;
+  mode: string;
+  workflowSha256: string;
+  workflowJson: unknown;
+  sourceWorkflowJson: unknown;
+  sourceWorkflowPreserved: boolean;
+  recognition?: WorkflowRecognitionProvenanceView;
+}
+
 export interface WorkflowWorkspaceView {
   workflowId: string;
   name: string;
@@ -501,6 +582,7 @@ export interface WorkflowWorkspaceView {
   workflowSha256: string;
   nodeCount: number;
   uniqueClassCount: number;
+  /** Legacy detailed current-runtime check. */
   capability: CapabilityState;
   capabilityIssues: CapabilityIssueView[];
   inputMappings: WorkflowInputMappingView[];

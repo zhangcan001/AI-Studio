@@ -39,11 +39,16 @@ describe("pending production queue cancellation policy", () => {
   });
 
   it("blocks cancellation while running, completed, archived, or empty", () => {
-    expect(canCancelPendingProductionQueue({ status: "RUNNING", pending: 1, running: 0 })).toBe(false);
+    expect(canCancelPendingProductionQueue({ status: "RUNNING", pending: 1, running: 2 })).toBe(false);
     expect(canCancelPendingProductionQueue({ status: "READY", pending: 1, running: 1 })).toBe(false);
     expect(canCancelPendingProductionQueue({ status: "COMPLETED", pending: 1, running: 0 })).toBe(false);
     expect(canCancelPendingProductionQueue({ status: "READY", pending: 0, running: 0 })).toBe(false);
     expect(canCancelPendingProductionQueue({ status: "READY", pending: 1, running: 0, archivedAt: "2026-08-11T00:00:00Z" })).toBe(false);
+  });
+
+  it("allows canceling pending items while one already-dispatched item finishes", () => {
+    expect(canCancelPendingProductionQueue({ status: "RUNNING", pending: 3, running: 1 })).toBe(true);
+    expect(canCancelPendingProductionQueue({ status: "PAUSED", pending: 2, running: 1 })).toBe(true);
   });
 });
 

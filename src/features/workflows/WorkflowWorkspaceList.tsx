@@ -44,6 +44,7 @@ export interface WorkflowWorkspaceListProps {
   onPurge: (item: WorkflowWorkspaceItem) => void;
   onRepairBuiltinPackage: (item: WorkflowWorkspaceItem) => void;
   onSetCurrentVersion: (item: WorkflowWorkspaceItem, version: WorkflowRegistryVersionView) => void;
+  onViewSavedVersion: (workflowVersionId: string) => void;
   onPromoteRecipe: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
   onClearPromotion: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
   onArchiveRecipe: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
@@ -81,6 +82,7 @@ export function WorkflowWorkspaceList({
   onPurge,
   onRepairBuiltinPackage,
   onSetCurrentVersion,
+  onViewSavedVersion,
   onPromoteRecipe,
   onClearPromotion,
   onArchiveRecipe,
@@ -188,6 +190,7 @@ export function WorkflowWorkspaceList({
                       <input type="checkbox" aria-label={`比较版本 ${version.version ?? version.workflowVersion ?? "—"}`} checked={selectedVersions.includes(version.workflowVersionId)} onChange={() => onToggleVersionSelection(version.workflowVersionId)} />
                       <strong>{version.version ?? version.workflowVersion ?? "—"}{version.workflowVersionId === currentVersionId ? " · 当前" : ""}</strong>
                       <span>{(version.recipes ?? []).length} 个 Recipe</span>
+                      {item.registryBacked && <button type="button" className="quiet-button" onClick={() => onViewSavedVersion(version.workflowVersionId)}>重新打开保存版本</button>}
                       {item.registryBacked && !removed && version.workflowVersionId !== currentVersionId && <button type="button" className="quiet-button" onClick={() => onSetCurrentVersion(item, version)}>设为当前版本</button>}
                     </div>
                   ))}

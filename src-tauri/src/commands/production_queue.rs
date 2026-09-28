@@ -2,15 +2,16 @@ use crate::{
     app_state::AppState,
     application::production_queue_service::{
         CreateDirectGenerationRequest, CreateProductionBatchItem, CreateProductionBatchRequest,
-        ProductionAdmissionView, ProductionPartialResumeEntry, ProductionPartialResumePlan,
-        ProductionPartialResumeResult, ProductionQueueError, ProductionQueueOverview,
+        ExecutionSummary, ProductionAdmissionView, ProductionPartialResumeEntry,
+        ProductionPartialResumePlan, ProductionPartialResumeResult, ProductionQueueError,
+        ProductionQueueOverview,
     },
     application::production_start_admission_service::ProductionStartAdmissionError,
     domain::{ProductionBatch, ProductionBatchDetail, ProductionBatchItem},
     error::AppError,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use tauri::State;
 
 use super::generation::InputValueDto;
@@ -95,6 +96,8 @@ pub struct ProductionBatchItemView {
     pub error_message: Option<String>,
     pub prompt_text: Option<String>,
     pub seed: Option<String>,
+    pub input_asset_ids: Vec<String>,
+    pub execution_summary: Option<ExecutionSummary>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -236,6 +239,7 @@ pub async fn production_queue_create(
                 tool_version_id,
                 submission_idempotency_key: None,
                 parent_task_id: None,
+                execution_input_sources: None,
             })
             .await
             .map_err(map_queue_error)?
@@ -308,6 +312,20 @@ pub async fn production_queue_get(
         .get(&project_id, &batch_id)
         .await
         .map(Into::into)
+        .map_err(map_queue_error)
+}
+
+#[tauri::command]
+pub async fn production_queue_execution_summary_for_task(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> Result<Option<crate::application::production_queue_service::ExecutionSummary>, AppError> {
+    state
+        .production
+        .queue
+        .execution_summary_for_task(&project_id, &task_id)
+        .await
         .map_err(map_queue_error)
 }
 
@@ -497,6 +515,7 @@ impl From<ProductionBatchItem> for ProductionBatchItemView {
     fn from(item: ProductionBatchItem) -> Self {
         let prompt_text = item_prompt_text(&item.values_json);
         let seed = item_seed(&item.values_json);
+        let input_asset_ids = item_input_asset_ids(&item.values_json);
         Self {
             id: item.id.as_str().to_owned(),
             ordinal: item.ordinal,
@@ -509,10 +528,46 @@ impl From<ProductionBatchItem> for ProductionBatchItemView {
             error_message: item.error_message,
             prompt_text,
             seed,
+            input_asset_ids,
+            execution_summary:
+                crate::application::production_queue_service::execution_summary_from_json(
+                    &item.values_json,
+                ),
             created_at: item.created_at.to_rfc3339(),
             updated_at: item.updated_at.to_rfc3339(),
         }
     }
+}
+
+fn item_input_asset_ids(values: &serde_json::Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut seen = HashSet::new();
+    let Some(fields) = values.as_object() else {
+        return ids;
+    };
+    for value in fields.values() {
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("image_asset") => {
+                if let Some(id) = value.get("assetId").and_then(serde_json::Value::as_str) {
+                    if !id.is_empty() && seen.insert(id.to_owned()) {
+                        ids.push(id.to_owned());
+                    }
+                }
+            }
+            Some("image_assets") => {
+                if let Some(asset_ids) = value.get("assetIds").and_then(serde_json::Value::as_array)
+                {
+                    for id in asset_ids.iter().filter_map(serde_json::Value::as_str) {
+                        if !id.is_empty() && seen.insert(id.to_owned()) {
+                            ids.push(id.to_owned());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    ids
 }
 
 fn item_prompt_text(values: &serde_json::Value) -> Option<String> {
@@ -681,5 +736,23 @@ pub(crate) fn map_start_admission_error(error: ProductionStartAdmissionError) ->
                 }),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::item_input_asset_ids;
+    use serde_json::json;
+
+    #[test]
+    fn batch_item_asset_summary_exposes_only_unique_image_ids() {
+        let values = json!({
+            "reference": { "type": "image_asset", "assetId": "ast_one" },
+            "frames": { "type": "image_assets", "assetIds": ["ast_one", "ast_two", ""] },
+            "video": { "type": "video_asset", "assetId": "ast_video" },
+            "privatePath": "C:/private/file.png"
+        });
+
+        assert_eq!(item_input_asset_ids(&values), vec!["ast_one", "ast_two"]);
     }
 }

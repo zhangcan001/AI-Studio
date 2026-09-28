@@ -1424,6 +1424,26 @@ impl WorkflowLifecycleService {
                 manifest_yaml,
                 recipe_yaml,
                 workflow_json,
+                source_workflow_json: bytes
+                    .source_workflow_json
+                    .map(String::from_utf8)
+                    .transpose()
+                    .map_err(|_| {
+                        WorkflowLifecycleError::new(
+                            "RUNTIME_PACKAGE_INVALID",
+                            "workflow_source.json is not valid UTF-8",
+                        )
+                    })?,
+                recognition_metadata_json: bytes
+                    .recognition_metadata_json
+                    .map(String::from_utf8)
+                    .transpose()
+                    .map_err(|_| {
+                        WorkflowLifecycleError::new(
+                            "RUNTIME_PACKAGE_INVALID",
+                            "workflow_recognition.json is not valid UTF-8",
+                        )
+                    })?,
             });
         }
         self.find_package(
@@ -3263,6 +3283,8 @@ outputs: []
             ),
             recipe_yaml: recipe_yaml.to_owned(),
             workflow_json: EXACT_WORKFLOW_JSON.to_owned(),
+            source_workflow_json: None,
+            recognition_metadata_json: None,
         }
     }
 

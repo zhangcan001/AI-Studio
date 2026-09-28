@@ -1,6 +1,7 @@
 use crate::application::workflow_ui_serialization::{
-    NormalizationCompatibilityContext, SerializerKind, UiInputEvidence,
-    UiInputSerializationDescriptor, UiSerializationDescriptorSet,
+    FrontendSerializationContract, NormalizationCompatibilityContext, SerializerKind,
+    UiInputEvidence, UiInputSerializationDescriptor, UiSerializationDescriptorSet, UiWidgetBinding,
+    WidgetBindingKind,
 };
 use crate::compiler::WorkflowValidator;
 use crate::domain::WorkflowDocument;
@@ -133,8 +134,17 @@ impl WorkflowUiFeatureSet {
         document: &UiWorkflowDocument,
         descriptors: &UiSerializationDescriptorSet,
     ) -> Self {
+        let lookup = WorkflowUiLookupIndex::build(&document.nodes, &document.links);
+        let classifications = classify_ui_nodes(document, descriptors, &lookup);
+        self.with_classifications(document, &classifications)
+    }
+
+    fn with_classifications(
+        &self,
+        document: &UiWorkflowDocument,
+        classifications: &BTreeMap<String, UiNodeClassificationResult>,
+    ) -> Self {
         let mut builder = FeatureSetBuilder::from_set(self);
-        let classifications = classify_ui_nodes(document, descriptors);
 
         // V1A reported these node families as detected-but-unsupported. V1B
         // keeps detection in the same feature authority and changes support
@@ -276,6 +286,286 @@ pub struct UiLink {
     pub declared_type: Option<String>,
 }
 
+trait WorkflowIndexNode {
+    fn workflow_node_id(&self) -> &str;
+}
+
+trait WorkflowIndexLink {
+    fn workflow_link_id(&self) -> i64;
+    fn workflow_origin_node_id(&self) -> &str;
+    fn workflow_origin_slot(&self) -> usize;
+    fn workflow_target_node_id(&self) -> &str;
+    fn workflow_target_slot(&self) -> usize;
+}
+
+impl WorkflowIndexNode for UiNode {
+    fn workflow_node_id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl WorkflowIndexLink for UiLink {
+    fn workflow_link_id(&self) -> i64 {
+        self.id
+    }
+
+    fn workflow_origin_node_id(&self) -> &str {
+        &self.origin_node_id
+    }
+
+    fn workflow_origin_slot(&self) -> usize {
+        self.origin_slot
+    }
+
+    fn workflow_target_node_id(&self) -> &str {
+        &self.target_node_id
+    }
+
+    fn workflow_target_slot(&self) -> usize {
+        self.target_slot
+    }
+}
+
+/// A single adjacency/identity index for one serialized graph scope. Buckets
+/// retain every endpoint in source order, including fan-out and fan-in links.
+#[derive(Clone, Debug, Default)]
+struct WorkflowUiLookupIndex {
+    node_by_id: HashMap<String, usize>,
+    duplicate_node_ids: BTreeSet<String>,
+    link_by_id: HashMap<i64, usize>,
+    duplicate_link_ids: BTreeSet<i64>,
+    incoming_links_by_node: HashMap<String, Vec<usize>>,
+    incoming_links_by_target_slot: HashMap<(String, usize), Vec<usize>>,
+    outgoing_links_by_node: HashMap<String, Vec<usize>>,
+    outgoing_links_by_source_slot: HashMap<(String, usize), Vec<usize>>,
+    boundary_origin_links_by_source_slot: HashMap<usize, Vec<usize>>,
+    boundary_target_links_by_target_slot: HashMap<usize, Vec<usize>>,
+}
+
+impl WorkflowUiLookupIndex {
+    fn build<N: WorkflowIndexNode, L: WorkflowIndexLink>(nodes: &[N], links: &[L]) -> Self {
+        record_lookup_index_build();
+        let mut index = Self::default();
+        for (position, node) in nodes.iter().enumerate() {
+            let id = node.workflow_node_id().to_owned();
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                index.node_by_id.entry(id.clone())
+            {
+                entry.insert(position);
+            } else {
+                index.duplicate_node_ids.insert(id);
+            }
+        }
+        for (position, link) in links.iter().enumerate() {
+            record_indexed_link_visits(1);
+            let id = link.workflow_link_id();
+            if let std::collections::hash_map::Entry::Vacant(entry) = index.link_by_id.entry(id) {
+                entry.insert(position);
+            } else {
+                index.duplicate_link_ids.insert(id);
+            }
+            index
+                .incoming_links_by_node
+                .entry(link.workflow_target_node_id().to_owned())
+                .or_default()
+                .push(position);
+            index
+                .incoming_links_by_target_slot
+                .entry((
+                    link.workflow_target_node_id().to_owned(),
+                    link.workflow_target_slot(),
+                ))
+                .or_default()
+                .push(position);
+            index
+                .outgoing_links_by_node
+                .entry(link.workflow_origin_node_id().to_owned())
+                .or_default()
+                .push(position);
+            index
+                .outgoing_links_by_source_slot
+                .entry((
+                    link.workflow_origin_node_id().to_owned(),
+                    link.workflow_origin_slot(),
+                ))
+                .or_default()
+                .push(position);
+            let has_origin = index
+                .node_by_id
+                .contains_key(link.workflow_origin_node_id());
+            let has_target = index
+                .node_by_id
+                .contains_key(link.workflow_target_node_id());
+            if !has_origin && has_target {
+                index
+                    .boundary_origin_links_by_source_slot
+                    .entry(link.workflow_origin_slot())
+                    .or_default()
+                    .push(position);
+            } else if has_origin && !has_target {
+                index
+                    .boundary_target_links_by_target_slot
+                    .entry(link.workflow_target_slot())
+                    .or_default()
+                    .push(position);
+            }
+        }
+        index
+    }
+
+    fn node_position(&self, id: &str) -> Option<usize> {
+        record_indexed_node_lookups(1);
+        self.node_by_id.get(id).copied()
+    }
+
+    fn node<'a, N: WorkflowIndexNode>(&self, nodes: &'a [N], id: &str) -> Option<&'a N> {
+        self.node_position(id).map(|position| &nodes[position])
+    }
+
+    fn link<'a, L: WorkflowIndexLink>(&self, links: &'a [L], id: i64) -> Option<&'a L> {
+        self.link_by_id.get(&id).map(|position| &links[*position])
+    }
+
+    fn incoming_links<'a, L: WorkflowIndexLink>(
+        &'a self,
+        links: &'a [L],
+        node_id: &str,
+    ) -> impl Iterator<Item = &'a L> + 'a {
+        self.link_bucket(links, self.incoming_links_by_node.get(node_id))
+    }
+
+    fn incoming_links_for_target_slot<'a, L: WorkflowIndexLink>(
+        &'a self,
+        links: &'a [L],
+        node_id: &str,
+        slot: usize,
+    ) -> impl Iterator<Item = &'a L> + 'a {
+        self.link_bucket(
+            links,
+            self.incoming_links_by_target_slot
+                .get(&(node_id.to_owned(), slot)),
+        )
+    }
+
+    fn outgoing_links<'a, L: WorkflowIndexLink>(
+        &'a self,
+        links: &'a [L],
+        node_id: &str,
+    ) -> impl Iterator<Item = &'a L> + 'a {
+        self.link_bucket(links, self.outgoing_links_by_node.get(node_id))
+    }
+
+    fn outgoing_links_for_source_slot<'a, L: WorkflowIndexLink>(
+        &'a self,
+        links: &'a [L],
+        node_id: &str,
+        slot: usize,
+    ) -> impl Iterator<Item = &'a L> + 'a {
+        self.link_bucket(
+            links,
+            self.outgoing_links_by_source_slot
+                .get(&(node_id.to_owned(), slot)),
+        )
+    }
+
+    fn boundary_origin_links_for_source_slot<'a, L: WorkflowIndexLink>(
+        &'a self,
+        links: &'a [L],
+        slot: usize,
+    ) -> impl Iterator<Item = &'a L> + 'a {
+        self.link_bucket(links, self.boundary_origin_links_by_source_slot.get(&slot))
+    }
+
+    fn boundary_target_links_for_target_slot<'a, L: WorkflowIndexLink>(
+        &'a self,
+        links: &'a [L],
+        slot: usize,
+    ) -> impl Iterator<Item = &'a L> + 'a {
+        self.link_bucket(links, self.boundary_target_links_by_target_slot.get(&slot))
+    }
+
+    fn link_bucket<'a, L: WorkflowIndexLink>(
+        &'a self,
+        links: &'a [L],
+        positions: Option<&'a Vec<usize>>,
+    ) -> impl Iterator<Item = &'a L> + 'a {
+        let positions = positions.map(Vec::as_slice).unwrap_or_default();
+        record_indexed_link_visits(positions.len());
+        positions.iter().map(move |position| &links[*position])
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct WorkflowUiLookupStats {
+    index_build_count: usize,
+    indexed_link_visits: usize,
+    indexed_node_lookups: usize,
+    full_link_scan_count: usize,
+}
+
+#[cfg(test)]
+fn capture_workflow_ui_lookup_stats<T>(action: impl FnOnce() -> T) -> (T, WorkflowUiLookupStats) {
+    let previous = WORKFLOW_UI_LOOKUP_STATS
+        .with(|stats| stats.replace(Some(WorkflowUiLookupStats::default())));
+    let result = action();
+    let captured = WORKFLOW_UI_LOOKUP_STATS.with(|stats| stats.replace(previous));
+    (result, captured.unwrap_or_default())
+}
+
+#[cfg(test)]
+thread_local! {
+    static WORKFLOW_UI_LOOKUP_STATS: std::cell::RefCell<Option<WorkflowUiLookupStats>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn record_lookup_index_build() {
+    WORKFLOW_UI_LOOKUP_STATS.with(|stats| {
+        if let Some(stats) = stats.borrow_mut().as_mut() {
+            stats.index_build_count += 1;
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn record_lookup_index_build() {}
+
+#[cfg(test)]
+fn record_indexed_link_visits(count: usize) {
+    WORKFLOW_UI_LOOKUP_STATS.with(|stats| {
+        if let Some(stats) = stats.borrow_mut().as_mut() {
+            stats.indexed_link_visits += count;
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn record_indexed_link_visits(_count: usize) {}
+
+#[cfg(test)]
+fn record_indexed_node_lookups(count: usize) {
+    WORKFLOW_UI_LOOKUP_STATS.with(|stats| {
+        if let Some(stats) = stats.borrow_mut().as_mut() {
+            stats.indexed_node_lookups += count;
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn record_indexed_node_lookups(_count: usize) {}
+
+#[cfg(test)]
+fn record_full_link_scan() {
+    WORKFLOW_UI_LOOKUP_STATS.with(|stats| {
+        if let Some(stats) = stats.borrow_mut().as_mut() {
+            stats.full_link_scan_count += 1;
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn record_full_link_scan() {}
+
 /// The single classification result consumed by feature support resolution
 /// and graph normalization.  A node's class name is only one input; the
 /// result also records the verified serialization contract that justified the
@@ -297,6 +587,15 @@ enum UiNodeContract {
     PrimitiveBinding,
     AliasBinding,
     Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UiFrontendOnlyClassification {
+    classification: UiNodeClassification,
+    contract: UiNodeContract,
+    feature: WorkflowUiFeature,
+    supported: bool,
+    reason: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -491,6 +790,278 @@ fn is_note_type(class_type: &str) -> bool {
     class_type.trim().eq_ignore_ascii_case("note")
 }
 
+fn is_verified_structural_presentation_node(node: &UiNode) -> bool {
+    let output_topology_is_frontend_only = node.outputs.iter().all(|output| {
+        output.link_ids.is_empty()
+            && output
+                .declared_type
+                .as_deref()
+                .is_none_or(|declared_type| declared_type.trim() == "*")
+    });
+    if !node.inputs.is_empty() || !output_topology_is_frontend_only {
+        return false;
+    }
+
+    let values_are_empty = node.widgets_values.is_empty() && node.widgets_values_named.is_none();
+    let named_text = node
+        .widgets_values_named
+        .as_ref()
+        .filter(|values| values.len() == 1)
+        .and_then(|values| values.get("text"))
+        .and_then(Value::as_str);
+    let named_text_contract = named_text.is_some_and(|text| {
+        node.outputs.is_empty()
+            && (node.widgets_values.is_empty()
+                || (node.widgets_values.len() == 1
+                    && node.widgets_values.first().and_then(Value::as_str) == Some(text)))
+    });
+    let positional_text_annotation = node.outputs.is_empty()
+        && node.widgets_values_named.is_none()
+        && node.widgets_values.len() == 1
+        && node
+            .widgets_values
+            .first()
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
+        && node
+            .title
+            .as_deref()
+            .is_some_and(|title| !title.trim().is_empty());
+
+    let style_property_count = [
+        "fontFamily",
+        "fontSize",
+        "fontColor",
+        "textAlign",
+        "backgroundColor",
+        "padding",
+        "borderRadius",
+        "angle",
+    ]
+    .into_iter()
+    .filter(|property| node.properties.contains_key(*property))
+    .count();
+    let styled_canvas_annotation = values_are_empty
+        && node.outputs.is_empty()
+        && node
+            .title
+            .as_deref()
+            .is_some_and(|title| !title.trim().is_empty())
+        && style_property_count >= 2;
+
+    let control_property_families = ["show", "match", "toggle", "sort"]
+        .into_iter()
+        .filter(|family| {
+            node.properties.keys().any(|key| {
+                let key = key.to_ascii_lowercase();
+                if *family == "sort" {
+                    key == *family
+                } else {
+                    key.starts_with(*family)
+                }
+            })
+        })
+        .count();
+    let wildcard_control_output = !node.outputs.is_empty()
+        && node.outputs.iter().all(|output| {
+            output
+                .declared_type
+                .as_deref()
+                .is_some_and(|declared_type| declared_type.trim() == "*")
+                && output.link_ids.is_empty()
+        });
+    let frontend_graph_control =
+        values_are_empty && wildcard_control_output && control_property_families >= 2;
+
+    named_text_contract
+        || positional_text_annotation
+        || styled_canvas_annotation
+        || frontend_graph_control
+}
+
+fn classify_frontend_only_contract(
+    node: &UiNode,
+    has_graph_link: bool,
+    verified_alias: bool,
+) -> Option<UiFrontendOnlyClassification> {
+    if is_note_type(&node.class_type) {
+        let safe = node.inputs.is_empty() && node.outputs.is_empty() && !has_graph_link;
+        return Some(UiFrontendOnlyClassification {
+            classification: if safe {
+                UiNodeClassification::PresentationOnlyNode
+            } else {
+                UiNodeClassification::UnknownUiNode
+            },
+            contract: if safe {
+                UiNodeContract::Presentation
+            } else {
+                UiNodeContract::Unknown
+            },
+            feature: WorkflowUiFeature::NoteNode,
+            supported: safe,
+            reason: if safe {
+                "generic Note contract has no runtime sockets or execution links".to_owned()
+            } else {
+                "generic Note contract contains runtime sockets or execution links".to_owned()
+            },
+        });
+    }
+
+    if is_verified_structural_presentation_node(node) {
+        let safe = !has_graph_link;
+        return Some(UiFrontendOnlyClassification {
+            classification: if safe {
+                UiNodeClassification::PresentationOnlyNode
+            } else {
+                UiNodeClassification::UnknownUiNode
+            },
+            contract: if safe {
+                UiNodeContract::Presentation
+            } else {
+                UiNodeContract::Unknown
+            },
+            feature: WorkflowUiFeature::FrontendVirtualNode,
+            supported: safe,
+            reason: if safe {
+                "serialized node matches a provider-neutral presentation contract".to_owned()
+            } else {
+                "presentation node has execution links".to_owned()
+            },
+        });
+    }
+
+    if verified_alias {
+        return Some(UiFrontendOnlyClassification {
+            classification: UiNodeClassification::FrontendBindingNode,
+            contract: UiNodeContract::AliasBinding,
+            feature: WorkflowUiFeature::FrontendVirtualNode,
+            supported: true,
+            reason: "serialized typed alias producer/consumer contract is verified".to_owned(),
+        });
+    }
+    None
+}
+
+/// Fingerprinting and normalization share this structural frontend-contract
+/// classifier. Class names are not used as provider-specific UI exceptions.
+pub(crate) fn source_graph_frontend_only_node_ids<T>(
+    root: &Map<String, Value>,
+    runtime_schema_classes: &BTreeMap<String, T>,
+) -> BTreeSet<String> {
+    let Ok(raw_nodes) = parse_raw_nodes(root.get("nodes"), "classification") else {
+        return BTreeSet::new();
+    };
+    let nodes = raw_nodes
+        .iter()
+        .filter_map(|node| source_node_for_classification(&node.object))
+        .collect::<Vec<_>>();
+    if nodes.len() != raw_nodes.len() {
+        return BTreeSet::new();
+    }
+    let empty_links = Value::Array(Vec::new());
+    let Some(links) = parse_raw_links(
+        Some(root.get("links").unwrap_or(&empty_links)),
+        "classification",
+    )
+    .ok() else {
+        return BTreeSet::new();
+    };
+    let links = links
+        .into_iter()
+        .map(|link| UiLink {
+            id: link.id,
+            origin_node_id: link.origin_node_id,
+            origin_slot: link.origin_slot,
+            target_node_id: link.target_node_id,
+            target_slot: link.target_slot,
+            declared_type: link.declared_type,
+        })
+        .collect::<Vec<_>>();
+    let document = UiWorkflowDocument {
+        workflow_format_version: String::new(),
+        frontend_version: None,
+        nodes,
+        links,
+        features: WorkflowUiFeatureSet::default(),
+        subgraph_definition_ids: BTreeSet::new(),
+        nested_subgraphs: false,
+    };
+    let lookup = WorkflowUiLookupIndex::build(&document.nodes, &document.links);
+    let classifications = classify_ui_nodes_with_schema(&document, &lookup, |class_type| {
+        runtime_schema_classes.contains_key(class_type)
+    });
+    classifications
+        .into_iter()
+        .filter_map(|(node_id, result)| {
+            let frontend_contract = matches!(
+                result.feature,
+                Some(
+                    WorkflowUiFeature::NoteNode
+                        | WorkflowUiFeature::PrimitiveNode
+                        | WorkflowUiFeature::RerouteNode
+                        | WorkflowUiFeature::FrontendVirtualNode
+                )
+            );
+            frontend_contract.then_some(node_id)
+        })
+        .collect()
+}
+
+fn source_node_for_classification(source: &Map<String, Value>) -> Option<UiNode> {
+    let id = source.get("id").and_then(|value| match value {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(value) if !value.trim().is_empty() => Some(value.clone()),
+        _ => None,
+    })?;
+    let class_type = source.get("type")?.as_str()?.to_owned();
+    let inputs = parse_input_sockets(source.get("inputs"), &id, &class_type).ok()?;
+    let outputs = parse_output_sockets(source.get("outputs"), &id).ok()?;
+    let mut widgets_values_named = source
+        .get("widgets_values_named")
+        .and_then(Value::as_object)
+        .map(|values| {
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<BTreeMap<_, _>>()
+        });
+    let widgets_values = match source.get("widgets_values") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(values)) => values.clone(),
+        Some(Value::Object(values)) => {
+            if widgets_values_named.is_none() {
+                widgets_values_named = Some(
+                    values
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect::<BTreeMap<_, _>>(),
+                );
+            }
+            Vec::new()
+        }
+        Some(_) => return None,
+    };
+    let properties = source
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    Some(UiNode {
+        id,
+        class_type,
+        title: source
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        mode: UiNodeMode::parse(source.get("mode").and_then(Value::as_i64).unwrap_or(0)),
+        inputs,
+        outputs,
+        widgets_values,
+        widgets_values_named,
+        properties,
+    })
+}
+
 fn is_generic_primitive_type(class_type: &str) -> bool {
     class_type.trim().eq_ignore_ascii_case("primitivenode")
 }
@@ -512,21 +1083,6 @@ fn is_explicit_unknown_virtual(node: &UiNode) -> bool {
             .get("is_virtual")
             .and_then(Value::as_bool)
             .unwrap_or(false)
-        || node.class_type.to_ascii_lowercase().contains("virtual")
-}
-
-fn is_known_frontend_virtual_class(class_type: &str) -> bool {
-    matches!(
-        class_type,
-        "Label (rgthree)" | "MarkdownNote" | "Fast Groups Bypasser (rgthree)"
-    )
-}
-
-fn is_known_presentation_class(class_type: &str) -> bool {
-    matches!(
-        class_type,
-        "Label (rgthree)" | "MarkdownNote" | "Fast Groups Bypasser (rgthree)"
-    )
 }
 
 fn alias_role(node: &UiNode) -> Option<UiAliasRole> {
@@ -593,15 +1149,258 @@ fn serialized_alias_identity(node: &UiNode, role: UiAliasRole) -> Option<String>
     )
 }
 
-fn is_serialized_alias_candidate(node: &UiNode) -> bool {
-    alias_role(node).is_some_and(|role| serialized_alias_identity(node, role).is_some())
+fn has_explicit_alias_identity(node: &UiNode, role: UiAliasRole) -> bool {
+    ["alias_id", "aliasId", "alias", "key", "previousName"]
+        .into_iter()
+        .any(|name| {
+            node.properties
+                .get(name)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+        || node
+            .widgets_values_named
+            .as_ref()
+            .and_then(|values| values.get("Constant"))
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        || (role == UiAliasRole::Consumer
+            && node
+                .widgets_values
+                .first()
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty()))
 }
 
-fn has_execution_link(document: &UiWorkflowDocument, node_id: &str) -> bool {
-    document
-        .links
-        .iter()
-        .any(|link| link.origin_node_id == node_id || link.target_node_id == node_id)
+fn verified_alias_node_ids(
+    nodes: &[UiNode],
+    links: &[UiLink],
+    lookup: &WorkflowUiLookupIndex,
+) -> BTreeSet<String> {
+    if !lookup.duplicate_node_ids.is_empty() || !lookup.duplicate_link_ids.is_empty() {
+        return BTreeSet::new();
+    }
+
+    let mut groups = BTreeMap::<String, Vec<(&UiNode, UiAliasRole)>>::new();
+    for node in nodes {
+        let Some(role) = alias_role(node) else {
+            continue;
+        };
+        let Some(identity) = serialized_alias_identity(node, role) else {
+            continue;
+        };
+        groups.entry(identity).or_default().push((node, role));
+    }
+
+    let mut verified = BTreeSet::new();
+    for (identity, group) in groups {
+        let producers = group
+            .iter()
+            .filter(|(_, role)| *role == UiAliasRole::Producer)
+            .map(|(node, _)| *node)
+            .collect::<Vec<_>>();
+        let consumers = group
+            .iter()
+            .filter(|(_, role)| *role == UiAliasRole::Consumer)
+            .map(|(node, _)| *node)
+            .collect::<Vec<_>>();
+        let [producer] = producers.as_slice() else {
+            continue;
+        };
+        if consumers.is_empty() {
+            continue;
+        }
+        let Some(value_type) = verified_alias_producer_type(producer, nodes, links, lookup) else {
+            continue;
+        };
+        if consumers.iter().all(|consumer| {
+            verified_alias_consumer(consumer, &identity, &value_type, nodes, links, lookup)
+        }) {
+            verified.insert(producer.id.clone());
+            verified.extend(consumers.iter().map(|consumer| consumer.id.clone()));
+        }
+    }
+    verified
+}
+
+fn validate_alias_candidate_diagnostics(
+    nodes: &[UiNode],
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<(), NormalizationError> {
+    let mut groups = BTreeMap::<String, Vec<(&UiNode, UiAliasRole)>>::new();
+    for node in nodes {
+        if descriptors.node(&node.class_type).is_some()
+            || is_generic_primitive_type(&node.class_type)
+            || is_reroute_type(&node.class_type)
+        {
+            continue;
+        }
+        let Some(role) = alias_role(node) else {
+            continue;
+        };
+        if !has_explicit_alias_identity(node, role) {
+            continue;
+        }
+        let Some(identity) = serialized_alias_identity(node, role) else {
+            continue;
+        };
+        groups.entry(identity).or_default().push((node, role));
+    }
+
+    for (identity, group) in groups {
+        let producers = group
+            .iter()
+            .filter(|(_, role)| *role == UiAliasRole::Producer)
+            .map(|(node, _)| *node)
+            .collect::<Vec<_>>();
+        let consumers = group
+            .iter()
+            .filter(|(_, role)| *role == UiAliasRole::Consumer)
+            .map(|(node, _)| *node)
+            .collect::<Vec<_>>();
+        if consumers.is_empty() {
+            continue;
+        }
+        let [producer] = producers.as_slice() else {
+            let (code, message) = if producers.is_empty() {
+                (
+                    "ALIAS_CONSUMER_WITHOUT_PRODUCER",
+                    format!("alias {identity} has consumers but no producer"),
+                )
+            } else {
+                (
+                    "AMBIGUOUS_ALIAS_PRODUCER",
+                    format!("alias {identity} has more than one producer"),
+                )
+            };
+            return Err(NormalizationError::new(code, message));
+        };
+
+        let producer_type = producer
+            .outputs
+            .first()
+            .and_then(|output| output.declared_type.as_deref());
+        for consumer in consumers {
+            let consumer_type = consumer
+                .outputs
+                .first()
+                .and_then(|output| output.declared_type.as_deref());
+            if !compatible_socket_types(producer_type, consumer_type) {
+                return Err(NormalizationError::new(
+                    "ALIAS_TYPE_CONFLICT",
+                    format!("alias {identity} consumer type conflicts with producer type"),
+                ));
+            }
+        }
+
+        // Other failed identity/topology evidence remains unknown in the shared
+        // classifier and therefore fails closed before normalization.
+    }
+    Ok(())
+}
+
+fn verified_alias_producer_type(
+    producer: &UiNode,
+    nodes: &[UiNode],
+    links: &[UiLink],
+    lookup: &WorkflowUiLookupIndex,
+) -> Option<String> {
+    let input = producer.inputs.first()?;
+    let output = producer.outputs.first()?;
+    let incoming = lookup
+        .incoming_links(links, &producer.id)
+        .collect::<Vec<_>>();
+    let [link] = incoming.as_slice() else {
+        return None;
+    };
+    if input.link_id != Some(link.id) || link.target_slot != 0 {
+        return None;
+    }
+    let source = lookup.node(nodes, &link.origin_node_id)?;
+    let source_output = source.outputs.get(link.origin_slot)?;
+    let value_type = output.declared_type.as_deref()?.trim();
+    let input_type = input.declared_type.as_deref()?.trim();
+    let source_type = source_output.declared_type.as_deref()?.trim();
+    let link_type = link.declared_type.as_deref()?.trim();
+    if [value_type, input_type, source_type, link_type]
+        .into_iter()
+        .any(str::is_empty)
+        || !source_output.link_ids.contains(&link.id)
+        || !compatible_socket_types(Some(value_type), Some(input_type))
+        || !compatible_socket_types(Some(value_type), Some(source_type))
+        || !compatible_socket_types(Some(value_type), Some(link_type))
+    {
+        return None;
+    }
+    Some(value_type.to_owned())
+}
+
+fn verified_alias_consumer(
+    consumer: &UiNode,
+    identity: &str,
+    value_type: &str,
+    nodes: &[UiNode],
+    links: &[UiLink],
+    lookup: &WorkflowUiLookupIndex,
+) -> bool {
+    if alias_role(consumer) != Some(UiAliasRole::Consumer)
+        || serialized_alias_identity(consumer, UiAliasRole::Consumer).as_deref() != Some(identity)
+    {
+        return false;
+    }
+    let Some(output) = consumer.outputs.first() else {
+        return false;
+    };
+    let Some(output_type) = output.declared_type.as_deref() else {
+        return false;
+    };
+    if !compatible_socket_types(Some(value_type), Some(output_type)) {
+        return false;
+    }
+    let outgoing = lookup
+        .outgoing_links(links, &consumer.id)
+        .collect::<Vec<_>>();
+    let declared_link_ids = output.link_ids.iter().copied().collect::<BTreeSet<_>>();
+    let topology_link_ids = outgoing.iter().map(|link| link.id).collect::<BTreeSet<_>>();
+    !topology_link_ids.is_empty()
+        && declared_link_ids == topology_link_ids
+        && outgoing.iter().all(|link| {
+            let Some(link_type) = link.declared_type.as_deref() else {
+                return false;
+            };
+            let Some(target) = lookup.node(nodes, &link.target_node_id) else {
+                return false;
+            };
+            let Some(target_input) = target.inputs.get(link.target_slot) else {
+                return false;
+            };
+            link.origin_slot == 0
+                && target_input.link_id == Some(link.id)
+                && target_input
+                    .declared_type
+                    .as_deref()
+                    .is_some_and(|target_type| {
+                        compatible_socket_types(Some(value_type), Some(link_type))
+                            && compatible_socket_types(Some(value_type), Some(target_type))
+                    })
+        })
+}
+
+fn has_execution_link(
+    document: &UiWorkflowDocument,
+    lookup: &WorkflowUiLookupIndex,
+    node_id: &str,
+) -> bool {
+    has_execution_link_from_index(lookup, &document.links, node_id)
+}
+
+fn has_execution_link_from_index<L: WorkflowIndexLink>(
+    lookup: &WorkflowUiLookupIndex,
+    links: &[L],
+    node_id: &str,
+) -> bool {
+    lookup.incoming_links(links, node_id).next().is_some()
+        || lookup.outgoing_links(links, node_id).next().is_some()
 }
 
 fn primitive_control_value(value: &Value) -> bool {
@@ -659,21 +1458,37 @@ fn primitive_binding_value(node: &UiNode) -> Result<Value, String> {
 fn classify_ui_nodes(
     document: &UiWorkflowDocument,
     descriptors: &UiSerializationDescriptorSet,
+    lookup: &WorkflowUiLookupIndex,
 ) -> BTreeMap<String, UiNodeClassificationResult> {
+    classify_ui_nodes_with_schema(document, lookup, |class_type| {
+        descriptors.node(class_type).is_some()
+    })
+}
+
+fn classify_ui_nodes_with_schema(
+    document: &UiWorkflowDocument,
+    lookup: &WorkflowUiLookupIndex,
+    has_runtime_schema: impl Fn(&str) -> bool,
+) -> BTreeMap<String, UiNodeClassificationResult> {
+    let verified_aliases = verified_alias_node_ids(&document.nodes, &document.links, lookup);
     document
         .nodes
         .iter()
         .map(|node| {
-            let result = if is_reroute_type(&node.class_type) {
-                let incoming_links = document
-                    .links
-                    .iter()
-                    .filter(|link| link.target_node_id == node.id)
+            let result = if has_runtime_schema(&node.class_type) {
+                UiNodeClassificationResult {
+                    classification: UiNodeClassification::RuntimeNode,
+                    contract: UiNodeContract::Runtime,
+                    feature: None,
+                    supported: true,
+                    reason: "object_info schema-backed runtime node".to_owned(),
+                }
+            } else if is_reroute_type(&node.class_type) {
+                let incoming_links = lookup
+                    .incoming_links(&document.links, &node.id)
                     .collect::<Vec<_>>();
-                let outgoing_links = document
-                    .links
-                    .iter()
-                    .filter(|link| link.origin_node_id == node.id)
+                let outgoing_links = lookup
+                    .outgoing_links(&document.links, &node.id)
                     .collect::<Vec<_>>();
                 let input_evidence = node.inputs.first().is_some_and(|input| {
                     incoming_links.is_empty()
@@ -721,10 +1536,8 @@ fn classify_ui_nodes(
                     },
                 }
             } else if is_generic_primitive_type(&node.class_type) {
-                let outgoing_links = document
-                    .links
-                    .iter()
-                    .filter(|link| link.origin_node_id == node.id)
+                let outgoing_links = lookup
+                    .outgoing_links(&document.links, &node.id)
                     .collect::<Vec<_>>();
                 let output_evidence = node.outputs.first().is_some_and(|output| {
                     !output.link_ids.is_empty()
@@ -767,59 +1580,7 @@ fn classify_ui_nodes(
                             .to_owned()
                     },
                 }
-            } else if is_note_type(&node.class_type) {
-                let safe = node.inputs.is_empty()
-                    && node.outputs.is_empty()
-                    && !has_execution_link(document, &node.id);
-                UiNodeClassificationResult {
-                    classification: if safe {
-                        UiNodeClassification::PresentationOnlyNode
-                    } else {
-                        UiNodeClassification::UnknownUiNode
-                    },
-                    contract: if safe {
-                        UiNodeContract::Presentation
-                    } else {
-                        UiNodeContract::Unknown
-                    },
-                    feature: Some(WorkflowUiFeature::NoteNode),
-                    supported: safe,
-                    reason: if safe {
-                        "Note has no runtime sockets or execution links".to_owned()
-                    } else if !node.outputs.is_empty() {
-                        "Note has runtime outputs and cannot be dropped safely".to_owned()
-                    } else {
-                        "Note has runtime sockets or execution links and cannot be dropped safely"
-                            .to_owned()
-                    },
-                }
-            } else if is_known_presentation_class(&node.class_type) {
-                let safe = node.inputs.is_empty()
-                    && node.outputs.iter().all(|output| output.link_ids.is_empty())
-                    && !has_execution_link(document, &node.id);
-                UiNodeClassificationResult {
-                    classification: if safe {
-                        UiNodeClassification::PresentationOnlyNode
-                    } else {
-                        UiNodeClassification::UnknownUiNode
-                    },
-                    contract: if safe {
-                        UiNodeContract::Presentation
-                    } else {
-                        UiNodeContract::Unknown
-                    },
-                    feature: Some(WorkflowUiFeature::FrontendVirtualNode),
-                    supported: safe,
-                    reason: if safe {
-                        "known frontend presentation node has no execution links".to_owned()
-                    } else {
-                        "known frontend presentation node has runtime sockets or execution links"
-                            .to_owned()
-                    },
-                }
-            } else if descriptors.node(&node.class_type).is_some()
-                || is_runtime_primitive_type(&node.class_type)
-            {
+            } else if is_runtime_primitive_type(&node.class_type) {
                 UiNodeClassificationResult {
                     classification: UiNodeClassification::RuntimeNode,
                     contract: UiNodeContract::Runtime,
@@ -828,14 +1589,17 @@ fn classify_ui_nodes(
                     supported: true,
                     reason: "object_info schema-backed runtime node".to_owned(),
                 }
-            } else if is_serialized_alias_candidate(node) {
+            } else if let Some(frontend) = classify_frontend_only_contract(
+                node,
+                has_execution_link(document, lookup, &node.id),
+                verified_aliases.contains(&node.id),
+            ) {
                 UiNodeClassificationResult {
-                    classification: UiNodeClassification::FrontendBindingNode,
-                    contract: UiNodeContract::AliasBinding,
-                    feature: Some(WorkflowUiFeature::FrontendVirtualNode),
-                    supported: true,
-                    reason: "serialized typed alias producer/consumer contract is verified"
-                        .to_owned(),
+                    classification: frontend.classification,
+                    contract: frontend.contract,
+                    feature: Some(frontend.feature),
+                    supported: frontend.supported,
+                    reason: frontend.reason,
                 }
             } else if is_explicit_unknown_virtual(node) {
                 UiNodeClassificationResult {
@@ -889,10 +1653,13 @@ fn add_source_id_feature(
 fn detect_ui_features(
     root: &Map<String, Value>,
     nodes: &[UiNode],
+    links: &[UiLink],
     subgraph_features: Option<&SubgraphFlattenMetadata>,
 ) -> WorkflowUiFeatureSet {
     let mut builder = FeatureSetBuilder::default();
     let raw_nodes = root.get("nodes").and_then(Value::as_array);
+    let lookup = WorkflowUiLookupIndex::build(nodes, links);
+    let verified_aliases = verified_alias_node_ids(nodes, links, &lookup);
     if let Some(raw_nodes) = raw_nodes {
         for (index, node) in nodes.iter().enumerate() {
             if let Some(raw_node) = raw_nodes.get(index).and_then(Value::as_object) {
@@ -980,13 +1747,19 @@ fn detect_ui_features(
                     None,
                 );
             }
-            if is_known_frontend_virtual_class(&node.class_type)
-                || is_serialized_alias_candidate(node)
-            {
+            if let Some(classification) = classify_frontend_only_contract(
+                node,
+                has_execution_link_from_index(&lookup, links, &node.id),
+                verified_aliases.contains(&node.id),
+            ) {
                 builder.add(
-                    WorkflowUiFeature::FrontendVirtualNode,
-                    supported_status(WorkflowUiFeature::FrontendVirtualNode),
-                    "verified frontend virtual or serialized alias contract",
+                    classification.feature,
+                    if classification.supported {
+                        CompatibilityFeatureStatus::Supported
+                    } else {
+                        CompatibilityFeatureStatus::Unsupported
+                    },
+                    classification.reason,
                     Some(&node.id),
                     Some(&node.class_type),
                     None,
@@ -1258,6 +2031,34 @@ struct RawUiLink {
     declared_type: Option<String>,
 }
 
+impl WorkflowIndexNode for RawUiNode {
+    fn workflow_node_id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl WorkflowIndexLink for RawUiLink {
+    fn workflow_link_id(&self) -> i64 {
+        self.id
+    }
+
+    fn workflow_origin_node_id(&self) -> &str {
+        &self.origin_node_id
+    }
+
+    fn workflow_origin_slot(&self) -> usize {
+        self.origin_slot
+    }
+
+    fn workflow_target_node_id(&self) -> &str {
+        &self.target_node_id
+    }
+
+    fn workflow_target_slot(&self) -> usize {
+        self.target_slot
+    }
+}
+
 #[derive(Clone, Debug)]
 struct SubgraphIoContract {
     id: Option<String>,
@@ -1275,6 +2076,7 @@ struct SubgraphDefinition {
     outputs: Vec<SubgraphIoContract>,
     nodes: Vec<RawUiNode>,
     links: Vec<RawUiLink>,
+    lookup: WorkflowUiLookupIndex,
 }
 
 /// The only authority that indexes serialized subgraph definitions.  The
@@ -1295,6 +2097,7 @@ struct FlatSubgraphGraph {
 struct SubgraphBoundaryResolution {
     input_consumers: BTreeMap<usize, Vec<RawUiLink>>,
     output_producers: BTreeMap<usize, Vec<RawUiLink>>,
+    lookup: WorkflowUiLookupIndex,
 }
 
 #[derive(Clone, Debug)]
@@ -1981,10 +2784,10 @@ fn apply_subgraph_instance_widget_values(
             continue;
         };
         for consumer in consumers {
-            let target = graph
-                .nodes
-                .iter_mut()
-                .find(|node| node.id == consumer.target_node_id)
+            let target = boundaries
+                .lookup
+                .node_position(&consumer.target_node_id)
+                .and_then(|position| graph.nodes.get_mut(position))
                 .ok_or_else(|| {
                     UiParseError::new(
                         "SUBGRAPH_BOUNDARY_TARGET_MISSING",
@@ -2520,14 +3323,18 @@ fn parse_subgraph_definition(
             }
         }
     }
+    let nodes = parse_raw_nodes(object.get("nodes"), &format!("definition {id}"))?;
+    let links = parse_raw_links(object.get("links"), &format!("definition {id}"))?;
+    let lookup = WorkflowUiLookupIndex::build(&nodes, &links);
     Ok(SubgraphDefinition {
         id: id.clone(),
         input_node_id,
         output_node_id,
         inputs,
         outputs,
-        nodes: parse_raw_nodes(object.get("nodes"), &format!("definition {id}"))?,
-        links: parse_raw_links(object.get("links"), &format!("definition {id}"))?,
+        nodes,
+        links,
+        lookup,
     })
 }
 
@@ -2691,9 +3498,8 @@ fn validate_proxy_widgets(
             ));
         }
         let inner = definition
-            .nodes
-            .iter()
-            .find(|candidate| candidate.id == inner_id)
+            .lookup
+            .node(&definition.nodes, &inner_id)
             .ok_or_else(|| {
                 UiParseError::new(
                     "SUBGRAPH_PROXY_WIDGET_INVALID",
@@ -2746,13 +3552,9 @@ fn resolve_subgraph_boundaries(
     graph: &FlatSubgraphGraph,
     path: &[String],
 ) -> Result<SubgraphBoundaryResolution, UiParseError> {
-    let node_ids = graph
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    let mut input_consumers = BTreeMap::<usize, Vec<RawUiLink>>::new();
-    let mut output_producers = BTreeMap::<usize, Vec<RawUiLink>>::new();
+    let lookup = WorkflowUiLookupIndex::build(&graph.nodes, &graph.links);
+    let mut boundaries = SubgraphBoundaryResolution::default();
+    record_full_link_scan();
     for link in &graph.links {
         let from_input = link.origin_node_id == definition.input_node_id;
         let to_output = link.target_node_id == definition.output_node_id;
@@ -2780,7 +3582,7 @@ fn resolve_subgraph_boundaries(
                     ),
                 ));
             }
-            if !node_ids.contains(link.target_node_id.as_str()) {
+            if !lookup.node_by_id.contains_key(&link.target_node_id) {
                 return Err(UiParseError::new(
                     "SUBGRAPH_BOUNDARY_TARGET_MISSING",
                     format!(
@@ -2791,7 +3593,8 @@ fn resolve_subgraph_boundaries(
                     ),
                 ));
             }
-            input_consumers
+            boundaries
+                .input_consumers
                 .entry(link.origin_slot)
                 .or_default()
                 .push(link.clone());
@@ -2808,7 +3611,7 @@ fn resolve_subgraph_boundaries(
                     ),
                 ));
             }
-            if !node_ids.contains(link.origin_node_id.as_str()) {
+            if !lookup.node_by_id.contains_key(&link.origin_node_id) {
                 return Err(UiParseError::new(
                     "SUBGRAPH_BOUNDARY_SOURCE_MISSING",
                     format!(
@@ -2819,7 +3622,8 @@ fn resolve_subgraph_boundaries(
                     ),
                 ));
             }
-            output_producers
+            boundaries
+                .output_producers
                 .entry(link.target_slot)
                 .or_default()
                 .push(link.clone());
@@ -2831,8 +3635,8 @@ fn resolve_subgraph_boundaries(
             || link.origin_node_id == definition.output_node_id;
         let target_is_boundary = link.target_node_id == definition.input_node_id
             || link.target_node_id == definition.output_node_id;
-        if (!node_ids.contains(link.origin_node_id.as_str()) && !origin_is_boundary)
-            || (!node_ids.contains(link.target_node_id.as_str()) && !target_is_boundary)
+        if (!lookup.node_by_id.contains_key(&link.origin_node_id) && !origin_is_boundary)
+            || (!lookup.node_by_id.contains_key(&link.target_node_id) && !target_is_boundary)
         {
             return Err(UiParseError::new(
                 "SUBGRAPH_LINK_ENDPOINT_MISSING",
@@ -2846,7 +3650,11 @@ fn resolve_subgraph_boundaries(
     }
 
     for (index, slot) in definition.inputs.iter().enumerate() {
-        if input_consumers.get(&index).is_none_or(Vec::is_empty) {
+        if boundaries
+            .input_consumers
+            .get(&index)
+            .is_none_or(Vec::is_empty)
+        {
             if slot.link_ids.is_empty() {
                 continue;
             }
@@ -2859,8 +3667,14 @@ fn resolve_subgraph_boundaries(
                 ),
             ));
         }
-        validate_boundary_link_ids(slot, input_consumers.get(&index), definition, path, "input")?;
-        for link in input_consumers.get(&index).into_iter().flatten() {
+        validate_boundary_link_ids(
+            slot,
+            boundaries.input_consumers.get(&index),
+            definition,
+            path,
+            "input",
+        )?;
+        for link in boundaries.input_consumers.get(&index).into_iter().flatten() {
             if !compatible_socket_types(Some(&slot.declared_type), link.declared_type.as_deref()) {
                 return Err(UiParseError::new(
                     "SUBGRAPH_INPUT_TYPE_CONFLICT",
@@ -2872,10 +3686,8 @@ fn resolve_subgraph_boundaries(
                     ),
                 ));
             }
-            let target = graph
-                .nodes
-                .iter()
-                .find(|node| node.id == link.target_node_id)
+            let target = lookup
+                .node(&graph.nodes, &link.target_node_id)
                 .ok_or_else(|| {
                     UiParseError::new(
                         "SUBGRAPH_BOUNDARY_TARGET_MISSING",
@@ -2902,12 +3714,16 @@ fn resolve_subgraph_boundaries(
     for (index, slot) in definition.outputs.iter().enumerate() {
         validate_boundary_link_ids(
             slot,
-            output_producers.get(&index),
+            boundaries.output_producers.get(&index),
             definition,
             path,
             "output",
         )?;
-        let producers = output_producers.get(&index).cloned().unwrap_or_default();
+        let producers = boundaries
+            .output_producers
+            .get(&index)
+            .cloned()
+            .unwrap_or_default();
         if producers.is_empty() {
             return Err(UiParseError::new(
                 "MISSING_SUBGRAPH_OUTPUT_BOUNDARY",
@@ -2941,10 +3757,8 @@ fn resolve_subgraph_boundaries(
                 ),
             ));
         }
-        let origin = graph
-            .nodes
-            .iter()
-            .find(|node| node.id == link.origin_node_id)
+        let origin = lookup
+            .node(&graph.nodes, &link.origin_node_id)
             .ok_or_else(|| {
                 UiParseError::new(
                     "SUBGRAPH_BOUNDARY_SOURCE_MISSING",
@@ -2967,10 +3781,8 @@ fn resolve_subgraph_boundaries(
             ));
         }
     }
-    Ok(SubgraphBoundaryResolution {
-        input_consumers,
-        output_producers,
-    })
+    boundaries.lookup = lookup;
+    Ok(boundaries)
 }
 
 fn validate_boundary_link_ids(
@@ -3089,6 +3901,7 @@ fn flatten_subgraph_root(
     let root_links = parse_raw_links(root.get("links"), "root")?;
     let mut resolver = SubgraphInstanceResolver::new(&index);
     let mut flat = resolver.flatten_scope(&root_nodes, &root_links, &[], &[], None)?;
+    record_full_link_scan();
     if flat.links.iter().any(|link| {
         link.origin_node_id == "-10"
             || link.origin_node_id == "-20"
@@ -3100,6 +3913,7 @@ fn flatten_subgraph_root(
             "root graph contains an unresolved subgraph boundary link",
         ));
     }
+    record_full_link_scan();
     for (index, link) in flat.links.iter_mut().enumerate() {
         link.id = i64::try_from(index + 1).map_err(|_| {
             UiParseError::new(
@@ -3139,6 +3953,1147 @@ fn flatten_subgraph_root(
         ),
     );
     Ok((flattened, metadata))
+}
+
+/// Convert only historical subgraph serialization metadata to the current
+/// serialized contract. Definition indexing, instance resolution, boundary
+/// validation and recursive flattening remain owned by the existing engine.
+fn canonicalize_legacy_subgraph_contract(
+    source: &Value,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<Value, UiParseError> {
+    let mut canonical = source.clone();
+    let mut definitions = BTreeMap::new();
+    collect_subgraph_definitions(source, &mut definitions);
+    if let Some(subgraphs) = canonical
+        .as_object_mut()
+        .and_then(|root| root.get_mut("definitions"))
+        .and_then(Value::as_object_mut)
+        .and_then(|definitions| definitions.get_mut("subgraphs"))
+        .and_then(Value::as_array_mut)
+    {
+        canonicalize_subgraph_definition_tree(subgraphs, descriptors, &definitions)?;
+    }
+    let mut definitions = BTreeMap::new();
+    collect_subgraph_definitions(&canonical, &mut definitions);
+    let definition_node_indexes = index_serialized_definition_nodes(&definitions);
+    if let Some(nodes) = canonical
+        .as_object_mut()
+        .and_then(|root| root.get_mut("nodes"))
+    {
+        canonicalize_proxy_widgets(nodes, &definitions, &definition_node_indexes, descriptors)?;
+    }
+    if let Some(subgraphs) = canonical
+        .as_object_mut()
+        .and_then(|root| root.get_mut("definitions"))
+        .and_then(Value::as_object_mut)
+        .and_then(|definitions| definitions.get_mut("subgraphs"))
+        .and_then(Value::as_array_mut)
+    {
+        canonicalize_nested_proxy_widgets(
+            subgraphs,
+            &definitions,
+            &definition_node_indexes,
+            descriptors,
+        )?;
+    }
+    Ok(canonical)
+}
+
+fn index_serialized_definition_nodes(
+    definitions: &BTreeMap<String, Value>,
+) -> BTreeMap<String, BTreeMap<String, Vec<usize>>> {
+    let mut indexes = BTreeMap::new();
+    for (definition_id, definition) in definitions {
+        let Some(nodes) = definition
+            .as_object()
+            .and_then(|definition| definition.get("nodes"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        let mut by_id = BTreeMap::<String, Vec<usize>>::new();
+        for (position, node) in nodes.iter().enumerate() {
+            let Some(id) = node
+                .as_object()
+                .and_then(|node| node.get("id"))
+                .and_then(|id| parse_node_id(Some(id), position).ok())
+            else {
+                continue;
+            };
+            by_id.entry(id).or_default().push(position);
+        }
+        indexes.insert(definition_id.clone(), by_id);
+    }
+    indexes
+}
+
+fn collect_subgraph_definitions(value: &Value, output: &mut BTreeMap<String, Value>) {
+    let Some(subgraphs) = value
+        .as_object()
+        .and_then(|root| root.get("definitions"))
+        .and_then(Value::as_object)
+        .and_then(|definitions| definitions.get("subgraphs"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for definition in subgraphs {
+        if let Some(id) = definition
+            .as_object()
+            .and_then(|definition| definition.get("id"))
+            .and_then(Value::as_str)
+        {
+            output.insert(id.to_owned(), definition.clone());
+        }
+        collect_subgraph_definitions(definition, output);
+    }
+}
+
+fn canonicalize_subgraph_definition_tree(
+    definitions: &mut [Value],
+    descriptors: &UiSerializationDescriptorSet,
+    known_definitions: &BTreeMap<String, Value>,
+) -> Result<(), UiParseError> {
+    for definition in definitions {
+        canonicalize_one_subgraph_definition(definition, descriptors, known_definitions)?;
+        if let Some(nested) = definition
+            .as_object_mut()
+            .and_then(|definition| definition.get_mut("definitions"))
+            .and_then(Value::as_object_mut)
+            .and_then(|definitions| definitions.get_mut("subgraphs"))
+            .and_then(Value::as_array_mut)
+        {
+            canonicalize_subgraph_definition_tree(nested, descriptors, known_definitions)?;
+        }
+    }
+    Ok(())
+}
+
+fn canonicalize_one_subgraph_definition(
+    definition: &mut Value,
+    descriptors: &UiSerializationDescriptorSet,
+    known_definitions: &BTreeMap<String, Value>,
+) -> Result<(), UiParseError> {
+    let Some(object) = definition.as_object() else {
+        return Ok(());
+    };
+    let Some(id) = object.get("id").and_then(Value::as_str).map(str::to_owned) else {
+        return Ok(());
+    };
+    let nodes = parse_raw_nodes(object.get("nodes"), &format!("definition {id}"))?;
+    let links = parse_raw_links(object.get("links"), &format!("definition {id}"))?;
+    let lookup = WorkflowUiLookupIndex::build(&nodes, &links);
+    let inputs = parse_subgraph_io(object.get("inputs"), "inputs", &format!("definition {id}"))?;
+    let outputs = parse_subgraph_io(
+        object.get("outputs"),
+        "outputs",
+        &format!("definition {id}"),
+    )?;
+    let node_ids = nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+
+    let input_node_id = match serialized_boundary_node_id(object.get("inputNode"), &id, "input")? {
+        Some(value) => value,
+        None => infer_legacy_boundary_node_id(
+            &nodes,
+            &links,
+            &inputs,
+            known_definitions,
+            descriptors,
+            &lookup,
+            "input",
+            &id,
+        )?,
+    };
+    let output_node_id = match serialized_boundary_node_id(object.get("outputNode"), &id, "output")?
+    {
+        Some(value) => value,
+        None => infer_legacy_boundary_node_id(
+            &nodes,
+            &links,
+            &outputs,
+            known_definitions,
+            descriptors,
+            &lookup,
+            "output",
+            &id,
+        )?,
+    };
+    if node_ids.contains(input_node_id.as_str()) || node_ids.contains(output_node_id.as_str()) {
+        return Err(UiParseError::new(
+            "LEGACY_SUBGRAPH_SENTINEL_ID_CONFLICT",
+            format!("definition {id} boundary metadata aliases a runtime node ID"),
+        ));
+    }
+
+    let object = definition
+        .as_object_mut()
+        .expect("definition object was checked");
+    canonicalize_boundary_metadata(object, "inputNode", &input_node_id);
+    canonicalize_boundary_metadata(object, "outputNode", &output_node_id);
+    canonicalize_interface_link_ids(
+        object,
+        "inputs",
+        &input_node_id,
+        &links,
+        &lookup,
+        "input",
+        &id,
+    )?;
+    canonicalize_interface_link_ids(
+        object,
+        "outputs",
+        &output_node_id,
+        &links,
+        &lookup,
+        "output",
+        &id,
+    )?;
+    Ok(())
+}
+
+fn serialized_boundary_node_id(
+    value: Option<&Value>,
+    definition_id: &str,
+    direction: &str,
+) -> Result<Option<String>, UiParseError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let serialized_id = match value {
+        Value::Object(object) => object.get("id").ok_or_else(|| {
+            UiParseError::new(
+                "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_INSUFFICIENT",
+                format!("definition {definition_id} {direction}Node metadata has no explicit id"),
+            )
+        })?,
+        _ => value,
+    };
+    parse_node_id(Some(serialized_id), 0)
+        .map(Some)
+        .map_err(|_| {
+            UiParseError::new(
+                "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_INSUFFICIENT",
+                format!("definition {definition_id} {direction}Node id is not a valid identity"),
+            )
+        })
+}
+
+fn canonicalize_boundary_metadata(definition: &mut Map<String, Value>, field: &str, id: &str) {
+    let mut metadata = definition
+        .get(field)
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    metadata
+        .entry("id".to_owned())
+        .or_insert_with(|| Value::String(id.to_owned()));
+    definition.insert(field.to_owned(), Value::Object(metadata));
+}
+
+fn infer_legacy_boundary_node_id(
+    nodes: &[RawUiNode],
+    links: &[RawUiLink],
+    interfaces: &[SubgraphIoContract],
+    known_definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+    lookup: &WorkflowUiLookupIndex,
+    direction: &str,
+    definition_id: &str,
+) -> Result<String, UiParseError> {
+    let mut candidates = BTreeSet::new();
+    for (slot_index, interface) in interfaces.iter().enumerate() {
+        let boundary_links = match direction {
+            "input" => lookup
+                .boundary_origin_links_for_source_slot(links, slot_index)
+                .collect::<Vec<_>>(),
+            "output" => lookup
+                .boundary_target_links_for_target_slot(links, slot_index)
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        for link in boundary_links {
+            let (candidate_id, linked_node_id, linked_slot) = match direction {
+                "input" => (
+                    link.origin_node_id.as_str(),
+                    link.target_node_id.as_str(),
+                    link.target_slot,
+                ),
+                "output" => (
+                    link.target_node_id.as_str(),
+                    link.origin_node_id.as_str(),
+                    link.origin_slot,
+                ),
+                _ => continue,
+            };
+            if !compatible_socket_types(
+                Some(&interface.declared_type),
+                link.declared_type.as_deref(),
+            ) {
+                continue;
+            }
+            let Some(linked_node) = lookup.node(nodes, linked_node_id) else {
+                continue;
+            };
+            let schema_type = if direction == "input" {
+                inferred_input_schema_type(linked_node, linked_slot, known_definitions, descriptors)
+            } else {
+                inferred_output_schema_type(
+                    linked_node,
+                    linked_slot,
+                    known_definitions,
+                    descriptors,
+                )
+            };
+            let Some(schema_type) = schema_type else {
+                continue;
+            };
+            let serialized_socket = raw_node_socket(
+                linked_node,
+                if direction == "input" {
+                    "inputs"
+                } else {
+                    "outputs"
+                },
+                linked_slot,
+            );
+            let Some(serialized_type) = serialized_socket
+                .and_then(|socket| socket.get("type"))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            if !compatible_socket_types(Some(&interface.declared_type), Some(serialized_type))
+                || !compatible_socket_types(Some(&interface.declared_type), Some(&schema_type))
+                || !compatible_socket_types(Some(serialized_type), Some(&schema_type))
+            {
+                continue;
+            }
+            if !interface.link_ids.is_empty() && !interface.link_ids.contains(&link.id) {
+                continue;
+            }
+            candidates.insert(candidate_id.to_owned());
+        }
+    }
+    match candidates.len() {
+        0 => Err(UiParseError::new(
+            "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_INSUFFICIENT",
+            format!(
+                "definition {definition_id} has no unique serialized {direction} boundary endpoint, interface slot, compatible type and schema-backed inner socket"
+            ),
+        )),
+        1 => Ok(candidates.into_iter().next().expect("one candidate")),
+        count => Err(UiParseError::new(
+            "LEGACY_SUBGRAPH_BOUNDARY_EVIDENCE_AMBIGUOUS",
+            format!("definition {definition_id} has {count} candidate {direction} boundary identities"),
+        )),
+    }
+}
+
+fn inferred_input_schema_type(
+    node: &RawUiNode,
+    slot: usize,
+    known_definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Option<String> {
+    let socket = raw_node_socket(node, "inputs", slot)?;
+    let node_class = node_type(node).ok()?;
+    if let Some(definition) = known_definitions.get(&node_class) {
+        return definition
+            .get("inputs")
+            .and_then(Value::as_array)
+            .and_then(|values| values.get(slot))
+            .and_then(Value::as_object)
+            .and_then(|input| input.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+    }
+    let name = socket.get("name").and_then(Value::as_str)?;
+    let widget_name = socket
+        .get("widget")
+        .and_then(Value::as_object)
+        .and_then(|widget| widget.get("name"))
+        .and_then(Value::as_str);
+    let named_values = node
+        .object
+        .get("widgets_values_named")
+        .and_then(Value::as_object)
+        .map(|values| {
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        });
+    let binding = descriptors
+        .resolve_ui_input(
+            &node_class,
+            name,
+            widget_name,
+            socket.get("shape").and_then(Value::as_i64),
+            socket.get("link").and_then(Value::as_i64).is_some(),
+            named_values.as_ref(),
+        )
+        .ok()?;
+    binding
+        .descriptor
+        .map(|descriptor| declared_type_name(descriptor.declared_type).to_owned())
+}
+
+fn inferred_output_schema_type(
+    node: &RawUiNode,
+    slot: usize,
+    known_definitions: &BTreeMap<String, Value>,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Option<String> {
+    let node_class = node_type(node).ok()?;
+    if let Some(definition) = known_definitions.get(&node_class) {
+        return definition
+            .get("outputs")
+            .and_then(Value::as_array)
+            .and_then(|values| values.get(slot))
+            .and_then(Value::as_object)
+            .and_then(|output| output.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+    }
+    descriptors
+        .node(&node_class)?
+        .output_types
+        .get(slot)
+        .copied()
+        .map(|declared_type| declared_type_name(declared_type).to_owned())
+}
+
+fn canonicalize_interface_link_ids(
+    definition: &mut Map<String, Value>,
+    field: &str,
+    boundary_node_id: &str,
+    links: &[RawUiLink],
+    lookup: &WorkflowUiLookupIndex,
+    direction: &str,
+    definition_id: &str,
+) -> Result<(), UiParseError> {
+    let Some(interfaces) = definition.get_mut(field).and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for (slot_index, interface) in interfaces.iter_mut().enumerate() {
+        let Some(interface_object) = interface.as_object_mut() else {
+            continue;
+        };
+        if interface_object.contains_key("linkIds") && interface_object.contains_key("link_ids") {
+            return Err(UiParseError::new(
+                "LEGACY_SUBGRAPH_INTERFACE_EVIDENCE_CONFLICT",
+                format!(
+                    "definition {definition_id} {field}[{slot_index}] has competing link ID fields"
+                ),
+            ));
+        }
+        let mut topology_ids = match direction {
+            "input" => lookup
+                .outgoing_links_for_source_slot(links, boundary_node_id, slot_index)
+                .map(|link| link.id)
+                .collect::<Vec<_>>(),
+            "output" => lookup
+                .incoming_links_for_target_slot(links, boundary_node_id, slot_index)
+                .map(|link| link.id)
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        topology_ids.sort_unstable();
+        topology_ids.dedup();
+        let explicit_key = if interface_object.contains_key("linkIds") {
+            Some("linkIds")
+        } else if interface_object.contains_key("link_ids") {
+            Some("link_ids")
+        } else {
+            None
+        };
+        if let Some(key) = explicit_key {
+            let explicit = interface_object
+                .get(key)
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    UiParseError::new(
+                        "LEGACY_SUBGRAPH_INTERFACE_EVIDENCE_CONFLICT",
+                        format!("definition {definition_id} {field}[{slot_index}] {key} is not an array"),
+                    )
+                })?
+                .iter()
+                .filter_map(Value::as_i64)
+                .collect::<BTreeSet<_>>();
+            let topology = topology_ids.iter().copied().collect::<BTreeSet<_>>();
+            if explicit != topology {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_INTERFACE_EVIDENCE_CONFLICT",
+                    format!("definition {definition_id} {field}[{slot_index}] explicit link IDs conflict with exact serialized endpoints"),
+                ));
+            }
+        } else if !topology_ids.is_empty() {
+            interface_object.insert(
+                "linkIds".to_owned(),
+                Value::Array(topology_ids.into_iter().map(Value::from).collect()),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn canonicalize_nested_proxy_widgets(
+    definitions: &mut [Value],
+    known_definitions: &BTreeMap<String, Value>,
+    definition_node_indexes: &BTreeMap<String, BTreeMap<String, Vec<usize>>>,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<(), UiParseError> {
+    for definition in definitions {
+        if let Some(nodes) = definition
+            .as_object_mut()
+            .and_then(|definition| definition.get_mut("nodes"))
+        {
+            canonicalize_proxy_widgets(
+                nodes,
+                known_definitions,
+                definition_node_indexes,
+                descriptors,
+            )?;
+        }
+        if let Some(nested) = definition
+            .as_object_mut()
+            .and_then(|definition| definition.get_mut("definitions"))
+            .and_then(Value::as_object_mut)
+            .and_then(|definitions| definitions.get_mut("subgraphs"))
+            .and_then(Value::as_array_mut)
+        {
+            canonicalize_nested_proxy_widgets(
+                nested,
+                known_definitions,
+                definition_node_indexes,
+                descriptors,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a proxy through exact serialized subgraph input interfaces until
+/// the existing schema-backed widget authority can identify the runtime
+/// input. Composite inputs are not object_info nodes, so their interface and
+/// next proxy edge must both be present and unique; names alone never resolve
+/// the target.
+fn resolve_proxy_control_widget_binding(
+    node: &Value,
+    widget_name: &str,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<Option<UiWidgetBinding>, UiParseError> {
+    if widget_name != "control_after_generate" {
+        return Ok(None);
+    }
+    let Some(object) = node.as_object() else {
+        return Ok(None);
+    };
+    let Some(class_type) = object.get("type").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let Some(schema_node) = descriptors.node(class_type) else {
+        return Ok(None);
+    };
+    let mut matching = Vec::new();
+    for descriptor in schema_node
+        .inputs
+        .values()
+        .filter(|input| input.serializer_kind == SerializerKind::StandardSeed && !input.hidden)
+    {
+        let sockets = object
+            .get("inputs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object)
+            .filter(|socket| {
+                socket.get("name").and_then(Value::as_str) == Some(descriptor.name.as_str())
+                    && socket
+                        .get("widget")
+                        .and_then(Value::as_object)
+                        .and_then(|widget| widget.get("name"))
+                        .and_then(Value::as_str)
+                        == Some(descriptor.name.as_str())
+            })
+            .collect::<Vec<_>>();
+        if sockets.len() > 1 {
+            return Err(UiParseError::new(
+                "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+                format!(
+                    "proxy target node {} has multiple seed input sockets for control_after_generate",
+                    object.get("id").map(Value::to_string).unwrap_or_default()
+                ),
+            ));
+        }
+        if let Some(socket) = sockets.first() {
+            let socket_type = socket.get("type").and_then(Value::as_str);
+            let schema_type = declared_type_name(descriptor.declared_type);
+            if schema_type == "UNKNOWN" || !compatible_socket_types(socket_type, Some(schema_type))
+            {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                    format!(
+                        "proxy target node {} seed control input {} conflicts with its schema type",
+                        object.get("id").map(Value::to_string).unwrap_or_default(),
+                        descriptor.name
+                    ),
+                ));
+            }
+            matching.push(descriptor.clone());
+        }
+    }
+    match matching.len() {
+        0 => Ok(None),
+        1 => Ok(Some(UiWidgetBinding {
+            kind: WidgetBindingKind::ControlWidget,
+            runtime_name: None,
+            descriptor: matching.pop(),
+        })),
+        _ => Err(UiParseError::new(
+            "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+            format!(
+                "proxy target node {} has multiple schema-backed seed controls for control_after_generate",
+                object.get("id").map(Value::to_string).unwrap_or_default()
+            ),
+        )),
+    }
+}
+
+fn resolve_proxy_widget_schema_binding(
+    node: &Value,
+    widget_name: &str,
+    expected_type: Option<&str>,
+    definitions: &BTreeMap<String, Value>,
+    definition_node_indexes: &BTreeMap<String, BTreeMap<String, Vec<usize>>>,
+    descriptors: &UiSerializationDescriptorSet,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Result<Option<UiWidgetBinding>, UiParseError> {
+    let Some(object) = node.as_object() else {
+        return Ok(None);
+    };
+    let Some(class_type) = object.get("type").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let named_values = object
+        .get("widgets_values_named")
+        .and_then(Value::as_object)
+        .map(|values| {
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<BTreeMap<_, _>>()
+        });
+    if let Ok(binding) = descriptors.resolve_ui_input(
+        class_type,
+        widget_name,
+        Some(widget_name),
+        None,
+        false,
+        named_values.as_ref(),
+    ) {
+        if binding.runtime_name.is_some() && binding.descriptor.is_some() {
+            let sockets = object
+                .get("inputs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_object)
+                .filter(|socket| {
+                    socket.get("name").and_then(Value::as_str) == Some(widget_name)
+                        || socket
+                            .get("widget")
+                            .and_then(Value::as_object)
+                            .and_then(|widget| widget.get("name"))
+                            .and_then(Value::as_str)
+                            == Some(widget_name)
+                })
+                .collect::<Vec<_>>();
+            if sockets.len() != 1 {
+                return Err(UiParseError::new(
+                    if sockets.is_empty() {
+                        "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                    } else {
+                        "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                    },
+                    format!(
+                        "proxy target node {} has {} serialized inputs for widget {widget_name}",
+                        object.get("id").map(Value::to_string).unwrap_or_default(),
+                        sockets.len()
+                    ),
+                ));
+            }
+            let descriptor = binding.descriptor.as_ref().expect("schema binding checked");
+            let socket_type = sockets[0]
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    UiParseError::new(
+                        "LEGACY_SUBGRAPH_PROXY_TYPE_EVIDENCE_INSUFFICIENT",
+                        format!(
+                            "proxy target node {} widget {widget_name} has no serialized socket type",
+                            object.get("id").map(Value::to_string).unwrap_or_default()
+                        ),
+                    )
+                })?;
+            let schema_type = declared_type_name(descriptor.declared_type);
+            let combo_contract = descriptor.serializer_kind == SerializerKind::StandardCombo
+                && socket_type.eq_ignore_ascii_case("COMBO");
+            let control_contract = descriptor.serializer_kind.is_frontend_control();
+            if schema_type == "UNKNOWN"
+                && expected_type.is_none_or(|expected| {
+                    expected.eq_ignore_ascii_case("UNKNOWN")
+                        || !compatible_socket_types(Some(expected), Some(socket_type))
+                })
+            {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TYPE_EVIDENCE_INSUFFICIENT",
+                    format!(
+                        "proxy target node {} widget {widget_name} has unknown schema type and no matching serialized interface type",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                ));
+            }
+            let type_conflict = (schema_type != "UNKNOWN"
+                && !compatible_socket_types(Some(socket_type), Some(schema_type)))
+                || expected_type.is_some_and(|expected| {
+                    !compatible_socket_types(Some(expected), Some(socket_type))
+                        || (schema_type != "UNKNOWN"
+                            && !compatible_socket_types(Some(expected), Some(schema_type)))
+                });
+            if type_conflict && !combo_contract && !control_contract {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                    format!(
+                        "proxy target node {} widget {widget_name} socket type {socket_type} conflicts with schema type {schema_type}",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                ));
+            }
+            return Ok(Some(binding));
+        }
+    }
+    if let Some(binding) = resolve_proxy_control_widget_binding(node, widget_name, descriptors)? {
+        return Ok(Some(binding));
+    }
+
+    let Some(definition) = definitions.get(class_type) else {
+        return Ok(None);
+    };
+    let key = (class_type.to_owned(), widget_name.to_owned());
+    if !visited.insert(key.clone()) {
+        return Err(UiParseError::new(
+            "LEGACY_SUBGRAPH_PROXY_TARGET_CYCLE",
+            format!("composite proxy target {class_type}/{widget_name} recurses"),
+        ));
+    }
+    let result = (|| {
+        let sockets = object
+            .get("inputs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter(|(_, socket)| {
+                socket
+                    .as_object()
+                    .and_then(|socket| socket.get("name"))
+                    .and_then(Value::as_str)
+                    == Some(widget_name)
+                    && socket
+                        .as_object()
+                        .and_then(|socket| socket.get("widget"))
+                        .and_then(Value::as_object)
+                        .and_then(|widget| widget.get("name"))
+                        .and_then(Value::as_str)
+                        == Some(widget_name)
+            })
+            .collect::<Vec<_>>();
+        if sockets.len() != 1 {
+            return Err(UiParseError::new(
+                if sockets.is_empty() {
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                } else {
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                },
+                format!(
+                    "composite proxy target {} has {} exact widget input sockets for {widget_name}",
+                    object.get("id").map(Value::to_string).unwrap_or_default(),
+                    sockets.len()
+                ),
+            ));
+        }
+        let (slot, socket) = sockets[0];
+        let interface = definition
+            .get("inputs")
+            .and_then(Value::as_array)
+            .and_then(|inputs| inputs.get(slot))
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!(
+                        "composite proxy target {class_type} has no interface input slot {slot}"
+                    ),
+                )
+            })?;
+        let interface_name = interface.get("name").and_then(Value::as_str);
+        let socket_type = socket
+            .as_object()
+            .and_then(|socket| socket.get("type"))
+            .and_then(Value::as_str);
+        let interface_type = interface.get("type").and_then(Value::as_str);
+        if interface_name != Some(widget_name)
+            || !compatible_socket_types(interface_type, socket_type)
+            || expected_type.is_some_and(|expected| {
+                !compatible_socket_types(Some(expected), socket_type)
+                    || !compatible_socket_types(Some(expected), interface_type)
+            })
+        {
+            return Err(UiParseError::new(
+                "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                format!("composite proxy target {class_type} input {widget_name} conflicts with its definition interface"),
+            ));
+        }
+
+        let entries = object
+            .get("properties")
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get("proxyWidgets"))
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!(
+                        "composite proxy target {} has no serialized proxyWidgets evidence",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                )
+            })?;
+        let mut matching = Vec::new();
+        for entry in entries {
+            let pair = entry.as_array().ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!(
+                        "composite proxy target {} has a non-pair proxy entry",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                )
+            })?;
+            if pair.len() != 2 {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!(
+                        "composite proxy target {} has a proxy entry that is not a pair",
+                        object.get("id").map(Value::to_string).unwrap_or_default()
+                    ),
+                ));
+            }
+            if pair[1].as_str() == Some(widget_name) {
+                let target_id = parse_node_id(pair.first(), 0).map_err(|_| {
+                    UiParseError::new(
+                        "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                        format!(
+                            "composite proxy target {} has an invalid inner node identity",
+                            object.get("id").map(Value::to_string).unwrap_or_default()
+                        ),
+                    )
+                })?;
+                matching.push(target_id);
+            }
+        }
+        if matching.len() != 1 {
+            return Err(UiParseError::new(
+                if matching.is_empty() {
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                } else {
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                },
+                format!("composite proxy target {class_type} has {} exact downstream proxies for {widget_name}", matching.len()),
+            ));
+        }
+        let child_nodes = definition
+            .get("nodes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!("composite proxy target {class_type} definition has no nodes"),
+                )
+            })?;
+        let target_positions = definition_node_indexes
+            .get(class_type)
+            .and_then(|by_id| by_id.get(&matching[0]))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if target_positions.len() != 1 {
+            return Err(UiParseError::new(
+                if target_positions.is_empty() {
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                } else {
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                },
+                format!(
+                    "composite proxy target {class_type} resolves inner node {} {} times",
+                    matching[0],
+                    target_positions.len()
+                ),
+            ));
+        }
+        let target = &child_nodes[target_positions[0]];
+        let binding = resolve_proxy_widget_schema_binding(
+            target,
+            widget_name,
+            interface_type,
+            definitions,
+            definition_node_indexes,
+            descriptors,
+            visited,
+        )?
+        .ok_or_else(|| UiParseError::new(
+            "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+            format!("composite proxy target {class_type} inner node {} does not resolve to a schema widget", matching[0]),
+        ))?;
+        let descriptor = binding
+            .descriptor
+            .as_ref()
+            .expect("resolved target has schema descriptor");
+        let schema_type = declared_type_name(descriptor.declared_type);
+        if schema_type != "UNKNOWN"
+            && (!compatible_socket_types(socket_type, Some(schema_type))
+                || !compatible_socket_types(interface_type, Some(schema_type)))
+        {
+            return Err(UiParseError::new(
+                "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                format!("composite proxy target {class_type} input {widget_name} conflicts with downstream schema type {schema_type}"),
+            ));
+        }
+        Ok(binding)
+    })();
+    visited.remove(&key);
+    result.map(Some)
+}
+
+fn canonicalize_proxy_widgets(
+    nodes: &mut Value,
+    definitions: &BTreeMap<String, Value>,
+    definition_node_indexes: &BTreeMap<String, BTreeMap<String, Vec<usize>>>,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<(), UiParseError> {
+    let Some(nodes) = nodes.as_array_mut() else {
+        return Ok(());
+    };
+    for node in nodes {
+        let Some(object) = node.as_object_mut() else {
+            continue;
+        };
+        let owner_inputs = object
+            .get("inputs")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let node_id = object
+            .get("id")
+            .and_then(|id| parse_node_id(Some(id), 0).ok())
+            .unwrap_or_else(|| "?".to_owned());
+        let node_class = object
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let Some(proxy_widgets) = object
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+            .and_then(|properties| properties.get_mut("proxyWidgets"))
+        else {
+            continue;
+        };
+        let Some(definition) = definitions.get(&node_class) else {
+            continue;
+        };
+        let entries = proxy_widgets.as_array_mut().ok_or_else(|| {
+            UiParseError::new(
+                "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                format!("composite instance {node_id} proxyWidgets is not an array"),
+            )
+        })?;
+        let mut proxy_name_counts = BTreeMap::<String, usize>::new();
+        for entry in entries.iter() {
+            if let Some(widget_name) = entry
+                .as_array()
+                .and_then(|pair| (pair.len() == 2).then(|| pair[1].as_str()).flatten())
+            {
+                *proxy_name_counts.entry(widget_name.to_owned()).or_default() += 1;
+            }
+        }
+        let inner_nodes = definition
+            .get("nodes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!("composite instance {node_id} definition has no node array"),
+                )
+            })?;
+        let mut seen = BTreeSet::new();
+        for entry in entries {
+            let pair = entry.as_array_mut().ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!("composite instance {node_id} proxy entry is not a two-item array"),
+                )
+            })?;
+            if pair.len() != 2 {
+                return Err(UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!("composite instance {node_id} proxy entry is not a two-item pair"),
+                ));
+            }
+            let inner_id = parse_node_id(pair.first(), 0).map_err(|_| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                    format!("composite instance {node_id} proxy target identity is invalid"),
+                )
+            })?;
+            let widget_name = pair[1]
+                .as_str()
+                .filter(|name| !name.trim().is_empty())
+                .ok_or_else(|| {
+                    UiParseError::new(
+                        "LEGACY_SUBGRAPH_PROXY_SHAPE_UNSUPPORTED",
+                        format!("composite instance {node_id} proxy widget identity is invalid"),
+                    )
+                })?;
+            let owner_sockets = owner_inputs
+                .iter()
+                .filter_map(Value::as_object)
+                .filter(|socket| {
+                    socket.get("name").and_then(Value::as_str) == Some(widget_name)
+                        && socket
+                            .get("widget")
+                            .and_then(Value::as_object)
+                            .and_then(|widget| widget.get("name"))
+                            .and_then(Value::as_str)
+                            == Some(widget_name)
+                })
+                .collect::<Vec<_>>();
+            if owner_sockets.len() > 1 {
+                return Err(UiParseError::new(
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+                    format!("composite instance {node_id} has multiple owner inputs for widget {widget_name}"),
+                ));
+            }
+            let owner_type = (proxy_name_counts.get(widget_name) == Some(&1))
+                .then(|| {
+                    owner_sockets
+                        .first()
+                        .and_then(|socket| socket.get("type"))
+                        .and_then(Value::as_str)
+                })
+                .flatten();
+            if !seen.insert((inner_id.clone(), widget_name.to_owned())) {
+                return Err(UiParseError::new(
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+                    format!("composite instance {node_id} repeats proxy target {inner_id}/{widget_name}"),
+                ));
+            }
+            let inner_positions = definition_node_indexes
+                .get(&node_class)
+                .and_then(|by_id| by_id.get(&inner_id))
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if inner_positions.len() != 1 {
+                return Err(UiParseError::new(
+                    if inner_positions.is_empty() {
+                        "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED"
+                    } else {
+                        "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET"
+                    },
+                    format!(
+                        "composite instance {node_id} resolves inner node {inner_id} {} times",
+                        inner_positions.len()
+                    ),
+                ));
+            }
+            let inner = &inner_nodes[inner_positions[0]];
+            let binding = resolve_proxy_widget_schema_binding(
+                inner,
+                widget_name,
+                owner_type,
+                definitions,
+                definition_node_indexes,
+                descriptors,
+                &mut BTreeSet::new(),
+            )?
+            .ok_or_else(|| {
+                UiParseError::new(
+                    "LEGACY_SUBGRAPH_PROXY_TARGET_UNRESOLVED",
+                    format!(
+                        "inner node {inner_id} widget {widget_name} has no unique schema contract"
+                    ),
+                )
+            })?;
+            let descriptor = binding.descriptor.as_ref().expect("descriptor was checked");
+            let widget_sockets = inner
+                .as_object()
+                .and_then(|inner| inner.get("inputs"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_object)
+                .filter(|socket| {
+                    socket.get("name").and_then(Value::as_str) == Some(widget_name)
+                        || socket
+                            .get("widget")
+                            .and_then(Value::as_object)
+                            .and_then(|widget| widget.get("name"))
+                            .and_then(Value::as_str)
+                            == Some(widget_name)
+                })
+                .collect::<Vec<_>>();
+            if widget_sockets.len() > 1 {
+                return Err(UiParseError::new(
+                    "AMBIGUOUS_SUBGRAPH_PROXY_WIDGET",
+                    format!("inner node {inner_id} has multiple serialized sockets for widget {widget_name}"),
+                ));
+            }
+            if let Some(socket_type) = widget_sockets
+                .first()
+                .and_then(|socket| socket.get("type"))
+                .and_then(Value::as_str)
+            {
+                let schema_type = declared_type_name(descriptor.declared_type);
+                let combo_contract = descriptor.serializer_kind == SerializerKind::StandardCombo
+                    && socket_type.eq_ignore_ascii_case("COMBO");
+                let control_contract = descriptor.serializer_kind.is_frontend_control();
+                let type_conflict = (schema_type == "UNKNOWN"
+                    && owner_type.is_none_or(|expected| {
+                        expected.eq_ignore_ascii_case("UNKNOWN")
+                            || !compatible_socket_types(Some(expected), Some(socket_type))
+                    }))
+                    || (schema_type != "UNKNOWN"
+                        && !compatible_socket_types(Some(socket_type), Some(schema_type)))
+                    || owner_type.is_some_and(|expected| {
+                        !compatible_socket_types(Some(expected), Some(socket_type))
+                            || (schema_type != "UNKNOWN"
+                                && !compatible_socket_types(Some(expected), Some(schema_type)))
+                    });
+                if type_conflict && !combo_contract && !control_contract {
+                    return Err(UiParseError::new(
+                        "LEGACY_SUBGRAPH_PROXY_TYPE_CONFLICT",
+                        format!("inner node {inner_id} widget {widget_name} conflicts with its schema input type"),
+                    ));
+                }
+            }
+            pair[0] = Value::String(inner_id);
+        }
+    }
+    Ok(())
 }
 
 /// Parse a source ComfyUI workflow without performing conversion or I/O.
@@ -3302,7 +5257,12 @@ pub fn parse_ui_workflow_value(value: &Value) -> Result<UiWorkflowDocument, UiPa
         });
     }
 
-    let features = detect_ui_features(source_root, &parsed_nodes, Some(&subgraph_metadata));
+    let features = detect_ui_features(
+        source_root,
+        &parsed_nodes,
+        &parsed_links,
+        Some(&subgraph_metadata),
+    );
     Ok(UiWorkflowDocument {
         workflow_format_version,
         frontend_version,
@@ -3312,6 +5272,34 @@ pub fn parse_ui_workflow_value(value: &Value) -> Result<UiWorkflowDocument, UiPa
         subgraph_definition_ids: subgraph_metadata.definition_ids,
         nested_subgraphs: subgraph_metadata.nested,
     })
+}
+
+/// Parse a UI workflow using the descriptor-selected serialization contracts.
+/// Only LegacySubgraphBoundaryProxyV0 runs the metadata adapter; CurrentContract
+/// continues through the exact same parser path as before.
+pub fn parse_ui_workflow_value_with_descriptors(
+    value: &Value,
+    descriptors: &UiSerializationDescriptorSet,
+) -> Result<UiWorkflowDocument, UiParseError> {
+    if !descriptors
+        .profile
+        .contracts
+        .contains(&FrontendSerializationContract::LegacySubgraphBoundaryProxyV0)
+    {
+        return parse_ui_workflow_value(value);
+    }
+    if descriptors
+        .profile
+        .contracts
+        .contains(&FrontendSerializationContract::Current)
+    {
+        return Err(UiParseError::new(
+            "SERIALIZATION_CONTRACT_SET_INVALID",
+            "CurrentContract cannot be combined with LegacySubgraphBoundaryProxyV0",
+        ));
+    }
+    let canonical = canonicalize_legacy_subgraph_contract(value, descriptors)?;
+    parse_ui_workflow_value(&canonical)
 }
 
 fn parse_node_id(value: Option<&Value>, index: usize) -> Result<String, UiParseError> {
@@ -3460,8 +5448,16 @@ pub fn normalize_links(
     document: &UiWorkflowDocument,
     descriptors: &UiSerializationDescriptorSet,
 ) -> Result<NormalizedLinkMap, NormalizationError> {
-    let classifications = classify_ui_nodes(document, descriptors);
-    Ok(normalize_graph(document, descriptors, &classifications)?.links)
+    let lookup = WorkflowUiLookupIndex::build(&document.nodes, &document.links);
+    validate_alias_candidate_diagnostics(&document.nodes, descriptors)?;
+    let classifications = classify_ui_nodes(document, descriptors, &lookup);
+    let features = document
+        .features
+        .with_classifications(document, &classifications);
+    if let Some(observation) = features.blocking_observation() {
+        return Err(NormalizationError::unsupported_feature(observation));
+    }
+    Ok(normalize_graph(document, descriptors, &classifications, &lookup)?.links)
 }
 
 fn active_node_map<'a>(
@@ -3577,7 +5573,8 @@ fn resolve_bypass_origin<'a>(
     aliases: &HashMap<String, UiAliasBinding>,
     nodes: &BTreeMap<String, &'a UiNode>,
     classifications: &BTreeMap<String, UiNodeClassificationResult>,
-    incoming: &HashMap<String, Vec<UiLink>>,
+    lookup: &WorkflowUiLookupIndex,
+    links: &'a [UiLink],
     seen: &mut HashSet<String>,
 ) -> Result<ResolvedOrigin<'a>, NormalizationError> {
     if classification_for(classifications, origin).contract != UiNodeContract::Runtime {
@@ -3605,9 +5602,12 @@ fn resolve_bypass_origin<'a>(
                 ),
             )
         })?;
-        let incoming_links = incoming.get(&origin.id).cloned().unwrap_or_default();
+        let incoming_links = lookup
+            .incoming_links(links, &origin.id)
+            .filter(|link| nodes.contains_key(&link.origin_node_id))
+            .collect::<Vec<_>>();
         let mut candidates = Vec::new();
-        for bridge in &incoming_links {
+        for bridge in incoming_links {
             let bridge_target_socket = origin.inputs.get(bridge.target_slot).ok_or_else(|| {
                 NormalizationError::new(
                     "LINK_TARGET_SLOT_INVALID",
@@ -3632,7 +5632,8 @@ fn resolve_bypass_origin<'a>(
                 aliases,
                 nodes,
                 classifications,
-                incoming,
+                lookup,
+                links,
                 seen,
             )?;
             let source_type = resolved_output_type(&resolved);
@@ -3671,7 +5672,8 @@ fn resolve_origin<'a>(
     aliases: &HashMap<String, UiAliasBinding>,
     nodes: &BTreeMap<String, &'a UiNode>,
     classifications: &BTreeMap<String, UiNodeClassificationResult>,
-    incoming: &HashMap<String, Vec<UiLink>>,
+    lookup: &WorkflowUiLookupIndex,
+    links: &'a [UiLink],
     seen: &mut HashSet<String>,
 ) -> Result<ResolvedOrigin<'a>, NormalizationError> {
     if origin.mode == UiNodeMode::Bypass {
@@ -3681,7 +5683,8 @@ fn resolve_origin<'a>(
             aliases,
             nodes,
             classifications,
-            incoming,
+            lookup,
+            links,
             seen,
         );
     }
@@ -3718,7 +5721,10 @@ fn resolve_origin<'a>(
                     format!("Reroute cycle reaches node {}", origin.id),
                 ));
             }
-            let incoming_links = incoming.get(&origin.id).cloned().unwrap_or_default();
+            let incoming_links = lookup
+                .incoming_links(links, &origin.id)
+                .filter(|link| nodes.contains_key(&link.origin_node_id))
+                .collect::<Vec<_>>();
             let result = if incoming_links.is_empty() {
                 Err(NormalizationError::new(
                     "REROUTE_SOURCE_MISSING",
@@ -3734,7 +5740,7 @@ fn resolve_origin<'a>(
                     ),
                 ))
             } else {
-                let bridge = &incoming_links[0];
+                let bridge = incoming_links[0];
                 let bridge_target_socket =
                     origin.inputs.get(bridge.target_slot).ok_or_else(|| {
                         NormalizationError::new(
@@ -3760,7 +5766,8 @@ fn resolve_origin<'a>(
                     aliases,
                     nodes,
                     classifications,
-                    incoming,
+                    lookup,
+                    links,
                     seen,
                 )?;
                 let source_type = resolved_output_type(&resolved);
@@ -3836,7 +5843,8 @@ fn resolve_origin<'a>(
                     aliases,
                     nodes,
                     classifications,
-                    incoming,
+                    lookup,
+                    links,
                     seen,
                 )?;
                 if !compatible_socket_types(
@@ -3988,6 +5996,7 @@ fn collect_virtual_aliases<'a>(
     document: &'a UiWorkflowDocument,
     nodes: &BTreeMap<String, &'a UiNode>,
     classifications: &BTreeMap<String, UiNodeClassificationResult>,
+    lookup: &WorkflowUiLookupIndex,
 ) -> Result<HashMap<String, UiAliasBinding>, NormalizationError> {
     let mut aliases = HashMap::new();
     for producer in nodes.values() {
@@ -4003,10 +6012,8 @@ fn collect_virtual_aliases<'a>(
                     format!("alias producer {} has no stable identity", producer.id),
                 )
             })?;
-        let incoming = document
-            .links
-            .iter()
-            .filter(|link| link.target_node_id == producer.id)
+        let incoming = lookup
+            .incoming_links(&document.links, &producer.id)
             .collect::<Vec<_>>();
         if incoming.len() != 1 {
             return Err(NormalizationError::new(
@@ -4079,37 +6086,18 @@ fn normalize_graph(
     document: &UiWorkflowDocument,
     descriptors: &UiSerializationDescriptorSet,
     classifications: &BTreeMap<String, UiNodeClassificationResult>,
+    lookup: &WorkflowUiLookupIndex,
 ) -> Result<NormalizedUiGraph, NormalizationError> {
-    if let Some(observation) = document
-        .features
-        .with_schema(document, descriptors)
-        .blocking_observation()
-    {
-        return Err(NormalizationError::unsupported_feature(observation));
-    }
     let nodes = active_node_map(document)?;
-    let aliases = collect_virtual_aliases(document, &nodes, classifications)?;
-    let mut links_by_id = HashMap::new();
-    let mut incoming = HashMap::<String, Vec<UiLink>>::new();
-
-    for link in &document.links {
-        if links_by_id.insert(link.id, link.clone()).is_some() {
-            return Err(NormalizationError::new(
-                "DUPLICATE_LINK_ID",
-                format!("link id {} is declared by more than one tuple", link.id),
-            ));
-        }
-        let (Some(_origin), Some(target)) = (
-            nodes.get(&link.origin_node_id),
-            nodes.get(&link.target_node_id),
-        ) else {
-            continue;
-        };
-        incoming
-            .entry(target.id.clone())
-            .or_default()
-            .push(link.clone());
+    if let Some(link_id) = lookup.duplicate_link_ids.first() {
+        return Err(NormalizationError::new(
+            "DUPLICATE_LINK_ID",
+            format!("link id {link_id} is declared by more than one tuple"),
+        ));
     }
+    let aliases = collect_virtual_aliases(document, &nodes, classifications, lookup)?;
+
+    record_full_link_scan();
     for link in &document.links {
         let (Some(origin), Some(target)) = (
             nodes.get(&link.origin_node_id),
@@ -4118,9 +6106,12 @@ fn normalize_graph(
             continue;
         };
         if classification_for(classifications, target).contract == UiNodeContract::Reroute
-            && incoming
-                .get(&target.id)
-                .is_some_and(|links| links.len() > 1)
+            && lookup
+                .incoming_links(&document.links, &target.id)
+                .filter(|link| nodes.contains_key(&link.origin_node_id))
+                .take(2)
+                .count()
+                > 1
         {
             return Err(NormalizationError::new(
                 "REROUTE_AMBIGUOUS_FANIN",
@@ -4136,10 +6127,9 @@ fn normalize_graph(
         if classification_for(classifications, node).contract != UiNodeContract::Reroute {
             continue;
         }
-        if document
-            .links
-            .iter()
-            .any(|link| link.origin_node_id == node.id && nodes.contains_key(&link.target_node_id))
+        if lookup
+            .outgoing_links(&document.links, &node.id)
+            .any(|link| nodes.contains_key(&link.target_node_id))
         {
             let _ = resolve_origin(
                 node,
@@ -4147,7 +6137,8 @@ fn normalize_graph(
                 &aliases,
                 &nodes,
                 classifications,
-                &incoming,
+                lookup,
+                &document.links,
                 &mut HashSet::new(),
             )?;
         }
@@ -4156,6 +6147,7 @@ fn normalize_graph(
     let mut normalized = BTreeMap::new();
     let mut literal_inputs = BTreeMap::new();
     let mut seen_targets = HashSet::new();
+    record_full_link_scan();
     for link in &document.links {
         let (Some(origin_raw), Some(target)) = (
             nodes.get(&link.origin_node_id),
@@ -4251,7 +6243,8 @@ fn normalize_graph(
             &aliases,
             &nodes,
             classifications,
-            &incoming,
+            lookup,
+            &document.links,
             &mut HashSet::new(),
         ) {
             Err(error) if error.code == "BYPASS_SOURCE_UNAVAILABLE" => continue,
@@ -4303,20 +6296,18 @@ fn normalize_graph(
         }
         for input in &node.inputs {
             if let Some(link_id) = input.link_id {
-                if !links_by_id.contains_key(&link_id) {
-                    let inactive_origin = document.links.iter().any(|link| {
-                        link.id == link_id && !nodes.contains_key(&link.origin_node_id)
-                    });
-                    if inactive_origin {
-                        continue;
+                match lookup.link(&document.links, link_id) {
+                    None => {
+                        return Err(NormalizationError::new(
+                            "LINK_NODE_EVIDENCE_MISSING",
+                            format!(
+                                "node {} input {} references missing link {}",
+                                node.id, input.name, link_id
+                            ),
+                        ));
                     }
-                    return Err(NormalizationError::new(
-                        "LINK_NODE_EVIDENCE_MISSING",
-                        format!(
-                            "node {} input {} references missing link {}",
-                            node.id, input.name, link_id
-                        ),
-                    ));
+                    Some(link) if !nodes.contains_key(&link.origin_node_id) => continue,
+                    Some(_) => {}
                 }
             }
         }
@@ -4367,6 +6358,87 @@ pub fn normalize_widgets(
         )
     })?;
     let mut inputs = Map::new();
+    let uses_legacy_dynamic_input = if descriptors.is_legacy_dynamic_input() {
+        node.inputs.iter().try_fold(false, |found, socket| {
+            if found {
+                return Ok(true);
+            }
+            if socket.name.contains('.')
+                || socket
+                    .declared_type
+                    .as_deref()
+                    .is_some_and(|value| value.to_ascii_uppercase().contains("DYNAMIC"))
+            {
+                return Ok(true);
+            }
+            descriptors
+                .legacy_dynamic_input_target(&node.class_type, &socket.name)
+                .map(|target| target.is_some())
+                .map_err(|error| {
+                    NormalizationError::new(
+                        error.code,
+                        format!("node {} input {}: {}", node.id, socket.name, error.message),
+                    )
+                })
+        })?
+    } else {
+        false
+    };
+    let uses_legacy_widget_slot = descriptors.is_legacy_widget_slot() && !uses_legacy_dynamic_input;
+    if uses_legacy_dynamic_input {
+        for socket in &node.inputs {
+            let binding = descriptors
+                .resolve_ui_input(
+                    &node.class_type,
+                    &socket.name,
+                    socket.widget_name.as_deref(),
+                    socket.shape,
+                    socket.link_id.is_some(),
+                    node.widgets_values_named.as_ref(),
+                )
+                .map_err(|error| {
+                    NormalizationError::new(
+                        error.code,
+                        format!("node {} input {}: {}", node.id, socket.name, error.message),
+                    )
+                })?;
+            if binding.kind != WidgetBindingKind::DynamicInput {
+                continue;
+            }
+            let (Some(raw_type), Some(input)) =
+                (socket.declared_type.as_deref(), binding.descriptor.as_ref())
+            else {
+                continue;
+            };
+            if !compatible_socket_types(
+                Some(raw_type),
+                Some(declared_type_name(input.declared_type)),
+            ) {
+                return Err(NormalizationError::new(
+                    "legacy_dynamic_type_mismatch",
+                    format!(
+                        "node {} dynamic input {} declares type {}, schema requires {}",
+                        node.id,
+                        binding.runtime_name.as_deref().unwrap_or(&socket.name),
+                        raw_type,
+                        declared_type_name(input.declared_type)
+                    ),
+                ));
+            }
+        }
+        if let Some(named_values) = &node.widgets_values_named {
+            for name in named_values.keys() {
+                descriptors
+                    .legacy_dynamic_input_target(&node.class_type, name)
+                    .map_err(|error| {
+                        NormalizationError::new(
+                            error.code,
+                            format!("node {} input {}: {}", node.id, name, error.message),
+                        )
+                    })?;
+            }
+        }
+    }
     if let Some(named) = &node.widgets_values_named {
         for (name, value) in named {
             let Some(input) = descriptors.input_for_node(
@@ -4392,7 +6464,7 @@ pub fn normalize_widgets(
             }
             validate_literal(&input, value).map_err(|message| {
                 NormalizationError::new(
-                    "WIDGET_VALUE_INVALID",
+                    widget_value_error_code(descriptors),
                     format!("node {} input {}: {message}", node.id, name),
                 )
             })?;
@@ -4400,23 +6472,23 @@ pub fn normalize_widgets(
         }
     }
 
-    let positional_names = positional_widget_names(node, descriptors, links)?;
-    if !node.widgets_values.is_empty() {
-        let named_values_cover_positional = node.properties.contains_key(SUBGRAPH_SCOPE_PROPERTY)
-            && !positional_names.is_empty()
-            && node
-                .widgets_values_named
-                .as_ref()
-                .is_some_and(|named| positional_names.iter().all(|name| named.contains_key(name)));
-        let positional_values = if named_values_cover_positional
-            || (positional_names.is_empty() && node.widgets_values_named.is_some())
-        {
-            Vec::new()
-        } else {
+    // Preserve the current contract's eager socket validation (including
+    // ambiguous converted-widget diagnostics) even when a node has no
+    // positional values. The legacy slot profiles own their own cursor evidence.
+    let current_positional_names = if uses_legacy_widget_slot || uses_legacy_dynamic_input {
+        None
+    } else {
+        Some(positional_widget_names(node, descriptors, links)?)
+    };
+    if !node.widgets_values.is_empty() || uses_legacy_dynamic_input {
+        let positional_values = if uses_legacy_widget_slot {
+            let inputs = positional_widget_evidence(node);
+            let linked_names = linked_names_for_node(node, links);
             descriptors
-                .consume_positional_values(
+                .consume_legacy_positional_values(
                     &node.class_type,
-                    &positional_names,
+                    &inputs,
+                    &linked_names,
                     &node.widgets_values,
                     node.widgets_values_named.as_ref(),
                 )
@@ -4426,13 +6498,68 @@ pub fn normalize_widgets(
                         format!("node {}: {}", node.id, error.message),
                     )
                 })?
+        } else if uses_legacy_dynamic_input {
+            let inputs = positional_widget_evidence(node);
+            let linked_names = linked_names_for_node(node, links);
+            descriptors
+                .consume_legacy_dynamic_positional_values(
+                    &node.class_type,
+                    &inputs,
+                    &linked_names,
+                    &node.widgets_values,
+                    node.widgets_values_named.as_ref(),
+                )
+                .map_err(|error| {
+                    NormalizationError::new(
+                        error.code,
+                        format!("node {}: {}", node.id, error.message),
+                    )
+                })?
+        } else {
+            let positional_names = current_positional_names
+                .as_deref()
+                .expect("current profile has positional widget names");
+            let named_values_cover_positional =
+                node.properties.contains_key(SUBGRAPH_SCOPE_PROPERTY)
+                    && !positional_names.is_empty()
+                    && node.widgets_values_named.as_ref().is_some_and(|named| {
+                        positional_names.iter().all(|name| named.contains_key(name))
+                    });
+            if named_values_cover_positional
+                || (positional_names.is_empty() && node.widgets_values_named.is_some())
+            {
+                Vec::new()
+            } else {
+                descriptors
+                    .consume_positional_values(
+                        &node.class_type,
+                        &positional_names,
+                        &node.widgets_values,
+                        node.widgets_values_named.as_ref(),
+                    )
+                    .map_err(|error| {
+                        NormalizationError::new(
+                            error.code,
+                            format!("node {}: {}", node.id, error.message),
+                        )
+                    })?
+            }
         };
+        let mut resolved_named_values = node.widgets_values_named.clone().unwrap_or_default();
+        if uses_legacy_dynamic_input {
+            for (name, value) in &positional_values {
+                if descriptor.inputs.get(name).is_some_and(|input| {
+                    input.declared_type
+                        == crate::application::workflow_recognition_schema::RecognitionDeclaredType::DynamicCombo
+                }) {
+                    resolved_named_values.insert(name.clone(), value.clone());
+                }
+            }
+        }
         for (name, value) in positional_values {
-            let Some(input) = descriptors.input_for_node(
-                &node.class_type,
-                node.widgets_values_named.as_ref(),
-                &name,
-            ) else {
+            let Some(input) =
+                descriptors.input_for_node(&node.class_type, Some(&resolved_named_values), &name)
+            else {
                 continue;
             };
             if input.serializer_kind == SerializerKind::WorkflowOnlyControl {
@@ -4465,7 +6592,7 @@ pub fn normalize_widgets(
                 }
                 validate_literal(&input, &value).map_err(|message| {
                     NormalizationError::new(
-                        "WIDGET_VALUE_INVALID",
+                        widget_value_error_code(descriptors),
                         format!("node {} input {}: {message}", node.id, name),
                     )
                 })?;
@@ -4515,21 +6642,8 @@ fn positional_widget_names(
     descriptors: &UiSerializationDescriptorSet,
     links: &NormalizedLinkMap,
 ) -> Result<Vec<String>, NormalizationError> {
-    let inputs = node
-        .inputs
-        .iter()
-        .map(|socket| UiInputEvidence {
-            name: socket.name.clone(),
-            widget_name: socket.widget_name.clone(),
-            shape: socket.shape,
-            linked: socket.link_id.is_some(),
-        })
-        .collect::<Vec<_>>();
-    let linked_names = links
-        .keys()
-        .filter(|(node_id, _)| node_id == &node.id)
-        .map(|(_, input_name)| input_name.clone())
-        .collect::<BTreeSet<_>>();
+    let inputs = positional_widget_evidence(node);
+    let linked_names = linked_names_for_node(node, links);
     descriptors
         .positional_input_names(
             &node.class_type,
@@ -4540,6 +6654,38 @@ fn positional_widget_names(
         .map_err(|error| {
             NormalizationError::new(error.code, format!("node {}: {}", node.id, error.message))
         })
+}
+
+fn positional_widget_evidence(node: &UiNode) -> Vec<UiInputEvidence> {
+    node.inputs
+        .iter()
+        .map(|socket| UiInputEvidence {
+            name: socket.name.clone(),
+            widget_name: socket.widget_name.clone(),
+            shape: socket.shape,
+            linked: socket.link_id.is_some(),
+        })
+        .collect()
+}
+
+fn linked_names_for_node(node: &UiNode, links: &NormalizedLinkMap) -> BTreeSet<String> {
+    links
+        .keys()
+        .filter(|(node_id, _)| node_id == &node.id)
+        .map(|(_, input_name)| input_name.clone())
+        .collect()
+}
+
+fn widget_value_error_code(descriptors: &UiSerializationDescriptorSet) -> &'static str {
+    if descriptors
+        .profile
+        .contracts
+        .contains(&FrontendSerializationContract::LegacyWidgetSlotV0)
+    {
+        "legacy_widget_type_mismatch"
+    } else {
+        "WIDGET_VALUE_INVALID"
+    }
 }
 
 fn validate_literal(
@@ -4650,21 +6796,34 @@ pub fn normalize_ui_workflow(
             ),
         ));
     }
-    if document.frontend_version.as_deref()
-        != Some(descriptors.compatibility.frontend_version.as_str())
+    let source_frontend_version = document.frontend_version.as_deref().unwrap_or("unknown");
+    let frontend_version_matches = if descriptors
+        .profile
+        .contracts
+        .contains(&FrontendSerializationContract::Current)
     {
+        document.frontend_version.as_deref()
+            == Some(descriptors.compatibility.frontend_version.as_str())
+    } else {
+        source_frontend_version == descriptors.compatibility.frontend_version
+    };
+    if !frontend_version_matches {
         return Err(NormalizationError::new(
             "FRONTEND_VERSION_UNSUPPORTED",
             "source frontendVersion is missing or not in the verified compatibility set",
         ));
     }
-    let feature_set = document.features.with_schema(document, descriptors);
+    let lookup = WorkflowUiLookupIndex::build(&document.nodes, &document.links);
+    validate_alias_candidate_diagnostics(&document.nodes, descriptors)?;
+    let classifications = classify_ui_nodes(document, descriptors, &lookup);
+    let feature_set = document
+        .features
+        .with_classifications(document, &classifications);
     if let Some(observation) = feature_set.blocking_observation() {
         return Err(NormalizationError::unsupported_feature(observation));
     }
     let id_mapping = build_source_id_mapping(document);
-    let classifications = classify_ui_nodes(document, descriptors);
-    let graph = normalize_graph(document, descriptors, &classifications)?;
+    let graph = normalize_graph(document, descriptors, &classifications, &lookup)?;
     let links = graph.links;
     let nodes = active_node_map(document)?;
     let mut api_root = Map::new();
@@ -4841,8 +7000,209 @@ fn format_number(value: f64) -> String {
 
 #[cfg(test)]
 mod parser_tests {
-    use super::{parse_ui_workflow_value, UiNodeMode};
-    use serde_json::json;
+    use super::{
+        apply_subgraph_instance_widget_values, canonicalize_interface_link_ids,
+        capture_workflow_ui_lookup_stats, classify_ui_nodes_with_schema,
+        infer_legacy_boundary_node_id, normalize_links, parse_ui_workflow_value,
+        resolve_subgraph_boundaries, verified_alias_node_ids, FlatSubgraphGraph, RawUiLink,
+        RawUiNode, SubgraphDefinition, SubgraphIoContract, UiInputSocket, UiLink, UiNode,
+        UiNodeClassification, UiNodeContract, UiNodeMode, UiOutputSocket,
+        UiSerializationDescriptorSet, UiWorkflowDocument, WorkflowUiFeatureSet,
+        WorkflowUiLookupIndex, WorkflowUiLookupStats,
+    };
+    use crate::application::{
+        workflow_recognition_schema::RecognitionSchemaContext,
+        workflow_ui_serialization::{
+            FrontendSerializationProfile, NormalizationCompatibilityContext,
+        },
+    };
+    use serde_json::{json, Map, Value};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn empty_node(id: &str, class_type: &str) -> UiNode {
+        UiNode {
+            id: id.to_owned(),
+            class_type: class_type.to_owned(),
+            title: None,
+            mode: UiNodeMode::Always,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            widgets_values: Vec::new(),
+            widgets_values_named: None,
+            properties: Map::new(),
+        }
+    }
+
+    fn input(name: &str, declared_type: &str, link_id: Option<i64>) -> UiInputSocket {
+        UiInputSocket {
+            name: name.to_owned(),
+            declared_type: Some(declared_type.to_owned()),
+            link_id,
+            widget_name: None,
+            shape: None,
+        }
+    }
+
+    fn output(name: &str, declared_type: &str, link_ids: &[i64]) -> UiOutputSocket {
+        UiOutputSocket {
+            name: name.to_owned(),
+            declared_type: Some(declared_type.to_owned()),
+            link_ids: link_ids.to_vec(),
+            widget_name: None,
+        }
+    }
+
+    fn test_document(nodes: Vec<UiNode>, links: Vec<UiLink>) -> UiWorkflowDocument {
+        UiWorkflowDocument {
+            workflow_format_version: "0.4".to_owned(),
+            frontend_version: Some("1.52.7".to_owned()),
+            nodes,
+            links,
+            features: WorkflowUiFeatureSet::default(),
+            subgraph_definition_ids: BTreeSet::new(),
+            nested_subgraphs: false,
+        }
+    }
+
+    fn test_descriptors(object_info: Value) -> UiSerializationDescriptorSet {
+        let context = NormalizationCompatibilityContext::from_source(
+            "0.4",
+            Some("1.52.7"),
+            "synthetic-test-schema",
+        )
+        .unwrap();
+        let profile = FrontendSerializationProfile::from_context(&context).unwrap();
+        UiSerializationDescriptorSet::build(
+            &RecognitionSchemaContext::parse(&object_info),
+            profile,
+            context,
+        )
+        .unwrap()
+    }
+
+    fn classify(
+        document: &UiWorkflowDocument,
+        runtime_classes: &[&str],
+    ) -> BTreeMap<String, super::UiNodeClassificationResult> {
+        let runtime_classes = runtime_classes.iter().copied().collect::<BTreeSet<_>>();
+        let lookup = WorkflowUiLookupIndex::build(&document.nodes, &document.links);
+        classify_ui_nodes_with_schema(document, &lookup, |class_type| {
+            runtime_classes.contains(class_type)
+        })
+    }
+
+    fn typed_alias_document(producer_class: &str, consumer_class: &str) -> UiWorkflowDocument {
+        let mut source = empty_node("source", "RuntimeSource");
+        source.outputs.push(output("value", "STRING", &[1]));
+        let mut producer = empty_node("producer", producer_class);
+        producer.inputs.push(input("value", "STRING", Some(1)));
+        producer.outputs.push(output("value", "STRING", &[]));
+        producer.widgets_values = vec![json!("shared"); 1];
+        producer.widgets_values_named =
+            Some(BTreeMap::from([("Constant".to_owned(), json!("shared"))]));
+        producer
+            .properties
+            .insert("alias_id".to_owned(), json!("shared"));
+        let mut consumer = empty_node("consumer", consumer_class);
+        consumer.outputs.push(output("value", "STRING", &[2]));
+        consumer.widgets_values = vec![json!("shared"); 1];
+        consumer.widgets_values_named =
+            Some(BTreeMap::from([("Constant".to_owned(), json!("shared"))]));
+        consumer
+            .properties
+            .insert("alias_id".to_owned(), json!("shared"));
+        let mut sink = empty_node("sink", "RuntimeSink");
+        sink.inputs.push(input("value", "STRING", Some(2)));
+        test_document(
+            vec![source, producer, consumer, sink],
+            vec![
+                UiLink {
+                    id: 1,
+                    origin_node_id: "source".to_owned(),
+                    origin_slot: 0,
+                    target_node_id: "producer".to_owned(),
+                    target_slot: 0,
+                    declared_type: Some("STRING".to_owned()),
+                },
+                UiLink {
+                    id: 2,
+                    origin_node_id: "consumer".to_owned(),
+                    origin_slot: 0,
+                    target_node_id: "sink".to_owned(),
+                    target_slot: 0,
+                    declared_type: Some("STRING".to_owned()),
+                },
+            ],
+        )
+    }
+
+    fn reroute_chain(reroute_count: usize) -> UiWorkflowDocument {
+        let mut nodes = Vec::with_capacity(reroute_count + 2);
+        let mut source = empty_node("0", "RuntimeSource");
+        source.outputs.push(output("value", "INT", &[1]));
+        nodes.push(source);
+        let mut links = Vec::with_capacity(reroute_count + 1);
+        for index in 0..reroute_count {
+            let incoming_id = (index + 1) as i64;
+            let outgoing_id = (index + 2) as i64;
+            let mut reroute = empty_node(&(index + 1).to_string(), "Reroute");
+            reroute
+                .inputs
+                .push(input("value", "INT", Some(incoming_id)));
+            reroute.outputs.push(output("value", "INT", &[outgoing_id]));
+            nodes.push(reroute);
+            links.push(UiLink {
+                id: incoming_id,
+                origin_node_id: index.to_string(),
+                origin_slot: 0,
+                target_node_id: (index + 1).to_string(),
+                target_slot: 0,
+                declared_type: Some("INT".to_owned()),
+            });
+        }
+        let sink_id = (reroute_count + 1).to_string();
+        let last_link_id = (reroute_count + 1) as i64;
+        let mut sink = empty_node(&sink_id, "RuntimeSink");
+        sink.inputs.push(input("value", "INT", Some(last_link_id)));
+        nodes.push(sink);
+        links.push(UiLink {
+            id: last_link_id,
+            origin_node_id: reroute_count.to_string(),
+            origin_slot: 0,
+            target_node_id: sink_id,
+            target_slot: 0,
+            declared_type: Some("INT".to_owned()),
+        });
+        test_document(nodes, links)
+    }
+
+    fn runtime_pair_document(pair_count: usize, reverse_links: bool) -> UiWorkflowDocument {
+        let mut nodes = Vec::with_capacity(pair_count * 2);
+        let mut links = Vec::with_capacity(pair_count);
+        for index in 0..pair_count {
+            let source_id = format!("source-{index}");
+            let sink_id = format!("sink-{index}");
+            let link_id = index as i64 + 1;
+            let mut source = empty_node(&source_id, "RuntimeSource");
+            source.outputs.push(output("value", "INT", &[link_id]));
+            let mut sink = empty_node(&sink_id, "RuntimeSink");
+            sink.inputs.push(input("value", "INT", Some(link_id)));
+            nodes.push(source);
+            nodes.push(sink);
+            links.push(UiLink {
+                id: link_id,
+                origin_node_id: source_id,
+                origin_slot: 0,
+                target_node_id: sink_id,
+                target_slot: 0,
+                declared_type: Some("INT".to_owned()),
+            });
+        }
+        if reverse_links {
+            links.reverse();
+        }
+        test_document(nodes, links)
+    }
 
     fn minimal_workflow() -> serde_json::Value {
         json!({
@@ -4930,5 +7290,542 @@ mod parser_tests {
         value["links"][0] = json!([1, 1, 0]);
         let error = parse_ui_workflow_value(&value).unwrap_err();
         assert_eq!(error.code, "UI_LINK_TUPLE_INVALID");
+    }
+
+    #[test]
+    fn structural_presentation_node_classified_without_class_name() {
+        let mut note = empty_node("note", "NodeGamma");
+        note.title = Some("Canvas annotation".to_owned());
+        note.properties
+            .insert("fontFamily".to_owned(), json!("Arial"));
+        note.properties.insert("fontSize".to_owned(), json!(18));
+        let result = classify(&test_document(vec![note], Vec::new()), &[])
+            .remove("note")
+            .unwrap();
+        assert_eq!(
+            result.classification,
+            UiNodeClassification::PresentationOnlyNode
+        );
+        assert_eq!(result.contract, UiNodeContract::Presentation);
+        assert!(result.supported);
+    }
+
+    #[test]
+    fn two_unrelated_presentation_classes_share_one_contract() {
+        let mut alpha = empty_node("alpha", "NodeAlpha");
+        alpha.widgets_values = vec![json!("shared annotation")];
+        alpha.widgets_values_named = Some(BTreeMap::from([(
+            "text".to_owned(),
+            json!("shared annotation"),
+        )]));
+        let mut beta = alpha.clone();
+        beta.id = "beta".to_owned();
+        beta.class_type = "NodeBeta".to_owned();
+        let classifications = classify(&test_document(vec![alpha, beta], Vec::new()), &[]);
+        let alpha = classifications.get("alpha").unwrap();
+        let beta = classifications.get("beta").unwrap();
+        assert_eq!(alpha.contract, UiNodeContract::Presentation);
+        assert_eq!(beta.contract, UiNodeContract::Presentation);
+        assert_eq!(alpha.classification, beta.classification);
+    }
+
+    #[test]
+    fn unrelated_positional_text_annotations_share_the_generic_contract() {
+        let mut alpha = empty_node("alpha", "NodeAlpha");
+        alpha.title = Some("Alpha annotation".to_owned());
+        alpha.widgets_values = vec![json!("Alpha text")];
+        let mut beta = empty_node("beta", "NodeBeta");
+        beta.title = Some("Beta annotation".to_owned());
+        beta.widgets_values = vec![json!("Beta text")];
+
+        let classifications = classify(&test_document(vec![alpha, beta], Vec::new()), &[]);
+        for node_id in ["alpha", "beta"] {
+            let result = &classifications[node_id];
+            assert_eq!(result.contract, UiNodeContract::Presentation);
+            assert_eq!(
+                result.classification,
+                UiNodeClassification::PresentationOnlyNode
+            );
+            assert!(result.supported);
+        }
+    }
+
+    #[test]
+    fn positional_text_without_title_fails_closed() {
+        let mut node = empty_node("unknown", "NodeGamma");
+        node.widgets_values = vec![json!("text without explicit annotation title")];
+
+        let result = classify(&test_document(vec![node], Vec::new()), &[])
+            .remove("unknown")
+            .unwrap();
+        assert_eq!(result.classification, UiNodeClassification::UnknownUiNode);
+        assert_eq!(result.contract, UiNodeContract::Unknown);
+        assert!(!result.supported);
+    }
+
+    #[test]
+    fn schema_backed_positional_text_shape_remains_runtime() {
+        let mut node = empty_node("runtime", "NodeAlpha");
+        node.title = Some("Runtime node title".to_owned());
+        node.widgets_values = vec![json!("runtime value")];
+        node.outputs.push(output("result", "IMAGE", &[]));
+
+        let result = classify(&test_document(vec![node], Vec::new()), &["NodeAlpha"])
+            .remove("runtime")
+            .unwrap();
+        assert_eq!(result.classification, UiNodeClassification::RuntimeNode);
+        assert_eq!(result.contract, UiNodeContract::Runtime);
+    }
+
+    #[test]
+    fn unrelated_classes_share_the_generic_graph_control_contract() {
+        let mut alpha = empty_node("alpha", "NodeAlpha");
+        alpha.outputs.push(output("optional", "*", &[]));
+        alpha
+            .properties
+            .insert("showNavigation".to_owned(), json!(true));
+        alpha.properties.insert("matchColors".to_owned(), json!(""));
+        let mut beta = empty_node("beta", "NodeBeta");
+        beta.outputs.push(output("optional", "*", &[]));
+        beta.properties.insert("sort".to_owned(), json!("position"));
+        beta.properties
+            .insert("toggleRestriction".to_owned(), json!("default"));
+
+        let classifications = classify(&test_document(vec![alpha, beta], Vec::new()), &[]);
+        let alpha = classifications.get("alpha").unwrap();
+        let beta = classifications.get("beta").unwrap();
+        assert_eq!(alpha.contract, UiNodeContract::Presentation);
+        assert_eq!(beta.contract, UiNodeContract::Presentation);
+        assert_eq!(alpha.classification, beta.classification);
+        assert_eq!(
+            alpha.classification,
+            UiNodeClassification::PresentationOnlyNode
+        );
+    }
+
+    #[test]
+    fn incomplete_graph_control_evidence_fails_closed() {
+        let mut node = empty_node("unknown-control", "NodeGamma");
+        node.outputs.push(output("optional", "*", &[]));
+        node.properties
+            .insert("showNavigation".to_owned(), json!(true));
+        let result = classify(&test_document(vec![node], Vec::new()), &[])
+            .remove("unknown-control")
+            .unwrap();
+        assert_eq!(result.classification, UiNodeClassification::UnknownUiNode);
+        assert_eq!(result.contract, UiNodeContract::Unknown);
+        assert!(!result.supported);
+    }
+
+    #[test]
+    fn unknown_schema_less_node_without_presentation_evidence_fails_closed() {
+        let result = classify(
+            &test_document(vec![empty_node("unknown", "NodeGamma")], Vec::new()),
+            &[],
+        )
+        .remove("unknown")
+        .unwrap();
+        assert_eq!(result.classification, UiNodeClassification::UnknownUiNode);
+        assert!(!result.supported);
+    }
+
+    #[test]
+    fn runtime_node_with_presentation_like_name_remains_runtime() {
+        let mut node = empty_node("runtime", "MarkdownNote");
+        node.widgets_values_named = Some(BTreeMap::from([("text".to_owned(), json!("runtime"))]));
+        let result = classify(&test_document(vec![node], Vec::new()), &["MarkdownNote"])
+            .remove("runtime")
+            .unwrap();
+        assert_eq!(result.classification, UiNodeClassification::RuntimeNode);
+        assert_eq!(result.contract, UiNodeContract::Runtime);
+    }
+
+    #[test]
+    fn presentation_classification_is_class_name_independent() {
+        let mut alpha = empty_node("alpha", "NodeAlpha");
+        alpha.widgets_values_named = Some(BTreeMap::from([("text".to_owned(), json!("A"))]));
+        let mut beta = alpha.clone();
+        beta.id = "beta".to_owned();
+        beta.class_type = "NodeBeta".to_owned();
+        let classifications = classify(&test_document(vec![alpha, beta], Vec::new()), &[]);
+        assert_eq!(
+            classifications["alpha"].contract,
+            classifications["beta"].contract
+        );
+        assert_eq!(
+            classifications["alpha"].contract,
+            UiNodeContract::Presentation
+        );
+    }
+
+    #[test]
+    fn alias_classification_does_not_require_set_get_names() {
+        let document = typed_alias_document("NodeAlpha", "NodeBeta");
+        let classifications = classify(&document, &["RuntimeSource", "RuntimeSink"]);
+        assert_eq!(
+            classifications["producer"].contract,
+            UiNodeContract::AliasBinding
+        );
+        assert_eq!(
+            classifications["consumer"].contract,
+            UiNodeContract::AliasBinding
+        );
+        let lookup = WorkflowUiLookupIndex::build(&document.nodes, &document.links);
+        assert_eq!(
+            verified_alias_node_ids(&document.nodes, &document.links, &lookup),
+            BTreeSet::from(["consumer".to_owned(), "producer".to_owned()])
+        );
+    }
+
+    #[test]
+    fn set_get_like_names_without_alias_evidence_do_not_create_alias() {
+        let mut producer = empty_node("producer", "SetNode");
+        producer.inputs.push(input("value", "STRING", Some(1)));
+        producer.outputs.push(output("value", "STRING", &[]));
+        let mut consumer = empty_node("consumer", "GetNode");
+        consumer.outputs.push(output("value", "STRING", &[2]));
+        let result = classify(&test_document(vec![producer, consumer], Vec::new()), &[]);
+        assert_ne!(result["producer"].contract, UiNodeContract::AliasBinding);
+        assert_ne!(result["consumer"].contract, UiNodeContract::AliasBinding);
+    }
+
+    #[test]
+    fn alias_identity_without_valid_typed_topology_fails_closed() {
+        let mut document = typed_alias_document("NodeAlpha", "NodeBeta");
+        document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "consumer")
+            .unwrap()
+            .outputs[0]
+            .declared_type = Some("IMAGE".to_owned());
+
+        let result = classify(&document, &["RuntimeSource", "RuntimeSink"]);
+        assert_ne!(result["producer"].contract, UiNodeContract::AliasBinding);
+        assert_ne!(result["consumer"].contract, UiNodeContract::AliasBinding);
+        assert_eq!(
+            result["producer"].classification,
+            UiNodeClassification::UnknownUiNode
+        );
+        assert_eq!(
+            result["consumer"].classification,
+            UiNodeClassification::UnknownUiNode
+        );
+    }
+
+    #[test]
+    fn runtime_set_like_class_remains_runtime() {
+        let mut node = empty_node("runtime-set", "SetNode");
+        node.inputs.push(input("value", "INT", None));
+        node.outputs.push(output("value", "INT", &[]));
+        let result = classify(&test_document(vec![node], Vec::new()), &["SetNode"])
+            .remove("runtime-set")
+            .unwrap();
+        assert_eq!(result.classification, UiNodeClassification::RuntimeNode);
+        assert_eq!(result.contract, UiNodeContract::Runtime);
+    }
+
+    #[test]
+    fn source_fingerprint_uses_verified_generic_alias_classification() {
+        let root = json!({
+            "nodes": [
+                {"id":"source","type":"RuntimeSource","inputs":[],"outputs":[{"name":"value","type":"STRING","links":[1]}]},
+                {"id":"producer","type":"NodeAlpha","inputs":[{"name":"value","type":"STRING","link":1}],"outputs":[{"name":"value","type":"STRING","links":[]}],"widgets_values":["shared"],"widgets_values_named":{"Constant":"shared"},"properties":{"alias_id":"shared"}},
+                {"id":"consumer","type":"NodeBeta","inputs":[],"outputs":[{"name":"value","type":"STRING","links":[2]}],"widgets_values":["shared"],"widgets_values_named":{"Constant":"shared"},"properties":{"alias_id":"shared"}},
+                {"id":"sink","type":"RuntimeSink","inputs":[{"name":"value","type":"STRING","link":2}],"outputs":[]}
+            ],
+            "links": [[1,"source",0,"producer",0,"STRING"],[2,"consumer",0,"sink",0,"STRING"]]
+        });
+        let classes = BTreeMap::from([
+            ("RuntimeSource".to_owned(), ()),
+            ("RuntimeSink".to_owned(), ()),
+        ]);
+        let frontend_only =
+            super::source_graph_frontend_only_node_ids(root.as_object().unwrap(), &classes);
+        assert!(frontend_only.contains("producer"));
+        assert!(frontend_only.contains("consumer"));
+        assert!(!frontend_only.contains("source"));
+        assert!(!frontend_only.contains("sink"));
+    }
+
+    #[test]
+    fn node_classification_does_not_rescan_full_link_set_per_node() {
+        fn visits(count: usize) -> (usize, usize) {
+            let document = reroute_chain(count);
+            let (classifications, stats) = capture_workflow_ui_lookup_stats(|| {
+                let lookup = WorkflowUiLookupIndex::build(&document.nodes, &document.links);
+                classify_ui_nodes_with_schema(&document, &lookup, |class_type| {
+                    matches!(class_type, "RuntimeSource" | "RuntimeSink")
+                })
+            });
+            assert_eq!(stats.index_build_count, 1);
+            assert_eq!(stats.full_link_scan_count, 0);
+            assert_eq!(
+                classifications
+                    .values()
+                    .filter(|node| node.contract == UiNodeContract::Reroute)
+                    .count(),
+                count
+            );
+            (stats.indexed_link_visits, stats.full_link_scan_count)
+        }
+
+        let (small_work, _) = visits(64);
+        let (large_work, _) = visits(128);
+        assert!(large_work <= small_work * 21 / 10);
+    }
+
+    #[test]
+    fn subgraph_interface_lookup_does_not_rescan_full_link_set() {
+        fn measure(slot_count: usize) -> (String, super::WorkflowUiLookupStats) {
+            capture_workflow_ui_lookup_stats(|| {
+                let descriptors = test_descriptors(json!({
+                    "Runtime": {"input":{"required":{"value":["INT"]}},"output":[]}
+                }));
+                let mut nodes = Vec::with_capacity(slot_count);
+                let mut links = Vec::with_capacity(slot_count * 2);
+                let mut interfaces = Vec::with_capacity(slot_count);
+                let mut interface_values = Vec::with_capacity(slot_count);
+                for index in 0..slot_count {
+                    let id = format!("inner-{index}");
+                    let link_id = index as i64 + 1;
+                    nodes.push(RawUiNode {
+                        id: id.clone(),
+                        object: Map::from_iter([
+                            ("id".to_owned(), json!(id)),
+                            ("type".to_owned(), json!("Runtime")),
+                            (
+                                "inputs".to_owned(),
+                                json!([{"name":"value","type":"INT","link":link_id}]),
+                            ),
+                            ("outputs".to_owned(), json!([])),
+                        ]),
+                    });
+                    interfaces.push(SubgraphIoContract {
+                        id: None,
+                        name: format!("input-{index}"),
+                        declared_type: "INT".to_owned(),
+                        link_ids: BTreeSet::new(),
+                    });
+                    interface_values.push(json!({"name":format!("input-{index}"),"type":"INT"}));
+                    links.push(RawUiLink {
+                        id: link_id,
+                        origin_node_id: "-10".to_owned(),
+                        origin_slot: index,
+                        target_node_id: id,
+                        target_slot: 0,
+                        declared_type: Some("INT".to_owned()),
+                    });
+                }
+                for index in 0..slot_count.saturating_sub(1) {
+                    links.push(RawUiLink {
+                        id: slot_count as i64 + index as i64 + 1,
+                        origin_node_id: format!("inner-{index}"),
+                        origin_slot: 0,
+                        target_node_id: format!("inner-{}", index + 1),
+                        target_slot: 0,
+                        declared_type: Some("INT".to_owned()),
+                    });
+                }
+                let lookup = WorkflowUiLookupIndex::build(&nodes, &links);
+                let boundary = infer_legacy_boundary_node_id(
+                    &nodes,
+                    &links,
+                    &interfaces,
+                    &BTreeMap::new(),
+                    &descriptors,
+                    &lookup,
+                    "input",
+                    "synthetic-definition",
+                )
+                .unwrap();
+                let mut definition =
+                    Map::from_iter([("inputs".to_owned(), Value::Array(interface_values))]);
+                canonicalize_interface_link_ids(
+                    &mut definition,
+                    "inputs",
+                    &boundary,
+                    &links,
+                    &lookup,
+                    "input",
+                    "synthetic-definition",
+                )
+                .unwrap();
+                let canonical = definition["inputs"].as_array().unwrap();
+                assert_eq!(canonical.len(), slot_count);
+                assert!(canonical.iter().enumerate().all(|(index, interface)| {
+                    interface["linkIds"] == json!([index as i64 + 1])
+                }));
+                boundary
+            })
+        }
+
+        let (small_boundary, small_stats) = measure(64);
+        let (large_boundary, large_stats) = measure(128);
+        assert_eq!(small_boundary, "-10");
+        assert_eq!(large_boundary, "-10");
+        for stats in [small_stats, large_stats] {
+            assert_eq!(stats.index_build_count, 1);
+            assert_eq!(stats.full_link_scan_count, 0);
+        }
+        assert!(large_stats.indexed_link_visits <= small_stats.indexed_link_visits * 21 / 10);
+    }
+
+    #[test]
+    fn subgraph_widget_boundary_targets_use_indexed_node_positions() {
+        fn propagate(slot_count: usize) -> WorkflowUiLookupStats {
+            let (_, stats) = capture_workflow_ui_lookup_stats(|| {
+                let inputs = (0..slot_count)
+                    .map(|index| SubgraphIoContract {
+                        id: None,
+                        name: format!("input-{index}"),
+                        declared_type: "INT".to_owned(),
+                        link_ids: BTreeSet::from([index as i64 + 1]),
+                    })
+                    .collect::<Vec<_>>();
+                let definition = SubgraphDefinition {
+                    id: "synthetic-definition".to_owned(),
+                    input_node_id: "-10".to_owned(),
+                    output_node_id: "-20".to_owned(),
+                    inputs,
+                    outputs: Vec::new(),
+                    nodes: Vec::new(),
+                    links: Vec::new(),
+                    lookup: WorkflowUiLookupIndex::default(),
+                };
+                let mut nodes = Vec::with_capacity(slot_count * 2);
+                let mut links = Vec::with_capacity(slot_count * 2);
+                let mut widget_values = Map::new();
+                for index in 0..slot_count {
+                    let boundary_link_id = index as i64 + 1;
+                    let internal_link_id = slot_count as i64 + index as i64 + 1;
+                    let inner_id = format!("inner-{index}");
+                    let sink_id = format!("sink-{index}");
+                    nodes.push(RawUiNode {
+                        id: inner_id.clone(),
+                        object: json!({
+                            "id": inner_id.clone(),
+                            "type": "Runtime",
+                            "inputs": [{
+                                "name": "boundary-value",
+                                "type": "INT",
+                                "link": boundary_link_id,
+                                "widget": {"name": format!("widget-{index}")}
+                            }],
+                            "outputs": [{"name":"value","type":"INT","links":[internal_link_id]}]
+                        })
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                    });
+                    nodes.push(RawUiNode {
+                        id: sink_id.clone(),
+                        object: json!({
+                            "id": sink_id.clone(),
+                            "type": "Runtime",
+                            "inputs": [{"name":"value","type":"INT","link":internal_link_id}],
+                            "outputs": []
+                        })
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                    });
+                    links.push(RawUiLink {
+                        id: boundary_link_id,
+                        origin_node_id: "-10".to_owned(),
+                        origin_slot: index,
+                        target_node_id: inner_id.clone(),
+                        target_slot: 0,
+                        declared_type: Some("INT".to_owned()),
+                    });
+                    links.push(RawUiLink {
+                        id: internal_link_id,
+                        origin_node_id: inner_id,
+                        origin_slot: 0,
+                        target_node_id: sink_id,
+                        target_slot: 0,
+                        declared_type: Some("INT".to_owned()),
+                    });
+                    widget_values.insert(format!("input-{index}"), json!(index));
+                }
+                let mut graph = FlatSubgraphGraph { nodes, links };
+                let boundaries = resolve_subgraph_boundaries(&definition, &graph, &[]).unwrap();
+                let instance = RawUiNode {
+                    id: "instance".to_owned(),
+                    object: Map::from_iter([(
+                        "widgets_values_named".to_owned(),
+                        Value::Object(widget_values),
+                    )]),
+                };
+                apply_subgraph_instance_widget_values(
+                    &instance,
+                    &definition,
+                    &boundaries,
+                    &mut graph,
+                    &[],
+                )
+                .unwrap();
+                for index in 0..slot_count {
+                    let node = &graph.nodes[index * 2];
+                    assert_eq!(
+                        node.object["widgets_values_named"]
+                            .get(format!("widget-{index}").as_str())
+                            .unwrap(),
+                        &json!(index)
+                    );
+                }
+            });
+            stats
+        }
+
+        let small = propagate(64);
+        let large = propagate(128);
+        for stats in [small, large] {
+            assert_eq!(stats.index_build_count, 1);
+            assert_eq!(stats.full_link_scan_count, 1);
+        }
+        assert!(large.indexed_node_lookups <= small.indexed_node_lookups * 21 / 10);
+        assert!(large.indexed_link_visits <= small.indexed_link_visits * 21 / 10);
+    }
+
+    #[test]
+    fn graph_index_lookup_order_does_not_affect_output() {
+        let descriptors = test_descriptors(json!({
+            "RuntimeSource":{"input":{"required":{}},"output":["INT"]},
+            "RuntimeSink":{"input":{"required":{"value":["INT"]}},"output":[]}
+        }));
+        let first_document = runtime_pair_document(8, false);
+        let reordered_document = runtime_pair_document(8, true);
+        let (first, first_stats) = capture_workflow_ui_lookup_stats(|| {
+            normalize_links(&first_document, &descriptors).unwrap()
+        });
+        let (reordered, reordered_stats) = capture_workflow_ui_lookup_stats(|| {
+            normalize_links(&reordered_document, &descriptors).unwrap()
+        });
+        assert_eq!(first, reordered);
+        for stats in [first_stats, reordered_stats] {
+            assert_eq!(stats.index_build_count, 1);
+            assert_eq!(stats.full_link_scan_count, 2);
+        }
+    }
+
+    #[test]
+    fn normalization_lookup_work_scales_linearly_or_nlogn() {
+        let descriptors = test_descriptors(json!({
+            "RuntimeSource":{"input":{"required":{}},"output":["INT"]},
+            "RuntimeSink":{"input":{"required":{"value":["INT"]}},"output":[]}
+        }));
+        let measure = |count| {
+            let document = runtime_pair_document(count, false);
+            let (_, stats) = capture_workflow_ui_lookup_stats(|| {
+                normalize_links(&document, &descriptors).unwrap()
+            });
+            assert_eq!(stats.index_build_count, 1);
+            assert_eq!(stats.full_link_scan_count, 2);
+            stats.indexed_link_visits + stats.full_link_scan_count * document.links.len()
+        };
+        let small_work = measure(64);
+        let large_work = measure(128);
+        assert!(large_work <= small_work * 21 / 10);
     }
 }

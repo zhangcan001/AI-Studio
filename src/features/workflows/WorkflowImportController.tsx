@@ -22,6 +22,7 @@ export interface WorkflowImportControllerProps {
   onRegenerateRecipe?: () => void;
   onRestoreExisting?: () => void;
   onCommitImport: (action: WorkflowImportCommitAction) => void;
+  onSaveReviewMetadata: (metadata: { name: string; category: string; mode: string }) => void;
   onOpenStudio?: (workflowId: string, recipeId: string) => void;
   onUseInProject?: (workflowId: string, recipeId: string) => void;
   onReturnToList: () => void;

@@ -8,6 +8,8 @@ pub struct WorkflowPackageFiles {
     pub manifest_yaml: String,
     pub recipe_yaml: String,
     pub workflow_json: String,
+    pub source_workflow_json: Option<String>,
+    pub recognition_metadata_json: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

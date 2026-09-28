@@ -209,6 +209,8 @@ import type {
   ProductionBatchCreateItem,
   ProductionBatchDetail,
   ProductionBatchSummary,
+  ExecutionSummary,
+  ExecutionValueSource,
   ProductionAdmissionStatus,
   ProductionPartialResumePlan,
   ProductionPartialResumeResult,
@@ -253,6 +255,7 @@ import type {
   WorkflowRegistryMutationResult,
   WorkflowRegistryRestoreResult,
   WorkflowRegistryView,
+  WorkflowSavedVersionDetailsView,
   WorkflowVersionDiffView,
   WorkflowWorkspaceView,
 } from "../types/workflowOnboarding";
@@ -622,6 +625,10 @@ export function getWorkflowRegistry(workflowId: string): Promise<WorkflowRegistr
   return invoke<WorkflowRegistryView>("workflow_get_registry", { workflowId });
 }
 
+export function getSavedWorkflowVersionDetails(workflowVersionId: string): Promise<WorkflowSavedVersionDetailsView> {
+  return invoke<WorkflowSavedVersionDetailsView>("workflow_get_saved_version_details", { workflowVersionId });
+}
+
 export function renameWorkflow(workflowId: string, name: string): Promise<WorkflowRegistryMutationResult> {
   return invoke<WorkflowRegistryMutationResult>("workflow_rename", { workflowId, name });
 }
@@ -743,6 +750,40 @@ export function submitGeneration(request: {
   parentTaskId?: string;
 }): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("generation_create", { request });
+}
+
+export function preflightWorkflowExecution(request: {
+  projectId: string;
+  workflowVersionId: string;
+  recipeId: string;
+  values: GenerationValues;
+}): Promise<{ status: "READY" | "NEEDS_REVIEW" | "BLOCKED"; code?: string; target?: string }> {
+  return invoke("workflow_execution_preflight", { request });
+}
+
+export function createWorkflowExecution(request: {
+  projectId: string;
+  workflowVersionId: string;
+  recipeId: string;
+  values: GenerationValues;
+  submissionIdempotencyKey: string;
+  inputSources: Record<string, ExecutionValueSource>;
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("workflow_execution_create", { request });
+}
+
+export function createWorkflowExecutionBatch(request: {
+  projectId: string;
+  name: string;
+  workflowVersionId: string;
+  recipeId: string;
+  submissionIdempotencyKey: string;
+  items: Array<{
+    values: GenerationValues;
+    inputSources: Record<string, ExecutionValueSource>;
+  }>;
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("workflow_execution_create_batch", { request });
 }
 
 export function previewWorkflowBenchmark(
@@ -1322,6 +1363,10 @@ export function getProductionAdmissionStatus(): Promise<ProductionAdmissionStatu
 
 export function getProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("production_queue_get", { projectId, batchId });
+}
+
+export function getWorkflowExecutionSummary(projectId: string, taskId: string): Promise<ExecutionSummary | null> {
+  return invoke<ExecutionSummary | null>("production_queue_execution_summary_for_task", { projectId, taskId });
 }
 
 export function getProductionBatchArtifacts(projectId: string, batchId: string): Promise<ProductionBatchArtifactsDto> {

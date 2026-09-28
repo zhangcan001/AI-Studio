@@ -1,0 +1,970 @@
+{
+  "source_manifest_id": "PRIMARY_BLACK_BOX_MANIFEST_V2",
+  "base_head": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+  "observed_only_fields": [
+    "actual_root_ids",
+    "actual_capabilities",
+    "actual_readiness"
+  ],
+  "manifest_path": "real/manifest.json",
+  "schema_snapshot_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+  "synthetic_membership_verified": false,
+  "verified_synthetic_membership_count": 69,
+  "gpu_required": false,
+  "samples": [
+    {
+      "source_origin": "Lightricks / LTX-2.3",
+      "ground_truth": "One video output root; text prompt plus numeric generation controls.",
+      "provenance_sha256": "298732b3487b0144a34bce30674cc8fe86e54b76ccf335964fe6e97a9c635a65",
+      "ui_sha256": "fc8fa4c6a1066429704066d082290ed7487357dcf1e46376c09abc27bc893cac",
+      "api_sha256": "37e789bdf93df06a52b2c0cb3ceba208e12d9aba99359bbf92f73de5c7249fa3",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R01_LTX23_T2V",
+      "expected_category": "video",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R01_LTX23_T2V/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R01_LTX23_T2V/sample.ui.json",
+      "expected_mode": "text_to_video",
+      "api_path": "real/R01_LTX23_T2V/sample.api.json"
+    },
+    {
+      "source_origin": "Lightricks / LTX-2.3",
+      "ground_truth": "One video output root; first-frame and last-frame media plus prompt and numeric controls.",
+      "provenance_sha256": "1977f25ce6e8a3b585a3fea6e470c4e5820b0d35054d37afe9906252fd9f18b4",
+      "ui_sha256": "774b80bdc7f8c0947bb96bf514417fdaa1db968021e678ec473b54eab66ed8b1",
+      "api_sha256": "e27a13f421ec23d5375613bc12c3f1a7ee67554d76e5c42cbc96fbd435e38c8b",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R02_LTX23_FLF2V",
+      "expected_category": "video",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R02_LTX23_FLF2V/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R02_LTX23_FLF2V/sample.ui.json",
+      "expected_mode": "first_last_frame_to_video",
+      "api_path": "real/R02_LTX23_FLF2V/sample.api.json"
+    },
+    {
+      "source_origin": "MiniMax H3",
+      "ground_truth": "One video output root; prompt, seed, dimensions, duration/fps and sampler controls.",
+      "provenance_sha256": "a4fc2d4719139c8142dea12973b6caa88b993e72e10d4965a73df47622a18c17",
+      "ui_sha256": "a474516210e2e739bff1a2afc2d0d62b2b6149675e87a8fa3becc35ce73f0678",
+      "api_sha256": "06237c824f9f378f3cf415d5e3d3d096ec5c6287f7edda8d4a011064de9ae7a9",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R03_MINIMAX_H3_T2V",
+      "expected_category": "video",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R03_MINIMAX_H3_T2V/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R03_MINIMAX_H3_T2V/sample.ui.json",
+      "expected_mode": "text_to_video",
+      "api_path": "real/R03_MINIMAX_H3_T2V/sample.api.json"
+    },
+    {
+      "source_origin": "MiniMax H3",
+      "ground_truth": "One video output root; prompt plus reference image set and numeric video controls.",
+      "provenance_sha256": "9ef57a86c4df527d20a69605cea2bce8d4e5e07590fb5b869eeac50bfa7b46a0",
+      "ui_sha256": "c4fc3a4ed2917ec2dd1c9742404be0da6cbf916677e14cbf09769574dd43860c",
+      "api_sha256": "9c5b6bb3ffc375d82659f4929ab2aad826dee69a5960746e1975860bc5374bcb",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R04_MINIMAX_H3_R2V",
+      "expected_category": "video",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R04_MINIMAX_H3_R2V/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R04_MINIMAX_H3_R2V/sample.ui.json",
+      "expected_mode": "reference_to_video",
+      "api_path": "real/R04_MINIMAX_H3_R2V/sample.api.json"
+    },
+    {
+      "source_origin": "Krea-2",
+      "ground_truth": "One image output root; prompt and numeric generation controls.",
+      "provenance_sha256": "5780a927e00c30aa30ed643b0768dd8991c91e57d375e870c7d01988686a59ed",
+      "ui_sha256": "f59a858e447a28ede893f03444491b18360ae12fb221f125de52ef80ab132287",
+      "api_sha256": "1edccf4d209f23b19e47dfa5d1e3589ab5d104444936f80a7cfd348e8be1c6fe",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R05_KREA2_T2I",
+      "expected_category": "image",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R05_KREA2_T2I/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R05_KREA2_T2I/sample.ui.json",
+      "expected_mode": "text_to_image",
+      "api_path": "real/R05_KREA2_T2I/sample.api.json"
+    },
+    {
+      "source_origin": "Wan 2.2",
+      "ground_truth": "One video output root; first-frame image, prompt and numeric video controls.",
+      "provenance_sha256": "c67ea6ce35d8f0494fac9169360731a38ccd150fed1ccda287eb81d2368c95d1",
+      "ui_sha256": "4a4ab1cb4a24050889630a598f3d43838fc11c273d35fb8da194a2ea1d206184",
+      "api_sha256": "331c0e4971384947f2b8dc4ea64be6807b5e2859f9cbeeefe948611c58f368a6",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R06_WAN22_I2V",
+      "expected_category": "video",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R06_WAN22_I2V/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R06_WAN22_I2V/sample.ui.json",
+      "expected_mode": "image_to_video",
+      "api_path": "real/R06_WAN22_I2V/sample.api.json"
+    },
+    {
+      "source_origin": "Qwen Image Edit",
+      "ground_truth": "One image output root; source image, edit prompt and numeric controls.",
+      "provenance_sha256": "ba58f894762a81a56c7b89f084e6ac1099ee73deabdec29e883767ccea3864f8",
+      "ui_sha256": "31e0aa8273c71a9b1c9756190941e146f298c2bf26620bcba1e1f076b86a7847",
+      "api_sha256": "aba9de58e7cb9c555fb5d31016dab1672d40c4f7d2fdfa51d0534b006a83117c",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R07_QWEN_IMAGE_EDIT_I2I",
+      "expected_category": "image",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R07_QWEN_IMAGE_EDIT_I2I/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R07_QWEN_IMAGE_EDIT_I2I/sample.ui.json",
+      "expected_mode": "image_to_image",
+      "api_path": "real/R07_QWEN_IMAGE_EDIT_I2I/sample.api.json"
+    },
+    {
+      "source_origin": "Z-Image",
+      "ground_truth": "One image output root; prompt and numeric generation controls.",
+      "provenance_sha256": "7eaab0cc4edbb60e71ed19adc215c5c76624c599f3ab8ac4b238aeac139a094e",
+      "ui_sha256": "bb9c135e99455728e7fc28aea6d7ae9f0606ec3f5d3a3538b8944a85b05d5bfb",
+      "api_sha256": "1c085f5e3db6acf2cc9dfdb550801601e68be259797b54153257572ec2ee0516",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R08_ZIMAGE_T2I",
+      "expected_category": "image",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R08_ZIMAGE_T2I/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R08_ZIMAGE_T2I/sample.ui.json",
+      "expected_mode": "text_to_image",
+      "api_path": "real/R08_ZIMAGE_T2I/sample.api.json"
+    },
+    {
+      "source_origin": "ComfyUI_LayerStyle",
+      "ground_truth": "Three independent image output roots from a typed custom ImageBlend graph; external image inputs do not leak across roots.",
+      "provenance_sha256": "1e920b51fbde9fe4594379ee565016a37801e95df7fc7ecc9fe441834d63172f",
+      "ui_sha256": "1322df20b91507c6ba86121d91b12b98c39718921044d59595d4e2c7e99a83cf",
+      "api_sha256": "4ad84f4e4b5be6996ac52b5d936ecc9570bf0d482ebf2e9c8038cbcbc82fa250",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R09_CUSTOM_IMAGE_BLEND",
+      "expected_category": "image",
+      "expected_root_count": 3,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R09_CUSTOM_IMAGE_BLEND/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R09_CUSTOM_IMAGE_BLEND/sample.ui.json",
+      "expected_mode": "image_to_image",
+      "api_path": "real/R09_CUSTOM_IMAGE_BLEND/sample.api.json"
+    },
+    {
+      "source_origin": "Leapfusion / HunyuanVideo",
+      "ground_truth": "One video output root; image reference, prompt and numeric video controls.",
+      "provenance_sha256": "e3b42f9878798f819e1a5080d2009f35da0ef01290b7da2f9c2f294b7b1b07bb",
+      "ui_sha256": "9646b9b9b72f6ccb5db717a2ceee7b32aae7f7a0ce2149c8354ebd4fc173fe0d",
+      "api_sha256": "6c011f28e9d2c715e880a7ab412fb46671bf58b3c5eff3099da2c408da7082ff",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R10_LEAPFUSION_CUSTOM_I2V",
+      "expected_category": "video",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R10_LEAPFUSION_CUSTOM_I2V/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R10_LEAPFUSION_CUSTOM_I2V/sample.ui.json",
+      "expected_mode": "image_to_video",
+      "api_path": "real/R10_LEAPFUSION_CUSTOM_I2V/sample.api.json"
+    },
+    {
+      "source_origin": "WF-26 / LayerStyle ecosystem",
+      "ground_truth": "One image output root with legacy UI-only graph metadata; compatibility-scope evidence, not a semantic pass.",
+      "provenance_sha256": "b20129a847def735e7a9d5a6dc493e0856f97220f5fe8ca8e87832b6e5dc298f",
+      "ui_sha256": "4819c733591da478aa45a679cc4bda19b4a94a7bb0dcffa22aaaed422f7f3ee9",
+      "api_sha256": "8098c6fc10d90d93abb1057eb1995bd88afed6e18e600b5c15397173a3528e7b",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R11_WF26_IMAGE",
+      "expected_category": "image",
+      "expected_root_count": 1,
+      "paired_api_profile_evidence": "User-provided baseline evidence attests paired API/profile mode=text_to_image; manifest declares image_to_image. The production replay mode is diagnostic only and is not used to manufacture this expectation.",
+      "paired_api_profile_mode": "text_to_image",
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "NOT_COUNTED_DUE_TO_EVIDENCE_CONFLICT",
+      "provenance_path": "real/R11_WF26_IMAGE/provenance.json",
+      "expected_evidence_status": "EVIDENCE_CONTRACT_CONFLICT",
+      "ui_path": "real/R11_WF26_IMAGE/sample.ui.json",
+      "expected_mode": "image_to_image",
+      "api_path": "real/R11_WF26_IMAGE/sample.api.json"
+    },
+    {
+      "source_origin": "ComfyUI_LayerStyle / Advance",
+      "ground_truth": "Two independent image output roots from a typed custom composite/mask graph; source images and scale utility are explicit.",
+      "provenance_sha256": "b4fbefa0633869ba3c3296eae3bcaaec21bd87b022b604e7000b7bf7827b4be3",
+      "ui_sha256": "3d8498266316abe69605d672593a9099be3bafadf6460dd6988c931ac33a4c3b",
+      "api_sha256": "aa67fd2ba1df7bf419f34120c82c1596c0724d06b6d096b1767c9dbd3d998aa7",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R12_CUSTOM_IMAGE_BLEND_ADVANCED",
+      "expected_category": "image",
+      "expected_root_count": 2,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R12_CUSTOM_IMAGE_BLEND_ADVANCED/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R12_CUSTOM_IMAGE_BLEND_ADVANCED/sample.ui.json",
+      "expected_mode": "image_to_image",
+      "api_path": "real/R12_CUSTOM_IMAGE_BLEND_ADVANCED/sample.api.json"
+    },
+    {
+      "source_origin": "ComfyUI_LayerStyle",
+      "ground_truth": "Five image output roots from a typed composite/mask graph; image and mask/crop dataflow are graph-local.",
+      "provenance_sha256": "f3e04c094343904770ec2b48fe696246b1761da581755d24d0109266f056b2c4",
+      "ui_sha256": "d9370ef841aab435ce349cae7e6db1c6b7eff7d805e7d18e8753c46b977a6488",
+      "api_sha256": "77f2897da8efa5eff9b268721343d838ca48b95a6d87a91a13b914b690dbfed4",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R13_IMAGE_COMPOSITE_MASK",
+      "expected_category": "image",
+      "expected_root_count": 5,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R13_IMAGE_COMPOSITE_MASK/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R13_IMAGE_COMPOSITE_MASK/sample.ui.json",
+      "expected_mode": "image_to_image",
+      "api_path": "real/R13_IMAGE_COMPOSITE_MASK/sample.api.json"
+    },
+    {
+      "source_origin": "ComfyUI_LayerStyle",
+      "ground_truth": "Five image output roots from an image scale/restore graph; one external image input and scale/original-size utility dataflow.",
+      "provenance_sha256": "697b00050088a198cf9af43f4a24fc13d46a5688e44d432797f6fa270b13317a",
+      "ui_sha256": "6411e80e2f6a524ff7f84714dc0f92046e3ffc3d4bd0d2e860ad0df8df09fbca",
+      "api_sha256": "5eb867785a65ddabaf8caa41084251efd6cfd5c96f9a9ac3a97dd379cec19980",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R14_IMAGE_SCALE_RESTORE",
+      "expected_category": "image",
+      "expected_root_count": 5,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R14_IMAGE_SCALE_RESTORE/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R14_IMAGE_SCALE_RESTORE/sample.ui.json",
+      "expected_mode": "image_to_image",
+      "api_path": "real/R14_IMAGE_SCALE_RESTORE/sample.api.json"
+    },
+    {
+      "source_origin": "ComfyUI_LayerStyle",
+      "ground_truth": "Thirty-one image output roots from a blend-mode graph; one external image input and independent preview roots.",
+      "provenance_sha256": "3374e8a626d8f7cfa07d0d307da112a598a677e8be31431497d98982d7972ad7",
+      "ui_sha256": "4f86fa1b3ba09a1fbd8ba6999335d811ce30e98446ce2240a78d462d9817eb94",
+      "api_sha256": "62a7fb95d82b5927ff47c2b10630c5b4d5e184caf628407f8b4f82545e04b228",
+      "field_evidence": {
+        "expected_root_count": {
+          "level": "independently_derived",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.groundTruth (explicit number of media output roots)"
+        },
+        "api_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.apiSha256; verified against sample.api.json"
+        },
+        "expected_evidence_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; 14 semantic pass + R11 conflict"
+        },
+        "provenance_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.provenanceSha256; verified against provenance.json"
+        },
+        "object_info_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.objectInfoSha256; verified against shared object_info.json"
+        },
+        "expected_category": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.category"
+        },
+        "ui_sha256": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.uiSha256; verified against sample.ui.json"
+        },
+        "sample_id": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.sampleId"
+        },
+        "expected_semantic_counting_status": {
+          "level": "independently_derived",
+          "source": "Final Architecture Review 1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b; R11 excluded from pass/failure"
+        },
+        "expected_mode": {
+          "level": "attested",
+          "source": "PRIMARY_BLACK_BOX_MANIFEST_V2.samples.mode"
+        }
+      },
+      "baseline_commit": "0e3080ebaba8f2f787fbcbab44574d13c9da6a98",
+      "sample_id": "R15_BLEND_MODE_V2",
+      "expected_category": "image",
+      "expected_root_count": 31,
+      "paired_api_profile_evidence": null,
+      "paired_api_profile_mode": null,
+      "object_info_sha256": "0b2ca3bd2544925654422ceb269d32752f195366bdcc642a29bc12af31a681d1",
+      "object_info_path": "real/object_info.json",
+      "expected_semantic_counting_status": "COUNTED_SEMANTIC_PASS",
+      "provenance_path": "real/R15_BLEND_MODE_V2/provenance.json",
+      "expected_evidence_status": "CONSISTENT",
+      "ui_path": "real/R15_BLEND_MODE_V2/sample.ui.json",
+      "expected_mode": "image_to_image",
+      "api_path": "real/R15_BLEND_MODE_V2/sample.api.json"
+    }
+  ],
+  "historical_synthetic_expected_total": 72,
+  "live_object_info_required": false,
+  "baseline_id": "V3_REPLAY_BASELINE_V1",
+  "live_comfyui_required": false,
+  "expected_real_count": 15,
+  "object_info_path": "real/object_info.json",
+  "source_manifest_sha256": "5566941f90b18c7838d97c79ed417fdb86293921faf9578e695c0b78a7f4232b",
+  "review_artifact_sha256": "1d5a691b40dcf54f959994589bc92e1cb12263e2338af30ccaf9749a3a6f1e6b",
+  "network_required": false
+}

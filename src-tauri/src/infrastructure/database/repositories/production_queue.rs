@@ -332,9 +332,14 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
 
         let batch_update = sqlx::query(
             "UPDATE production_batches
-             SET status = 'COMPLETED', updated_at = ?
+             SET status = CASE WHEN EXISTS (
+                 SELECT 1 FROM production_batch_items
+                 WHERE batch_id = ? AND status IN ('DISPATCHING', 'DISPATCHED')
+             ) THEN 'PAUSED' ELSE 'COMPLETED' END,
+             updated_at = ?
              WHERE project_id = ? AND id = ?",
         )
+        .bind(batch_id.as_str())
         .bind(format_datetime(updated_at))
         .bind(project_id)
         .bind(batch_id.as_str())
@@ -2330,6 +2335,61 @@ mod tests {
             .unwrap();
         assert_eq!(detail.batch.status, ProductionBatchStatus::Completed);
         assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Cancelled);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_items_pauses_batch_and_preserves_dispatched_item() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("cancel-running-pending.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 8, 14, 10, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let dispatched = fixture_item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Dispatched,
+            None,
+            json!({"prompt": "already dispatched"}),
+        );
+        let pending = fixture_item(
+            &batch_id,
+            1,
+            ProductionBatchItemStatus::Pending,
+            None,
+            json!({"prompt": "must not dispatch"}),
+        );
+        repository
+            .insert(
+                &fixture_batch(&batch_id, ProductionBatchStatus::Running, now),
+                &[dispatched.clone(), pending.clone()],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .cancel_pending_items_and_complete("project-1", &batch_id, now)
+                .await
+                .unwrap(),
+            1
+        );
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Paused);
+        assert_eq!(
+            detail.items[0].status,
+            ProductionBatchItemStatus::Dispatched
+        );
+        assert_eq!(detail.items[0].id, dispatched.id);
+        assert_eq!(detail.items[1].status, ProductionBatchItemStatus::Cancelled);
+        assert_eq!(detail.items[1].id, pending.id);
         pool.close().await;
     }
 

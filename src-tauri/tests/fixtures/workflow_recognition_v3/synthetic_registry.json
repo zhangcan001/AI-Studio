@@ -1,0 +1,543 @@
+{
+  "terminal_media_delta_candidates": [
+    {
+      "can_prove_phase1_membership": false,
+      "referenced_by_phase1_review": false,
+      "present_at_final_review_baseline": false,
+      "introduced_commit": "dacafca3ef1f7ba0900d4507555641c0bf10bfd7",
+      "semantic_family": "typed terminal media output-root resolution",
+      "test": "generic_typed_terminal_media_sink_is_output_root"
+    },
+    {
+      "can_prove_phase1_membership": false,
+      "referenced_by_phase1_review": false,
+      "present_at_final_review_baseline": false,
+      "introduced_commit": "dacafca3ef1f7ba0900d4507555641c0bf10bfd7",
+      "semantic_family": "fail-closed non-media terminal-root rejection",
+      "test": "terminal_unknown_node_without_media_evidence_is_not_root"
+    },
+    {
+      "can_prove_phase1_membership": false,
+      "referenced_by_phase1_review": false,
+      "present_at_final_review_baseline": false,
+      "introduced_commit": "dacafca3ef1f7ba0900d4507555641c0bf10bfd7",
+      "semantic_family": "serialized media terminal output-root resolution",
+      "test": "generic_serialized_terminal_media_sink_is_output_root"
+    }
+  ],
+  "verified_synthetic_case_count": 69,
+  "historical_synthetic_membership_verified": false,
+  "phase_evidence": {
+    "PHASE2B": {
+      "source": "Phase2B explicitly enumerates 12 required per-root contract tests",
+      "prompt_sha256": "63d525a69209be842d0630b25a6f7702f5793dc1b46dd8a9ed5e3730d07f8c72"
+    },
+    "READINESS": {
+      "source": "Readiness fix required generic schema/type tests",
+      "prompt_sha256": "a6d55c5db8107fbd94d55b5c5c9ad835f89d3c90b4a4e53edda576725f203860"
+    },
+    "PHASE2A": {
+      "source": "Phase2A required root-resolution tests; terminal-media candidates are not in this enumerated nine",
+      "prompt_sha256": "adc0e00b5d34a1401abec612a645a9ea10f037a11d5b3da742f12005765f40d5"
+    },
+    "PHASE1_EXPLICIT": {
+      "source": "WORKFLOW_RECOGNITION_V3_PHASE1 prompt: named contract test IDs 1-12",
+      "prompt_sha256": "944f25da4f6b339349c61ea8293d18016da69b98d0c4f61104ccf8d0c6a6e948"
+    },
+    "PHASE2C": {
+      "source": "Phase2C explicitly enumerates 19 required canonical/schema tests",
+      "prompt_sha256": "6f10058acfaba7176dbcc413f9d86e33a0e180d9fedd87ed0d047abc592b120a"
+    }
+  },
+  "phase2abc_readiness_proven_count": 57,
+  "phase1_expected_count": 15,
+  "synthetic_baseline_complete_mode_enabled": false,
+  "verified_cases": [
+    {
+      "wrapper_test": "case_no_root_returns_unknown_not_full_graph",
+      "phase": "PHASE2A",
+      "source_test": "no_root_returns_unknown_not_full_graph",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "no_root_returns_unknown_not_full_graph"
+    },
+    {
+      "wrapper_test": "case_ambiguous_root_returns_ambiguous",
+      "phase": "PHASE2A",
+      "source_test": "ambiguous_root_returns_ambiguous",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "ambiguous_root_returns_ambiguous"
+    },
+    {
+      "wrapper_test": "case_strong_root_beats_weak_preview",
+      "phase": "PHASE2A",
+      "source_test": "strong_root_beats_weak_preview",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "strong_root_beats_weak_preview"
+    },
+    {
+      "wrapper_test": "case_explicit_output_mapping_resolves_unknown",
+      "phase": "PHASE2A",
+      "source_test": "explicit_output_mapping_resolves_unknown",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "explicit_output_mapping_resolves_unknown"
+    },
+    {
+      "wrapper_test": "case_invalid_explicit_output_mapping_fails_safe",
+      "phase": "PHASE2A",
+      "source_test": "invalid_explicit_output_mapping_fails_safe",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "invalid_explicit_output_mapping_fails_safe"
+    },
+    {
+      "wrapper_test": "case_terminal_input_node_is_not_output_root",
+      "phase": "PHASE2A",
+      "source_test": "terminal_input_node_is_not_output_root",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "terminal_input_node_is_not_output_root"
+    },
+    {
+      "wrapper_test": "case_weak_class_title_hint_alone_does_not_resolve_root",
+      "phase": "PHASE2A",
+      "source_test": "weak_class_title_hint_alone_does_not_resolve_root",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "weak_class_title_hint_alone_does_not_resolve_root"
+    },
+    {
+      "wrapper_test": "case_two_compatible_strong_roots_remain_resolved",
+      "phase": "PHASE2A",
+      "source_test": "two_compatible_strong_roots_remain_resolved",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "two_compatible_strong_roots_remain_resolved"
+    },
+    {
+      "wrapper_test": "case_root_resolution_is_order_independent",
+      "phase": "PHASE2A",
+      "source_test": "root_resolution_is_order_independent",
+      "source_suite": "workflow_analysis_service::tests",
+      "case_id": "root_resolution_is_order_independent"
+    },
+    {
+      "wrapper_test": "case_per_root_closure_does_not_union_inputs",
+      "phase": "PHASE2B",
+      "source_test": "PER_ROOT_CLOSURE_DOES_NOT_UNION_INPUTS",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "PER_ROOT_CLOSURE_DOES_NOT_UNION_INPUTS"
+    },
+    {
+      "wrapper_test": "case_two_compatible_video_roots",
+      "phase": "PHASE2B",
+      "source_test": "TWO_COMPATIBLE_VIDEO_ROOTS",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "TWO_COMPATIBLE_VIDEO_ROOTS"
+    },
+    {
+      "wrapper_test": "case_two_different_capability_roots",
+      "phase": "PHASE2B",
+      "source_test": "TWO_DIFFERENT_CAPABILITY_ROOTS",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "TWO_DIFFERENT_CAPABILITY_ROOTS"
+    },
+    {
+      "wrapper_test": "case_root_a_ready_root_b_unsupported",
+      "phase": "PHASE2B",
+      "source_test": "ROOT_A_READY_ROOT_B_UNSUPPORTED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "ROOT_A_READY_ROOT_B_UNSUPPORTED"
+    },
+    {
+      "wrapper_test": "case_image_input_does_not_leak_across_roots",
+      "phase": "PHASE2B",
+      "source_test": "IMAGE_INPUT_DOES_NOT_LEAK_ACROSS_ROOTS",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "IMAGE_INPUT_DOES_NOT_LEAK_ACROSS_ROOTS"
+    },
+    {
+      "wrapper_test": "case_reference_semantic_does_not_leak_across_roots",
+      "phase": "PHASE2B",
+      "source_test": "REFERENCE_SEMANTIC_DOES_NOT_LEAK_ACROSS_ROOTS",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "REFERENCE_SEMANTIC_DOES_NOT_LEAK_ACROSS_ROOTS"
+    },
+    {
+      "wrapper_test": "case_shared_upstream_can_belong_to_multiple_roots",
+      "phase": "PHASE2B",
+      "source_test": "SHARED_UPSTREAM_CAN_BELONG_TO_MULTIPLE_ROOTS",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "SHARED_UPSTREAM_CAN_BELONG_TO_MULTIPLE_ROOTS"
+    },
+    {
+      "wrapper_test": "case_internal_generated_media_is_not_external_input",
+      "phase": "PHASE2B",
+      "source_test": "INTERNAL_GENERATED_MEDIA_IS_NOT_EXTERNAL_INPUT",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "INTERNAL_GENERATED_MEDIA_IS_NOT_EXTERNAL_INPUT"
+    },
+    {
+      "wrapper_test": "case_root_unknown_dependency_is_scoped",
+      "phase": "PHASE2B",
+      "source_test": "ROOT_UNKNOWN_DEPENDENCY_IS_SCOPED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "ROOT_UNKNOWN_DEPENDENCY_IS_SCOPED"
+    },
+    {
+      "wrapper_test": "case_explicit_selected_root_controls_primary_without_dropping_other_roots",
+      "phase": "PHASE2B",
+      "source_test": "EXPLICIT_SELECTED_ROOT_CONTROLS_PRIMARY_WITHOUT_DROPPING_OTHER_ROOTS",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "EXPLICIT_SELECTED_ROOT_CONTROLS_PRIMARY_WITHOUT_DROPPING_OTHER_ROOTS"
+    },
+    {
+      "wrapper_test": "case_per_root_output_types_are_preserved",
+      "phase": "PHASE2B",
+      "source_test": "PER_ROOT_OUTPUT_TYPES_ARE_PRESERVED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "PER_ROOT_OUTPUT_TYPES_ARE_PRESERVED"
+    },
+    {
+      "wrapper_test": "case_per_root_capability_is_order_independent",
+      "phase": "PHASE2B",
+      "source_test": "PER_ROOT_CAPABILITY_IS_ORDER_INDEPENDENT",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "PER_ROOT_CAPABILITY_IS_ORDER_INDEPENDENT"
+    },
+    {
+      "wrapper_test": "case_schema_type_overrides_alias_name",
+      "phase": "PHASE2C",
+      "source_test": "SCHEMA_TYPE_OVERRIDES_ALIAS_NAME",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "SCHEMA_TYPE_OVERRIDES_ALIAS_NAME"
+    },
+    {
+      "wrapper_test": "case_class_title_cannot_override_schema_type",
+      "phase": "PHASE2C",
+      "source_test": "CLASS_TITLE_CANNOT_OVERRIDE_SCHEMA_TYPE",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "CLASS_TITLE_CANNOT_OVERRIDE_SCHEMA_TYPE"
+    },
+    {
+      "wrapper_test": "case_sparse_schema_t2v",
+      "phase": "PHASE2C",
+      "source_test": "SPARSE_SCHEMA_T2V",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "SPARSE_SCHEMA_T2V"
+    },
+    {
+      "wrapper_test": "case_sparse_schema_i2v",
+      "phase": "PHASE2C",
+      "source_test": "SPARSE_SCHEMA_I2V",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "SPARSE_SCHEMA_I2V"
+    },
+    {
+      "wrapper_test": "case_unknown_role_known_types_nonblocking",
+      "phase": "PHASE2C",
+      "source_test": "UNKNOWN_ROLE_KNOWN_TYPES_NONBLOCKING",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_ROLE_KNOWN_TYPES_NONBLOCKING"
+    },
+    {
+      "wrapper_test": "case_unknown_transform_with_known_media_types",
+      "phase": "PHASE2C",
+      "source_test": "UNKNOWN_TRANSFORM_WITH_KNOWN_MEDIA_TYPES",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_TRANSFORM_WITH_KNOWN_MEDIA_TYPES"
+    },
+    {
+      "wrapper_test": "case_unknown_source_with_known_image_output",
+      "phase": "PHASE2C",
+      "source_test": "UNKNOWN_SOURCE_WITH_KNOWN_IMAGE_OUTPUT",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_SOURCE_WITH_KNOWN_IMAGE_OUTPUT"
+    },
+    {
+      "wrapper_test": "case_unknown_sink_with_known_video_input",
+      "phase": "PHASE2C",
+      "source_test": "UNKNOWN_SINK_WITH_KNOWN_VIDEO_INPUT",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_SINK_WITH_KNOWN_VIDEO_INPUT"
+    },
+    {
+      "wrapper_test": "case_unknown_required_custom_type_fails_closed",
+      "phase": "PHASE2C",
+      "source_test": "UNKNOWN_REQUIRED_CUSTOM_TYPE_FAILS_CLOSED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_REQUIRED_CUSTOM_TYPE_FAILS_CLOSED"
+    },
+    {
+      "wrapper_test": "case_reference_list_schema_is_reference",
+      "phase": "PHASE2C",
+      "source_test": "REFERENCE_LIST_SCHEMA_IS_REFERENCE",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "REFERENCE_LIST_SCHEMA_IS_REFERENCE"
+    },
+    {
+      "wrapper_test": "case_reference_indexed_slots_are_reference",
+      "phase": "PHASE2C",
+      "source_test": "REFERENCE_INDEXED_SLOTS_ARE_REFERENCE",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "REFERENCE_INDEXED_SLOTS_ARE_REFERENCE"
+    },
+    {
+      "wrapper_test": "case_multiple_image_inputs_not_reference",
+      "phase": "PHASE2C",
+      "source_test": "MULTIPLE_IMAGE_INPUTS_NOT_REFERENCE",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "MULTIPLE_IMAGE_INPUTS_NOT_REFERENCE"
+    },
+    {
+      "wrapper_test": "case_reference_alias_cannot_override_non_image_schema",
+      "phase": "PHASE2C",
+      "source_test": "REFERENCE_ALIAS_CANNOT_OVERRIDE_NON_IMAGE_SCHEMA",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "REFERENCE_ALIAS_CANNOT_OVERRIDE_NON_IMAGE_SCHEMA"
+    },
+    {
+      "wrapper_test": "case_canonical_prompt_hint_is_shared",
+      "phase": "PHASE2C",
+      "source_test": "CANONICAL_PROMPT_HINT_IS_SHARED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "CANONICAL_PROMPT_HINT_IS_SHARED"
+    },
+    {
+      "wrapper_test": "case_canonical_media_hint_is_shared",
+      "phase": "PHASE2C",
+      "source_test": "CANONICAL_MEDIA_HINT_IS_SHARED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "CANONICAL_MEDIA_HINT_IS_SHARED"
+    },
+    {
+      "wrapper_test": "case_internal_generated_media_remains_internal",
+      "phase": "PHASE2C",
+      "source_test": "INTERNAL_GENERATED_MEDIA_REMAINS_INTERNAL",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "INTERNAL_GENERATED_MEDIA_REMAINS_INTERNAL"
+    },
+    {
+      "wrapper_test": "case_reference_semantic_remains_root_scoped",
+      "phase": "PHASE2C",
+      "source_test": "REFERENCE_SEMANTIC_REMAINS_ROOT_SCOPED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "REFERENCE_SEMANTIC_REMAINS_ROOT_SCOPED"
+    },
+    {
+      "wrapper_test": "case_canonical_resolution_is_order_independent",
+      "phase": "PHASE2C",
+      "source_test": "CANONICAL_RESOLUTION_IS_ORDER_INDEPENDENT",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "CANONICAL_RESOLUTION_IS_ORDER_INDEPENDENT"
+    },
+    {
+      "wrapper_test": "case_legacy_suggestion_consumes_canonical_hints",
+      "phase": "PHASE2C",
+      "source_test": "LEGACY_SUGGESTION_CONSUMES_CANONICAL_HINTS",
+      "source_suite": "workflow_onboarding_service::tests",
+      "case_id": "LEGACY_SUGGESTION_CONSUMES_CANONICAL_HINTS"
+    },
+    {
+      "wrapper_test": "case_schema_type_layering_preserves_raw_custom_types",
+      "phase": "READINESS",
+      "source_test": "SCHEMA_TYPE_LAYERING_PRESERVES_RAW_CUSTOM_TYPES",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "SCHEMA_TYPE_LAYERING_PRESERVES_RAW_CUSTOM_TYPES"
+    },
+    {
+      "wrapper_test": "case_opaque_custom_control_nonblocking",
+      "phase": "READINESS",
+      "source_test": "OPAQUE_CUSTOM_CONTROL_NONBLOCKING",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "OPAQUE_CUSTOM_CONTROL_NONBLOCKING"
+    },
+    {
+      "wrapper_test": "case_arbitrary_opaque_types_do_not_require_adapter",
+      "phase": "READINESS",
+      "source_test": "ARBITRARY_OPAQUE_TYPES_DO_NOT_REQUIRE_ADAPTER",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "ARBITRARY_OPAQUE_TYPES_DO_NOT_REQUIRE_ADAPTER"
+    },
+    {
+      "wrapper_test": "case_opaque_external_media_boundary_fails_closed",
+      "phase": "READINESS",
+      "source_test": "OPAQUE_EXTERNAL_MEDIA_BOUNDARY_FAILS_CLOSED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "OPAQUE_EXTERNAL_MEDIA_BOUNDARY_FAILS_CLOSED"
+    },
+    {
+      "wrapper_test": "case_opaque_output_boundary_fails_closed",
+      "phase": "READINESS",
+      "source_test": "OPAQUE_OUTPUT_BOUNDARY_FAILS_CLOSED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "OPAQUE_OUTPUT_BOUNDARY_FAILS_CLOSED"
+    },
+    {
+      "wrapper_test": "case_opaque_media_sink_output_is_nonblocking",
+      "phase": "READINESS",
+      "source_test": "OPAQUE_MEDIA_SINK_OUTPUT_IS_NONBLOCKING",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "OPAQUE_MEDIA_SINK_OUTPUT_IS_NONBLOCKING"
+    },
+    {
+      "wrapper_test": "case_wildcard_resolves_from_known_source",
+      "phase": "READINESS",
+      "source_test": "WILDCARD_RESOLVES_FROM_KNOWN_SOURCE",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "WILDCARD_RESOLVES_FROM_KNOWN_SOURCE"
+    },
+    {
+      "wrapper_test": "case_wildcard_resolves_from_known_target",
+      "phase": "READINESS",
+      "source_test": "WILDCARD_RESOLVES_FROM_KNOWN_TARGET",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "WILDCARD_RESOLVES_FROM_KNOWN_TARGET"
+    },
+    {
+      "wrapper_test": "case_unconstrained_wildcard_capability_boundary_fails_closed",
+      "phase": "READINESS",
+      "source_test": "UNCONSTRAINED_WILDCARD_CAPABILITY_BOUNDARY_FAILS_CLOSED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNCONSTRAINED_WILDCARD_CAPABILITY_BOUNDARY_FAILS_CLOSED"
+    },
+    {
+      "wrapper_test": "case_unconstrained_wildcard_auxiliary_nonblocking",
+      "phase": "READINESS",
+      "source_test": "UNCONSTRAINED_WILDCARD_AUXILIARY_NONBLOCKING",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNCONSTRAINED_WILDCARD_AUXILIARY_NONBLOCKING"
+    },
+    {
+      "wrapper_test": "case_matchtype_propagates_known_media",
+      "phase": "READINESS",
+      "source_test": "MATCHTYPE_PROPAGATES_KNOWN_MEDIA",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "MATCHTYPE_PROPAGATES_KNOWN_MEDIA"
+    },
+    {
+      "wrapper_test": "case_matchtype_unresolved_critical_fails_closed",
+      "phase": "READINESS",
+      "source_test": "MATCHTYPE_UNRESOLVED_CRITICAL_FAILS_CLOSED",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "MATCHTYPE_UNRESOLVED_CRITICAL_FAILS_CLOSED"
+    },
+    {
+      "wrapper_test": "case_autogrow_input_resolves_from_known_source",
+      "phase": "READINESS",
+      "source_test": "AUTOGROW_INPUT_RESOLVES_FROM_KNOWN_SOURCE",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "AUTOGROW_INPUT_RESOLVES_FROM_KNOWN_SOURCE"
+    },
+    {
+      "wrapper_test": "case_conditional_input_resolves_selected_option",
+      "phase": "READINESS",
+      "source_test": "CONDITIONAL_INPUT_RESOLVES_SELECTED_OPTION",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "CONDITIONAL_INPUT_RESOLVES_SELECTED_OPTION"
+    },
+    {
+      "wrapper_test": "case_autogrow_prefix_input_resolves_from_known_source",
+      "phase": "READINESS",
+      "source_test": "AUTOGROW_PREFIX_INPUT_RESOLVES_FROM_KNOWN_SOURCE",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "AUTOGROW_PREFIX_INPUT_RESOLVES_FROM_KNOWN_SOURCE"
+    },
+    {
+      "wrapper_test": "case_custom_type_name_does_not_change_capability",
+      "phase": "READINESS",
+      "source_test": "CUSTOM_TYPE_NAME_DOES_NOT_CHANGE_CAPABILITY",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "CUSTOM_TYPE_NAME_DOES_NOT_CHANGE_CAPABILITY"
+    },
+    {
+      "wrapper_test": "case_opaque_type_order_independent",
+      "phase": "READINESS",
+      "source_test": "OPAQUE_TYPE_ORDER_INDEPENDENT",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "OPAQUE_TYPE_ORDER_INDEPENDENT"
+    },
+    {
+      "wrapper_test": "case_unknown_t2v",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "capability_uses_active_image_connection_not_optional_schema_presence",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_T2V"
+    },
+    {
+      "wrapper_test": "case_unknown_i2v",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "capability_uses_active_image_connection_not_optional_schema_presence",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_I2V"
+    },
+    {
+      "wrapper_test": "case_optional_image_unconnected",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "capability_uses_active_image_connection_not_optional_schema_presence",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "OPTIONAL_IMAGE_UNCONNECTED"
+    },
+    {
+      "wrapper_test": "case_optional_image_connected",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "capability_uses_active_image_connection_not_optional_schema_presence",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "OPTIONAL_IMAGE_CONNECTED"
+    },
+    {
+      "wrapper_test": "case_disconnected_image_source",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "active_dependency_graph_excludes_disconnected_nodes_and_keeps_multiple_roots",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "DISCONNECTED_IMAGE_SOURCE"
+    },
+    {
+      "wrapper_test": "case_disconnected_missing_node",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "disconnected_missing_schema_is_noncritical_but_active_missing_schema_blocks",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "DISCONNECTED_MISSING_NODE"
+    },
+    {
+      "wrapper_test": "case_active_missing_node",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "disconnected_missing_schema_is_noncritical_but_active_missing_schema_blocks",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "ACTIVE_MISSING_NODE"
+    },
+    {
+      "wrapper_test": "case_unknown_reference_video",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "generic_reference_media_is_distinct_from_generic_image_to_video",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_REFERENCE_VIDEO"
+    },
+    {
+      "wrapper_test": "case_reference_node_disconnected",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "generic_reference_media_is_distinct_from_generic_image_to_video",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "REFERENCE_NODE_DISCONNECTED"
+    },
+    {
+      "wrapper_test": "case_unknown_identity_known_capability",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "capability_uses_active_image_connection_not_optional_schema_presence",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_IDENTITY_KNOWN_CAPABILITY"
+    },
+    {
+      "wrapper_test": "case_unknown_critical_semantic_type",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "active_unknown_critical_socket_fails_closed_without_provider_rules",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "UNKNOWN_CRITICAL_SEMANTIC_TYPE"
+    },
+    {
+      "wrapper_test": "case_multi_output_workflow",
+      "phase": "PHASE1_EXPLICIT",
+      "source_test": "active_dependency_graph_excludes_disconnected_nodes_and_keeps_multiple_roots",
+      "source_suite": "workflow_semantic_graph::tests",
+      "case_id": "MULTI_OUTPUT_WORKFLOW"
+    }
+  ],
+  "historical_synthetic_expected_total": 72,
+  "baseline_id": "V3_REPLAY_BASELINE_V1",
+  "phase1_explicitly_proven_count": 12
+}

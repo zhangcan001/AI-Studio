@@ -1,0 +1,337 @@
+{
+  "id": "f2187236-e62b-41fa-8b56-a49bc745a9b3",
+  "revision": 0,
+  "last_node_id": 28,
+  "last_link_id": 30,
+  "nodes": [
+    {
+      "id": 8,
+      "type": "LoadImage",
+      "pos": [
+        810,
+        220
+      ],
+      "size": [
+        270,
+        320
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            12
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.36.0",
+        "Node name for S&R": "LoadImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "512x512 (16).png",
+        "image"
+      ],
+      "widgets_values_named": {
+        "image": "512x512 (16).png",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 9,
+      "type": "LoadImage",
+      "pos": [
+        740,
+        -180
+      ],
+      "size": [
+        360,
+        320
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            11
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.36.0",
+        "Node name for S&R": "LoadImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "3840x2160car.jpg",
+        "image"
+      ],
+      "widgets_values_named": {
+        "image": "3840x2160car.jpg",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 19,
+      "type": "LayerUtility: ImageBlendAdvance",
+      "pos": [
+        1150,
+        60
+      ],
+      "size": [
+        320,
+        340
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "background_image",
+          "type": "IMAGE",
+          "link": 11
+        },
+        {
+          "name": "layer_image",
+          "type": "IMAGE",
+          "link": 12
+        },
+        {
+          "name": "layer_mask",
+          "shape": 7,
+          "type": "MASK",
+          "link": 13
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            28
+          ]
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": [
+            30
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui_layerstyle",
+        "ver": "64f976fec8492ea4930c0e30c32369573189b23d",
+        "Node name for S&R": "LayerUtility: ImageBlendAdvance",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        true,
+        "normal",
+        100,
+        73.67,
+        27.7,
+        "horizontal",
+        2,
+        1,
+        25.28,
+        "lanczos",
+        2
+      ],
+      "widgets_values_named": {
+        "invert_mask": true,
+        "blend_mode": "normal",
+        "opacity": 100,
+        "x_percent": 73.67,
+        "y_percent": 27.7,
+        "mirror": "horizontal",
+        "scale": 2,
+        "aspect_ratio": 1,
+        "rotate": 25.28,
+        "transform_method": "lanczos",
+        "anti_aliasing": 2
+      },
+      "color": "rgba(38, 73, 116, 0.7)"
+    },
+    {
+      "id": 23,
+      "type": "PreviewImage",
+      "pos": [
+        1560,
+        -240
+      ],
+      "size": [
+        650,
+        390
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 28
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.36.0",
+        "Node name for S&R": "PreviewImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      }
+    },
+    {
+      "id": 28,
+      "type": "LayerMask: MaskPreview",
+      "pos": [
+        1550,
+        200
+      ],
+      "size": [
+        650,
+        390
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 30
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui_layerstyle",
+        "ver": "64f976fec8492ea4930c0e30c32369573189b23d",
+        "Node name for S&R": "LayerMask: MaskPreview",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "rgba(27, 80, 119, 0.7)"
+    }
+  ],
+  "links": [
+    [
+      11,
+      9,
+      0,
+      19,
+      0,
+      "IMAGE"
+    ],
+    [
+      12,
+      8,
+      0,
+      19,
+      1,
+      "IMAGE"
+    ],
+    [
+      13,
+      8,
+      1,
+      19,
+      2,
+      "MASK"
+    ],
+    [
+      28,
+      19,
+      0,
+      23,
+      0,
+      "IMAGE"
+    ],
+    [
+      30,
+      19,
+      1,
+      28,
+      0,
+      "MASK"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ue_links": [],
+    "ds": {
+      "scale": 0.45,
+      "offset": [
+        -768.3333333333333,
+        645
+      ]
+    },
+    "frontendVersion": "1.52.7",
+    "VHS_latentpreview": true,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

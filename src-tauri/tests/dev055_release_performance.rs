@@ -1327,6 +1327,8 @@ async fn performance_harness() -> PerformanceHarness {
             manifest_yaml: "schema_version: 1\nid: wfl_dev055_fixture\nname: DEV-055 Fixture\nworkflow_version: 1.0.0\nrecipe_version: 1.0.0\ncategory: image\nmode: t2i\n".to_owned(),
             recipe_yaml: RECIPE_YAML.to_owned(),
             workflow_json: WORKFLOW_JSON.to_owned(),
+            source_workflow_json: None,
+            recognition_metadata_json: None,
         },
         calls: source_calls.clone(),
     });

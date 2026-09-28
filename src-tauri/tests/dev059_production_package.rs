@@ -186,6 +186,8 @@ fn dev080_runtime_package() -> WorkflowPackageFiles {
         ),
         recipe_yaml: DEV080_RECIPE_YAML.to_owned(),
         workflow_json: DEV080_WORKFLOW_JSON.to_owned(),
+        source_workflow_json: None,
+        recognition_metadata_json: None,
     }
 }
 

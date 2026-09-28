@@ -34,6 +34,12 @@ pub struct RuntimeWorkflowVersionRecord {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkflowVersionProvenanceRecord {
+    pub source_workflow_json: Option<String>,
+    pub recognition_metadata_json: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WorkflowDeletionCounts {
     pub active_task_count: u64,
     pub active_queue_item_count: u64,
@@ -51,6 +57,13 @@ pub trait WorkflowRuntimeRepository: Send + Sync {
         &self,
         workflow_version_id: &str,
     ) -> Result<Option<RuntimeWorkflowVersionRecord>, RepositoryError>;
+
+    async fn find_version_provenance(
+        &self,
+        _workflow_version_id: &str,
+    ) -> Result<Option<WorkflowVersionProvenanceRecord>, RepositoryError> {
+        Ok(None)
+    }
 
     async fn inspect_deletion(
         &self,

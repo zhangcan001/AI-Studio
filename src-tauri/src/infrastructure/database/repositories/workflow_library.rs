@@ -77,6 +77,18 @@ async fn register_package(
 
     let (workflow_version_id, inserted_workflow_version) = match existing_version {
         Some(existing) if existing.workflow_sha256 == package.workflow_sha256 => {
+            sqlx::query(
+                "UPDATE workflow_versions
+                 SET source_workflow_json = COALESCE(source_workflow_json, ?),
+                     recognition_metadata_json = COALESCE(recognition_metadata_json, ?)
+                 WHERE id = ?",
+            )
+            .bind(&package.source_workflow_json)
+            .bind(&package.recognition_metadata_json)
+            .bind(&existing.id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_sqlx_error)?;
             (existing.id, false)
         }
         Some(_) => {
@@ -90,8 +102,9 @@ async fn register_package(
             sqlx::query(
                 "INSERT INTO workflow_versions (
                     id, workflow_id, version, api_workflow_json, workflow_sha256,
-                    package_name, package_source_path, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    package_name, package_source_path, created_at,
+                    source_workflow_json, recognition_metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(&package.workflow_id)
@@ -101,6 +114,8 @@ async fn register_package(
             .bind(&package.package_name)
             .bind(&package.package_source_path)
             .bind(format_datetime(package.created_at))
+            .bind(&package.source_workflow_json)
+            .bind(&package.recognition_metadata_json)
             .execute(&mut **transaction)
             .await
             .map_err(map_sqlx_error)?;
@@ -296,6 +311,8 @@ mod tests {
             workflow_version: "1.0.0".to_owned(),
             workflow_json: json!({"3": {"inputs": {}, "class_type": "KSampler"}}),
             workflow_sha256: workflow_hash.to_owned(),
+            source_workflow_json: None,
+            recognition_metadata_json: None,
             recipe_version: "1.0.0".to_owned(),
             recipe_schema_version: 1,
             recipe_yaml: "schema_version: 1".to_owned(),
@@ -329,6 +346,49 @@ mod tests {
                 .await
                 .unwrap(),
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn persists_original_payload_and_recognition_metadata_with_version() {
+        let (_directory, pool, repository) = setup().await;
+        let mut package = package("workflow-hash", "recipe-hash");
+        package.source_workflow_json = Some(r#"{"ui":{"nodes":[]}}"#.to_owned());
+        package.recognition_metadata_json = Some(
+            r#"{"recognitionEngine":"WORKFLOW_RECOGNITION_V3","recognitionEngineVersion":"3"}"#
+                .to_owned(),
+        );
+
+        repository.register_package(&package).await.unwrap();
+        let persisted = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT source_workflow_json, recognition_metadata_json FROM workflow_versions WHERE workflow_id = ?",
+        )
+        .bind(&package.workflow_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            persisted.0.as_deref(),
+            package.source_workflow_json.as_deref()
+        );
+        assert_eq!(
+            persisted.1.as_deref(),
+            package.recognition_metadata_json.as_deref()
+        );
+
+        let mut duplicate = package.clone();
+        duplicate.source_workflow_json = Some(r#"{"ui":{"nodes":[1]}}"#.to_owned());
+        repository.register_package(&duplicate).await.unwrap();
+        let unchanged = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT source_workflow_json, recognition_metadata_json FROM workflow_versions WHERE workflow_id = ?",
+        )
+        .bind(&package.workflow_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            unchanged, persisted,
+            "duplicate package must not overwrite immutable provenance"
         );
     }
 

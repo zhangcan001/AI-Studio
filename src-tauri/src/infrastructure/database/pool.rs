@@ -107,7 +107,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            38
+            39
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")

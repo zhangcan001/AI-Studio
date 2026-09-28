@@ -1,0 +1,171 @@
+{
+  "2": {
+    "inputs": {
+      "image": "1344x768_beach.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "3": {
+    "inputs": {
+      "image": "512x512.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "12": {
+    "inputs": {
+      "invert_mask": false,
+      "detect": "mask_area",
+      "top_reserve": 0,
+      "bottom_reserve": 0,
+      "left_reserve": 0,
+      "right_reserve": 0,
+      "round_to_multiple": "None",
+      "image": [
+        "34",
+        0
+      ],
+      "mask": [
+        "34",
+        3
+      ],
+      "crop_box": [
+        "34",
+        4
+      ]
+    },
+    "class_type": "LayerUtility: CropByMask V2",
+    "_meta": {
+      "title": "图层工具：遮罩裁剪 V2"
+    }
+  },
+  "18": {
+    "inputs": {
+      "images": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "19": {
+    "inputs": {
+      "mask": [
+        "12",
+        1
+      ]
+    },
+    "class_type": "LayerMask: MaskPreview",
+    "_meta": {
+      "title": "图层遮罩：遮罩预览"
+    }
+  },
+  "28": {
+    "inputs": {
+      "images": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "29": {
+    "inputs": {
+      "mask": [
+        "34",
+        3
+      ]
+    },
+    "class_type": "LayerMask: MaskPreview",
+    "_meta": {
+      "title": "图层遮罩：遮罩预览"
+    }
+  },
+  "30": {
+    "inputs": {
+      "invert_mask": false,
+      "background_image": [
+        "34",
+        0
+      ],
+      "croped_image": [
+        "12",
+        0
+      ],
+      "crop_box": [
+        "12",
+        2
+      ],
+      "croped_mask": [
+        "12",
+        1
+      ]
+    },
+    "class_type": "LayerUtility: RestoreCropBox",
+    "_meta": {
+      "title": "图层工具：恢复裁剪框"
+    }
+  },
+  "31": {
+    "inputs": {
+      "images": [
+        "30",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "34": {
+    "inputs": {
+      "invert_mask": true,
+      "opacity": 100,
+      "x_percent": 50,
+      "y_percent": 50,
+      "scale": 1,
+      "rotate": 0,
+      "mirror": "None",
+      "anti_aliasing": 0,
+      "handle_detect": "mask_area",
+      "top_handle": 0.3,
+      "bottom_handle": 0.3,
+      "left_handle": 0.3,
+      "right_handle": 0.3,
+      "handle_mask_outradius": 128,
+      "top_reserve": 0,
+      "bottom_reserve": 0,
+      "left_reserve": 0,
+      "right_reserve": 0,
+      "round_to_multiple": "8",
+      "background_image": [
+        "2",
+        0
+      ],
+      "layer_image": [
+        "3",
+        0
+      ],
+      "layer_mask": [
+        "3",
+        1
+      ]
+    },
+    "class_type": "LayerUtility: ImageCompositeHandleMask",
+    "_meta": {
+      "title": "LayerUtility: Image Composite Handle Mask"
+    }
+  }
+}

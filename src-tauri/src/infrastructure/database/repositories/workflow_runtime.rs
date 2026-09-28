@@ -1,7 +1,7 @@
 use super::{format_datetime, map_sqlx_error};
 use crate::application::ports::{
     RepositoryError, RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowDeletionCounts,
-    WorkflowRuntimeRepository,
+    WorkflowRuntimeRepository, WorkflowVersionProvenanceRecord,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -120,6 +120,28 @@ impl WorkflowRuntimeRepository for SqliteWorkflowRuntimeRepository {
             .await?
             .into_iter()
             .next())
+    }
+
+    async fn find_version_provenance(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<Option<WorkflowVersionProvenanceRecord>, RepositoryError> {
+        let row = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT source_workflow_json, recognition_metadata_json
+             FROM workflow_versions WHERE id = ?",
+        )
+        .bind(workflow_version_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(
+            row.map(|(source_workflow_json, recognition_metadata_json)| {
+                WorkflowVersionProvenanceRecord {
+                    source_workflow_json,
+                    recognition_metadata_json,
+                }
+            }),
+        )
     }
 
     async fn inspect_deletion(

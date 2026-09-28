@@ -1,5 +1,7 @@
 use crate::application::comfy_service::{ComfyConnectionStatus, ComfyService};
-use crate::application::production_queue_service::{ProductionQueueError, ProductionQueueService};
+use crate::application::production_queue_service::{
+    ProductionBatchPreflightIssue, ProductionQueueError, ProductionQueueService,
+};
 use crate::application::workflow_lifecycle_service::{
     WorkflowLifecycleError, WorkflowLifecycleService, WorkflowRecipeRuntimeInspection,
 };
@@ -176,6 +178,16 @@ impl ProductionStartAdmissionService {
                 inspections.push(inspection);
             }
             evaluate_runtime_admission(&detail.items, status.status, &inspections)?;
+        }
+
+        let preflight_issues = self
+            .queue
+            .preflight_saved_execution_batch(project_id, &detail)
+            .await?;
+        if !preflight_issues.is_empty() {
+            return Err(ProductionStartAdmissionError::Runtime(
+                batch_preflight_failure(&detail.items, &preflight_issues),
+            ));
         }
 
         self.queue.commit_start_admitted(&detail).await?;
@@ -401,6 +413,38 @@ fn runtime_failure_from_lifecycle_error(
         format!("{}: {}", error.code(), error),
         Vec::new(),
     )
+}
+
+fn batch_preflight_failure(
+    items: &[ProductionBatchItem],
+    issues: &[ProductionBatchPreflightIssue],
+) -> RuntimeAdmissionFailure {
+    let identity = issues
+        .first()
+        .and_then(|issue| items.get(issue.item_number.saturating_sub(1)))
+        .or_else(|| items.first());
+    let reason = format!(
+        "BATCH_NOT_STARTED: {}",
+        issues
+            .iter()
+            .map(|issue| match issue.target.as_deref() {
+                Some(target) => format!("item {} {} ({target})", issue.item_number, issue.code),
+                None => format!("item {} {}", issue.item_number, issue.code),
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    );
+    RuntimeAdmissionFailure {
+        code: RUNTIME_ADMISSION_READINESS_BLOCKED,
+        workflow_version_id: identity
+            .map(|item| item.workflow_version_id.clone())
+            .unwrap_or_default(),
+        recipe_id: identity
+            .map(|item| item.recipe_id.clone())
+            .unwrap_or_default(),
+        reason,
+        missing_nodes: Vec::new(),
+    }
 }
 
 fn runtime_failure(

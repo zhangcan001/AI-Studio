@@ -4,13 +4,14 @@ use crate::{
         generation_input_preparer::GenerationInputValue,
         production_queue_service::{
             CreateDirectGenerationBatchItem, CreateDirectGenerationBatchRequest,
-            CreateDirectGenerationRequest, CreateProductionBatchItem,
+            CreateDirectGenerationRequest, CreateProductionBatchItem, ExecutionValueSource,
         },
     },
     domain::SeedValue,
     error::AppError,
 };
 use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use tauri::State;
 
@@ -33,6 +34,8 @@ pub struct GenerationCreateRequest {
     pub submission_idempotency_key: Option<String>,
     #[serde(default)]
     pub parent_task_id: Option<String>,
+    #[serde(default)]
+    pub input_sources: Option<BTreeMap<String, ExecutionValueSource>>,
 }
 
 const MAX_BATCH_ITEMS: usize = 100;
@@ -72,6 +75,32 @@ pub struct GenerationBatchItemRequest {
     pub tool_instance_id: Option<String>,
     #[serde(default)]
     pub tool_version_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowExecutionBatchCreateRequest {
+    pub project_id: String,
+    pub name: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub submission_idempotency_key: String,
+    pub items: Vec<WorkflowExecutionBatchItemRequest>,
+    #[serde(default)]
+    pub model_version_id: Option<String>,
+    #[serde(default)]
+    pub prompt_version_id: Option<String>,
+    #[serde(default)]
+    pub tool_instance_id: Option<String>,
+    #[serde(default)]
+    pub tool_version_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowExecutionBatchItemRequest {
+    pub values: BTreeMap<String, InputValueDto>,
+    pub input_sources: BTreeMap<String, ExecutionValueSource>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -220,8 +249,179 @@ impl GenerationCreateRequest {
             tool_version_id: self.tool_version_id,
             submission_idempotency_key: self.submission_idempotency_key,
             parent_task_id: self.parent_task_id,
+            execution_input_sources: self.input_sources,
         })
     }
+}
+
+impl WorkflowExecutionBatchCreateRequest {
+    fn into_application(self) -> Result<CreateDirectGenerationBatchRequest, AppError> {
+        crate::domain::validate_project_id(&self.project_id)
+            .map_err(|error| AppError::invalid_input(error.to_string()))?;
+        if self.items.is_empty() || self.items.len() > MAX_BATCH_ITEMS {
+            return Err(AppError::invalid_input(format!(
+                "BATCH_TOO_LARGE: batch must contain 1..{MAX_BATCH_ITEMS} items"
+            )));
+        }
+        let request_key = self.submission_idempotency_key.trim().to_owned();
+        if request_key.is_empty() || request_key.len() > 160 {
+            return Err(AppError::invalid_input(
+                "batch submission idempotency key must contain 1..160 characters",
+            ));
+        }
+        let items = self
+            .items
+            .into_iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let values = item
+                    .values
+                    .into_iter()
+                    .map(|(key, value)| Ok((key.clone(), value.into_application(&key)?)))
+                    .collect::<Result<BTreeMap<_, _>, AppError>>()?;
+                Ok(CreateDirectGenerationBatchItem {
+                    item: CreateProductionBatchItem {
+                        workflow_version_id: self.workflow_version_id.clone(),
+                        recipe_id: self.recipe_id.clone(),
+                        values,
+                    },
+                    shot_id: None,
+                    stage: None,
+                    prompt_version_id: self.prompt_version_id.clone(),
+                    model_version_id: self.model_version_id.clone(),
+                    tool_instance_id: self.tool_instance_id.clone(),
+                    tool_version_id: self.tool_version_id.clone(),
+                    submission_idempotency_key: Some(format!(
+                        "workflow-execution-batch:{request_key}:{index}"
+                    )),
+                    parent_task_id: None,
+                    execution_input_sources: Some(item.input_sources),
+                })
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
+        Ok(CreateDirectGenerationBatchRequest {
+            project_id: self.project_id,
+            name: self.name,
+            continue_on_failure: true,
+            items,
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowExecutionPreflightView {
+    pub status: &'static str,
+    pub code: Option<String>,
+    pub target: Option<String>,
+}
+
+/// Read-only, exact-pair preflight. A blocked outcome never creates a queue item.
+#[tauri::command]
+pub async fn workflow_execution_preflight(
+    state: State<'_, AppState>,
+    request: GenerationCreateRequest,
+) -> Result<WorkflowExecutionPreflightView, AppError> {
+    let request = request.into_application()?;
+    let result = state
+        .production
+        .queue
+        .preflight_direct_generation(&request.project_id, &request.item)
+        .await;
+    Ok(match result {
+        Ok(()) => WorkflowExecutionPreflightView {
+            status: "READY",
+            code: None,
+            target: None,
+        },
+        Err(error) => {
+            let (code, target) = match error {
+                crate::application::generation_service::GenerationServiceError::ExecutionFailed {
+                    code,
+                    message,
+                } => (code, Some(message)),
+                crate::application::generation_service::GenerationServiceError::Compile(_) => {
+                    ("EXECUTION_INPUT_INVALID".to_owned(), None)
+                }
+                crate::application::generation_service::GenerationServiceError::InputPrepare(_) => {
+                    ("EXECUTION_ASSET_UNAVAILABLE".to_owned(), None)
+                }
+                _ => ("EXECUTION_PREFLIGHT_FAILED".to_owned(), None),
+            };
+            WorkflowExecutionPreflightView {
+                status: if code == "INPUT_OPTION_UNAVAILABLE"
+                    || code == "RUNTIME_PREFLIGHT_NEEDS_REVIEW"
+                {
+                    "NEEDS_REVIEW"
+                } else {
+                    "BLOCKED"
+                },
+                code: Some(code),
+                target,
+            }
+        }
+    })
+}
+
+/// Saved-version entrypoint: rechecks values and live runtime under queue
+/// admission immediately before persisting the single queue item.
+#[tauri::command]
+pub async fn workflow_execution_create(
+    state: State<'_, AppState>,
+    request: GenerationCreateRequest,
+) -> Result<super::production_queue::ProductionBatchDetailView, AppError> {
+    let request = request.into_application()?;
+    let _admission = state
+        .production
+        .queue
+        .acquire_interactive_admission()
+        .await
+        .map_err(super::production_queue::map_queue_error)?;
+    state
+        .production
+        .queue
+        .preflight_direct_generation(&request.project_id, &request.item)
+        .await
+        .map_err(|error| AppError::workflow_onboarding(format!(
+            "WORKFLOW_EXECUTION_PREFLIGHT_BLOCKED: {}",
+            match error {
+                crate::application::generation_service::GenerationServiceError::ExecutionFailed { code, .. } => code,
+                crate::application::generation_service::GenerationServiceError::Compile(_) => "EXECUTION_INPUT_INVALID".to_owned(),
+                crate::application::generation_service::GenerationServiceError::InputPrepare(_) => "EXECUTION_ASSET_UNAVAILABLE".to_owned(),
+                _ => "EXECUTION_PREFLIGHT_FAILED".to_owned(),
+            }
+        )))?;
+    state
+        .production
+        .queue
+        .create_direct_generation(request)
+        .await
+        .map(Into::into)
+        .map_err(super::production_queue::map_queue_error)
+}
+
+/// Materialize a saved-version batch into the existing Production Queue.
+/// Runtime validation is performed for every frozen item by Queue Start before
+/// the batch transitions from READY to RUNNING.
+#[tauri::command]
+pub async fn workflow_execution_create_batch(
+    state: State<'_, AppState>,
+    request: WorkflowExecutionBatchCreateRequest,
+) -> Result<super::production_queue::ProductionBatchDetailView, AppError> {
+    let request = request.into_application()?;
+    let _admission = state
+        .production
+        .queue
+        .acquire_interactive_admission()
+        .await
+        .map_err(super::production_queue::map_queue_error)?;
+    state
+        .production
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .map(Into::into)
+        .map_err(super::production_queue::map_queue_error)
 }
 
 impl GenerationBatchItemRequest {
@@ -246,6 +446,7 @@ impl GenerationBatchItemRequest {
             tool_version_id: self.tool_version_id,
             submission_idempotency_key: None,
             parent_task_id: None,
+            execution_input_sources: None,
         })
     }
 }

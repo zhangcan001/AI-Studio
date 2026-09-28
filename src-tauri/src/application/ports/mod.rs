@@ -179,6 +179,6 @@ pub use workflow_runtime_artifact_repository::{
 };
 pub use workflow_runtime_repository::{
     RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowDeletionCounts,
-    WorkflowRuntimeRepository,
+    WorkflowRuntimeRepository, WorkflowVersionProvenanceRecord,
 };
 pub use workflow_runtime_state_repository::{WorkflowRuntimeState, WorkflowRuntimeStateRepository};
