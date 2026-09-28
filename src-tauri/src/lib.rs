@@ -1250,6 +1250,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_lifecycle::workflow_clean_staging,
             commands::workflow_lifecycle::workflow_inspect_deletion,
             commands::workflow_lifecycle::workflow_delete_version,
+            commands::workflow_lifecycle::workflow_version_delete,
             commands::workflow_lifecycle::workflow_delete_workflow,
             commands::workflow_lifecycle::workflow_restore_version,
             commands::workflow_benchmark::workflow_benchmark_preview,
