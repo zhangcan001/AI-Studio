@@ -414,7 +414,21 @@ mod tests {
         }
     }
 
-    async fn setup() -> ProjectWorkflowBindingService {
+    /// W-31: keep the TempDir alive for the whole test; the service derefs
+    /// so existing call sites stay unchanged.
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        service: ProjectWorkflowBindingService,
+    }
+
+    impl std::ops::Deref for Fixture {
+        type Target = ProjectWorkflowBindingService;
+        fn deref(&self) -> &Self::Target {
+            &self.service
+        }
+    }
+
+    async fn setup() -> Fixture {
         let directory = tempdir().unwrap();
         let pool = initialize(&directory.path().join("app.db")).await.unwrap();
         test_support::seed_task_dependencies(&pool).await;
@@ -426,13 +440,16 @@ mod tests {
             Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
         let state_repository: Arc<dyn WorkflowRuntimeStateRepository> =
             Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool));
-        ProjectWorkflowBindingService::new(
-            binding_repository,
-            project_repository,
-            runtime_repository,
-            state_repository,
-            Arc::new(FixedClock),
-        )
+        Fixture {
+            _dir: directory,
+            service: ProjectWorkflowBindingService::new(
+                binding_repository,
+                project_repository,
+                runtime_repository,
+                state_repository,
+                Arc::new(FixedClock),
+            ),
+        }
     }
 
     fn request(stage: &str, mode: &str) -> ProjectWorkflowConfigUpdateRequest {

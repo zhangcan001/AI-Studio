@@ -334,9 +334,18 @@ mod tests {
     use crate::infrastructure::database::initialize;
     use chrono::Utc;
     use sqlx::SqlitePool;
-    use tempfile::tempdir;
+    use tempfile::{tempdir, TempDir};
 
-    async fn setup() -> (SqlitePool, SqliteWorkflowRuntimeArtifactRepository) {
+    /// W-31: the TempDir must outlive the pool; dropping it early deletes
+    /// the database directory and causes intermittent "unable to open
+    /// database file" failures.
+    struct Fixture {
+        _dir: TempDir,
+        pool: SqlitePool,
+        repository: SqliteWorkflowRuntimeArtifactRepository,
+    }
+
+    async fn setup() -> Fixture {
         let directory = tempdir().expect("temporary directory should exist");
         let pool = initialize(&directory.path().join("app.db"))
             .await
@@ -380,10 +389,11 @@ mod tests {
             .await
             .unwrap();
         }
-        (
-            pool.clone(),
-            SqliteWorkflowRuntimeArtifactRepository::new(pool),
-        )
+        Fixture {
+            _dir: directory,
+            pool: pool.clone(),
+            repository: SqliteWorkflowRuntimeArtifactRepository::new(pool),
+        }
     }
 
     fn artifact(id: &str, recipe_id: &str, package_name: &str) -> WorkflowRuntimeArtifactRecord {
@@ -406,7 +416,11 @@ mod tests {
 
     #[tokio::test]
     async fn exact_recipe_mapping_allows_multiple_packages_without_last_write_wins() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         repository
             .upsert(&artifact("artifact-a", "artifact-recipe-1", "package-a"))
             .await
@@ -450,7 +464,9 @@ mod tests {
 
     #[tokio::test]
     async fn exact_mapping_is_immutable_and_idempotent() {
-        let (_pool, repository) = setup().await;
+        let Fixture {
+            _dir, repository, ..
+        } = setup().await;
         let first = artifact("artifact-a", "artifact-recipe-1", "package-a");
         repository.upsert(&first).await.unwrap();
         repository.upsert(&first).await.unwrap();

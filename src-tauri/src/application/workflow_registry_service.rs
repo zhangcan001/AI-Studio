@@ -651,7 +651,7 @@ impl WorkflowRegistryService {
         let record = repository.get(workflow_id).await?.ok_or_else(|| {
             WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned())
         })?;
-        let (all_versions, states) = self.load_runtime().await?;
+        let (all_versions, _states) = self.load_runtime().await?;
         let versions = all_versions
             .into_iter()
             .filter(|version| version.workflow_id == workflow_id)
@@ -676,13 +676,8 @@ impl WorkflowRegistryService {
         if record.library_state != WORKFLOW_LIBRARY_REMOVED {
             blocking_reasons.push("workflow must be REMOVED before purge".to_owned());
         }
-        if versions
-            .iter()
-            .any(|version| !state_for(&states, &version.workflow_version_id).archived)
-        {
-            blocking_reasons
-                .push("every workflow version must be archived before purge".to_owned());
-        }
+        // W-03: REMOVED is the logical purge precondition; versions keep their
+        // own runtime state and are no longer bulk-archived on removal.
         append_purge_reference_reasons(&references, &mut blocking_reasons);
         if self.runtime_artifact_repository.is_none() {
             blocking_reasons.push("runtime artifact repository is not configured".to_owned());
@@ -840,16 +835,67 @@ impl WorkflowRegistryService {
         self.get(workflow_id).await
     }
 
+    /// W-27: only an available version (not archived, enabled) of an ACTIVE
+    /// workflow may become current. Serialized with remove/restore/purge.
     pub async fn set_current_version(
         &self,
         workflow_id: &str,
         workflow_version_id: &str,
+    ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        self.set_current_version_checked(workflow_id, workflow_version_id, true)
+            .await
+    }
+
+    /// Import commit variant: a freshly published version may still be
+    /// disabled while its capability is unchecked (for example ComfyUI is
+    /// offline), but it must never be archived or belong to a REMOVED
+    /// workflow.
+    pub async fn set_current_version_after_import(
+        &self,
+        workflow_id: &str,
+        workflow_version_id: &str,
+    ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        self.set_current_version_checked(workflow_id, workflow_version_id, false)
+            .await
+    }
+
+    async fn set_current_version_checked(
+        &self,
+        workflow_id: &str,
+        workflow_version_id: &str,
+        require_enabled: bool,
     ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
         let Some(repository) = &self.registry_repository else {
             return Err(WorkflowRegistryServiceError::Repository(
                 RepositoryError::database("workflow registry repository is not configured"),
             ));
         };
+        let _guard = self.lifecycle_gate.lock().await;
+        let record = repository.get(workflow_id).await?.ok_or_else(|| {
+            WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned())
+        })?;
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+            .filter(|version| version.workflow_id == workflow_id)
+            .ok_or_else(|| WorkflowRegistryServiceError::VersionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+            })?;
+        let state = self
+            .state_repository
+            .find_state(&version.workflow_version_id)
+            .await?;
+        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let enabled = state.as_ref().is_none_or(|state| state.enabled);
+        if record.library_state != WORKFLOW_LIBRARY_ACTIVE
+            || archived
+            || (require_enabled && !enabled)
+        {
+            return Err(WorkflowRegistryServiceError::VersionUnavailable {
+                workflow_version_id: workflow_version_id.to_owned(),
+            });
+        }
         repository
             .set_current_version(workflow_id, workflow_version_id, self.clock.now())
             .await?;
@@ -1544,14 +1590,6 @@ impl WorkflowRegistryService {
             if record.library_state != WORKFLOW_LIBRARY_REMOVED {
                 return Err(WorkflowRegistryServiceError::PurgeBlocked(
                     "workflow must be REMOVED before purge".to_owned(),
-                ));
-            }
-            if versions
-                .iter()
-                .any(|version| !state_for(&states, &version.workflow_version_id).archived)
-            {
-                return Err(WorkflowRegistryServiceError::PurgeBlocked(
-                    "every workflow version must be archived before purge".to_owned(),
                 ));
             }
             let references = repository
@@ -2346,6 +2384,22 @@ pub enum WorkflowRegistryServiceError {
     },
     Blocked(String),
     NotRemoved(String),
+    /// W-03: a single version of a REMOVED workflow cannot be restored on
+    /// its own; the whole workflow must be restored first.
+    RemovedRestoreWorkflowFirst(String),
+    /// W-27: the target version is archived/disabled or the workflow is not
+    /// ACTIVE, so it cannot become the current version.
+    VersionUnavailable {
+        workflow_version_id: String,
+    },
+    /// W-20: the current version cannot be deleted on its own.
+    VersionIsCurrent {
+        workflow_version_id: String,
+    },
+    /// W-20: a production batch still references the version.
+    VersionInUse {
+        workflow_version_id: String,
+    },
     PurgeBlocked(String),
     PurgePackage(String),
     PurgeCompensationFailed {
@@ -2377,6 +2431,10 @@ impl WorkflowRegistryServiceError {
             Self::LastActiveRecipeGuard { .. } => "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD",
             Self::Blocked(_) => "WORKFLOW_DELETE_BLOCKED_ACTIVE_TASKS",
             Self::NotRemoved(_) => "WORKFLOW_NOT_REMOVED",
+            Self::RemovedRestoreWorkflowFirst(_) => "WORKFLOW_REMOVED_RESTORE_WORKFLOW_FIRST",
+            Self::VersionUnavailable { .. } => "WORKFLOW_VERSION_UNAVAILABLE",
+            Self::VersionIsCurrent { .. } => "WORKFLOW_VERSION_IS_CURRENT",
+            Self::VersionInUse { .. } => "WORKFLOW_VERSION_IN_USE",
             Self::PurgeBlocked(_) => "WORKFLOW_PURGE_BLOCKED",
             Self::PurgePackage(_) => "WORKFLOW_PURGE_PACKAGE_ERROR",
             Self::PurgeCompensationFailed { .. } => "WORKFLOW_PURGE_COMPENSATION_FAILED",
@@ -2462,6 +2520,28 @@ impl fmt::Display for WorkflowRegistryServiceError {
             } => write!(
                 formatter,
                 "WORKFLOW_REGISTRY_COMPENSATION_FAILED: {operation} failed ({cause}); compensation failed ({compensation})"
+            ),
+            Self::RemovedRestoreWorkflowFirst(workflow_id) => write!(
+                formatter,
+                "WORKFLOW_REMOVED_RESTORE_WORKFLOW_FIRST: workflow {workflow_id} is removed; restore the workflow first"
+            ),
+            Self::VersionUnavailable {
+                workflow_version_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_VERSION_UNAVAILABLE: workflow version {workflow_version_id} is archived, disabled or belongs to a removed workflow"
+            ),
+            Self::VersionIsCurrent {
+                workflow_version_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_VERSION_IS_CURRENT: workflow version {workflow_version_id} is the current version"
+            ),
+            Self::VersionInUse {
+                workflow_version_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_VERSION_IN_USE: workflow version {workflow_version_id} is referenced by production batches"
             ),
         }
     }

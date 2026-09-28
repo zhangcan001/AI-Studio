@@ -510,13 +510,26 @@ mod tests {
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use chrono::{Duration, FixedOffset, TimeZone, Utc};
     use sqlx::SqlitePool;
-    use tempfile::tempdir;
+    use tempfile::{tempdir, TempDir};
 
-    async fn setup() -> (SqlitePool, SqliteTaskHistoryRepository) {
+    /// W-31: the TempDir must outlive the pool; dropping it early deletes
+    /// the database directory and causes intermittent "unable to open
+    /// database file" failures.
+    struct Fixture {
+        _dir: TempDir,
+        pool: SqlitePool,
+        repository: SqliteTaskHistoryRepository,
+    }
+
+    async fn setup() -> Fixture {
         let directory = tempdir().unwrap();
         let pool = initialize(&directory.path().join("app.db")).await.unwrap();
         test_support::seed_task_dependencies(&pool).await;
-        (pool.clone(), SqliteTaskHistoryRepository::new(pool))
+        Fixture {
+            _dir: directory,
+            pool: pool.clone(),
+            repository: SqliteTaskHistoryRepository::new(pool),
+        }
     }
 
     async fn insert_task(pool: &SqlitePool, task: &Task) {
@@ -545,7 +558,11 @@ mod tests {
 
     #[tokio::test]
     async fn uses_project_isolation_and_keyset_ordering() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
         let first = Task::new(
             "project-1",
@@ -610,7 +627,11 @@ mod tests {
 
     #[tokio::test]
     async fn active_filter_excludes_terminal_statuses() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         let task_repository =
             crate::infrastructure::database::repositories::SqliteTaskRepository::new(pool.clone());
         let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
@@ -680,7 +701,11 @@ mod tests {
 
     #[tokio::test]
     async fn applies_workflow_keyword_time_filters_and_returns_project_options() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         let now = Utc::now();
         sqlx::query(
             "INSERT INTO workflows (id, name, category, mode, current_version_id, created_at, updated_at)
@@ -821,7 +846,11 @@ mod tests {
 
     #[tokio::test]
     async fn today_combines_status_workflow_keyword_project_and_keyset_filters() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         let today_start = today_start_utc();
         sqlx::query(
             "INSERT INTO projects (id, name, root_path, created_at, updated_at)

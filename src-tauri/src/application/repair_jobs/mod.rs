@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod recipe_jobs;
+pub mod registry_jobs;
 
 /// One unit of work found by a job's read-only planning pass.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]

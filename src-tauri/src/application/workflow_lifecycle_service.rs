@@ -30,11 +30,17 @@ use std::{
 };
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
+use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 pub const MAX_WORKFLOW_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_WORKFLOW_ARCHIVE_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
-pub const MAX_WORKFLOW_ARCHIVE_FILES: usize = 4;
+pub const MAX_WORKFLOW_ARCHIVE_FILES: usize = 6;
+/// W-17: hard cap for one decompressed archive entry. The declared size in
+/// the zip header is untrusted, so reads are bounded by this cap.
+pub const MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
+/// W-17: entries above this size must not exceed the compression ratio cap.
+const ARCHIVE_RATIO_CHECK_MIN_BYTES: u64 = 1024 * 1024;
+const MAX_WORKFLOW_ARCHIVE_COMPRESSION_RATIO: u64 = 100;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowLifecycleError {
@@ -369,7 +375,7 @@ impl WorkflowLifecycleService {
                 fast_view_for_version(
                     version,
                     enabled,
-                    archived,
+                    archived || version.library_removed,
                     archived_at.map(|value| value.to_rfc3339()),
                     cached_views.get(&version.workflow_version_id),
                     capabilities.get(&version.workflow_version_id),
@@ -495,7 +501,8 @@ impl WorkflowLifecycleService {
                 .await
                 .map_err(db_error)?;
             let enabled = state.as_ref().map_or(true, |state| state.enabled);
-            let archived = state.as_ref().is_some_and(|state| state.archived);
+            let archived =
+                state.as_ref().is_some_and(|state| state.archived) || version.library_removed;
             let archived_at = state
                 .as_ref()
                 .and_then(|state| state.archived_at)
@@ -1250,7 +1257,8 @@ impl WorkflowLifecycleService {
             .await
             .map_err(db_error)?;
         let enabled = state.as_ref().map_or(true, |state| state.enabled);
-        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let archived =
+            state.as_ref().is_some_and(|state| state.archived) || version.library_removed;
         let recipe_archived = match &self.recipe_state_repository {
             Some(repository) => repository
                 .find_state(workflow_version_id, recipe_id)
@@ -1657,30 +1665,40 @@ impl WorkflowLifecycleService {
                 && version.workflow_version == manifest.workflow_version
         }) {
             if existing.workflow_sha256 != workflow_sha {
+                // W-18: same identity with different content is not overwritten.
+                // Callers may regenerate the workflow id and restore as a new copy.
                 return Err(WorkflowLifecycleError::new(
-                    "WORKFLOW_VERSION_CONFLICT",
-                    "workflow version already exists with different content",
+                    "PACKAGE_ID_CONFLICT",
+                    "workflow id already exists with different content; restore as a new workflow with a regenerated id",
                 ));
             }
-            if let Some(recipe) = existing
+            if let Some(existing_recipe) = existing
                 .recipes
                 .iter()
-                .find(|recipe| recipe.version == manifest.recipe_version)
+                .find(|candidate| candidate.version == manifest.recipe_version)
             {
-                if recipe.recipe_sha256 == recipe_sha {
+                if existing_recipe.recipe_sha256 == recipe_sha {
                     let state = self
                         .state_repository
                         .find_state(&existing.workflow_version_id)
                         .await
                         .map_err(db_error)?;
+                    // W-18: never claim READY without a live capability check.
+                    let capability = self
+                        .onboarding_service
+                        .check_runtime_workflow_with_recipe(&workflow_json, &recipe)
+                        .await
+                        .map_err(|error| {
+                            WorkflowLifecycleError::new(error.code(), error.to_string())
+                        })?;
                     return Ok(WorkflowRestoreView {
                         status: "ALREADY_INSTALLED".to_owned(),
                         package_name: String::new(),
                         workflow_id: manifest.id,
                         workflow_version: manifest.workflow_version,
-                        recipe_id: Some(recipe.recipe_id.clone()),
-                        enabled: state.as_ref().map_or(true, |value| value.enabled),
-                        capability: "READY".to_owned(),
+                        recipe_id: Some(existing_recipe.recipe_id.clone()),
+                        enabled: state.as_ref().map_or(false, |value| value.enabled),
+                        capability: capability_state(&capability),
                     });
                 }
                 return Err(WorkflowLifecycleError::new(
@@ -1695,8 +1713,9 @@ impl WorkflowLifecycleService {
             .check_runtime_workflow_with_recipe(&workflow_json, &recipe)
             .await
             .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
-        let enabled = capability.state
-            == crate::application::workflow_onboarding_service::CapabilityState::Ready;
+        // W-18: restored packages enter a review state. Production use still
+        // requires an explicit enable / recipe promotion.
+        let enabled = false;
         let package_name = format!(
             "{}_{}_{}_{}_{}",
             safe_identifier(&manifest.id),
@@ -1799,7 +1818,8 @@ impl WorkflowLifecycleService {
             .await
             .map_err(db_error)?;
         let enabled = state.as_ref().map_or(true, |state| state.enabled);
-        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let archived =
+            state.as_ref().is_some_and(|state| state.archived) || version.library_removed;
         let archived_at = state
             .as_ref()
             .and_then(|state| state.archived_at)
@@ -2350,12 +2370,21 @@ fn validate_exact_runtime_package(
 
 fn build_archive(package: &WorkflowPackageBytes) -> Result<Vec<u8>, WorkflowLifecycleError> {
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
-    for (name, bytes) in [
+    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let package_info = br#"{"format_version":2}"#.to_vec();
+    let mut files: Vec<(&str, &[u8])> = vec![
         ("manifest.yaml", &package.manifest_yaml),
         ("recipe.yaml", &package.recipe_yaml),
         ("workflow_api.json", &package.workflow_api_json),
-    ] {
+        ("package_info.json", &package_info),
+    ];
+    if let Some(source) = &package.source_workflow_json {
+        files.push(("workflow_source.json", source));
+    }
+    if let Some(recognition) = &package.recognition_metadata_json {
+        files.push(("workflow_recognition.json", recognition));
+    }
+    for (name, bytes) in files {
         writer
             .start_file(name, options)
             .map_err(|error| archive_error(error.to_string()))?;
@@ -2367,6 +2396,23 @@ fn build_archive(package: &WorkflowPackageBytes) -> Result<Vec<u8>, WorkflowLife
         .finish()
         .map_err(|error| archive_error(error.to_string()))
         .map(|cursor| cursor.into_inner())
+}
+
+fn is_unsafe_archive_name(name: &str) -> bool {
+    let normalized = name.replace('\\', "/");
+    normalized.starts_with('/')
+        || normalized.split('/').any(|component| component == "..")
+        || normalized.as_bytes().get(1) == Some(&b':')
+}
+
+fn archive_entry_too_large(name: &str) -> WorkflowLifecycleError {
+    WorkflowLifecycleError::new(
+        "PACKAGE_ARCHIVE_ENTRY_TOO_LARGE",
+        format!(
+            "archive entry {name} exceeds the {} MiB limit",
+            MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES / 1024 / 1024
+        ),
+    )
 }
 
 fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycleError> {
@@ -2389,6 +2435,8 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
         "recipe.yaml",
         "workflow_api.json",
         "package_info.json",
+        "workflow_source.json",
+        "workflow_recognition.json",
     ];
     let mut entries = BTreeMap::new();
     let mut compressed_total = 0u64;
@@ -2398,6 +2446,12 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
             .by_index(index)
             .map_err(|error| archive_error(error.to_string()))?;
         let name = file.name().to_owned();
+        if is_unsafe_archive_name(&name) {
+            return Err(WorkflowLifecycleError::new(
+                "PACKAGE_ARCHIVE_UNSAFE_PATH",
+                "archive entry names must not contain '..' or absolute paths",
+            ));
+        }
         if !allowed.contains(&name.as_str())
             || file.is_dir()
             || file.enclosed_name().is_none()
@@ -2423,8 +2477,22 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
                 "archive contains duplicate entries",
             ));
         }
-        compressed_total = compressed_total.saturating_add(file.compressed_size());
-        uncompressed_total = uncompressed_total.saturating_add(file.size());
+        let compressed_size = file.compressed_size();
+        compressed_total = compressed_total.saturating_add(compressed_size);
+        if file.size() > MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES {
+            return Err(archive_entry_too_large(&name));
+        }
+        // Never trust the declared size: bound the actual read.
+        let mut content = Vec::new();
+        (&mut file)
+            .take(MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES + 1)
+            .read_to_end(&mut content)
+            .map_err(|error| archive_error(error.to_string()))?;
+        let actual_size = content.len() as u64;
+        if actual_size > MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES {
+            return Err(archive_entry_too_large(&name));
+        }
+        uncompressed_total = uncompressed_total.saturating_add(actual_size);
         if compressed_total > MAX_WORKFLOW_ARCHIVE_BYTES as u64
             || uncompressed_total > MAX_WORKFLOW_ARCHIVE_UNCOMPRESSED_BYTES
         {
@@ -2433,9 +2501,14 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
                 "archive exceeds the 64 MiB size limit",
             ));
         }
-        let mut content = Vec::new();
-        file.read_to_end(&mut content)
-            .map_err(|error| archive_error(error.to_string()))?;
+        if actual_size > ARCHIVE_RATIO_CHECK_MIN_BYTES
+            && actual_size > compressed_size.saturating_mul(MAX_WORKFLOW_ARCHIVE_COMPRESSION_RATIO)
+        {
+            return Err(WorkflowLifecycleError::new(
+                "PACKAGE_ARCHIVE_COMPRESSION_RATIO_EXCEEDED",
+                format!("archive entry {name} exceeds the 100:1 compression ratio limit"),
+            ));
+        }
         entries.insert(name, content);
     }
     let manifest = entries.remove("manifest.yaml").ok_or_else(|| {
@@ -2450,7 +2523,25 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
             "workflow_api.json is required",
         )
     })?;
-    Ok(WorkflowPackageBytes::new(manifest, recipe, workflow))
+    let _package_info = entries.remove("package_info.json");
+    let source = entries.remove("workflow_source.json");
+    let recognition = match entries.remove("workflow_recognition.json") {
+        Some(bytes) => {
+            // R-10: tolerate partial/older recognition metadata so packages
+            // from other builds still restore.
+            let _: crate::application::workflow_recognition_provenance::WorkflowRecognitionProvenance =
+                serde_json::from_slice(&bytes).map_err(|error| {
+                    WorkflowLifecycleError::new(
+                        "PACKAGE_ARCHIVE_INVALID_RECOGNITION",
+                        format!("workflow_recognition.json is invalid: {error}"),
+                    )
+                })?;
+            Some(bytes)
+        }
+        None => None,
+    };
+    Ok(WorkflowPackageBytes::new(manifest, recipe, workflow)
+        .with_recognition_data(source, recognition))
 }
 
 fn diff_workflow(
@@ -2747,6 +2838,7 @@ mod tests {
     use super::{
         build_archive, deletion_action, diff_workflow, fast_view_for_version, parse_archive,
         readiness_for, sha256, WorkflowDiagnosticView, WorkflowLifecycleService,
+        MAX_WORKFLOW_ARCHIVE_FILES,
     };
     use crate::application::{
         ports::{
@@ -2775,7 +2867,7 @@ mod tests {
             Arc, Mutex,
         },
     };
-    use zip::{write::FileOptions, ZipWriter};
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
     const EXACT_WORKFLOW_JSON: &str = r#"{
   "1": {"class_type": "TestNode", "inputs": {"mode": "bad"}},
@@ -3371,6 +3463,7 @@ outputs: []
             has_successful_run: false,
             latest_success_at: None,
             latest_failure_at: None,
+            library_removed: false,
         };
         let runtime: Arc<dyn WorkflowRuntimeRepository> =
             Arc::new(ExactRuntimeRepository { version });
@@ -3657,6 +3750,131 @@ outputs: []
     }
 
     #[test]
+    fn w16_package_roundtrip_preserves_provenance() {
+        let recognition = serde_json::to_vec(&json!({
+            "recognitionEngine": "WORKFLOW_RECOGNITION_V3",
+            "recognitionEngineVersion": "3",
+            "recognizedAt": "2026-01-01T00:00:00Z",
+            "sourceFormat": "API",
+            "schemaSource": "STATIC_ANALYSIS",
+            "inferredType": "IMAGE",
+            "inferredMode": "text_to_image",
+            "finalType": "IMAGE",
+            "finalMode": "text_to_image",
+            "semanticCapabilityStatus": "READY",
+            "runtimeImportStatus": "READY",
+            "outputRootState": "RESOLVED",
+        }))
+        .unwrap();
+        let package =
+            WorkflowPackageBytes::new(b"manifest".to_vec(), b"recipe".to_vec(), b"{}".to_vec())
+                .with_recognition_data(
+                    Some(br#"{"nodes":[]}"#.to_vec()),
+                    Some(recognition.clone()),
+                );
+        let archive = build_archive(&package).unwrap();
+        let restored = parse_archive(&archive).unwrap();
+        assert_eq!(
+            restored.source_workflow_json.as_deref(),
+            Some(br#"{"nodes":[]}"#.as_slice())
+        );
+        assert_eq!(
+            restored.recognition_metadata_json.as_deref(),
+            Some(recognition.as_slice())
+        );
+        let names: Vec<_> = {
+            let mut zip = ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
+            (0..zip.len())
+                .map(|i| zip.by_index(i).unwrap().name().to_owned())
+                .collect()
+        };
+        assert!(names.contains(&"package_info.json".to_owned()));
+        assert!(names.contains(&"workflow_source.json".to_owned()));
+        assert!(names.contains(&"workflow_recognition.json".to_owned()));
+        assert!(names.len() <= MAX_WORKFLOW_ARCHIVE_FILES);
+    }
+
+    #[test]
+    fn w16_v1_package_still_restores() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, bytes) in [
+            ("manifest.yaml", b"manifest".as_slice()),
+            ("recipe.yaml", b"recipe".as_slice()),
+            ("workflow_api.json", b"{}".as_slice()),
+        ] {
+            writer.start_file(name, FileOptions::default()).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+        let archive = writer.finish().unwrap().into_inner();
+        let restored = parse_archive(&archive).unwrap();
+        assert!(restored.source_workflow_json.is_none());
+        assert!(restored.recognition_metadata_json.is_none());
+        assert_eq!(restored.workflow_api_json, b"{}");
+    }
+
+    fn w18_restore_archive() -> Vec<u8> {
+        let package = WorkflowPackageBytes::new(
+            br#"schema_version: 1
+id: wfl_exact_shared
+name: Exact Shared
+workflow_version: 1.0.0
+recipe_version: 1.0.0
+category: image
+mode: text_to_image
+"#
+            .to_vec(),
+            EXACT_RECIPE_A_YAML.as_bytes().to_vec(),
+            EXACT_WORKFLOW_JSON.as_bytes().to_vec(),
+        );
+        build_archive(&package).unwrap()
+    }
+
+    #[tokio::test]
+    async fn w18_restore_does_not_mark_ready_without_check() {
+        let (service, _source, _state) = exact_service_with_options(
+            false,
+            Some(WorkflowRuntimeState {
+                workflow_version_id: "wv-exact-shared".to_owned(),
+                enabled: true,
+                archived: false,
+                archived_at: None,
+                updated_at: Utc::now(),
+            }),
+            // TestNode is missing from the live schema.
+            json!({}),
+            None,
+        );
+        let view = service
+            .restore_package(w18_restore_archive())
+            .await
+            .unwrap();
+        assert_eq!(view.status, "ALREADY_INSTALLED");
+        assert_ne!(view.capability, "READY");
+        assert!(view.enabled);
+    }
+
+    #[tokio::test]
+    async fn w18_id_conflict_with_different_hash_rejected() {
+        let (service, _source) = exact_service();
+        let package = WorkflowPackageBytes::new(
+            br#"schema_version: 1
+id: wfl_exact_shared
+name: Exact Shared
+workflow_version: 1.0.0
+recipe_version: 1.0.0
+category: image
+mode: text_to_image
+"#
+            .to_vec(),
+            EXACT_RECIPE_A_YAML.as_bytes().to_vec(),
+            br#"{"1":{"class_type":"TestNode","inputs":{"mode":"other"}},"2":{"class_type":"SaveImage","inputs":{"images":["1",0]}}}"#.to_vec(),
+        );
+        let archive = build_archive(&package).unwrap();
+        let error = service.restore_package(archive).await.unwrap_err();
+        assert_eq!(error.code(), "PACKAGE_ID_CONFLICT");
+    }
+
+    #[test]
     fn deletion_policy_removes_products_and_historical_user_workflows_without_hard_delete() {
         assert_eq!(deletion_action(true, false, false, false), "REMOVE");
         assert_eq!(deletion_action(false, false, false, true), "REMOVE");
@@ -3694,7 +3912,59 @@ outputs: []
         writer.write_all(b"escape").unwrap();
         let archive = writer.finish().unwrap().into_inner();
         let error = parse_archive(&archive).unwrap_err();
-        assert_eq!(error.code(), "PACKAGE_ARCHIVE_UNEXPECTED_ENTRY");
+        assert_eq!(error.code(), "PACKAGE_ARCHIVE_UNSAFE_PATH");
+    }
+
+    #[test]
+    fn w17_rejects_path_traversal_name() {
+        for name in [
+            "../manifest.yaml",
+            "nested/../../recipe.yaml",
+            "/etc/manifest.yaml",
+            "C:/manifest.yaml",
+            "..\\workflow_api.json",
+        ] {
+            let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+            writer.start_file(name, FileOptions::default()).unwrap();
+            writer.write_all(b"escape").unwrap();
+            let archive = writer.finish().unwrap().into_inner();
+            let error = parse_archive(&archive).unwrap_err();
+            assert_eq!(error.code(), "PACKAGE_ARCHIVE_UNSAFE_PATH", "{name}");
+        }
+    }
+
+    #[test]
+    fn w17_rejects_entry_exceeding_cap() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "workflow_api.json",
+                FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+        let chunk = vec![b' '; 1024 * 1024];
+        for _ in 0..(super::MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES / (1024 * 1024)) {
+            writer.write_all(&chunk).unwrap();
+        }
+        writer.write_all(b" ").unwrap();
+        let archive = writer.finish().unwrap().into_inner();
+        let error = parse_archive(&archive).unwrap_err();
+        assert_eq!(error.code(), "PACKAGE_ARCHIVE_ENTRY_TOO_LARGE");
+    }
+
+    #[test]
+    fn w17_rejects_high_compression_ratio() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "workflow_api.json",
+                FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+        writer.write_all(&vec![b' '; 4 * 1024 * 1024]).unwrap();
+        let archive = writer.finish().unwrap().into_inner();
+        let error = parse_archive(&archive).unwrap_err();
+        assert_eq!(error.code(), "PACKAGE_ARCHIVE_COMPRESSION_RATIO_EXCEEDED");
     }
 
     #[test]
@@ -3740,6 +4010,7 @@ outputs: []
             has_successful_run: false,
             latest_success_at: None,
             latest_failure_at: None,
+            library_removed: false,
         };
 
         let view = fast_view_for_version(&version, true, false, None, None, None);

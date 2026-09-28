@@ -286,6 +286,21 @@ pub async fn workflow_delete_version(
         .map_err(map_coordinator_error)
 }
 
+/// W-20: delete exactly one non-current version of a workflow.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_version_delete(
+    state: State<'_, AppState>,
+    workflow_id: String,
+    version_id: String,
+) -> Result<WorkflowDeletionResult, AppError> {
+    state
+        .workflow
+        .lifecycle_coordinator
+        .delete_workflow_version(&workflow_id, &version_id)
+        .await
+        .map_err(map_coordinator_error)
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_delete_workflow(
     state: State<'_, AppState>,

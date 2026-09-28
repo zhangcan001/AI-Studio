@@ -6,7 +6,7 @@ use crate::application::{
     workflow_onboarding_service::CapabilityState,
     workflow_registry_service::{
         WorkflowRegistryMutationResult, WorkflowRegistryPurgeResult, WorkflowRegistryRestoreResult,
-        WorkflowRegistryService, WorkflowRegistryServiceError,
+        WorkflowRegistryService, WorkflowRegistryServiceError, WORKFLOW_LIBRARY_ACTIVE,
     },
 };
 use std::{error::Error, fmt, sync::Arc};
@@ -61,6 +61,9 @@ impl WorkflowLifecycleCoordinator {
             .map_err(Into::into)
     }
 
+    /// W-20: deleting a version only ever affects that version. The current
+    /// version and versions referenced by production batches are rejected;
+    /// deleting a whole workflow goes through `remove_workflow`.
     pub async fn delete_version(
         &self,
         workflow_version_id: &str,
@@ -77,15 +80,67 @@ impl WorkflowLifecycleCoordinator {
                 .await
                 .map_err(Into::into);
         };
-        let removed = self.registry.remove_workflow_inner(&workflow_id).await?;
-        Ok(WorkflowDeletionResult {
-            action: "REMOVE".to_owned(),
-            delete_action: "REMOVE".to_owned(),
-            project_binding_count: removed.cleared_binding_count,
-            workflow_id,
-            workflow_version_id: workflow_version_id.to_owned(),
-            archived: true,
-        })
+        self.delete_registry_version_inner(&workflow_id, workflow_version_id)
+            .await
+    }
+
+    /// W-20: `workflow_version_delete {workflowId, versionId}`.
+    pub async fn delete_workflow_version(
+        &self,
+        workflow_id: &str,
+        workflow_version_id: &str,
+    ) -> Result<WorkflowDeletionResult, WorkflowLifecycleCoordinatorError> {
+        let _guard = self.gate.lock().await;
+        match self
+            .registry
+            .registry_workflow_id_for_version(workflow_version_id)
+            .await?
+        {
+            Some(owner) if owner == workflow_id => {
+                self.delete_registry_version_inner(workflow_id, workflow_version_id)
+                    .await
+            }
+            Some(_) => Err(WorkflowRegistryServiceError::VersionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+            }
+            .into()),
+            None => self
+                .lifecycle
+                .delete_version(workflow_version_id)
+                .await
+                .map_err(Into::into),
+        }
+    }
+
+    async fn delete_registry_version_inner(
+        &self,
+        workflow_id: &str,
+        workflow_version_id: &str,
+    ) -> Result<WorkflowDeletionResult, WorkflowLifecycleCoordinatorError> {
+        let workflow = self.registry.get(workflow_id).await?;
+        if workflow.library_state != WORKFLOW_LIBRARY_ACTIVE {
+            return Err(WorkflowRegistryServiceError::RemovedRestoreWorkflowFirst(
+                workflow_id.to_owned(),
+            )
+            .into());
+        }
+        if workflow.current_version_id.as_deref() == Some(workflow_version_id) {
+            return Err(WorkflowRegistryServiceError::VersionIsCurrent {
+                workflow_version_id: workflow_version_id.to_owned(),
+            }
+            .into());
+        }
+        let inspection = self.lifecycle.inspect_deletion(workflow_version_id).await?;
+        if inspection.production_batch_item_count > 0 || inspection.active_queue_item_count > 0 {
+            return Err(WorkflowRegistryServiceError::VersionInUse {
+                workflow_version_id: workflow_version_id.to_owned(),
+            }
+            .into());
+        }
+        self.lifecycle
+            .delete_version(workflow_version_id)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn delete_workflow(
@@ -136,16 +191,19 @@ impl WorkflowLifecycleCoordinator {
                 .await
                 .map_err(Into::into);
         };
-        let restored = self.restore_workflow_inner(&workflow_id).await?;
-        Ok(WorkflowRestoreResult {
-            workflow_version_id: restored
-                .current_version_id
-                .unwrap_or_else(|| workflow_version_id.to_owned()),
-            archived: false,
-            enabled: restored.enabled,
-            capability: restored.capability,
-            readiness: restored.readiness,
-        })
+        // W-03: restoring a version never restores the whole workflow. On an
+        // ACTIVE workflow only this version is un-archived; a REMOVED
+        // workflow must be restored explicitly first.
+        let workflow = self.registry.get(&workflow_id).await?;
+        if workflow.library_state != WORKFLOW_LIBRARY_ACTIVE {
+            return Err(
+                WorkflowRegistryServiceError::RemovedRestoreWorkflowFirst(workflow_id).into(),
+            );
+        }
+        self.lifecycle
+            .restore_version(workflow_version_id)
+            .await
+            .map_err(Into::into)
     }
 
     async fn restore_workflow_inner(

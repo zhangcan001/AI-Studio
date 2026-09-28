@@ -127,6 +127,7 @@ export {
   discardOnboarding,
   deleteWorkflow,
   deleteWorkflowVersion,
+  deleteWorkflowVersionOf,
   duplicateWorkflowRecipe,
   exportWorkflowPackage,
   getOnboardingDraft,

@@ -2021,19 +2021,15 @@ async fn dev084_restore_requires_runtime_revalidation() {
     fs::remove_dir_all(harness.library_root.join(&harness.package_name))
         .expect("restore fixture package should be removed");
 
-    let restored = harness
-        .registry
+    // W-03: removal no longer archives versions, so the coordinator restore
+    // revalidates the current version through the capability recheck path.
+    let restored = lifecycle_coordinator_for(&harness)
         .restore_workflow(&harness.workflow_id)
         .await
         .expect("logical restore should succeed before runtime revalidation");
     assert_eq!(restored.library_state, "ACTIVE");
-    let version_restore = lifecycle_service_for(&harness)
-        .restore_version(&workflow_version_id)
-        .await
-        .expect("restore should close with an attention state");
-    assert!(!version_restore.enabled);
-    assert!(!version_restore.archived);
-    assert_eq!(version_restore.readiness, "RESTORED_NEEDS_ATTENTION");
+    assert!(!restored.enabled);
+    assert_eq!(restored.readiness, "RESTORED_NEEDS_ATTENTION");
     assert_eq!(
         SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone())
             .find_state(&workflow_version_id)
@@ -2139,8 +2135,8 @@ async fn dev084_coordinator_serializes_restore_then_remove() {
         .unwrap()
         .unwrap();
     assert_eq!(workflow.library_state, "REMOVED");
-    assert!(state.archived);
-    assert!(!state.enabled);
+    // W-03: removal is logical only; the version's runtime state is kept.
+    assert!(!state.archived);
 }
 
 #[tokio::test]
@@ -2231,7 +2227,7 @@ async fn dev084_coordinator_serializes_remove_and_purge() {
 }
 
 #[tokio::test]
-async fn dev084_legacy_delete_version_routes_registry_workflow_to_remove() {
+async fn dev084_delete_current_version_is_rejected_then_remove_and_purge() {
     let harness = registry_purge_harness(
         "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
         "dev084_legacy_delete_version",
@@ -2239,12 +2235,28 @@ async fn dev084_legacy_delete_version_routes_registry_workflow_to_remove() {
     )
     .await;
     let (workflow_version_id, _) = exact_generation_identity(&harness).await;
-    let result = lifecycle_coordinator_for(&harness)
+    let coordinator = lifecycle_coordinator_for(&harness);
+    // W-20: the legacy delete-version route no longer removes the whole
+    // workflow; the current version cannot be deleted on its own.
+    let error = coordinator
         .delete_version(&workflow_version_id)
         .await
-        .expect("legacy delete-version route should logically remove Registry workflow");
-
-    assert_eq!(result.action, "REMOVE");
+        .expect_err("the current version must not be deleted on its own");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_IS_CURRENT");
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
+            .await
+            .unwrap()
+            .library_state,
+        "ACTIVE"
+    );
+    let result = coordinator
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("whole-workflow removal is explicit");
+    assert_eq!(result.library_state, "REMOVED");
     assert_eq!(
         harness
             .registry
@@ -2328,38 +2340,54 @@ async fn dev084_legacy_product_delete_retains_package_and_can_restore() {
     assert!(harness.library_root.join(package_name).is_dir());
 }
 
-#[tokio::test]
-async fn dev084_legacy_restore_version_routes_to_current_logical_workflow() {
+async fn w03_harness_with_older_version(name: &str) -> (RegistryPurgeHarness, String, String) {
     let harness = registry_purge_harness(
         "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
-        "dev084_legacy_restore_version",
+        name,
         "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
     )
     .await;
     let (current_version_id, _) = exact_generation_identity(&harness).await;
-    let older_version_id = "dev084-older-version";
+    let older_version_id = format!("{name}-older-version");
     sqlx::query(
         "INSERT INTO workflow_versions
          (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
-         VALUES (?, ?, '0.9.0', '{}', 'dev084-older-sha', ?)",
+         VALUES (?, ?, '0.9.0', '{}', ?, ?)",
     )
-    .bind(older_version_id)
+    .bind(&older_version_id)
     .bind(&harness.workflow_id)
+    .bind(format!("{name}-older-sha"))
     .bind("2026-01-01T00:00:00Z")
     .execute(&harness.pool)
     .await
     .unwrap();
-    harness
-        .registry
+    (harness, current_version_id, older_version_id)
+}
+
+async fn w03_archived(harness: &RegistryPurgeHarness, workflow_version_id: &str) -> bool {
+    SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone())
+        .find_state(workflow_version_id)
+        .await
+        .unwrap()
+        .is_some_and(|state| state.archived)
+}
+
+#[tokio::test]
+async fn w03_remove_restore_keeps_all_versions() {
+    let (harness, current_version_id, older_version_id) =
+        w03_harness_with_older_version("w03_remove_restore").await;
+    let coordinator = lifecycle_coordinator_for(&harness);
+    coordinator
         .remove_workflow(&harness.workflow_id)
         .await
         .unwrap();
+    assert!(!w03_archived(&harness, &current_version_id).await);
+    assert!(!w03_archived(&harness, &older_version_id).await);
 
-    let restored = lifecycle_coordinator_for(&harness)
-        .restore_version(&current_version_id)
+    coordinator
+        .restore_workflow(&harness.workflow_id)
         .await
-        .expect("legacy restore-version route should restore the logical workflow");
-    assert_eq!(restored.workflow_version_id, current_version_id);
+        .unwrap();
     assert_eq!(
         harness
             .registry
@@ -2369,29 +2397,210 @@ async fn dev084_legacy_restore_version_routes_to_current_logical_workflow() {
             .library_state,
         "ACTIVE"
     );
-    let states = SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone())
-        .list_states()
+    assert!(!w03_archived(&harness, &current_version_id).await);
+    assert!(!w03_archived(&harness, &older_version_id).await);
+}
+
+#[tokio::test]
+async fn w03_restore_version_on_removed_workflow_requires_workflow_restore() {
+    let (harness, current_version_id, _) =
+        w03_harness_with_older_version("w03_restore_version_removed").await;
+    let coordinator = lifecycle_coordinator_for(&harness);
+    coordinator
+        .remove_workflow(&harness.workflow_id)
         .await
         .unwrap();
-    assert!(
-        !states
-            .iter()
-            .find(|state| state.workflow_version_id == current_version_id)
-            .unwrap()
-            .archived
-    );
-    assert!(
-        states
-            .iter()
-            .find(|state| state.workflow_version_id == older_version_id)
-            .unwrap()
-            .archived
-    );
-    assert!(
-        SqliteProjectWorkflowBindingRepository::new(harness.pool.clone())
-            .list_for_project("prj_default")
+    let error = coordinator
+        .restore_version(&current_version_id)
+        .await
+        .expect_err("a single version of a removed workflow must not restore");
+    assert_eq!(error.code(), "WORKFLOW_REMOVED_RESTORE_WORKFLOW_FIRST");
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
             .await
             .unwrap()
-            .is_empty()
+            .library_state,
+        "REMOVED"
     );
+}
+
+#[tokio::test]
+async fn w03_restore_version_on_active_workflow() {
+    let (harness, current_version_id, older_version_id) =
+        w03_harness_with_older_version("w03_restore_version_active").await;
+    let now = Utc::now();
+    SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone())
+        .set_archived(&older_version_id, true, false, Some(now), now)
+        .await
+        .unwrap();
+
+    let restored = lifecycle_coordinator_for(&harness)
+        .restore_version(&older_version_id)
+        .await
+        .expect("an archived version of an active workflow restores on its own");
+    assert_eq!(restored.workflow_version_id, older_version_id);
+    assert!(!restored.archived);
+    assert!(!w03_archived(&harness, &older_version_id).await);
+    assert!(!w03_archived(&harness, &current_version_id).await);
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
+            .await
+            .unwrap()
+            .current_version_id
+            .as_deref(),
+        Some(current_version_id.as_str())
+    );
+}
+
+#[tokio::test]
+async fn w27_set_current_to_archived_version_rejected() {
+    let (harness, current_version_id, older_version_id) =
+        w03_harness_with_older_version("w27_set_current").await;
+    let now = Utc::now();
+    let states = SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone());
+    states
+        .set_archived(&older_version_id, true, false, Some(now), now)
+        .await
+        .unwrap();
+    let error = harness
+        .registry
+        .set_current_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect_err("an archived version must not become current");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_UNAVAILABLE");
+
+    // Disabled (not archived) is rejected as well.
+    states
+        .set_archived(&older_version_id, false, false, None, now)
+        .await
+        .unwrap();
+    let error = harness
+        .registry
+        .set_current_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect_err("a disabled version must not become current");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_UNAVAILABLE");
+
+    // An enabled version of a REMOVED workflow is rejected.
+    states
+        .set_archived(&older_version_id, false, true, None, now)
+        .await
+        .unwrap();
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .unwrap();
+    let error = harness
+        .registry
+        .set_current_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect_err("a removed workflow cannot change its current version");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_UNAVAILABLE");
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
+            .await
+            .unwrap()
+            .current_version_id
+            .as_deref(),
+        Some(current_version_id.as_str())
+    );
+
+    // After restore, the available version can become current.
+    harness
+        .registry
+        .restore_workflow(&harness.workflow_id)
+        .await
+        .unwrap();
+    harness
+        .registry
+        .set_current_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect("an available version of an active workflow becomes current");
+}
+
+#[tokio::test]
+async fn w20_delete_non_current_version_keeps_workflow() {
+    let (harness, current_version_id, older_version_id) =
+        w03_harness_with_older_version("w20_delete_version").await;
+    let coordinator = lifecycle_coordinator_for(&harness);
+
+    let error = coordinator
+        .delete_workflow_version(&harness.workflow_id, &current_version_id)
+        .await
+        .expect_err("current version is protected");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_IS_CURRENT");
+    let error = coordinator
+        .delete_workflow_version("another-workflow", &older_version_id)
+        .await
+        .expect_err("the version must belong to the given workflow");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_NOT_FOUND");
+
+    coordinator
+        .delete_workflow_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect("a non-current, unused version can be deleted");
+    let workflow = harness.registry.get(&harness.workflow_id).await.unwrap();
+    assert_eq!(workflow.library_state, "ACTIVE");
+    assert_eq!(
+        workflow.current_version_id.as_deref(),
+        Some(current_version_id.as_str())
+    );
+    assert!(!w03_archived(&harness, &current_version_id).await);
+    assert!(
+        workflow
+            .versions
+            .iter()
+            .all(|version| version.workflow_version_id != older_version_id)
+            || w03_archived(&harness, &older_version_id).await
+    );
+}
+
+#[tokio::test]
+async fn w20_delete_version_referenced_by_batch_is_rejected() {
+    let (harness, _, older_version_id) = w03_harness_with_older_version("w20_delete_in_use").await;
+    let now = "2026-01-01T00:00:00Z";
+    // Recipe rows are irrelevant for the in-use check; bypass FKs on one connection.
+    let mut conn = harness.pool.acquire().await.unwrap();
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO production_batches (id, project_id, name, status, created_at, updated_at)
+         VALUES ('w20-batch', 'prj_default', 'W20', 'COMPLETED', ?, ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO production_batch_items
+         (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status,
+          created_at, updated_at)
+         VALUES ('w20-item', 'w20-batch', 1, ?, 'w20-recipe', '{}', 'SUCCEEDED', ?, ?)",
+    )
+    .bind(&older_version_id)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    drop(conn);
+    let error = lifecycle_coordinator_for(&harness)
+        .delete_workflow_version(&harness.workflow_id, &older_version_id)
+        .await
+        .expect_err("batch-referenced versions stay");
+    assert_eq!(error.code(), "WORKFLOW_VERSION_IN_USE");
 }

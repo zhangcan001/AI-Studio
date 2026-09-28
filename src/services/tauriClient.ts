@@ -731,6 +731,10 @@ export function deleteWorkflowVersion(workflowVersionId: string): Promise<Workfl
   return invoke<WorkflowDeletionResult>("workflow_delete_version", { workflowVersionId });
 }
 
+export function deleteWorkflowVersionOf(workflowId: string, versionId: string): Promise<WorkflowDeletionResult> {
+  return invoke<WorkflowDeletionResult>("workflow_version_delete", { workflowId, versionId });
+}
+
 export function deleteWorkflow(workflowId: string): Promise<WorkflowDeletionResult[]> {
   return invoke<WorkflowDeletionResult[]>("workflow_delete_workflow", { workflowId });
 }

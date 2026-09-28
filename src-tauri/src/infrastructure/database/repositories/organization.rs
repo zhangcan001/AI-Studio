@@ -79,6 +79,7 @@ const TEMPLATE_SELECT: &str = "SELECT pt.id, pt.name, pt.normalized_name, pt.des
     pt.workflow_version_id, pt.recipe_id, pt.values_json, pt.created_at, pt.updated_at,
     CASE WHEN w.current_version_id = pt.workflow_version_id
       AND r.id IS NOT NULL AND r.workflow_version_id = pt.workflow_version_id
+      AND COALESCE(w.library_state, 'ACTIVE') = 'ACTIVE'
       AND COALESCE(wrs.enabled, 1) = 1
       AND COALESCE(wrs.archived, 0) = 0
       AND r.version = (SELECT MAX(latest.version) FROM recipes latest WHERE latest.workflow_version_id = pt.workflow_version_id)

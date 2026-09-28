@@ -18,6 +18,7 @@ const tauriMocks = vi.hoisted(() => ({
   listWorkflowProductionWorkspace: vi.fn(),
   refreshWorkflowProductionWorkspace: vi.fn(),
   inspectWorkflowDeletion: vi.fn(),
+  deleteWorkflow: vi.fn(),
   deleteWorkflowVersion: vi.fn(),
   restoreWorkflowVersion: vi.fn(),
   recheckWorkflowCapability: vi.fn(),
@@ -260,13 +261,13 @@ describe("DEV-079 工作流列表用于当前项目 UAT", () => {
       builtin: true,
     };
     tauriMocks.inspectWorkflowDeletion.mockResolvedValue({ ...productDeletionInspection, projectBindingCount: 1 });
-    tauriMocks.deleteWorkflowVersion.mockResolvedValue({
+    tauriMocks.deleteWorkflow.mockResolvedValue([{
       action: "REMOVE",
       projectBindingCount: 2,
       workflowId: "PRODUCT_WF",
       workflowVersionId: "PRODUCT_WV",
       archived: true,
-    });
+    }]);
     renderWorkspace({ items: [productRow] });
 
     const row = await publishedRowView("Product Workflow");
