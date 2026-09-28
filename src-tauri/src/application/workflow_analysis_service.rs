@@ -52,6 +52,7 @@ const AMBIGUITY_MARGIN: i32 = 12;
 const SCORE_GRAPH_CONDITIONING_ROLE: i32 = 60;
 const SCORE_PRIMITIVE_SOURCE_NODE: i32 = 20;
 const PENALTY_SYSTEM_PROMPT_HINT: i32 = -40;
+const SCORE_GRAPH_PRIMARY_SAMPLER: i32 = 40;
 
 // Variant names are already SCREAMING_SNAKE_CASE and serialize verbatim. A
 // `rename_all = "SCREAMING_SNAKE_CASE"` here would split every capital letter
@@ -86,6 +87,9 @@ pub enum EvidenceKind {
     PRIMITIVE_SOURCE_NODE,
     /// The node title or input name marks the text as a system prompt.
     SYSTEM_PROMPT_HINT,
+    /// The candidate belongs to the primary (first-pass) sampler of a
+    /// multi-sampler graph.
+    GRAPH_PRIMARY_SAMPLER,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -419,6 +423,9 @@ pub fn analyze_workflow_with_schema_and_output_roots(
 
     let roles = sampler_conditioning_roles(workflow, &graph, schema);
     apply_conditioning_roles(&mut candidates, &roles, schema.is_some());
+    if let Some(primary) = primary_sampler(workflow, &graph) {
+        apply_primary_sampler(&mut candidates, &primary, schema.is_some());
+    }
 
     let (inputs, _bindings, input_issues) = resolve_candidates(candidates);
     issues.extend(input_issues);
@@ -612,6 +619,7 @@ fn evidence_weight(kind: EvidenceKind) -> i32 {
         EvidenceKind::GRAPH_CONDITIONING_ROLE => SCORE_GRAPH_CONDITIONING_ROLE,
         EvidenceKind::PRIMITIVE_SOURCE_NODE => SCORE_PRIMITIVE_SOURCE_NODE,
         EvidenceKind::SYSTEM_PROMPT_HINT => PENALTY_SYSTEM_PROMPT_HINT,
+        EvidenceKind::GRAPH_PRIMARY_SAMPLER => SCORE_GRAPH_PRIMARY_SAMPLER,
     }
 }
 
@@ -1053,7 +1061,8 @@ fn compact_source(evidence: &[RecognitionEvidence]) -> String {
             }
             EvidenceKind::GRAPH_DIRECT_SINK
             | EvidenceKind::GRAPH_OUTPUT_PATH
-            | EvidenceKind::GRAPH_CONDITIONING_ROLE => {
+            | EvidenceKind::GRAPH_CONDITIONING_ROLE
+            | EvidenceKind::GRAPH_PRIMARY_SAMPLER => {
                 parts.insert("GRAPH");
             }
             EvidenceKind::SCHEMA_TYPE_MATCH
@@ -2806,6 +2815,101 @@ fn apply_conditioning_roles(
         });
     }
     candidates.retain(|_, choices| !choices.is_empty());
+}
+
+const SAMPLER_LATENT_INPUTS: &[&str] = &["latent_image", "samples", "latent"];
+
+fn is_sampler_node(workflow: &WorkflowDocument, graph: &WorkflowGraph, node_id: &str) -> bool {
+    let class_type = workflow
+        .class_type(node_id)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    class_type.contains("sampler")
+        && graph
+            .upstream_of(node_id)
+            .iter()
+            .any(|link| SAMPLER_LATENT_INPUTS.contains(&link.target_input.as_str()))
+}
+
+/// R-06: in a multi-pass graph (base + refiner, Wan 2.2 high/low noise, ...)
+/// the primary sampler is the one whose latent input does not trace back to
+/// another sampler. Returns `None` for single-sampler graphs or when the
+/// primary sampler is not unique.
+pub(crate) fn primary_sampler(
+    workflow: &WorkflowDocument,
+    graph: &WorkflowGraph,
+) -> Option<String> {
+    let samplers = graph
+        .nodes
+        .iter()
+        .filter(|node_id| is_sampler_node(workflow, graph, node_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if samplers.len() < 2 {
+        return None;
+    }
+    let primaries = samplers
+        .iter()
+        .filter(|sampler| {
+            let mut stack = graph
+                .upstream_of(sampler)
+                .iter()
+                .filter(|link| SAMPLER_LATENT_INPUTS.contains(&link.target_input.as_str()))
+                .map(|link| link.source_node_id.clone())
+                .collect::<Vec<_>>();
+            let mut visited = BTreeSet::new();
+            while let Some(node_id) = stack.pop() {
+                if !visited.insert(node_id.clone()) {
+                    continue;
+                }
+                if samplers.contains(&node_id) {
+                    return false;
+                }
+                for link in graph.upstream_of(&node_id) {
+                    let name = normalize(&link.target_input);
+                    if matches!(
+                        name.as_str(),
+                        "positive" | "negative" | "conditioning" | "vae" | "clip"
+                    ) || name.contains("model")
+                    {
+                        continue;
+                    }
+                    stack.push(link.source_node_id.clone());
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    (primaries.len() == 1).then(|| primaries[0].clone())
+}
+
+fn apply_primary_sampler(
+    candidates: &mut BTreeMap<(String, Option<usize>), Vec<Candidate>>,
+    primary: &str,
+    compact_sources: bool,
+) {
+    for choices in candidates.values_mut() {
+        for candidate in choices
+            .iter_mut()
+            .filter(|candidate| candidate.node_id == primary)
+        {
+            push_evidence(
+                candidate,
+                evidence(
+                    EvidenceKind::GRAPH_PRIMARY_SAMPLER,
+                    "candidate belongs to the primary sampler",
+                ),
+            );
+            candidate.score = candidate.evidence.iter().map(|item| item.weight).sum();
+            if !candidate.has_schema_conflict {
+                candidate.confidence = confidence_from_score(candidate.score);
+            }
+            if compact_sources {
+                candidate.source = compact_source(&candidate.evidence);
+            }
+        }
+    }
 }
 
 fn is_system_prompt_name(name: &str) -> bool {

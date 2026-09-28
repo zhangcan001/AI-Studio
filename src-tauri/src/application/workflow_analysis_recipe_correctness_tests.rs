@@ -256,3 +256,35 @@ fn r04_controlnet_router_keeps_positive_and_negative_branches_apart() {
     );
     assert!(!roles.contains_key(&("4".to_owned(), "ckpt_name".to_owned())));
 }
+
+/// Base + refiner graph: sampler 3 feeds its latent into refiner sampler 13.
+fn two_pass_t2i() -> Value {
+    let mut workflow = basic_t2i();
+    workflow["13"] = json!({"class_type": "KSampler", "inputs": {
+        "seed": 2, "steps": 10, "cfg": 5.0, "sampler_name": "euler", "scheduler": "normal",
+        "denoise": 0.4, "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0],
+        "latent_image": ["3", 0]}});
+    workflow["8"]["inputs"]["samples"] = json!(["13", 0]);
+    workflow
+}
+
+#[test]
+fn r06_primary_sampler_is_the_first_pass() {
+    let workflow = two_pass_t2i();
+    let document = WorkflowDocument::parse(workflow.clone()).unwrap();
+    let graph = WorkflowGraph::from_document(&document).unwrap();
+    assert_eq!(primary_sampler(&document, &graph), Some("3".to_owned()));
+    let single = WorkflowDocument::parse(basic_t2i()).unwrap();
+    let single_graph = WorkflowGraph::from_document(&single).unwrap();
+    assert_eq!(primary_sampler(&single, &single_graph), None);
+}
+
+#[test]
+fn r06_seed_and_steps_bind_to_primary_sampler() {
+    let report = analyze_real(two_pass_t2i());
+    assert_eq!(binding(&report, "seed"), Some(("3".into(), "seed".into())));
+    assert_eq!(
+        binding(&report, "steps"),
+        Some(("3".into(), "steps".into()))
+    );
+}
