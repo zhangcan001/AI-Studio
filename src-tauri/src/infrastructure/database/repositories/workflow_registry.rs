@@ -585,9 +585,18 @@ mod tests {
     use crate::infrastructure::database::initialize;
     use chrono::{TimeZone, Utc};
     use sqlx::SqlitePool;
-    use tempfile::tempdir;
+    use tempfile::{tempdir, TempDir};
 
-    async fn setup() -> (SqlitePool, SqliteWorkflowRegistryRepository) {
+    /// W-31: the TempDir must outlive the pool; dropping it early deletes
+    /// the database directory and causes intermittent "unable to open
+    /// database file" failures.
+    struct Fixture {
+        _dir: TempDir,
+        pool: SqlitePool,
+        repository: SqliteWorkflowRegistryRepository,
+    }
+
+    async fn setup() -> Fixture {
         let directory = tempdir().expect("temporary directory should exist");
         let pool = initialize(&directory.path().join("app.db"))
             .await
@@ -624,12 +633,20 @@ mod tests {
         .execute(&pool)
         .await
         .expect("recipe fixture should insert");
-        (pool.clone(), SqliteWorkflowRegistryRepository::new(pool))
+        Fixture {
+            _dir: directory,
+            pool: pool.clone(),
+            repository: SqliteWorkflowRegistryRepository::new(pool),
+        }
     }
 
     #[tokio::test]
     async fn logical_lifecycle_keeps_ids_clears_bindings_and_purges_only_after_remove() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         let timestamp = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
 
         repository
@@ -726,7 +743,11 @@ mod tests {
 
     #[tokio::test]
     async fn remove_blocks_active_task_without_mutating_state() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         sqlx::query(
             "INSERT INTO projects (id, name, root_path, created_at, updated_at)
              VALUES ('registry-project', 'Project', 'C:/project', ?, ?)",

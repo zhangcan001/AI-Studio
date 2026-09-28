@@ -202,9 +202,18 @@ mod tests {
     use crate::infrastructure::database::initialize;
     use chrono::{TimeZone, Utc};
     use sqlx::SqlitePool;
-    use tempfile::tempdir;
+    use tempfile::{tempdir, TempDir};
 
-    async fn setup() -> (SqlitePool, SqliteWorkflowRecipePromotionRepository) {
+    /// W-31: the TempDir must outlive the pool; dropping it early deletes
+    /// the database directory and causes intermittent "unable to open
+    /// database file" failures.
+    struct Fixture {
+        _dir: TempDir,
+        pool: SqlitePool,
+        repository: SqliteWorkflowRecipePromotionRepository,
+    }
+
+    async fn setup() -> Fixture {
         let directory = tempdir().expect("temporary directory should exist");
         let pool = initialize(&directory.path().join("app.db"))
             .await
@@ -240,15 +249,18 @@ mod tests {
             .await
             .unwrap();
         }
-        (
-            pool.clone(),
-            SqliteWorkflowRecipePromotionRepository::new(pool),
-        )
+        Fixture {
+            _dir: directory,
+            pool: pool.clone(),
+            repository: SqliteWorkflowRecipePromotionRepository::new(pool),
+        }
     }
 
     #[tokio::test]
     async fn promotion_is_exact_idempotent_and_replaces_atomically() {
-        let (_pool, repository) = setup().await;
+        let Fixture {
+            _dir, repository, ..
+        } = setup().await;
         let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
         repository
             .promote("promotion-version", "recipe-a", at)
@@ -270,7 +282,9 @@ mod tests {
 
     #[tokio::test]
     async fn clear_is_exact_and_idempotent() {
-        let (_pool, repository) = setup().await;
+        let Fixture {
+            _dir, repository, ..
+        } = setup().await;
         let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
         repository
             .promote("promotion-version", "recipe-a", at)
@@ -289,7 +303,9 @@ mod tests {
 
     #[tokio::test]
     async fn stale_clear_preserves_newer_promotion() {
-        let (_pool, repository) = setup().await;
+        let Fixture {
+            _dir, repository, ..
+        } = setup().await;
         let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
         repository
             .promote("promotion-version", "recipe-a", at)
@@ -310,7 +326,11 @@ mod tests {
 
     #[tokio::test]
     async fn clear_rejects_unknown_version_and_recipe_from_another_version() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
         let error = repository
             .clear("missing-version", "recipe-a")
@@ -343,7 +363,11 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_unknown_recipe_and_archived_version() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
         let error = repository
             .promote("promotion-version", "other", at)
@@ -378,7 +402,11 @@ mod tests {
 
     #[tokio::test]
     async fn deleting_workflow_version_cleans_promotion() {
-        let (pool, repository) = setup().await;
+        let Fixture {
+            _dir,
+            pool,
+            repository,
+        } = setup().await;
         let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
         repository
             .promote("promotion-version", "recipe-a", at)
