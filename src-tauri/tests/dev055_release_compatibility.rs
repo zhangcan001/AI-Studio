@@ -1264,8 +1264,8 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 39);
-    assert_eq!(migration_marker_count(pool, 39).await, 1);
+    assert_eq!(max_migration(pool).await, 40);
+    assert_eq!(migration_marker_count(pool, 40).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1427,10 +1427,10 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_039() {
+async fn dev055_migration_matrix_reaches_040() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(39));
+    assert_eq!(versions.last().copied(), Some(40));
     assert!(
         versions.contains(&33),
         "repository must contain migration 033"

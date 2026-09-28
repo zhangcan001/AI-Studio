@@ -64,6 +64,7 @@ pub mod provenance_lineage_service;
 pub mod recipe_history_query_service;
 pub mod reference_anchor_service;
 pub mod reference_set_service;
+pub mod repair_jobs;
 pub mod scene_production_service;
 pub mod scheduler;
 pub mod series_production_service;

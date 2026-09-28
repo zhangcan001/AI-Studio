@@ -17,6 +17,7 @@ import type {
   AssetVersionView,
 } from "../types/asset";
 import type { AssetVideoPromptView } from "../types/assetVideoPrompt";
+import type { RepairJobStatusView } from "../types/repairJobs";
 import type {
   H3LocalImportInspection,
   H3LocalImportMode,
@@ -643,6 +644,11 @@ export function promoteWorkflowRecipe(workflowVersionId: string, recipeId: strin
 
 export function clearWorkflowRecipePromotion(workflowVersionId: string, recipeId: string): Promise<WorkflowRegistryView> {
   return invoke<WorkflowRegistryView>("workflow_clear_recipe_promotion", { workflowVersionId, recipeId });
+}
+
+/** Read-only status of the application-level recipe repair jobs. */
+export function repairJobsStatus(): Promise<RepairJobStatusView[]> {
+  return invoke<RepairJobStatusView[]>("repair_jobs_status");
 }
 
 export function archiveWorkflowRecipe(workflowVersionId: string, recipeId: string): Promise<WorkflowRegistryView> {

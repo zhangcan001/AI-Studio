@@ -85,7 +85,7 @@ mod tests {
                'script_sources', 'script_import_drafts',
                'production_package_batch_bindings', 'project_workflow_bindings',
                'workflow_runtime_artifacts', 'workflow_recipe_promotions',
-               'workflow_recipe_runtime_states', 'artifact_reviews')",
+               'workflow_recipe_runtime_states', 'artifact_reviews', 'app_repair_jobs')",
         )
         .fetch_one(pool)
         .await
@@ -101,13 +101,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 70);
+        assert_eq!(table_count(&pool).await, 71);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            39
+            40
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -330,7 +330,7 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 70);
+        assert_eq!(table_count(&second_pool).await, 71);
         second_pool.close().await;
     }
 
