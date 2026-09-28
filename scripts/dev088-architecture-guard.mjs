@@ -590,35 +590,51 @@ if (!["project_production_preflight", "project_production_admit", "MAX_PROJECT_P
   throw new Error("BULK_PREPARATION_AUTHORITY failed: project plan/admit must use the existing preparation service with 500/100 bounds");
 }
 
-const reviewWorkspaceSource = readFileSync(join(root, "src/features/studio/ProductionBatchReviewWorkspace.tsx"), "utf8");
-const reviewBoardSource = readFileSync(join(root, "src/features/shots/ShotBatchReviewBoard.tsx"), "utf8");
-const reviewServiceSource = readFileSync(join(root, "src-tauri/src/application/production_item_review_service.rs"), "utf8");
-const reviewCommandSource = readFileSync(join(root, "src-tauri/src/commands/production_item_review.rs"), "utf8");
-const reviewRepositorySource = readFileSync(join(root, "src-tauri/src/infrastructure/database/repositories/production_item_review.rs"), "utf8");
 const reviewInboxSource = readFileSync(join(root, "src/features/production/ProductionReviewInbox.tsx"), "utf8");
-if ([reviewWorkspaceSource, reviewBoardSource, reviewServiceSource, reviewCommandSource].some((source) => /autoStart|auto_start|autoStarted|auto_started/.test(source))) {
-  throw new Error("REVIEW_REGEN_NO_AUTO_START failed: review regeneration must not expose an auto-start capability");
+const artifactServiceSource = readFileSync(join(root, "src-tauri/src/application/artifact_service.rs"), "utf8");
+const artifactCommandSource = readFileSync(join(root, "src-tauri/src/commands/artifact.rs"), "utf8");
+const artifactRepositorySource = readFileSync(join(root, "src-tauri/src/infrastructure/database/repositories/artifact.rs"), "utf8");
+const packageWorkspaceSource = readFileSync(join(root, "src/features/production/ProductionPackageWorkspace.tsx"), "utf8");
+const packageServiceSource = readFileSync(join(root, "src-tauri/src/application/production_package_service.rs"), "utf8");
+if (reviewInboxSource.includes("startProductionQueue")
+  || reviewInboxSource.includes("production_queue_start")
+  || reviewInboxSource.includes("createProductionPackageBatches")) {
+  throw new Error("ARTIFACT_REVIEW_NO_EXECUTION failed: review UI must not create or start production batches");
 }
-if (!reviewServiceSource.includes("CreateProductionBatchRequest")
-  || !reviewCommandSource.includes("production_item_review_regenerate_marked")
-  || !reviewWorkspaceSource.includes("等待启动")
-  || !reviewWorkspaceSource.includes("打开生产队列")) {
-  throw new Error("REWORK_BATCH_EXPLICIT_START failed: review rework must create READY state and offer an explicit queue action");
+if (!reviewInboxSource.includes("getArtifactReviewQueue")
+  || !reviewInboxSource.includes("submitArtifactReview")
+  || !artifactServiceSource.includes("pub async fn review_queue(")
+  || !artifactServiceSource.includes(".list_review_queue(project_id, filter, limit.clamp(1, 100), offset)")
+  || !artifactServiceSource.includes("pub async fn submit_review(")
+  || !artifactServiceSource.includes("update_review_if_revision")) {
+  throw new Error("ARTIFACT_REVIEW_USES_EXISTING_AUTHORITY failed: review must use bounded ArtifactService and revision-checked repository operations");
 }
-if (!reviewRepositorySource.includes("list_project_inbox")
-  || !reviewRepositorySource.includes("COUNT(*) OVER ()")
-  || !reviewRepositorySource.includes("selected_video_asset_id")
-  || !reviewInboxSource.includes("getProductionReviewInbox")) {
-  throw new Error("REVIEW_USES_EXISTING_AUTHORITY failed: inbox must be a bounded set-based projection using existing review/Shot/Asset authority");
+if (!artifactCommandSource.includes("pub async fn artifact_review_queue_get(")
+  || !artifactCommandSource.includes(".review_queue(")
+  || !artifactCommandSource.includes("pub async fn artifact_review_submit(")
+  || !artifactCommandSource.includes(".submit_review(")) {
+  throw new Error("ARTIFACT_REVIEW_TYPED_COMMANDS failed: review UI must use the registered ArtifactService command boundary");
 }
-if (reviewInboxSource.includes("CREATE TABLE") || reviewInboxSource.includes("production_queue_start")) {
-  throw new Error("NO_SECOND_REVIEW_QUEUE failed: Review Inbox must remain read-only and reuse the Production Queue");
+if (!artifactRepositorySource.includes("async fn list_review_queue(")
+  || !artifactRepositorySource.includes("WHERE review.project_id = ? AND {decision_filter}")
+  || !artifactRepositorySource.includes("a.project_id = review.project_id")
+  || !artifactRepositorySource.includes("t.project_id = review.project_id")
+  || !artifactRepositorySource.includes("LIMIT ? OFFSET ?")) {
+  throw new Error("ARTIFACT_REVIEW_PROJECT_SCOPE failed: persisted review listings must remain project-scoped and paginated");
+}
+if (packageWorkspaceSource.includes("startProductionQueue")
+  || packageWorkspaceSource.includes("production_queue_start")
+  || !packageWorkspaceSource.includes("尚未开始真实生产")) {
+  throw new Error("PACKAGE_IMPORT_NO_AUTO_START failed: package import must leave execution to the explicit Production Queue action");
+}
+if (!packageServiceSource.includes("auto_start: false")
+  || !packageServiceSource.includes("if result.auto_started")
+  || !packageServiceSource.includes("package import unexpectedly started a batch")) {
+  throw new Error("PACKAGE_IMPORT_AUTHORITY failed: backend must reject an unexpected auto-start from package batch admission");
 }
 const productionQueuePanelSource = readFileSync(join(root, "src/features/studio/ProductionQueuePanel.tsx"), "utf8");
-if (reviewServiceSource.includes("start_production")
-  || reviewWorkspaceSource.includes("startProductionQueue")
-  || !productionQueuePanelSource.includes("startProductionQueue")) {
-  throw new Error("EXECUTION_START_AUTHORITY failed: only the existing Production Queue may start execution");
+if (!productionQueuePanelSource.includes("startProductionQueue")) {
+  throw new Error("EXECUTION_START_AUTHORITY failed: the existing Production Queue must remain the execution start authority");
 }
 
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
@@ -654,12 +670,13 @@ console.log(`BULK_PREPARE_NO_AUTO_START=PASS`);
 console.log(`BATCH_CREATE_NO_AUTO_START=PASS`);
 console.log(`EXPLICIT_QUEUE_START_ONLY=PASS`);
 console.log(`BULK_PREPARATION_AUTHORITY=PASS`);
-console.log(`REVIEW_REGEN_NO_AUTO_START=PASS`);
-console.log(`REWORK_BATCH_EXPLICIT_START=PASS`);
-console.log(`REVIEW_USES_EXISTING_AUTHORITY=PASS`);
-console.log(`NO_SECOND_REVIEW_QUEUE=PASS`);
+console.log(`ARTIFACT_REVIEW_NO_EXECUTION=PASS`);
+console.log(`ARTIFACT_REVIEW_USES_EXISTING_AUTHORITY=PASS`);
+console.log(`ARTIFACT_REVIEW_TYPED_COMMANDS=PASS`);
+console.log(`ARTIFACT_REVIEW_PROJECT_SCOPE=PASS`);
+console.log(`PACKAGE_IMPORT_NO_AUTO_START=PASS`);
+console.log(`PACKAGE_IMPORT_AUTHORITY=PASS`);
 console.log(`EXECUTION_START_AUTHORITY=PASS`);
-console.log(`REVIEW_REGEN_AUTO_START_CAPABILITY=REMOVED`);
 console.log(`INTERNAL_SCRIPT_AUTHORING_RETIRED=PASS`);
 console.log(`INTERNAL_STORYBOARD_AUTHORING_RETIRED=PASS`);
 console.log(`INTERNAL_PROMPT_AUTHORING_RETIRED=PASS`);

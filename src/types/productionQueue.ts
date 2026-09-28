@@ -55,6 +55,7 @@ export interface ProductionBatchItemView {
   errorMessage?: string;
   promptText?: string;
   seed?: string;
+  inputAssetIds?: string[];
   executionSummary?: ExecutionSummary;
   createdAt?: string;
   updatedAt?: string;

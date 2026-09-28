@@ -3,6 +3,15 @@ import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../serv
 import type { AssetView } from "../../types/asset";
 import { assetDisplayName, assetTypeLabel, formatDateTime, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 
+function assetReadFailureCode(error: unknown): "ASSET_FILE_MISSING" | "ASSET_READ_FAILED" {
+  const message = typeof error === "string"
+    ? error
+    : error instanceof Error ? error.message : String(error);
+  return /ASSET_NOT_FOUND|no such file or directory|cannot find (?:the )?(?:file|path)|file not found/i.test(message)
+    ? "ASSET_FILE_MISSING"
+    : "ASSET_READ_FAILED";
+}
+
 interface Props {
   projectId: string;
   asset: AssetView;
@@ -21,6 +30,7 @@ export function AssetCard({ projectId, asset, onSelect, compareMode = false, com
   const cardRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>();
+  const [previewFailure, setPreviewFailure] = useState<"ASSET_FILE_MISSING" | "ASSET_READ_FAILED">();
 
   useEffect(() => {
     const element = cardRef.current;
@@ -47,10 +57,13 @@ export function AssetCard({ projectId, asset, onSelect, compareMode = false, com
     const isAudio = asset.assetType === "audio" || asset.category === "source_audio";
     if (isVideo && !asset.thumbnailAvailable || isAudio) {
       setPreviewUrl(undefined);
+      setPreviewFailure(undefined);
       return () => undefined;
     }
     let active = true;
     let url: string | undefined;
+    setPreviewUrl(undefined);
+    setPreviewFailure(undefined);
     const readPreview = asset.thumbnailAvailable
       ? readAssetThumbnail(projectId, asset.id).catch(() => readAssetImage(projectId, asset.id))
       : readAssetImage(projectId, asset.id);
@@ -60,8 +73,11 @@ export function AssetCard({ projectId, asset, onSelect, compareMode = false, com
         url = URL.createObjectURL(new Blob([bytes], { type: asset.thumbnailAvailable ? "image/png" : asset.mimeType }));
         setPreviewUrl(url);
       })
-      .catch(() => {
-        if (active) setPreviewUrl(undefined);
+      .catch((error: unknown) => {
+        if (active) {
+          setPreviewUrl(undefined);
+          setPreviewFailure(assetReadFailureCode(error));
+        }
       });
     return () => {
       active = false;
@@ -87,6 +103,8 @@ export function AssetCard({ projectId, asset, onSelect, compareMode = false, com
       <span className="asset-library-image">
         {previewUrl ? (
           <img src={previewUrl} alt={displayName} loading="lazy" />
+        ) : previewFailure ? (
+          <span className="asset-image-placeholder" role="status">{previewFailure}</span>
         ) : isVideo && mediaUrl ? (
           <video src={mediaUrl} aria-label={displayName} preload="metadata" muted playsInline />
         ) : (

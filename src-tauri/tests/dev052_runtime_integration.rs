@@ -34,6 +34,7 @@ use ai_studio_lib::application::{
         ProductionStartAdmissionError, ProductionStartAdmissionService,
         RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE, RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED,
         RUNTIME_ADMISSION_COMFY_UNAVAILABLE, RUNTIME_ADMISSION_MISSING_NODES,
+        RUNTIME_ADMISSION_READINESS_BLOCKED,
     },
     shot_batch_service::ShotBatchService,
     shot_context_resolver::ShotContextResolver,
@@ -679,7 +680,7 @@ async fn harness_with_packages(
     let workflow_lifecycle_service = Arc::new(WorkflowLifecycleService::new(
         source,
         workflow_library_service,
-        onboarding_service,
+        onboarding_service.clone(),
         runtime_repository,
         runtime_state_repository,
         package_store,
@@ -709,16 +710,19 @@ async fn harness_with_packages(
         .with_stage_prompt_repository(shot_bulk_repository)
         .with_generation_snapshot_repository(snapshot_repository.clone()),
     );
-    let generation_service = Arc::new(GenerationService::new(
-        task_repository.clone(),
-        snapshot_repository.clone(),
-        definition_repository.clone(),
-        comfy_adapter.clone(),
-        project_repository.clone(),
-        asset_store.clone(),
-        asset_repository.clone(),
-        clock.clone(),
-    ));
+    let generation_service = Arc::new(
+        GenerationService::new(
+            task_repository.clone(),
+            snapshot_repository.clone(),
+            definition_repository.clone(),
+            comfy_adapter.clone(),
+            project_repository.clone(),
+            asset_store.clone(),
+            asset_repository.clone(),
+            clock.clone(),
+        )
+        .with_workflow_compatibility_service(onboarding_service.clone()),
+    );
     let recovery_service = Arc::new(TaskRecoveryService::new(
         task_repository.clone(),
         snapshot_repository.clone(),
@@ -1245,6 +1249,259 @@ async fn direct_generation_batch_creates_n_tasks_and_submissions_only_after_queu
     .await
     .expect("unique queue task links should be readable");
     assert_eq!(distinct_tasks, 3);
+}
+
+#[tokio::test]
+async fn repeated_multi_item_submission_returns_the_same_batch_and_items() {
+    let harness = harness().await;
+    let request = direct_generation_batch_request(&harness, 3);
+    let first = harness
+        .queue
+        .create_direct_generation_batch(request.clone())
+        .await
+        .expect("first batch submission should persist");
+    let duplicate = harness
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .expect("repeat should resolve to the existing idempotent batch");
+
+    assert_eq!(first.batch.id, duplicate.batch.id);
+    assert_eq!(
+        first.items.iter().map(|item| &item.id).collect::<Vec<_>>(),
+        duplicate
+            .items
+            .iter()
+            .map(|item| &item.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(count(&harness.pool, "production_batches").await, 1);
+    assert_eq!(count(&harness.pool, "production_batch_items").await, 3);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn synthetic_hundred_item_batch_persists_and_aggregates_without_dispatch() {
+    let harness = harness().await;
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(direct_generation_batch_request(&harness, 100))
+        .await
+        .expect("a bounded 100-item synthetic batch should persist atomically");
+
+    assert_eq!(batch.items.len(), 100);
+    assert_eq!(count(&harness.pool, "production_batches").await, 1);
+    assert_eq!(count(&harness.pool, "production_batch_items").await, 100);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+
+    let reloaded = harness
+        .queue
+        .get(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("the synthetic batch should reopen from persisted storage");
+    assert_eq!(reloaded.items.len(), 100);
+    let overview = harness
+        .queue
+        .overview(PROJECT_ID)
+        .await
+        .expect("the persisted batch should contribute to queue aggregates");
+    assert_eq!(overview.total_queues, 1);
+    assert_eq!(overview.total_items, 100);
+    assert_eq!(overview.pending_items, 100);
+    assert_eq!(overview.active_items, 0);
+    assert_eq!(
+        overview.succeeded_items
+            + overview.failed_items
+            + overview.cancelled_items
+            + overview.skipped_items,
+        0
+    );
+}
+
+#[tokio::test]
+async fn saved_execution_batch_preflight_fetches_one_schema_for_one_exact_identity() {
+    let harness = harness().await;
+    let mut request = direct_generation_batch_request(&harness, 3);
+    for (index, item) in request.items.iter_mut().enumerate() {
+        item.submission_idempotency_key = Some(format!("workflow-execution-batch:test:{index}"));
+        item.execution_input_sources = Some(BTreeMap::from([(
+            "prompt".to_owned(),
+            ExecutionValueSource::UserInput,
+        )]));
+    }
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .expect("saved execution batch should persist");
+    let before = harness.comfy.object_info_calls.load(Ordering::SeqCst);
+
+    let issues = harness
+        .queue
+        .preflight_saved_execution_batch(PROJECT_ID, &batch)
+        .await
+        .expect("batch should preflight against current Comfy schema");
+
+    assert!(
+        issues.is_empty(),
+        "unexpected per-item preflight issues: {issues:?}"
+    );
+    assert_eq!(
+        harness.comfy.object_info_calls.load(Ordering::SeqCst) - before,
+        1,
+        "one exact workflow-version/recipe pair should share one live schema response"
+    );
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn invalid_saved_batch_item_blocks_start_without_partial_dispatch() {
+    let harness = harness().await;
+    let mut request = direct_generation_batch_request(&harness, 3);
+    for (index, item) in request.items.iter_mut().enumerate() {
+        item.submission_idempotency_key = Some(format!("workflow-execution-batch:test:{index}"));
+        item.execution_input_sources = Some(BTreeMap::from([(
+            "prompt".to_owned(),
+            ExecutionValueSource::UserInput,
+        )]));
+    }
+    request.items[1].item.values.clear();
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .expect("invalid frozen values remain inspectable in a prepared batch");
+
+    let error = harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect_err("one invalid input must block the complete batch start");
+    assert!(matches!(
+        error,
+        ProductionStartAdmissionError::Runtime(ref failure)
+            if failure.code == RUNTIME_ADMISSION_READINESS_BLOCKED
+                && failure.reason.contains("item 2 EXECUTION_INPUT_INVALID")
+    ));
+    let unchanged = harness
+        .queue
+        .get(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("blocked batch should remain readable");
+    assert_eq!(unchanged.batch.status, ProductionBatchStatus::Ready);
+    assert!(unchanged
+        .items
+        .iter()
+        .all(|item| item.status == ProductionBatchItemStatus::Pending));
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn ordinary_item_failure_does_not_stop_later_batch_items() {
+    let harness = harness().await;
+    let mut request = direct_generation_batch_request(&harness, 3);
+    request.items[0].item.values.clear();
+    harness.comfy.reject_submission_as_validation_error();
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .expect("queue can persist values for start-time validation");
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("ordinary item validation failure should not block initial batch admission");
+
+    let final_detail = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let detail = harness
+                .queue
+                .get(PROJECT_ID, batch.batch.id.as_str())
+                .await
+                .expect("batch history remains readable");
+            if detail.items.iter().all(|item| item.status.is_terminal()) {
+                break detail;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("every remaining item should reach a terminal status");
+
+    assert_eq!(final_detail.items.len(), 3);
+    assert_eq!(final_detail.batch.status, ProductionBatchStatus::Completed);
+    assert_eq!(
+        final_detail.items[0].status,
+        ProductionBatchItemStatus::Failed
+    );
+    assert!(final_detail.items[1..]
+        .iter()
+        .all(|item| item.status == ProductionBatchItemStatus::Failed));
+    assert!(final_detail.items[0].error_code.is_some());
+    assert_eq!(count(&harness.pool, "tasks").await, 3);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn cancelling_active_batch_marks_pending_cancelled_and_prevents_later_dispatch() {
+    let harness = harness().await;
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(direct_generation_batch_request(&harness, 3))
+        .await
+        .expect("batch should be persisted before queue start");
+    harness.comfy.hold_submission();
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("queue start should dispatch its first item");
+    harness.comfy.wait_for_submission().await;
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+
+    let cancelled = harness
+        .queue
+        .cancel_pending(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("active task may finish while pending work is cancelled");
+    assert_eq!(cancelled.batch.status, ProductionBatchStatus::Paused);
+    assert_eq!(
+        cancelled.items[0].status,
+        ProductionBatchItemStatus::Dispatched
+    );
+    assert!(cancelled.items[1..]
+        .iter()
+        .all(|item| item.status == ProductionBatchItemStatus::Cancelled));
+    harness.comfy.release_submission();
+
+    let completed = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let detail = harness
+                .queue
+                .get(PROJECT_ID, batch.batch.id.as_str())
+                .await
+                .expect("cancelled batch remains readable");
+            if detail.batch.status == ProductionBatchStatus::Completed {
+                break detail;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the active item should reach a terminal state after release");
+    assert_eq!(completed.items[0].status, ProductionBatchItemStatus::Failed);
+    assert!(completed.items[1..]
+        .iter()
+        .all(|item| item.status == ProductionBatchItemStatus::Cancelled));
+    sleep(Duration::from_millis(100)).await;
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

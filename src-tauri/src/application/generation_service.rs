@@ -276,6 +276,30 @@ impl GenerationService {
         recipe_id: &str,
         values: &BTreeMap<String, GenerationInputValue>,
     ) -> Result<(), GenerationServiceError> {
+        let mut results = self
+            .preflight_saved_version_batch(
+                project_id,
+                workflow_version_id,
+                recipe_id,
+                std::slice::from_ref(values),
+            )
+            .await?;
+        results.pop().unwrap_or(Ok(()))
+    }
+
+    /// Preflight many frozen executions against one current live Comfy schema.
+    /// The shared schema and exact saved definition are loaded once, while each
+    /// item's compiled values and referenced files are validated independently.
+    pub async fn preflight_saved_version_batch(
+        &self,
+        project_id: &str,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        values: &[BTreeMap<String, GenerationInputValue>],
+    ) -> Result<Vec<Result<(), GenerationServiceError>>, GenerationServiceError> {
+        if values.is_empty() {
+            return Ok(Vec::new());
+        }
         if let Some(admission) = &self.new_generation_admission {
             if !admission
                 .is_available_for_new_generation(workflow_version_id, recipe_id)
@@ -346,67 +370,77 @@ impl GenerationService {
                     }),
             });
         }
-        let compiled = self
-            .compiler
-            .compile(
-                &workflow,
-                &recipe,
-                &CompileRequest::new(GenerationInputPreparer::preflight_values(values)),
-            )
-            .map_err(GenerationServiceError::Compile)?;
-        let mut resolved_check_recipe = recipe.clone();
-        // Media filenames are assigned only after upload. Keep those targets
-        // dynamic, while checking every other resolved value against live enum
-        // options instead of silently choosing a replacement.
-        resolved_check_recipe.bindings.retain(|binding| {
-            matches!(
-                recipe.inputs.get(&binding.source),
-                Some(
-                    crate::domain::InputDefinition::Image { .. }
-                        | crate::domain::InputDefinition::Images { .. }
-                        | crate::domain::InputDefinition::Video { .. }
-                        | crate::domain::InputDefinition::Videos { .. }
-                        | crate::domain::InputDefinition::Audio { .. }
-                        | crate::domain::InputDefinition::Audios { .. }
-                )
-            )
-        });
-        let resolved_capability = compatibility
-            .check_runtime_workflow_with_recipe_and_object_info(
-                &compiled.workflow.to_string(),
-                &resolved_check_recipe,
-                &object_info,
-            )
-            .map_err(|error| GenerationServiceError::ExecutionFailed {
-                code: error.code().to_owned(),
-                message: "resolved workflow capability check failed".to_owned(),
-            })?;
-        if resolved_capability.state != CapabilityState::Ready {
-            let issue = resolved_capability.issues.first();
-            return Err(GenerationServiceError::ExecutionFailed {
-                code: issue
-                    .map(|issue| issue.code.clone())
-                    .unwrap_or_else(|| "RUNTIME_PREFLIGHT_NEEDS_REVIEW".to_owned()),
-                message: issue
-                    .map(|issue| {
-                        format!(
-                            "node={} input={}",
-                            issue.node_id.as_deref().unwrap_or("?"),
-                            issue.input_name.as_deref().unwrap_or("?"),
+        let mut results = Vec::with_capacity(values.len());
+        for item_values in values {
+            let result = async {
+                let compiled = self
+                    .compiler
+                    .compile(
+                        &workflow,
+                        &recipe,
+                        &CompileRequest::new(GenerationInputPreparer::preflight_values(
+                            item_values,
+                        )),
+                    )
+                    .map_err(GenerationServiceError::Compile)?;
+                let mut resolved_check_recipe = recipe.clone();
+                // Media filenames are assigned only after upload. Keep those targets
+                // dynamic, while checking every other resolved value against live enum
+                // options instead of silently choosing a replacement.
+                resolved_check_recipe.bindings.retain(|binding| {
+                    matches!(
+                        recipe.inputs.get(&binding.source),
+                        Some(
+                            crate::domain::InputDefinition::Image { .. }
+                                | crate::domain::InputDefinition::Images { .. }
+                                | crate::domain::InputDefinition::Video { .. }
+                                | crate::domain::InputDefinition::Videos { .. }
+                                | crate::domain::InputDefinition::Audio { .. }
+                                | crate::domain::InputDefinition::Audios { .. }
                         )
-                    })
-                    .unwrap_or_else(|| "resolved workflow is incompatible".to_owned()),
-            });
+                    )
+                });
+                let resolved_capability = compatibility
+                    .check_runtime_workflow_with_recipe_and_object_info(
+                        &compiled.workflow.to_string(),
+                        &resolved_check_recipe,
+                        &object_info,
+                    )
+                    .map_err(|error| GenerationServiceError::ExecutionFailed {
+                        code: error.code().to_owned(),
+                        message: "resolved workflow capability check failed".to_owned(),
+                    })?;
+                if resolved_capability.state != CapabilityState::Ready {
+                    let issue = resolved_capability.issues.first();
+                    return Err(GenerationServiceError::ExecutionFailed {
+                        code: issue
+                            .map(|issue| issue.code.clone())
+                            .unwrap_or_else(|| "RUNTIME_PREFLIGHT_NEEDS_REVIEW".to_owned()),
+                        message: issue
+                            .map(|issue| {
+                                format!(
+                                    "node={} input={}",
+                                    issue.node_id.as_deref().unwrap_or("?"),
+                                    issue.input_name.as_deref().unwrap_or("?"),
+                                )
+                            })
+                            .unwrap_or_else(|| "resolved workflow is incompatible".to_owned()),
+                    });
+                }
+                self.generation_input_preparer
+                    .validate_asset_references(project_id, item_values)
+                    .await
+                    .map_err(GenerationServiceError::InputPrepare)?;
+                self.generation_input_preparer
+                    .validate_local_asset_files(project_id, item_values)
+                    .await
+                    .map_err(GenerationServiceError::InputPrepare)?;
+                Ok(())
+            }
+            .await;
+            results.push(result);
         }
-        self.generation_input_preparer
-            .validate_asset_references(project_id, values)
-            .await
-            .map_err(GenerationServiceError::InputPrepare)?;
-        self.generation_input_preparer
-            .validate_local_asset_files(project_id, values)
-            .await
-            .map_err(GenerationServiceError::InputPrepare)?;
-        Ok(())
+        Ok(results)
     }
 
     pub fn new(

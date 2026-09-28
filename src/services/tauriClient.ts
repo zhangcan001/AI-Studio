@@ -772,6 +772,20 @@ export function createWorkflowExecution(request: {
   return invoke<ProductionBatchDetail>("workflow_execution_create", { request });
 }
 
+export function createWorkflowExecutionBatch(request: {
+  projectId: string;
+  name: string;
+  workflowVersionId: string;
+  recipeId: string;
+  submissionIdempotencyKey: string;
+  items: Array<{
+    values: GenerationValues;
+    inputSources: Record<string, ExecutionValueSource>;
+  }>;
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("workflow_execution_create_batch", { request });
+}
+
 export function previewWorkflowBenchmark(
   request: WorkflowBenchmarkCreateRequest,
 ): Promise<{ candidates: WorkflowBenchmarkCandidatePreview[] }> {

@@ -1228,6 +1228,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::generation::generation_create,
             commands::generation::workflow_execution_preflight,
             commands::generation::workflow_execution_create,
+            commands::generation::workflow_execution_create_batch,
             commands::generation::generation_create_batch,
             commands::h3_local_import::h3_local_import_pick_directory,
             commands::h3_local_import::h3_local_import_rescan,

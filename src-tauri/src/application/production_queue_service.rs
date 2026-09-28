@@ -163,6 +163,13 @@ pub struct ProductionQueueOverview {
     pub skipped_items: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionBatchPreflightIssue {
+    pub item_number: usize,
+    pub code: String,
+    pub target: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProductionAdmissionView {
     pub busy: bool,
@@ -344,6 +351,89 @@ impl ProductionQueueService {
             .await
     }
 
+    /// Validate persisted saved-version batch items immediately before queue
+    /// start. Items share the current schema lookup by exact WorkflowVersion /
+    /// Recipe identity; values and media references are still checked per item.
+    pub async fn preflight_saved_execution_batch(
+        &self,
+        project_id: &str,
+        detail: &ProductionBatchDetail,
+    ) -> Result<Vec<ProductionBatchPreflightIssue>, ProductionQueueError> {
+        let mut groups = BTreeMap::<
+            (String, String),
+            Vec<(usize, BTreeMap<String, GenerationInputValue>)>,
+        >::new();
+        for (index, item) in detail.items.iter().enumerate() {
+            if item.status != ProductionBatchItemStatus::Pending {
+                continue;
+            }
+            let context = direct_generation_context_from_json(&item.values_json)
+                .map_err(ProductionQueueError::InvalidInput)?;
+            let Some(context) = context else {
+                continue;
+            };
+            // Phase 2A single-item execution is already preflighted before its
+            // queue item is created. Restrict this additional admission pass to
+            // the explicit saved-execution batch request contract.
+            if context.execution_summary.is_none()
+                || !context
+                    .submission_idempotency_key
+                    .as_deref()
+                    .is_some_and(|key| key.starts_with("workflow-execution-batch:"))
+            {
+                continue;
+            }
+            let values = generation_values_from_json(&item.values_json)
+                .map_err(ProductionQueueError::InvalidInput)?;
+            groups
+                .entry((item.workflow_version_id.clone(), item.recipe_id.clone()))
+                .or_default()
+                .push((index + 1, values));
+        }
+
+        let mut issues = Vec::new();
+        for ((workflow_version_id, recipe_id), items) in groups {
+            let values = items
+                .iter()
+                .map(|(_, values)| values.clone())
+                .collect::<Vec<_>>();
+            match self
+                .generation_service
+                .preflight_saved_version_batch(
+                    project_id,
+                    &workflow_version_id,
+                    &recipe_id,
+                    &values,
+                )
+                .await
+            {
+                Ok(results) => {
+                    for ((item_number, _), result) in items.into_iter().zip(results) {
+                        if let Err(error) = result {
+                            let (code, target) = execution_preflight_issue(&error);
+                            issues.push(ProductionBatchPreflightIssue {
+                                item_number,
+                                code,
+                                target,
+                            });
+                        }
+                    }
+                }
+                Err(error) => {
+                    let (code, target) = execution_preflight_issue(&error);
+                    issues.extend(items.into_iter().map(|(item_number, _)| {
+                        ProductionBatchPreflightIssue {
+                            item_number,
+                            code: code.clone(),
+                            target: target.clone(),
+                        }
+                    }));
+                }
+            }
+        }
+        Ok(issues)
+    }
+
     pub async fn create_direct_generation_batch(
         &self,
         request: CreateDirectGenerationBatchRequest,
@@ -430,28 +520,56 @@ impl ProductionQueueService {
                 "direct generation batch contains duplicate submission idempotency keys".to_owned(),
             ));
         }
-        if let [context] = contexts.as_slice() {
-            if let Some(key) = context.submission_idempotency_key.as_deref() {
-                for batch in self.repository.list(&request.project_id).await? {
-                    let Some(detail) = self
-                        .repository
-                        .find_detail(&request.project_id, &batch.id)
-                        .await?
-                    else {
-                        continue;
-                    };
-                    let already_submitted = detail.items.iter().any(|item| {
+        let requested_keys = contexts
+            .iter()
+            .filter_map(|context| context.submission_idempotency_key.as_deref())
+            .collect::<Vec<_>>();
+        if contexts.len() > 1
+            && !requested_keys.is_empty()
+            && requested_keys.len() != contexts.len()
+        {
+            return Err(ProductionQueueError::InvalidInput(
+                "direct generation batch idempotency keys must cover every item".to_owned(),
+            ));
+        }
+        if !requested_keys.is_empty() {
+            for batch in self.repository.list(&request.project_id).await? {
+                let Some(detail) = self
+                    .repository
+                    .find_detail(&request.project_id, &batch.id)
+                    .await?
+                else {
+                    continue;
+                };
+                let existing_keys = detail
+                    .items
+                    .iter()
+                    .filter_map(|item| {
                         direct_generation_context_from_json(&item.values_json)
                             .ok()
                             .flatten()
                             .and_then(|context| context.submission_idempotency_key)
-                            .as_deref()
-                            == Some(key)
-                    });
-                    if already_submitted {
-                        return Ok(detail);
-                    }
+                    })
+                    .collect::<Vec<_>>();
+                let overlaps = existing_keys
+                    .iter()
+                    .any(|existing| requested_keys.contains(&existing.as_str()));
+                if !overlaps {
+                    continue;
                 }
+                let exact_batch_match = detail.items.len() == requested_keys.len()
+                    && existing_keys.len() == requested_keys.len()
+                    && existing_keys
+                        .iter()
+                        .zip(&requested_keys)
+                        .all(|(existing, requested)| existing == requested);
+                if exact_batch_match || contexts.len() == 1 {
+                    return Ok(detail);
+                }
+                return Err(ProductionQueueError::InvalidInput(
+                    "direct generation batch idempotency key conflicts with an existing batch"
+                        .to_owned(),
+                ));
             }
         }
         self.create_internal(
@@ -946,18 +1064,6 @@ impl ProductionQueueService {
                 "archived production batches must be restored before cancellation".to_owned(),
             ));
         }
-        if detail.batch.status == ProductionBatchStatus::Running
-            || detail.items.iter().any(|item| {
-                matches!(
-                    item.status,
-                    ProductionBatchItemStatus::Dispatching | ProductionBatchItemStatus::Dispatched
-                )
-            })
-        {
-            return Err(ProductionQueueError::InvalidState(
-                "production batches with active work cannot be cancelled; pause and wait for the active task to finish".to_owned(),
-            ));
-        }
         if detail.batch.status == ProductionBatchStatus::Completed {
             return Err(ProductionQueueError::InvalidState(
                 "completed production batches cannot be cancelled".to_owned(),
@@ -1415,6 +1521,24 @@ impl ProductionQueueService {
                         )
                         .await?;
                 }
+                if record.batch.status == ProductionBatchStatus::Paused {
+                    if let Some(detail) = self
+                        .repository
+                        .find_detail(&record.batch.project_id, &record.batch.id)
+                        .await?
+                    {
+                        if detail.items.iter().all(|item| item.status.is_terminal()) {
+                            self.repository
+                                .set_batch_status(
+                                    &record.batch.project_id,
+                                    &record.batch.id,
+                                    ProductionBatchStatus::Completed,
+                                    self.clock.now(),
+                                )
+                                .await?;
+                        }
+                    }
+                }
             }
         }
         active = self.repository.list_active_items().await?;
@@ -1581,6 +1705,20 @@ impl ProductionQueueService {
                         .expect("production recovery task registry mutex poisoned")
                         .remove(task_id.as_str());
                     if detail.batch.status == ProductionBatchStatus::Paused {
+                        if let Some(updated) =
+                            self.repository.find_detail(project_id, batch_id).await?
+                        {
+                            if updated.items.iter().all(|item| item.status.is_terminal()) {
+                                self.repository
+                                    .set_batch_status(
+                                        project_id,
+                                        batch_id,
+                                        ProductionBatchStatus::Completed,
+                                        self.clock.now(),
+                                    )
+                                    .await?;
+                            }
+                        }
                         return Ok(());
                     }
                     if should_pause_after_terminal(status, code, detail.batch.continue_on_failure) {
@@ -2365,6 +2503,21 @@ fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
             NODE_INCOMPATIBLE
         }
         GenerationServiceError::ExecutionFailed { .. } => "EXECUTION_ERROR",
+    }
+}
+
+fn execution_preflight_issue(error: &GenerationServiceError) -> (String, Option<String>) {
+    match error {
+        GenerationServiceError::ExecutionFailed { code, message } => (
+            code.clone(),
+            message.starts_with("node=").then(|| message.clone()),
+        ),
+        GenerationServiceError::Compile(_) => ("EXECUTION_INPUT_INVALID".to_owned(), None),
+        GenerationServiceError::InputPrepare(_) => ("EXECUTION_ASSET_UNAVAILABLE".to_owned(), None),
+        GenerationServiceError::DefinitionNotFound { .. } => {
+            ("WORKFLOW_RECIPE_NOT_FOUND".to_owned(), None)
+        }
+        _ => ("EXECUTION_PREFLIGHT_FAILED".to_owned(), None),
     }
 }
 
