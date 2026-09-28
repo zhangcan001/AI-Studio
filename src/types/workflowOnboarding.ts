@@ -82,6 +82,10 @@ export type WorkflowRecognitionEvidenceKind =
   | "TERMINAL_OUTPUT"
   | "PREVIEW_OUTPUT"
   | "AUXILIARY_OUTPUT"
+  | "GRAPH_CONDITIONING_ROLE"
+  | "PRIMITIVE_SOURCE_NODE"
+  | "SYSTEM_PROMPT_HINT"
+  | "GRAPH_PRIMARY_SAMPLER"
   | string;
 
 export interface WorkflowRecognitionEvidenceView {
@@ -324,7 +328,12 @@ export interface WorkflowInputMappingView {
   targetNode: string;
   targetInput: string;
   itemIndex?: number;
+  /** W-22: absent on legacy data; treat as random unless a numeric default is set. */
+  seedMode?: SeedMode;
 }
+
+/** W-22: fixed = reuse the workflow's literal seed; random = new seed per run. */
+export type SeedMode = "fixed" | "random";
 
 export interface WorkflowOutputMappingView {
   outputId: string;
@@ -878,6 +887,7 @@ export interface WorkflowOnboardingInputMappingRequest {
   targetNode: string;
   targetInput: string;
   itemIndex?: number;
+  seedMode?: SeedMode;
 }
 
 export interface WorkflowOnboardingOutputMappingRequest {

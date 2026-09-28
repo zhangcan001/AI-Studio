@@ -110,6 +110,156 @@ pub struct WorkflowNormalizationDiagnosticView {
     pub workflow_format: Option<String>,
 }
 
+/// Typed failure of UI-source normalization. Codes produced in this module are
+/// never packed into strings; only errors surfaced by lower layers (whose
+/// Display starts with `CODE:`) are classified from their prefix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingNormalizationCode {
+    MissingNodes,
+    WorkflowFormatVersionUnknown,
+    FrontendVersionUnknown,
+    FrontendVersionUnsupported,
+    HistoricalProfileDetectedButNotImplemented,
+    ObjectInfoSchemaLineageDrift,
+    SerializationEvidencePartial,
+    ObjectInfoSchemaProvenanceMismatch,
+    ProvenanceFingerprintConflict,
+    HistoricalSerializationFingerprintUnknown,
+    UnsupportedNormalizationCompatibility,
+    SchemaUnavailable,
+    UnsupportedUiFeature,
+    NormalizationBlocked,
+}
+
+impl PendingNormalizationCode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingNodes => "MISSING_NODES",
+            Self::WorkflowFormatVersionUnknown => "WORKFLOW_FORMAT_VERSION_UNKNOWN",
+            Self::FrontendVersionUnknown => "FRONTEND_VERSION_UNKNOWN",
+            Self::FrontendVersionUnsupported => "FRONTEND_VERSION_UNSUPPORTED",
+            Self::HistoricalProfileDetectedButNotImplemented => {
+                "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
+            }
+            Self::ObjectInfoSchemaLineageDrift => "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT",
+            Self::SerializationEvidencePartial => "SERIALIZATION_EVIDENCE_PARTIAL",
+            Self::ObjectInfoSchemaProvenanceMismatch => "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH",
+            Self::ProvenanceFingerprintConflict => "PROVENANCE_FINGERPRINT_CONFLICT",
+            Self::HistoricalSerializationFingerprintUnknown => {
+                "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN"
+            }
+            Self::UnsupportedNormalizationCompatibility => {
+                "UNSUPPORTED_NORMALIZATION_COMPATIBILITY"
+            }
+            Self::SchemaUnavailable => "SCHEMA_UNAVAILABLE",
+            Self::UnsupportedUiFeature => "UNSUPPORTED_UI_FEATURE",
+            Self::NormalizationBlocked => "NORMALIZATION_BLOCKED",
+        }
+    }
+
+    /// Classify the `CODE` prefix of an error produced by a lower layer.
+    fn from_lower_layer_prefix(prefix: &str) -> Self {
+        match prefix.trim() {
+            "UNKNOWN_NODE_CLASS" => Self::MissingNodes,
+            "WORKFLOW_FORMAT_VERSION_UNKNOWN" => Self::WorkflowFormatVersionUnknown,
+            "FRONTEND_VERSION_UNKNOWN" => Self::FrontendVersionUnknown,
+            "FRONTEND_VERSION_UNSUPPORTED" => Self::FrontendVersionUnsupported,
+            "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED" => {
+                Self::HistoricalProfileDetectedButNotImplemented
+            }
+            "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT" => Self::ObjectInfoSchemaLineageDrift,
+            "SERIALIZATION_EVIDENCE_PARTIAL" => Self::SerializationEvidencePartial,
+            "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH" => Self::ObjectInfoSchemaProvenanceMismatch,
+            "PROVENANCE_FINGERPRINT_CONFLICT" => Self::ProvenanceFingerprintConflict,
+            "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN" => {
+                Self::HistoricalSerializationFingerprintUnknown
+            }
+            "UNSUPPORTED_NORMALIZATION_COMPATIBILITY" => {
+                Self::UnsupportedNormalizationCompatibility
+            }
+            "SCHEMA_EMPTY" => Self::SchemaUnavailable,
+            _ => Self::NormalizationBlocked,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PendingNormalizationError {
+    code: PendingNormalizationCode,
+    message: String,
+    missing_classes: Vec<String>,
+    legacy_frontend_unknown: bool,
+}
+
+impl PendingNormalizationError {
+    fn new(code: PendingNormalizationCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            missing_classes: Vec::new(),
+            legacy_frontend_unknown: false,
+        }
+    }
+
+    fn missing_nodes(missing_classes: Vec<String>, legacy_frontend_unknown: bool) -> Self {
+        Self {
+            message: format!(
+                "MISSING_NODES: ComfyUI is missing node classes [{}]",
+                missing_classes.join(", ")
+            ),
+            code: PendingNormalizationCode::MissingNodes,
+            missing_classes,
+            legacy_frontend_unknown,
+        }
+    }
+
+    fn from_lower_layer(message: String) -> Self {
+        let prefix = message
+            .split_once(':')
+            .map(|(prefix, _)| prefix)
+            .unwrap_or(message.as_str());
+        Self::new(
+            PendingNormalizationCode::from_lower_layer_prefix(prefix),
+            message.clone(),
+        )
+    }
+}
+
+/// Map UI-format node classes to their node ids (for MISSING_NODE issues).
+fn ui_node_ids_by_class(raw_bytes: &[u8]) -> BTreeMap<String, Vec<String>> {
+    let mut result = BTreeMap::<String, Vec<String>>::new();
+    let Ok(value) = serde_json::from_slice::<Value>(raw_bytes) else {
+        return result;
+    };
+    let mut stack = vec![&value];
+    while let Some(current) = stack.pop() {
+        if let Some(nodes) = current.get("nodes").and_then(Value::as_array) {
+            for node in nodes {
+                let Some(class_type) = node.get("type").and_then(Value::as_str) else {
+                    continue;
+                };
+                let node_id = match node.get("id") {
+                    Some(Value::String(id)) => id.clone(),
+                    Some(Value::Number(id)) => id.to_string(),
+                    _ => continue,
+                };
+                result
+                    .entry(class_type.to_owned())
+                    .or_default()
+                    .push(node_id);
+            }
+        }
+        if let Some(subgraphs) = current
+            .get("definitions")
+            .and_then(|definitions| definitions.get("subgraphs"))
+            .and_then(Value::as_array)
+        {
+            stack.extend(subgraphs.iter());
+        }
+    }
+    result
+}
+
 impl WorkflowNormalizationDiagnosticView {
     fn basic(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -369,6 +519,19 @@ pub struct WorkflowOnboardingInputMappingRequest {
     pub target_input: String,
     #[serde(default)]
     pub item_index: Option<usize>,
+    /// W-22: explicit seed default mode. Missing keeps the legacy
+    /// interpretation of `default_value` (numeric = fixed, else random).
+    #[serde(default)]
+    pub seed_mode: Option<SeedMode>,
+}
+
+/// W-22: whether a seed field starts from the workflow's literal seed
+/// (`fixed`) or draws a new random seed per run (`random`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SeedMode {
+    Fixed,
+    Random,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -559,6 +722,8 @@ pub struct WorkflowInputMappingView {
     pub target_node: String,
     pub target_input: String,
     pub item_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed_mode: Option<SeedMode>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -799,6 +964,7 @@ struct InputMapping {
     target_node: String,
     target_input: String,
     item_index: Option<usize>,
+    seed_mode: Option<SeedMode>,
     source: InputMappingSource,
 }
 
@@ -2128,8 +2294,9 @@ impl WorkflowOnboardingService {
         )>,
         WorkflowOnboardingError,
     > {
-        let pending = |diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
-                       state: CapabilityState|
+        let pending_with_issues = |diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
+                                   state: CapabilityState,
+                                   issues: Vec<CapabilityIssueView>|
          -> Result<
             Option<(
                 CapabilityCheckView,
@@ -2141,7 +2308,7 @@ impl WorkflowOnboardingService {
             let capability = CapabilityCheckView {
                 state,
                 checked_at: Some(self.clock.now().to_rfc3339()),
-                issues: Vec::new(),
+                issues,
                 profile: None,
             };
             self.with_registry(|registry| {
@@ -2161,6 +2328,10 @@ impl WorkflowOnboardingService {
                 Ok(())
             })??;
             Ok(None)
+        };
+        let pending = |diagnostics: Vec<WorkflowNormalizationDiagnosticView>,
+                       state: CapabilityState| {
+            pending_with_issues(diagnostics, state, Vec::new())
         };
 
         let object = match self.comfy_adapter.get_object_info().await {
@@ -2196,22 +2367,45 @@ impl WorkflowOnboardingService {
 
         let mut feature_block: Option<WorkflowUiFeatureObservation> = None;
         let mut normalized_features: Option<Vec<WorkflowUiFeatureObservation>> = None;
-        let result = (|| -> Result<_, String> {
+        let lower = |error: &dyn std::fmt::Display| {
+            PendingNormalizationError::from_lower_layer(error.to_string())
+        };
+        let result = (|| -> Result<_, PendingNormalizationError> {
             let schema = RecognitionSchemaContext::parse(&object);
-            let source_value: Value = serde_json::from_slice(&initial.raw_bytes)
-                .map_err(|error| format!("UI_JSON_INVALID: {error}"))?;
+            let source_value: Value =
+                serde_json::from_slice(&initial.raw_bytes).map_err(|error| {
+                    PendingNormalizationError::new(
+                        PendingNormalizationCode::NormalizationBlocked,
+                        format!("UI_JSON_INVALID: {error}"),
+                    )
+                })?;
             let schema_fingerprint = canonical_schema_fingerprint(&object);
             let fingerprint = HistoricalUiSerializationFingerprint::from_source_value(
                 &source_value,
                 schema_fingerprint.clone(),
                 &schema,
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| lower(&error))?;
+            // Missing node classes are the actionable root cause: the UI source
+            // cannot be normalized without their schemas, so report them before
+            // profile resolution folds them into a generic provenance mismatch.
+            if !fingerprint.schema_lineage.missing_node_classes.is_empty() {
+                let legacy_frontend_unknown = initial.frontend_version.is_none()
+                    && fingerprint.positional_widget_cursor_gap
+                    && !fingerprint.dynamic_input_evidence;
+                return Err(PendingNormalizationError::missing_nodes(
+                    fingerprint.schema_lineage.missing_node_classes.clone(),
+                    legacy_frontend_unknown,
+                ));
+            }
             let workflow_format_version = initial
                 .workflow_format_version
                 .as_deref()
                 .ok_or_else(|| {
-                    "WORKFLOW_FORMAT_VERSION_UNKNOWN: source UI workflow has no workflow format version provenance".to_owned()
+                    PendingNormalizationError::new(
+                        PendingNormalizationCode::WorkflowFormatVersionUnknown,
+                        "WORKFLOW_FORMAT_VERSION_UNKNOWN: source UI workflow has no workflow format version provenance",
+                    )
                 })?;
             let resolved_profile =
                 UiCompatibilityProfileResolver::resolve(UiCompatibilityResolutionInput {
@@ -2225,50 +2419,53 @@ impl WorkflowOnboardingService {
                     .primary_diagnostic()
                     .unwrap_or("historical_serialization_fingerprint_unknown");
                 let code = match diagnostic {
-                    "frontend_provenance_insufficient" => "FRONTEND_VERSION_UNKNOWN",
+                    "frontend_provenance_insufficient" => {
+                        PendingNormalizationCode::FrontendVersionUnknown
+                    }
                     "historical_profile_detected_but_not_implemented" => {
-                        "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
+                        PendingNormalizationCode::HistoricalProfileDetectedButNotImplemented
                     }
                     "object_info_schema_lineage_mismatch"
-                    | "object_info_schema_provenance_mismatch" => {
-                        // Preserve the existing pending-draft diagnostic for a source that has
-                        // neither frontend provenance nor a usable node-class lineage.  This
-                        // does not make the profile supported; it only keeps the actionable
-                        // pre-existing error for malformed/incomplete UI imports.
-                        if initial.frontend_version.is_none()
-                            && fingerprint.positional_widget_cursor_gap
-                            && !fingerprint.dynamic_input_evidence
-                            && !fingerprint.schema_lineage.missing_node_classes.is_empty()
-                        {
-                            "FRONTEND_VERSION_UNKNOWN"
-                        } else {
-                            "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
-                        }
+                    | "object_info_schema_provenance_mismatch"
+                    | "schema_snapshot_provenance_insufficient" => {
+                        PendingNormalizationCode::ObjectInfoSchemaProvenanceMismatch
                     }
-                    "object_info_schema_lineage_drift" => "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT",
-                    "schema_snapshot_provenance_insufficient" => {
-                        "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
+                    "object_info_schema_lineage_drift" => {
+                        PendingNormalizationCode::ObjectInfoSchemaLineageDrift
                     }
-                    "serialization_evidence_partial" => "SERIALIZATION_EVIDENCE_PARTIAL",
-                    "provenance_fingerprint_conflict" => "PROVENANCE_FINGERPRINT_CONFLICT",
-                    _ => "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN",
+                    "serialization_evidence_partial" => {
+                        PendingNormalizationCode::SerializationEvidencePartial
+                    }
+                    "provenance_fingerprint_conflict" => {
+                        PendingNormalizationCode::ProvenanceFingerprintConflict
+                    }
+                    _ => PendingNormalizationCode::HistoricalSerializationFingerprintUnknown,
                 };
-                return Err(format!(
-                    "{code}: contracts=[{}] serialization_evidence={} schema_provenance={} ({})",
-                    resolved_profile
-                        .required_contracts
-                        .iter()
-                        .map(|contract| contract.as_str())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                    resolved_profile.serialization_evidence_status.as_str(),
-                    resolved_profile.schema_provenance.as_str(),
-                    diagnostic
+                return Err(PendingNormalizationError::new(
+                    code,
+                    format!(
+                        "{}: contracts=[{}] serialization_evidence={} schema_provenance={} ({})",
+                        code.as_str(),
+                        resolved_profile
+                            .required_contracts
+                            .iter()
+                            .map(|contract| contract.as_str())
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        resolved_profile.serialization_evidence_status.as_str(),
+                        resolved_profile.schema_provenance.as_str(),
+                        diagnostic
+                    ),
                 ));
             }
             let normalization_contracts = resolved_profile
                 .contracts_for_normalization()
-                .ok_or_else(|| "SERIALIZATION_EVIDENCE_NOT_RESOLVED".to_owned())?;
+                .ok_or_else(|| {
+                    PendingNormalizationError::new(
+                        PendingNormalizationCode::NormalizationBlocked,
+                        "SERIALIZATION_EVIDENCE_NOT_RESOLVED",
+                    )
+                })?;
             let is_historical = resolved_profile.serialization_evidence_status
                 == SerializationEvidenceStatus::ResolvedHistorical;
             let compatibility = if is_historical {
@@ -2283,31 +2480,31 @@ impl WorkflowOnboardingService {
                     resolved_profile.evidence.frontend_version.as_deref(),
                     schema_fingerprint,
                 )
-                .map_err(|error| error.to_string())?
+                .map_err(|error| lower(&error))?
             };
             let profile = FrontendSerializationProfile::from_contracts_from_context(
                 &compatibility,
                 normalization_contracts,
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| lower(&error))?;
             let descriptors =
                 UiSerializationDescriptorSet::build(&schema, profile, compatibility.clone())
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| lower(&error))?;
             let ui_document = parse_ui_workflow_value_with_descriptors(&source_value, &descriptors)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| lower(&error))?;
             let feature_set = ui_document.features.with_schema(&ui_document, &descriptors);
             normalized_features = Some(feature_set.observations.clone());
             if let Some(observation) = feature_set.blocking_observation() {
                 feature_block = Some(observation.clone());
-                return Err(format!(
-                    "UNSUPPORTED_UI_FEATURE:{}",
-                    observation.feature.as_str()
+                return Err(PendingNormalizationError::new(
+                    PendingNormalizationCode::UnsupportedUiFeature,
+                    format!("UNSUPPORTED_UI_FEATURE:{}", observation.feature.as_str()),
                 ));
             }
-            let normalized = normalize_ui_workflow(&ui_document, &descriptors)
-                .map_err(|error| error.to_string())?;
+            let normalized =
+                normalize_ui_workflow(&ui_document, &descriptors).map_err(|error| lower(&error))?;
             let mut nodes =
-                inspect_workflow(&normalized.workflow).map_err(|error| error.to_string())?;
+                inspect_workflow(&normalized.workflow).map_err(|error| lower(&error))?;
             enrich_nodes_with_schema(&mut nodes, &schema);
             let output_roots = output_root_selections_from_mappings(&initial.output_mappings);
             let analysis = WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
@@ -2354,36 +2551,58 @@ impl WorkflowOnboardingService {
                         CapabilityState::IncompatibleInputValues,
                     );
                 }
-                let code = match error.split(':').next().unwrap_or_default() {
-                    "UNKNOWN_NODE_CLASS" => "MISSING_NODES",
-                    "WORKFLOW_FORMAT_VERSION_UNKNOWN" => "WORKFLOW_FORMAT_VERSION_UNKNOWN",
-                    "FRONTEND_VERSION_UNKNOWN" => "FRONTEND_VERSION_UNKNOWN",
-                    "FRONTEND_VERSION_UNSUPPORTED" => "FRONTEND_VERSION_UNSUPPORTED",
-                    "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED" => {
-                        "HISTORICAL_PROFILE_DETECTED_BUT_NOT_IMPLEMENTED"
+                if error.code == PendingNormalizationCode::MissingNodes
+                    && error.missing_classes.is_empty()
+                {
+                    return pending(
+                        vec![WorkflowNormalizationDiagnosticView::basic(
+                            error.code.as_str(),
+                            error.message,
+                        )],
+                        CapabilityState::MissingNodes,
+                    );
+                }
+                if error.code == PendingNormalizationCode::MissingNodes {
+                    let node_ids_by_class = ui_node_ids_by_class(&initial.raw_bytes);
+                    let mut diagnostics = Vec::new();
+                    let mut issues = Vec::new();
+                    for class_type in &error.missing_classes {
+                        let node_ids = node_ids_by_class
+                            .get(class_type)
+                            .cloned()
+                            .unwrap_or_default();
+                        let message = format!("缺少 ComfyUI 节点类型：{class_type}");
+                        let mut diagnostic =
+                            WorkflowNormalizationDiagnosticView::basic("MISSING_NODE", &message);
+                        diagnostic.node_type = Some(class_type.clone());
+                        diagnostic.node_id = node_ids.first().cloned();
+                        diagnostics.push(diagnostic);
+                        issues.push(CapabilityIssueView {
+                            code: "MISSING_NODE".to_owned(),
+                            class_type: Some(class_type.clone()),
+                            node_id: None,
+                            affected_node_ids: node_ids,
+                            input_name: None,
+                            current_value: None,
+                            message: format!("Missing ComfyUI node class {class_type}"),
+                        });
                     }
-                    "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT" => "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT",
-                    "SERIALIZATION_EVIDENCE_PARTIAL" => "SERIALIZATION_EVIDENCE_PARTIAL",
-                    "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH" => {
-                        "OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"
+                    if error.legacy_frontend_unknown {
+                        // Keep the pre-existing actionable provenance hint for
+                        // UI sources without frontend provenance.
+                        diagnostics.push(WorkflowNormalizationDiagnosticView::basic(
+                            PendingNormalizationCode::FrontendVersionUnknown.as_str(),
+                            error.message.clone(),
+                        ));
                     }
-                    "PROVENANCE_FINGERPRINT_CONFLICT" => "PROVENANCE_FINGERPRINT_CONFLICT",
-                    "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN" => {
-                        "HISTORICAL_SERIALIZATION_FINGERPRINT_UNKNOWN"
-                    }
-                    "UNSUPPORTED_NORMALIZATION_COMPATIBILITY" => {
-                        "UNSUPPORTED_NORMALIZATION_COMPATIBILITY"
-                    }
-                    "SCHEMA_EMPTY" => "SCHEMA_UNAVAILABLE",
-                    _ => "NORMALIZATION_BLOCKED",
-                };
+                    return pending_with_issues(diagnostics, CapabilityState::MissingNodes, issues);
+                }
                 pending(
-                    vec![WorkflowNormalizationDiagnosticView::basic(code, error)],
-                    if code == "MISSING_NODES" {
-                        CapabilityState::MissingNodes
-                    } else {
-                        CapabilityState::IncompatibleInputValues
-                    },
+                    vec![WorkflowNormalizationDiagnosticView::basic(
+                        error.code.as_str(),
+                        error.message,
+                    )],
+                    CapabilityState::IncompatibleInputValues,
                 )
             }
         }
@@ -3059,6 +3278,9 @@ impl WorkflowOnboardingService {
                 target_node: request.target_node,
                 target_input: request.target_input,
                 item_index: request.item_index,
+                seed_mode: (field_type == SemanticFieldType::Seed)
+                    .then_some(request.seed_mode)
+                    .flatten(),
                 source,
             };
             draft.input_mappings.retain(|existing| {
@@ -3359,7 +3581,7 @@ impl WorkflowOnboardingService {
         {
             return Ok(published);
         }
-        let published = self.publish_internal(draft_id, false).await?;
+        let published = self.publish_internal(draft_id, false, true).await?;
         self.with_registry(|registry| {
             registry.cache_commit(&request, published.clone());
             Ok(())
@@ -3371,13 +3593,14 @@ impl WorkflowOnboardingService {
         &self,
         draft_id: &str,
     ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
-        self.publish_internal(draft_id, true).await
+        self.publish_internal(draft_id, true, true).await
     }
 
     async fn publish_internal(
         &self,
         draft_id: &str,
         allow_unready_capability: bool,
+        disable_unready_version: bool,
     ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
         // Always recheck the live capability before publishing. A previous
         // READY result is only a snapshot and cannot authorize a stale draft.
@@ -3410,6 +3633,20 @@ impl WorkflowOnboardingService {
             return Err(WorkflowOnboardingError::new(
                 "WORKFLOW_REQUIRED_INPUT_MAPPING_UNRESOLVED",
                 "confirm the ambiguous primary input before saving",
+            ));
+        }
+        // W-07: manual publish uses the same structural gate as auto-publish.
+        // Broken links cannot be resolved by a mapping choice.
+        if let Some(issue) = draft.analysis.as_ref().and_then(|analysis| {
+            analysis
+                .issues
+                .iter()
+                .find(|issue| is_structural_link_issue(&issue.code))
+                .cloned()
+        }) {
+            return Err(WorkflowOnboardingError::new(
+                "WORKFLOW_LINK_INVALID",
+                format!("{}: {}", issue.code, issue.message),
             ));
         }
 
@@ -3561,7 +3798,12 @@ impl WorkflowOnboardingService {
             (None, draft.recipe_id.clone())
         };
 
-        if allow_unready_capability && draft.capability.state != CapabilityState::Ready {
+        // A repair republishes an already-registered workflow version; it must
+        // not disable that version just because ComfyUI is offline at startup.
+        if allow_unready_capability
+            && disable_unready_version
+            && draft.capability.state != CapabilityState::Ready
+        {
             if let (Some(runtime_repository), Some(state_repository)) =
                 (&self.runtime_repository, &self.state_repository)
             {
@@ -3712,6 +3954,7 @@ impl WorkflowOnboardingService {
                             target_node: binding.target.node.clone(),
                             target_input: binding.target.input.clone(),
                             item_index: binding.item_index,
+                            seed_mode: recipe.inputs.get(&binding.source).and_then(input_seed_mode),
                         })
                         .collect(),
                     recipe.outputs.iter().map(output_view).collect(),
@@ -4501,11 +4744,27 @@ fn analysis_input_mapping(
     let field_type = SemanticFieldType::parse(&input.field_type).ok()?;
     let default_value = match field_type {
         SemanticFieldType::Textarea | SemanticFieldType::Integer | SemanticFieldType::Number => {
-            input.value.as_ref().map(current_value_summary)
+            input.value.as_ref().and_then(raw_default_value)
         }
-        SemanticFieldType::Seed => Some("random".to_owned()),
+        // W-22: the literal integer seed from the workflow becomes the
+        // default; the mode decides whether it is used as-is or replaced by
+        // a random seed per run.
+        SemanticFieldType::Seed => input
+            .value
+            .as_ref()
+            .and_then(Value::as_u64)
+            .map(|value| value.to_string()),
         _ => None,
     };
+    let seed_mode = (field_type == SemanticFieldType::Seed).then(|| {
+        if default_value.is_some()
+            && ui_seed_control_is_fixed(draft, &input.node_id, input.value.as_ref())
+        {
+            SeedMode::Fixed
+        } else {
+            SeedMode::Random
+        }
+    });
     let (min_value, max_value, step) = match field_type {
         SemanticFieldType::Integer => (
             node_input
@@ -4557,8 +4816,86 @@ fn analysis_input_mapping(
         target_node: input.node_id.clone(),
         target_input: input.input_name.clone(),
         item_index: input.item_index,
+        seed_mode,
         source: InputMappingSource::ModelInferred,
     })
+}
+
+/// W-22: inspect the UI-format source for the seed widget's
+/// `control_after_generate` value. Only an explicit `fixed` control next to
+/// the literal seed counts as fixed; API-format workflows carry no control
+/// widget and therefore stay random.
+fn ui_seed_control_is_fixed(
+    draft: &WorkflowOnboardingDraft,
+    node_id: &str,
+    seed_value: Option<&Value>,
+) -> bool {
+    if draft.source_format == ComfyWorkflowInputFormat::Api {
+        return false;
+    }
+    let Some(seed) = seed_value.and_then(Value::as_u64) else {
+        return false;
+    };
+    let Ok(document) = serde_json::from_slice::<Value>(&draft.raw_bytes) else {
+        return false;
+    };
+    ui_seed_control_in_nodes(&document, node_id, seed).unwrap_or(false)
+}
+
+fn ui_seed_control_in_nodes(document: &Value, node_id: &str, seed: u64) -> Option<bool> {
+    // Subgraph-expanded API ids look like "outer:inner"; the widget lives on
+    // the innermost node id.
+    let local_id = node_id.rsplit(':').next().unwrap_or(node_id);
+    let mut node_lists = vec![document.get("nodes")?];
+    if let Some(subgraphs) = document
+        .get("definitions")
+        .and_then(|value| value.get("subgraphs"))
+        .and_then(Value::as_array)
+    {
+        node_lists.extend(subgraphs.iter().filter_map(|graph| graph.get("nodes")));
+    }
+    for nodes in node_lists {
+        let Some(nodes) = nodes.as_array() else {
+            continue;
+        };
+        for node in nodes {
+            let id = match node.get("id") {
+                Some(Value::Number(number)) => number.to_string(),
+                Some(Value::String(text)) => text.clone(),
+                _ => continue,
+            };
+            if id != local_id {
+                continue;
+            }
+            match node.get("widgets_values") {
+                Some(Value::Array(values)) => {
+                    let found = values.windows(2).find_map(|pair| {
+                        (pair[0].as_u64() == Some(seed))
+                            .then(|| pair[1].as_str())
+                            .flatten()
+                            .filter(|control| {
+                                matches!(
+                                    *control,
+                                    "fixed" | "increment" | "decrement" | "randomize"
+                                )
+                            })
+                    });
+                    if let Some(control) = found {
+                        return Some(control == "fixed");
+                    }
+                }
+                Some(Value::Object(values)) => {
+                    if let Some(control) =
+                        values.get("control_after_generate").and_then(Value::as_str)
+                    {
+                        return Some(control == "fixed");
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 fn normalize_inferred_plural_bounds(mappings: &mut [InputMapping]) {
@@ -4817,6 +5154,13 @@ fn view_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingDraftVie
     }
 }
 
+fn is_structural_link_issue(code: &str) -> bool {
+    matches!(
+        code,
+        "WORKFLOW_LINK_SLOT_OUT_OF_RANGE" | "WORKFLOW_LINK_TYPE_MISMATCH"
+    )
+}
+
 fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingValidationView {
     if draft.normalized_api.is_none() {
         let mut issues = draft
@@ -4904,6 +5248,18 @@ fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingVa
         ) {
             mapping_bounds_valid = false;
             issues.push(error.to_string());
+        }
+        // W-07 type guard: free text must never be written into a COMBO
+        // input (checkpoint names, sampler names, ...). ComfyUI would reject
+        // the prompt value at execution time.
+        if mapping.field_type == SemanticFieldType::Textarea
+            && input.is_some_and(|input| !input.allowed_options.is_empty())
+        {
+            mapping_bounds_valid = false;
+            issues.push(format!(
+                "INPUT_MAPPING_TYPE_MISMATCH: text field {} cannot target combo input {}.{}",
+                mapping.semantic_key, mapping.target_node, mapping.target_input
+            ));
         }
     }
     let dry_run = recipe_result
@@ -5030,9 +5386,16 @@ impl InputMapping {
             }),
             SemanticFieldType::Seed => Ok(InputDefinition::Seed {
                 label: self.label.clone(),
-                default: match default.as_deref() {
-                    None | Some("") | Some("random") => SeedDefault::Random,
-                    Some(value) => SeedDefault::Fixed(value.parse().map_err(|_| {
+                default: match (self.seed_mode, default.as_deref()) {
+                    (Some(SeedMode::Random), _) => SeedDefault::Random,
+                    (Some(SeedMode::Fixed), None | Some("") | Some("random")) => {
+                        return Err(WorkflowOnboardingError::new(
+                            "MAPPING_INVALID",
+                            "fixed seed mode requires an unsigned integer default",
+                        ));
+                    }
+                    (None, None | Some("") | Some("random")) => SeedDefault::Random,
+                    (_, Some(value)) => SeedDefault::Fixed(value.parse().map_err(|_| {
                         WorkflowOnboardingError::new(
                             "MAPPING_INVALID",
                             format!("seed default {value} is not an unsigned integer"),
@@ -5324,6 +5687,7 @@ fn input_mapping_view(mapping: &InputMapping) -> WorkflowInputMappingView {
         target_node: mapping.target_node.clone(),
         target_input: mapping.target_input.clone(),
         item_index: mapping.item_index,
+        seed_mode: mapping.seed_mode,
     }
 }
 
@@ -5381,6 +5745,7 @@ fn input_mappings_from_recipe(
                 max_items: input_max_items(definition),
                 target_node: binding.target.node.clone(),
                 target_input: binding.target.input.clone(),
+                seed_mode: input_seed_mode(definition),
                 item_index: binding.item_index,
                 source: InputMappingSource::ReusedRecipe,
             })
@@ -5410,6 +5775,16 @@ fn input_required(definition: &InputDefinition) -> bool {
         | InputDefinition::Videos { required, .. }
         | InputDefinition::Audios { required, .. } => *required,
         InputDefinition::Seed { .. } => true,
+    }
+}
+
+fn input_seed_mode(definition: &InputDefinition) -> Option<SeedMode> {
+    match definition {
+        InputDefinition::Seed { default, .. } => Some(match default {
+            SeedDefault::Random => SeedMode::Random,
+            SeedDefault::Fixed(_) => SeedMode::Fixed,
+        }),
+        _ => None,
     }
 }
 
@@ -6295,6 +6670,22 @@ fn value_kind(value: &Value, linked: bool) -> &'static str {
         "object"
     } else {
         "null"
+    }
+}
+
+/// W-01: recipe defaults keep the workflow's literal value verbatim. The
+/// display summary (`current_value_summary`) trims, truncates to 120 chars and
+/// strips path-like prefixes, which silently corrupted long prompts. Links are
+/// never defaults.
+fn raw_default_value(value: &Value) -> Option<String> {
+    if possible_link(value).is_some() {
+        return None;
+    }
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
     }
 }
 
@@ -7479,6 +7870,7 @@ outputs: []
             allowed_options: Vec::new(),
         };
         let request = WorkflowOnboardingInputMappingRequest {
+            seed_mode: None,
             semantic_key: "steps".to_owned(),
             field_type: "integer".to_owned(),
             label: "Steps".to_owned(),
@@ -7652,6 +8044,7 @@ outputs: []
             .set_input_mapping(
                 &draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "unrelated_media".to_owned(),
                     field_type: "image".to_owned(),
                     label: "Reference image".to_owned(),
@@ -7673,6 +8066,7 @@ outputs: []
             .set_input_mapping(
                 &draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "output_prefix".to_owned(),
                     field_type: "textarea".to_owned(),
                     label: "Output prefix".to_owned(),
@@ -7694,6 +8088,7 @@ outputs: []
             .set_input_mapping(
                 &draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "prompt".to_owned(),
                     field_type: "textarea".to_owned(),
                     label: "Prompt".to_owned(),
@@ -8006,6 +8401,7 @@ outputs: []
             .set_input_mapping(
                 &changed_draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "prompt".to_owned(),
                     field_type: "textarea".to_owned(),
                     label: "Prompt".to_owned(),
@@ -8183,6 +8579,7 @@ outputs: []
             .set_input_mapping(
                 &ambiguous.draft_id,
                 WorkflowOnboardingInputMappingRequest {
+                    seed_mode: None,
                     semantic_key: "image".to_owned(),
                     field_type: "image".to_owned(),
                     label: "Input image".to_owned(),
@@ -9218,6 +9615,7 @@ outputs: []
             .any(|issue| issue.code == "AMBIGUOUS_INPUT"));
 
         let mapping = |target_input: &str| WorkflowOnboardingInputMappingRequest {
+            seed_mode: None,
             semantic_key: "prompt".to_owned(),
             field_type: "textarea".to_owned(),
             label: "Prompt".to_owned(),
@@ -9436,6 +9834,7 @@ outputs: []
                     target_node: "1".to_owned(),
                     target_input: "prompt".to_owned(),
                     item_index: None,
+                    seed_mode: None,
                     source: InputMappingSource::ModelInferred,
                 },
                 InputMapping {
@@ -9452,6 +9851,7 @@ outputs: []
                     target_node: "1".to_owned(),
                     target_input: "seed".to_owned(),
                     item_index: None,
+                    seed_mode: None,
                     source: InputMappingSource::ModelInferred,
                 },
             ],
@@ -9649,6 +10049,187 @@ outputs: []
         }
     }
 
+    #[test]
+    fn w01_default_keeps_long_prompt_verbatim() {
+        let long_prompt = format!("  /leading slash kept {}  ", "cinematic light, ".repeat(20));
+        assert!(long_prompt.chars().count() > 120);
+        assert_eq!(
+            raw_default_value(&json!(long_prompt)).as_deref(),
+            Some(long_prompt.as_str())
+        );
+        assert_eq!(raw_default_value(&json!(8)).as_deref(), Some("8"));
+        assert_eq!(raw_default_value(&json!(0.75)).as_deref(), Some("0.75"));
+        assert_eq!(raw_default_value(&json!(["3", 0])), None);
+
+        let draft = test_draft(json!({
+            "1": {"inputs": {"prompt": long_prompt, "seed": 7, "steps": 30}, "class_type": "ImageSampler"},
+            "2": {"inputs": {"images": ["1", 0]}, "class_type": "SaveImage"}
+        }));
+        let result = infer_auto_onboarding(&draft);
+        let prompt = result
+            .input_mappings
+            .iter()
+            .find(|mapping| mapping.semantic_key == "prompt")
+            .expect("prompt mapping");
+        assert_eq!(prompt.default_value.as_deref(), Some(long_prompt.as_str()));
+    }
+
+    #[test]
+    fn w07_textarea_mapping_on_combo_input_blocks_publish() {
+        let mut draft = test_draft(json!({
+            "1": {"inputs": {"ckpt_name": "a.safetensors", "prompt": "x"}, "class_type": "ImageSampler"},
+            "2": {"inputs": {"images": ["1", 0]}, "class_type": "SaveImage"}
+        }));
+        for node in draft.nodes.iter_mut().filter(|node| node.node_id == "1") {
+            for input in node
+                .inputs
+                .iter_mut()
+                .filter(|input| input.name == "ckpt_name")
+            {
+                input.allowed_options = vec!["a.safetensors".to_owned()];
+            }
+        }
+        draft.input_mappings = vec![InputMapping {
+            semantic_key: "prompt".to_owned(),
+            field_type: SemanticFieldType::Textarea,
+            label: "Prompt".to_owned(),
+            required: true,
+            default_value: Some("a.safetensors".to_owned()),
+            min_value: None,
+            max_value: None,
+            step: None,
+            min_items: None,
+            max_items: None,
+            target_node: "1".to_owned(),
+            target_input: "ckpt_name".to_owned(),
+            item_index: None,
+            seed_mode: None,
+            source: InputMappingSource::UserConfirmed,
+        }];
+        let validation = validation_for_draft(&draft);
+        assert!(!validation.ready_to_publish);
+        assert!(!importable_validation(&validation));
+        assert!(validation
+            .issues
+            .iter()
+            .any(|issue| issue.starts_with("INPUT_MAPPING_TYPE_MISMATCH")));
+    }
+
+    #[test]
+    fn w07_structural_link_issues_are_recognized() {
+        assert!(is_structural_link_issue("WORKFLOW_LINK_SLOT_OUT_OF_RANGE"));
+        assert!(is_structural_link_issue("WORKFLOW_LINK_TYPE_MISMATCH"));
+        assert!(!is_structural_link_issue("AMBIGUOUS_INPUT"));
+    }
+
+    #[test]
+    fn r09_pending_error_message_with_colon_keeps_code() {
+        let error = PendingNormalizationError::from_lower_layer(
+            "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT: node 7: widget `a:b` drifted".to_owned(),
+        );
+        assert_eq!(
+            error.code,
+            PendingNormalizationCode::ObjectInfoSchemaLineageDrift
+        );
+        assert_eq!(error.code.as_str(), "OBJECT_INFO_SCHEMA_LINEAGE_DRIFT");
+        assert!(error.message.contains("widget `a:b` drifted"));
+
+        let unknown = PendingNormalizationError::from_lower_layer("no code here".to_owned());
+        assert_eq!(unknown.code, PendingNormalizationCode::NormalizationBlocked);
+        let schema = PendingNormalizationError::from_lower_layer("SCHEMA_EMPTY".to_owned());
+        assert_eq!(schema.code.as_str(), "SCHEMA_UNAVAILABLE");
+    }
+
+    #[test]
+    fn r09_missing_nodes_error_carries_classes() {
+        let error = PendingNormalizationError::missing_nodes(
+            vec!["BlendCustom".to_owned(), "Other:Node".to_owned()],
+            false,
+        );
+        assert_eq!(error.code, PendingNormalizationCode::MissingNodes);
+        assert_eq!(error.missing_classes, vec!["BlendCustom", "Other:Node"]);
+    }
+
+    #[test]
+    fn r02_ui_node_ids_by_class_includes_subgraph_nodes() {
+        let raw = serde_json::to_vec(&json!({
+            "nodes": [{"id": 3, "type": "BlendCustom"}, {"id": "4", "type": "SaveImage"}],
+            "definitions": {"subgraphs": [{"nodes": [{"id": 9, "type": "BlendCustom"}]}]}
+        }))
+        .unwrap();
+        let by_class = ui_node_ids_by_class(&raw);
+        assert_eq!(by_class["BlendCustom"], vec!["3", "9"]);
+        assert_eq!(by_class["SaveImage"], vec!["4"]);
+    }
+
+    #[tokio::test]
+    async fn r02_ui_workflow_missing_custom_node_reports_missing_node() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("library");
+        let staging_root = directory.path().join("staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let service = WorkflowOnboardingService::new(
+            source.clone(),
+            Arc::new(StubComfyAdapter::ready()),
+            Arc::new(WorkflowLibraryService::new(
+                source,
+                Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+                Arc::new(TestClock),
+            )),
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root,
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        );
+        let raw = serde_json::to_vec(&json!({
+            "version": 0.4,
+            "extra": {"frontendVersion": "1.42.14"},
+            "nodes": [
+                {"id": 1, "type": "Sampler", "mode": 0, "inputs": [], "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [1]}], "widgets_values": ["a cat"]},
+                {"id": 2, "type": "BlendCustomNode", "mode": 0, "inputs": [{"name": "image", "type": "IMAGE", "link": 1}], "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [2]}], "widgets_values": [0.5]},
+                {"id": 3, "type": "SaveImage", "mode": 0, "inputs": [{"name": "images", "type": "IMAGE", "link": 2}], "outputs": [], "widgets_values": ["out"]}
+            ],
+            "links": [[1, 1, 0, 2, 0, "IMAGE"], [2, 2, 0, 3, 0, "IMAGE"]]
+        }))
+        .unwrap();
+        let imported = service
+            .import_bytes(raw, "missing-custom.json".to_owned(), None)
+            .await
+            .expect("UI workflow with a missing custom node should remain a draft");
+        let plan = service.reanalyze_draft(&imported.draft_id).await.unwrap();
+        assert_eq!(
+            plan.normalization_state,
+            WorkflowNormalizationState::UiSourcePending
+        );
+        let codes = plan
+            .normalization_diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            !codes.contains(&"OBJECT_INFO_SCHEMA_PROVENANCE_MISMATCH"),
+            "missing nodes must not be reported as a provenance mismatch: {codes:?}"
+        );
+        let missing = plan
+            .normalization_diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "MISSING_NODE")
+            .expect("a MISSING_NODE diagnostic per missing class");
+        assert_eq!(missing.node_type.as_deref(), Some("BlendCustomNode"));
+        assert_eq!(missing.node_id.as_deref(), Some("2"));
+        assert_eq!(plan.capability.state, CapabilityState::MissingNodes);
+        assert!(plan.capability.issues.iter().any(|issue| {
+            issue.code == "MISSING_NODE"
+                && issue.class_type.as_deref() == Some("BlendCustomNode")
+                && issue.affected_node_ids == vec!["2".to_owned()]
+        }));
+    }
+
     impl StubComfyAdapter {
         fn ready() -> Self {
             Self {
@@ -9749,4 +10330,104 @@ outputs: []
             Err(ComfyAdapterError::Incompatible("test".to_owned()))
         }
     }
+
+    fn w22_seed_draft(ui_control: Option<&str>) -> WorkflowOnboardingDraft {
+        let mut draft = test_draft(json!({
+            "3": {"inputs": {"seed": 424242, "steps": 20}, "class_type": "KSampler"}
+        }));
+        if let Some(control) = ui_control {
+            draft.source_format = ComfyWorkflowInputFormat::Ui;
+            draft.raw_bytes = serde_json::to_vec(&json!({
+                "nodes": [{"id": 3, "type": "KSampler", "widgets_values": [424242, control, 20, 7, "euler", "normal", 1]}],
+                "links": []
+            }))
+            .unwrap();
+        }
+        draft
+    }
+
+    fn w22_seed_input() -> crate::application::workflow_analysis_service::WorkflowAnalysisInput {
+        crate::application::workflow_analysis_service::WorkflowAnalysisInput {
+            semantic_key: "seed".to_owned(),
+            field_type: "seed".to_owned(),
+            label: "Seed".to_owned(),
+            required: false,
+            value: Some(json!(424242)),
+            node_id: "3".to_owned(),
+            input_name: "seed".to_owned(),
+            item_index: None,
+            confidence:
+                crate::application::workflow_recognition_service::RecognitionConfidence::High,
+            source: "test".to_owned(),
+            score: 100,
+            evidence: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn w22_seed_default_uses_literal_when_fixed() {
+        let draft = w22_seed_draft(Some("fixed"));
+        let mapping = analysis_input_mapping(&draft, &w22_seed_input()).unwrap();
+        assert_eq!(mapping.default_value.as_deref(), Some("424242"));
+        assert_eq!(mapping.seed_mode, Some(SeedMode::Fixed));
+        match mapping.to_definition().unwrap() {
+            InputDefinition::Seed { default, .. } => {
+                assert_eq!(default, SeedDefault::Fixed(424242))
+            }
+            other => panic!("unexpected definition {other:?}"),
+        }
+        let view = serde_json::to_value(input_mapping_view(&mapping)).unwrap();
+        assert_eq!(view["seedMode"], "fixed");
+        assert_eq!(view["defaultValue"], "424242");
+    }
+
+    #[test]
+    fn w22_seed_default_random_when_control_randomizes_or_api_format() {
+        for draft in [w22_seed_draft(Some("randomize")), w22_seed_draft(None)] {
+            let mapping = analysis_input_mapping(&draft, &w22_seed_input()).unwrap();
+            assert_eq!(mapping.default_value.as_deref(), Some("424242"));
+            assert_eq!(mapping.seed_mode, Some(SeedMode::Random));
+            match mapping.to_definition().unwrap() {
+                InputDefinition::Seed { default, .. } => assert_eq!(default, SeedDefault::Random),
+                other => panic!("unexpected definition {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn w22_missing_seed_mode_keeps_legacy_default_semantics() {
+        let draft = w22_seed_draft(None);
+        let mut mapping = analysis_input_mapping(&draft, &w22_seed_input()).unwrap();
+        mapping.seed_mode = None;
+        assert!(matches!(
+            mapping.to_definition().unwrap(),
+            InputDefinition::Seed {
+                default: SeedDefault::Fixed(424242),
+                ..
+            }
+        ));
+        mapping.default_value = Some("random".to_owned());
+        assert!(matches!(
+            mapping.to_definition().unwrap(),
+            InputDefinition::Seed {
+                default: SeedDefault::Random,
+                ..
+            }
+        ));
+        mapping.seed_mode = Some(SeedMode::Fixed);
+        assert_eq!(
+            mapping.to_definition().unwrap_err().code(),
+            "MAPPING_INVALID"
+        );
+        let request: WorkflowOnboardingInputMappingRequest = serde_json::from_value(json!({
+            "semanticKey": "seed", "fieldType": "seed", "label": "Seed",
+            "targetNode": "3", "targetInput": "seed", "seedMode": "random"
+        }))
+        .unwrap();
+        assert_eq!(request.seed_mode, Some(SeedMode::Random));
+    }
 }
+
+#[path = "workflow_onboarding_recipe_repair.rs"]
+mod recipe_repair;
+pub use recipe_repair::{RecipeRepairCandidate, RecipeRepairKind, RecipeRepairOutcome};

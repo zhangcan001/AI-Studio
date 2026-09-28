@@ -8,6 +8,7 @@ import type {
   SemanticCapabilityStatus,
   RuntimeImportStatus,
 } from "../../types/workflowOnboarding";
+import { evidenceKindLabel } from "../../i18n/statusLabels";
 
 export type WorkflowImportErrorKind = "UI_FORMAT" | "NOT_API_FORMAT" | "INVALID_JSON" | "UNKNOWN_FORMAT" | "IMPORT_FAILED";
 
@@ -239,6 +240,10 @@ function issueTitle(code: string): string {
       return "当前环境缺少节点";
     case "INPUT_OPTION_UNAVAILABLE":
       return "输入选项不可用";
+    case "WORKFLOW_LINK_SLOT_OUT_OF_RANGE":
+      return "连线引用了不存在的输出槽";
+    case "WORKFLOW_LINK_TYPE_MISMATCH":
+      return "连线类型不一致";
     case "AMBIGUOUS_OUTPUT":
       return "检测到多个输出节点";
     case "AMBIGUOUS_OUTPUT_ROOT":
@@ -348,8 +353,8 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
     ? rootResolution.roots
     : rootResolution?.state === "AMBIGUOUS" ? rootResolution.candidates : [];
   const evidenceSummary = [
-    ...(analysis?.inputs ?? []).flatMap((input) => (input.evidence ?? []).map((evidence) => `${evidence.kind} · ${input.semanticKey} · ${evidence.weight}`)),
-    ...(analysis?.outputs ?? []).flatMap((output) => (output.evidence ?? []).map((evidence) => `${evidence.kind} · ${output.outputId} · ${evidence.weight}`)),
+    ...(analysis?.inputs ?? []).flatMap((input) => (input.evidence ?? []).map((evidence) => `${evidenceKindLabel(evidence.kind)} · ${input.semanticKey} · ${evidence.weight}`)),
+    ...(analysis?.outputs ?? []).flatMap((output) => (output.evidence ?? []).map((evidence) => `${evidenceKindLabel(evidence.kind)} · ${output.outputId} · ${evidence.weight}`)),
   ].slice(0, 8);
   return (
     <section className="workflow-smart-issues" aria-label="工作流导入问题">
@@ -434,7 +439,7 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
                         {node && <small>节点名称 {node.title} · 节点类型 {node.classType}</small>}
                         {candidate.fieldType && <small>输入类型 {candidate.fieldType}</small>}
                         {candidate.reason && <small>候选依据 {candidate.reason}</small>}
-                        {candidate.evidence?.map((evidence, evidenceIndex) => <small key={`${evidence.kind}:${evidenceIndex}`}>{evidence.kind} · {evidence.reason} · 权重 {evidence.weight}</small>)}
+                        {candidate.evidence?.map((evidence, evidenceIndex) => <small key={`${evidence.kind}:${evidenceIndex}`}>{evidenceKindLabel(evidence.kind)} · {evidence.reason} · 权重 {evidence.weight}</small>)}
                       </label>;
                     })}
                   </fieldset>

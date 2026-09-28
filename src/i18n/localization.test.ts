@@ -57,6 +57,8 @@ describe("用户可见错误信息", () => {
   it("maps known backend error codes to Chinese", () => {
     expect(toUserMessage({ code: "COMFY_OFFLINE", message: "connection refused" })).toContain("ComfyUI");
     expect(errorMessageForCode("TASK_NOT_CANCELLABLE")).toBe("当前任务状态不支持取消。");
+    expect(errorMessageForCode("WORKFLOW_LINK_SLOT_OUT_OF_RANGE")).toContain("输出槽");
+    expect(errorMessageForCode("WORKFLOW_LINK_TYPE_MISMATCH")).toContain("类型不一致");
   });
 
   it("keeps runtime admission identity in the user-visible start error", () => {
@@ -114,4 +116,20 @@ describe("用户可见错误信息", () => {
     expect(formatted.technicalMessage).toContain("SECRET_RAW_ERROR");
   });
 
+});
+
+describe("evidenceKindLabel", () => {
+  it("renders a Chinese label and keeps the raw evidence code", async () => {
+    const { evidenceKindLabel } = await import("./statusLabels");
+    expect(evidenceKindLabel("GRAPH_OUTPUT_PATH")).toBe("位于输出路径（GRAPH_OUTPUT_PATH）");
+    expect(evidenceKindLabel("UNKNOWN_KIND")).toBe("UNKNOWN_KIND");
+  });
+});
+
+describe("frame_count field label (R-01)", () => {
+  it("labels frame counts as frames, not seconds", async () => {
+    const { fieldLabel } = await import("./statusLabels");
+    expect(fieldLabel("frame_count")).toBe("帧数");
+    expect(fieldLabel("duration_seconds")).toBe("时长（秒）");
+  });
 });

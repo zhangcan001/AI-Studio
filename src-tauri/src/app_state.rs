@@ -38,6 +38,7 @@ use crate::application::provenance_lineage_service::ProvenanceLineageService;
 use crate::application::recipe_history_query_service::RecipeHistoryQueryService;
 use crate::application::reference_anchor_service::ReferenceAnchorService;
 use crate::application::reference_set_service::ReferenceSetService;
+use crate::application::repair_jobs::RepairJobRunner;
 use crate::application::scene_production_service::SceneProductionService;
 use crate::application::series_production_service::SeriesProductionService;
 use crate::application::settings_service::SettingsService;
@@ -151,6 +152,7 @@ pub struct SystemServices {
     pub comfy_preflight: Arc<ComfyPreflightService>,
     pub diagnostics: Arc<DiagnosticsService>,
     pub settings: Arc<SettingsService>,
+    pub repair_jobs: Arc<RepairJobRunner>,
 }
 
 pub struct AppState {

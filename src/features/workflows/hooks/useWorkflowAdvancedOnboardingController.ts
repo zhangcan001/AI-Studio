@@ -26,6 +26,7 @@ import {
   optionalNumber,
   optionalText,
   type MappingDraft,
+  seedModeRequest,
 } from "../workflowParameterExposureModel";
 
 export interface OutputDraft {
@@ -210,6 +211,7 @@ export function useWorkflowAdvancedOnboardingController({
       label: mapping.label,
       required: mapping.required,
       defaultValue: optionalText(mapping.defaultValue),
+      seedMode: seedModeRequest(mapping),
       minValue: optionalText(mapping.minValue),
       maxValue: optionalText(mapping.maxValue),
       step: optionalText(mapping.step),

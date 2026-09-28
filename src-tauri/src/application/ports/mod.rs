@@ -33,6 +33,7 @@ pub mod provenance_lineage_repository;
 pub mod recipe_history_query_repository;
 pub mod reference_anchor_repository;
 pub mod reference_set_repository;
+pub mod repair_job_repository;
 pub mod repository_error;
 pub mod settings_store;
 pub mod shot_batch_repository;
@@ -130,6 +131,10 @@ pub use provenance_lineage_repository::ProvenanceLineageRepository;
 pub use recipe_history_query_repository::*;
 pub use reference_anchor_repository::{ReferenceAnchorRecord, ReferenceAnchorRepository};
 pub use reference_set_repository::ReferenceSetRepository;
+pub use repair_job_repository::{
+    RepairJobRecord, RepairJobRepository, REPAIR_JOB_COMPLETED, REPAIR_JOB_FAILED,
+    REPAIR_JOB_RUNNING, REPAIR_JOB_SKIPPED,
+};
 pub use repository_error::RepositoryError;
 pub use settings_store::{
     AppSettings, ComfyEnvironmentProfile, ComfySettings, LoadedSettings, RuntimeParameterProfile,

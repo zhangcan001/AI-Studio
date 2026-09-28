@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RecipeViewModel } from "../../types/generation";
 import {
+  batchPromptField,
   materializeWorkflowExecutionBatch,
   parseBatchPrompts,
 } from "./workflowExecutionBatch";
@@ -94,5 +95,44 @@ describe("workflow execution batch materialization", () => {
 
   it("parses non-empty prompt lines in order", () => {
     expect(parseBatchPrompts(" first \n\n second\n  ")).toEqual(["first", "second"]);
+  });
+
+  it("W-06: batch prompt lines never overwrite the negative prompt", () => {
+    const negativeFirst: RecipeViewModel = {
+      ...recipe,
+      fields: [
+        { key: "negative_prompt", type: "textarea", label: "Negative", required: false, default: "blurry" },
+        { key: "system_prompt", type: "textarea", label: "System", required: false, default: "sys" },
+        ...recipe.fields,
+      ],
+    };
+    expect(batchPromptField(negativeFirst)?.key).toBe("prompt");
+    const batch = materializeWorkflowExecutionBatch(
+      negativeFirst,
+      {
+        negative_prompt: { type: "string", value: "blurry" },
+        prompt: { type: "string", value: "base" },
+        seed: { type: "seed_fixed", value: "1" },
+      },
+      "first\nsecond",
+      1,
+      [],
+    );
+    expect(batch.errors).toEqual([]);
+    expect(batch.items.map(({ values }) => values.prompt)).toEqual([
+      { type: "string", value: "first" },
+      { type: "string", value: "second" },
+    ]);
+    expect(batch.items.every(({ values }) => (
+      values.negative_prompt?.type === "string" && values.negative_prompt.value === "blurry"
+    ))).toBe(true);
+  });
+
+  it("W-06: a recipe with only a negative prompt has no batch prompt field", () => {
+    const onlyNegative: RecipeViewModel = {
+      ...recipe,
+      fields: [{ key: "negative_prompt", type: "textarea", label: "Negative", required: false, default: "" }],
+    };
+    expect(batchPromptField(onlyNegative)).toBeUndefined();
   });
 });

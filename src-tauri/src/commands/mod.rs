@@ -29,6 +29,7 @@ pub mod prompt_library;
 pub mod provenance_lineage;
 pub mod recipe_history;
 pub mod reference_anchor;
+pub mod repair_jobs;
 pub mod scene_production;
 pub mod series_production;
 pub mod settings;

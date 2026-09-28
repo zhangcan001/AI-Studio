@@ -450,7 +450,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     clock.clone(),
                 )
                 .with_registry_repository(workflow_registry_repository)
-                .with_recipe_promotion_repository(workflow_recipe_promotion_repository)
+                .with_recipe_promotion_repository(workflow_recipe_promotion_repository.clone())
                 .with_recipe_runtime_state_repository(
                     workflow_recipe_runtime_state_repository.clone(),
                 )
@@ -933,6 +933,19 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     project_repository.clone(),
                 )));
             }
+            let repair_job_runner = Arc::new(application::repair_jobs::RepairJobRunner::new(
+                Arc::new(infrastructure::database::SqliteRepairJobRepository::new(
+                    database_pool.clone(),
+                )),
+                clock.clone(),
+                application::repair_jobs::recipe_jobs::RecipeRepairJob::all(
+                    workflow_onboarding_service.clone(),
+                    Some(workflow_recipe_promotion_repository.clone()),
+                    Some(project_workflow_binding_repository.clone()),
+                    clock.clone(),
+                ),
+            ));
+            let startup_repair_jobs = repair_job_runner.clone();
             let startup_recovery = task_recovery_service.clone();
             let startup_production_queue = production_queue_service.clone();
             app.manage(AppState::new(
@@ -1016,8 +1029,18 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     comfy_preflight: comfy_preflight_service,
                     diagnostics: diagnostics_service,
                     settings: settings_service,
+                    repair_jobs: repair_job_runner.clone(),
                 },
             ));
+
+            tauri::async_runtime::spawn(async move {
+                // Recipe repairs publish new immutable recipe versions; they run
+                // in the background and never block application startup.
+                let outcomes = startup_repair_jobs.run_pending().await;
+                if !outcomes.is_empty() {
+                    tracing::info!(jobs = outcomes.len(), "startup repair jobs finished");
+                }
+            });
 
             tauri::async_runtime::spawn(async move {
                 match startup_recovery.reconcile_active().await {
@@ -1137,6 +1160,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::diagnostics::runtime_activity_status,
             commands::diagnostics::diagnostics_summary,
             commands::diagnostics::diagnostics_export,
+            commands::repair_jobs::repair_jobs_status,
             commands::comfy::comfy_get_status,
             commands::comfy::comfy_refresh_capabilities,
             commands::comfy::comfy_get_settings,

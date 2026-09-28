@@ -49,10 +49,16 @@ const HIGH_CONFIDENCE_MIN_SCORE: i32 = 45;
 const MEDIUM_CONFIDENCE_MIN_SCORE: i32 = 25;
 const REQUIRED_SELECTION_MARGIN: i32 = 15;
 const AMBIGUITY_MARGIN: i32 = 12;
+const SCORE_GRAPH_CONDITIONING_ROLE: i32 = 60;
+const SCORE_PRIMITIVE_SOURCE_NODE: i32 = 20;
+const PENALTY_SYSTEM_PROMPT_HINT: i32 = -40;
+const SCORE_GRAPH_PRIMARY_SAMPLER: i32 = 40;
 
+// Variant names are already SCREAMING_SNAKE_CASE and serialize verbatim. A
+// `rename_all = "SCREAMING_SNAKE_CASE"` here would split every capital letter
+// (`GRAPH_OUTPUT_PATH` -> `G_R_A_P_H__O_U_T_P_U_T__P_A_T_H`).
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvidenceKind {
     EXPLICIT_OUTPUT_MAPPING,
     EXACT_INPUT_NAME,
@@ -74,6 +80,16 @@ pub enum EvidenceKind {
     TERMINAL_OUTPUT,
     PREVIEW_OUTPUT,
     AUXILIARY_OUTPUT,
+    /// The text leaf feeds exactly one sampler conditioning role
+    /// (positive/negative) that matches the candidate field.
+    GRAPH_CONDITIONING_ROLE,
+    /// The text leaf is a Primitive* node, the usual user-facing entry point.
+    PRIMITIVE_SOURCE_NODE,
+    /// The node title or input name marks the text as a system prompt.
+    SYSTEM_PROMPT_HINT,
+    /// The candidate belongs to the primary (first-pass) sampler of a
+    /// multi-sampler graph.
+    GRAPH_PRIMARY_SAMPLER,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -405,8 +421,17 @@ pub fn analyze_workflow_with_schema_and_output_roots(
         }
     }
 
+    let roles = sampler_conditioning_roles(workflow, &graph, schema);
+    apply_conditioning_roles(&mut candidates, &roles, schema.is_some());
+    if let Some(primary) = primary_sampler(workflow, &graph) {
+        apply_primary_sampler(&mut candidates, &primary, schema.is_some());
+    }
+
     let (inputs, _bindings, input_issues) = resolve_candidates(candidates);
     issues.extend(input_issues);
+    if let Some(schema) = schema {
+        issues.extend(validate_links_against_schema(workflow, schema));
+    }
     let category = if output_analysis.resolution.is_resolved() {
         category_for_outputs(&output_analysis.outputs)
     } else {
@@ -591,6 +616,10 @@ fn evidence_weight(kind: EvidenceKind) -> i32 {
         EvidenceKind::TERMINAL_OUTPUT => 25,
         EvidenceKind::PREVIEW_OUTPUT => -60,
         EvidenceKind::AUXILIARY_OUTPUT => -40,
+        EvidenceKind::GRAPH_CONDITIONING_ROLE => SCORE_GRAPH_CONDITIONING_ROLE,
+        EvidenceKind::PRIMITIVE_SOURCE_NODE => SCORE_PRIMITIVE_SOURCE_NODE,
+        EvidenceKind::SYSTEM_PROMPT_HINT => PENALTY_SYSTEM_PROMPT_HINT,
+        EvidenceKind::GRAPH_PRIMARY_SAMPLER => SCORE_GRAPH_PRIMARY_SAMPLER,
     }
 }
 
@@ -725,15 +754,16 @@ fn schema_literal_guess(
             return Some(schema_media_guess(media_kind, input.required));
         }
     }
+    // W-02: a prompt is free text. COMBO/Enum inputs (checkpoint names,
+    // sampler names, ...) are never prompt candidates.
     if value.is_string()
-        && matches!(
-            input.declared_type,
-            RecognitionDeclaredType::String | RecognitionDeclaredType::Enum
-        )
+        && input.declared_type == RecognitionDeclaredType::String
         && is_prompt_like_name(&name, &class)
     {
         return Some(Guess {
-            semantic_key: if name.contains("negative") {
+            semantic_key: if canonical_semantic_hint(&name)
+                .is_some_and(|hint| hint.semantic == CanonicalSemantic::NegativePrompt)
+            {
                 "negative_prompt"
             } else {
                 "prompt"
@@ -920,6 +950,9 @@ fn schema_linked_guess(
 }
 
 fn is_prompt_like_name(name: &str, class_type: &str) -> bool {
+    if is_system_prompt_name(name) || is_text_separator_input(name) {
+        return false;
+    }
     canonical_semantic_hint(name).is_some_and(|hint| {
         matches!(
             hint.semantic,
@@ -934,10 +967,8 @@ fn is_prompt_like_name(name: &str, class_type: &str) -> bool {
 
 fn declared_type_for_field(field_type: &str) -> &'static [RecognitionDeclaredType] {
     match field_type {
-        "textarea" => &[
-            RecognitionDeclaredType::String,
-            RecognitionDeclaredType::Enum,
-        ],
+        // W-02 type guard: COMBO/Enum values are never free text.
+        "textarea" => &[RecognitionDeclaredType::String],
         "integer" | "seed" => &[RecognitionDeclaredType::Integer],
         "number" => &[
             RecognitionDeclaredType::Integer,
@@ -1028,7 +1059,10 @@ fn compact_source(evidence: &[RecognitionEvidence]) -> String {
             EvidenceKind::EXACT_INPUT_NAME | EvidenceKind::INPUT_NAME_ALIAS => {
                 parts.insert("NAME");
             }
-            EvidenceKind::GRAPH_DIRECT_SINK | EvidenceKind::GRAPH_OUTPUT_PATH => {
+            EvidenceKind::GRAPH_DIRECT_SINK
+            | EvidenceKind::GRAPH_OUTPUT_PATH
+            | EvidenceKind::GRAPH_CONDITIONING_ROLE
+            | EvidenceKind::GRAPH_PRIMARY_SAMPLER => {
                 parts.insert("GRAPH");
             }
             EvidenceKind::SCHEMA_TYPE_MATCH
@@ -1040,7 +1074,10 @@ fn compact_source(evidence: &[RecognitionEvidence]) -> String {
             EvidenceKind::MEDIA_TYPE_MATCH => {
                 parts.insert("MEDIA");
             }
-            EvidenceKind::CLASS_TYPE_HINT | EvidenceKind::NODE_TITLE_HINT => {
+            EvidenceKind::CLASS_TYPE_HINT
+            | EvidenceKind::NODE_TITLE_HINT
+            | EvidenceKind::PRIMITIVE_SOURCE_NODE
+            | EvidenceKind::SYSTEM_PROMPT_HINT => {
                 parts.insert("HINT");
             }
             EvidenceKind::LITERAL_TYPE_MATCH | EvidenceKind::NUMERIC_RANGE_MATCH => {
@@ -1243,6 +1280,29 @@ fn enrich_candidate_with_context(
         }
     }
 
+    if candidate.field_type == "textarea" {
+        if class_type.to_ascii_lowercase().starts_with("primitive") {
+            push_evidence(
+                candidate,
+                evidence(
+                    EvidenceKind::PRIMITIVE_SOURCE_NODE,
+                    "text originates from a primitive input node",
+                ),
+            );
+        }
+        if is_system_prompt_name(&normalize(title))
+            || is_system_prompt_name(&normalize(&candidate.input_name))
+        {
+            push_evidence(
+                candidate,
+                evidence(
+                    EvidenceKind::SYSTEM_PROMPT_HINT,
+                    "node title or input name marks a system prompt",
+                ),
+            );
+        }
+    }
+
     candidate.score = candidate.evidence.iter().map(|item| item.weight).sum();
     candidate.confidence = if candidate.has_schema_conflict {
         RecognitionConfidence::Low
@@ -1297,6 +1357,31 @@ fn infer_linked_input(
         return;
     }
 
+    // R-01: a linked frame count (`length`) driven by a proven
+    // `seconds * fps + 1` expression is exposed as duration_seconds on the
+    // seconds leaf; otherwise the frame count is traced like any other number.
+    if semantic_key == "frame_count" {
+        if let Some(candidate) =
+            infer_duration_candidate(workflow, graph, target_node, target_input)
+        {
+            append_candidate(candidates, candidate);
+            return;
+        }
+        let driven_by_expression = graph
+            .incoming_source(target_node, target_input)
+            .and_then(|source| workflow.class_type(source))
+            .is_some_and(is_arithmetic_node);
+        if driven_by_expression {
+            issues.push(WorkflowAnalysisIssue {
+                code: "AMBIGUOUS_DURATION_SOURCE".to_owned(),
+                message: "无法自动确认视频时长来源，请选择唯一的动态数值源。".to_owned(),
+                field: Some("duration_seconds".to_owned()),
+                candidates: Vec::new(),
+            });
+            return;
+        }
+    }
+
     if semantic_key == "duration_seconds" {
         if let Some(candidate) =
             infer_duration_candidate(workflow, graph, target_node, target_input)
@@ -1318,6 +1403,9 @@ fn infer_linked_input(
             continue;
         }
         let leaf = trace.source;
+        if is_text_separator_input(&normalize(&leaf.input)) {
+            continue;
+        }
         let class_type = workflow.class_type(&leaf.node_id).unwrap_or_default();
         let Some(guess) = literal_guess(class_type, &leaf.input, &leaf.value)
             .or_else(|| {
@@ -1428,6 +1516,18 @@ fn linked_source_guess(
 ) -> Option<Guess> {
     if source_guess.semantic_key == target_semantic.semantic_key {
         return Some(source_guess);
+    }
+    // W-02: a generic text/prompt leaf traced from a negative conditioning
+    // sink is the negative prompt (e.g. CLIPTextEncode.text -> KSampler.negative).
+    if target_semantic.semantic_key == "negative_prompt"
+        && source_guess.semantic_key == "prompt"
+        && source_guess.field_type == "textarea"
+    {
+        return Some(Guess {
+            semantic_key: "negative_prompt",
+            required: false,
+            ..source_guess
+        });
     }
     if target_semantic.force_media_source
         && media_family(target_semantic.semantic_key) == media_family(source_guess.semantic_key)
@@ -1736,7 +1836,13 @@ fn infer_outputs(
         let schema_node = schema.and_then(|schema| schema.node(class_type));
         let schema_output_type = schema_node.and_then(declared_output_media_type);
         let node_output_type = media_output_type_from_node(node);
-        let output_type = schema_output_type.clone().or(node_output_type);
+        // W-08: animated savers write a video container (webm / animated webp
+        // / apng) even though their input socket is IMAGE frames.
+        let output_type = if is_animated_save_class(class_type) {
+            Some("video".to_owned())
+        } else {
+            schema_output_type.clone().or(node_output_type)
+        };
         let explicit = node
             .get("output_node")
             .and_then(Value::as_bool)
@@ -2375,6 +2481,13 @@ fn is_utility_class(text: &str) -> bool {
         || text.contains("utility")
 }
 
+pub(crate) fn is_animated_save_class(class_type: &str) -> bool {
+    matches!(
+        class_type.to_ascii_lowercase().as_str(),
+        "savewebm" | "saveanimatedwebp" | "saveanimatedpng"
+    )
+}
+
 fn is_video_output_class(text: &str) -> bool {
     ["savevideo", "createvideo", "videooutput"]
         .iter()
@@ -2413,7 +2526,8 @@ fn is_ignored_input(name: &str) -> bool {
             | "megapixels"
             | "pix_fmt"
             | "crf"
-    ) || name.contains("model")
+    ) || is_text_separator_input(name)
+        || name.contains("model")
         || name.contains("vae")
         || name.contains("clip")
         || name.contains("lora")
@@ -2535,6 +2649,423 @@ fn number_starting_at(chars: &[char], start: usize) -> Option<f64> {
         end += 1;
     }
     chars[start..end].iter().collect::<String>().parse().ok()
+}
+
+/// Conditioning role of a text leaf as seen from a sampler/guider.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum PromptRole {
+    Positive,
+    Negative,
+}
+
+impl PromptRole {
+    fn semantic_key(self) -> &'static str {
+        match self {
+            Self::Positive => "prompt",
+            Self::Negative => "negative_prompt",
+        }
+    }
+}
+
+type ConditioningRoles = BTreeMap<(String, String), BTreeSet<PromptRole>>;
+
+/// W-02 / R-03 / R-04: walk upstream from every node that consumes
+/// `positive`/`negative` conditioning (samplers, guiders) and record which
+/// string literal leaves feed which role.
+///
+/// * `ConditioningZeroOut` stops the walk (it discards the text).
+/// * Conditioning routers that themselves take `positive`/`negative` (for
+///   example ControlNetApplyAdvanced) are followed by output slot: slot 0 is
+///   the positive branch, slot 1 the negative branch.
+/// * model/clip/vae/image style inputs are not followed, so loader combos never
+///   become prompt leaves; delimiter-like inputs and COMBO/Enum inputs are
+///   never recorded.
+pub(crate) fn sampler_conditioning_roles(
+    workflow: &WorkflowDocument,
+    graph: &WorkflowGraph,
+    schema: Option<&RecognitionSchemaContext>,
+) -> ConditioningRoles {
+    let mut roles = ConditioningRoles::new();
+    for node_id in &graph.nodes {
+        let upstream = graph.upstream_of(node_id);
+        for (role, name) in [
+            (PromptRole::Positive, "positive"),
+            (PromptRole::Negative, "negative"),
+        ] {
+            for link in upstream.iter().filter(|link| link.target_input == name) {
+                let mut visited = BTreeSet::new();
+                walk_conditioning_role(
+                    workflow,
+                    graph,
+                    schema,
+                    &link.source_node_id,
+                    link.source_output_index,
+                    role,
+                    &mut visited,
+                    &mut roles,
+                );
+            }
+        }
+    }
+    roles
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_conditioning_role(
+    workflow: &WorkflowDocument,
+    graph: &WorkflowGraph,
+    schema: Option<&RecognitionSchemaContext>,
+    node_id: &str,
+    output_slot: u64,
+    role: PromptRole,
+    visited: &mut BTreeSet<(String, u64)>,
+    roles: &mut ConditioningRoles,
+) {
+    if !visited.insert((node_id.to_owned(), output_slot)) {
+        return;
+    }
+    let class_type = workflow.class_type(node_id).unwrap_or_default();
+    if class_type.to_ascii_lowercase().contains("zeroout") {
+        return;
+    }
+    let upstream = graph.upstream_of(node_id);
+    let is_router = upstream.iter().any(|link| link.target_input == "positive")
+        && upstream.iter().any(|link| link.target_input == "negative");
+    if is_router {
+        let branch = match output_slot {
+            0 => "positive",
+            1 => "negative",
+            _ => return,
+        };
+        for link in upstream.iter().filter(|link| link.target_input == branch) {
+            walk_conditioning_role(
+                workflow,
+                graph,
+                schema,
+                &link.source_node_id,
+                link.source_output_index,
+                role,
+                visited,
+                roles,
+            );
+        }
+        return;
+    }
+    if let Some(inputs) = workflow.inputs(node_id) {
+        for (input_name, value) in inputs {
+            if !value.is_string() || is_text_separator_input(&normalize(input_name)) {
+                continue;
+            }
+            let declared = schema
+                .and_then(|schema| schema.node(class_type))
+                .and_then(|node| node.input(input_name))
+                .map(|input| input.declared_type);
+            if declared.is_some_and(|declared| declared != RecognitionDeclaredType::String) {
+                continue;
+            }
+            roles
+                .entry((node_id.to_owned(), input_name.clone()))
+                .or_default()
+                .insert(role);
+        }
+    }
+    for link in upstream {
+        if !follows_conditioning_text(&link.target_input) {
+            continue;
+        }
+        walk_conditioning_role(
+            workflow,
+            graph,
+            schema,
+            &link.source_node_id,
+            link.source_output_index,
+            role,
+            visited,
+            roles,
+        );
+    }
+}
+
+fn follows_conditioning_text(input_name: &str) -> bool {
+    let name = normalize(input_name);
+    !(is_ignored_input(&name)
+        || matches!(
+            name.as_str(),
+            "image"
+                | "images"
+                | "pixels"
+                | "mask"
+                | "latent"
+                | "latent_image"
+                | "samples"
+                | "control_net"
+                | "style_model"
+                | "unet"
+        ))
+}
+
+/// Boost prompt candidates whose leaf feeds exactly the matching role and
+/// drop candidates that only feed the opposite role.
+fn apply_conditioning_roles(
+    candidates: &mut BTreeMap<(String, Option<usize>), Vec<Candidate>>,
+    roles: &ConditioningRoles,
+    compact_sources: bool,
+) {
+    if roles.is_empty() {
+        return;
+    }
+    for ((semantic_key, _), choices) in candidates.iter_mut() {
+        let expected = match semantic_key.as_str() {
+            "prompt" => PromptRole::Positive,
+            "negative_prompt" => PromptRole::Negative,
+            _ => continue,
+        };
+        choices.retain_mut(|candidate| {
+            let Some(leaf_roles) =
+                roles.get(&(candidate.node_id.clone(), candidate.input_name.clone()))
+            else {
+                return true;
+            };
+            if leaf_roles.len() != 1 {
+                return true;
+            }
+            if !leaf_roles.contains(&expected) {
+                return false;
+            }
+            push_evidence(
+                candidate,
+                evidence(
+                    EvidenceKind::GRAPH_CONDITIONING_ROLE,
+                    format!(
+                        "text feeds only the sampler {} conditioning",
+                        expected.semantic_key()
+                    ),
+                ),
+            );
+            candidate.score = candidate.evidence.iter().map(|item| item.weight).sum();
+            if !candidate.has_schema_conflict {
+                candidate.confidence = confidence_from_score(candidate.score);
+            }
+            if compact_sources {
+                candidate.source = compact_source(&candidate.evidence);
+            }
+            true
+        });
+    }
+    candidates.retain(|_, choices| !choices.is_empty());
+}
+
+const SAMPLER_LATENT_INPUTS: &[&str] = &["latent_image", "samples", "latent"];
+
+fn is_sampler_node(workflow: &WorkflowDocument, graph: &WorkflowGraph, node_id: &str) -> bool {
+    let class_type = workflow
+        .class_type(node_id)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    class_type.contains("sampler")
+        && graph
+            .upstream_of(node_id)
+            .iter()
+            .any(|link| SAMPLER_LATENT_INPUTS.contains(&link.target_input.as_str()))
+}
+
+/// R-06: in a multi-pass graph (base + refiner, Wan 2.2 high/low noise, ...)
+/// the primary sampler is the one whose latent input does not trace back to
+/// another sampler. Returns `None` for single-sampler graphs or when the
+/// primary sampler is not unique.
+pub(crate) fn primary_sampler(
+    workflow: &WorkflowDocument,
+    graph: &WorkflowGraph,
+) -> Option<String> {
+    let samplers = graph
+        .nodes
+        .iter()
+        .filter(|node_id| is_sampler_node(workflow, graph, node_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if samplers.len() < 2 {
+        return None;
+    }
+    let primaries = samplers
+        .iter()
+        .filter(|sampler| {
+            let mut stack = graph
+                .upstream_of(sampler)
+                .iter()
+                .filter(|link| SAMPLER_LATENT_INPUTS.contains(&link.target_input.as_str()))
+                .map(|link| link.source_node_id.clone())
+                .collect::<Vec<_>>();
+            let mut visited = BTreeSet::new();
+            while let Some(node_id) = stack.pop() {
+                if !visited.insert(node_id.clone()) {
+                    continue;
+                }
+                if samplers.contains(&node_id) {
+                    return false;
+                }
+                for link in graph.upstream_of(&node_id) {
+                    let name = normalize(&link.target_input);
+                    if matches!(
+                        name.as_str(),
+                        "positive" | "negative" | "conditioning" | "vae" | "clip"
+                    ) || name.contains("model")
+                    {
+                        continue;
+                    }
+                    stack.push(link.source_node_id.clone());
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    (primaries.len() == 1).then(|| primaries[0].clone())
+}
+
+fn apply_primary_sampler(
+    candidates: &mut BTreeMap<(String, Option<usize>), Vec<Candidate>>,
+    primary: &str,
+    compact_sources: bool,
+) {
+    for choices in candidates.values_mut() {
+        for candidate in choices
+            .iter_mut()
+            .filter(|candidate| candidate.node_id == primary)
+        {
+            push_evidence(
+                candidate,
+                evidence(
+                    EvidenceKind::GRAPH_PRIMARY_SAMPLER,
+                    "candidate belongs to the primary sampler",
+                ),
+            );
+            candidate.score = candidate.evidence.iter().map(|item| item.weight).sum();
+            if !candidate.has_schema_conflict {
+                candidate.confidence = confidence_from_score(candidate.score);
+            }
+            if compact_sources {
+                candidate.source = compact_source(&candidate.evidence);
+            }
+        }
+    }
+}
+
+fn is_system_prompt_name(name: &str) -> bool {
+    name.contains("system")
+}
+
+/// R-03: string-join helpers (StringConcatenate.delimiter, ...) are never
+/// prompt text.
+fn is_text_separator_input(name: &str) -> bool {
+    matches!(name, "delimiter" | "separator" | "joiner" | "sep")
+}
+
+/// R-08: validate every link against the live ComfyUI schema.
+///
+/// * `WORKFLOW_LINK_SLOT_OUT_OF_RANGE` — the link references an output slot the
+///   source node class does not declare (ComfyUI would fail at execution).
+/// * `WORKFLOW_LINK_TYPE_MISMATCH` — both sides declare a concrete, simple type
+///   and they differ (ComfyUI `validate_inputs` rejects this as well). Wildcards,
+///   unions, combo lists and MatchType templates are never reported.
+///
+/// Nodes whose class is unknown to the schema or whose outputs are not declared
+/// are skipped; missing classes are reported elsewhere.
+pub(crate) fn validate_links_against_schema(
+    workflow: &WorkflowDocument,
+    schema: &RecognitionSchemaContext,
+) -> Vec<WorkflowAnalysisIssue> {
+    let mut issues = Vec::new();
+    let Some(nodes) = workflow.value().as_object() else {
+        return issues;
+    };
+    for (node_id, node) in nodes {
+        let Some(node) = node.as_object() else {
+            continue;
+        };
+        let target_class = node
+            .get("class_type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(inputs) = node.get("inputs").and_then(Value::as_object) else {
+            continue;
+        };
+        for (input_name, value) in inputs {
+            if !is_link(value) {
+                continue;
+            }
+            let link = value.as_array().expect("checked link");
+            let source_id = link[0].as_str().unwrap_or_default();
+            let slot = link[1].as_u64().unwrap_or_default() as usize;
+            let Some(source_class) = nodes
+                .get(source_id)
+                .and_then(|source| source.get("class_type"))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let Some(source_schema) = schema.nodes.get(source_class) else {
+                continue;
+            };
+            let output_count = source_schema.raw_output_types.len();
+            if output_count == 0 {
+                continue;
+            }
+            let field = Some(format!("{node_id}.{input_name}"));
+            if slot >= output_count {
+                issues.push(WorkflowAnalysisIssue {
+                    code: "WORKFLOW_LINK_SLOT_OUT_OF_RANGE".to_owned(),
+                    message: format!(
+                        "节点 {node_id}（{target_class}）的输入 {input_name} 连接到节点 {source_id}（{source_class}）的输出槽 {slot}，但该节点只有 {output_count} 个输出。"
+                    ),
+                    field,
+                    candidates: Vec::new(),
+                });
+                continue;
+            }
+            if source_schema
+                .output_match_types
+                .get(slot)
+                .is_some_and(Option::is_some)
+            {
+                continue;
+            }
+            let Some(input_schema) = schema
+                .nodes
+                .get(target_class)
+                .and_then(|target| target.input(input_name))
+            else {
+                continue;
+            };
+            if input_schema.match_template.is_some() {
+                continue;
+            }
+            let output_type = source_schema.raw_output_types[slot].as_str();
+            let input_type = input_schema.raw_type.trim();
+            if is_simple_link_type(output_type)
+                && is_simple_link_type(input_type)
+                && !output_type.eq_ignore_ascii_case(input_type)
+            {
+                issues.push(WorkflowAnalysisIssue {
+                    code: "WORKFLOW_LINK_TYPE_MISMATCH".to_owned(),
+                    message: format!(
+                        "节点 {node_id}（{target_class}）的输入 {input_name} 需要 {input_type}，但连接的节点 {source_id}（{source_class}）输出槽 {slot} 类型为 {output_type}。"
+                    ),
+                    field,
+                    candidates: Vec::new(),
+                });
+            }
+        }
+    }
+    issues
+}
+
+fn is_simple_link_type(raw: &str) -> bool {
+    !raw.is_empty()
+        && raw != "*"
+        && !raw.eq_ignore_ascii_case("COMBO")
+        && raw.chars().all(|character| {
+            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+        })
 }
 
 fn is_link(value: &Value) -> bool {
@@ -4145,3 +4676,7 @@ pub(crate) mod tests {
         assert_eq!(forward.mode, "first_last_frame_to_video");
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_analysis_recipe_correctness_tests.rs"]
+mod recipe_correctness_tests;

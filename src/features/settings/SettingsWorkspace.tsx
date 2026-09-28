@@ -24,6 +24,7 @@ import { UiErrorNotice } from "../../i18n/UiErrorNotice";
 import { formatFileSize, formatDateTime } from "../../i18n/statusLabels";
 import { formatUiError } from "../../i18n/errorMessages";
 import { ComfyStatus as ComfyStatusCard } from "../comfy/ComfyStatus";
+import { RepairJobsStatusSection } from "./RepairJobsStatusSection";
 
 interface Props {
   comfy?: ComfyStatus;
@@ -459,6 +460,8 @@ export function SettingsWorkspace({
         {!preflight && !preflightLoading && <p>尚未运行预检。</p>}
         {preflight && <PreflightReportView report={preflight} />}
       </section>
+
+      <RepairJobsStatusSection />
     </section>
   );
 }

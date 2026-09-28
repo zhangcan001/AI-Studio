@@ -225,7 +225,7 @@ impl OutputCollector {
                 }
                 continue;
             };
-            let files = output_files(node_output);
+            let files = output_files_with_animation(node_output);
             if files.is_empty() {
                 if output.required
                     && !existing_outputs
@@ -239,11 +239,19 @@ impl OutputCollector {
                 }
                 continue;
             }
-            for (position, file) in files.iter().enumerate() {
+            for (position, (file, animated)) in files.iter().enumerate() {
                 if existing_outputs.contains(&(output.id.clone(), position)) {
                     continue;
                 }
-                match output.output_type {
+                // W-08: ComfyUI marks animated results (SaveAnimatedWEBP,
+                // SaveWEBM, ...) with `animated: true`; those are streamed as
+                // video even when an older recipe declared the output as image.
+                let effective_type = if *animated == Some(true) {
+                    OutputType::Video
+                } else {
+                    output.output_type
+                };
+                match effective_type {
                     OutputType::Image => {
                         let data = self
                             .adapter
@@ -289,13 +297,27 @@ impl OutputCollector {
 }
 
 fn output_files(node_output: &crate::application::ports::ComfyNodeOutput) -> Vec<ComfyOutputFile> {
+    output_files_with_animation(node_output)
+        .into_iter()
+        .map(|(file, _)| file)
+        .collect()
+}
+
+fn output_files_with_animation(
+    node_output: &crate::application::ports::ComfyNodeOutput,
+) -> Vec<(ComfyOutputFile, Option<bool>)> {
     if node_output.saved_results.is_empty() {
-        return node_output.images.clone();
+        return node_output
+            .images
+            .iter()
+            .cloned()
+            .map(|file| (file, None))
+            .collect();
     }
     node_output
         .saved_results
         .iter()
-        .map(|result| result.file.clone())
+        .map(|result| (result.file.clone(), result.animated))
         .collect()
 }
 
@@ -609,6 +631,56 @@ mod tests {
             }
             CollectedOutput::Image(_) => panic!("video recipe must not produce an image output"),
         }
+    }
+
+    #[tokio::test]
+    async fn w08_animated_result_on_image_output_is_collected_as_video() {
+        let adapter = Arc::new(FakeAdapter {
+            history: Ok(ComfyHistory {
+                prompt_id: "prompt-1".to_owned(),
+                status: Default::default(),
+                outputs: BTreeMap::from([(
+                    "11".to_owned(),
+                    ComfyNodeOutput {
+                        images: Vec::new(),
+                        saved_results: vec![ComfySavedResult {
+                            file: ComfyOutputFile {
+                                filename: "ComfyUI_00001.webp".to_owned(),
+                                subfolder: String::new(),
+                                folder_type: "output".to_owned(),
+                            },
+                            animated: Some(true),
+                        }],
+                    },
+                )]),
+            }),
+            bytes: Vec::new(),
+        });
+        let recipe = Recipe {
+            schema_version: 1,
+            id: "legacy_webp_recipe".to_owned(),
+            name: "Animated WEBP".to_owned(),
+            workflow: WorkflowRef {
+                file: "workflow_api.json".to_owned(),
+            },
+            inputs: BTreeMap::new(),
+            bindings: Vec::new(),
+            outputs: vec![OutputDefinition {
+                id: "generated_image".to_owned(),
+                output_type: OutputType::Image,
+                node: "11".to_owned(),
+                required: true,
+            }],
+        };
+        let outputs = OutputCollector::new(adapter)
+            .collect_outputs(&recipe, "prompt-1")
+            .await
+            .expect("animated output should collect");
+        assert_eq!(outputs.len(), 1);
+        assert!(
+            matches!(&outputs[0], CollectedOutput::Video(_)),
+            "animated results must be routed as video"
+        );
     }
 
     #[allow(dead_code)]

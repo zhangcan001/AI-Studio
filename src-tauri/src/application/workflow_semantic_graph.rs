@@ -184,7 +184,10 @@ impl CanonicalSemantic {
             Self::Seed => "seed",
             Self::Width => "width",
             Self::Height => "height",
-            Self::Frames | Self::Duration => "duration_seconds",
+            // R-01: frame counts are not seconds. Only a proven duration
+            // expression (seconds * fps + 1) is exposed as duration_seconds.
+            Self::Frames => "frame_count",
+            Self::Duration => "duration_seconds",
             Self::Fps => "fps",
             Self::Model | Self::ImageModel => "model",
             Self::VideoModel => "video_model",
@@ -375,13 +378,18 @@ pub fn canonical_semantic_hint(input_name: &str) -> Option<SemanticInputHint> {
     let semantic = match name.as_str() {
         "prompt" | "text" => CanonicalSemantic::PromptText,
         "positive" | "positive_prompt" => CanonicalSemantic::PositivePrompt,
-        "negative" | "negative_prompt" => CanonicalSemantic::NegativePrompt,
+        "negative" | "negative_prompt" | "neg" | "neg_prompt" | "negative_text" | "neg_text"
+        | "uncond" | "unconditional" => CanonicalSemantic::NegativePrompt,
         "description" => CanonicalSemantic::PromptText,
         "width" => CanonicalSemantic::Width,
         "height" => CanonicalSemantic::Height,
         "seed" | "noise_seed" | "random_seed" => CanonicalSemantic::Seed,
-        "length" | "duration" | "duration_seconds" | "seconds" => CanonicalSemantic::Duration,
-        "frames" | "num_frames" | "frame_count" | "duration_frames" => CanonicalSemantic::Frames,
+        "duration" | "duration_seconds" | "seconds" => CanonicalSemantic::Duration,
+        // ComfyUI video latent nodes (EmptyHunyuanLatentVideo, WanImageToVideo,
+        // EmptyLTXVLatentVideo, ...) name their frame count `length`.
+        "length" | "frames" | "num_frames" | "frame_count" | "duration_frames" | "video_length" => {
+            CanonicalSemantic::Frames
+        }
         "fps" | "frame_rate" | "framerate" => CanonicalSemantic::Fps,
         "steps" | "num_steps" | "sampling_steps" => CanonicalSemantic::Steps,
         "cfg" | "cfg_scale" => CanonicalSemantic::Cfg,
@@ -422,6 +430,11 @@ pub fn canonical_semantic_hint(input_name: &str) -> Option<SemanticInputHint> {
         }
         _ if indexed_slot(&name, AUDIO_SLOT_PREFIXES).is_some() => {
             CanonicalSemantic::ReferenceAudioList
+        }
+        // R-05: system prompts steer an LLM; they are never the user prompt.
+        _ if name.contains("system") => return None,
+        _ if name.starts_with("negative_") || name.starts_with("neg_") => {
+            CanonicalSemantic::NegativePrompt
         }
         _ if name.starts_with("prompt_") || name.ends_with("_prompt") => {
             CanonicalSemantic::PromptText

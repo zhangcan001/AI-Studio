@@ -19,13 +19,13 @@ pub use repositories::{
     SqliteProjectManifestRepository, SqliteProjectRepository,
     SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository,
     SqliteProvenanceLineageRepository, SqliteRecipeHistoryQueryRepository,
-    SqliteReferenceAnchorRepository, SqliteReferenceSetRepository, SqliteShotConsistencyRepository,
-    SqliteShotRepository, SqliteTaskHistoryRepository, SqliteTaskRepository, SqliteToolRepository,
-    SqliteWorkflowBenchmarkRepository, SqliteWorkflowLibraryRepository,
-    SqliteWorkflowRecipePromotionRepository, SqliteWorkflowRecipeRuntimeStateRepository,
-    SqliteWorkflowRegistryRepository, SqliteWorkflowRunRepository,
-    SqliteWorkflowRuntimeArtifactRepository, SqliteWorkflowRuntimeRepository,
-    SqliteWorkflowRuntimeStateRepository,
+    SqliteReferenceAnchorRepository, SqliteReferenceSetRepository, SqliteRepairJobRepository,
+    SqliteShotConsistencyRepository, SqliteShotRepository, SqliteTaskHistoryRepository,
+    SqliteTaskRepository, SqliteToolRepository, SqliteWorkflowBenchmarkRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRecipePromotionRepository,
+    SqliteWorkflowRecipeRuntimeStateRepository, SqliteWorkflowRegistryRepository,
+    SqliteWorkflowRunRepository, SqliteWorkflowRuntimeArtifactRepository,
+    SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
 };
 
 #[cfg(test)]

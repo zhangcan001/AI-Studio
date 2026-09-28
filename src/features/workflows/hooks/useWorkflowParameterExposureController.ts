@@ -24,6 +24,7 @@ import {
   supportedParameterFieldType,
   type MappingDraft,
   type ParameterMappingEdit,
+  seedModeRequest,
 } from "../workflowParameterExposureModel";
 
 export type { MappingDraft, ParameterMappingEdit } from "../workflowParameterExposureModel";
@@ -119,6 +120,7 @@ export function useWorkflowParameterExposureController({
         label: mapping.label,
         required: mapping.required,
         defaultValue: optionalText(mapping.defaultValue),
+        seedMode: seedModeRequest(mapping),
         minValue: optionalText(mapping.minValue),
         maxValue: optionalText(mapping.maxValue),
         step: optionalText(input.numericStep ?? ""),
@@ -146,6 +148,7 @@ export function useWorkflowParameterExposureController({
         label: mapping.label,
         required: mapping.required,
         defaultValue: optionalText(mapping.defaultValue),
+        seedMode: seedModeRequest(mapping),
         minValue: optionalText(mapping.minValue),
         maxValue: optionalText(mapping.maxValue),
         step: optionalText(mapping.step ?? ""),
@@ -191,6 +194,7 @@ export function useWorkflowParameterExposureController({
           label: edit.draft.label,
           required: edit.draft.required,
           defaultValue: optionalText(edit.draft.defaultValue),
+          seedMode: seedModeRequest(edit.draft),
           minValue: optionalText(edit.draft.minValue),
           maxValue: optionalText(edit.draft.maxValue),
           step: optionalText(edit.draft.step),
