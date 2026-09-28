@@ -123,6 +123,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   PACKAGE_ID_CONFLICT: "该工作流 ID 已存在且内容不同。请使用新的 ID 另存为新工作流，或先删除本地冲突版本。",
   PACKAGE_ARCHIVE_ENTRY_TOO_LARGE: "工作流包中的单个文件超过 16 MiB 上限，已拒绝导入。",
   PACKAGE_ARCHIVE_COMPRESSION_RATIO_EXCEEDED: "工作流包压缩比异常（超过 100:1），可能是恶意压缩包，已拒绝导入。",
+  PACKAGE_ARCHIVE_INVALID_RECOGNITION: "工作流包中的识别元数据（workflow_recognition.json）格式无效，已拒绝导入。",
   PACKAGE_ARCHIVE_UNSAFE_PATH: "工作流包包含不安全的文件路径（.. 或绝对路径），已拒绝导入。",
   WORKFLOW_VERSION_IS_CURRENT: "不能删除当前版本，请先将其他版本设为当前版本。",
   WORKFLOW_VERSION_IN_USE: "该版本仍被生产批次或队列任务引用，不能删除。",
