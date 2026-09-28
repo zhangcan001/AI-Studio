@@ -30,11 +30,17 @@ use std::{
 };
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
+use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 pub const MAX_WORKFLOW_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_WORKFLOW_ARCHIVE_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_WORKFLOW_ARCHIVE_FILES: usize = 4;
+/// W-17: hard cap for one decompressed archive entry. The declared size in
+/// the zip header is untrusted, so reads are bounded by this cap.
+pub const MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
+/// W-17: entries above this size must not exceed the compression ratio cap.
+const ARCHIVE_RATIO_CHECK_MIN_BYTES: u64 = 1024 * 1024;
+const MAX_WORKFLOW_ARCHIVE_COMPRESSION_RATIO: u64 = 100;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowLifecycleError {
@@ -2353,7 +2359,7 @@ fn validate_exact_runtime_package(
 
 fn build_archive(package: &WorkflowPackageBytes) -> Result<Vec<u8>, WorkflowLifecycleError> {
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for (name, bytes) in [
         ("manifest.yaml", &package.manifest_yaml),
         ("recipe.yaml", &package.recipe_yaml),
@@ -2370,6 +2376,23 @@ fn build_archive(package: &WorkflowPackageBytes) -> Result<Vec<u8>, WorkflowLife
         .finish()
         .map_err(|error| archive_error(error.to_string()))
         .map(|cursor| cursor.into_inner())
+}
+
+fn is_unsafe_archive_name(name: &str) -> bool {
+    let normalized = name.replace('\\', "/");
+    normalized.starts_with('/')
+        || normalized.split('/').any(|component| component == "..")
+        || normalized.as_bytes().get(1) == Some(&b':')
+}
+
+fn archive_entry_too_large(name: &str) -> WorkflowLifecycleError {
+    WorkflowLifecycleError::new(
+        "PACKAGE_ARCHIVE_ENTRY_TOO_LARGE",
+        format!(
+            "archive entry {name} exceeds the {} MiB limit",
+            MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES / 1024 / 1024
+        ),
+    )
 }
 
 fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycleError> {
@@ -2401,6 +2424,12 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
             .by_index(index)
             .map_err(|error| archive_error(error.to_string()))?;
         let name = file.name().to_owned();
+        if is_unsafe_archive_name(&name) {
+            return Err(WorkflowLifecycleError::new(
+                "PACKAGE_ARCHIVE_UNSAFE_PATH",
+                "archive entry names must not contain '..' or absolute paths",
+            ));
+        }
         if !allowed.contains(&name.as_str())
             || file.is_dir()
             || file.enclosed_name().is_none()
@@ -2426,8 +2455,22 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
                 "archive contains duplicate entries",
             ));
         }
-        compressed_total = compressed_total.saturating_add(file.compressed_size());
-        uncompressed_total = uncompressed_total.saturating_add(file.size());
+        let compressed_size = file.compressed_size();
+        compressed_total = compressed_total.saturating_add(compressed_size);
+        if file.size() > MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES {
+            return Err(archive_entry_too_large(&name));
+        }
+        // Never trust the declared size: bound the actual read.
+        let mut content = Vec::new();
+        (&mut file)
+            .take(MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES + 1)
+            .read_to_end(&mut content)
+            .map_err(|error| archive_error(error.to_string()))?;
+        let actual_size = content.len() as u64;
+        if actual_size > MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES {
+            return Err(archive_entry_too_large(&name));
+        }
+        uncompressed_total = uncompressed_total.saturating_add(actual_size);
         if compressed_total > MAX_WORKFLOW_ARCHIVE_BYTES as u64
             || uncompressed_total > MAX_WORKFLOW_ARCHIVE_UNCOMPRESSED_BYTES
         {
@@ -2436,9 +2479,14 @@ fn parse_archive(bytes: &[u8]) -> Result<WorkflowPackageBytes, WorkflowLifecycle
                 "archive exceeds the 64 MiB size limit",
             ));
         }
-        let mut content = Vec::new();
-        file.read_to_end(&mut content)
-            .map_err(|error| archive_error(error.to_string()))?;
+        if actual_size > ARCHIVE_RATIO_CHECK_MIN_BYTES
+            && actual_size > compressed_size.saturating_mul(MAX_WORKFLOW_ARCHIVE_COMPRESSION_RATIO)
+        {
+            return Err(WorkflowLifecycleError::new(
+                "PACKAGE_ARCHIVE_COMPRESSION_RATIO_EXCEEDED",
+                format!("archive entry {name} exceeds the 100:1 compression ratio limit"),
+            ));
+        }
         entries.insert(name, content);
     }
     let manifest = entries.remove("manifest.yaml").ok_or_else(|| {
@@ -3698,7 +3746,59 @@ outputs: []
         writer.write_all(b"escape").unwrap();
         let archive = writer.finish().unwrap().into_inner();
         let error = parse_archive(&archive).unwrap_err();
-        assert_eq!(error.code(), "PACKAGE_ARCHIVE_UNEXPECTED_ENTRY");
+        assert_eq!(error.code(), "PACKAGE_ARCHIVE_UNSAFE_PATH");
+    }
+
+    #[test]
+    fn w17_rejects_path_traversal_name() {
+        for name in [
+            "../manifest.yaml",
+            "nested/../../recipe.yaml",
+            "/etc/manifest.yaml",
+            "C:/manifest.yaml",
+            "..\\workflow_api.json",
+        ] {
+            let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+            writer.start_file(name, FileOptions::default()).unwrap();
+            writer.write_all(b"escape").unwrap();
+            let archive = writer.finish().unwrap().into_inner();
+            let error = parse_archive(&archive).unwrap_err();
+            assert_eq!(error.code(), "PACKAGE_ARCHIVE_UNSAFE_PATH", "{name}");
+        }
+    }
+
+    #[test]
+    fn w17_rejects_entry_exceeding_cap() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "workflow_api.json",
+                FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+        let chunk = vec![b' '; 1024 * 1024];
+        for _ in 0..(super::MAX_WORKFLOW_ARCHIVE_ENTRY_BYTES / (1024 * 1024)) {
+            writer.write_all(&chunk).unwrap();
+        }
+        writer.write_all(b" ").unwrap();
+        let archive = writer.finish().unwrap().into_inner();
+        let error = parse_archive(&archive).unwrap_err();
+        assert_eq!(error.code(), "PACKAGE_ARCHIVE_ENTRY_TOO_LARGE");
+    }
+
+    #[test]
+    fn w17_rejects_high_compression_ratio() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "workflow_api.json",
+                FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+        writer.write_all(&vec![b' '; 4 * 1024 * 1024]).unwrap();
+        let archive = writer.finish().unwrap().into_inner();
+        let error = parse_archive(&archive).unwrap_err();
+        assert_eq!(error.code(), "PACKAGE_ARCHIVE_COMPRESSION_RATIO_EXCEEDED");
     }
 
     #[test]
