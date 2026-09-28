@@ -1836,7 +1836,13 @@ fn infer_outputs(
         let schema_node = schema.and_then(|schema| schema.node(class_type));
         let schema_output_type = schema_node.and_then(declared_output_media_type);
         let node_output_type = media_output_type_from_node(node);
-        let output_type = schema_output_type.clone().or(node_output_type);
+        // W-08: animated savers write a video container (webm / animated webp
+        // / apng) even though their input socket is IMAGE frames.
+        let output_type = if is_animated_save_class(class_type) {
+            Some("video".to_owned())
+        } else {
+            schema_output_type.clone().or(node_output_type)
+        };
         let explicit = node
             .get("output_node")
             .and_then(Value::as_bool)
@@ -2473,6 +2479,13 @@ fn is_utility_class(text: &str) -> bool {
         || text.contains("debug")
         || text.contains("log")
         || text.contains("utility")
+}
+
+pub(crate) fn is_animated_save_class(class_type: &str) -> bool {
+    matches!(
+        class_type.to_ascii_lowercase().as_str(),
+        "savewebm" | "saveanimatedwebp" | "saveanimatedpng"
+    )
 }
 
 fn is_video_output_class(text: &str) -> bool {

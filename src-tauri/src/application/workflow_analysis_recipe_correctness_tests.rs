@@ -322,3 +322,22 @@ fn r01_video_latent_length_literal_is_exposed_as_frame_count() {
     assert_eq!(frames.value, Some(json!(81)));
     assert_eq!(frames.field_type, "integer");
 }
+
+#[test]
+fn w08_animated_savers_are_video_outputs() {
+    for class_type in ["SaveWEBM", "SaveAnimatedWEBP"] {
+        let mut workflow = basic_t2i();
+        workflow["9"] = json!({"class_type": class_type, "inputs": {
+            "filename_prefix": "out", "images": ["8", 0], "fps": 16.0}});
+        let report = analyze_real(workflow);
+        let output = report
+            .outputs
+            .iter()
+            .find(|output| output.node_id == "9")
+            .unwrap_or_else(|| panic!("{class_type} output missing: {:?}", report.outputs));
+        assert_eq!(output.output_type, "video", "{class_type}");
+        assert_eq!(report.category, "video", "{class_type}");
+    }
+    assert!(is_animated_save_class("SaveAnimatedPNG"));
+    assert!(!is_animated_save_class("SaveImage"));
+}
