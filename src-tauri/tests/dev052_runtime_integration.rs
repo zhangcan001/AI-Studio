@@ -34,7 +34,7 @@ use ai_studio_lib::application::{
         ProductionStartAdmissionError, ProductionStartAdmissionService,
         RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE, RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED,
         RUNTIME_ADMISSION_COMFY_UNAVAILABLE, RUNTIME_ADMISSION_MISSING_NODES,
-        RUNTIME_ADMISSION_READINESS_BLOCKED,
+        RUNTIME_ADMISSION_READINESS_BLOCKED, RUNTIME_ADMISSION_WORKFLOW_DISABLED,
     },
     shot_batch_service::ShotBatchService,
     shot_context_resolver::ShotContextResolver,
@@ -292,6 +292,11 @@ struct CountingComfyAdapter {
     health_check_started: Arc<AtomicBool>,
     health_check_notify: Arc<Notify>,
     health_check_release: Arc<Notify>,
+    hold_object_info_after: Arc<AtomicUsize>,
+    object_info_hold_started: Arc<AtomicBool>,
+    object_info_hold_released: Arc<AtomicBool>,
+    object_info_hold_notify: Arc<Notify>,
+    object_info_hold_release: Arc<Notify>,
     hold_submission: Arc<AtomicBool>,
     reject_submission_as_validation_error: Arc<AtomicBool>,
     submission_released: Arc<AtomicBool>,
@@ -315,6 +320,11 @@ impl CountingComfyAdapter {
             health_check_started: Arc::new(AtomicBool::new(false)),
             health_check_notify: Arc::new(Notify::new()),
             health_check_release: Arc::new(Notify::new()),
+            hold_object_info_after: Arc::new(AtomicUsize::new(0)),
+            object_info_hold_started: Arc::new(AtomicBool::new(false)),
+            object_info_hold_released: Arc::new(AtomicBool::new(true)),
+            object_info_hold_notify: Arc::new(Notify::new()),
+            object_info_hold_release: Arc::new(Notify::new()),
             hold_submission: Arc::new(AtomicBool::new(false)),
             reject_submission_as_validation_error: Arc::new(AtomicBool::new(false)),
             submission_started: Arc::new(AtomicBool::new(false)),
@@ -336,6 +346,9 @@ impl CountingComfyAdapter {
             .store(false, Ordering::SeqCst);
         self.hold_health_check.store(false, Ordering::SeqCst);
         self.health_check_released.store(true, Ordering::SeqCst);
+        self.hold_object_info_after.store(0, Ordering::SeqCst);
+        self.object_info_hold_started.store(false, Ordering::SeqCst);
+        self.object_info_hold_released.store(true, Ordering::SeqCst);
         self.hold_submission.store(false, Ordering::SeqCst);
         self.reject_submission_as_validation_error
             .store(false, Ordering::SeqCst);
@@ -375,6 +388,28 @@ impl CountingComfyAdapter {
     async fn wait_for_health_check(&self) {
         if !self.health_check_started.load(Ordering::SeqCst) {
             self.health_check_notify.notified().await;
+        }
+    }
+
+    fn hold_next_admission_preflight_object_info(&self) {
+        self.object_info_hold_started.store(false, Ordering::SeqCst);
+        self.object_info_hold_released
+            .store(false, Ordering::SeqCst);
+        self.hold_object_info_after.store(
+            self.object_info_calls.load(Ordering::SeqCst) + 3,
+            Ordering::SeqCst,
+        );
+    }
+
+    fn release_object_info(&self) {
+        self.object_info_hold_released.store(true, Ordering::SeqCst);
+        self.hold_object_info_after.store(0, Ordering::SeqCst);
+        self.object_info_hold_release.notify_waiters();
+    }
+
+    async fn wait_for_object_info_hold(&self) {
+        while !self.object_info_hold_started.load(Ordering::SeqCst) {
+            self.object_info_hold_notify.notified().await;
         }
     }
 
@@ -444,7 +479,7 @@ impl ComfyAdapter for CountingComfyAdapter {
     }
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
-        self.object_info_calls.fetch_add(1, Ordering::SeqCst);
+        let call_number = self.object_info_calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.capability_refresh_failure.load(Ordering::SeqCst) {
             return Err(ComfyAdapterError::Protocol(
                 "DEV-078 test capability refresh failed".to_owned(),
@@ -473,6 +508,15 @@ impl ComfyAdapter for CountingComfyAdapter {
                 .as_object_mut()
                 .expect("test object_info should be an object")
                 .remove("KSampler");
+        }
+        if call_number == self.hold_object_info_after.load(Ordering::SeqCst) {
+            self.object_info_hold_started.store(true, Ordering::SeqCst);
+            self.object_info_hold_notify.notify_waiters();
+            while !self.object_info_hold_released.load(Ordering::SeqCst)
+                && call_number == self.hold_object_info_after.load(Ordering::SeqCst)
+            {
+                self.object_info_hold_release.notified().await;
+            }
         }
         Ok(object_info)
     }
@@ -846,6 +890,27 @@ async fn create_runtime_batch_for_recipe(
         })
         .await
         .expect("DEV-078 runtime batch should be created without starting")
+        .batch
+        .id
+        .as_str()
+        .to_owned()
+}
+
+async fn create_saved_runtime_batch_for_recipe(harness: &Harness, recipe_id: &str) -> String {
+    let mut request = direct_generation_batch_request(harness, 1);
+    let item = &mut request.items[0];
+    item.item.recipe_id = recipe_id.to_owned();
+    item.execution_type = ExecutionType::WorkflowBatch;
+    item.submission_idempotency_key = Some("dev078-admission-preflight".to_owned());
+    item.execution_input_sources = Some(BTreeMap::from([(
+        "prompt".to_owned(),
+        ExecutionValueSource::UserInput,
+    )]));
+    harness
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .expect("saved runtime batch should be created without starting")
         .batch
         .id
         .as_str()
@@ -1759,6 +1824,79 @@ async fn dev078_b2_runtime_block_keeps_batch_pending_without_side_effects() {
         .expect("blocked batch should remain readable");
     assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
     assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Pending);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn dev078_lifecycle_disable_during_preflight_rejects_without_dispatch() {
+    let harness = harness().await;
+    let batch_id = create_saved_runtime_batch_for_recipe(&harness, &harness.recipe_id).await;
+    harness.comfy.hold_next_admission_preflight_object_info();
+
+    let admission = harness.admission.clone();
+    let start_batch_id = batch_id.clone();
+    let start = tokio::spawn(async move { admission.start(PROJECT_ID, &start_batch_id).await });
+    harness.comfy.wait_for_object_info_hold().await;
+    harness
+        .lifecycle
+        .set_enabled(&harness.workflow_version_id, false)
+        .await
+        .expect("the controlled lifecycle mutation should succeed");
+    harness.comfy.release_object_info();
+
+    let error = tokio::time::timeout(Duration::from_secs(5), start)
+        .await
+        .expect("admission should finish after the controlled preflight")
+        .expect("admission task should not panic")
+        .expect_err("a workflow disabled during preflight must not start");
+    assert_eq!(
+        runtime_failure_code(error),
+        RUNTIME_ADMISSION_WORKFLOW_DISABLED
+    );
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("blocked batch should remain readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn dev078_exact_recipe_readiness_change_during_preflight_rejects_without_dispatch() {
+    let harness = shared_recipe_harness().await;
+    let recipe_b = recipe_id_for_version(&harness, SHARED_RECIPE_B_VERSION);
+    // Recipe B is admitted while the controlled adapter exposes the broad
+    // sampler schema, then becomes incompatible while saved-batch preflight
+    // is waiting on the same exact runtime boundary.
+    harness.comfy.set_recipe_specific_incompatibility(false);
+    let batch_id = create_saved_runtime_batch_for_recipe(&harness, &recipe_b).await;
+    harness.comfy.hold_next_admission_preflight_object_info();
+
+    let admission = harness.admission.clone();
+    let start_batch_id = batch_id.clone();
+    let start = tokio::spawn(async move { admission.start(PROJECT_ID, &start_batch_id).await });
+    harness.comfy.wait_for_object_info_hold().await;
+    harness.comfy.set_recipe_specific_incompatibility(true);
+    harness.comfy.release_object_info();
+
+    let error = tokio::time::timeout(Duration::from_secs(5), start)
+        .await
+        .expect("admission should finish after the controlled preflight")
+        .expect("admission task should not panic")
+        .expect_err("a changed exact recipe readiness must not start");
+    assert_eq!(
+        runtime_failure_code(error),
+        RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE
+    );
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("blocked batch should remain readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
     assert_eq!(count(&harness.pool, "tasks").await, 0);
     assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
 }

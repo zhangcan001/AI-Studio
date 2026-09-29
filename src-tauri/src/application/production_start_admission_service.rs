@@ -107,6 +107,89 @@ pub struct ProductionStartAdmissionService {
     lifecycle: Arc<WorkflowLifecycleService>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RuntimeAdmissionSnapshot {
+    pub(crate) pairs: Vec<RuntimeAdmissionPairSnapshot>,
+    pub(crate) runtime_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RuntimeAdmissionPairSnapshot {
+    pub(crate) workflow_id: String,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
+    pub(crate) recipe_version: String,
+    pub(crate) workflow_sha256: String,
+    pub(crate) recipe_sha256: String,
+    pub(crate) enabled: bool,
+    pub(crate) archived: bool,
+    pub(crate) recipe_archived: bool,
+    pub(crate) package_name: String,
+    pub(crate) package_status: String,
+    pub(crate) diagnostics: Vec<(String, String)>,
+    pub(crate) capability: String,
+    pub(crate) capability_issues: Vec<RuntimeAdmissionCapabilityIssueSnapshot>,
+    pub(crate) has_successful_run: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RuntimeAdmissionCapabilityIssueSnapshot {
+    pub(crate) code: String,
+    pub(crate) class_type: Option<String>,
+    pub(crate) node_id: Option<String>,
+    pub(crate) affected_node_ids: Vec<String>,
+    pub(crate) input_name: Option<String>,
+    pub(crate) current_value: Option<String>,
+    pub(crate) message: String,
+}
+
+impl RuntimeAdmissionSnapshot {
+    fn from_inspections(
+        inspections: &[WorkflowRecipeRuntimeInspection],
+        runtime_generation: Option<u64>,
+    ) -> Self {
+        Self {
+            pairs: inspections
+                .iter()
+                .map(|inspection| RuntimeAdmissionPairSnapshot {
+                    workflow_id: inspection.workflow_id.clone(),
+                    workflow_version_id: inspection.workflow_version_id.clone(),
+                    recipe_id: inspection.recipe_id.clone(),
+                    recipe_version: inspection.recipe_version.clone(),
+                    workflow_sha256: inspection.workflow_sha256.clone(),
+                    recipe_sha256: inspection.recipe_sha256.clone(),
+                    enabled: inspection.enabled,
+                    archived: inspection.archived,
+                    recipe_archived: inspection.recipe_archived,
+                    package_name: inspection.package_name.clone(),
+                    package_status: inspection.package_status.clone(),
+                    diagnostics: inspection
+                        .diagnostics
+                        .iter()
+                        .map(|diagnostic| (diagnostic.code.clone(), diagnostic.message.clone()))
+                        .collect(),
+                    capability: inspection.capability.clone(),
+                    capability_issues: inspection
+                        .capability_issues
+                        .iter()
+                        .map(|issue| RuntimeAdmissionCapabilityIssueSnapshot {
+                            code: issue.code.clone(),
+                            class_type: issue.class_type.clone(),
+                            node_id: issue.node_id.clone(),
+                            affected_node_ids: issue.affected_node_ids.clone(),
+                            input_name: issue.input_name.clone(),
+                            current_value: issue.current_value.clone(),
+                            message: issue.message.clone(),
+                        })
+                        .collect(),
+                    has_successful_run: inspection.has_successful_run,
+                })
+                .collect(),
+            runtime_generation,
+        }
+    }
+}
+
 impl ProductionStartAdmissionService {
     pub fn new(
         queue: Arc<ProductionQueueService>,
@@ -118,6 +201,82 @@ impl ProductionStartAdmissionService {
             comfy,
             lifecycle,
         }
+    }
+
+    async fn collect_runtime_snapshot(
+        &self,
+        pending_pairs: &[(String, String)],
+        refresh_capabilities: bool,
+    ) -> Result<
+        (
+            ComfyConnectionStatus,
+            RuntimeAdmissionSnapshot,
+            Vec<WorkflowRecipeRuntimeInspection>,
+        ),
+        ProductionStartAdmissionError,
+    > {
+        let status = self.comfy.get_status().await.map_err(|error| {
+            runtime_failure(
+                pending_pairs,
+                RUNTIME_ADMISSION_COMFY_UNAVAILABLE,
+                format!("{}: {}", error.code(), error),
+                Vec::new(),
+            )
+        })?;
+        let status_failure_code = match status.status {
+            ComfyConnectionStatus::Connected => None,
+            ComfyConnectionStatus::Offline => Some(RUNTIME_ADMISSION_COMFY_UNAVAILABLE),
+            ComfyConnectionStatus::Incompatible => Some(RUNTIME_ADMISSION_COMFY_INCOMPATIBLE),
+        };
+        if let Some(code) = status_failure_code {
+            return Err(ProductionStartAdmissionError::Runtime(runtime_failure(
+                pending_pairs,
+                code,
+                format!("ComfyUI status is {:?}", status.status),
+                Vec::new(),
+            )));
+        }
+
+        if refresh_capabilities {
+            self.comfy.refresh_capabilities().await.map_err(|error| {
+                ProductionStartAdmissionError::Runtime(runtime_failure(
+                    pending_pairs,
+                    RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED,
+                    format!("{}: {}", error.code(), error),
+                    Vec::new(),
+                ))
+            })?;
+        }
+
+        let inspections = self.inspect_runtime_pairs(pending_pairs).await?;
+        let runtime_generation = Some(self.comfy.runtime_generation());
+        Ok((
+            status.status,
+            RuntimeAdmissionSnapshot::from_inspections(&inspections, runtime_generation),
+            inspections,
+        ))
+    }
+
+    async fn inspect_runtime_pairs(
+        &self,
+        pending_pairs: &[(String, String)],
+    ) -> Result<Vec<WorkflowRecipeRuntimeInspection>, ProductionStartAdmissionError> {
+        let mut inspections = Vec::with_capacity(pending_pairs.len());
+        for (workflow_version_id, recipe_id) in pending_pairs {
+            let inspection = self
+                .lifecycle
+                .inspect_recipe_runtime(workflow_version_id, recipe_id)
+                .await
+                .map_err(|error| {
+                    ProductionStartAdmissionError::Runtime(runtime_failure_from_lifecycle_error(
+                        workflow_version_id,
+                        recipe_id,
+                        error,
+                    ))
+                })?;
+            inspections.push(inspection);
+        }
+        Ok(inspections)
     }
 
     pub async fn start(
@@ -138,61 +297,13 @@ impl ProductionStartAdmissionService {
                     .await?
             };
             let pending_pairs = pending_runtime_pairs(&detail.items);
-            let runtime_generation = if pending_pairs.is_empty() {
-                None
+            let (runtime_generation, lifecycle_snapshot_a) = if pending_pairs.is_empty() {
+                (None, RuntimeAdmissionSnapshot::from_inspections(&[], None))
             } else {
-                let status = self.comfy.get_status().await.map_err(|error| {
-                    runtime_failure(
-                        &pending_pairs,
-                        RUNTIME_ADMISSION_COMFY_UNAVAILABLE,
-                        format!("{}: {}", error.code(), error),
-                        Vec::new(),
-                    )
-                })?;
-                let status_failure_code = match status.status {
-                    ComfyConnectionStatus::Connected => None,
-                    ComfyConnectionStatus::Offline => Some(RUNTIME_ADMISSION_COMFY_UNAVAILABLE),
-                    ComfyConnectionStatus::Incompatible => {
-                        Some(RUNTIME_ADMISSION_COMFY_INCOMPATIBLE)
-                    }
-                };
-                if let Some(code) = status_failure_code {
-                    return Err(ProductionStartAdmissionError::Runtime(runtime_failure(
-                        &pending_pairs,
-                        code,
-                        format!("ComfyUI status is {:?}", status.status),
-                        Vec::new(),
-                    )));
-                }
-
-                self.comfy.refresh_capabilities().await.map_err(|error| {
-                    ProductionStartAdmissionError::Runtime(runtime_failure(
-                        &pending_pairs,
-                        RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED,
-                        format!("{}: {}", error.code(), error),
-                        Vec::new(),
-                    ))
-                })?;
-
-                let mut inspections = Vec::with_capacity(pending_pairs.len());
-                for (workflow_version_id, recipe_id) in &pending_pairs {
-                    let inspection = self
-                        .lifecycle
-                        .inspect_recipe_runtime(workflow_version_id, recipe_id)
-                        .await
-                        .map_err(|error| {
-                            ProductionStartAdmissionError::Runtime(
-                                runtime_failure_from_lifecycle_error(
-                                    workflow_version_id,
-                                    recipe_id,
-                                    error,
-                                ),
-                            )
-                        })?;
-                    inspections.push(inspection);
-                }
-                evaluate_runtime_admission(&detail.items, status.status, &inspections)?;
-                Some(self.comfy.runtime_generation())
+                let (status, snapshot, inspections) =
+                    self.collect_runtime_snapshot(&pending_pairs, true).await?;
+                evaluate_runtime_admission(&detail.items, status, &inspections)?;
+                (snapshot.runtime_generation, snapshot)
             };
 
             let preflight_issues = self
@@ -205,6 +316,15 @@ impl ProductionStartAdmissionService {
                 ));
             }
 
+            let lifecycle_snapshot_b = if pending_pairs.is_empty() {
+                RuntimeAdmissionSnapshot::from_inspections(&[], None)
+            } else {
+                let (status, snapshot, inspections) =
+                    self.collect_runtime_snapshot(&pending_pairs, false).await?;
+                evaluate_runtime_admission(&detail.items, status, &inspections)?;
+                snapshot
+            };
+
             let _admission = self.queue.acquire_runtime_configuration_admission().await;
             let latest = self
                 .queue
@@ -212,7 +332,7 @@ impl ProductionStartAdmissionService {
                 .await?;
             let runtime_stale = runtime_generation
                 .is_some_and(|generation| self.comfy.runtime_generation() != generation);
-            if latest != detail || runtime_stale {
+            if latest != detail || lifecycle_snapshot_b != lifecycle_snapshot_a || runtime_stale {
                 if attempt < MAX_ADMISSION_SNAPSHOT_RETRIES {
                     continue;
                 }
@@ -221,14 +341,14 @@ impl ProductionStartAdmissionService {
                         "",
                         "",
                         RUNTIME_ADMISSION_SNAPSHOT_STALE,
-                        "batch or runtime state changed during admission; retry Queue Start",
+                        "batch, lifecycle, or runtime state changed during admission; retry Queue Start",
                         Vec::new(),
                     )
                 } else {
                     runtime_failure(
                         &pending_pairs,
                         RUNTIME_ADMISSION_SNAPSHOT_STALE,
-                        "batch or runtime state changed during admission; retry Queue Start"
+                        "batch, lifecycle, or runtime state changed during admission; retry Queue Start"
                             .to_owned(),
                         Vec::new(),
                     )
@@ -537,6 +657,7 @@ mod tests {
     };
     use chrono::Utc;
     use serde_json::json;
+    use tokio::sync::{oneshot, Barrier};
 
     fn item(
         workflow_version_id: &str,
@@ -571,6 +692,8 @@ mod tests {
             workflow_version_id: workflow_version_id.to_owned(),
             recipe_id: recipe_id.to_owned(),
             recipe_version: "1.0.0".to_owned(),
+            workflow_sha256: "workflow-sha".to_owned(),
+            recipe_sha256: "recipe-sha".to_owned(),
             enabled: true,
             archived: false,
             recipe_archived: false,
@@ -590,6 +713,10 @@ mod tests {
             Err(ProductionStartAdmissionError::Runtime(failure)) => failure,
             other => panic!("expected runtime admission failure, got {other:?}"),
         }
+    }
+
+    fn snapshot(inspection: WorkflowRecipeRuntimeInspection) -> RuntimeAdmissionSnapshot {
+        RuntimeAdmissionSnapshot::from_inspections(&[inspection], Some(7))
     }
 
     #[test]
@@ -893,5 +1020,76 @@ mod tests {
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE);
         assert_eq!(failure.recipe_id, "recipe-b");
+    }
+
+    #[tokio::test]
+    async fn lifecycle_snapshot_rejects_workflow_disabled_during_preflight() {
+        let initial = inspection("wv-a", "recipe-a", "READY");
+        let started = Arc::new(Barrier::new(2));
+        let (release, release_rx) = oneshot::channel();
+        let preflight_started = started.clone();
+        let preflight = tokio::spawn(async move {
+            preflight_started.wait().await;
+            release_rx.await.unwrap();
+        });
+
+        let snapshot_a = snapshot(initial.clone());
+        started.wait().await;
+        let mut disabled = initial;
+        disabled.enabled = false;
+        release.send(()).unwrap();
+        preflight.await.unwrap();
+        let snapshot_b = snapshot(disabled);
+
+        assert_ne!(snapshot_a, snapshot_b);
+        assert!(!snapshot_b.pairs[0].enabled);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_snapshot_rejects_exact_runtime_readiness_change_during_preflight() {
+        let initial = inspection("wv-a", "recipe-a", "READY");
+        let started = Arc::new(Barrier::new(2));
+        let (release, release_rx) = oneshot::channel();
+        let preflight_started = started.clone();
+        let preflight = tokio::spawn(async move {
+            preflight_started.wait().await;
+            release_rx.await.unwrap();
+        });
+
+        let snapshot_a = snapshot(initial.clone());
+        started.wait().await;
+        let mut changed = initial;
+        changed.recipe_sha256 = "changed-recipe-sha".to_owned();
+        changed.capability = "INCOMPATIBLE_INPUT_VALUES".to_owned();
+        release.send(()).unwrap();
+        preflight.await.unwrap();
+        let snapshot_b = snapshot(changed);
+
+        assert_ne!(snapshot_a, snapshot_b);
+        assert_ne!(
+            snapshot_a.pairs[0].recipe_sha256,
+            snapshot_b.pairs[0].recipe_sha256
+        );
+        assert_eq!(snapshot_b.pairs[0].capability, "INCOMPATIBLE_INPUT_VALUES");
+    }
+
+    #[tokio::test]
+    async fn lifecycle_snapshot_unchanged_between_preflight_barriers_is_admitted() {
+        let initial = inspection("wv-a", "recipe-a", "READY");
+        let started = Arc::new(Barrier::new(2));
+        let (release, release_rx) = oneshot::channel();
+        let preflight_started = started.clone();
+        let preflight = tokio::spawn(async move {
+            preflight_started.wait().await;
+            release_rx.await.unwrap();
+        });
+
+        let snapshot_a = snapshot(initial.clone());
+        started.wait().await;
+        release.send(()).unwrap();
+        preflight.await.unwrap();
+        let snapshot_b = snapshot(initial);
+
+        assert_eq!(snapshot_a, snapshot_b);
     }
 }

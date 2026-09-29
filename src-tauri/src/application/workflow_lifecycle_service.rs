@@ -85,6 +85,10 @@ pub struct WorkflowRecipeRuntimeInspection {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub recipe_version: String,
+    /// Immutable registry hashes used to detect an exact runtime pair being
+    /// replaced while production admission is doing its heavy work.
+    pub workflow_sha256: String,
+    pub recipe_sha256: String,
     pub enabled: bool,
     pub archived: bool,
     pub recipe_archived: bool,
@@ -1273,6 +1277,8 @@ impl WorkflowLifecycleService {
                 workflow_version_id: version.workflow_version_id.clone(),
                 recipe_id: recipe.recipe_id.clone(),
                 recipe_version: recipe.version.clone(),
+                workflow_sha256: version.workflow_sha256.clone(),
+                recipe_sha256: recipe.recipe_sha256.clone(),
                 enabled,
                 archived,
                 recipe_archived,
@@ -1380,6 +1386,8 @@ impl WorkflowLifecycleService {
             workflow_version_id: version.workflow_version_id,
             recipe_id: recipe.recipe_id.clone(),
             recipe_version: recipe.version.clone(),
+            workflow_sha256: version.workflow_sha256,
+            recipe_sha256: recipe.recipe_sha256.clone(),
             enabled,
             archived,
             recipe_archived,
