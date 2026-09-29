@@ -148,6 +148,12 @@ impl RepairJobRunner {
     /// Make every registered job eligible to run again (for example after a
     /// package or backup import brought legacy recipes into the library).
     pub async fn mark_all_pending(&self) -> Result<(), RepositoryError> {
+        // Resetting a marker while run_pending is planning/applying the same
+        // job would let the runner finish with a COMPLETED marker immediately
+        // after the reset.  Use the same gate for both operations so an
+        // import/reset is ordered before or after a complete run, never in the
+        // middle of one.
+        let _guard = self.run_gate.lock().await;
         for job in &self.jobs {
             self.repository.reset(job.id()).await?;
         }
@@ -205,7 +211,15 @@ impl RepairJobRunner {
             Err(error) => Err(error),
         };
         let (status, summary, error) = match result {
-            Ok(summary) => (REPAIR_JOB_COMPLETED, Some(summary), None),
+            Ok(summary) if summary.failed.is_empty() => (REPAIR_JOB_COMPLETED, Some(summary), None),
+            Ok(summary) => (
+                REPAIR_JOB_FAILED,
+                Some(summary.clone()),
+                Some(format!(
+                    "{} repair item(s) failed; the job remains eligible for retry",
+                    summary.failed.len()
+                )),
+            ),
             Err(error) => (REPAIR_JOB_FAILED, None, Some(error)),
         };
         let summary_json = match (&summary, &error) {
@@ -353,6 +367,7 @@ mod tests {
         let (_directory, repository) = repository().await;
         let mut failing_item = CountingJob::new("item_failure_v1", 3);
         failing_item.fail_item = Some("rcp_1");
+        let failing_item = Arc::new(failing_item);
         let mut failing_plan = CountingJob::new("plan_failure_v1", 1);
         failing_plan.fail_plan = true;
         let healthy = Arc::new(CountingJob::new("healthy_v1", 1));
@@ -360,7 +375,7 @@ mod tests {
             repository.clone(),
             Arc::new(FixedClock),
             vec![
-                Arc::new(failing_item),
+                failing_item.clone(),
                 Arc::new(failing_plan),
                 healthy.clone(),
             ],
@@ -369,16 +384,23 @@ mod tests {
         let outcomes = runner.run_pending().await;
         assert_eq!(outcomes.len(), 3);
         let item = &outcomes[0];
-        assert_eq!(item.status, REPAIR_JOB_COMPLETED);
+        assert_eq!(item.status, REPAIR_JOB_FAILED);
         assert_eq!(item.summary.as_ref().unwrap().repaired, 2);
         assert_eq!(item.summary.as_ref().unwrap().failed.len(), 1);
+        assert!(item.error.is_some());
         assert_eq!(outcomes[1].status, REPAIR_JOB_FAILED);
         assert_eq!(outcomes[2].status, REPAIR_JOB_COMPLETED);
         assert_eq!(healthy.applied.load(Ordering::SeqCst), 1);
 
-        // A failed job stays eligible and is retried on the next pass.
+        // A failed job stays eligible and is retried on the next pass.  The
+        // item-failure job has no remaining work after its first pass, while
+        // the plan-failure job still fails at planning.
         let retry = runner.run_pending().await;
-        assert_eq!(retry.len(), 1);
-        assert_eq!(retry[0].job_id, "plan_failure_v1");
+        assert_eq!(retry.len(), 2);
+        assert_eq!(retry[0].job_id, "item_failure_v1");
+        assert_eq!(retry[0].status, REPAIR_JOB_COMPLETED);
+        assert_eq!(retry[1].job_id, "plan_failure_v1");
+        assert_eq!(retry[1].status, REPAIR_JOB_FAILED);
+        assert_eq!(failing_item.applied.load(Ordering::SeqCst), 2);
     }
 }
