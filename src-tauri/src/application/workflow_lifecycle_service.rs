@@ -3267,6 +3267,29 @@ outputs: []
             Ok(())
         }
 
+        async fn delete_slot(
+            &self,
+            project_id: &str,
+            stage: &str,
+            mode: &str,
+            expected_binding_instance_id: &str,
+            expected_revision: i64,
+        ) -> Result<u64, RepositoryError> {
+            if self.fail_clear {
+                return Err(RepositoryError::database("forced binding cleanup failure"));
+            }
+            let mut bindings = self.bindings.lock().unwrap();
+            let before = bindings.len();
+            bindings.retain(|binding| {
+                !(binding.project_id == project_id
+                    && binding.stage == stage
+                    && binding.mode == mode
+                    && binding.binding_instance_id == expected_binding_instance_id
+                    && binding.revision == expected_revision)
+            });
+            Ok((before - bindings.len()) as u64)
+        }
+
         async fn list_for_workflow_version(
             &self,
             workflow_version_id: &str,
