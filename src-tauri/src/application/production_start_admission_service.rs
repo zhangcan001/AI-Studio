@@ -32,14 +32,17 @@ pub const RUNTIME_ADMISSION_CAPABILITY_OFFLINE: &str = "RUNTIME_ADMISSION_CAPABI
 pub const RUNTIME_ADMISSION_CAPABILITY_UNKNOWN: &str = "RUNTIME_ADMISSION_CAPABILITY_UNKNOWN";
 pub const RUNTIME_ADMISSION_DIAGNOSTICS: &str = "RUNTIME_ADMISSION_DIAGNOSTICS";
 pub const RUNTIME_ADMISSION_READINESS_BLOCKED: &str = "RUNTIME_ADMISSION_READINESS_BLOCKED";
+pub const RUNTIME_ADMISSION_SNAPSHOT_STALE: &str = "RUNTIME_ADMISSION_SNAPSHOT_STALE";
+const MAX_ADMISSION_SNAPSHOT_RETRIES: usize = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeAdmissionFailure {
     pub code: &'static str,
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub reason: String,
     pub missing_nodes: Vec<String>,
+    pub batch_issues: Vec<ProductionBatchPreflightIssue>,
 }
 
 impl fmt::Display for RuntimeAdmissionFailure {
@@ -122,76 +125,122 @@ impl ProductionStartAdmissionService {
         project_id: &str,
         batch_id: &str,
     ) -> Result<(), ProductionStartAdmissionError> {
-        let _admission = self.queue.acquire_runtime_configuration_admission().await;
-        let detail = self
-            .queue
-            .inspect_start_admitted(project_id, batch_id)
-            .await?;
-        let pending_pairs = pending_runtime_pairs(&detail.items);
-        if !pending_pairs.is_empty() {
-            let status = self.comfy.get_status().await.map_err(|error| {
-                runtime_failure(
-                    &pending_pairs,
-                    RUNTIME_ADMISSION_COMFY_UNAVAILABLE,
-                    format!("{}: {}", error.code(), error),
-                    Vec::new(),
-                )
-            })?;
-            let status_failure_code = match status.status {
-                ComfyConnectionStatus::Connected => None,
-                ComfyConnectionStatus::Offline => Some(RUNTIME_ADMISSION_COMFY_UNAVAILABLE),
-                ComfyConnectionStatus::Incompatible => Some(RUNTIME_ADMISSION_COMFY_INCOMPATIBLE),
+        for attempt in 0..=MAX_ADMISSION_SNAPSHOT_RETRIES {
+            // The gate protects the short queue-state reads and the final
+            // commit, not the network/schema/recipe work.  This keeps Queue
+            // Start from blocking pause/cancel/configuration changes for the
+            // full duration of a ComfyUI capability refresh and a large batch
+            // preflight.
+            let detail = {
+                let _admission = self.queue.acquire_runtime_configuration_admission().await;
+                self.queue
+                    .inspect_start_admitted(project_id, batch_id)
+                    .await?
             };
-            if let Some(code) = status_failure_code {
-                return Err(ProductionStartAdmissionError::Runtime(runtime_failure(
-                    &pending_pairs,
-                    code,
-                    format!("ComfyUI status is {:?}", status.status),
-                    Vec::new(),
-                )));
+            let pending_pairs = pending_runtime_pairs(&detail.items);
+            let runtime_generation = if pending_pairs.is_empty() {
+                None
+            } else {
+                let status = self.comfy.get_status().await.map_err(|error| {
+                    runtime_failure(
+                        &pending_pairs,
+                        RUNTIME_ADMISSION_COMFY_UNAVAILABLE,
+                        format!("{}: {}", error.code(), error),
+                        Vec::new(),
+                    )
+                })?;
+                let status_failure_code = match status.status {
+                    ComfyConnectionStatus::Connected => None,
+                    ComfyConnectionStatus::Offline => Some(RUNTIME_ADMISSION_COMFY_UNAVAILABLE),
+                    ComfyConnectionStatus::Incompatible => {
+                        Some(RUNTIME_ADMISSION_COMFY_INCOMPATIBLE)
+                    }
+                };
+                if let Some(code) = status_failure_code {
+                    return Err(ProductionStartAdmissionError::Runtime(runtime_failure(
+                        &pending_pairs,
+                        code,
+                        format!("ComfyUI status is {:?}", status.status),
+                        Vec::new(),
+                    )));
+                }
+
+                self.comfy.refresh_capabilities().await.map_err(|error| {
+                    ProductionStartAdmissionError::Runtime(runtime_failure(
+                        &pending_pairs,
+                        RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED,
+                        format!("{}: {}", error.code(), error),
+                        Vec::new(),
+                    ))
+                })?;
+
+                let mut inspections = Vec::with_capacity(pending_pairs.len());
+                for (workflow_version_id, recipe_id) in &pending_pairs {
+                    let inspection = self
+                        .lifecycle
+                        .inspect_recipe_runtime(workflow_version_id, recipe_id)
+                        .await
+                        .map_err(|error| {
+                            ProductionStartAdmissionError::Runtime(
+                                runtime_failure_from_lifecycle_error(
+                                    workflow_version_id,
+                                    recipe_id,
+                                    error,
+                                ),
+                            )
+                        })?;
+                    inspections.push(inspection);
+                }
+                evaluate_runtime_admission(&detail.items, status.status, &inspections)?;
+                Some(self.comfy.runtime_generation())
+            };
+
+            let preflight_issues = self
+                .queue
+                .preflight_saved_execution_batch(project_id, &detail)
+                .await?;
+            if !preflight_issues.is_empty() {
+                return Err(ProductionStartAdmissionError::Runtime(
+                    batch_preflight_failure(&detail.items, &preflight_issues),
+                ));
             }
 
-            self.comfy.refresh_capabilities().await.map_err(|error| {
-                ProductionStartAdmissionError::Runtime(runtime_failure(
-                    &pending_pairs,
-                    RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED,
-                    format!("{}: {}", error.code(), error),
-                    Vec::new(),
-                ))
-            })?;
-
-            let mut inspections = Vec::with_capacity(pending_pairs.len());
-            for (workflow_version_id, recipe_id) in &pending_pairs {
-                let inspection = self
-                    .lifecycle
-                    .inspect_recipe_runtime(workflow_version_id, recipe_id)
-                    .await
-                    .map_err(|error| {
-                        ProductionStartAdmissionError::Runtime(
-                            runtime_failure_from_lifecycle_error(
-                                workflow_version_id,
-                                recipe_id,
-                                error,
-                            ),
-                        )
-                    })?;
-                inspections.push(inspection);
+            let _admission = self.queue.acquire_runtime_configuration_admission().await;
+            let latest = self
+                .queue
+                .inspect_start_admitted(project_id, batch_id)
+                .await?;
+            let runtime_stale = runtime_generation
+                .is_some_and(|generation| self.comfy.runtime_generation() != generation);
+            if latest != detail || runtime_stale {
+                if attempt < MAX_ADMISSION_SNAPSHOT_RETRIES {
+                    continue;
+                }
+                let failure = if pending_pairs.is_empty() {
+                    runtime_failure_for_pair(
+                        "",
+                        "",
+                        RUNTIME_ADMISSION_SNAPSHOT_STALE,
+                        "batch or runtime state changed during admission; retry Queue Start",
+                        Vec::new(),
+                    )
+                } else {
+                    runtime_failure(
+                        &pending_pairs,
+                        RUNTIME_ADMISSION_SNAPSHOT_STALE,
+                        "batch or runtime state changed during admission; retry Queue Start"
+                            .to_owned(),
+                        Vec::new(),
+                    )
+                };
+                return Err(ProductionStartAdmissionError::Runtime(failure));
             }
-            evaluate_runtime_admission(&detail.items, status.status, &inspections)?;
+
+            self.queue.commit_start_admitted(&latest).await?;
+            return Ok(());
         }
 
-        let preflight_issues = self
-            .queue
-            .preflight_saved_execution_batch(project_id, &detail)
-            .await?;
-        if !preflight_issues.is_empty() {
-            return Err(ProductionStartAdmissionError::Runtime(
-                batch_preflight_failure(&detail.items, &preflight_issues),
-            ));
-        }
-
-        self.queue.commit_start_admitted(&detail).await?;
-        Ok(())
+        unreachable!("admission retry loop always returns or continues with a finite bound")
     }
 }
 
@@ -444,6 +493,7 @@ fn batch_preflight_failure(
             .unwrap_or_default(),
         reason,
         missing_nodes: Vec::new(),
+        batch_issues: issues.to_vec(),
     }
 }
 
@@ -470,6 +520,7 @@ fn runtime_failure_for_pair(
         recipe_id: recipe_id.to_owned(),
         reason: reason.into(),
         missing_nodes,
+        batch_issues: Vec::new(),
     }
 }
 

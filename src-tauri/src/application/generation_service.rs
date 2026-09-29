@@ -109,6 +109,17 @@ impl NewGenerationAdmission for WorkflowRegistryService {
     }
 }
 
+/// Structured diagnostics carried alongside an execution admission failure.
+/// The queue layer can expose these fields without asking the frontend to
+/// parse a human-readable error string.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ExecutionFailureDetails {
+    pub semantic_field: Option<String>,
+    pub node_id: Option<String>,
+    pub input_name: Option<String>,
+    pub message_args: Option<Value>,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum GenerationServiceError {
     DefinitionNotFound {
@@ -135,6 +146,7 @@ pub enum GenerationServiceError {
     ExecutionFailed {
         code: String,
         message: String,
+        details: Option<ExecutionFailureDetails>,
     },
 }
 
@@ -173,7 +185,7 @@ impl fmt::Display for GenerationServiceError {
                 formatter,
                 "TASK_CREATED_HOOK_FAILED: task {task_id} could not be linked before execution: {error}"
             ),
-            Self::ExecutionFailed { code, message } => write!(formatter, "{code}: {message}"),
+            Self::ExecutionFailed { code, message, .. } => write!(formatter, "{code}: {message}"),
         }
     }
 }
@@ -251,6 +263,7 @@ impl GenerationExecutionLease {
             .map_err(|error| GenerationServiceError::ExecutionFailed {
                 code: "EXECUTION_ADMISSION_UNAVAILABLE".to_owned(),
                 message: error.to_string(),
+                details: None,
             })?;
         tracing::debug!(task_id = %task_id, "generation execution admission acquired");
         Ok(Self {
@@ -308,6 +321,7 @@ impl GenerationService {
                 return Err(GenerationServiceError::ExecutionFailed {
                     code: WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION.to_owned(),
                     message: "saved workflow version and recipe are unavailable".to_owned(),
+                    details: None,
                 });
             }
         }
@@ -329,11 +343,13 @@ impl GenerationService {
             .ok_or_else(|| GenerationServiceError::ExecutionFailed {
                 code: "RUNTIME_PREFLIGHT_UNAVAILABLE".to_owned(),
                 message: "runtime compatibility service is unavailable".to_owned(),
+                details: None,
             })?;
         let object_info = self.comfy_adapter.get_object_info().await.map_err(|_| {
             GenerationServiceError::ExecutionFailed {
                 code: "COMFYUI_CONNECTION_UNAVAILABLE".to_owned(),
                 message: "live schema could not be read".to_owned(),
+                details: None,
             }
         })?;
         let capability = compatibility
@@ -342,11 +358,16 @@ impl GenerationService {
                 &recipe,
                 &object_info,
             )
-            .map_err(|error| GenerationServiceError::ExecutionFailed {
-                code: error.code().to_owned(),
-                message: "runtime capability check failed".to_owned(),
+            .map_err(|error| {
+                self.comfy_adapter.invalidate_object_info();
+                GenerationServiceError::ExecutionFailed {
+                    code: error.code().to_owned(),
+                    message: "runtime capability check failed".to_owned(),
+                    details: None,
+                }
             })?;
         if capability.state != CapabilityState::Ready {
+            self.comfy_adapter.invalidate_object_info();
             let issue = capability.issues.first();
             return Err(GenerationServiceError::ExecutionFailed {
                 code: if capability.state == CapabilityState::ComfyOffline {
@@ -368,6 +389,12 @@ impl GenerationService {
                     .unwrap_or_else(|| {
                         format!("runtime capability state is {:?}", capability.state)
                     }),
+                details: issue.map(|issue| ExecutionFailureDetails {
+                    semantic_field: None,
+                    node_id: issue.node_id.clone(),
+                    input_name: issue.input_name.clone(),
+                    message_args: None,
+                }),
             });
         }
         let mut results = Vec::with_capacity(values.len());
@@ -406,11 +433,16 @@ impl GenerationService {
                         &resolved_check_recipe,
                         &object_info,
                     )
-                    .map_err(|error| GenerationServiceError::ExecutionFailed {
-                        code: error.code().to_owned(),
-                        message: "resolved workflow capability check failed".to_owned(),
+                    .map_err(|error| {
+                        self.comfy_adapter.invalidate_object_info();
+                        GenerationServiceError::ExecutionFailed {
+                            code: error.code().to_owned(),
+                            message: "resolved workflow capability check failed".to_owned(),
+                            details: None,
+                        }
                     })?;
                 if resolved_capability.state != CapabilityState::Ready {
+                    self.comfy_adapter.invalidate_object_info();
                     let issue = resolved_capability.issues.first();
                     return Err(GenerationServiceError::ExecutionFailed {
                         code: issue
@@ -425,6 +457,12 @@ impl GenerationService {
                                 )
                             })
                             .unwrap_or_else(|| "resolved workflow is incompatible".to_owned()),
+                        details: issue.map(|issue| ExecutionFailureDetails {
+                            semantic_field: None,
+                            node_id: issue.node_id.clone(),
+                            input_name: issue.input_name.clone(),
+                            message_args: None,
+                        }),
                     });
                 }
                 self.generation_input_preparer
@@ -713,6 +751,7 @@ impl GenerationService {
                         "workflow version {} and recipe {} are unavailable for a new generation",
                         request.workflow_version_id, request.recipe_id
                     ),
+                    details: None,
                 });
             }
         }
@@ -1243,7 +1282,11 @@ impl GenerationService {
                             .fail_and_preserve(
                                 &mut task,
                                 error,
-                                GenerationServiceError::ExecutionFailed { code, message },
+                                GenerationServiceError::ExecutionFailed {
+                                    code,
+                                    message,
+                                    details: None,
+                                },
                             )
                             .await);
                     }
@@ -1400,6 +1443,12 @@ impl GenerationService {
                     let original = GenerationServiceError::ExecutionFailed {
                         code: code.to_owned(),
                         message: message.clone(),
+                        details: Some(ExecutionFailureDetails {
+                            semantic_field: None,
+                            node_id: None,
+                            input_name: None,
+                            message_args: None,
+                        }),
                     };
                     return Err(self
                         .fail_and_preserve(
@@ -1426,6 +1475,12 @@ impl GenerationService {
                     let original = GenerationServiceError::ExecutionFailed {
                         code: "EXECUTION_INTERRUPTED".to_owned(),
                         message: message.clone(),
+                        details: Some(ExecutionFailureDetails {
+                            semantic_field: None,
+                            node_id: None,
+                            input_name: None,
+                            message_args: None,
+                        }),
                     };
                     return Err(self
                         .fail_and_preserve(
