@@ -150,6 +150,10 @@ impl ProjectWorkflowBindingService {
         project_id: &str,
         request: ProjectWorkflowBindingUpsertRequest,
     ) -> Result<ProjectWorkflowConfigView, ProjectWorkflowBindingServiceError> {
+        let _lifecycle_guard = match &self.registry {
+            Some(registry) => Some(registry.acquire_binding_mutation_guard().await),
+            None => None,
+        };
         self.ensure_project(project_id).await?;
         let mut keys = HashSet::new();
         let (stage, mode, workflow_version_id, recipe_id) = self
@@ -254,6 +258,10 @@ impl ProjectWorkflowBindingService {
         project_id: &str,
         request: ProjectWorkflowBindingRemoveRequest,
     ) -> Result<ProjectWorkflowConfigView, ProjectWorkflowBindingServiceError> {
+        let _lifecycle_guard = match &self.registry {
+            Some(registry) => Some(registry.acquire_binding_mutation_guard().await),
+            None => None,
+        };
         self.ensure_project(project_id).await?;
         let stage = request.stage.trim().to_owned();
         let mode = request.mode.trim().to_owned();
@@ -285,11 +293,17 @@ impl ProjectWorkflowBindingService {
         self.get(project_id).await
     }
 
+    /// Internal bulk/fixture compatibility only. Never register this as Tauri IPC:
+    /// interactive clients must provide OCC tokens through upsert/remove.
     pub async fn replace(
         &self,
         project_id: &str,
         request: ProjectWorkflowConfigUpdateRequest,
     ) -> Result<ProjectWorkflowConfigView, ProjectWorkflowBindingServiceError> {
+        let _lifecycle_guard = match &self.registry {
+            Some(registry) => Some(registry.acquire_binding_mutation_guard().await),
+            None => None,
+        };
         self.ensure_project(project_id).await?;
         let mut keys = HashSet::new();
         let now = self.clock.now();
@@ -742,6 +756,10 @@ impl From<RepositoryError> for ProjectWorkflowBindingServiceError {
         Self::Repository(error)
     }
 }
+
+#[cfg(test)]
+#[path = "binding_lifecycle_race_tests.rs"]
+mod lifecycle_race_tests;
 
 #[cfg(test)]
 mod tests {

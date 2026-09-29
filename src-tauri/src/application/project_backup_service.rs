@@ -7830,6 +7830,8 @@ mod tests {
             )
         );
         assert!(restored_binding.5.starts_with("bnd_"));
+        assert_ne!(restored_binding.5, "bnd_stale_binding");
+        assert_eq!(restored.backup_version, 20);
     }
 
     #[tokio::test]

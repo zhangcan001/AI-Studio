@@ -297,6 +297,13 @@ impl WorkflowRegistryService {
         self.lifecycle_gate.clone()
     }
 
+    /// Binding availability validation and its conditional write must share
+    /// the Registry/coordinator lifecycle boundary. No live ComfyUI work is
+    /// performed under this guard. Callers must not acquire it recursively.
+    pub(crate) async fn acquire_binding_mutation_guard(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.lifecycle_gate.clone().lock_owned().await
+    }
+
     pub(crate) async fn registry_contains(
         &self,
         workflow_id: &str,
@@ -2293,6 +2300,118 @@ impl WorkflowRegistryService {
 }
 
 type BindingSnapshot = Vec<(String, Vec<ProjectWorkflowBindingRecord>)>;
+
+#[cfg(test)]
+mod binding_compensation_tests {
+    use super::*;
+    use crate::infrastructure::database::{
+        initialize, repositories::test_support, SqliteProjectWorkflowBindingRepository,
+        SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
+    };
+    use chrono::Utc;
+
+    #[tokio::test]
+    async fn compensation_preserves_equivalent_and_third_pairs_and_restores_fresh_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = initialize(&dir.path().join("compensation.db"))
+            .await
+            .unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let bindings = Arc::new(SqliteProjectWorkflowBindingRepository::new(pool.clone()));
+        let registry = WorkflowRegistryService::new(
+            Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone())),
+            Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool)),
+            bindings.clone(),
+            Arc::new(crate::infrastructure::time::SystemClock),
+        );
+        let now = Utc::now();
+        let previous = ProjectWorkflowBindingRecord {
+            project_id: "project-1".into(),
+            stage: "IMAGE".into(),
+            mode: "DEFAULT".into(),
+            workflow_version_id: "workflow-version-1".into(),
+            recipe_id: "recipe-1".into(),
+            binding_instance_id: "bnd_old".into(),
+            revision: 7,
+            created_at: now,
+            updated_at: now,
+        };
+        let snapshot = vec![("project-1".into(), vec![previous.clone()])];
+        // remove_workflow owns this same guard through its awaited compensation.
+        // Calling compensation here also proves that it doesn't reacquire the gate.
+        let _guard = registry.acquire_binding_mutation_guard().await;
+        assert!(registry.lifecycle_gate().try_lock().is_err());
+        let mut current = previous.clone();
+        current.binding_instance_id = "bnd_current".into();
+        current.revision = 9;
+        bindings.insert_slot(&current).await.unwrap();
+        registry.compensate(&[], &snapshot).await.unwrap();
+        assert_eq!(
+            bindings
+                .find_slot("project-1", "IMAGE", "DEFAULT")
+                .await
+                .unwrap(),
+            Some(current.clone())
+        );
+        assert_eq!(
+            bindings
+                .update_slot(
+                    "project-1",
+                    "IMAGE",
+                    "DEFAULT",
+                    "bnd_current",
+                    9,
+                    "workflow-version-1",
+                    "third-recipe",
+                    now
+                )
+                .await
+                .unwrap(),
+            1
+        );
+        let third = bindings
+            .find_slot("project-1", "IMAGE", "DEFAULT")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(registry
+            .compensate(&[], &snapshot)
+            .await
+            .unwrap_err()
+            .contains("changed during compensation"));
+        assert_eq!(
+            bindings
+                .find_slot("project-1", "IMAGE", "DEFAULT")
+                .await
+                .unwrap(),
+            Some(third.clone())
+        );
+        assert_eq!(
+            bindings
+                .delete_slot(
+                    "project-1",
+                    "IMAGE",
+                    "DEFAULT",
+                    &third.binding_instance_id,
+                    third.revision
+                )
+                .await
+                .unwrap(),
+            1
+        );
+        registry.compensate(&[], &snapshot).await.unwrap();
+        let restored = bindings
+            .find_slot("project-1", "IMAGE", "DEFAULT")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored.recipe_id, previous.recipe_id);
+        assert_eq!(restored.revision, 1);
+        assert_ne!(restored.binding_instance_id, previous.binding_instance_id);
+        assert_ne!(restored.binding_instance_id, current.binding_instance_id);
+        assert_eq!(restored.created_at, previous.created_at);
+    }
+}
 
 fn compensation_or_repository(
     operation: &str,
