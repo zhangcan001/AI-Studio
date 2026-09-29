@@ -883,6 +883,8 @@ async fn remove_migration_036_schema(pool: &SqlitePool) {
 
 async fn remove_migration_035_schema(pool: &SqlitePool) {
     for statement in [
+        "ALTER TABLE project_workflow_bindings DROP COLUMN binding_instance_id",
+        "ALTER TABLE project_workflow_bindings DROP COLUMN revision",
         "DROP INDEX IF EXISTS uq_production_batch_items_project_submission_key",
         "DROP INDEX IF EXISTS idx_production_batch_items_project_submission_key",
         "ALTER TABLE production_batch_items DROP COLUMN execution_type",
@@ -893,7 +895,7 @@ async fn remove_migration_035_schema(pool: &SqlitePool) {
         sqlx::query(statement)
             .execute(pool)
             .await
-            .expect("040-041 schema should be removable from the isolated fixture");
+            .expect("040-042 schema should be removable from the isolated fixture");
     }
     remove_migration_036_schema(pool).await;
     for statement in [
