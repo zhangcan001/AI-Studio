@@ -669,6 +669,31 @@ mod lifecycle_e2e {
             Ok(())
         }
 
+        async fn delete_slot(
+            &self,
+            project_id: &str,
+            stage: &str,
+            mode: &str,
+            expected_binding_instance_id: &str,
+            expected_revision: i64,
+        ) -> Result<u64, RepositoryError> {
+            if self.clear_should_fail {
+                return Err(RepositoryError::database(
+                    "DEV-082 forced project binding cleanup failure",
+                ));
+            }
+            let mut records = self.records.lock().expect("fake bindings lock");
+            let before = records.len();
+            records.retain(|binding| {
+                !(binding.project_id == project_id
+                    && binding.stage == stage
+                    && binding.mode == mode
+                    && binding.binding_instance_id == expected_binding_instance_id
+                    && binding.revision == expected_revision)
+            });
+            Ok((before - records.len()) as u64)
+        }
+
         async fn list_for_workflow_version(
             &self,
             workflow_version_id: &str,
