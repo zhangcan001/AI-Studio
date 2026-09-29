@@ -13,7 +13,13 @@ import {
   workflowDisplayName,
   workflowModeLabel,
 } from "./statusLabels";
-import { errorMessageForCode, formatUiError, toUserMessage } from "./errorMessages";
+import {
+  errorMessageForCode,
+  formatUiError,
+  I18N_ERROR_CODE_REGISTRY,
+  productionBatchPreflightIssues,
+  toUserMessage,
+} from "./errorMessages";
 
 describe("简体中文状态展示", () => {
   it("maps task and production status values without changing protocol values", () => {
@@ -59,6 +65,41 @@ describe("用户可见错误信息", () => {
     expect(errorMessageForCode("TASK_NOT_CANCELLABLE")).toBe("当前任务状态不支持取消。");
     expect(errorMessageForCode("WORKFLOW_LINK_SLOT_OUT_OF_RANGE")).toContain("输出槽");
     expect(errorMessageForCode("WORKFLOW_LINK_TYPE_MISMATCH")).toContain("类型不一致");
+  });
+
+  it("i18n_code_coverage keeps every typed execution code localized", () => {
+    for (const code of I18N_ERROR_CODE_REGISTRY) {
+      expect(errorMessageForCode(code), code).not.toBe("操作失败，请查看技术详情。");
+    }
+  });
+
+  it("renders structured batch issues from typed IPC details and keeps legacy fallback", () => {
+    const issues = productionBatchPreflightIssues({
+      code: "PRODUCTION_START_ADMISSION_BLOCKED",
+      message: "legacy technical message",
+      details: {
+        batchIssues: [{
+          itemNumber: 2,
+          code: "INPUT_REQUIRED",
+          target: "26:prompt",
+          semanticField: "prompt",
+          nodeId: "26",
+          inputName: "text",
+          messageArgs: { expected: "string" },
+        }],
+      },
+    });
+    expect(issues).toEqual([{
+      itemNumber: 2,
+      code: "INPUT_REQUIRED",
+      target: "26:prompt",
+      semanticField: "prompt",
+      nodeId: "26",
+      inputName: "text",
+      messageArgs: { expected: "string" },
+    }]);
+    expect(errorMessageForCode(issues[0].code)).toContain("必填");
+    expect(productionBatchPreflightIssues({ message: "legacy only" })).toEqual([]);
   });
 
   it("keeps runtime admission identity in the user-visible start error", () => {

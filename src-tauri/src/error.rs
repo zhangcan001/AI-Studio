@@ -47,6 +47,7 @@ pub enum AppErrorCode {
     ArtifactOpenFailed,
     ArtifactReviewConflict,
     ArtifactReviewInvalid,
+    ProjectWorkflowBindingRevisionConflict,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -260,6 +261,18 @@ impl AppError {
         Self::new(AppErrorCode::ArtifactReviewInvalid, message)
     }
 
+    pub fn project_workflow_binding_revision_conflict(
+        message: impl Into<String>,
+        details: Value,
+    ) -> Self {
+        let mut error = Self::new(
+            AppErrorCode::ProjectWorkflowBindingRevisionConflict,
+            message,
+        );
+        error.details = Some(details);
+        error
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -304,6 +317,9 @@ impl AppError {
             AppErrorCode::ArtifactOpenFailed => "ARTIFACT_OPEN_FAILED",
             AppErrorCode::ArtifactReviewConflict => "ARTIFACT_REVIEW_CONFLICT",
             AppErrorCode::ArtifactReviewInvalid => "ARTIFACT_REVIEW_INVALID",
+            AppErrorCode::ProjectWorkflowBindingRevisionConflict => {
+                "PROJECT_WORKFLOW_BINDING_REVISION_CONFLICT"
+            }
         }
     }
 

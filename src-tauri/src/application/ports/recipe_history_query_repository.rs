@@ -9,6 +9,8 @@ pub struct RecipeHistoryQuery {
     pub recipe_id: String,
     pub task_cursor: Option<PageCursor>,
     pub task_limit: u32,
+    pub project_id: Option<String>,
+    pub statuses: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -2061,6 +2061,8 @@ async fn dev084_project_bindings_not_restored_implicitly() {
                 mode: "DEFAULT".to_owned(),
                 workflow_version_id,
                 recipe_id,
+                binding_instance_id: "bnd_dev084_fixture".to_owned(),
+                revision: 1,
                 created_at: now,
                 updated_at: now,
             }],

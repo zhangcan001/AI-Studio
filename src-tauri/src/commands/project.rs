@@ -2,7 +2,8 @@ use crate::{
     app_state::AppState,
     application::project_service::{ProjectServiceError, ProjectView},
     application::project_workflow_binding_service::{
-        ProjectWorkflowBindingServiceError, ProjectWorkflowConfigUpdateRequest,
+        ProjectWorkflowBindingRemoveRequest, ProjectWorkflowBindingServiceError,
+        ProjectWorkflowBindingUpsertRequest, ProjectWorkflowConfigUpdateRequest,
         ProjectWorkflowConfigView,
     },
     error::AppError,
@@ -76,6 +77,36 @@ pub async fn project_workflow_config_replace(
         .projects
         .workflow_binding
         .replace(&project_id, request)
+        .await
+        .map_err(map_project_workflow_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn project_workflow_binding_upsert(
+    state: State<'_, AppState>,
+    project_id: String,
+    request: ProjectWorkflowBindingUpsertRequest,
+) -> Result<ProjectWorkflowConfigView, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .projects
+        .workflow_binding
+        .upsert(&project_id, request)
+        .await
+        .map_err(map_project_workflow_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn project_workflow_binding_remove(
+    state: State<'_, AppState>,
+    project_id: String,
+    request: ProjectWorkflowBindingRemoveRequest,
+) -> Result<ProjectWorkflowConfigView, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .projects
+        .workflow_binding
+        .remove(&project_id, request)
         .await
         .map_err(map_project_workflow_error)
 }
@@ -193,6 +224,22 @@ fn map_project_workflow_error(error: ProjectWorkflowBindingServiceError) -> AppE
             AppError::project_not_found(format!("project {project_id} was not found"))
         }
         ProjectWorkflowBindingServiceError::Invalid(message) => AppError::invalid_input(message),
+        ProjectWorkflowBindingServiceError::Conflict(conflict) => {
+            AppError::project_workflow_binding_revision_conflict(
+                "项目工作流绑定已被其他操作修改，请重新确认后重试",
+                serde_json::json!({
+                    "projectId": conflict.project_id,
+                    "stage": conflict.stage,
+                    "mode": conflict.mode,
+                    "expectedBindingInstanceId": conflict.expected_binding_instance_id,
+                    "expectedRevision": conflict.expected_revision,
+                    "currentBindingInstanceId": conflict.current_binding_instance_id,
+                    "currentRevision": conflict.current_revision,
+                    "currentWorkflowVersionId": conflict.current_workflow_version_id,
+                    "currentRecipeId": conflict.current_recipe_id,
+                }),
+            )
+        }
         ProjectWorkflowBindingServiceError::Registry(message) => AppError::internal(message),
         ProjectWorkflowBindingServiceError::Repository(error) => {
             super::map_repository_error(&error)

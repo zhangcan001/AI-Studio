@@ -81,6 +81,13 @@ pub struct WorkflowRegistryRecipeView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkflowAvailabilityInspection {
+    pub available: bool,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkflowRegistryVersionView {
     pub workflow_version_id: String,
     pub workflow_id: String,
@@ -1140,69 +1147,112 @@ impl WorkflowRegistryService {
     }
 
     /// Resolve availability from the exact frozen pair. `current_version` is
-    /// intentionally not part of this predicate.
-    pub async fn is_available(
+    /// intentionally not part of this predicate. The reason list is the
+    /// single source of truth for both the boolean and stale-binding UI.
+    pub async fn inspect_availability(
         &self,
         workflow_version_id: &str,
         recipe_id: &str,
-    ) -> Result<bool, WorkflowRegistryServiceError> {
+    ) -> Result<WorkflowAvailabilityInspection, WorkflowRegistryServiceError> {
         let (versions, states) = self.load_runtime().await?;
         let Some(version) = versions
             .iter()
             .find(|version| version.workflow_version_id == workflow_version_id)
         else {
-            return Ok(false);
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: vec!["WORKFLOW_VERSION_NOT_FOUND".to_owned()],
+            });
         };
         if !version
             .recipes
             .iter()
             .any(|recipe| recipe.recipe_id == recipe_id)
         {
-            return Ok(false);
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: vec!["RECIPE_NOT_FOUND".to_owned()],
+            });
         }
         if self
             .recipe_is_archived(workflow_version_id, recipe_id)
             .await?
         {
-            return Ok(false);
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: vec!["RECIPE_ARCHIVED".to_owned()],
+            });
         }
 
         if let Some(repository) = &self.registry_repository {
             let Some(workflow) = repository.get(&version.workflow_id).await? else {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["WORKFLOW_NOT_FOUND".to_owned()],
+                });
             };
             if workflow.library_state != WORKFLOW_LIBRARY_ACTIVE {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["WORKFLOW_REMOVED".to_owned()],
+                });
             }
         }
 
         let version_state = state_for(&states, workflow_version_id);
-        if !version_state.enabled || version_state.archived {
-            return Ok(false);
+        let mut state_reasons = Vec::new();
+        if !version_state.enabled {
+            state_reasons.push("VERSION_DISABLED".to_owned());
+        }
+        if version_state.archived {
+            state_reasons.push("VERSION_ARCHIVED".to_owned());
+        }
+        if !state_reasons.is_empty() {
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: state_reasons,
+            });
         }
 
         let Some(artifact_repository) = &self.runtime_artifact_repository else {
             // New production admission is never allowed to infer a runtime
             // package from workflow_versions.package_name.
-            return Ok(false);
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: vec!["RUNTIME_ARTIFACT_MISSING".to_owned()],
+            });
         };
         let Some(recipe) = version
             .recipes
             .iter()
             .find(|recipe| recipe.recipe_id == recipe_id)
         else {
-            return Ok(false);
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: vec!["RECIPE_NOT_FOUND".to_owned()],
+            });
         };
         let artifacts = artifact_repository
             .list_for_recipe(workflow_version_id, recipe_id)
             .await?;
         let [artifact] = artifacts.as_slice() else {
-            return Ok(false);
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: vec![if artifacts.is_empty() {
+                    "RUNTIME_ARTIFACT_MISSING"
+                } else {
+                    "RUNTIME_ARTIFACT_AMBIGUOUS"
+                }
+                .to_owned()],
+            });
         };
         if artifact.workflow_sha256 != version.workflow_sha256
             || artifact.recipe_sha256 != recipe.recipe_sha256
         {
-            return Ok(false);
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: vec!["RUNTIME_ARTIFACT_HASH_MISMATCH".to_owned()],
+            });
         }
 
         // Production admission must also prove that the canonical artifact
@@ -1211,32 +1261,53 @@ impl WorkflowRegistryService {
         // composition root always supplies it.
         if let Some(package_store) = &self.package_store {
             let Ok(package) = package_store.read_runtime(&artifact.package_name).await else {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["RUNTIME_PACKAGE_UNREADABLE".to_owned()],
+                });
             };
             let Ok(manifest_yaml) = String::from_utf8(package.manifest_yaml.clone()) else {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["RUNTIME_PACKAGE_INVALID".to_owned()],
+                });
             };
             let Ok(manifest) = WorkflowManifest::parse(&manifest_yaml) else {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["RUNTIME_PACKAGE_INVALID".to_owned()],
+                });
             };
             if manifest.validate().is_err()
                 || manifest.id != version.workflow_id
                 || manifest.workflow_version != version.workflow_version
                 || manifest.recipe_version != recipe.version
             {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["RUNTIME_PACKAGE_IDENTITY_MISMATCH".to_owned()],
+                });
             }
             let Ok(recipe_yaml) = String::from_utf8(package.recipe_yaml.clone()) else {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["RUNTIME_PACKAGE_INVALID".to_owned()],
+                });
             };
             let Ok(runtime_recipe) = RecipeParser::parse(&recipe_yaml) else {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["RUNTIME_PACKAGE_INVALID".to_owned()],
+                });
             };
             if runtime_recipe.schema_version != recipe.schema_version
                 || sha256(package.workflow_api_json.as_slice()) != version.workflow_sha256
                 || sha256(package.recipe_yaml.as_slice()) != recipe.recipe_sha256
             {
-                return Ok(false);
+                return Ok(WorkflowAvailabilityInspection {
+                    available: false,
+                    reasons: vec!["RUNTIME_PACKAGE_IDENTITY_MISMATCH".to_owned()],
+                });
             }
         }
 
@@ -1244,7 +1315,25 @@ impl WorkflowRegistryService {
             .iter()
             .filter(|candidate| candidate.workflow_id == version.workflow_id)
             .any(|candidate| !state_for(&states, &candidate.workflow_version_id).archived);
-        Ok(workflow_active)
+        Ok(WorkflowAvailabilityInspection {
+            available: workflow_active,
+            reasons: if workflow_active {
+                Vec::new()
+            } else {
+                vec!["WORKFLOW_REMOVED".to_owned()]
+            },
+        })
+    }
+
+    pub async fn is_available(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<bool, WorkflowRegistryServiceError> {
+        Ok(self
+            .inspect_availability(workflow_version_id, recipe_id)
+            .await?
+            .available)
     }
 
     pub async fn resolve(
@@ -1384,9 +1473,15 @@ impl WorkflowRegistryService {
 
         let mut cleared_binding_count = 0;
         for version_id in &version_ids {
+            let exact_snapshot = binding_snapshot
+                .iter()
+                .flat_map(|(_, bindings)| bindings.iter())
+                .filter(|binding| binding.workflow_version_id == *version_id)
+                .cloned()
+                .collect::<Vec<_>>();
             match self
                 .binding_repository
-                .clear_by_workflow_version(version_id)
+                .clear_exact_bindings(&exact_snapshot)
                 .await
             {
                 Ok(count) => cleared_binding_count += count,
@@ -2154,12 +2249,39 @@ impl WorkflowRegistryService {
             }
         }
         for (project_id, previous) in bindings {
-            if let Err(error) = self
-                .binding_repository
-                .replace_for_project(project_id, previous)
-                .await
-            {
-                failures.push(format!("project {project_id}: {error}"));
+            for binding in previous {
+                let current = match self
+                    .binding_repository
+                    .find_slot(project_id, &binding.stage, &binding.mode)
+                    .await
+                {
+                    Ok(current) => current,
+                    Err(error) => {
+                        failures.push(format!("project {project_id}: {error}"));
+                        continue;
+                    }
+                };
+                if current.as_ref().is_some_and(|current| {
+                    current.workflow_version_id == binding.workflow_version_id
+                        && current.recipe_id == binding.recipe_id
+                }) {
+                    // The binding is already equivalent. Preserve the current
+                    // token and revision rather than restoring stale OCC state.
+                    continue;
+                }
+                if current.is_some() {
+                    failures.push(format!(
+                        "project {project_id} slot {}/{} changed during compensation",
+                        binding.stage, binding.mode
+                    ));
+                    continue;
+                }
+                let mut restored = binding.clone();
+                restored.binding_instance_id = format!("bnd_{}", Uuid::new_v4().simple());
+                restored.revision = 1;
+                if let Err(error) = self.binding_repository.insert_slot(&restored).await {
+                    failures.push(format!("project {project_id}: {error}"));
+                }
             }
         }
         if failures.is_empty() {

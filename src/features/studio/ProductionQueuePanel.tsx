@@ -22,12 +22,13 @@ import { subscribeTaskUpdates } from "../../services/taskEvents";
 import type {
   ProductionBatchDetail,
   ProductionBatchSummary,
+  ProductionBatchPreflightIssue,
   ProductionQueueOverview,
 } from "../../types/productionQueue";
 import type { BatchDraftItem } from "./batchDraft";
 import { canCancelPendingProductionQueue, isSafeProductionQueueRequeue } from "./productionQueuePolicy";
 import { productionBatchOutcomeLabel } from "./productionQueueOutcome";
-import { isComfyNodeIncompatible, toUserMessage } from "../../i18n/errorMessages";
+import { errorMessageForCode, isComfyNodeIncompatible, productionBatchPreflightIssues, toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
 import type { ReusableGenerationDraft } from "../../types/history";
 import type { AssetView } from "../../types/asset";
@@ -83,6 +84,7 @@ export function ProductionQueuePanel({
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [structuredIssues, setStructuredIssues] = useState<ProductionBatchPreflightIssue[]>([]);
   const [resultCompareAssets, setResultCompareAssets] = useState<AssetView[]>([]);
   const [resultCompareOpen, setResultCompareOpen] = useState(false);
   const [resultAssetsByItem, setResultAssetsByItem] = useState<Record<string, AssetView[]>>({});
@@ -144,6 +146,7 @@ export function ProductionQueuePanel({
     setDetail(undefined);
     setShowArchived(false);
     setNotice(undefined);
+    setStructuredIssues([]);
     setResultAssetsByItem({});
     setExpandedInlineItemId(undefined);
     void refreshQueues(true);
@@ -429,9 +432,11 @@ export function ProductionQueuePanel({
   async function runMutation(operation: () => Promise<void>) {
     setBusy(true);
     setNotice(undefined);
+    setStructuredIssues([]);
     try {
       await operation();
     } catch (error: unknown) {
+      setStructuredIssues(productionBatchPreflightIssues(error));
       setNotice(toUserMessage(error));
     } finally {
       setBusy(false);
@@ -778,6 +783,15 @@ export function ProductionQueuePanel({
         </div>
       )}
       {notice && <p className="disabled-note">{notice}</p>}
+      {!!structuredIssues.length && <section aria-label="结构化队列准入问题" className="production-queue-issues">
+        <h4>队列启动问题</h4>
+        <ul>{structuredIssues.map((issue) => <li key={`${issue.itemNumber}-${issue.code}-${issue.target ?? ""}`}>
+          第 {issue.itemNumber} 项：{errorMessageForCode(issue.code)}
+          {issue.semanticField && ` · 字段 ${issue.semanticField}`}
+          {issue.nodeId && ` · 节点 ${issue.nodeId}`}
+          {issue.inputName && ` · 输入 ${issue.inputName}`}
+        </li>)}</ul>
+      </section>}
       {resultCompareOpen && resultCompareAssets.length >= 2 && (
         <AssetCompareWorkspace
           projectId={projectId}

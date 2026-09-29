@@ -6,10 +6,13 @@ use crate::application::workflow_registry_service::WorkflowRegistryService;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
+use uuid::Uuid;
 
 pub const IMAGE_STAGE: &str = "IMAGE";
 pub const VIDEO_STAGE: &str = "VIDEO";
 pub const DEFAULT_MODE: &str = "DEFAULT";
+pub const PROJECT_WORKFLOW_BINDING_REVISION_CONFLICT: &str =
+    "PROJECT_WORKFLOW_BINDING_REVISION_CONFLICT";
 
 pub const VIDEO_MODES: [&str; 7] = [
     "FL2VA_TEXT_TO_VIDEO",
@@ -37,9 +40,34 @@ pub struct ProjectWorkflowBindingView {
     pub mode: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
+    pub binding_instance_id: String,
+    pub revision: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub available: bool,
+    pub availability_reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectWorkflowBindingUpsertRequest {
+    pub stage: String,
+    pub mode: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    #[serde(default)]
+    pub expected_binding_instance_id: Option<String>,
+    #[serde(default)]
+    pub expected_revision: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectWorkflowBindingRemoveRequest {
+    pub stage: String,
+    pub mode: String,
+    pub expected_binding_instance_id: Option<String>,
+    pub expected_revision: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -100,18 +128,161 @@ impl ProjectWorkflowBindingService {
         let bindings = self.binding_repository.list_for_project(project_id).await?;
         let mut views = Vec::with_capacity(bindings.len());
         for binding in bindings {
-            let available = self.is_available(&binding).await?;
+            let availability = self.inspect_availability(&binding).await?;
             views.push(ProjectWorkflowBindingView {
                 stage: binding.stage,
                 mode: binding.mode,
                 workflow_version_id: binding.workflow_version_id,
                 recipe_id: binding.recipe_id,
+                binding_instance_id: binding.binding_instance_id,
+                revision: binding.revision,
                 created_at: binding.created_at,
                 updated_at: binding.updated_at,
-                available,
+                available: availability.available,
+                availability_reasons: availability.reasons,
             });
         }
         Ok(config_from_bindings(project_id, views))
+    }
+
+    pub async fn upsert(
+        &self,
+        project_id: &str,
+        request: ProjectWorkflowBindingUpsertRequest,
+    ) -> Result<ProjectWorkflowConfigView, ProjectWorkflowBindingServiceError> {
+        self.ensure_project(project_id).await?;
+        let mut keys = HashSet::new();
+        let (stage, mode, workflow_version_id, recipe_id) = self
+            .validate_binding_input(
+                project_id,
+                request.stage,
+                request.mode,
+                request.workflow_version_id,
+                request.recipe_id,
+                &mut keys,
+            )
+            .await?;
+        let expected = match (
+            request.expected_binding_instance_id,
+            request.expected_revision,
+        ) {
+            (None, None) => None,
+            (Some(instance_id), Some(revision)) if !instance_id.trim().is_empty() && revision > 0 => {
+                Some((instance_id, revision))
+            }
+            _ => {
+                return Err(ProjectWorkflowBindingServiceError::Invalid(
+                    "PROJECT_WORKFLOW_BINDING_EXPECTED_TOKEN: expectedBindingInstanceId and expectedRevision must be provided together"
+                        .to_owned(),
+                ))
+            }
+        };
+        let now = self.clock.now();
+        match expected {
+            None => {
+                if self
+                    .binding_repository
+                    .find_slot(project_id, &stage, &mode)
+                    .await?
+                    .is_some()
+                {
+                    return Err(self
+                        .revision_conflict(project_id, &stage, &mode, None, None)
+                        .await?);
+                }
+                let binding = ProjectWorkflowBindingRecord {
+                    project_id: project_id.to_owned(),
+                    stage,
+                    mode,
+                    workflow_version_id,
+                    recipe_id,
+                    binding_instance_id: new_binding_instance_id(),
+                    revision: 1,
+                    created_at: now,
+                    updated_at: now,
+                };
+                match self.binding_repository.insert_slot(&binding).await {
+                    Ok(()) => {}
+                    Err(error) if is_unique_constraint(&error) => {
+                        return Err(self
+                            .revision_conflict(
+                                project_id,
+                                &binding.stage,
+                                &binding.mode,
+                                None,
+                                None,
+                            )
+                            .await?);
+                    }
+                    Err(error) => {
+                        return Err(ProjectWorkflowBindingServiceError::Repository(error))
+                    }
+                }
+            }
+            Some((instance_id, revision)) => {
+                let affected = self
+                    .binding_repository
+                    .update_slot(
+                        project_id,
+                        &stage,
+                        &mode,
+                        &instance_id,
+                        revision,
+                        &workflow_version_id,
+                        &recipe_id,
+                        now,
+                    )
+                    .await?;
+                if affected != 1 {
+                    return Err(self
+                        .revision_conflict(
+                            project_id,
+                            &stage,
+                            &mode,
+                            Some(instance_id),
+                            Some(revision),
+                        )
+                        .await?);
+                }
+            }
+        }
+        self.get(project_id).await
+    }
+
+    pub async fn remove(
+        &self,
+        project_id: &str,
+        request: ProjectWorkflowBindingRemoveRequest,
+    ) -> Result<ProjectWorkflowConfigView, ProjectWorkflowBindingServiceError> {
+        self.ensure_project(project_id).await?;
+        let stage = request.stage.trim().to_owned();
+        let mode = request.mode.trim().to_owned();
+        let mut keys = HashSet::new();
+        validate_binding_shape(&stage, &mode, "placeholder", "placeholder", &mut keys)?;
+        let (Some(instance_id), Some(revision)) = (
+            request.expected_binding_instance_id,
+            request.expected_revision,
+        ) else {
+            return Err(ProjectWorkflowBindingServiceError::Invalid(
+                "PROJECT_WORKFLOW_BINDING_EXPECTED_TOKEN: remove requires expectedBindingInstanceId and expectedRevision"
+                    .to_owned(),
+            ));
+        };
+        if instance_id.trim().is_empty() || revision < 1 {
+            return Err(ProjectWorkflowBindingServiceError::Invalid(
+                "PROJECT_WORKFLOW_BINDING_EXPECTED_TOKEN: remove token is invalid".to_owned(),
+            ));
+        }
+        let affected = self
+            .binding_repository
+            .delete_slot(project_id, &stage, &mode, &instance_id, revision)
+            .await?;
+        if affected != 1 {
+            return Err(self
+                .revision_conflict(project_id, &stage, &mode, Some(instance_id), Some(revision))
+                .await?);
+        }
+        self.get(project_id).await
     }
 
     pub async fn replace(
@@ -181,6 +352,8 @@ impl ProjectWorkflowBindingService {
                 mode,
                 workflow_version_id,
                 recipe_id,
+                binding_instance_id: new_binding_instance_id(),
+                revision: 1,
                 created_at: now,
                 updated_at: now,
             });
@@ -224,11 +397,26 @@ impl ProjectWorkflowBindingService {
         workflow_version_id: &str,
         recipe_id: &str,
     ) -> Result<bool, ProjectWorkflowBindingServiceError> {
+        Ok(self
+            .inspect_workflow_availability(workflow_version_id, recipe_id)
+            .await?
+            .available)
+    }
+
+    async fn inspect_workflow_availability(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<BindingAvailabilityInspection, ProjectWorkflowBindingServiceError> {
         if let Some(registry) = &self.registry {
-            return registry
-                .is_available(workflow_version_id, recipe_id)
+            let inspection = registry
+                .inspect_availability(workflow_version_id, recipe_id)
                 .await
-                .map_err(|error| ProjectWorkflowBindingServiceError::Registry(error.to_string()));
+                .map_err(|error| ProjectWorkflowBindingServiceError::Registry(error.to_string()))?;
+            return Ok(BindingAvailabilityInspection {
+                available: inspection.available,
+                reasons: inspection.reasons,
+            });
         }
 
         let Some(version) = self
@@ -236,14 +424,18 @@ impl ProjectWorkflowBindingService {
             .find_version(workflow_version_id)
             .await?
         else {
-            return Ok(false);
+            return Ok(BindingAvailabilityInspection::unavailable(
+                "WORKFLOW_VERSION_NOT_FOUND",
+            ));
         };
         if !version
             .recipes
             .iter()
             .any(|recipe| recipe.recipe_id == recipe_id)
         {
-            return Ok(false);
+            return Ok(BindingAvailabilityInspection::unavailable(
+                "RECIPE_NOT_FOUND",
+            ));
         }
         let state_available = self
             .runtime_state_repository
@@ -251,7 +443,9 @@ impl ProjectWorkflowBindingService {
             .await?
             .is_none_or(|state| state.enabled && !state.archived);
         if !state_available {
-            return Ok(false);
+            return Ok(BindingAvailabilityInspection::unavailable(
+                "VERSION_DISABLED",
+            ));
         }
 
         // Migration 028 will persist library_state on workflows. Until that
@@ -259,7 +453,7 @@ impl ProjectWorkflowBindingService {
         // representation; a non-current version remains available otherwise.
         let versions = self.runtime_repository.list_versions().await?;
         let states = self.runtime_state_repository.list_states().await?;
-        Ok(versions
+        let available = versions
             .iter()
             .filter(|candidate| candidate.workflow_id == version.workflow_id)
             .any(|candidate| {
@@ -267,7 +461,15 @@ impl ProjectWorkflowBindingService {
                     .iter()
                     .find(|state| state.workflow_version_id == candidate.workflow_version_id)
                     .is_none_or(|state| !state.archived)
-            }))
+            });
+        Ok(BindingAvailabilityInspection {
+            available,
+            reasons: if available {
+                Vec::new()
+            } else {
+                vec!["WORKFLOW_REMOVED".to_owned()]
+            },
+        })
     }
 
     async fn ensure_project(
@@ -287,12 +489,163 @@ impl ProjectWorkflowBindingService {
         Ok(())
     }
 
-    async fn is_available(
+    async fn inspect_availability(
         &self,
         binding: &ProjectWorkflowBindingRecord,
-    ) -> Result<bool, ProjectWorkflowBindingServiceError> {
-        self.is_workflow_available_for_recipe(&binding.workflow_version_id, &binding.recipe_id)
+    ) -> Result<BindingAvailabilityInspection, ProjectWorkflowBindingServiceError> {
+        self.inspect_workflow_availability(&binding.workflow_version_id, &binding.recipe_id)
             .await
+    }
+
+    async fn validate_binding_input(
+        &self,
+        _project_id: &str,
+        stage: String,
+        mode: String,
+        workflow_version_id: String,
+        recipe_id: String,
+        keys: &mut HashSet<(String, String)>,
+    ) -> Result<(String, String, String, String), ProjectWorkflowBindingServiceError> {
+        let stage = stage.trim().to_owned();
+        let mode = mode.trim().to_owned();
+        let workflow_version_id = workflow_version_id.trim().to_owned();
+        let recipe_id = recipe_id.trim().to_owned();
+        validate_binding_shape(&stage, &mode, &workflow_version_id, &recipe_id, keys)?;
+        let version = self
+            .runtime_repository
+            .find_version(&workflow_version_id)
+            .await?
+            .ok_or_else(|| {
+                ProjectWorkflowBindingServiceError::Invalid(format!(
+                    "PROJECT_WORKFLOW_WORKFLOW_NOT_FOUND: workflow version {workflow_version_id} was not found"
+                ))
+            })?;
+        if !version
+            .recipes
+            .iter()
+            .any(|recipe| recipe.recipe_id == recipe_id)
+        {
+            let recipe_exists_elsewhere = self
+                .runtime_repository
+                .list_versions()
+                .await?
+                .into_iter()
+                .any(|candidate| {
+                    candidate
+                        .recipes
+                        .iter()
+                        .any(|recipe| recipe.recipe_id == recipe_id)
+                });
+            let code = if recipe_exists_elsewhere {
+                "PROJECT_WORKFLOW_RECIPE_MISMATCH"
+            } else {
+                "PROJECT_WORKFLOW_RECIPE_NOT_FOUND"
+            };
+            return Err(ProjectWorkflowBindingServiceError::Invalid(format!(
+                "{code}: recipe {recipe_id} is not available in workflow version {workflow_version_id}"
+            )));
+        }
+        let availability = self
+            .inspect_workflow_availability(&workflow_version_id, &recipe_id)
+            .await?;
+        if !availability.available {
+            return Err(ProjectWorkflowBindingServiceError::Invalid(format!(
+                "PROJECT_WORKFLOW_WORKFLOW_UNAVAILABLE: workflow version {workflow_version_id} is unavailable ({})",
+                availability.reasons.join(", ")
+            )));
+        }
+        Ok((stage, mode, workflow_version_id, recipe_id))
+    }
+
+    async fn revision_conflict(
+        &self,
+        project_id: &str,
+        stage: &str,
+        mode: &str,
+        expected_binding_instance_id: Option<String>,
+        expected_revision: Option<i64>,
+    ) -> Result<ProjectWorkflowBindingServiceError, ProjectWorkflowBindingServiceError> {
+        let current = self
+            .binding_repository
+            .find_slot(project_id, stage, mode)
+            .await?;
+        Ok(ProjectWorkflowBindingServiceError::Conflict(
+            self.revision_conflict_details(
+                project_id,
+                stage,
+                mode,
+                expected_binding_instance_id,
+                expected_revision,
+                current,
+            ),
+        ))
+    }
+
+    fn revision_conflict_details(
+        &self,
+        project_id: &str,
+        stage: &str,
+        mode: &str,
+        expected_binding_instance_id: Option<String>,
+        expected_revision: Option<i64>,
+        current: Option<ProjectWorkflowBindingRecord>,
+    ) -> ProjectWorkflowBindingConflict {
+        ProjectWorkflowBindingConflict {
+            project_id: project_id.to_owned(),
+            stage: stage.to_owned(),
+            mode: mode.to_owned(),
+            expected_binding_instance_id,
+            expected_revision,
+            current_binding_instance_id: current
+                .as_ref()
+                .map(|value| value.binding_instance_id.clone()),
+            current_revision: current.as_ref().map(|value| value.revision),
+            current_workflow_version_id: current
+                .as_ref()
+                .map(|value| value.workflow_version_id.clone()),
+            current_recipe_id: current.map(|value| value.recipe_id),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BindingAvailabilityInspection {
+    pub available: bool,
+    pub reasons: Vec<String>,
+}
+
+impl BindingAvailabilityInspection {
+    fn unavailable(reason: &str) -> Self {
+        Self {
+            available: false,
+            reasons: vec![reason.to_owned()],
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectWorkflowBindingConflict {
+    pub project_id: String,
+    pub stage: String,
+    pub mode: String,
+    pub expected_binding_instance_id: Option<String>,
+    pub expected_revision: Option<i64>,
+    pub current_binding_instance_id: Option<String>,
+    pub current_revision: Option<i64>,
+    pub current_workflow_version_id: Option<String>,
+    pub current_recipe_id: Option<String>,
+}
+
+fn new_binding_instance_id() -> String {
+    format!("bnd_{}", Uuid::new_v4().simple())
+}
+
+fn is_unique_constraint(error: &RepositoryError) -> bool {
+    match error {
+        RepositoryError::Database { message } | RepositoryError::Integrity { message } => {
+            message.to_ascii_lowercase().contains("unique")
+        }
+        _ => false,
     }
 }
 
@@ -360,6 +713,7 @@ fn config_from_bindings(
 pub enum ProjectWorkflowBindingServiceError {
     ProjectNotFound(String),
     Invalid(String),
+    Conflict(ProjectWorkflowBindingConflict),
     Registry(String),
     Repository(RepositoryError),
 }
@@ -374,6 +728,7 @@ impl fmt::Display for ProjectWorkflowBindingServiceError {
                 )
             }
             Self::Invalid(message) => formatter.write_str(message),
+            Self::Conflict(_) => formatter.write_str(PROJECT_WORKFLOW_BINDING_REVISION_CONFLICT),
             Self::Registry(message) => write!(formatter, "WORKFLOW_REGISTRY_ERROR: {message}"),
             Self::Repository(error) => error.fmt(formatter),
         }

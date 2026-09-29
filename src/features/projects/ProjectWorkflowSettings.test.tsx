@@ -8,12 +8,14 @@ import { ProjectWorkflowSettings } from "./ProjectWorkflowSettings";
 
 const mocks = vi.hoisted(() => ({
   getProjectWorkflowConfig: vi.fn(),
-  replaceProjectWorkflowConfig: vi.fn(),
+  upsertProjectWorkflowBinding: vi.fn(),
+  removeProjectWorkflowBinding: vi.fn(),
 }));
 
 vi.mock("../../services/tauriClient", () => ({
   getProjectWorkflowConfig: mocks.getProjectWorkflowConfig,
-  replaceProjectWorkflowConfig: mocks.replaceProjectWorkflowConfig,
+  upsertProjectWorkflowBinding: mocks.upsertProjectWorkflowBinding,
+  removeProjectWorkflowBinding: mocks.removeProjectWorkflowBinding,
 }));
 
 const emptyConfig: ProjectWorkflowConfigView = {
@@ -63,7 +65,8 @@ describe("ProjectWorkflowSettings", () => {
   beforeEach(() => {
     localStorage.clear();
     mocks.getProjectWorkflowConfig.mockReset().mockResolvedValue(emptyConfig);
-    mocks.replaceProjectWorkflowConfig.mockReset().mockResolvedValue(emptyConfig);
+    mocks.upsertProjectWorkflowBinding.mockReset().mockResolvedValue(emptyConfig);
+    mocks.removeProjectWorkflowBinding.mockReset().mockResolvedValue(emptyConfig);
   });
 
   it("offers a one-click legacy import only while the database config is empty", async () => {
@@ -76,13 +79,13 @@ describe("ProjectWorkflowSettings", () => {
     expect(await screen.findByText("检测到旧版本保存的工作流选择")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "导入旧设置" }));
 
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-1", {
-      bindings: [{
-        stage: "IMAGE",
-        mode: "DEFAULT",
-        workflowVersionId: "image-version",
-        recipeId: "image-recipe",
-      }],
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith("project-1", {
+      stage: "IMAGE",
+      mode: "DEFAULT",
+      workflowVersionId: "image-version",
+      recipeId: "image-recipe",
+      expectedBindingInstanceId: null,
+      expectedRevision: null,
     });
   });
 
@@ -97,6 +100,8 @@ describe("ProjectWorkflowSettings", () => {
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
         available: true,
+        bindingInstanceId: "bnd_image",
+        revision: 1,
       },
     });
     render(<ProjectWorkflowSettings projectId="project-1" catalog={catalog} />);
@@ -106,7 +111,7 @@ describe("ProjectWorkflowSettings", () => {
     expect(screen.getByText("项目工作流设置")).toBeTruthy();
   });
 
-  it("keeps edits local until one explicit save replaces the complete config", async () => {
+  it("keeps edits local until one explicit save mutates only the changed slots", async () => {
     render(<ProjectWorkflowSettings projectId="project-1" catalog={catalog} />);
 
     await screen.findByLabelText("图片默认工作流");
@@ -114,15 +119,21 @@ describe("ProjectWorkflowSettings", () => {
     await userEvent.selectOptions(screen.getByLabelText("视频默认工作流"), "video-version:video-recipe");
     await userEvent.selectOptions(screen.getByLabelText("图生视频"), "i2v-version:i2v-recipe");
 
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "保存工作流配置" }));
 
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-1", {
-      bindings: [
-        { stage: "IMAGE", mode: "DEFAULT", workflowVersionId: "image-version", recipeId: "image-recipe" },
-        { stage: "VIDEO", mode: "DEFAULT", workflowVersionId: "video-version", recipeId: "video-recipe" },
-        { stage: "VIDEO", mode: "FL2VA_IMAGE_TO_VIDEO", workflowVersionId: "i2v-version", recipeId: "i2v-recipe" },
-      ],
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledTimes(3);
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenNthCalledWith(1, "project-1", {
+      stage: "IMAGE", mode: "DEFAULT", workflowVersionId: "image-version", recipeId: "image-recipe",
+      expectedBindingInstanceId: null, expectedRevision: null,
+    });
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenNthCalledWith(2, "project-1", {
+      stage: "VIDEO", mode: "DEFAULT", workflowVersionId: "video-version", recipeId: "video-recipe",
+      expectedBindingInstanceId: null, expectedRevision: null,
+    });
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenNthCalledWith(3, "project-1", {
+      stage: "VIDEO", mode: "FL2VA_IMAGE_TO_VIDEO", workflowVersionId: "i2v-version", recipeId: "i2v-recipe",
+      expectedBindingInstanceId: null, expectedRevision: null,
     });
   });
 
@@ -137,16 +148,20 @@ describe("ProjectWorkflowSettings", () => {
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
         available: false,
+        bindingInstanceId: "bnd_stale",
+        revision: 3,
       },
     });
     render(<ProjectWorkflowSettings projectId="project-1" catalog={catalog} />);
 
     expect(await screen.findByText(/原 WorkflowVersion：stale-version/)).toBeTruthy();
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.removeProjectWorkflowBinding).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "清除绑定" }));
     await userEvent.click(screen.getByRole("button", { name: "保存工作流配置" }));
 
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-1", { bindings: [] });
+    expect(mocks.removeProjectWorkflowBinding).toHaveBeenCalledWith("project-1", {
+      stage: "IMAGE", mode: "DEFAULT", expectedBindingInstanceId: "bnd_stale", expectedRevision: 3,
+    });
   });
 
   it("publishes the loaded and saved config for the live preflight panel", async () => {
@@ -160,14 +175,17 @@ describe("ProjectWorkflowSettings", () => {
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
         available: true,
+        bindingInstanceId: "bnd_image",
+        revision: 1,
       },
     };
     const onConfigChanged = vi.fn();
-    mocks.replaceProjectWorkflowConfig.mockResolvedValue(nextConfig);
+    mocks.upsertProjectWorkflowBinding.mockResolvedValue(nextConfig);
     render(<ProjectWorkflowSettings projectId="project-1" catalog={catalog} onConfigChanged={onConfigChanged} />);
 
     await screen.findByLabelText("图片默认工作流");
     expect(onConfigChanged).toHaveBeenCalledWith(emptyConfig);
+    await userEvent.selectOptions(screen.getByLabelText("图片默认工作流"), "image-version:image-recipe");
     await userEvent.click(screen.getByRole("button", { name: "保存工作流配置" }));
 
     await waitFor(() => expect(onConfigChanged).toHaveBeenLastCalledWith(nextConfig));
@@ -175,7 +193,7 @@ describe("ProjectWorkflowSettings", () => {
 
   it("does not publish a config when saving fails", async () => {
     const onConfigChanged = vi.fn();
-    mocks.replaceProjectWorkflowConfig.mockRejectedValue(new Error("offline"));
+    mocks.upsertProjectWorkflowBinding.mockRejectedValue(new Error("offline"));
     render(<ProjectWorkflowSettings projectId="project-1" catalog={catalog} onConfigChanged={onConfigChanged} />);
 
     await screen.findByLabelText("图片默认工作流");

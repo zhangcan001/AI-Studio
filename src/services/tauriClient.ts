@@ -89,6 +89,8 @@ import type {
   RestoredProjectView,
 } from "../types/project";
 import type {
+  ProjectWorkflowBindingRemoveRequest,
+  ProjectWorkflowBindingUpsertRequest,
   ProjectWorkflowConfigUpdateRequest,
   ProjectWorkflowConfigView,
 } from "../types/projectWorkflow";
@@ -1503,6 +1505,20 @@ export function replaceProjectWorkflowConfig(
   return invoke<ProjectWorkflowConfigView>("project_workflow_config_replace", { projectId, request });
 }
 
+export function upsertProjectWorkflowBinding(
+  projectId: string,
+  request: ProjectWorkflowBindingUpsertRequest,
+): Promise<ProjectWorkflowConfigView> {
+  return invoke<ProjectWorkflowConfigView>("project_workflow_binding_upsert", { projectId, request });
+}
+
+export function removeProjectWorkflowBinding(
+  projectId: string,
+  request: ProjectWorkflowBindingRemoveRequest,
+): Promise<ProjectWorkflowConfigView> {
+  return invoke<ProjectWorkflowConfigView>("project_workflow_binding_remove", { projectId, request });
+}
+
 export function exportProjectBackup(projectId: string): Promise<ProjectBackupExportView | null> {
   return invoke<ProjectBackupExportView | null>("project_backup_export", { projectId });
 }
@@ -1697,12 +1713,16 @@ export function getWorkflowRecipeHistory(
   recipeId: string,
   taskCursor?: WorkflowHistoryCursor,
   taskLimit?: number,
+  projectId?: string,
+  statuses?: string[],
 ): Promise<WorkflowRecipeHistoryView> {
   return invoke<WorkflowRecipeHistoryView>("workflow_recipe_history_get", {
     workflowVersionId,
     recipeId,
     taskCursor,
     taskLimit,
+    projectId,
+    statuses,
   });
 }
 

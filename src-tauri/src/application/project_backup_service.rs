@@ -7796,8 +7796,8 @@ mod tests {
             .contains(&"missing-recipe".to_owned()));
 
         let restored = service.restore(&preview.inspection_id).await.unwrap();
-        let restored_binding: (String, String, String, String) = sqlx::query_as(
-            "SELECT stage, mode, workflow_version_id, recipe_id
+        let restored_binding: (String, String, String, String, i64, String) = sqlx::query_as(
+            "SELECT stage, mode, workflow_version_id, recipe_id, revision, binding_instance_id
 
              FROM project_workflow_bindings WHERE project_id = ?",
         )
@@ -7806,14 +7806,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            restored_binding,
+            (
+                restored_binding.0.clone(),
+                restored_binding.1.clone(),
+                restored_binding.2.clone(),
+                restored_binding.3.clone(),
+                restored_binding.4,
+            ),
             (
                 "VIDEO".to_owned(),
                 "DEFAULT".to_owned(),
                 "missing-version".to_owned(),
-                "missing-recipe".to_owned()
+                "missing-recipe".to_owned(),
+                1,
             )
         );
+        assert!(restored_binding.5.starts_with("bnd_"));
     }
 
     #[tokio::test]

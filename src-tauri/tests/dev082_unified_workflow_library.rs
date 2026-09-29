@@ -1116,6 +1116,8 @@ mod lifecycle_e2e {
             mode: "DEFAULT".to_owned(),
             workflow_version_id: workflow.workflow_version_id.clone(),
             recipe_id: workflow.recipe_id.clone(),
+            binding_instance_id: format!("bnd_{project_id}_test"),
+            revision: 1,
             created_at: FixedClock.now(),
             updated_at: FixedClock.now(),
         }

@@ -88,31 +88,64 @@ impl RecipeRepairJob {
             }
         }
         if let Some(bindings) = &self.bindings {
-            let projects = bindings
+            let candidates = bindings
                 .list_for_workflow_version(workflow_version_id)
                 .await
                 .map_err(|error| error.to_string())?
                 .into_iter()
                 .filter(|record| record.recipe_id == old_recipe_id)
-                .map(|record| record.project_id)
-                .collect::<BTreeSet<_>>();
-            for project_id in projects {
-                let mut records = bindings
-                    .list_for_project(&project_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let now = self.clock.now();
-                for record in records.iter_mut().filter(|record| {
-                    record.workflow_version_id == workflow_version_id
-                        && record.recipe_id == old_recipe_id
-                }) {
-                    record.recipe_id = new_recipe_id.to_owned();
-                    record.updated_at = now;
+                .collect::<Vec<_>>();
+            for candidate in candidates {
+                let mut retargeted = false;
+                for _attempt in 0..3 {
+                    let current = bindings
+                        .find_slot(&candidate.project_id, &candidate.stage, &candidate.mode)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let Some(current) = current else {
+                        // A user may have removed the binding while the repair
+                        // was publishing. Removal is a valid superseding choice.
+                        retargeted = true;
+                        break;
+                    };
+                    if current.workflow_version_id != workflow_version_id
+                        || (current.recipe_id != old_recipe_id
+                            && current.recipe_id != new_recipe_id)
+                    {
+                        // A third exact pair is a user decision. Never
+                        // overwrite it with a background repair.
+                        retargeted = true;
+                        break;
+                    }
+                    if current.recipe_id == new_recipe_id {
+                        retargeted = true;
+                        break;
+                    }
+                    if bindings
+                        .update_slot(
+                            &current.project_id,
+                            &current.stage,
+                            &current.mode,
+                            &current.binding_instance_id,
+                            current.revision,
+                            workflow_version_id,
+                            new_recipe_id,
+                            self.clock.now(),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?
+                        == 1
+                    {
+                        retargeted = true;
+                        break;
+                    }
                 }
-                bindings
-                    .replace_for_project(&project_id, &records)
-                    .await
-                    .map_err(|error| error.to_string())?;
+                if !retargeted {
+                    return Err(format!(
+                        "binding retarget conflicted after bounded retry for project {} slot {}/{}",
+                        candidate.project_id, candidate.stage, candidate.mode
+                    ));
+                }
             }
         }
         Ok(())

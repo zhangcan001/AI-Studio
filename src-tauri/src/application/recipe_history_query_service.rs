@@ -63,20 +63,45 @@ impl RecipeHistoryQueryService {
     ) -> Result<RecipeHistoryView, RecipeHistoryQueryError> {
         let workflow_version_id = normalize_identity(workflow_version_id)?;
         let recipe_id = normalize_identity(recipe_id)?;
+        self.get_exact_pair_filtered(
+            &workflow_version_id,
+            &recipe_id,
+            task_cursor,
+            task_limit,
+            None,
+            Vec::new(),
+        )
+        .await
+    }
+
+    pub async fn get_exact_pair_filtered(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        task_cursor: Option<PageCursor>,
+        task_limit: Option<u32>,
+        project_id: Option<&str>,
+        statuses: Vec<String>,
+    ) -> Result<RecipeHistoryView, RecipeHistoryQueryError> {
+        let workflow_version_id = normalize_identity(workflow_version_id)?;
+        let recipe_id = normalize_identity(recipe_id)?;
+        let project_id = project_id.map(normalize_identity).transpose()?;
         let record = self
             .repository
             .get_exact_pair(RecipeHistoryQuery {
-                workflow_version_id: workflow_version_id.clone(),
-                recipe_id: recipe_id.clone(),
+                workflow_version_id: workflow_version_id.to_owned(),
+                recipe_id: recipe_id.to_owned(),
                 task_cursor,
                 task_limit: task_limit
                     .unwrap_or(DEFAULT_TASK_LIMIT)
                     .clamp(1, MAX_TASK_LIMIT),
+                project_id,
+                statuses,
             })
             .await?
             .ok_or(RecipeHistoryQueryError::NotFound {
-                workflow_version_id,
-                recipe_id,
+                workflow_version_id: workflow_version_id.to_owned(),
+                recipe_id: recipe_id.to_owned(),
             })?;
         Ok(RecipeHistoryView::from(record))
     }

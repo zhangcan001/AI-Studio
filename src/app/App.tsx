@@ -17,7 +17,7 @@ import {
   refreshComfyCapabilities,
   replaceConsistencyScopeBinding,
   getProjectWorkflowConfig,
-  replaceProjectWorkflowConfig,
+  upsertProjectWorkflowBinding,
   replaceShotConsistencyBinding,
 } from "../services/tauriClient";
 import { subscribeTaskUpdates } from "../services/taskEvents";
@@ -683,8 +683,14 @@ function App() {
       }
 
       const currentConfig = await getProjectWorkflowConfig(currentProject.id);
-      const nextConfig = await replaceProjectWorkflowConfig(currentProject.id, {
-        bindings: projectWorkflowBindingsForRecipe(currentConfig, selection, recipe),
+      const currentBinding = selection === "IMAGE" ? currentConfig.imageDefault : currentConfig.videoDefault;
+      const nextConfig = await upsertProjectWorkflowBinding(currentProject.id, {
+        stage: selection,
+        mode: "DEFAULT",
+        workflowVersionId: recipe.workflowVersionId,
+        recipeId: recipe.recipeId,
+        expectedBindingInstanceId: currentBinding?.bindingInstanceId ?? null,
+        expectedRevision: currentBinding?.revision ?? null,
       });
       const confirmedBinding = selection === "IMAGE" ? nextConfig.imageDefault : nextConfig.videoDefault;
       if (

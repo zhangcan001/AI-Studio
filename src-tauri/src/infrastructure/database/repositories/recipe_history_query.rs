@@ -210,6 +210,17 @@ impl SqliteRecipeHistoryQueryRepository {
             .push_bind(&request.workflow_version_id)
             .push(" AND t.recipe_id = ")
             .push_bind(&request.recipe_id);
+        if let Some(project_id) = &request.project_id {
+            query.push(" AND t.project_id = ").push_bind(project_id);
+        }
+        if !request.statuses.is_empty() {
+            query.push(" AND t.status IN (");
+            let mut separated = query.separated(", ");
+            for status in &request.statuses {
+                separated.push_bind(status);
+            }
+            separated.push_unseparated(")");
+        }
         if let Some(cursor) = &request.task_cursor {
             let created_at = cursor.created_at.to_rfc3339();
             query
@@ -725,6 +736,8 @@ mod tests {
                 recipe_id: "recipe-2".to_owned(),
                 task_cursor: None,
                 task_limit: 20,
+                project_id: None,
+                statuses: Vec::new(),
             })
             .await
             .unwrap()
@@ -737,6 +750,8 @@ mod tests {
                 recipe_id: "missing".to_owned(),
                 task_cursor: None,
                 task_limit: 20,
+                project_id: None,
+                statuses: Vec::new(),
             })
             .await
             .unwrap()

@@ -10,7 +10,11 @@ import {
   type H3CompatibleMode,
   type SelectedRecipeRef,
 } from "../runtime/workflowCapabilities";
-import { getProjectWorkflowConfig, replaceProjectWorkflowConfig } from "../../services/tauriClient";
+import {
+  getProjectWorkflowConfig,
+  removeProjectWorkflowBinding,
+  upsertProjectWorkflowBinding,
+} from "../../services/tauriClient";
 import type { RecipeViewModel } from "../../types/generation";
 import type {
   ProjectWorkflowBindingInput,
@@ -18,7 +22,7 @@ import type {
   ProjectWorkflowConfigView,
   ProjectWorkflowMode,
 } from "../../types/projectWorkflow";
-import { toUserMessage } from "../../i18n/errorMessages";
+import { errorMessageForCode, toUserMessage } from "../../i18n/errorMessages";
 import { workflowDisplayName } from "../../i18n/statusLabels";
 
 interface Props {
@@ -93,6 +97,35 @@ function draftBindings(draft: Draft): ProjectWorkflowBindingInput[] {
   return bindings.filter((binding): binding is ProjectWorkflowBindingInput => Boolean(binding));
 }
 
+const BINDING_SLOTS: Array<{ stage: "IMAGE" | "VIDEO"; mode: ProjectWorkflowMode }> = [
+  { stage: "IMAGE", mode: "DEFAULT" },
+  { stage: "VIDEO", mode: "DEFAULT" },
+  ...VIDEO_MODES.map((mode) => ({ stage: "VIDEO" as const, mode })),
+];
+
+function configBindings(config: ProjectWorkflowConfigView): ProjectWorkflowBindingView[] {
+  return [
+    config.imageDefault,
+    config.videoDefault,
+    ...config.videoModeOverrides,
+  ].filter((binding): binding is ProjectWorkflowBindingView => Boolean(binding));
+}
+
+function bindingForSlot(
+  config: ProjectWorkflowConfigView,
+  stage: "IMAGE" | "VIDEO",
+  mode: ProjectWorkflowMode,
+): ProjectWorkflowBindingView | undefined {
+  return configBindings(config).find((binding) => binding.stage === stage && binding.mode === mode);
+}
+
+function desiredRefsFromBindings(bindings: ProjectWorkflowBindingInput[]): Map<string, SelectedRecipeRef> {
+  return new Map(bindings.map((binding) => [
+    `${binding.stage}/${binding.mode}`,
+    { workflowVersionId: binding.workflowVersionId, recipeId: binding.recipeId },
+  ]));
+}
+
 function recipeLabel(recipe: RecipeViewModel): string {
   return `${workflowDisplayName(recipe.workflowId, recipe.name)} · ${recipe.workflowVersionId} · ${recipe.recipeId}`;
 }
@@ -109,6 +142,11 @@ function isStale(
           && recipe.recipeId === binding.recipeId
         ))),
   );
+}
+
+function availabilityReasonText(binding: ProjectWorkflowBindingView | null | undefined): string {
+  const reasons = binding?.availabilityReasons?.map((reason) => errorMessageForCode(reason)).filter(Boolean) ?? [];
+  return reasons.length ? `原因：${reasons.join("；")}` : "";
 }
 
 function ConfiguredSelect({
@@ -206,7 +244,39 @@ export function ProjectWorkflowSettings({ projectId, catalog, onConfigChanged }:
     setError(undefined);
     setNotice(undefined);
     try {
-      const nextConfig = await replaceProjectWorkflowConfig(projectId, { bindings });
+      let nextConfig = config;
+      if (!nextConfig) throw new Error("项目工作流配置尚未加载");
+      const desired = desiredRefsFromBindings(bindings);
+      for (const slot of BINDING_SLOTS) {
+        const key = `${slot.stage}/${slot.mode}`;
+        const current = bindingForSlot(nextConfig, slot.stage, slot.mode);
+        const target = desired.get(key);
+        if (target && current
+          && current.workflowVersionId === target.workflowVersionId
+          && current.recipeId === target.recipeId) {
+          continue;
+        }
+        if (target) {
+          nextConfig = await upsertProjectWorkflowBinding(projectId, {
+            stage: slot.stage,
+            mode: slot.mode,
+            workflowVersionId: target.workflowVersionId,
+            recipeId: target.recipeId,
+            expectedBindingInstanceId: current?.bindingInstanceId ?? null,
+            expectedRevision: current?.revision ?? null,
+          });
+        } else if (current) {
+          if (!current.bindingInstanceId || current.revision === undefined) {
+            throw new Error("项目工作流绑定缺少并发版本信息，请刷新后重试。");
+          }
+          nextConfig = await removeProjectWorkflowBinding(projectId, {
+            stage: slot.stage,
+            mode: slot.mode,
+            expectedBindingInstanceId: current.bindingInstanceId,
+            expectedRevision: current.revision,
+          });
+        }
+      }
       setConfig(nextConfig);
       onConfigChanged?.(nextConfig);
       setDraft(draftFromConfig(nextConfig));
@@ -218,6 +288,16 @@ export function ProjectWorkflowSettings({ projectId, catalog, onConfigChanged }:
       clearProjectWorkflowOverrides(projectId);
       setNotice(message);
     } catch (value) {
+      if (value && typeof value === "object" && "code" in value
+        && (value as { code?: unknown }).code === "PROJECT_WORKFLOW_BINDING_REVISION_CONFLICT") {
+        try {
+          const latest = await getProjectWorkflowConfig(projectId);
+          setConfig(latest);
+          onConfigChanged?.(latest);
+        } catch {
+          // Keep the local draft even if the conflict refresh cannot complete.
+        }
+      }
       setError(toUserMessage(value));
     } finally {
       setSaving(false);
@@ -265,8 +345,8 @@ export function ProjectWorkflowSettings({ projectId, catalog, onConfigChanged }:
           </div>
         </div>
       )}
-      {imageStale && <p className="settings-warning" role="alert">⚠ 当前绑定工作流不可用。原 WorkflowVersion：{config.imageDefault?.workflowVersionId} · 原 Recipe：{config.imageDefault?.recipeId}。请重新选择或清除绑定；系统不会静默改写项目配置。</p>}
-      {videoStale && <p className="settings-warning" role="alert">⚠ 当前绑定工作流不可用。原 WorkflowVersion：{config.videoDefault?.workflowVersionId} · 原 Recipe：{config.videoDefault?.recipeId}。请重新选择或清除绑定；系统不会静默改写项目配置。</p>}
+      {imageStale && <p className="settings-warning" role="alert">⚠ 当前绑定工作流不可用。{availabilityReasonText(config.imageDefault)} 原 WorkflowVersion：{config.imageDefault?.workflowVersionId} · 原 Recipe：{config.imageDefault?.recipeId}。请重新选择或清除绑定；系统不会静默改写项目配置。</p>}
+      {videoStale && <p className="settings-warning" role="alert">⚠ 当前绑定工作流不可用。{availabilityReasonText(config.videoDefault)} 原 WorkflowVersion：{config.videoDefault?.workflowVersionId} · 原 Recipe：{config.videoDefault?.recipeId}。请重新选择或清除绑定；系统不会静默改写项目配置。</p>}
       <div className="project-workflow-defaults">
         <ConfiguredSelect
           label="图片默认工作流"
@@ -293,7 +373,7 @@ export function ProjectWorkflowSettings({ projectId, catalog, onConfigChanged }:
             const candidates = recipesForVideoMode(catalog, mode);
             return (
               <div className="project-workflow-mode-row" key={mode}>
-                {isStale(configuredBinding, candidates) && <p className="settings-warning">⚠ {VIDEO_MODE_LABELS[mode]}绑定不可用。原 WorkflowVersion：{configuredBinding?.workflowVersionId} · 原 Recipe：{configuredBinding?.recipeId}。请重新选择或清除。</p>}
+                {isStale(configuredBinding, candidates) && <p className="settings-warning">⚠ {VIDEO_MODE_LABELS[mode]}绑定不可用。{availabilityReasonText(configuredBinding)} 原 WorkflowVersion：{configuredBinding?.workflowVersionId} · 原 Recipe：{configuredBinding?.recipeId}。请重新选择或清除。</p>}
                 <ConfiguredSelect
                   label={VIDEO_MODE_LABELS[mode]}
                   value={draft.videoModeOverrides[mode]}

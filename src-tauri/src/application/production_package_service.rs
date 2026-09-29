@@ -1245,9 +1245,12 @@ mod tests {
             mode: mode.to_owned(),
             workflow_version_id: workflow_version_id.to_owned(),
             recipe_id: recipe_id.to_owned(),
+            binding_instance_id: "bnd_package_test".to_owned(),
+            revision: 1,
             created_at: now,
             updated_at: now,
             available,
+            availability_reasons: Vec::new(),
         }
     }
 

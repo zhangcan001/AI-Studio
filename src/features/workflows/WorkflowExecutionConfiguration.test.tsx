@@ -190,7 +190,14 @@ describe("saved version execution configuration", () => {
     });
     render(<WorkflowExecutionConfiguration details={details} catalog={[recipe]} projectId="prj_test" comfyConnected />);
     await waitFor(() => expect(screen.getByText(/历史执行 tsk_previous/)).toBeTruthy());
-    expect(mocks.getWorkflowRecipeHistory).toHaveBeenCalledWith("wfv_test", "rcp_test", undefined, 20);
+    expect(mocks.getWorkflowRecipeHistory).toHaveBeenCalledWith(
+      "wfv_test",
+      "rcp_test",
+      undefined,
+      20,
+      "prj_test",
+      ["SUCCEEDED", "FAILED"],
+    );
     expect(mocks.getTaskDetail).toHaveBeenCalledWith("prj_test", "tsk_previous");
     expect(mocks.getWorkflowExecutionSummary).toHaveBeenCalledWith("prj_test", "tsk_previous");
     expect(screen.getByText(/ast_result · result.png · AI_STUDIO_MANAGED/)).toBeTruthy();
@@ -217,5 +224,41 @@ describe("saved version execution configuration", () => {
     expect(screen.getByText(/saved safe test · USER_INPUT/)).toBeTruthy();
     expect(screen.queryByText(/unsafe raw details/)).toBeNull();
     expect(mocks.getWorkflowExecutionSummary).toHaveBeenCalledWith("prj_test", "tsk_failed");
+  });
+
+  it("reconciles a completed batch, loads skipped terminal details, and reruns with a new key", async () => {
+    const user = userEvent.setup();
+    const completedBatch = {
+      id: "pbt_test",
+      name: "Completed",
+      status: "COMPLETED",
+      total: 1,
+      pending: 0,
+      running: 0,
+      succeeded: 0,
+      failed: 0,
+      cancelled: 0,
+      skipped: 1,
+      items: [{ id: "pbi_test", ordinal: 0, status: "SKIPPED", taskId: "tsk_skipped", inputAssetIds: [] }],
+    };
+    mocks.createWorkflowExecution.mockResolvedValue({ ...completedBatch, status: "READY" });
+    mocks.getProductionQueue.mockResolvedValue(completedBatch);
+    mocks.getTaskDetail.mockResolvedValue({ id: "tsk_skipped", status: "SKIPPED", outputAssets: [] });
+
+    render(<WorkflowExecutionConfiguration details={details} catalog={[recipe]} projectId="prj_test" comfyConnected />);
+    await user.type(screen.getAllByRole("textbox")[1], "rerun-safe");
+    await user.click(screen.getByRole("button", { name: "运行工作流" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "再次执行" })).toBeTruthy());
+    expect(mocks.getTaskDetail).toHaveBeenCalledWith("prj_test", "tsk_skipped");
+
+    const firstKey = mocks.createWorkflowExecution.mock.calls[0][0].submissionIdempotencyKey;
+    await user.click(screen.getByRole("button", { name: "再次执行" }));
+    await user.click(screen.getByRole("button", { name: "运行工作流" }));
+    await waitFor(() => expect(mocks.createWorkflowExecution).toHaveBeenCalledTimes(2));
+    const secondKey = mocks.createWorkflowExecution.mock.calls[1][0].submissionIdempotencyKey;
+    expect(secondKey).not.toBe(firstKey);
+    expect(mocks.createWorkflowExecution.mock.calls[1][0].values).toEqual({
+      prompt: { type: "string", value: "rerun-safe" },
+    });
   });
 });

@@ -16,12 +16,14 @@ import { ProjectWorkflowSettings } from "./ProjectWorkflowSettings";
 
 const mocks = vi.hoisted(() => ({
   getProjectWorkflowConfig: vi.fn(),
-  replaceProjectWorkflowConfig: vi.fn(),
+  upsertProjectWorkflowBinding: vi.fn(),
+  removeProjectWorkflowBinding: vi.fn(),
 }));
 
 vi.mock("../../services/tauriClient", () => ({
   getProjectWorkflowConfig: mocks.getProjectWorkflowConfig,
-  replaceProjectWorkflowConfig: mocks.replaceProjectWorkflowConfig,
+  upsertProjectWorkflowBinding: mocks.upsertProjectWorkflowBinding,
+  removeProjectWorkflowBinding: mocks.removeProjectWorkflowBinding,
 }));
 
 const PROJECT_ID = "project-uat";
@@ -100,6 +102,8 @@ function binding(
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     available,
+    bindingInstanceId: `bnd_${stage.toLowerCase()}_${mode.toLowerCase()}`,
+    revision: 1,
   };
 }
 
@@ -112,6 +116,8 @@ function staleBinding(stage: "IMAGE" | "VIDEO", mode: ProjectWorkflowMode): Proj
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     available: false,
+    bindingInstanceId: `bnd_stale_${stage.toLowerCase()}_${mode.toLowerCase()}`,
+    revision: 1,
   };
 }
 
@@ -161,7 +167,8 @@ describe("Project Workflow deterministic UI UAT", () => {
   beforeEach(() => {
     localStorage.clear();
     mocks.getProjectWorkflowConfig.mockReset();
-    mocks.replaceProjectWorkflowConfig.mockReset();
+    mocks.upsertProjectWorkflowBinding.mockReset().mockResolvedValue(config());
+    mocks.removeProjectWorkflowBinding.mockReset().mockResolvedValue(config());
   });
 
   afterEach(cleanup);
@@ -179,7 +186,7 @@ describe("Project Workflow deterministic UI UAT", () => {
 
   it("Case B: saves an image default and updates the real preflight panel", async () => {
     const nextConfig = config({ imageDefault: binding("IMAGE", "DEFAULT", IMAGE_A) });
-    mocks.replaceProjectWorkflowConfig.mockResolvedValue(nextConfig);
+    mocks.upsertProjectWorkflowBinding.mockResolvedValue(nextConfig);
     await renderUat(config());
 
     const user = userEvent.setup();
@@ -187,14 +194,14 @@ describe("Project Workflow deterministic UI UAT", () => {
     await user.click(screen.getByRole("button", { name: "保存工作流配置" }));
 
     await waitFor(() => expect(itemForPath("图片生成").textContent).toContain("来源：项目图片默认"));
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledTimes(1);
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith(PROJECT_ID, {
-      bindings: [{
-        stage: "IMAGE",
-        mode: "DEFAULT",
-        workflowVersionId: IMAGE_A.workflowVersionId,
-        recipeId: IMAGE_A.recipeId,
-      }],
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith(PROJECT_ID, {
+      stage: "IMAGE",
+      mode: "DEFAULT",
+      workflowVersionId: IMAGE_A.workflowVersionId,
+      recipeId: IMAGE_A.recipeId,
+      expectedBindingInstanceId: null,
+      expectedRevision: null,
     });
   });
 
@@ -238,7 +245,7 @@ describe("Project Workflow deterministic UI UAT", () => {
     expect(imageToVideo.textContent).toContain("原 WorkflowVersion：stale-video-version");
     expect(imageToVideo.textContent).toContain("原 Recipe：stale-video-recipe");
     expect(imageToVideo.textContent).toContain("建议重新选择或清除失效绑定");
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
   });
 
   it("Case F: blocks an H3 mode without an exact recipe even when generic CUSTOM_VIDEO exists", async () => {
@@ -276,7 +283,7 @@ describe("Project Workflow deterministic UI UAT", () => {
   it("Case G: converges preflight from image A to image B after one live save", async () => {
     const initialConfig = config({ imageDefault: binding("IMAGE", "DEFAULT", IMAGE_A) });
     const nextConfig = config({ imageDefault: binding("IMAGE", "DEFAULT", IMAGE_B) });
-    mocks.replaceProjectWorkflowConfig.mockResolvedValue(nextConfig);
+    mocks.upsertProjectWorkflowBinding.mockResolvedValue(nextConfig);
     await renderUat(initialConfig);
 
     const user = userEvent.setup();
@@ -284,12 +291,20 @@ describe("Project Workflow deterministic UI UAT", () => {
     expect(itemForPath("图片生成").textContent).toContain("WorkflowVersion：image-a-version");
 
     await user.selectOptions(screen.getByLabelText("图片默认工作流"), recipeValue(IMAGE_B));
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "保存工作流配置" }));
 
     await waitFor(() => expect(itemForPath("图片生成").textContent).toContain("WorkflowVersion：image-b-version"));
     expect(itemForPath("图片生成").textContent).toContain("来源：项目图片默认");
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith(PROJECT_ID, {
+      stage: "IMAGE",
+      mode: "DEFAULT",
+      workflowVersionId: IMAGE_B.workflowVersionId,
+      recipeId: IMAGE_B.recipeId,
+      expectedBindingInstanceId: "bnd_image_default",
+      expectedRevision: 1,
+    });
     expect(screen.getByRole("region", { name: "生产可用性" })).toBe(preflightPanel);
   });
 });

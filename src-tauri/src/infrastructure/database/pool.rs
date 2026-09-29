@@ -107,7 +107,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            41
+            42
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -170,7 +170,9 @@ mod tests {
                 "workflow_version_id",
                 "recipe_id",
                 "created_at",
-                "updated_at"
+                "updated_at",
+                "revision",
+                "binding_instance_id"
             ]
         );
         let project_workflow_binding_primary_key = sqlx::query_scalar::<_, String>(
@@ -183,6 +185,16 @@ mod tests {
         assert_eq!(
             project_workflow_binding_primary_key,
             vec!["project_id", "stage", "mode"]
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM project_workflow_bindings
+                 WHERE revision < 1 OR binding_instance_id IS NULL OR trim(binding_instance_id) = ''",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("binding OCC columns should be valid"),
+            0
         );
         let runtime_state_columns = sqlx::query_scalar::<_, String>(
             "SELECT name FROM pragma_table_info('workflow_runtime_states') WHERE name IN ('archived', 'archived_at') ORDER BY cid",
@@ -332,6 +344,80 @@ mod tests {
             .expect("second migration should succeed");
         assert_eq!(table_count(&second_pool).await, 71);
         second_pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn migration_042_backfills_historical_binding_occ_identity() {
+        let temporary_directory = tempdir().expect("temporary directory should be created");
+        let database_path = temporary_directory.path().join("pre-042.db");
+        let pool = initialize(&database_path)
+            .await
+            .expect("current schema should initialize");
+
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES
+               ('legacy-binding-project', 'Legacy binding project', 'C:/legacy',
+                '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+               ('legacy-binding-project-2', 'Legacy binding project 2', 'C:/legacy-2',
+                '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy projects should insert");
+        sqlx::query("DROP TABLE project_workflow_bindings")
+            .execute(&pool)
+            .await
+            .expect("binding table should be replaceable in the isolated fixture");
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/027_project_workflow_bindings.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("pre-042 binding schema should be recreated");
+        sqlx::query(
+            "INSERT INTO project_workflow_bindings
+             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             VALUES
+               ('legacy-binding-project', 'IMAGE', 'DEFAULT', 'legacy-image-version', 'legacy-image-recipe',
+                '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+               ('legacy-binding-project', 'VIDEO', 'DEFAULT', 'legacy-video-version', 'legacy-video-recipe',
+                '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("historical binding rows should insert");
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 42")
+            .execute(&pool)
+            .await
+            .expect("042 migration marker should be removable in the isolated fixture");
+        pool.close().await;
+
+        let upgraded = initialize(&database_path)
+            .await
+            .expect("042 should upgrade the legacy binding schema");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
+                .fetch_one(&upgraded)
+                .await
+                .expect("latest migration should be readable"),
+            42
+        );
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT revision, binding_instance_id
+             FROM project_workflow_bindings
+             WHERE project_id = 'legacy-binding-project'
+             ORDER BY stage",
+        )
+        .fetch_all(&upgraded)
+        .await
+        .expect("upgraded bindings should be readable");
+        assert_eq!(rows.len(), 2);
+        assert!(rows
+            .iter()
+            .all(|(revision, instance_id)| { *revision == 1 && !instance_id.trim().is_empty() }));
+        assert_ne!(rows[0].1, rows[1].1);
+        upgraded.close().await;
     }
 
     #[tokio::test]

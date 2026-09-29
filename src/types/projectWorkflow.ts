@@ -18,9 +18,25 @@ export interface ProjectWorkflowBindingInput {
 }
 
 export interface ProjectWorkflowBindingView extends ProjectWorkflowBindingInput {
+  /** Present in native responses; optional for legacy adapters and fixtures. */
+  bindingInstanceId?: string;
+  revision?: number;
   createdAt: string;
   updatedAt: string;
   available: boolean;
+  availabilityReasons?: string[];
+}
+
+export interface ProjectWorkflowBindingUpsertRequest extends ProjectWorkflowBindingInput {
+  expectedBindingInstanceId?: string | null;
+  expectedRevision?: number | null;
+}
+
+export interface ProjectWorkflowBindingRemoveRequest {
+  stage: ProjectWorkflowStage;
+  mode: ProjectWorkflowMode;
+  expectedBindingInstanceId: string;
+  expectedRevision: number;
 }
 
 export interface ProjectWorkflowConfigUpdateRequest {

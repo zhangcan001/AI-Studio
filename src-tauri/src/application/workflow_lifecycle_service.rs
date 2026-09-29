@@ -987,10 +987,7 @@ impl WorkflowLifecycleService {
             .map_err(db_error)?;
 
         let cleared_count = if let Some(repository) = &self.project_workflow_binding_repository {
-            match repository
-                .clear_by_workflow_version(&inspection.workflow_version_id)
-                .await
-            {
+            match repository.clear_exact_bindings(project_bindings).await {
                 Ok(count) => count,
                 Err(error) => {
                     let cleanup_message = error.to_string();
@@ -3239,6 +3236,8 @@ outputs: []
             mode: "DEFAULT".to_owned(),
             workflow_version_id: workflow_version_id.to_owned(),
             recipe_id: "recipe-a".to_owned(),
+            binding_instance_id: "bnd_lifecycle_test".to_owned(),
+            revision: 1,
             created_at: now,
             updated_at: now,
         }

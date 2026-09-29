@@ -2896,8 +2896,9 @@ async fn restore_rows_in_transaction(
     for binding in &document.project_workflow_bindings {
         sqlx::query(
             "INSERT INTO project_workflow_bindings
-             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+             (project_id, stage, mode, workflow_version_id, recipe_id,
+              binding_instance_id, revision, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
         )
         .bind(&project.id)
         .bind(&binding.stage)
@@ -2910,6 +2911,7 @@ async fn restore_rows_in_transaction(
             &workflow_version_id_map,
             &binding.recipe_id,
         ))
+        .bind(format!("bnd_{}", Uuid::new_v4().simple()))
         .bind(&binding.created_at)
         .bind(&binding.updated_at)
         .execute(&mut **transaction)

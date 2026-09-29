@@ -1,3 +1,5 @@
+import type { ProductionBatchPreflightIssue } from "../types/productionQueue";
+
 export interface UiError {
   message: string;
   code?: string;
@@ -95,6 +97,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   RECIPE_VERSION_CONFLICT: "配方版本已发生变化，请刷新后重试。",
   WORKFLOW_VALIDATION_FAILED: "工作流校验未通过，请检查输入和输出映射。",
   REFERENCE_MAPPING_INCOMPLETE: "参考图绑定不完整，请补齐结构化素材绑定后再生成。",
+  INPUT_MAPPING_UNRESOLVED: "工作流输入映射尚未完成，请返回映射检查并补齐。",
   WORKFLOW_ONBOARDING_ERROR: "工作流导入失败，请检查文件和映射配置。",
   WORKFLOW_RECIPE_LIFECYCLE_ERROR: "工作流配方生命周期操作失败，请查看技术详情。",
   WORKFLOW_RECIPE_NOT_FOUND: "请求的配方不属于该工作流版本。",
@@ -130,6 +133,20 @@ const ERROR_MESSAGES: Record<string, string> = {
   WORKFLOW_VERSION_IN_USE: "该版本仍被生产批次或队列任务引用，不能删除。",
   WORKFLOW_REMOVED_RESTORE_WORKFLOW_FIRST: "该工作流已删除，请先恢复整个工作流，再恢复单个版本。",
   PROJECT_NOT_FOUND: "找不到该项目，请刷新项目列表。",
+  PROJECT_WORKFLOW_BINDING_REVISION_CONFLICT: "项目工作流绑定已被其他操作修改，请确认最新绑定后重试。",
+  RECIPE_NOT_FOUND: "找不到对应的工作流配方，请刷新工作流列表。",
+  RECIPE_MISMATCH: "所选配方不属于该工作流版本。",
+  RECIPE_ARCHIVED: "该配方已归档，无法继续使用。",
+  WORKFLOW_NOT_FOUND: "找不到对应的工作流。",
+  WORKFLOW_REMOVED: "该工作流已移除，请重新选择。",
+  VERSION_DISABLED: "该工作流版本已停用。",
+  VERSION_ARCHIVED: "该工作流版本已归档。",
+  RUNTIME_ARTIFACT_MISSING: "该工作流缺少可用的运行包。",
+  RUNTIME_ARTIFACT_AMBIGUOUS: "该工作流存在多个运行包，无法确认唯一版本。",
+  RUNTIME_ARTIFACT_HASH_MISMATCH: "运行包与工作流配方内容不一致。",
+  RUNTIME_PACKAGE_UNREADABLE: "工作流运行包无法读取。",
+  RUNTIME_PACKAGE_INVALID: "工作流运行包内容无效。",
+  RUNTIME_PACKAGE_IDENTITY_MISMATCH: "工作流运行包身份校验未通过。",
   TASK_NOT_FOUND: "找不到该任务，请刷新任务历史。",
   ASSET_NOT_FOUND: "找不到该资产，请刷新资产库。",
   ASSET_READ_FAILED: "读取资产失败，请稍后重试。",
@@ -152,6 +169,56 @@ const ERROR_MESSAGES: Record<string, string> = {
   TASK_RECOVERY_DEFERRED: "任务恢复已延后，请稍后刷新任务状态。",
   TASK_RECOVERY_UNRESOLVED: "任务恢复状态暂时无法确认，请查看任务详情。",
 };
+
+/**
+ * Stable code authority for typed execution, binding, and availability errors.
+ * Keep this list explicit so adding a backend code without Chinese UI coverage
+ * fails the localization test instead of silently falling back to a generic
+ * message.
+ */
+export const I18N_ERROR_CODE_REGISTRY = [
+  "PROJECT_WORKFLOW_BINDING_REVISION_CONFLICT",
+  "RECIPE_NOT_FOUND",
+  "RECIPE_MISMATCH",
+  "RECIPE_ARCHIVED",
+  "WORKFLOW_NOT_FOUND",
+  "WORKFLOW_REMOVED",
+  "VERSION_DISABLED",
+  "VERSION_ARCHIVED",
+  "RUNTIME_ARTIFACT_MISSING",
+  "RUNTIME_ARTIFACT_AMBIGUOUS",
+  "RUNTIME_ARTIFACT_HASH_MISMATCH",
+  "RUNTIME_PACKAGE_UNREADABLE",
+  "RUNTIME_PACKAGE_INVALID",
+  "RUNTIME_PACKAGE_IDENTITY_MISMATCH",
+  "PRODUCTION_START_ADMISSION_BLOCKED",
+  "RUNTIME_ADMISSION_RECIPE_NOT_FOUND",
+  "RUNTIME_ADMISSION_WORKFLOW_NOT_FOUND",
+  "RUNTIME_ADMISSION_WORKFLOW_DISABLED",
+  "RUNTIME_ADMISSION_WORKFLOW_ARCHIVED",
+  "RUNTIME_ADMISSION_PACKAGE_INVALID",
+  "RUNTIME_ADMISSION_MISSING_NODES",
+  "RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE",
+  "RUNTIME_ADMISSION_CAPABILITY_NOT_CHECKED",
+  "RUNTIME_ADMISSION_COMFY_UNAVAILABLE",
+  "RUNTIME_ADMISSION_COMFY_INCOMPATIBLE",
+  "RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED",
+  "RUNTIME_ADMISSION_WORKSPACE_DIAGNOSTICS_FAILED",
+  "RUNTIME_ADMISSION_CAPABILITY_OFFLINE",
+  "RUNTIME_ADMISSION_CAPABILITY_UNKNOWN",
+  "RUNTIME_ADMISSION_DIAGNOSTICS",
+  "RUNTIME_ADMISSION_READINESS_BLOCKED",
+  "RUNTIME_ADMISSION_SNAPSHOT_STALE",
+  "WORKFLOW_VALIDATION_FAILED",
+  "INPUT_MAPPING_UNRESOLVED",
+  "INPUT_MAPPING_TYPE_MISMATCH",
+  "INPUT_REQUIRED",
+  "INPUT_TYPE_MISMATCH",
+  "INPUT_OUT_OF_RANGE",
+  "INPUT_STEP_MISMATCH",
+  "INPUT_COUNT_OUT_OF_RANGE",
+  "MISSING_NODE",
+] as const;
 
 function rawErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -237,11 +304,30 @@ function runtimeAdmissionRecords(error: unknown): Record<string, unknown>[] {
   const details = error.details;
   if (Array.isArray(details)) return details.filter(isRecord);
   if (!isRecord(details)) return [];
-  for (const key of ["failures", "issues", "blockers"]) {
+  for (const key of ["failures", "issues", "blockers", "batchIssues"]) {
     const records = details[key];
     if (Array.isArray(records)) return records.filter(isRecord);
   }
   return [details];
+}
+
+/** Read the typed Queue Start issue list without parsing its human message. */
+export function productionBatchPreflightIssues(error: unknown): ProductionBatchPreflightIssue[] {
+  if (!isRecord(error) || !isRecord(error.details)) return [];
+  const raw = error.details.batchIssues;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isRecord)
+    .map((issue) => ({
+      itemNumber: typeof issue.itemNumber === "number" ? issue.itemNumber : 0,
+      code: nonEmptyString(issue.code) ?? "UNKNOWN",
+      target: nonEmptyString(issue.target) ?? null,
+      semanticField: nonEmptyString(issue.semanticField) ?? null,
+      nodeId: nonEmptyString(issue.nodeId) ?? null,
+      inputName: nonEmptyString(issue.inputName) ?? null,
+      messageArgs: issue.messageArgs ?? null,
+    }))
+    .filter((issue) => issue.itemNumber > 0);
 }
 
 function runtimeAdmissionDetails(error: unknown): string | undefined {

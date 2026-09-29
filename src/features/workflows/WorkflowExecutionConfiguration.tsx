@@ -12,10 +12,10 @@ import {
 } from "../../services/tauriClient";
 import { defaultGenerationValues } from "../../stores/studioStore";
 import type { DraftValue, GenerationValues, RecipeViewModel } from "../../types/generation";
-import type { ExecutionSummary, ExecutionValueSource, ProductionBatchDetail } from "../../types/productionQueue";
+import type { ExecutionSummary, ExecutionValueSource, ProductionBatchDetail, ProductionBatchPreflightIssue } from "../../types/productionQueue";
 import type { TaskDetail } from "../../types/history";
 import type { WorkflowSavedVersionDetailsView } from "../../types/workflowOnboarding";
-import { errorMessageForCode, toUserMessage } from "../../i18n/errorMessages";
+import { errorMessageForCode, productionBatchPreflightIssues, toUserMessage } from "../../i18n/errorMessages";
 import { formatDurationMs, productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "../studio/DynamicFormRenderer";
 import { canCancelPendingProductionQueue } from "../studio/productionQueuePolicy";
@@ -23,6 +23,7 @@ import { productionBatchOutcomeLabel } from "../studio/productionQueueOutcome";
 import { AssetCard } from "../assets/AssetCard";
 import { AssetPickerDialog } from "../studio/AssetPickerDialog";
 import { AssetPreview } from "../assets/AssetPreview";
+import { ComfyNodeErrorSection } from "../../components/tasks/ComfyNodeErrorSection";
 import {
   MAX_WORKFLOW_EXECUTION_BATCH_ITEMS,
   materializeWorkflowExecutionBatch,
@@ -42,6 +43,12 @@ export function WorkflowExecutionConfiguration({ details, catalog, projectId, co
     recipe.workflowId === details.workflowId && recipe.workflowVersionId === details.workflowVersionId
   )), [catalog, details.workflowId, details.workflowVersionId]);
   const [recipeId, setRecipeId] = useState(recipes.length === 1 ? recipes[0].recipeId : "");
+  useEffect(() => {
+    setRecipeId((current) => {
+      if (current && recipes.some((candidate) => candidate.recipeId === current)) return current;
+      return recipes.length === 1 ? recipes[0].recipeId : "";
+    });
+  }, [recipes]);
   const recipe = recipes.find((item) => item.recipeId === recipeId);
   return (
     <section className="workflow-saved-details workflow-diff-panel" aria-label="执行配置">
@@ -57,7 +64,7 @@ export function WorkflowExecutionConfiguration({ details, catalog, projectId, co
         </select>
       </label>}
       {recipe && projectId && <ExecutionForm
-        key={recipe.recipeId}
+        key={`${projectId}:${details.workflowVersionId}:${recipe.recipeId}`}
         details={details}
         recipe={recipe}
         projectId={projectId}
@@ -78,6 +85,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
   const [values, setValues] = useState<GenerationValues>(() => defaultGenerationValues(recipe));
   const [editedFields, setEditedFields] = useState<Set<string>>(() => new Set());
   const [preflight, setPreflight] = useState<{ status: string; code?: string; target?: string }>();
+  const [structuredIssues, setStructuredIssues] = useState<ProductionBatchPreflightIssue[]>([]);
   const [checking, setChecking] = useState(false);
   const [batchId, setBatchId] = useState<string>();
   const [batch, setBatch] = useState<ProductionBatchDetail>();
@@ -116,10 +124,15 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
     let active = true;
     setPreviousTask(undefined);
     setPreviousSummary(undefined);
-    void getWorkflowRecipeHistory(details.workflowVersionId, recipe.recipeId, undefined, 20)
-      .then((history) => history.taskPage.items.find((item) =>
-        item.projectId === projectId && (item.status === "SUCCEEDED" || item.status === "FAILED")
-      ))
+    void getWorkflowRecipeHistory(
+      details.workflowVersionId,
+      recipe.recipeId,
+      undefined,
+      20,
+      projectId,
+      ["SUCCEEDED", "FAILED"],
+    )
+      .then((history) => history.taskPage.items[0])
       .then(async (item) => {
         if (!item || !projectId) return undefined;
         const [previous, summary] = await Promise.all([
@@ -145,7 +158,17 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
   useEffect(() => {
     if (!batchId) return;
     let active = true;
+    let timer: number | undefined;
+    let inFlight = false;
+    let completedDetailRetries = 0;
+    let completedObserved = false;
+    const schedule = (delay: number) => {
+      if (active) timer = window.setTimeout(() => void refresh(), delay);
+    };
     const refresh = async () => {
+      if (!active || inFlight) return;
+      inFlight = true;
+      let nextDelay: number | undefined = 1500;
       try {
         const next = await getProductionQueue(projectId, batchId);
         if (!active) return;
@@ -153,7 +176,8 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
         const item = next.items[0];
         if (item?.executionSummary) setPreviousSummary(item.executionSummary);
         const terminalItems = next.items.filter((candidate) => candidate.taskId
-          && (candidate.status === "SUCCEEDED" || candidate.status === "FAILED" || candidate.status === "CANCELLED")
+          && (candidate.status === "SUCCEEDED" || candidate.status === "FAILED" || candidate.status === "CANCELLED"
+            || candidate.status === "SKIPPED")
           && !loadedTaskIds.current.has(candidate.taskId));
         const taskDetails = await Promise.all(terminalItems.map(async (candidate) => {
           const taskId = candidate.taskId!;
@@ -169,13 +193,32 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
         if (active && loadedDetails.length) {
           setTasksByItem((current) => ({ ...current, ...Object.fromEntries(loadedDetails) }));
         }
+        const missingTerminalDetails = terminalItems.length - loadedDetails.length;
+        if (next.status === "COMPLETED") {
+          completedObserved = true;
+          if (missingTerminalDetails > 0 && completedDetailRetries < 3) {
+            completedDetailRetries += 1;
+            nextDelay = 1500;
+          } else {
+            nextDelay = undefined;
+          }
+        }
       } catch (cause: unknown) {
-        if (active) setError(toUserMessage(cause));
+        if (active) {
+          setStructuredIssues(productionBatchPreflightIssues(cause));
+          setError(toUserMessage(cause));
+          if (completedObserved && completedDetailRetries >= 3) nextDelay = undefined;
+        }
+      } finally {
+        inFlight = false;
+        if (active && nextDelay !== undefined) schedule(nextDelay);
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 1500);
-    return () => { active = false; window.clearInterval(timer); };
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [batchId, projectId]);
 
   function changeValue(key: string, value?: DraftValue) {
@@ -186,6 +229,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
       return next;
     });
     setPreflight(undefined);
+    setStructuredIssues([]);
     setEditedFields((current) => new Set(current).add(key));
     submissionKey.current = crypto.randomUUID();
   }
@@ -193,6 +237,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
   function changePromptBatch(value: string) {
     setPromptBatchInput(value);
     setPreflight(undefined);
+    setStructuredIssues([]);
     submissionKey.current = crypto.randomUUID();
   }
 
@@ -200,6 +245,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
     const next = Number(value);
     setSeedCount(Number.isFinite(next) ? Math.trunc(next) : 0);
     setPreflight(undefined);
+    setStructuredIssues([]);
     submissionKey.current = crypto.randomUUID();
   }
 
@@ -207,6 +253,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
     setBatchImageAssetIds(assetIds);
     setImageBatchPickerOpen(false);
     setPreflight(undefined);
+    setStructuredIssues([]);
     submissionKey.current = crypto.randomUUID();
   }
 
@@ -247,6 +294,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
     busy.current = true;
     setChecking(true);
     setError(undefined);
+    setStructuredIssues([]);
     try {
       if (!(await check())) return;
       let id = batchId;
@@ -293,6 +341,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
       }
       await startProductionQueue(projectId, id);
     } catch (cause: unknown) {
+      setStructuredIssues(productionBatchPreflightIssues(cause));
       setError(toUserMessage(cause));
     } finally {
       busy.current = false;
@@ -310,6 +359,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
     busy.current = true;
     setChecking(true);
     setError(undefined);
+    setStructuredIssues([]);
     try {
       setBatch(await cancelPendingProductionQueue(projectId, batchId));
     } catch (cause: unknown) {
@@ -318,6 +368,19 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
       busy.current = false;
       setChecking(false);
     }
+  }
+
+  function prepareRerun() {
+    setBatchId(undefined);
+    setBatch(undefined);
+    setTasksByItem({});
+    loadedTaskIds.current.clear();
+    setError(undefined);
+    setPreflight(undefined);
+    setStructuredIssues([]);
+    setPreviousTask(undefined);
+    setPreviousSummary(undefined);
+    submissionKey.current = crypto.randomUUID();
   }
 
   const hiddenBatchFields = new Set<string>();
@@ -377,12 +440,26 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
       <button type="button" onClick={() => void (async () => {
         setChecking(true);
         setError(undefined);
-        try { await check(); } catch (cause: unknown) { setError(toUserMessage(cause)); }
+        try { await check(); } catch (cause: unknown) {
+          setStructuredIssues(productionBatchPreflightIssues(cause));
+          setError(toUserMessage(cause));
+        }
         finally { setChecking(false); }
       })()} disabled={checking || !comfyConnected || !!batchId || hasBatchOverrides && !batchReadyToSubmit}>{hasBatchOverrides ? "检查批次配置" : "运行前检查"}</button>
-      <button type="button" onClick={() => void run()} disabled={checking || !comfyConnected || !!missingMappings.length || !!batchId && batch?.status !== "READY" || !batchId && hasBatchOverrides && !batchReadyToSubmit}>{batchId ? "启动批次" : hasBatchOverrides ? "创建并启动批次" : "运行工作流"}</button>
+      <button type="button" onClick={() => void run()} disabled={checking || !comfyConnected || !!missingMappings.length || !!batchId && batch?.status !== "READY" && batch?.status !== "PAUSED" || !batchId && hasBatchOverrides && !batchReadyToSubmit}>{batchId ? batch?.status === "PAUSED" ? "继续批次" : "启动批次" : hasBatchOverrides ? "创建并启动批次" : "运行工作流"}</button>
     </div>
     {preflight && <p role="status">Runtime Preflight: {preflight.status}{preflight.code ? ` · ${preflight.code}` : ""}{preflight.target ? ` · ${preflight.target}` : ""}</p>}
+    {!!structuredIssues.length && <section aria-label="结构化准入问题" className="workflow-execution-issues">
+      <h4>启动前检查发现的问题</h4>
+      <ul>{structuredIssues.map((issue) => <li key={`${issue.itemNumber}-${issue.code}-${issue.target ?? ""}`}>
+        第 {issue.itemNumber} 项：{errorMessageForCode(issue.code)}
+        {issue.semanticField && ` · 字段 ${issue.semanticField}`}
+        {issue.nodeId && ` · 节点 ${issue.nodeId}`}
+        {issue.inputName && ` · 输入 ${issue.inputName}`}
+        {issue.target && ` · 目标 ${issue.target}`}
+        {issue.messageArgs !== null && <code> · {JSON.stringify(issue.messageArgs)}</code>}
+      </li>)}</ul>
+    </section>}
     {error && <p role="alert">{error}</p>}
     {batch && <section className="workflow-execution-batch-results" aria-label="批次结果">
       <h4>批次 · {batch.name || batch.id}</h4>
@@ -390,6 +467,7 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
       {canCancelPendingProductionQueue(batch) && <button type="button" className="quiet-button danger-button" onClick={() => void cancelBatch()} disabled={checking}>
         {batch.running > 0 ? "取消剩余项" : "取消待执行项"}
       </button>}
+      {batch.status === "COMPLETED" && <button type="button" className="quiet-button" onClick={prepareRerun} disabled={checking}>再次执行</button>}
       <progress aria-label="批次完成进度" value={batchProgress} max={100}>{batchProgress}%</progress>
       <span>{batchProgress}%</span>
       <ol>{batch.items.map((item) => {
@@ -408,6 +486,13 @@ function ExecutionForm({ details, recipe, projectId, comfyConnected, onOpenTask 
           {!!itemTask?.outputAssets.length && <div className="workflow-execution-batch-asset-grid" aria-label={`第 ${item.ordinal + 1} 项结果资产`}>
             {itemTask.outputAssets.map((asset) => <AssetCard key={asset.id} projectId={projectId} asset={asset} onSelect={setPreviewAsset} />)}
           </div>}
+          {itemTask && (itemTask.nodeErrors?.length || itemTask.rawError !== undefined) ? (
+            <ComfyNodeErrorSection
+              nodeErrors={itemTask.nodeErrors ?? []}
+              rawError={itemTask.rawError}
+              title={`第 ${item.ordinal + 1} 项节点错误详情`}
+            />
+          ) : null}
         </li>;
       })}</ol>
     </section>}

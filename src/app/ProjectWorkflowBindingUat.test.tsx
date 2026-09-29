@@ -16,7 +16,8 @@ import App from "./App";
 const mocks = vi.hoisted(() => ({
   listGenerationCatalog: vi.fn(),
   getProjectWorkflowConfig: vi.fn(),
-  replaceProjectWorkflowConfig: vi.fn(),
+  upsertProjectWorkflowBinding: vi.fn(),
+  removeProjectWorkflowBinding: vi.fn(),
   listProjects: vi.fn(),
   getWorkspaceResume: vi.fn(),
   saveWorkspaceResume: vi.fn(),
@@ -123,6 +124,8 @@ function binding(
     createdAt: "2026-09-03T00:00:00.000Z",
     updatedAt: "2026-09-03T00:00:00.000Z",
     available: true,
+    bindingInstanceId: `bnd_${stage.toLowerCase()}_${mode.toLowerCase()}`,
+    revision: 1,
   };
 }
 
@@ -194,19 +197,16 @@ describe("DEV-080 用于当前项目持久化 UAT", () => {
     const current = config(binding("IMAGE", "DEFAULT", "OLD_IMAGE_WV", "OLD_IMAGE_R"), videoDefault, overrides);
     const saved = config(binding("IMAGE", "DEFAULT", selected.workflowVersionId, selected.recipeId), videoDefault, overrides);
     mocks.getProjectWorkflowConfig.mockResolvedValue(current);
-    mocks.replaceProjectWorkflowConfig.mockResolvedValue(saved);
+    mocks.upsertProjectWorkflowBinding.mockResolvedValue(saved);
     prepareApp([selected]);
 
     await openWorkflowAction();
 
-    await waitFor(() => expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledTimes(1));
     expect(mocks.listGenerationCatalog.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-1", {
-      bindings: [
-        { stage: "IMAGE", mode: "DEFAULT", workflowVersionId: selected.workflowVersionId, recipeId: selected.recipeId },
-        { stage: "VIDEO", mode: "DEFAULT", workflowVersionId: "OLD_VIDEO_WV", recipeId: "OLD_VIDEO_R" },
-        ...overrides.map(({ stage, mode, workflowVersionId, recipeId }) => ({ stage, mode, workflowVersionId, recipeId })),
-      ],
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith("project-1", {
+      stage: "IMAGE", mode: "DEFAULT", workflowVersionId: selected.workflowVersionId, recipeId: selected.recipeId,
+      expectedBindingInstanceId: "bnd_image_default", expectedRevision: 1,
     });
     await waitFor(() => expect(document.querySelector(".workflow-notice")?.textContent).toContain("已设为当前项目图片默认工作流"));
   });
@@ -220,18 +220,15 @@ describe("DEV-080 用于当前项目持久化 UAT", () => {
     const current = config(imageDefault, binding("VIDEO", "DEFAULT", "OLD_VIDEO_WV", "OLD_VIDEO_R"), overrides);
     const saved = config(imageDefault, binding("VIDEO", "DEFAULT", selected.workflowVersionId, selected.recipeId), overrides);
     mocks.getProjectWorkflowConfig.mockResolvedValue(current);
-    mocks.replaceProjectWorkflowConfig.mockResolvedValue(saved);
+    mocks.upsertProjectWorkflowBinding.mockResolvedValue(saved);
     prepareApp([selected]);
 
     await openWorkflowAction();
 
-    await waitFor(() => expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledTimes(1));
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-1", {
-      bindings: [
-        { stage: "IMAGE", mode: "DEFAULT", workflowVersionId: "OLD_IMAGE_WV", recipeId: "OLD_IMAGE_R" },
-        { stage: "VIDEO", mode: "DEFAULT", workflowVersionId: selected.workflowVersionId, recipeId: selected.recipeId },
-        ...overrides.map(({ stage, mode, workflowVersionId, recipeId }) => ({ stage, mode, workflowVersionId, recipeId })),
-      ],
+    await waitFor(() => expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledTimes(1));
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith("project-1", {
+      stage: "VIDEO", mode: "DEFAULT", workflowVersionId: selected.workflowVersionId, recipeId: selected.recipeId,
+      expectedBindingInstanceId: "bnd_video_default", expectedRevision: 1,
     });
     await waitFor(() => expect(document.querySelector(".workflow-notice")?.textContent).toContain("已设为当前项目视频默认工作流"));
   });
@@ -244,13 +241,13 @@ describe("DEV-080 用于当前项目持久化 UAT", () => {
 
     await waitFor(() => expect(document.querySelector(".global-error")?.textContent).toContain("当前项目不可用，无法绑定工作流。"));
     expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
   });
 
   it("replace 返回非 exact pair 时拒绝确认", async () => {
     const selected = recipe(["image"]);
     mocks.getProjectWorkflowConfig.mockResolvedValue(config(null, null));
-    mocks.replaceProjectWorkflowConfig.mockResolvedValue(
+    mocks.upsertProjectWorkflowBinding.mockResolvedValue(
       config(binding("IMAGE", "DEFAULT", "WRONG_WV", "WRONG_R"), null),
     );
     prepareApp([selected]);
@@ -271,7 +268,7 @@ describe("DEV-080 用于当前项目持久化 UAT", () => {
 
     await waitFor(() => expect(document.querySelector(".global-error")?.textContent).toContain("刚添加的工作流暂时还没有出现在项目工作流列表中，请刷新后重试。"));
     expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
   });
 
   it("没有输出时拒绝绑定", async () => {
@@ -282,7 +279,7 @@ describe("DEV-080 用于当前项目持久化 UAT", () => {
 
     await waitFor(() => expect(document.querySelector(".global-error")?.textContent).toContain("该工作流没有图片或视频输出，无法绑定为项目默认工作流。"));
     expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
   });
 
   it("双输出时进入项目设置但不猜测默认阶段", async () => {
@@ -295,7 +292,7 @@ describe("DEV-080 用于当前项目持久化 UAT", () => {
 
     await waitFor(() => expect(document.querySelector(".workflow-notice")?.textContent).toContain("同时输出图片和视频，未自动绑定"));
     expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
   });
 
   it("切换到目标项目后再应用精确镜头焦点", async () => {
