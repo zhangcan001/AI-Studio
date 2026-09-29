@@ -609,8 +609,9 @@ async fn seed_dev080_custom_package_binding(pool: &SqlitePool) {
         .expect("DEV-080 custom workflow should become current");
     sqlx::query(
         "INSERT INTO project_workflow_bindings
-         (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
-         VALUES (?, 'VIDEO', 'DEFAULT', ?, ?, ?, ?)",
+         (project_id, stage, mode, workflow_version_id, recipe_id,
+          binding_instance_id, revision, created_at, updated_at)
+         VALUES (?, 'VIDEO', 'DEFAULT', ?, ?, 'bnd_dev059_default', 1, ?, ?)",
     )
     .bind(DEV059_PROJECT_ID)
     .bind(DEV080_WORKFLOW_VERSION_ID)

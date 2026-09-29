@@ -754,9 +754,10 @@ mod tests {
         .unwrap();
         sqlx::query(
             "INSERT INTO project_workflow_bindings
-             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             (project_id, stage, mode, workflow_version_id, recipe_id,
+              binding_instance_id, revision, created_at, updated_at)
              VALUES ('registry-project', 'VIDEO', 'DEFAULT', 'registry-version',
-                     'registry-recipe', ?, ?)",
+                     'registry-recipe', 'bnd_registry_project', 1, ?, ?)",
         )
         .bind("2026-01-01T00:00:00Z")
         .bind("2026-01-01T00:00:00Z")

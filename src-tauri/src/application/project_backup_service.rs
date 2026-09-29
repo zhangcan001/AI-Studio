@@ -5085,10 +5085,13 @@ mod tests {
         .unwrap();
         sqlx::query(
             "INSERT INTO project_workflow_bindings
-             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             (project_id, stage, mode, workflow_version_id, recipe_id,
+              binding_instance_id, revision, created_at, updated_at)
              VALUES
-             (?, 'IMAGE', 'DEFAULT', 'workflow-version-1', 'recipe-1', ?, ?),
-             (?, 'VIDEO', 'DEFAULT', 'workflow-version-1', 'recipe-1', ?, ?)",
+             (?, 'IMAGE', 'DEFAULT', 'workflow-version-1', 'recipe-1',
+              'bnd_current_v20_image', 1, ?, ?),
+             (?, 'VIDEO', 'DEFAULT', 'workflow-version-1', 'recipe-1',
+              'bnd_current_v20_video', 1, ?, ?)",
         )
         .bind(&project_id)
         .bind("2026-01-01T00:00:00Z")
@@ -6069,11 +6072,14 @@ mod tests {
             .unwrap();
         sqlx::query(
             "INSERT INTO project_workflow_bindings
-             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             (project_id, stage, mode, workflow_version_id, recipe_id,
+              binding_instance_id, revision, created_at, updated_at)
              VALUES
              ('project-backup', 'IMAGE', 'DEFAULT', 'workflow-version-1', 'recipe-1',
+              'bnd_backup_image', 1,
               '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
              ('project-backup', 'VIDEO', 'FL2VA_TEXT_TO_VIDEO', 'workflow-version-1', 'recipe-1',
+              'bnd_backup_video', 1,
               '2026-01-01T00:00:01Z', '2026-01-01T00:00:01Z')",
         )
         .execute(&pool)
@@ -7773,8 +7779,10 @@ mod tests {
         .unwrap();
         sqlx::query(
             "INSERT INTO project_workflow_bindings
-             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             (project_id, stage, mode, workflow_version_id, recipe_id,
+              binding_instance_id, revision, created_at, updated_at)
              VALUES ('stale-binding', 'VIDEO', 'DEFAULT', 'missing-version', 'missing-recipe',
+                     'bnd_stale_binding', 1,
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
         )
         .execute(&pool)
@@ -8617,8 +8625,10 @@ mod tests {
         .unwrap();
         sqlx::query(
             "INSERT INTO project_workflow_bindings
-             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             (project_id, stage, mode, workflow_version_id, recipe_id,
+              binding_instance_id, revision, created_at, updated_at)
              VALUES ('prj_w04', 'IMAGE', 'DEFAULT', 'wv_w04', 'rcp_w04',
+                     'bnd_w04', 1,
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
         )
         .execute(&pool)

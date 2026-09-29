@@ -1338,8 +1338,10 @@ async fn dev084_purge_inspection_reports_exact_references() {
     .expect("benchmark candidate reference fixture should insert");
     sqlx::query(
         "INSERT INTO project_workflow_bindings
-            (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+            (project_id, stage, mode, workflow_version_id, recipe_id,
+             binding_instance_id, revision, created_at, updated_at)
          VALUES ('prj_default', 'VIDEO', 'FL2VA_TEXT_TO_VIDEO', ?, ?,
+                 'bnd_dev084_fl2va', 1,
                  '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
     )
     .bind(&workflow_version_id)
