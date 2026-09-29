@@ -1,4 +1,5 @@
 //! Deterministic service/repository races: no sleeps or live ComfyUI calls.
+#[cfg(test)]
 use super::*;
 use crate::infrastructure::database::{
     initialize, repositories::test_support, SqliteProjectRepository,
