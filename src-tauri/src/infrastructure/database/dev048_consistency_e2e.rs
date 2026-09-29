@@ -298,6 +298,12 @@ async fn remove_022_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
 
 async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
     for statement in [
+        "DROP INDEX IF EXISTS uq_production_batch_items_project_submission_key",
+        "DROP INDEX IF EXISTS idx_production_batch_items_project_submission_key",
+        "ALTER TABLE production_batch_items DROP COLUMN execution_type",
+        "ALTER TABLE production_batch_items DROP COLUMN submission_idempotency_key",
+        "ALTER TABLE production_batch_items DROP COLUMN project_id",
+        "DROP TABLE IF EXISTS app_repair_jobs",
         "DROP TRIGGER IF EXISTS task_output_assets_create_artifact_review",
         "DROP INDEX IF EXISTS idx_artifact_reviews_project_decision",
         "DROP TABLE IF EXISTS artifact_reviews",
@@ -612,7 +618,7 @@ async fn dev048_fresh_migration_001_to_039_creates_only_the_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        40
+        41
     );
     let required_tables = [
         "profile_revisions",
@@ -678,7 +684,7 @@ async fn dev048_021_to_039_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        40
+        41
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -746,7 +752,7 @@ async fn dev052_existing_023_to_039_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        40
+        41
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1559,7 +1565,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 40)
+            .is_some_and(|version| version <= 41)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"2.0.0-personal\""));

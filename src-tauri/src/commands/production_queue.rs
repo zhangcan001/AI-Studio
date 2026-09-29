@@ -2,7 +2,7 @@ use crate::{
     app_state::AppState,
     application::production_queue_service::{
         CreateDirectGenerationRequest, CreateProductionBatchItem, CreateProductionBatchRequest,
-        ExecutionSummary, ProductionAdmissionView, ProductionPartialResumeEntry,
+        ExecutionSummary, ExecutionType, ProductionAdmissionView, ProductionPartialResumeEntry,
         ProductionPartialResumePlan, ProductionPartialResumeResult, ProductionQueueError,
         ProductionQueueOverview,
     },
@@ -237,6 +237,7 @@ pub async fn production_queue_create(
                 model_version_id,
                 tool_instance_id,
                 tool_version_id,
+                execution_type: ExecutionType::Direct,
                 submission_idempotency_key: None,
                 parent_task_id: None,
                 execution_input_sources: None,
@@ -732,6 +733,7 @@ pub(crate) fn map_start_admission_error(error: ProductionStartAdmissionError) ->
                     "recipeId": failure.recipe_id,
                     "reason": failure.reason,
                     "missingNodes": failure.missing_nodes,
+                    "batchIssues": failure.batch_issues,
                     "message": message,
                 }),
             )

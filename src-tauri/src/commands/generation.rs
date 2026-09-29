@@ -4,7 +4,8 @@ use crate::{
         generation_input_preparer::GenerationInputValue,
         production_queue_service::{
             CreateDirectGenerationBatchItem, CreateDirectGenerationBatchRequest,
-            CreateDirectGenerationRequest, CreateProductionBatchItem, ExecutionValueSource,
+            CreateDirectGenerationRequest, CreateProductionBatchItem, ExecutionType,
+            ExecutionValueSource,
         },
     },
     domain::SeedValue,
@@ -247,6 +248,7 @@ impl GenerationCreateRequest {
             prompt_version_id: self.prompt_version_id,
             tool_instance_id: self.tool_instance_id,
             tool_version_id: self.tool_version_id,
+            execution_type: ExecutionType::Direct,
             submission_idempotency_key: self.submission_idempotency_key,
             parent_task_id: self.parent_task_id,
             execution_input_sources: self.input_sources,
@@ -291,6 +293,7 @@ impl WorkflowExecutionBatchCreateRequest {
                     model_version_id: self.model_version_id.clone(),
                     tool_instance_id: self.tool_instance_id.clone(),
                     tool_version_id: self.tool_version_id.clone(),
+                    execution_type: ExecutionType::WorkflowBatch,
                     submission_idempotency_key: Some(format!(
                         "workflow-execution-batch:{request_key}:{index}"
                     )),
@@ -339,6 +342,7 @@ pub async fn workflow_execution_preflight(
                 crate::application::generation_service::GenerationServiceError::ExecutionFailed {
                     code,
                     message,
+                    ..
                 } => (code, Some(message)),
                 crate::application::generation_service::GenerationServiceError::Compile(_) => {
                     ("EXECUTION_INPUT_INVALID".to_owned(), None)
@@ -371,12 +375,9 @@ pub async fn workflow_execution_create(
     request: GenerationCreateRequest,
 ) -> Result<super::production_queue::ProductionBatchDetailView, AppError> {
     let request = request.into_application()?;
-    let _admission = state
-        .production
-        .queue
-        .acquire_interactive_admission()
-        .await
-        .map_err(super::production_queue::map_queue_error)?;
+    // Batch creation only persists a READY queue.  Runtime admission belongs
+    // to Queue Start, so an active single-item generation must not block the
+    // user from preparing a later batch.
     state
         .production
         .queue
@@ -409,12 +410,9 @@ pub async fn workflow_execution_create_batch(
     request: WorkflowExecutionBatchCreateRequest,
 ) -> Result<super::production_queue::ProductionBatchDetailView, AppError> {
     let request = request.into_application()?;
-    let _admission = state
-        .production
-        .queue
-        .acquire_interactive_admission()
-        .await
-        .map_err(super::production_queue::map_queue_error)?;
+    // Batch creation only persists a READY queue. Runtime admission belongs
+    // to Queue Start, so an active single-item generation must not block
+    // preparation of a later workflow batch.
     state
         .production
         .queue
@@ -444,6 +442,7 @@ impl GenerationBatchItemRequest {
             prompt_version_id: self.prompt_version_id,
             tool_instance_id: self.tool_instance_id,
             tool_version_id: self.tool_version_id,
+            execution_type: ExecutionType::Direct,
             submission_idempotency_key: None,
             parent_task_id: None,
             execution_input_sources: None,
@@ -480,12 +479,6 @@ pub async fn generation_create_batch(
     crate::domain::validate_project_id(&request.project_id)
         .map_err(|error| AppError::invalid_input(error.to_string()))?;
     validate_batch_size(request.items.len())?;
-    let _admission = state
-        .production
-        .queue
-        .acquire_interactive_admission()
-        .await
-        .map_err(super::production_queue::map_queue_error)?;
 
     let items = request
         .items

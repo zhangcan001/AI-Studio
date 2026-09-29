@@ -882,6 +882,19 @@ async fn remove_migration_036_schema(pool: &SqlitePool) {
 }
 
 async fn remove_migration_035_schema(pool: &SqlitePool) {
+    for statement in [
+        "DROP INDEX IF EXISTS uq_production_batch_items_project_submission_key",
+        "DROP INDEX IF EXISTS idx_production_batch_items_project_submission_key",
+        "ALTER TABLE production_batch_items DROP COLUMN execution_type",
+        "ALTER TABLE production_batch_items DROP COLUMN submission_idempotency_key",
+        "ALTER TABLE production_batch_items DROP COLUMN project_id",
+        "DROP TABLE IF EXISTS app_repair_jobs",
+    ] {
+        sqlx::query(statement)
+            .execute(pool)
+            .await
+            .expect("040-041 schema should be removable from the isolated fixture");
+    }
     remove_migration_036_schema(pool).await;
     for statement in [
         "DROP INDEX IF EXISTS idx_tool_instances_last_checked",
@@ -1264,8 +1277,8 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 40);
-    assert_eq!(migration_marker_count(pool, 40).await, 1);
+    assert_eq!(max_migration(pool).await, 41);
+    assert_eq!(migration_marker_count(pool, 41).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1427,10 +1440,10 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_040() {
+async fn dev055_migration_matrix_reaches_041() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(40));
+    assert_eq!(versions.last().copied(), Some(41));
     assert!(
         versions.contains(&33),
         "repository must contain migration 033"

@@ -72,6 +72,27 @@ export interface ProductionBatchDetail extends ProductionBatchSummary {
   items: ProductionBatchItemView[];
 }
 
+/** Structured Queue Start admission diagnostics returned in IpcError.details. */
+export interface ProductionBatchPreflightIssue {
+  itemNumber: number;
+  code: string;
+  target: string | null;
+  semanticField: string | null;
+  nodeId: string | null;
+  inputName: string | null;
+  messageArgs: unknown | null;
+}
+
+export interface ProductionStartAdmissionErrorDetails {
+  code: string;
+  workflowVersionId: string;
+  recipeId: string;
+  reason: string;
+  missingNodes: string[];
+  batchIssues: ProductionBatchPreflightIssue[];
+  message: string;
+}
+
 export interface ProductionQueueOverview {
   totalQueues: number;
   runningQueues: number;

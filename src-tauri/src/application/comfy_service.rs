@@ -153,6 +153,14 @@ impl ComfyRuntime {
             .write()
             .unwrap_or_else(|error| error.into_inner()) = config;
     }
+
+    pub fn invalidate_object_info(&self) {
+        self.handle.invalidate_object_info();
+    }
+
+    pub fn object_info_generation(&self) -> u64 {
+        self.handle.object_info_generation()
+    }
 }
 
 impl ComfyService {
@@ -173,7 +181,15 @@ impl ComfyService {
         self.runtime.endpoint()
     }
 
+    /// Monotonic generation for the active ComfyUI schema/runtime view.
+    /// Admission snapshots use this to reject a result computed against a
+    /// schema that was invalidated while the expensive work was in flight.
+    pub fn runtime_generation(&self) -> u64 {
+        self.runtime.object_info_generation()
+    }
+
     pub async fn invalidate_capabilities(&self) {
+        self.runtime.invalidate_object_info();
         *self.capability_cache.write().await = None;
     }
 
@@ -188,6 +204,10 @@ impl ComfyService {
                 Ok(status)
             }
             Err(error) => {
+                // A failed health check is a runtime boundary: any schema
+                // cached before the disconnect must not be reused after a
+                // reconnect or ComfyUI restart.
+                self.runtime.invalidate_object_info();
                 tracing::warn!(
                     endpoint = %endpoint,
                     error_type = error.kind(),
@@ -214,6 +234,11 @@ impl ComfyService {
     }
 
     pub async fn refresh_capabilities(&self) -> Result<CapabilitySummary, AppError> {
+        // A caller asking for an explicit refresh must bypass the short-lived
+        // object_info cache.  Ordinary runtime inspections still reuse the
+        // handle cache and are singleflighted by the active runtime
+        // generation.
+        self.runtime.invalidate_object_info();
         let endpoint = self.endpoint();
         let object_info = self
             .runtime

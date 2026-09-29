@@ -27,14 +27,14 @@ use ai_studio_lib::application::{
     production_queue_service::{
         execution_summary_from_json, CreateDirectGenerationBatchItem,
         CreateDirectGenerationBatchRequest, CreateDirectGenerationRequest,
-        CreateProductionBatchItem, CreateProductionBatchRequest, ExecutionValueSource,
-        ProductionQueueError, ProductionQueueService,
+        CreateProductionBatchItem, CreateProductionBatchRequest, ExecutionType,
+        ExecutionValueSource, ProductionQueueError, ProductionQueueService,
     },
     production_start_admission_service::{
         ProductionStartAdmissionError, ProductionStartAdmissionService,
         RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE, RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED,
         RUNTIME_ADMISSION_COMFY_UNAVAILABLE, RUNTIME_ADMISSION_MISSING_NODES,
-        RUNTIME_ADMISSION_READINESS_BLOCKED,
+        RUNTIME_ADMISSION_READINESS_BLOCKED, RUNTIME_ADMISSION_WORKFLOW_DISABLED,
     },
     shot_batch_service::ShotBatchService,
     shot_context_resolver::ShotContextResolver,
@@ -292,6 +292,11 @@ struct CountingComfyAdapter {
     health_check_started: Arc<AtomicBool>,
     health_check_notify: Arc<Notify>,
     health_check_release: Arc<Notify>,
+    hold_object_info_after: Arc<AtomicUsize>,
+    object_info_hold_started: Arc<AtomicBool>,
+    object_info_hold_released: Arc<AtomicBool>,
+    object_info_hold_notify: Arc<Notify>,
+    object_info_hold_release: Arc<Notify>,
     hold_submission: Arc<AtomicBool>,
     reject_submission_as_validation_error: Arc<AtomicBool>,
     submission_released: Arc<AtomicBool>,
@@ -315,6 +320,11 @@ impl CountingComfyAdapter {
             health_check_started: Arc::new(AtomicBool::new(false)),
             health_check_notify: Arc::new(Notify::new()),
             health_check_release: Arc::new(Notify::new()),
+            hold_object_info_after: Arc::new(AtomicUsize::new(0)),
+            object_info_hold_started: Arc::new(AtomicBool::new(false)),
+            object_info_hold_released: Arc::new(AtomicBool::new(true)),
+            object_info_hold_notify: Arc::new(Notify::new()),
+            object_info_hold_release: Arc::new(Notify::new()),
             hold_submission: Arc::new(AtomicBool::new(false)),
             reject_submission_as_validation_error: Arc::new(AtomicBool::new(false)),
             submission_started: Arc::new(AtomicBool::new(false)),
@@ -336,6 +346,9 @@ impl CountingComfyAdapter {
             .store(false, Ordering::SeqCst);
         self.hold_health_check.store(false, Ordering::SeqCst);
         self.health_check_released.store(true, Ordering::SeqCst);
+        self.hold_object_info_after.store(0, Ordering::SeqCst);
+        self.object_info_hold_started.store(false, Ordering::SeqCst);
+        self.object_info_hold_released.store(true, Ordering::SeqCst);
         self.hold_submission.store(false, Ordering::SeqCst);
         self.reject_submission_as_validation_error
             .store(false, Ordering::SeqCst);
@@ -375,6 +388,28 @@ impl CountingComfyAdapter {
     async fn wait_for_health_check(&self) {
         if !self.health_check_started.load(Ordering::SeqCst) {
             self.health_check_notify.notified().await;
+        }
+    }
+
+    fn hold_next_admission_preflight_object_info(&self) {
+        self.object_info_hold_started.store(false, Ordering::SeqCst);
+        self.object_info_hold_released
+            .store(false, Ordering::SeqCst);
+        self.hold_object_info_after.store(
+            self.object_info_calls.load(Ordering::SeqCst) + 3,
+            Ordering::SeqCst,
+        );
+    }
+
+    fn release_object_info(&self) {
+        self.object_info_hold_released.store(true, Ordering::SeqCst);
+        self.hold_object_info_after.store(0, Ordering::SeqCst);
+        self.object_info_hold_release.notify_waiters();
+    }
+
+    async fn wait_for_object_info_hold(&self) {
+        while !self.object_info_hold_started.load(Ordering::SeqCst) {
+            self.object_info_hold_notify.notified().await;
         }
     }
 
@@ -444,7 +479,7 @@ impl ComfyAdapter for CountingComfyAdapter {
     }
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
-        self.object_info_calls.fetch_add(1, Ordering::SeqCst);
+        let call_number = self.object_info_calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.capability_refresh_failure.load(Ordering::SeqCst) {
             return Err(ComfyAdapterError::Protocol(
                 "DEV-078 test capability refresh failed".to_owned(),
@@ -473,6 +508,15 @@ impl ComfyAdapter for CountingComfyAdapter {
                 .as_object_mut()
                 .expect("test object_info should be an object")
                 .remove("KSampler");
+        }
+        if call_number == self.hold_object_info_after.load(Ordering::SeqCst) {
+            self.object_info_hold_started.store(true, Ordering::SeqCst);
+            self.object_info_hold_notify.notify_waiters();
+            while !self.object_info_hold_released.load(Ordering::SeqCst)
+                && call_number == self.hold_object_info_after.load(Ordering::SeqCst)
+            {
+                self.object_info_hold_release.notified().await;
+            }
         }
         Ok(object_info)
     }
@@ -852,6 +896,27 @@ async fn create_runtime_batch_for_recipe(
         .to_owned()
 }
 
+async fn create_saved_runtime_batch_for_recipe(harness: &Harness, recipe_id: &str) -> String {
+    let mut request = direct_generation_batch_request(harness, 1);
+    let item = &mut request.items[0];
+    item.item.recipe_id = recipe_id.to_owned();
+    item.execution_type = ExecutionType::WorkflowBatch;
+    item.submission_idempotency_key = Some("dev078-admission-preflight".to_owned());
+    item.execution_input_sources = Some(BTreeMap::from([(
+        "prompt".to_owned(),
+        ExecutionValueSource::UserInput,
+    )]));
+    harness
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .expect("saved runtime batch should be created without starting")
+        .batch
+        .id
+        .as_str()
+        .to_owned()
+}
+
 fn direct_generation_request(
     harness: &Harness,
     prompt: &str,
@@ -876,6 +941,7 @@ fn direct_generation_request(
         model_version_id: None,
         tool_instance_id: None,
         tool_version_id: None,
+        execution_type: ExecutionType::Direct,
         submission_idempotency_key: submission_idempotency_key.map(str::to_owned),
         parent_task_id: parent_task_id.map(str::to_owned),
         execution_input_sources: None,
@@ -906,6 +972,7 @@ fn direct_generation_batch_request(
                 model_version_id: None,
                 tool_instance_id: None,
                 tool_version_id: None,
+                execution_type: ExecutionType::Direct,
                 submission_idempotency_key: Some(format!("direct-batch-item-{index}")),
                 parent_task_id: None,
                 execution_input_sources: None,
@@ -1325,6 +1392,7 @@ async fn saved_execution_batch_preflight_fetches_one_schema_for_one_exact_identi
     let harness = harness().await;
     let mut request = direct_generation_batch_request(&harness, 3);
     for (index, item) in request.items.iter_mut().enumerate() {
+        item.execution_type = ExecutionType::WorkflowBatch;
         item.submission_idempotency_key = Some(format!("workflow-execution-batch:test:{index}"));
         item.execution_input_sources = Some(BTreeMap::from([(
             "prompt".to_owned(),
@@ -1362,6 +1430,7 @@ async fn invalid_saved_batch_item_blocks_start_without_partial_dispatch() {
     let harness = harness().await;
     let mut request = direct_generation_batch_request(&harness, 3);
     for (index, item) in request.items.iter_mut().enumerate() {
+        item.execution_type = ExecutionType::WorkflowBatch;
         item.submission_idempotency_key = Some(format!("workflow-execution-batch:test:{index}"));
         item.execution_input_sources = Some(BTreeMap::from([(
             "prompt".to_owned(),
@@ -1542,6 +1611,7 @@ async fn shot_generation_submission_keeps_linkage_pending_until_queue_start() {
             model_version_id: None,
             tool_instance_id: None,
             tool_version_id: None,
+            execution_type: ExecutionType::Direct,
             submission_idempotency_key: prepared.submission_idempotency_key,
             parent_task_id: prepared.parent_task_id,
             execution_input_sources: None,
@@ -1754,6 +1824,79 @@ async fn dev078_b2_runtime_block_keeps_batch_pending_without_side_effects() {
         .expect("blocked batch should remain readable");
     assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
     assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Pending);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn dev078_lifecycle_disable_during_preflight_rejects_without_dispatch() {
+    let harness = harness().await;
+    let batch_id = create_saved_runtime_batch_for_recipe(&harness, &harness.recipe_id).await;
+    harness.comfy.hold_next_admission_preflight_object_info();
+
+    let admission = harness.admission.clone();
+    let start_batch_id = batch_id.clone();
+    let start = tokio::spawn(async move { admission.start(PROJECT_ID, &start_batch_id).await });
+    harness.comfy.wait_for_object_info_hold().await;
+    harness
+        .lifecycle
+        .set_enabled(&harness.workflow_version_id, false)
+        .await
+        .expect("the controlled lifecycle mutation should succeed");
+    harness.comfy.release_object_info();
+
+    let error = tokio::time::timeout(Duration::from_secs(5), start)
+        .await
+        .expect("admission should finish after the controlled preflight")
+        .expect("admission task should not panic")
+        .expect_err("a workflow disabled during preflight must not start");
+    assert_eq!(
+        runtime_failure_code(error),
+        RUNTIME_ADMISSION_WORKFLOW_DISABLED
+    );
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("blocked batch should remain readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn dev078_exact_recipe_readiness_change_during_preflight_rejects_without_dispatch() {
+    let harness = shared_recipe_harness().await;
+    let recipe_b = recipe_id_for_version(&harness, SHARED_RECIPE_B_VERSION);
+    // Recipe B is admitted while the controlled adapter exposes the broad
+    // sampler schema, then becomes incompatible while saved-batch preflight
+    // is waiting on the same exact runtime boundary.
+    harness.comfy.set_recipe_specific_incompatibility(false);
+    let batch_id = create_saved_runtime_batch_for_recipe(&harness, &recipe_b).await;
+    harness.comfy.hold_next_admission_preflight_object_info();
+
+    let admission = harness.admission.clone();
+    let start_batch_id = batch_id.clone();
+    let start = tokio::spawn(async move { admission.start(PROJECT_ID, &start_batch_id).await });
+    harness.comfy.wait_for_object_info_hold().await;
+    harness.comfy.set_recipe_specific_incompatibility(true);
+    harness.comfy.release_object_info();
+
+    let error = tokio::time::timeout(Duration::from_secs(5), start)
+        .await
+        .expect("admission should finish after the controlled preflight")
+        .expect("admission task should not panic")
+        .expect_err("a changed exact recipe readiness must not start");
+    assert_eq!(
+        runtime_failure_code(error),
+        RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE
+    );
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("blocked batch should remain readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
     assert_eq!(count(&harness.pool, "tasks").await, 0);
     assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
 }
@@ -2013,7 +2156,7 @@ async fn dev078_b6_capability_refresh_failure_fails_closed() {
 }
 
 #[tokio::test]
-async fn dev078_existing_gate_excludes_configuration_changes_until_start_commits() {
+async fn dev078_runtime_admission_does_not_hold_configuration_gate_during_preflight() {
     let harness = harness().await;
     let batch_id = create_runtime_batch(&harness, 1).await;
     harness.comfy.hold_health_check();
@@ -2028,31 +2171,22 @@ async fn dev078_existing_gate_excludes_configuration_changes_until_start_commits
         let guard = queue.acquire_runtime_configuration_admission().await;
         acquired_tx
             .send(())
-            .expect("configuration waiter should still be observed");
-        guard
+            .expect("configuration waiter should be observed");
+        drop(guard);
     });
-    tokio::task::yield_now().await;
-    assert!(
-        !configuration_task.is_finished(),
-        "configuration changes must wait while runtime admission holds the existing gate"
-    );
-    assert!(
-        matches!(
-            acquired_rx.try_recv(),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-        ),
-        "configuration changes must not acquire the gate before start commits"
-    );
+    tokio::time::timeout(Duration::from_secs(1), &mut acquired_rx)
+        .await
+        .expect("configuration changes should not wait for runtime preflight")
+        .expect("configuration waiter should receive the admission signal");
 
     harness.comfy.release_health_check();
     start_task
         .await
         .expect("start task should join")
         .expect("valid runtime should eventually commit");
-    let _configuration_guard = configuration_task
+    configuration_task
         .await
         .expect("configuration waiter should join");
-    assert!(acquired_rx.await.is_ok());
 }
 
 async fn seed_hierarchy(pool: &SqlitePool, workflow_version_id: &str, recipe_id: &str) {
@@ -2757,7 +2891,7 @@ async fn runtime_database_is_fresh_migrated_through_039() {
             .fetch_one(&harness.pool)
             .await
             .unwrap(),
-        40
+        41
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
