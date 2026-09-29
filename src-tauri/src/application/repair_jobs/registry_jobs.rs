@@ -137,6 +137,7 @@ impl RepairJob for RegistryStrandedVersionsJob {
             needs_review: review,
             failed: Vec::new(),
             published_recipe_ids: Vec::new(),
+            progress: Vec::new(),
         })
     }
 }

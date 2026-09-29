@@ -48,6 +48,33 @@ pub struct RepairFailure {
     pub message: String,
 }
 
+/// Durable progress for one multi-stage repair item.  A published immutable
+/// recipe must not be published again merely because its promotion/binding
+/// retarget failed later in the same repair job.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RepairItemCheckpoint {
+    #[default]
+    Planned,
+    Published,
+    Retargeted,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairItemProgress {
+    pub item: RepairItem,
+    pub checkpoint: RepairItemCheckpoint,
+    #[serde(default)]
+    pub workflow_version_id: Option<String>,
+    #[serde(default)]
+    pub old_recipe_id: Option<String>,
+    #[serde(default)]
+    pub new_recipe_id: Option<String>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairSummary {
@@ -62,6 +89,10 @@ pub struct RepairSummary {
     /// New recipe ids published by this job, in publication order.
     #[serde(default)]
     pub published_recipe_ids: Vec<String>,
+    /// Per-item checkpoints used to resume a partially completed repair
+    /// without republishing an immutable recipe patch.
+    #[serde(default)]
+    pub progress: Vec<RepairItemProgress>,
 }
 
 #[async_trait]
@@ -75,6 +106,26 @@ pub trait RepairJob: Send + Sync {
     /// Apply the plan. Per-item failures belong in the summary; an `Err` means
     /// the whole job could not run and it will be retried on the next start.
     async fn apply(&self, plan: &RepairPlan) -> Result<RepairSummary, String>;
+
+    /// Plan against a previous persisted summary. Existing jobs keep the
+    /// simple API; multi-stage jobs can re-add non-terminal items from the
+    /// summary instead of relying on a fresh source-package scan.
+    async fn plan_with_previous(
+        &self,
+        _previous: Option<&RepairSummary>,
+    ) -> Result<RepairPlan, String> {
+        self.plan().await
+    }
+
+    /// Apply a plan while recovering item-level checkpoints from a previous
+    /// failed run. Existing jobs default to their original implementation.
+    async fn apply_with_previous(
+        &self,
+        plan: &RepairPlan,
+        _previous: Option<&RepairSummary>,
+    ) -> Result<RepairSummary, String> {
+        self.apply(plan).await
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -165,14 +216,15 @@ impl RepairJobRunner {
         let _guard = self.run_gate.lock().await;
         let mut outcomes = Vec::new();
         for job in &self.jobs {
-            match self.repository.find(job.id()).await {
+            let previous_summary = match self.repository.find(job.id()).await {
                 Ok(Some(record))
                     if record.status == REPAIR_JOB_COMPLETED
                         || record.status == REPAIR_JOB_SKIPPED =>
                 {
                     continue;
                 }
-                Ok(_) => {}
+                Ok(Some(record)) => serde_json::from_str(&record.summary_json).ok(),
+                Ok(None) => None,
                 Err(error) => {
                     outcomes.push(RepairJobOutcome {
                         job_id: job.id().to_owned(),
@@ -182,13 +234,17 @@ impl RepairJobRunner {
                     });
                     continue;
                 }
-            }
-            outcomes.push(self.run_one(job.as_ref()).await);
+            };
+            outcomes.push(self.run_one(job.as_ref(), previous_summary.as_ref()).await);
         }
         outcomes
     }
 
-    async fn run_one(&self, job: &dyn RepairJob) -> RepairJobOutcome {
+    async fn run_one(
+        &self,
+        job: &dyn RepairJob,
+        previous_summary: Option<&RepairSummary>,
+    ) -> RepairJobOutcome {
         let job_id = job.id().to_owned();
         if let Err(error) = self
             .repository
@@ -202,12 +258,24 @@ impl RepairJobRunner {
                 error: Some(error.to_string()),
             };
         }
-        let result = match job.plan().await {
-            Ok(plan) if plan.items.is_empty() => Ok(RepairSummary::default()),
-            Ok(plan) => job.apply(&plan).await.map(|mut summary| {
-                summary.planned = plan.items.len();
-                summary
-            }),
+        let result = match job.plan_with_previous(previous_summary).await {
+            Ok(plan) if plan.items.is_empty() => {
+                // A failed run may have only left human-review items. Those
+                // are intentionally not re-planned, but their evidence must
+                // remain visible when the job becomes COMPLETED.
+                let mut summary = previous_summary.cloned().unwrap_or_default();
+                summary.planned = 0;
+                summary.failed.clear();
+                Ok(summary)
+            }
+            Ok(plan) => {
+                job.apply_with_previous(&plan, previous_summary)
+                    .await
+                    .map(|mut summary| {
+                        summary.planned = plan.items.len();
+                        summary
+                    })
+            }
             Err(error) => Err(error),
         };
         let (status, summary, error) = match result {
@@ -258,8 +326,9 @@ mod tests {
     use super::*;
     use crate::infrastructure::database::{initialize, SqliteRepairJobRepository};
     use chrono::{DateTime, Utc};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tempfile::TempDir;
+    use tokio::sync::Notify;
 
     struct FixedClock;
     impl Clock for FixedClock {
@@ -326,6 +395,235 @@ mod tests {
             }
             self.remaining.store(0, Ordering::SeqCst);
             Ok(summary)
+        }
+    }
+
+    struct CheckpointJob {
+        b_retarget_fail_once: AtomicBool,
+        c_apply_fail_once: AtomicBool,
+        a_publish_count: AtomicUsize,
+        b_publish_count: AtomicUsize,
+        c_publish_count: AtomicUsize,
+        b_retarget_count: AtomicUsize,
+        c_apply_count: AtomicUsize,
+    }
+
+    impl CheckpointJob {
+        fn new() -> Self {
+            Self {
+                b_retarget_fail_once: AtomicBool::new(true),
+                c_apply_fail_once: AtomicBool::new(true),
+                a_publish_count: AtomicUsize::new(0),
+                b_publish_count: AtomicUsize::new(0),
+                c_publish_count: AtomicUsize::new(0),
+                b_retarget_count: AtomicUsize::new(0),
+                c_apply_count: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    fn checkpoint_item(recipe_id: &str) -> RepairItem {
+        RepairItem {
+            recipe_id: recipe_id.to_owned(),
+            ..RepairItem::default()
+        }
+    }
+
+    fn same_checkpoint_item(left: &RepairItem, right: &RepairItem) -> bool {
+        left.recipe_id == right.recipe_id
+    }
+
+    fn upsert_checkpoint(
+        summary: &mut RepairSummary,
+        item: &RepairItem,
+        checkpoint: RepairItemCheckpoint,
+        new_recipe_id: Option<&str>,
+        last_error: Option<String>,
+    ) {
+        let progress = RepairItemProgress {
+            item: item.clone(),
+            checkpoint,
+            workflow_version_id: Some("workflow-version".to_owned()),
+            old_recipe_id: Some(item.recipe_id.clone()),
+            new_recipe_id: new_recipe_id.map(str::to_owned),
+            last_error,
+        };
+        if let Some(existing) = summary
+            .progress
+            .iter_mut()
+            .find(|existing| same_checkpoint_item(&existing.item, item))
+        {
+            *existing = progress;
+        } else {
+            summary.progress.push(progress);
+        }
+    }
+
+    #[async_trait]
+    impl RepairJob for CheckpointJob {
+        fn id(&self) -> &'static str {
+            "checkpoint_retry_v1"
+        }
+
+        async fn plan(&self) -> Result<RepairPlan, String> {
+            self.plan_with_previous(None).await
+        }
+
+        async fn plan_with_previous(
+            &self,
+            previous: Option<&RepairSummary>,
+        ) -> Result<RepairPlan, String> {
+            let mut items = vec![
+                checkpoint_item("item_a"),
+                checkpoint_item("item_b"),
+                checkpoint_item("item_c"),
+            ];
+            if let Some(previous) = previous {
+                items.retain(|item| {
+                    !previous.progress.iter().any(|progress| {
+                        same_checkpoint_item(&progress.item, item)
+                            && progress.checkpoint == RepairItemCheckpoint::Retargeted
+                    })
+                });
+            }
+            Ok(RepairPlan { items })
+        }
+
+        async fn apply(&self, plan: &RepairPlan) -> Result<RepairSummary, String> {
+            self.apply_with_previous(plan, None).await
+        }
+
+        async fn apply_with_previous(
+            &self,
+            plan: &RepairPlan,
+            previous: Option<&RepairSummary>,
+        ) -> Result<RepairSummary, String> {
+            let mut summary = previous.cloned().unwrap_or_default();
+            summary.failed.clear();
+            for item in &plan.items {
+                let previous_checkpoint = summary
+                    .progress
+                    .iter()
+                    .find(|progress| same_checkpoint_item(&progress.item, item))
+                    .map(|progress| progress.checkpoint.clone());
+                match item.recipe_id.as_str() {
+                    "item_a" => {
+                        if previous_checkpoint.is_none() {
+                            self.a_publish_count.fetch_add(1, Ordering::SeqCst);
+                            upsert_checkpoint(
+                                &mut summary,
+                                item,
+                                RepairItemCheckpoint::Published,
+                                Some("patch_a"),
+                                None,
+                            );
+                        }
+                        upsert_checkpoint(
+                            &mut summary,
+                            item,
+                            RepairItemCheckpoint::Retargeted,
+                            Some("patch_a"),
+                            None,
+                        );
+                        summary.repaired += 1;
+                    }
+                    "item_b" => {
+                        if previous_checkpoint != Some(RepairItemCheckpoint::Published) {
+                            self.b_publish_count.fetch_add(1, Ordering::SeqCst);
+                            upsert_checkpoint(
+                                &mut summary,
+                                item,
+                                RepairItemCheckpoint::Published,
+                                Some("patch_b"),
+                                None,
+                            );
+                        }
+                        self.b_retarget_count.fetch_add(1, Ordering::SeqCst);
+                        if self.b_retarget_fail_once.swap(false, Ordering::SeqCst) {
+                            let message = "retarget failed once".to_owned();
+                            upsert_checkpoint(
+                                &mut summary,
+                                item,
+                                RepairItemCheckpoint::Published,
+                                Some("patch_b"),
+                                Some(message.clone()),
+                            );
+                            summary.failed.push(RepairFailure {
+                                recipe_id: item.recipe_id.clone(),
+                                message,
+                            });
+                        } else {
+                            upsert_checkpoint(
+                                &mut summary,
+                                item,
+                                RepairItemCheckpoint::Retargeted,
+                                Some("patch_b"),
+                                None,
+                            );
+                            summary.repaired += 1;
+                        }
+                    }
+                    "item_c" => {
+                        self.c_apply_count.fetch_add(1, Ordering::SeqCst);
+                        if self.c_apply_fail_once.swap(false, Ordering::SeqCst) {
+                            let message = "apply failed once".to_owned();
+                            upsert_checkpoint(
+                                &mut summary,
+                                item,
+                                RepairItemCheckpoint::Planned,
+                                None,
+                                Some(message.clone()),
+                            );
+                            summary.failed.push(RepairFailure {
+                                recipe_id: item.recipe_id.clone(),
+                                message,
+                            });
+                        } else {
+                            self.c_publish_count.fetch_add(1, Ordering::SeqCst);
+                            upsert_checkpoint(
+                                &mut summary,
+                                item,
+                                RepairItemCheckpoint::Retargeted,
+                                Some("patch_c"),
+                                None,
+                            );
+                            summary.repaired += 1;
+                        }
+                    }
+                    other => panic!("unexpected checkpoint item {other}"),
+                }
+            }
+            Ok(summary)
+        }
+    }
+
+    struct GateJob {
+        started: Notify,
+        release: Notify,
+        hold: AtomicBool,
+    }
+
+    #[async_trait]
+    impl RepairJob for GateJob {
+        fn id(&self) -> &'static str {
+            "gate_v1"
+        }
+
+        async fn plan(&self) -> Result<RepairPlan, String> {
+            Ok(RepairPlan {
+                items: vec![checkpoint_item("gate")],
+            })
+        }
+
+        async fn apply(&self, _plan: &RepairPlan) -> Result<RepairSummary, String> {
+            self.started.notify_waiters();
+            while self.hold.load(Ordering::SeqCst) {
+                self.release.notified().await;
+            }
+            Ok(RepairSummary {
+                repaired: 1,
+                ..RepairSummary::default()
+            })
         }
     }
 
@@ -402,5 +700,84 @@ mod tests {
         assert_eq!(retry[1].job_id, "plan_failure_v1");
         assert_eq!(retry[1].status, REPAIR_JOB_FAILED);
         assert_eq!(failing_item.applied.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn repair_job_retries_item_checkpoints_without_duplicate_publish() {
+        let (_directory, repository) = repository().await;
+        let job = Arc::new(CheckpointJob::new());
+        let runner =
+            RepairJobRunner::new(repository.clone(), Arc::new(FixedClock), vec![job.clone()]);
+
+        let first = runner.run_pending().await;
+        assert_eq!(first[0].status, REPAIR_JOB_FAILED);
+        let first_summary = first[0].summary.as_ref().unwrap();
+        assert_eq!(first_summary.failed.len(), 2);
+        assert_eq!(
+            first_summary
+                .progress
+                .iter()
+                .find(|progress| progress.item.recipe_id == "item_a")
+                .unwrap()
+                .checkpoint,
+            RepairItemCheckpoint::Retargeted
+        );
+        assert_eq!(
+            first_summary
+                .progress
+                .iter()
+                .find(|progress| progress.item.recipe_id == "item_b")
+                .unwrap()
+                .checkpoint,
+            RepairItemCheckpoint::Published
+        );
+
+        let second = runner.run_pending().await;
+        assert_eq!(second[0].status, REPAIR_JOB_COMPLETED);
+        let second_summary = second[0].summary.as_ref().unwrap();
+        assert!(second_summary.failed.is_empty());
+        assert_eq!(second_summary.progress.len(), 3);
+        assert!(second_summary
+            .progress
+            .iter()
+            .all(|progress| progress.checkpoint == RepairItemCheckpoint::Retargeted));
+        assert_eq!(job.a_publish_count.load(Ordering::SeqCst), 1);
+        assert_eq!(job.b_publish_count.load(Ordering::SeqCst), 1);
+        assert_eq!(job.c_publish_count.load(Ordering::SeqCst), 1);
+        assert_eq!(job.b_retarget_count.load(Ordering::SeqCst), 2);
+        assert_eq!(job.c_apply_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn mark_all_pending_waits_for_active_apply() {
+        let (_directory, repository) = repository().await;
+        let job = Arc::new(GateJob {
+            started: Notify::new(),
+            release: Notify::new(),
+            hold: AtomicBool::new(true),
+        });
+        let runner = Arc::new(RepairJobRunner::new(
+            repository,
+            Arc::new(FixedClock),
+            vec![job.clone()],
+        ));
+        let run_runner = runner.clone();
+        let started = job.started.notified();
+        let run = tokio::spawn(async move { run_runner.run_pending().await });
+        started.await;
+
+        let reset_runner = runner.clone();
+        let mut reset = tokio::spawn(async move { reset_runner.mark_all_pending().await });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), &mut reset)
+                .await
+                .is_err(),
+            "reset must not interleave with an active apply"
+        );
+
+        job.hold.store(false, Ordering::SeqCst);
+        job.release.notify_waiters();
+        run.await.unwrap();
+        reset.await.unwrap().unwrap();
     }
 }

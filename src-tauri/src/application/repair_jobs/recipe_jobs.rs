@@ -3,7 +3,10 @@
 //! republish, moves the recipe promotion and project workflow bindings from
 //! the repaired recipe to its replacement so the fix actually takes effect.
 
-use super::{RepairFailure, RepairItem, RepairJob, RepairPlan, RepairSummary};
+use super::{
+    RepairFailure, RepairItem, RepairItemCheckpoint, RepairItemProgress, RepairJob, RepairPlan,
+    RepairSummary,
+};
 use crate::application::ports::{
     Clock, ProjectWorkflowBindingRepository, WorkflowRecipePromotionRepository,
 };
@@ -139,6 +142,44 @@ fn candidate_from_item(item: &RepairItem) -> RecipeRepairCandidate {
     }
 }
 
+fn same_repair_item(left: &RepairItem, right: &RepairItem) -> bool {
+    left.workflow_id == right.workflow_id
+        && left.workflow_version_id == right.workflow_version_id
+        && left.recipe_id == right.recipe_id
+        && left.workflow_version == right.workflow_version
+        && left.recipe_version == right.recipe_version
+        && left.package_name == right.package_name
+}
+
+fn upsert_progress(summary: &mut RepairSummary, progress: RepairItemProgress) {
+    if let Some(existing) = summary
+        .progress
+        .iter_mut()
+        .find(|existing| same_repair_item(&existing.item, &progress.item))
+    {
+        *existing = progress;
+    } else {
+        summary.progress.push(progress);
+    }
+}
+
+fn push_unique_recipe_id(summary: &mut RepairSummary, recipe_id: &str) {
+    if !summary
+        .published_recipe_ids
+        .iter()
+        .any(|published| published == recipe_id)
+    {
+        summary.published_recipe_ids.push(recipe_id.to_owned());
+    }
+}
+
+fn has_needs_review(summary: &RepairSummary, item: &RepairItem) -> bool {
+    summary
+        .needs_review
+        .iter()
+        .any(|review| same_repair_item(review, item))
+}
+
 #[async_trait]
 impl RepairJob for RecipeRepairJob {
     fn id(&self) -> &'static str {
@@ -165,9 +206,132 @@ impl RepairJob for RecipeRepairJob {
         })
     }
 
+    async fn plan_with_previous(
+        &self,
+        previous: Option<&RepairSummary>,
+    ) -> Result<RepairPlan, String> {
+        let mut plan = self.plan().await?;
+        let Some(previous) = previous else {
+            return Ok(plan);
+        };
+
+        // A source package can disappear or change its candidate ordering
+        // after a failed run. Re-add every non-terminal checkpoint from the
+        // persisted summary so retry does not depend on a fresh scan finding
+        // the same item again. Human-review items are deliberately excluded.
+        let mut seen = plan.items.iter().cloned().collect::<Vec<_>>();
+        plan.items.retain(|item| {
+            !has_needs_review(previous, item)
+                && !previous.progress.iter().any(|progress| {
+                    same_repair_item(&progress.item, item)
+                        && progress.checkpoint == RepairItemCheckpoint::Retargeted
+                })
+        });
+        for progress in &previous.progress {
+            if progress.checkpoint == RepairItemCheckpoint::Retargeted
+                || has_needs_review(previous, &progress.item)
+                || seen
+                    .iter()
+                    .any(|item| same_repair_item(item, &progress.item))
+            {
+                continue;
+            }
+            seen.push(progress.item.clone());
+            plan.items.push(progress.item.clone());
+        }
+        Ok(plan)
+    }
+
     async fn apply(&self, plan: &RepairPlan) -> Result<RepairSummary, String> {
+        self.apply_with_previous(plan, None).await
+    }
+
+    async fn apply_with_previous(
+        &self,
+        plan: &RepairPlan,
+        previous: Option<&RepairSummary>,
+    ) -> Result<RepairSummary, String> {
         let mut summary = RepairSummary::default();
+        if let Some(previous) = previous {
+            summary.repaired = previous.repaired;
+            summary.skipped = previous.skipped;
+            summary.needs_review = previous.needs_review.clone();
+            summary.published_recipe_ids = previous.published_recipe_ids.clone();
+            summary.progress = previous.progress.clone();
+        }
         for item in &plan.items {
+            let previous_progress = summary
+                .progress
+                .iter()
+                .find(|progress| same_repair_item(&progress.item, item))
+                .cloned();
+            if previous_progress
+                .as_ref()
+                .is_some_and(|progress| progress.checkpoint == RepairItemCheckpoint::Retargeted)
+            {
+                continue;
+            }
+
+            if let Some(progress) = previous_progress
+                .as_ref()
+                .filter(|progress| progress.checkpoint == RepairItemCheckpoint::Published)
+            {
+                let Some(new_recipe_id) = progress.new_recipe_id.as_deref() else {
+                    summary.failed.push(RepairFailure {
+                        recipe_id: item.recipe_id.clone(),
+                        message: "published checkpoint is missing new recipe id".to_owned(),
+                    });
+                    continue;
+                };
+                let retarget_result = match (
+                    progress.workflow_version_id.as_deref(),
+                    progress.old_recipe_id.as_deref(),
+                ) {
+                    (Some(workflow_version_id), Some(old_recipe_id)) => {
+                        self.retarget(workflow_version_id, old_recipe_id, new_recipe_id)
+                            .await
+                    }
+                    _ => Ok(()),
+                };
+                match retarget_result {
+                    Ok(()) => {
+                        upsert_progress(
+                            &mut summary,
+                            RepairItemProgress {
+                                item: item.clone(),
+                                checkpoint: RepairItemCheckpoint::Retargeted,
+                                workflow_version_id: progress.workflow_version_id.clone(),
+                                old_recipe_id: progress.old_recipe_id.clone(),
+                                new_recipe_id: progress.new_recipe_id.clone(),
+                                last_error: None,
+                            },
+                        );
+                        summary.repaired += 1;
+                    }
+                    Err(error) => {
+                        let message = format!(
+                            "published {new_recipe_id} but could not move promotion/bindings: {error}"
+                        );
+                        upsert_progress(
+                            &mut summary,
+                            RepairItemProgress {
+                                item: item.clone(),
+                                checkpoint: RepairItemCheckpoint::Published,
+                                workflow_version_id: progress.workflow_version_id.clone(),
+                                old_recipe_id: progress.old_recipe_id.clone(),
+                                new_recipe_id: progress.new_recipe_id.clone(),
+                                last_error: Some(message.clone()),
+                            },
+                        );
+                        summary.failed.push(RepairFailure {
+                            recipe_id: item.recipe_id.clone(),
+                            message,
+                        });
+                    }
+                }
+                continue;
+            }
+
             match self
                 .onboarding
                 .apply_recipe_repair(self.kind, &candidate_from_item(item))
@@ -178,35 +342,86 @@ impl RepairJob for RecipeRepairJob {
                     old_recipe_id,
                     new_recipe_id,
                 }) => {
-                    summary.repaired += 1;
-                    summary.published_recipe_ids.push(new_recipe_id.clone());
-                    if let (Some(workflow_version_id), Some(old_recipe_id)) =
-                        (workflow_version_id, old_recipe_id)
-                    {
-                        if let Err(error) = self
-                            .retarget(&workflow_version_id, &old_recipe_id, &new_recipe_id)
-                            .await
-                        {
+                    push_unique_recipe_id(&mut summary, &new_recipe_id);
+                    upsert_progress(
+                        &mut summary,
+                        RepairItemProgress {
+                            item: item.clone(),
+                            checkpoint: RepairItemCheckpoint::Published,
+                            workflow_version_id: workflow_version_id.clone(),
+                            old_recipe_id: old_recipe_id.clone(),
+                            new_recipe_id: Some(new_recipe_id.clone()),
+                            last_error: None,
+                        },
+                    );
+                    let retarget_result =
+                        match (workflow_version_id.as_deref(), old_recipe_id.as_deref()) {
+                            (Some(workflow_version_id), Some(old_recipe_id)) => {
+                                self.retarget(workflow_version_id, old_recipe_id, &new_recipe_id)
+                                    .await
+                            }
+                            _ => Ok(()),
+                        };
+                    match retarget_result {
+                        Ok(()) => {
+                            upsert_progress(
+                                &mut summary,
+                                RepairItemProgress {
+                                    item: item.clone(),
+                                    checkpoint: RepairItemCheckpoint::Retargeted,
+                                    workflow_version_id: workflow_version_id.clone(),
+                                    old_recipe_id: old_recipe_id.clone(),
+                                    new_recipe_id: Some(new_recipe_id.clone()),
+                                    last_error: None,
+                                },
+                            );
+                            summary.repaired += 1;
+                        }
+                        Err(error) => {
+                            let message = format!(
+                                "published {new_recipe_id} but could not move promotion/bindings: {error}"
+                            );
+                            if let Some(progress) = summary
+                                .progress
+                                .iter_mut()
+                                .find(|progress| same_repair_item(&progress.item, item))
+                            {
+                                progress.last_error = Some(message.clone());
+                            }
                             summary.failed.push(RepairFailure {
                                 recipe_id: item.recipe_id.clone(),
-                                message: format!(
-                                    "published {new_recipe_id} but could not move promotion/bindings: {error}"
-                                ),
+                                message,
                             });
                         }
                     }
                 }
                 Ok(RecipeRepairOutcome::NeedsReview(reason)) => {
-                    summary.needs_review.push(RepairItem {
+                    let review = RepairItem {
                         reason,
                         ..item.clone()
-                    });
+                    };
+                    if !has_needs_review(&summary, &review) {
+                        summary.needs_review.push(review);
+                    }
                 }
                 Ok(RecipeRepairOutcome::Skipped(_)) => summary.skipped += 1,
-                Err(message) => summary.failed.push(RepairFailure {
-                    recipe_id: item.recipe_id.clone(),
-                    message,
-                }),
+                Err(message) => {
+                    upsert_progress(
+                        &mut summary,
+                        RepairItemProgress {
+                            item: item.clone(),
+                            checkpoint: RepairItemCheckpoint::Planned,
+                            workflow_version_id: None,
+                            old_recipe_id: None,
+                            new_recipe_id: None,
+                            last_error: Some(message.clone()),
+                        },
+                    );
+                    summary.failed.push(RepairFailure {
+                        recipe_id: item.recipe_id.clone(),
+                        message,
+                    });
+                }
             }
         }
         Ok(summary)
