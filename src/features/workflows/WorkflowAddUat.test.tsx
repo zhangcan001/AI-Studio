@@ -28,7 +28,7 @@ const serviceMocks = vi.hoisted(() => ({
   refreshWorkflowProductionWorkspace: vi.fn(),
   listGenerationCatalog: vi.fn(),
   getProjectWorkflowConfig: vi.fn(),
-  replaceProjectWorkflowConfig: vi.fn(),
+  upsertProjectWorkflowBinding: vi.fn(),
 }));
 
 vi.mock("../../services/tauriClient", async () => {
@@ -221,7 +221,7 @@ function prepareTauriBoundary(recipe: RecipeViewModel) {
   serviceMocks.refreshWorkflowProductionWorkspace.mockResolvedValue(EMPTY_WORKSPACE);
   serviceMocks.listGenerationCatalog.mockResolvedValue([recipe]);
   serviceMocks.getProjectWorkflowConfig.mockResolvedValue(EMPTY_PROJECT_CONFIG);
-  serviceMocks.replaceProjectWorkflowConfig.mockResolvedValue(EMPTY_PROJECT_CONFIG);
+  serviceMocks.upsertProjectWorkflowBinding.mockResolvedValue(EMPTY_PROJECT_CONFIG);
 }
 
 interface WorkflowProjectClosureHarnessProps {
@@ -482,16 +482,16 @@ describe("DEV-079 添加工作流前端 UAT", () => {
     const select = await screen.findByLabelText(selectLabel);
     expect(within(select).getByRole("option", { name: new RegExp(`${recipe.workflowVersionId}.*${recipe.recipeId}`) })).toBeTruthy();
     await user.selectOptions(select, `${recipe.workflowVersionId}:${recipe.recipeId}`);
-    expect(serviceMocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(serviceMocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "保存工作流配置" }));
-    await waitFor(() => expect(serviceMocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-1", {
-      bindings: [{
-        stage,
-        mode: "DEFAULT",
-        workflowVersionId: recipe.workflowVersionId,
-        recipeId: recipe.recipeId,
-      }],
+    await waitFor(() => expect(serviceMocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith("project-1", {
+      stage,
+      mode: "DEFAULT",
+      workflowVersionId: recipe.workflowVersionId,
+      recipeId: recipe.recipeId,
+      expectedBindingInstanceId: null,
+      expectedRevision: null,
     }));
   });
 

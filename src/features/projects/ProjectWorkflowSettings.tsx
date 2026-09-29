@@ -257,6 +257,9 @@ export function ProjectWorkflowSettings({ projectId, catalog, onConfigChanged }:
           continue;
         }
         if (target) {
+          if (current && (!current.bindingInstanceId || current.revision === undefined)) {
+            throw new Error("项目工作流绑定缺少并发版本信息，请刷新后重试。");
+          }
           nextConfig = await upsertProjectWorkflowBinding(projectId, {
             stage: slot.stage,
             mode: slot.mode,

@@ -16,13 +16,13 @@ import { ProjectWorkflowSettings } from "./ProjectWorkflowSettings";
 
 const mocks = vi.hoisted(() => ({
   getProjectWorkflowConfig: vi.fn(),
-  replaceProjectWorkflowConfig: vi.fn(),
+  upsertProjectWorkflowBinding: vi.fn(),
   getComfyPreflight: vi.fn(),
 }));
 
 vi.mock("../../services/tauriClient", () => ({
   getProjectWorkflowConfig: mocks.getProjectWorkflowConfig,
-  replaceProjectWorkflowConfig: mocks.replaceProjectWorkflowConfig,
+  upsertProjectWorkflowBinding: mocks.upsertProjectWorkflowBinding,
   getComfyPreflight: mocks.getComfyPreflight,
 }));
 
@@ -71,6 +71,8 @@ function binding(recipe: RecipeViewModel, stage: "IMAGE" | "VIDEO"): ProjectWork
     recipeId: recipe.recipeId,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
+    bindingInstanceId: `bnd_${stage.toLowerCase()}`,
+    revision: 1,
     available: true,
   };
 }
@@ -166,7 +168,7 @@ function Harness({ initialConfig, catalog = CATALOG }: { initialConfig: ProjectW
 describe("ProjectProductionReadiness deterministic UAT", () => {
   beforeEach(() => {
     mocks.getProjectWorkflowConfig.mockReset();
-    mocks.replaceProjectWorkflowConfig.mockReset();
+    mocks.upsertProjectWorkflowBinding.mockReset();
     mocks.getComfyPreflight.mockReset();
   });
 
@@ -216,14 +218,14 @@ describe("ProjectProductionReadiness deterministic UAT", () => {
     await userEvent.click(screen.getByRole("button", { name: "检查开工条件" }));
 
     await waitFor(() => expect(screen.getByText("⏳ 运行环境忙碌")).toBeTruthy());
-    expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
   });
 
   it("Case 4: invalidates the old runtime snapshot after saving A to B", async () => {
     const initialConfig = config({ imageDefault: binding(IMAGE_A, "IMAGE") });
     const nextConfig = config({ imageDefault: binding(IMAGE_B, "IMAGE") });
     mocks.getProjectWorkflowConfig.mockResolvedValue(initialConfig);
-    mocks.replaceProjectWorkflowConfig.mockResolvedValue(nextConfig);
+    mocks.upsertProjectWorkflowBinding.mockResolvedValue(nextConfig);
     mocks.getComfyPreflight.mockResolvedValue(READY_RUNTIME);
     render(<Harness initialConfig={initialConfig} />);
 
@@ -243,7 +245,7 @@ describe("ProjectProductionReadiness deterministic UAT", () => {
     const initialConfig = config({ imageDefault: binding(IMAGE_SHARED_A, "IMAGE") });
     const nextConfig = config({ imageDefault: binding(IMAGE_SHARED_B, "IMAGE") });
     mocks.getProjectWorkflowConfig.mockResolvedValue(initialConfig);
-    mocks.replaceProjectWorkflowConfig.mockResolvedValue(nextConfig);
+    mocks.upsertProjectWorkflowBinding.mockResolvedValue(nextConfig);
     mocks.getComfyPreflight.mockResolvedValue(READY_SHARED_RUNTIME);
     render(<Harness initialConfig={initialConfig} catalog={SHARED_RECIPE_CATALOG} />);
 
@@ -256,13 +258,13 @@ describe("ProjectProductionReadiness deterministic UAT", () => {
 
     await waitFor(() => expect(screen.getByText("项目工作流已变化，请重新检查开工条件。")).toBeTruthy());
     expect(screen.getByText("尚未检查当前运行环境")).toBeTruthy();
-    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-uat", {
-      bindings: [{
-        stage: "IMAGE",
-        mode: "DEFAULT",
-        workflowVersionId: "image-shared",
-        recipeId: "image-recipe-b",
-      }],
+    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith("project-uat", {
+      stage: "IMAGE",
+      mode: "DEFAULT",
+      workflowVersionId: "image-shared",
+      recipeId: "image-recipe-b",
+      expectedBindingInstanceId: "bnd_image",
+      expectedRevision: 1,
     });
     expect(mocks.getComfyPreflight).toHaveBeenCalledTimes(1);
   });
