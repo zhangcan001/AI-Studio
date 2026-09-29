@@ -1327,6 +1327,7 @@ async fn saved_execution_batch_preflight_fetches_one_schema_for_one_exact_identi
     let harness = harness().await;
     let mut request = direct_generation_batch_request(&harness, 3);
     for (index, item) in request.items.iter_mut().enumerate() {
+        item.execution_type = ExecutionType::WorkflowBatch;
         item.submission_idempotency_key = Some(format!("workflow-execution-batch:test:{index}"));
         item.execution_input_sources = Some(BTreeMap::from([(
             "prompt".to_owned(),
@@ -1364,6 +1365,7 @@ async fn invalid_saved_batch_item_blocks_start_without_partial_dispatch() {
     let harness = harness().await;
     let mut request = direct_generation_batch_request(&harness, 3);
     for (index, item) in request.items.iter_mut().enumerate() {
+        item.execution_type = ExecutionType::WorkflowBatch;
         item.submission_idempotency_key = Some(format!("workflow-execution-batch:test:{index}"));
         item.execution_input_sources = Some(BTreeMap::from([(
             "prompt".to_owned(),
@@ -2016,7 +2018,7 @@ async fn dev078_b6_capability_refresh_failure_fails_closed() {
 }
 
 #[tokio::test]
-async fn dev078_existing_gate_excludes_configuration_changes_until_start_commits() {
+async fn dev078_runtime_admission_does_not_hold_configuration_gate_during_preflight() {
     let harness = harness().await;
     let batch_id = create_runtime_batch(&harness, 1).await;
     harness.comfy.hold_health_check();
@@ -2031,31 +2033,22 @@ async fn dev078_existing_gate_excludes_configuration_changes_until_start_commits
         let guard = queue.acquire_runtime_configuration_admission().await;
         acquired_tx
             .send(())
-            .expect("configuration waiter should still be observed");
-        guard
+            .expect("configuration waiter should be observed");
+        drop(guard);
     });
-    tokio::task::yield_now().await;
-    assert!(
-        !configuration_task.is_finished(),
-        "configuration changes must wait while runtime admission holds the existing gate"
-    );
-    assert!(
-        matches!(
-            acquired_rx.try_recv(),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-        ),
-        "configuration changes must not acquire the gate before start commits"
-    );
+    tokio::time::timeout(Duration::from_secs(1), &mut acquired_rx)
+        .await
+        .expect("configuration changes should not wait for runtime preflight")
+        .expect("configuration waiter should receive the admission signal");
 
     harness.comfy.release_health_check();
     start_task
         .await
         .expect("start task should join")
         .expect("valid runtime should eventually commit");
-    let _configuration_guard = configuration_task
+    configuration_task
         .await
         .expect("configuration waiter should join");
-    assert!(acquired_rx.await.is_ok());
 }
 
 async fn seed_hierarchy(pool: &SqlitePool, workflow_version_id: &str, recipe_id: &str) {
