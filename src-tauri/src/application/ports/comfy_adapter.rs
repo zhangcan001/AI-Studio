@@ -528,6 +528,8 @@ pub struct ComfyAdapterHandle {
     current: RwLock<Arc<dyn ComfyAdapter>>,
     object_info_generation: AtomicU64,
     object_info_cache: StdMutex<ObjectInfoCache>,
+    #[cfg(test)]
+    object_info_waiter_observed: StdMutex<Option<Arc<Notify>>>,
 }
 
 const OBJECT_INFO_CACHE_TTL: Duration = Duration::from_secs(60);
@@ -551,7 +553,17 @@ impl ComfyAdapterHandle {
             current: RwLock::new(adapter),
             object_info_generation: AtomicU64::new(0),
             object_info_cache: StdMutex::new(ObjectInfoCache::Empty),
+            #[cfg(test)]
+            object_info_waiter_observed: StdMutex::new(None),
         }
+    }
+
+    #[cfg(test)]
+    fn set_test_waiter_observed_hook(&self, hook: Arc<Notify>) {
+        *self
+            .object_info_waiter_observed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(hook);
     }
 
     pub fn replace(&self, adapter: Arc<dyn ComfyAdapter>) {
@@ -640,7 +652,20 @@ impl ComfyAdapter for ComfyAdapterHandle {
                         generation: loading_generation,
                         notify,
                     } if *loading_generation == generation => {
-                        (None, Some(notify.clone()), None, None)
+                        #[cfg(test)]
+                        if let Some(hook) = self
+                            .object_info_waiter_observed
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .clone()
+                        {
+                            hook.notify_waiters();
+                        }
+                        // Subscribe while the cache mutex is still held.  A
+                        // leader cannot finish and notify this generation in
+                        // the gap between observing Loading and registering a
+                        // waiter.
+                        (None, Some(notify.clone().notified_owned()), None, None)
                     }
                     _ => {
                         let notify = Arc::new(Notify::new());
@@ -653,10 +678,7 @@ impl ComfyAdapter for ComfyAdapterHandle {
                 }
             };
 
-            if let Some(notify) = waiter {
-                // Create the future before releasing the mutex so a leader
-                // cannot notify between unlock and subscription.
-                let notified = notify.notified();
+            if let Some(notified) = waiter {
                 notified.await;
                 continue;
             }
@@ -781,10 +803,43 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    struct ObjectInfoGate {
+        started: AtomicUsize,
+        hold: std::sync::atomic::AtomicBool,
+        fail: std::sync::atomic::AtomicBool,
+        release: Notify,
+    }
+
+    impl ObjectInfoGate {
+        fn new() -> Self {
+            Self {
+                started: AtomicUsize::new(0),
+                hold: std::sync::atomic::AtomicBool::new(true),
+                fail: std::sync::atomic::AtomicBool::new(false),
+                release: Notify::new(),
+            }
+        }
+
+        async fn wait_started(&self) {
+            loop {
+                if self.started.load(Ordering::SeqCst) > 0 {
+                    return;
+                }
+                self.release.notified().await;
+            }
+        }
+
+        fn release(&self) {
+            self.hold.store(false, Ordering::SeqCst);
+            self.release.notify_waiters();
+        }
+    }
+
     struct TaggedAdapter {
         tag: &'static str,
         object_info_calls: Arc<AtomicUsize>,
         delay_object_info: bool,
+        object_info_gate: Option<Arc<ObjectInfoGate>>,
     }
 
     #[async_trait]
@@ -808,6 +863,18 @@ mod tests {
 
         async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
             self.object_info_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(gate) = &self.object_info_gate {
+                gate.started.fetch_add(1, Ordering::SeqCst);
+                gate.release.notify_waiters();
+                if gate.hold.load(Ordering::SeqCst) {
+                    gate.release.notified().await;
+                }
+                if gate.fail.load(Ordering::SeqCst) {
+                    return Err(ComfyAdapterError::Protocol(
+                        "controlled object_info failure".to_owned(),
+                    ));
+                }
+            }
             if self.delay_object_info {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
@@ -850,6 +917,7 @@ mod tests {
             tag: "A",
             object_info_calls: calls_a,
             delay_object_info: false,
+            object_info_gate: None,
         }));
         assert_eq!(
             handle.health_check().await.unwrap().system.comfyui_version,
@@ -859,6 +927,7 @@ mod tests {
             tag: "B",
             object_info_calls: calls_b,
             delay_object_info: false,
+            object_info_gate: None,
         }));
         assert_eq!(
             handle.health_check().await.unwrap().system.comfyui_version,
@@ -874,6 +943,7 @@ mod tests {
             tag: "A",
             object_info_calls: calls.clone(),
             delay_object_info: true,
+            object_info_gate: None,
         })));
 
         let (first, second) = tokio::join!(handle.get_object_info(), handle.get_object_info());
@@ -889,9 +959,131 @@ mod tests {
             tag: "B",
             object_info_calls: replacement_calls.clone(),
             delay_object_info: false,
+            object_info_gate: None,
         }));
         assert!(handle.get_object_info().await.unwrap().get("B").is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(replacement_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn object_info_waiter_subscribes_before_immediate_leader_completion() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(ObjectInfoGate::new());
+        let handle = Arc::new(ComfyAdapterHandle::new(Arc::new(TaggedAdapter {
+            tag: "race",
+            object_info_calls: calls.clone(),
+            delay_object_info: false,
+            object_info_gate: Some(gate.clone()),
+        })));
+        let observed = Arc::new(Notify::new());
+        handle.set_test_waiter_observed_hook(observed.clone());
+
+        let leader_handle = handle.clone();
+        let leader = tokio::spawn(async move { leader_handle.get_object_info().await });
+        gate.wait_started().await;
+        let follower_handle = handle.clone();
+        let follower = tokio::spawn(async move { follower_handle.get_object_info().await });
+        tokio::time::timeout(Duration::from_secs(1), observed.notified())
+            .await
+            .expect("follower should observe the in-flight generation");
+        gate.release();
+
+        let (leader, follower) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(leader, follower)
+        })
+        .await
+        .expect("a follower must not be stranded after an immediate leader completion");
+        assert_eq!(leader.unwrap().unwrap()["race"], serde_json::json!({}));
+        assert_eq!(follower.unwrap().unwrap()["race"], serde_json::json!({}));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn object_info_failure_wakes_followers_and_allows_next_request() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(ObjectInfoGate::new());
+        gate.fail.store(true, Ordering::SeqCst);
+        let handle = Arc::new(ComfyAdapterHandle::new(Arc::new(TaggedAdapter {
+            tag: "failure",
+            object_info_calls: calls.clone(),
+            delay_object_info: false,
+            object_info_gate: Some(gate.clone()),
+        })));
+        let observed = Arc::new(Notify::new());
+        handle.set_test_waiter_observed_hook(observed.clone());
+
+        let leader_handle = handle.clone();
+        let leader = tokio::spawn(async move { leader_handle.get_object_info().await });
+        gate.wait_started().await;
+        let follower_handle = handle.clone();
+        let follower = tokio::spawn(async move { follower_handle.get_object_info().await });
+        tokio::time::timeout(Duration::from_secs(1), observed.notified())
+            .await
+            .expect("follower should be registered before failure is released");
+        gate.release();
+
+        let (leader, follower) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(leader, follower)
+        })
+        .await
+        .expect("a failed leader must wake every follower");
+        assert!(leader.unwrap().is_err());
+        assert!(follower.unwrap().is_err());
+
+        gate.fail.store(false, Ordering::SeqCst);
+        gate.hold.store(false, Ordering::SeqCst);
+        let recovered = tokio::time::timeout(Duration::from_secs(1), handle.get_object_info())
+            .await
+            .expect("the next request should become the new generation leader")
+            .unwrap();
+        assert_eq!(recovered["failure"], serde_json::json!({}));
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn object_info_replacement_during_inflight_request_does_not_poison_new_generation() {
+        let old_calls = Arc::new(AtomicUsize::new(0));
+        let old_gate = Arc::new(ObjectInfoGate::new());
+        let handle = Arc::new(ComfyAdapterHandle::new(Arc::new(TaggedAdapter {
+            tag: "old",
+            object_info_calls: old_calls,
+            delay_object_info: false,
+            object_info_gate: Some(old_gate.clone()),
+        })));
+        let observed = Arc::new(Notify::new());
+        handle.set_test_waiter_observed_hook(observed.clone());
+
+        let leader_handle = handle.clone();
+        let leader = tokio::spawn(async move { leader_handle.get_object_info().await });
+        old_gate.wait_started().await;
+        let follower_handle = handle.clone();
+        let follower = tokio::spawn(async move { follower_handle.get_object_info().await });
+        tokio::time::timeout(Duration::from_secs(1), observed.notified())
+            .await
+            .expect("follower should wait on the old generation");
+
+        let new_calls = Arc::new(AtomicUsize::new(0));
+        handle.replace(Arc::new(TaggedAdapter {
+            tag: "new",
+            object_info_calls: new_calls.clone(),
+            delay_object_info: false,
+            object_info_gate: None,
+        }));
+        old_gate.release();
+
+        let (leader, follower) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(leader, follower)
+        })
+        .await
+        .expect("replacement must wake the old generation follower");
+        assert_eq!(leader.unwrap().unwrap()["old"], serde_json::json!({}));
+        assert_eq!(follower.unwrap().unwrap()["new"], serde_json::json!({}));
+        assert_eq!(new_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            handle.get_object_info().await.unwrap()["new"],
+            serde_json::json!({})
+        );
+        assert_eq!(new_calls.load(Ordering::SeqCst), 1);
     }
 }
