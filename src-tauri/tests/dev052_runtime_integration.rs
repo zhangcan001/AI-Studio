@@ -2760,7 +2760,7 @@ async fn runtime_database_is_fresh_migrated_through_039() {
             .fetch_one(&harness.pool)
             .await
             .unwrap(),
-        40
+        41
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
