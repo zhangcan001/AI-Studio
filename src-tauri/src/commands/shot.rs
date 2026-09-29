@@ -3,7 +3,9 @@ use crate::{
     app_state::AppState,
     application::{
         generation_input_preparer::GenerationInputValue,
-        production_queue_service::{CreateDirectGenerationRequest, CreateProductionBatchItem},
+        production_queue_service::{
+            CreateDirectGenerationRequest, CreateProductionBatchItem, ExecutionType,
+        },
         shot_service::{
             ShotGenerationRequest, ShotServiceError, ShotStageConfigRequest, ShotUpdateRequest,
             ShotView,
@@ -274,6 +276,7 @@ pub async fn shot_generate(
             model_version_id: None,
             tool_instance_id: None,
             tool_version_id: None,
+            execution_type: ExecutionType::Direct,
             submission_idempotency_key: prepared.submission_idempotency_key,
             parent_task_id: prepared.parent_task_id,
             execution_input_sources: None,

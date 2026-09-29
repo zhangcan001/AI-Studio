@@ -17,9 +17,41 @@ use crate::domain::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
+use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 const MAX_LOGICAL_PRODUCTION_BATCH_ITEMS: usize = 100;
+const DIRECT_GENERATION_CONTEXT_KEY: &str = "__ai_studio_direct_generation_context";
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectGenerationMetadata {
+    submission_idempotency_key: Option<String>,
+    execution_type: Option<String>,
+}
+
+fn direct_generation_metadata(values_json: &Value) -> (Option<String>, Option<String>) {
+    let Some(context) = values_json
+        .as_object()
+        .and_then(|object| object.get(DIRECT_GENERATION_CONTEXT_KEY))
+    else {
+        return (None, None);
+    };
+    let Ok(metadata) = serde_json::from_value::<DirectGenerationMetadata>(context.clone()) else {
+        return (None, None);
+    };
+    let execution_type = metadata.execution_type.or_else(|| {
+        metadata.submission_idempotency_key.as_deref().map(|key| {
+            if key.starts_with("workflow-execution-batch:") {
+                "WORKFLOW_BATCH".to_owned()
+            } else {
+                "DIRECT".to_owned()
+            }
+        })
+    });
+    (metadata.submission_idempotency_key, execution_type)
+}
 
 #[derive(Clone)]
 pub struct SqliteProductionQueueRepository {
@@ -503,8 +535,9 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
         sqlx::query(
             "INSERT INTO production_batch_items
-             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NULL, ?, NULL, NULL, ?, ?)",
+             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at, project_id, submission_idempotency_key, execution_type)
+             VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NULL, ?, NULL, NULL, ?, ?,
+                     (SELECT project_id FROM production_batches WHERE id = ?), NULL, NULL)",
         )
         .bind(item.id.as_str())
         .bind(item.batch_id.as_str())
@@ -515,6 +548,7 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         .bind(&item.retry_of_item_id)
         .bind(format_datetime(item.created_at))
         .bind(format_datetime(item.updated_at))
+        .bind(item.batch_id.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
@@ -1435,10 +1469,12 @@ async fn insert_batch_records(
             .ok_or_else(|| {
                 RepositoryError::serialization("production batch item values", "missing value")
             })?;
+        let (submission_idempotency_key, execution_type) =
+            direct_generation_metadata(&item.values_json);
         sqlx::query(
             "INSERT INTO production_batch_items
-             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at, project_id, submission_idempotency_key, execution_type)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(item.id.as_str())
         .bind(item.batch_id.as_str())
@@ -1453,6 +1489,9 @@ async fn insert_batch_records(
         .bind(&item.error_message)
         .bind(format_datetime(item.created_at))
         .bind(format_datetime(item.updated_at))
+        .bind(&batch.project_id)
+        .bind(submission_idempotency_key)
+        .bind(execution_type)
         .execute(&mut **transaction)
         .await
         .map_err(map_sqlx_error)?;
@@ -1528,8 +1567,9 @@ async fn insert_requeue_item_record(
         })?;
     sqlx::query(
         "INSERT INTO production_batch_items
-         (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NULL, ?, NULL, NULL, ?, ?)",
+         (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at, project_id, submission_idempotency_key, execution_type)
+         VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NULL, ?, NULL, NULL, ?, ?,
+                 (SELECT project_id FROM production_batches WHERE id = ?), NULL, NULL)",
     )
     .bind(item.id.as_str())
     .bind(item.batch_id.as_str())
@@ -1540,6 +1580,7 @@ async fn insert_requeue_item_record(
     .bind(&item.retry_of_item_id)
     .bind(format_datetime(item.created_at))
     .bind(format_datetime(item.updated_at))
+    .bind(item.batch_id.as_str())
     .execute(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
@@ -1894,6 +1935,106 @@ mod tests {
     use serde_json::json;
     use sqlx::SqlitePool;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn submission_idempotency_is_project_scoped_and_database_unique() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("submission-idempotency.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+             VALUES ('project-2', 'Project 2', NULL, 'C:/project-2', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 31, 2, 0, 0).unwrap();
+        let values = json!({
+            "__ai_studio_direct_generation_context": {
+                "executionType": "DIRECT",
+                "submissionIdempotencyKey": "submission:item-a"
+            }
+        });
+
+        let first_batch_id = ProductionBatchId::new();
+        let first_item = fixture_item(
+            &first_batch_id,
+            0,
+            ProductionBatchItemStatus::Pending,
+            None,
+            values.clone(),
+        );
+        repository
+            .insert(
+                &fixture_batch(&first_batch_id, ProductionBatchStatus::Ready, now),
+                &[first_item],
+            )
+            .await
+            .unwrap();
+
+        let second_batch_id = ProductionBatchId::new();
+        let second_batch = ProductionBatch {
+            id: second_batch_id.clone(),
+            project_id: "project-2".to_owned(),
+            name: "Project 2 fixture".to_owned(),
+            status: ProductionBatchStatus::Ready,
+            continue_on_failure: true,
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let second_item = fixture_item(
+            &second_batch_id,
+            0,
+            ProductionBatchItemStatus::Pending,
+            None,
+            values.clone(),
+        );
+        repository
+            .insert(&second_batch, &[second_item])
+            .await
+            .unwrap();
+
+        let conflicting_batch_id = ProductionBatchId::new();
+        let conflicting_item = fixture_item(
+            &conflicting_batch_id,
+            0,
+            ProductionBatchItemStatus::Pending,
+            None,
+            values,
+        );
+        let error = repository
+            .insert(
+                &fixture_batch(&conflicting_batch_id, ProductionBatchStatus::Ready, now),
+                &[conflicting_item],
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, RepositoryError::Integrity { message } if message.contains("submission_idempotency_key"))
+        );
+
+        let stored: (String, String, String) = sqlx::query_as(
+            "SELECT project_id, submission_idempotency_key, execution_type
+             FROM production_batch_items WHERE batch_id = ?",
+        )
+        .bind(first_batch_id.as_str())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored,
+            (
+                "project-1".to_owned(),
+                "submission:item-a".to_owned(),
+                "DIRECT".to_owned()
+            )
+        );
+        pool.close().await;
+    }
 
     #[tokio::test]
     async fn package_binding_is_atomic_project_scoped_restartable_and_cascades() {

@@ -63,6 +63,7 @@ pub struct CreateDirectGenerationRequest {
     pub model_version_id: Option<String>,
     pub tool_instance_id: Option<String>,
     pub tool_version_id: Option<String>,
+    pub execution_type: ExecutionType,
     pub submission_idempotency_key: Option<String>,
     pub parent_task_id: Option<String>,
     pub execution_input_sources: Option<BTreeMap<String, ExecutionValueSource>>,
@@ -77,6 +78,7 @@ pub struct CreateDirectGenerationBatchItem {
     pub model_version_id: Option<String>,
     pub tool_instance_id: Option<String>,
     pub tool_version_id: Option<String>,
+    pub execution_type: ExecutionType,
     pub submission_idempotency_key: Option<String>,
     pub parent_task_id: Option<String>,
     pub execution_input_sources: Option<BTreeMap<String, ExecutionValueSource>>,
@@ -91,6 +93,25 @@ pub struct CreateDirectGenerationBatchRequest {
 }
 
 const DIRECT_GENERATION_CONTEXT_KEY: &str = "__ai_studio_direct_generation_context";
+
+/// Identifies the producer of a persisted queue item.  New rows carry this
+/// explicitly; legacy rows without the field are interpreted from their old
+/// idempotency-key prefix only at read time.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ExecutionType {
+    Direct,
+    WorkflowBatch,
+}
+
+impl ExecutionType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "DIRECT",
+            Self::WorkflowBatch => "WORKFLOW_BATCH",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -141,6 +162,8 @@ struct DirectGenerationContext {
     model_version_id: Option<String>,
     tool_instance_id: Option<String>,
     tool_version_id: Option<String>,
+    #[serde(default)]
+    execution_type: Option<ExecutionType>,
     submission_idempotency_key: Option<String>,
     parent_task_id: Option<String>,
     execution_input_sources: Option<BTreeMap<String, ExecutionValueSource>>,
@@ -163,11 +186,16 @@ pub struct ProductionQueueOverview {
     pub skipped_items: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProductionBatchPreflightIssue {
     pub item_number: usize,
     pub code: String,
     pub target: Option<String>,
+    pub semantic_field: Option<String>,
+    pub node_id: Option<String>,
+    pub input_name: Option<String>,
+    pub message_args: Option<Value>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -245,6 +273,7 @@ pub struct ProductionQueueService {
     clock: Arc<dyn Clock>,
     running_batches: Arc<Mutex<HashSet<String>>>,
     admission_gate: Arc<AsyncMutex<()>>,
+    idempotency_gate: Arc<AsyncMutex<()>>,
     recovery_tasks: Arc<Mutex<HashSet<String>>>,
     new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
 }
@@ -269,6 +298,7 @@ impl ProductionQueueService {
             clock,
             running_batches: Arc::new(Mutex::new(HashSet::new())),
             admission_gate: Arc::new(AsyncMutex::new(())),
+            idempotency_gate: Arc::new(AsyncMutex::new(())),
             recovery_tasks: Arc::new(Mutex::new(HashSet::new())),
             new_generation_admission: None,
         }
@@ -312,6 +342,7 @@ impl ProductionQueueService {
             model_version_id,
             tool_instance_id,
             tool_version_id,
+            execution_type,
             submission_idempotency_key,
             parent_task_id,
             execution_input_sources,
@@ -328,6 +359,7 @@ impl ProductionQueueService {
                 model_version_id,
                 tool_instance_id,
                 tool_version_id,
+                execution_type,
                 submission_idempotency_key,
                 parent_task_id,
                 execution_input_sources,
@@ -375,12 +407,7 @@ impl ProductionQueueService {
             // Phase 2A single-item execution is already preflighted before its
             // queue item is created. Restrict this additional admission pass to
             // the explicit saved-execution batch request contract.
-            if context.execution_summary.is_none()
-                || !context
-                    .submission_idempotency_key
-                    .as_deref()
-                    .is_some_and(|key| key.starts_with("workflow-execution-batch:"))
-            {
+            if context.execution_summary.is_none() || !is_workflow_execution_batch(&context) {
                 continue;
             }
             let values = generation_values_from_json(&item.values_json)
@@ -410,22 +437,44 @@ impl ProductionQueueService {
                 Ok(results) => {
                     for ((item_number, _), result) in items.into_iter().zip(results) {
                         if let Err(error) = result {
-                            let (code, target) = execution_preflight_issue(&error);
+                            let (code, target, details) = execution_preflight_issue(&error);
                             issues.push(ProductionBatchPreflightIssue {
                                 item_number,
                                 code,
                                 target,
+                                semantic_field: details
+                                    .as_ref()
+                                    .and_then(|details| details.semantic_field.clone()),
+                                node_id: details
+                                    .as_ref()
+                                    .and_then(|details| details.node_id.clone()),
+                                input_name: details
+                                    .as_ref()
+                                    .and_then(|details| details.input_name.clone()),
+                                message_args: details
+                                    .as_ref()
+                                    .and_then(|details| details.message_args.clone()),
                             });
                         }
                     }
                 }
                 Err(error) => {
-                    let (code, target) = execution_preflight_issue(&error);
+                    let (code, target, details) = execution_preflight_issue(&error);
                     issues.extend(items.into_iter().map(|(item_number, _)| {
                         ProductionBatchPreflightIssue {
                             item_number,
                             code: code.clone(),
                             target: target.clone(),
+                            semantic_field: details
+                                .as_ref()
+                                .and_then(|details| details.semantic_field.clone()),
+                            node_id: details.as_ref().and_then(|details| details.node_id.clone()),
+                            input_name: details
+                                .as_ref()
+                                .and_then(|details| details.input_name.clone()),
+                            message_args: details
+                                .as_ref()
+                                .and_then(|details| details.message_args.clone()),
                         }
                     }));
                 }
@@ -467,6 +516,7 @@ impl ProductionQueueService {
                     direct_item.tool_version_id,
                     "tool version id",
                 )?,
+                execution_type: Some(direct_item.execution_type),
                 submission_idempotency_key: normalize_direct_context_id(
                     direct_item.submission_idempotency_key,
                     "submission idempotency key",
@@ -523,6 +573,7 @@ impl ProductionQueueService {
         let requested_keys = contexts
             .iter()
             .filter_map(|context| context.submission_idempotency_key.as_deref())
+            .map(str::to_owned)
             .collect::<Vec<_>>();
         if contexts.len() > 1
             && !requested_keys.is_empty()
@@ -532,6 +583,11 @@ impl ProductionQueueService {
                 "direct generation batch idempotency keys must cover every item".to_owned(),
             ));
         }
+        let _idempotency_guard = if requested_keys.is_empty() {
+            None
+        } else {
+            Some(self.idempotency_gate.lock().await)
+        };
         if !requested_keys.is_empty() {
             for batch in self.repository.list(&request.project_id).await? {
                 let Some(detail) = self
@@ -544,6 +600,7 @@ impl ProductionQueueService {
                 let existing_keys = detail
                     .items
                     .iter()
+                    .filter(|item| item.retry_of_item_id.is_none())
                     .filter_map(|item| {
                         direct_generation_context_from_json(&item.values_json)
                             .ok()
@@ -551,20 +608,19 @@ impl ProductionQueueService {
                             .and_then(|context| context.submission_idempotency_key)
                     })
                     .collect::<Vec<_>>();
-                let overlaps = existing_keys
+                let existing_logical_item_count = detail
+                    .items
                     .iter()
-                    .any(|existing| requested_keys.contains(&existing.as_str()));
-                if !overlaps {
-                    continue;
-                }
-                let exact_batch_match = detail.items.len() == requested_keys.len()
-                    && existing_keys.len() == requested_keys.len()
-                    && existing_keys
-                        .iter()
-                        .zip(&requested_keys)
-                        .all(|(existing, requested)| existing == requested);
-                if exact_batch_match || contexts.len() == 1 {
-                    return Ok(detail);
+                    .filter(|item| item.retry_of_item_id.is_none())
+                    .count();
+                match classify_submission_idempotency(
+                    &existing_keys,
+                    existing_logical_item_count,
+                    &requested_keys,
+                ) {
+                    SubmissionIdempotencyMatch::NoOverlap => continue,
+                    SubmissionIdempotencyMatch::Exact => return Ok(detail),
+                    SubmissionIdempotencyMatch::Conflict => {}
                 }
                 return Err(ProductionQueueError::InvalidInput(
                     "direct generation batch idempotency key conflicts with an existing batch"
@@ -572,17 +628,72 @@ impl ProductionQueueService {
                 ));
             }
         }
-        self.create_internal(
-            CreateProductionBatchRequest {
-                project_id: request.project_id,
-                name: request.name,
-                continue_on_failure: request.continue_on_failure,
-                items: queue_items,
-            },
-            None,
-            Some(contexts),
-        )
-        .await
+        let project_id = request.project_id.clone();
+        let result = self
+            .create_internal(
+                CreateProductionBatchRequest {
+                    project_id: request.project_id,
+                    name: request.name,
+                    continue_on_failure: request.continue_on_failure,
+                    items: queue_items,
+                },
+                None,
+                Some(contexts),
+            )
+            .await;
+        match result {
+            Err(ProductionQueueError::Repository(error))
+                if is_submission_idempotency_conflict(&error) && !requested_keys.is_empty() =>
+            {
+                self.resolve_submission_idempotency_conflict(&project_id, &requested_keys)
+                    .await
+            }
+            other => other,
+        }
+    }
+
+    async fn resolve_submission_idempotency_conflict(
+        &self,
+        project_id: &str,
+        requested_keys: &[String],
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        for batch in self.repository.list(project_id).await? {
+            let Some(detail) = self.repository.find_detail(project_id, &batch.id).await? else {
+                continue;
+            };
+            let existing_keys = detail
+                .items
+                .iter()
+                .filter(|item| item.retry_of_item_id.is_none())
+                .filter_map(|item| {
+                    direct_generation_context_from_json(&item.values_json)
+                        .ok()
+                        .flatten()
+                        .and_then(|context| context.submission_idempotency_key)
+                })
+                .collect::<Vec<_>>();
+            let existing_logical_item_count = detail
+                .items
+                .iter()
+                .filter(|item| item.retry_of_item_id.is_none())
+                .count();
+            match classify_submission_idempotency(
+                &existing_keys,
+                existing_logical_item_count,
+                requested_keys,
+            ) {
+                SubmissionIdempotencyMatch::NoOverlap => continue,
+                SubmissionIdempotencyMatch::Exact => return Ok(detail),
+                SubmissionIdempotencyMatch::Conflict => {}
+            }
+            return Err(ProductionQueueError::InvalidInput(
+                "direct generation batch idempotency key conflicts with an existing batch"
+                    .to_owned(),
+            ));
+        }
+        Err(ProductionQueueError::InvalidInput(
+            "direct generation batch idempotency conflict could not be resolved".to_owned(),
+        ))
     }
 
     async fn create_internal(
@@ -2491,18 +2602,80 @@ fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
     }
 }
 
-fn execution_preflight_issue(error: &GenerationServiceError) -> (String, Option<String>) {
+fn execution_preflight_issue(
+    error: &GenerationServiceError,
+) -> (
+    String,
+    Option<String>,
+    Option<crate::application::generation_service::ExecutionFailureDetails>,
+) {
     match error {
-        GenerationServiceError::ExecutionFailed { code, message } => (
+        GenerationServiceError::ExecutionFailed {
+            code,
+            message: _,
+            details,
+        } => (
             code.clone(),
-            message.starts_with("node=").then(|| message.clone()),
+            details.as_ref().and_then(execution_failure_target),
+            details.clone(),
         ),
-        GenerationServiceError::Compile(_) => ("EXECUTION_INPUT_INVALID".to_owned(), None),
-        GenerationServiceError::InputPrepare(_) => ("EXECUTION_ASSET_UNAVAILABLE".to_owned(), None),
-        GenerationServiceError::DefinitionNotFound { .. } => {
-            ("WORKFLOW_RECIPE_NOT_FOUND".to_owned(), None)
+        GenerationServiceError::Compile(_) => ("EXECUTION_INPUT_INVALID".to_owned(), None, None),
+        GenerationServiceError::InputPrepare(_) => {
+            ("EXECUTION_ASSET_UNAVAILABLE".to_owned(), None, None)
         }
-        _ => ("EXECUTION_PREFLIGHT_FAILED".to_owned(), None),
+        GenerationServiceError::DefinitionNotFound { .. } => {
+            ("WORKFLOW_RECIPE_NOT_FOUND".to_owned(), None, None)
+        }
+        _ => ("EXECUTION_PREFLIGHT_FAILED".to_owned(), None, None),
+    }
+}
+
+fn execution_failure_target(
+    details: &crate::application::generation_service::ExecutionFailureDetails,
+) -> Option<String> {
+    match (details.node_id.as_deref(), details.input_name.as_deref()) {
+        (Some(node_id), Some(input_name)) => Some(format!("node={node_id} input={input_name}")),
+        (Some(node_id), None) => Some(format!("node={node_id}")),
+        (None, Some(input_name)) => Some(format!("input={input_name}")),
+        (None, None) => None,
+    }
+}
+
+fn is_submission_idempotency_conflict(error: &RepositoryError) -> bool {
+    matches!(error, RepositoryError::Integrity { message } if message
+        .contains("submission_idempotency_key"))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SubmissionIdempotencyMatch {
+    NoOverlap,
+    Exact,
+    Conflict,
+}
+
+fn classify_submission_idempotency(
+    existing_keys: &[String],
+    existing_logical_item_count: usize,
+    requested_keys: &[String],
+) -> SubmissionIdempotencyMatch {
+    if !existing_keys
+        .iter()
+        .any(|existing| requested_keys.contains(existing))
+    {
+        return SubmissionIdempotencyMatch::NoOverlap;
+    }
+
+    let mut sorted_existing_keys = existing_keys.to_vec();
+    let mut sorted_requested_keys = requested_keys.to_vec();
+    sorted_existing_keys.sort_unstable();
+    sorted_requested_keys.sort_unstable();
+    if existing_logical_item_count == requested_keys.len()
+        && existing_keys.len() == requested_keys.len()
+        && sorted_existing_keys == sorted_requested_keys
+    {
+        SubmissionIdempotencyMatch::Exact
+    } else {
+        SubmissionIdempotencyMatch::Conflict
     }
 }
 
@@ -2599,6 +2772,17 @@ fn direct_generation_context_from_json(
     serde_json::from_value(context.clone())
         .map(Some)
         .map_err(|error| format!("direct generation context is invalid: {error}"))
+}
+
+fn is_workflow_execution_batch(context: &DirectGenerationContext) -> bool {
+    match context.execution_type {
+        Some(ExecutionType::WorkflowBatch) => true,
+        Some(ExecutionType::Direct) => false,
+        None => context
+            .submission_idempotency_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("workflow-execution-batch:")),
+    }
 }
 
 pub fn execution_summary_from_json(values_json: &Value) -> Option<ExecutionSummary> {
@@ -2948,11 +3132,12 @@ impl From<RepositoryError> for ProductionQueueError {
 mod tests {
     use super::{
         build_partial_resume_plan, build_retry_item, build_retry_lineages,
-        direct_context_values_json, direct_generation_context_from_json, find_admission_blocker,
-        find_retry_item, freeze_random_seed_values, generation_start_error_code,
-        generation_values_from_json, generation_values_to_json, is_transient_requeue_error,
-        reference_manifest_for_values, select_recovery, should_pause_after_terminal,
-        validate_package_recipe_for_mode,
+        classify_submission_idempotency, direct_context_values_json,
+        direct_generation_context_from_json, find_admission_blocker, find_retry_item,
+        freeze_random_seed_values, generation_start_error_code, generation_values_from_json,
+        generation_values_to_json, is_transient_requeue_error, reference_manifest_for_values,
+        select_recovery, should_pause_after_terminal, validate_package_recipe_for_mode,
+        SubmissionIdempotencyMatch,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::GenerationServiceError;
@@ -3071,6 +3256,7 @@ mod tests {
             model_version_id: Some("model-version-1".to_owned()),
             tool_instance_id: Some("tool-instance-1".to_owned()),
             tool_version_id: Some("tool-version-1".to_owned()),
+            execution_type: Some(super::ExecutionType::Direct),
             submission_idempotency_key: Some("submission-1".to_owned()),
             parent_task_id: Some("task-parent".to_owned()),
             execution_input_sources: None,
@@ -3083,6 +3269,53 @@ mod tests {
             direct_generation_context_from_json(&encoded).unwrap(),
             Some(context)
         );
+    }
+
+    #[test]
+    fn batch_idempotency_requires_the_complete_logical_item_set() {
+        let existing = vec![
+            "submission:item-a".to_owned(),
+            "submission:item-b".to_owned(),
+        ];
+        let exact = vec![
+            "submission:item-b".to_owned(),
+            "submission:item-a".to_owned(),
+        ];
+        let partial = vec![
+            "submission:item-a".to_owned(),
+            "submission:item-c".to_owned(),
+        ];
+        let unrelated = vec![
+            "submission:item-c".to_owned(),
+            "submission:item-d".to_owned(),
+        ];
+
+        assert_eq!(
+            classify_submission_idempotency(&existing, 2, &exact),
+            SubmissionIdempotencyMatch::Exact
+        );
+        assert_eq!(
+            classify_submission_idempotency(&existing, 2, &partial),
+            SubmissionIdempotencyMatch::Conflict
+        );
+        assert_eq!(
+            classify_submission_idempotency(&existing, 2, &unrelated),
+            SubmissionIdempotencyMatch::NoOverlap
+        );
+        assert_eq!(
+            classify_submission_idempotency(&existing, 3, &exact),
+            SubmissionIdempotencyMatch::Conflict
+        );
+        let mut legacy = super::DirectGenerationContext::default();
+        legacy.submission_idempotency_key = Some("workflow-execution-batch:legacy:0".to_owned());
+        assert!(super::is_workflow_execution_batch(&legacy));
+
+        legacy.execution_type = Some(super::ExecutionType::Direct);
+        assert!(!super::is_workflow_execution_batch(&legacy));
+
+        legacy.execution_type = Some(super::ExecutionType::WorkflowBatch);
+        legacy.submission_idempotency_key = Some("direct-key".to_owned());
+        assert!(super::is_workflow_execution_batch(&legacy));
     }
 
     #[test]
