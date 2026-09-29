@@ -298,6 +298,12 @@ async fn remove_022_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
 
 async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
     for statement in [
+        "DROP INDEX IF EXISTS uq_production_batch_items_project_submission_key",
+        "DROP INDEX IF EXISTS idx_production_batch_items_project_submission_key",
+        "ALTER TABLE production_batch_items DROP COLUMN execution_type",
+        "ALTER TABLE production_batch_items DROP COLUMN submission_idempotency_key",
+        "ALTER TABLE production_batch_items DROP COLUMN project_id",
+        "DROP TABLE IF EXISTS app_repair_jobs",
         "DROP TRIGGER IF EXISTS task_output_assets_create_artifact_review",
         "DROP INDEX IF EXISTS idx_artifact_reviews_project_decision",
         "DROP TABLE IF EXISTS artifact_reviews",

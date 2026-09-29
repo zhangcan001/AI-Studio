@@ -882,6 +882,19 @@ async fn remove_migration_036_schema(pool: &SqlitePool) {
 }
 
 async fn remove_migration_035_schema(pool: &SqlitePool) {
+    for statement in [
+        "DROP INDEX IF EXISTS uq_production_batch_items_project_submission_key",
+        "DROP INDEX IF EXISTS idx_production_batch_items_project_submission_key",
+        "ALTER TABLE production_batch_items DROP COLUMN execution_type",
+        "ALTER TABLE production_batch_items DROP COLUMN submission_idempotency_key",
+        "ALTER TABLE production_batch_items DROP COLUMN project_id",
+        "DROP TABLE IF EXISTS app_repair_jobs",
+    ] {
+        sqlx::query(statement)
+            .execute(pool)
+            .await
+            .expect("040-041 schema should be removable from the isolated fixture");
+    }
     remove_migration_036_schema(pool).await;
     for statement in [
         "DROP INDEX IF EXISTS idx_tool_instances_last_checked",
