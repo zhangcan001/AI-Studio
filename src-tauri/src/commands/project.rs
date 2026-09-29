@@ -3,8 +3,7 @@ use crate::{
     application::project_service::{ProjectServiceError, ProjectView},
     application::project_workflow_binding_service::{
         ProjectWorkflowBindingRemoveRequest, ProjectWorkflowBindingServiceError,
-        ProjectWorkflowBindingUpsertRequest, ProjectWorkflowConfigUpdateRequest,
-        ProjectWorkflowConfigView,
+        ProjectWorkflowBindingUpsertRequest, ProjectWorkflowConfigView,
     },
     error::AppError,
 };
@@ -62,21 +61,6 @@ pub async fn project_workflow_config_get(
         .projects
         .workflow_binding
         .get(&project_id)
-        .await
-        .map_err(map_project_workflow_error)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-pub async fn project_workflow_config_replace(
-    state: State<'_, AppState>,
-    project_id: String,
-    request: ProjectWorkflowConfigUpdateRequest,
-) -> Result<ProjectWorkflowConfigView, AppError> {
-    super::validate_project_id(&project_id)?;
-    state
-        .projects
-        .workflow_binding
-        .replace(&project_id, request)
         .await
         .map_err(map_project_workflow_error)
 }

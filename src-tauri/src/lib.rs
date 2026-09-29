@@ -1322,7 +1322,6 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::project::project_create,
             commands::project::project_update,
             commands::project::project_workflow_config_get,
-            commands::project::project_workflow_config_replace,
             commands::project::project_workflow_binding_upsert,
             commands::project::project_workflow_binding_remove,
             commands::project::project_backup_export,

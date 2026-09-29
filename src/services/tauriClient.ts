@@ -91,7 +91,6 @@ import type {
 import type {
   ProjectWorkflowBindingRemoveRequest,
   ProjectWorkflowBindingUpsertRequest,
-  ProjectWorkflowConfigUpdateRequest,
   ProjectWorkflowConfigView,
 } from "../types/projectWorkflow";
 import type { ProjectManifestExportView } from "../types/projectManifest";
@@ -1496,13 +1495,6 @@ export function updateProject(
 
 export function getProjectWorkflowConfig(projectId: string): Promise<ProjectWorkflowConfigView> {
   return invoke<ProjectWorkflowConfigView>("project_workflow_config_get", { projectId });
-}
-
-export function replaceProjectWorkflowConfig(
-  projectId: string,
-  request: ProjectWorkflowConfigUpdateRequest,
-): Promise<ProjectWorkflowConfigView> {
-  return invoke<ProjectWorkflowConfigView>("project_workflow_config_replace", { projectId, request });
 }
 
 export function upsertProjectWorkflowBinding(

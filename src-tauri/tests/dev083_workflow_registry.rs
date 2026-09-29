@@ -440,3 +440,21 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
         .expect_err("cross-version recipe identity must be rejected");
     assert_eq!(wrong_membership.code(), "WORKFLOW_RECIPE_NOT_FOUND");
 }
+
+#[test]
+fn binding_commands_expose_only_slot_occ_mutations() {
+    let registration = include_str!("../src/lib.rs");
+    let commands = include_str!("../src/commands/project.rs");
+    let client = include_str!("../../src/services/tauriClient.ts");
+    assert!(!registration.contains("commands::project::project_workflow_config_replace"));
+    assert!(!commands.contains("fn project_workflow_config_replace"));
+    assert!(!client.contains("replaceProjectWorkflowConfig"));
+    for name in [
+        "project_workflow_binding_upsert",
+        "project_workflow_binding_remove",
+    ] {
+        assert!(registration.contains(&format!("commands::project::{name}")));
+        assert!(commands.contains(&format!("fn {name}")));
+        assert!(client.contains(&format!("\"{name}\"")));
+    }
+}
