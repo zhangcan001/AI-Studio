@@ -302,7 +302,9 @@ fn resolve_integer_input(
         });
     }
 
-    if step.is_some_and(|step| value % step != 0) {
+    if step.is_some_and(|step| {
+        !super::validator::integer_is_aligned_to_step(value, min.unwrap_or(0), step)
+    }) {
         return Err(CompileError::InputStepMismatch {
             input: input_key.to_owned(),
             value,

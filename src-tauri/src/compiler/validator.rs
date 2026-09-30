@@ -3,6 +3,10 @@ use std::collections::BTreeSet;
 
 pub struct RecipeValidator;
 
+pub fn integer_is_aligned_to_step(value: i64, base: i64, step: i64) -> bool {
+    step > 0 && (i128::from(value) - i128::from(base)) % i128::from(step) == 0
+}
+
 pub fn number_is_aligned_to_step(value: f64, base: f64, step: f64) -> bool {
     if !value.is_finite() || !base.is_finite() || !step.is_finite() || step <= 0.0 {
         return false;
@@ -75,7 +79,9 @@ impl RecipeValidator {
                                 "input \"{key}\" default {default} is outside its declared range"
                             )));
                         }
-                        if step.is_some_and(|step| *default % step != 0) {
+                        if step.is_some_and(|step| {
+                            !integer_is_aligned_to_step(*default, min.unwrap_or(0), step)
+                        }) {
                             return Err(RecipeError::invalid(format!(
                                 "input \"{key}\" default {default} is not aligned to step {}",
                                 step.expect("step checked above")
@@ -83,9 +89,9 @@ impl RecipeValidator {
                         }
                     }
                     if let Some(step) = step {
-                        if min.is_some_and(|min| min % step != 0)
-                            || max.is_some_and(|max| max % step != 0)
-                        {
+                        if max.is_some_and(|max| {
+                            !integer_is_aligned_to_step(max, min.unwrap_or(0), *step)
+                        }) {
                             return Err(RecipeError::invalid(format!(
                                 "input \"{key}\" min/max must be aligned to step {step}"
                             )));
@@ -632,5 +638,21 @@ outputs: []
             let workflow = WorkflowDocument::parse(value).expect("root should parse");
             assert!(WorkflowValidator::validate(&workflow).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod pr_e_step_tests {
+    use super::*;
+    #[test]
+    fn pr_e_integer_step_is_anchored_to_min_without_overflow() {
+        for n in [1, 9, 97] {
+            assert!(integer_is_aligned_to_step(n, 1, 8));
+        }
+        assert!(!integer_is_aligned_to_step(0, 1, 8));
+        assert!(integer_is_aligned_to_step(0, 0, 8));
+        assert!(integer_is_aligned_to_step(-7, -15, 8));
+        assert!(!integer_is_aligned_to_step(1, 1, 0));
+        assert!(integer_is_aligned_to_step(i64::MAX, i64::MIN, 1));
     }
 }
