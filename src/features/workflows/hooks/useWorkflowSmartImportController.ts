@@ -171,7 +171,7 @@ export function useWorkflowSmartImportController({
         const nextDraft = await setOnboardingOutputMapping(plan.draftId, {
           outputId: candidate.outputId ?? "output_1",
           label: candidate.label,
-          type: candidate.outputType as "image" | "video",
+          type: candidate.outputType as "image" | "video" | "audio",
           nodeId: candidate.nodeId,
           required: true,
         });

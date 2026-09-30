@@ -31,6 +31,7 @@ pub struct CollectedVideo {
 pub enum CollectedOutput {
     Image(CollectedImage),
     Video(CollectedVideo),
+    Audio(CollectedVideo),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -246,11 +247,12 @@ impl OutputCollector {
                 // W-08: ComfyUI marks animated results (SaveAnimatedWEBP,
                 // SaveWEBM, ...) with `animated: true`; those are streamed as
                 // video even when an older recipe declared the output as image.
-                let effective_type = if *animated == Some(true) {
-                    OutputType::Video
-                } else {
-                    output.output_type
-                };
+                let effective_type =
+                    if *animated == Some(true) && output.output_type != OutputType::Audio {
+                        OutputType::Video
+                    } else {
+                        output.output_type
+                    };
                 match effective_type {
                     OutputType::Image => {
                         let data = self
@@ -289,8 +291,34 @@ impl OutputCollector {
                             stream,
                         }));
                     }
+                    OutputType::Audio => {
+                        let stream = self
+                            .adapter
+                            .open_output_stream(file)
+                            .await
+                            .map_err(map_adapter_error)?;
+                        let content_type = stream.content_type().map(str::to_owned);
+                        let content_length = stream.content_length();
+                        collected.push(CollectedOutput::Audio(CollectedVideo {
+                            output_id: output.id.clone(),
+                            node_id: output.node.clone(),
+                            original_filename: file.filename.clone(),
+                            content_type,
+                            content_length,
+                            position,
+                            subfolder: file.subfolder.clone(),
+                            folder_type: file.folder_type.clone(),
+                            stream,
+                        }));
+                    }
                 }
             }
+        }
+        if !recipe.outputs.is_empty() && collected.is_empty() && existing_outputs.is_empty() {
+            return Err(OutputCollectorError::OutputMissing {
+                output_id: recipe.outputs[0].id.clone(),
+                node_id: recipe.outputs[0].node.clone(),
+            });
         }
         Ok(collected)
     }
@@ -321,7 +349,7 @@ fn output_files_with_animation(
         .collect()
 }
 
-fn map_adapter_error(error: ComfyAdapterError) -> OutputCollectorError {
+pub(crate) fn map_adapter_error(error: ComfyAdapterError) -> OutputCollectorError {
     match error {
         ComfyAdapterError::HistoryNotFound(prompt_id) => {
             OutputCollectorError::HistoryNotFound { prompt_id }
@@ -577,8 +605,38 @@ mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             CollectedOutput::Image(image) => assert_eq!(image.position, 1),
-            CollectedOutput::Video(_) => panic!("image recipe must not produce video output"),
+            CollectedOutput::Video(_) | CollectedOutput::Audio(_) => {
+                panic!("image recipe must not produce video output")
+            }
         }
+    }
+
+    #[tokio::test]
+    async fn pr_e_audio_only_collects_stream_and_zero_assets_fails() {
+        let h = history(vec![ComfyOutputFile {
+            filename: "sound.wav".to_owned(),
+            subfolder: String::new(),
+            folder_type: "output".to_owned(),
+        }]);
+        let adapter = Arc::new(FakeAdapter {
+            history: Ok(h.clone()),
+            bytes: Vec::new(),
+        });
+        let mut r = recipe(true);
+        r.outputs[0].output_type = OutputType::Audio;
+        let collector = OutputCollector::new(adapter);
+        let outputs = collector.collect_outputs(&r, "prompt-1").await.unwrap();
+        assert!(matches!(&outputs[0], CollectedOutput::Audio(_)));
+        let empty = ComfyHistory {
+            prompt_id: "prompt-1".to_owned(),
+            status: Default::default(),
+            outputs: BTreeMap::new(),
+        };
+        r.outputs[0].required = false;
+        assert!(matches!(
+            collector.collect_outputs_from_history(&r, &empty).await,
+            Err(OutputCollectorError::OutputMissing { .. })
+        ));
     }
 
     #[tokio::test]
@@ -629,7 +687,9 @@ mod tests {
             CollectedOutput::Video(video) => {
                 assert_eq!(video.content_type.as_deref(), Some("video/mp4"))
             }
-            CollectedOutput::Image(_) => panic!("video recipe must not produce an image output"),
+            CollectedOutput::Image(_) | CollectedOutput::Audio(_) => {
+                panic!("video recipe must not produce an image output")
+            }
         }
     }
 

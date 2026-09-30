@@ -509,6 +509,7 @@ fn recipe_matches_report(recipe: &Recipe, report: &WorkflowRecognitionReport) ->
             let output_type_matches = match candidate.output_type {
                 OutputType::Image => output.output_type == "image",
                 OutputType::Video => output.output_type == "video",
+                OutputType::Audio => output.output_type == "audio",
             };
             output_type_matches && candidate.node == output.node_id
         })

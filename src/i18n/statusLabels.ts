@@ -39,6 +39,7 @@ const ASSET_CATEGORY_LABELS: Record<string, string> = {
   source_video: "源视频",
   generated_video: "生成视频",
   source_audio: "源音频",
+  generated_audio: "生成音频",
 };
 
 const WORKFLOW_MODE_LABELS: Record<string, string> = {
@@ -149,6 +150,10 @@ export function assetDisplayName(asset: Pick<AssetView, "category" | "name">, na
   if (asset.category === "generated_video" && /^generated video(?:\s+\d+)?$/i.test(name.trim())) {
     const suffix = name.trim().match(/\d+$/)?.[0];
     return suffix ? `生成视频 ${suffix}` : "生成视频";
+  }
+  if (asset.category === "generated_audio" && /^generated audio(?:\s+\d+)?$/i.test(name.trim())) {
+    const suffix = name.trim().match(/\d+$/)?.[0];
+    return suffix ? `生成音频 ${suffix}` : "生成音频";
   }
   return name;
 }

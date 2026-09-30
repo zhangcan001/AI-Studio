@@ -42,6 +42,7 @@ pub fn classify_shot_recipe(
             match expected_output {
                 OutputType::Image => "image",
                 OutputType::Video => "video",
+                OutputType::Audio => "audio",
             }
         ));
     }

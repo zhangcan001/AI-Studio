@@ -168,6 +168,7 @@ pub struct BindingTarget {
 pub enum OutputType {
     Image,
     Video,
+    Audio,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

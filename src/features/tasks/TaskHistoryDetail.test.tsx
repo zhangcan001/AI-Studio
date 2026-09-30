@@ -35,6 +35,7 @@ describe("任务历史 ComfyUI 校验详情", () => {
             },
           ],
           rawError: { "26": { class_type: "NBH3HyperStepSimple" } },
+          parseWarnings: [{nodeId: "9", outputKey: "images", outputIndex: 1, code: "INVALID_OUTPUT_ENTRY", detail: "entry skipped"}],
           outputAssets: [],
           reusableDraft: { available: false, missingAssetIds: [] },
         }}
@@ -47,6 +48,8 @@ describe("任务历史 ComfyUI 校验详情", () => {
       />,
     );
 
+    expect(html).toContain("输出解析警告");
+    expect(html).toContain("INVALID_OUTPUT_ENTRY");
     expect(html).toContain("ComfyUI 节点校验详情");
     expect(html).toContain("节点 26");
     expect(html).toContain("NBH3HyperStepSimple");

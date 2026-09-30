@@ -211,8 +211,12 @@ impl AssetImportService {
                     self.persist_collected_image(project_id, task_id, &project_root, image)
                         .await
                 }
+                CollectedOutput::Audio(audio) => {
+                    self.persist_collected_stream(project_id, task_id, &project_root, audio, true)
+                        .await
+                }
                 CollectedOutput::Video(video) => {
-                    self.persist_collected_video(project_id, task_id, &project_root, video)
+                    self.persist_collected_stream(project_id, task_id, &project_root, video, false)
                         .await
                 }
             };
@@ -320,15 +324,19 @@ impl AssetImportService {
         ))
     }
 
-    async fn persist_collected_video(
+    async fn persist_collected_stream(
         &self,
         project_id: &str,
         task_id: &TaskId,
         project_root: &std::path::Path,
         mut video: CollectedVideo,
+        audio: bool,
     ) -> Result<(Asset, TaskOutputAssetMapping, Vec<PathBuf>), AssetImportError> {
-        let (extension, mime_type) =
-            validate_video_output(&video.original_filename, video.content_type.as_deref())?;
+        let (extension, mime_type) = if audio {
+            validate_audio_output(&video.original_filename, video.content_type.as_deref())?
+        } else {
+            validate_video_output(&video.original_filename, video.content_type.as_deref())?
+        };
         if video
             .content_length
             .is_some_and(|length| length > MAX_VIDEO_OUTPUT_BYTES)
@@ -342,13 +350,18 @@ impl AssetImportService {
         }
 
         let asset_id = AssetId::new();
-        let mut writer = self
-            .asset_store
-            .begin_video_write(project_root, &asset_id, extension)
-            .await
-            .map_err(|error| AssetImportError::AssetPersistence {
-                message: error.to_string(),
-            })?;
+        let write = if audio {
+            self.asset_store
+                .begin_audio_write(project_root, &asset_id, extension)
+                .await
+        } else {
+            self.asset_store
+                .begin_video_write(project_root, &asset_id, extension)
+                .await
+        };
+        let mut writer = write.map_err(|error| AssetImportError::AssetPersistence {
+            message: error.to_string(),
+        })?;
         let mut hasher = Sha256::new();
         let mut file_size = 0u64;
         let mut signature = Vec::with_capacity(64);
@@ -381,10 +394,18 @@ impl AssetImportService {
                 });
             }
         }
-        if file_size == 0 || !valid_video_signature(extension, &signature) {
+        if file_size == 0
+            || !(if audio {
+                crate::application::production_package_inspector::valid_audio_signature(
+                    extension, &signature,
+                )
+            } else {
+                valid_video_signature(extension, &signature)
+            })
+        {
             let _ = writer.abort().await;
             return Err(AssetImportError::OutputImportFailed {
-                message: "video output is empty or is not a recognized MP4/WEBM stream".to_owned(),
+                message: "media output is empty or has an unrecognized stream signature".to_owned(),
             });
         }
         let stored = writer
@@ -394,10 +415,20 @@ impl AssetImportService {
                 message: error.to_string(),
             })?;
         let mut paths = vec![stored.path.clone()];
-        let probed = self.media_probe.probe_video(&stored.path).await;
-        let thumbnail_path = if let Some(poster) =
+        let probed = if audio {
+            crate::application::media_probe::VideoMetadata {
+                duration_ms: self.media_probe.probe_audio(&stored.path).await.duration_ms,
+                ..Default::default()
+            }
+        } else {
+            self.media_probe.probe_video(&stored.path).await
+        };
+        let poster = if audio {
+            None
+        } else {
             self.media_probe.generate_video_poster(&stored.path).await
-        {
+        };
+        let thumbnail_path = if let Some(poster) = poster {
             match self
                 .asset_store
                 .write_video_poster(project_root, &asset_id, &poster)
@@ -423,24 +454,42 @@ impl AssetImportService {
             "comfyFilename": video.original_filename.clone(),
             "comfySubfolder": video.subfolder.clone(),
             "comfyType": video.folder_type.clone(),
-            "mediaKind": "video",
+            "mediaKind": if audio { "audio" } else { "video" },
         });
-        let mut asset = match Asset::new_generated_video(
-            asset_id.clone(),
-            project_id,
-            format!("Generated Video {}", video.position + 1),
-            video.original_filename.clone(),
-            stored.path.display().to_string(),
-            format!("{:x}", hasher.finalize()),
-            mime_type,
-            probed.width,
-            probed.height,
-            probed.duration_ms,
-            file_size,
-            task_id.clone(),
-            metadata,
-            created_at,
-        ) {
+        let created = if audio {
+            Asset::new_generated_audio(
+                asset_id.clone(),
+                project_id,
+                format!("Generated Audio {}", video.position + 1),
+                video.original_filename.clone(),
+                stored.path.display().to_string(),
+                format!("{:x}", hasher.clone().finalize()),
+                mime_type,
+                probed.duration_ms,
+                file_size,
+                task_id.clone(),
+                metadata,
+                created_at,
+            )
+        } else {
+            Asset::new_generated_video(
+                asset_id.clone(),
+                project_id,
+                format!("Generated Video {}", video.position + 1),
+                video.original_filename.clone(),
+                stored.path.display().to_string(),
+                format!("{:x}", hasher.finalize()),
+                mime_type,
+                probed.width,
+                probed.height,
+                probed.duration_ms,
+                file_size,
+                task_id.clone(),
+                metadata,
+                created_at,
+            )
+        };
+        let mut asset = match created {
             Ok(asset) => asset,
             Err(error) => {
                 self.compensate(&paths).await;
@@ -517,6 +566,38 @@ fn validate_video_output(
             message: format!("unsupported video output format: {filename}"),
         }),
     }
+}
+
+fn validate_audio_output(
+    filename: &str,
+    content_type: Option<&str>,
+) -> Result<(&'static str, &'static str), AssetImportError> {
+    let extension = std::path::Path::new(filename)
+        .extension()
+        .and_then(|v| v.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let ext = match extension.as_str() {
+        "wav" => "wav",
+        "mp3" => "mp3",
+        "flac" => "flac",
+        "ogg" => "ogg",
+        "opus" => "opus",
+        "m4a" => "m4a",
+        _ => return Err(invalid_image("unsupported generated audio format")),
+    };
+    let mime = crate::application::production_package_inspector::audio_mime(ext);
+    if let Some(actual) = content_type.map(|s| s.split(';').next().unwrap_or(s).trim()) {
+        if actual != mime
+            && actual != "application/octet-stream"
+            && !(ext == "wav" && matches!(actual, "audio/x-wav" | "audio/wave"))
+        {
+            return Err(invalid_image(
+                "generated audio extension/content-type mismatch",
+            ));
+        }
+    }
+    Ok((ext, mime))
 }
 
 fn valid_video_signature(extension: &str, bytes: &[u8]) -> bool {
@@ -788,6 +869,69 @@ mod tests {
         })
     }
 
+    struct WavStream(Option<Vec<u8>>);
+    #[async_trait]
+    impl ComfyOutputStream for WavStream {
+        fn content_type(&self) -> Option<&str> {
+            Some("audio/wav")
+        }
+        fn content_length(&self) -> Option<u64> {
+            Some(48)
+        }
+        async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ComfyAdapterError> {
+            Ok(self.0.take())
+        }
+    }
+    fn generated_audio() -> CollectedOutput {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&40u32.to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&8000u32.to_le_bytes());
+        bytes.extend_from_slice(&16000u32.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&4u32.to_le_bytes());
+        bytes.extend_from_slice(&[0, 0, 0, 0]);
+        CollectedOutput::Audio(CollectedVideo {
+            output_id: "generated_audio".to_owned(),
+            node_id: "12".to_owned(),
+            original_filename: "sound.wav".to_owned(),
+            content_type: Some("audio/wav".to_owned()),
+            content_length: Some(48),
+            position: 0,
+            subfolder: String::new(),
+            folder_type: "output".to_owned(),
+            stream: Box::new(WavStream(Some(bytes))),
+        })
+    }
+    #[tokio::test]
+    async fn pr_e_generated_audio_only_and_mixed_image_are_persisted() {
+        for mixed in [false, true] {
+            let root = tempdir().unwrap();
+            let repository = FakeAssetRepository::default();
+            let mut outputs = vec![generated_audio()];
+            if mixed {
+                outputs.push(CollectedOutput::Image(image(png_bytes(2, 3))));
+            }
+            let assets = service(root.path(), repository.clone())
+                .import_outputs("project-1", &task_id(), outputs)
+                .await
+                .unwrap();
+            assert_eq!(assets.len(), if mixed { 2 } else { 1 });
+            assert_eq!(assets[0].category, "generated_audio");
+            assert_eq!(assets[0].asset_type, crate::domain::AssetType::Audio);
+            assert_eq!(assets[0].source_task_id, Some(task_id()));
+            assert!(Path::new(&assets[0].storage_path).is_file());
+            assert!(assets[0].thumbnail_path.is_none());
+            assert_eq!(repository.assets.lock().unwrap().len(), assets.len());
+        }
+    }
+
     #[tokio::test]
     async fn validates_actual_image_format_and_records_hash_dimensions_and_extension() {
         let root = tempdir().unwrap();
@@ -928,7 +1072,7 @@ mod tests {
         let repository = FakeAssetRepository::default();
         let mut output = match video("generated_video", 1024, None) {
             CollectedOutput::Video(output) => output,
-            CollectedOutput::Image(_) => unreachable!(),
+            CollectedOutput::Image(_) | CollectedOutput::Audio(_) => unreachable!(),
         };
         output.content_type = Some("text/html".to_owned());
         let error = service(root.path(), repository.clone())
@@ -964,5 +1108,31 @@ mod tests {
         if video_directory.exists() {
             assert_eq!(std::fs::read_dir(video_directory).unwrap().count(), 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod pr_e_audio_validation_tests {
+    use super::*;
+    #[test]
+    fn pr_e_audio_extension_mime_and_signature_are_required() {
+        assert_eq!(
+            validate_audio_output("sound.wav", Some("audio/wav")).unwrap(),
+            ("wav", "audio/wav")
+        );
+        assert!(validate_audio_output("sound.wav", Some("video/mp4")).is_err());
+        assert!(validate_audio_output("sound.exe", Some("audio/wav")).is_err());
+        assert!(
+            crate::application::production_package_inspector::valid_audio_signature(
+                "wav",
+                b"RIFF0000WAVEdata"
+            )
+        );
+        assert!(
+            !crate::application::production_package_inspector::valid_audio_signature(
+                "wav",
+                b"not an audio file"
+            )
+        );
     }
 }

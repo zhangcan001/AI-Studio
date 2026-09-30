@@ -174,6 +174,17 @@ pub struct ComfyHistoryStatus {
     pub messages: Option<Value>,
 }
 
+impl ComfyHistoryStatus {
+    pub fn parse_warnings(&self) -> Vec<Value> {
+        self.messages
+            .as_ref()
+            .and_then(|v| v.get("parseWarnings"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
 impl Default for ComfyHistoryStatus {
     fn default() -> Self {
         Self {

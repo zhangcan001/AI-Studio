@@ -155,7 +155,7 @@ export interface WorkflowRecognitionInputView {
 
 export interface WorkflowRecognitionOutputView {
   outputId: string;
-  type: "image" | "video" | string;
+  type: "image" | "video" | "audio" | string;
   nodeId: string;
   label?: string;
   required: boolean;
@@ -338,7 +338,7 @@ export type SeedMode = "fixed" | "random";
 export interface WorkflowOutputMappingView {
   outputId: string;
   label: string;
-  type: "image" | "video";
+  type: "image" | "video" | "audio";
   nodeId: string;
   required: boolean;
 }
@@ -448,7 +448,7 @@ export interface WorkflowAutoIssueCandidateView {
   nodeId?: string;
   inputName?: string;
   outputId?: string;
-  outputType?: "image" | "video" | string;
+  outputType?: "image" | "video" | "audio" | string;
   fieldType?: WorkflowFieldType | string;
   reason?: string;
   score?: number;
@@ -893,7 +893,7 @@ export interface WorkflowOnboardingInputMappingRequest {
 export interface WorkflowOnboardingOutputMappingRequest {
   outputId: string;
   label: string;
-  type: "image" | "video";
+  type: "image" | "video" | "audio";
   nodeId: string;
   required: boolean;
 }

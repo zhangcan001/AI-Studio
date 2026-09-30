@@ -139,6 +139,10 @@ impl TaskHistoryService {
                 .error
                 .as_ref()
                 .and_then(|error| error.raw.clone()),
+            parse_warnings: self
+                .history_repository
+                .output_parse_warnings(project_id, &task_id)
+                .await?,
             output_assets,
             reusable_draft,
         })
@@ -417,6 +421,7 @@ pub struct TaskDetailView {
     pub error_message: Option<String>,
     pub node_errors: Vec<TaskNodeErrorView>,
     pub raw_error: Option<Value>,
+    pub parse_warnings: Vec<Value>,
     pub output_assets: Vec<AssetSummaryView>,
     pub reusable_draft: ReusableDraftAvailabilityView,
 }
@@ -1169,6 +1174,7 @@ outputs: []
             error_message: Some("The task did not complete successfully.".to_owned()),
             node_errors: Vec::new(),
             raw_error: None,
+            parse_warnings: Vec::new(),
             output_assets: Vec::new(),
             reusable_draft: super::ReusableDraftAvailabilityView {
                 available: false,

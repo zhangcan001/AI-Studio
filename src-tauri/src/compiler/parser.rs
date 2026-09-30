@@ -177,6 +177,8 @@ enum OutputTypeDto {
     Image,
     #[serde(rename = "video")]
     Video,
+    #[serde(rename = "audio")]
+    Audio,
 }
 
 impl RecipeFileDto {
@@ -220,6 +222,7 @@ impl RecipeFileDto {
                 output_type: match output.output_type {
                     OutputTypeDto::Image => OutputType::Image,
                     OutputTypeDto::Video => OutputType::Video,
+                    OutputTypeDto::Audio => OutputType::Audio,
                 },
                 node: output.node,
                 required: output.required,

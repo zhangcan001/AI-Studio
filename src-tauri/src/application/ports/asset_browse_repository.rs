@@ -11,6 +11,7 @@ pub enum AssetCategoryFilter {
     SourceAudio,
     GeneratedImage,
     GeneratedVideo,
+    GeneratedAudio,
 }
 
 impl AssetCategoryFilter {
@@ -22,6 +23,7 @@ impl AssetCategoryFilter {
             Self::SourceAudio => Some("source_audio"),
             Self::GeneratedImage => Some("generated_image"),
             Self::GeneratedVideo => Some("generated_video"),
+            Self::GeneratedAudio => Some("generated_audio"),
         }
     }
 }

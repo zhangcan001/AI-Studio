@@ -1235,20 +1235,36 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
         })?;
 
     let mut normalized = std::collections::BTreeMap::new();
+    let mut warnings = Vec::new();
     for (node_id, node_value) in outputs {
-        let node = node_value.as_object().ok_or_else(|| {
-            ComfyAdapterError::Protocol(format!("history output node {node_id} must be an object"))
-        })?;
+        let Some(node) = node_value.as_object() else {
+            warnings.push(history_parse_warning(
+                node_id,
+                "node",
+                None,
+                "OUTPUT_NODE_INVALID",
+            ));
+            continue;
+        };
         let animated_flags = node.get("animated").and_then(Value::as_array);
-        let image_results =
-            normalize_saved_result_array(node_id, node, "images", animated_flags, None)?;
-        let files = image_results
-            .iter()
-            .map(|result| result.file.clone())
-            .collect();
-        let mut saved_results = image_results;
-        for field in ["gifs", "videos"] {
-            for result in normalize_saved_result_array(node_id, node, field, None, Some(true))? {
+        let images = normalize_saved_result_array(
+            node_id,
+            node,
+            "images",
+            animated_flags,
+            None,
+            &mut warnings,
+        );
+        let files = images.iter().map(|result| result.file.clone()).collect();
+        let mut saved_results = images;
+        for (field, animated) in [
+            ("gifs", Some(true)),
+            ("videos", Some(true)),
+            ("audio", None),
+        ] {
+            for result in
+                normalize_saved_result_array(node_id, node, field, None, animated, &mut warnings)
+            {
                 if !saved_results
                     .iter()
                     .any(|existing| existing.file == result.file)
@@ -1265,12 +1281,36 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
             },
         );
     }
-
+    if !warnings.is_empty()
+        && normalized
+            .values()
+            .all(|node| node.saved_results.is_empty())
+    {
+        return Err(ComfyAdapterError::Protocol(
+            "history contains no safely usable output".to_owned(),
+        ));
+    }
+    let mut status = status;
+    if !warnings.is_empty() {
+        // Preserve Comfy execution messages; persist only bounded safe diagnostics,
+        // never the rejected raw output payload.
+        warnings.truncate(64);
+        status.messages = Some(serde_json::json!({
+            "comfyMessages": status.messages,
+            "parseWarnings": warnings,
+        }));
+    }
     Ok(ComfyHistory {
         prompt_id: prompt_id.to_owned(),
         status,
         outputs: normalized,
     })
+}
+
+fn history_parse_warning(node: &str, key: &str, index: Option<usize>, code: &str) -> Value {
+    serde_json::json!({"nodeId": node.chars().take(128).collect::<String>(),
+        "outputKey": key, "outputIndex": index, "code": code,
+        "detail": "Unsafe or malformed output metadata was skipped."})
 }
 
 fn normalize_saved_result_array(
@@ -1279,31 +1319,44 @@ fn normalize_saved_result_array(
     field: &str,
     animated_flags: Option<&Vec<Value>>,
     default_animated: Option<bool>,
-) -> Result<Vec<ComfySavedResult>, ComfyAdapterError> {
+    warnings: &mut Vec<Value>,
+) -> Vec<ComfySavedResult> {
     let Some(value) = node.get(field) else {
-        return Ok(Vec::new());
+        return Vec::new();
     };
-    let entries = value.as_array().ok_or_else(|| {
-        ComfyAdapterError::Protocol(format!(
-            "history output node {node_id} {field} must be an array"
-        ))
-    })?;
+    let Some(entries) = value.as_array() else {
+        warnings.push(history_parse_warning(
+            node_id,
+            field,
+            None,
+            "OUTPUT_ARRAY_INVALID",
+        ));
+        return Vec::new();
+    };
     let mut results = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
-        let entry = entry.as_object().ok_or_else(|| {
-            ComfyAdapterError::Protocol(format!(
-                "history output node {node_id} {field} item must be an object"
-            ))
-        })?;
-        let filename = entry
+        let Some(entry) = entry.as_object() else {
+            warnings.push(history_parse_warning(
+                node_id,
+                field,
+                Some(index),
+                "OUTPUT_ENTRY_INVALID",
+            ));
+            continue;
+        };
+        let Some(filename) = entry
             .get("filename")
             .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| {
-                ComfyAdapterError::Protocol(format!(
-                    "history output node {node_id} {field} filename is missing"
-                ))
-            })?;
+            .filter(|s| !s.trim().is_empty())
+        else {
+            warnings.push(history_parse_warning(
+                node_id,
+                field,
+                Some(index),
+                "OUTPUT_FILENAME_MISSING",
+            ));
+            continue;
+        };
         let file = ComfyOutputFile {
             filename: filename.to_owned(),
             subfolder: entry
@@ -1317,7 +1370,15 @@ fn normalize_saved_result_array(
                 .unwrap_or("output")
                 .to_owned(),
         };
-        validate_comfy_output_file(&file)?;
+        if validate_comfy_output_file(&file).is_err() {
+            warnings.push(history_parse_warning(
+                node_id,
+                field,
+                Some(index),
+                "OUTPUT_PATH_UNSAFE",
+            ));
+            continue;
+        }
         results.push(ComfySavedResult {
             file,
             animated: animated_flags
@@ -1327,7 +1388,7 @@ fn normalize_saved_result_array(
                 .or(default_animated),
         });
     }
-    Ok(results)
+    results
 }
 
 fn validate_comfy_output_file(file: &ComfyOutputFile) -> Result<(), ComfyAdapterError> {
@@ -2765,7 +2826,7 @@ mod tests {
         assert_eq!(history.prompt_id, "prompt-1");
         assert_eq!(history.outputs["9"].images.len(), 2);
         assert_eq!(history.outputs["9"].images[1].subfolder, "nested");
-        assert_eq!(history.outputs["9"].saved_results.len(), 2);
+        assert_eq!(history.outputs["9"].saved_results.len(), 3);
         assert_eq!(history.outputs["9"].saved_results[0].animated, Some(true));
         assert!(history.outputs["3"].images.is_empty());
     }
@@ -3231,5 +3292,33 @@ mod tests {
                 .expect("unknown event should be ignored"),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod pr_e_history_tests {
+    use super::*;
+    #[test]
+    fn pr_e_history_keeps_safe_outputs_and_structured_warnings() {
+        let history = normalize_history("p", serde_json::json!({"p": {
+            "status":{"completed":true, "messages":[["execution_success",{}]]},
+            "outputs": {"1":{"images":[{"filename":"safe.png"}, {"filename":"../unsafe.png"}, null]},
+                        "2":{"audio":[{"filename":"sound.wav"}]}, "3":{"videos":false}}
+        }})).unwrap();
+        assert_eq!(history.outputs["1"].images.len(), 1);
+        assert_eq!(history.outputs["2"].saved_results.len(), 1);
+        assert_eq!(history.status.parse_warnings().len(), 3);
+        assert!(history
+            .status
+            .messages
+            .as_ref()
+            .unwrap()
+            .get("comfyMessages")
+            .is_some());
+        assert!(normalize_history(
+            "p",
+            serde_json::json!({"p":{"outputs":{"1":{"images":[null]}}}})
+        )
+        .is_err());
     }
 }

@@ -14,6 +14,7 @@ export function ProductionAssetPreview({ projectId, asset, onClose, onOpenTask }
   const [imageUrl, setImageUrl] = useState<string>();
   const [error, setError] = useState<string>();
   const isVideo = asset.assetType === "video" || asset.category === "generated_video" || asset.category === "source_video";
+  const isAudio = asset.assetType === "audio";
   const displayName = assetDisplayName(asset);
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export function ProductionAssetPreview({ projectId, asset, onClose, onOpenTask }
   }, [onClose]);
 
   useEffect(() => {
-    if (isVideo) return () => undefined;
+    if (isVideo || isAudio) return () => undefined;
     let active = true;
     let objectUrl: string | undefined;
     setImageUrl(undefined);
@@ -43,9 +44,9 @@ export function ProductionAssetPreview({ projectId, asset, onClose, onOpenTask }
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [asset.id, asset.mimeType, isVideo, projectId]);
+  }, [asset.id, asset.mimeType, isVideo, isAudio, projectId]);
 
-  const mediaUrl = isVideo ? getAssetMediaUrl(projectId, asset.id, "video") : undefined;
+  const mediaUrl = isVideo || isAudio ? getAssetMediaUrl(projectId, asset.id, isVideo ? "video" : "audio") : undefined;
 
   return (
     <div className="production-asset-preview-backdrop" role="presentation" onMouseDown={onClose}>
@@ -75,6 +76,8 @@ export function ProductionAssetPreview({ projectId, asset, onClose, onOpenTask }
         <div className="production-asset-preview-media">
           {isVideo && mediaUrl ? (
             <video src={mediaUrl} controls preload="metadata" playsInline aria-label={displayName} />
+          ) : isAudio && mediaUrl ? (
+            <audio src={mediaUrl} controls preload="metadata" aria-label={displayName} />
           ) : imageUrl ? (
             <img src={imageUrl} alt={displayName} />
           ) : (

@@ -32,7 +32,7 @@ import {
 export interface OutputDraft {
   outputId: string;
   label: string;
-  type: "image" | "video";
+  type: "image" | "video" | "audio";
   nodeId: string;
   required: boolean;
 }

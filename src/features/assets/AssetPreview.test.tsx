@@ -77,6 +77,14 @@ describe("AssetPreview detail MVP", () => {
     vi.clearAllMocks();
   });
 
+  it("plays generated audio through the existing project-scoped media route", async () => {
+    const audio = { ...asset, assetType: "audio" as const, category: "generated_audio", mimeType: "audio/wav", originalName: "sound.wav" };
+    const { container } = render(<AssetPreview projectId="project-1" asset={audio} onClose={vi.fn()} />);
+    await waitFor(() => expect(container.querySelector("audio")).toBeTruthy());
+    expect(container.querySelector("audio")?.getAttribute("src")).toContain("audio");
+    expect(mocks.readAssetImage).not.toHaveBeenCalled();
+  });
+
   it("shows metadata, provenance, relations, and read-only version history", async () => {
     render(<AssetPreview projectId="project-1" asset={asset} onClose={vi.fn()} />);
 

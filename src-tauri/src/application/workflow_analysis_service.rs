@@ -1226,6 +1226,19 @@ fn enrich_candidate_with_context(
     if let Some(schema) = schema {
         if let Some(schema_node) = schema.node(class_type) {
             if let Some(input_schema) = schema_node.input(&candidate.input_name) {
+                // Numeric storage syntax is not its domain type. A FLOAT with
+                // an integral default remains a number; INT 1.0 remains integer.
+                if matches!(candidate.field_type.as_str(), "integer" | "number") {
+                    match input_schema.declared_type {
+                        RecognitionDeclaredType::Integer => {
+                            candidate.field_type = "integer".to_owned()
+                        }
+                        RecognitionDeclaredType::Float => {
+                            candidate.field_type = "number".to_owned()
+                        }
+                        _ => {}
+                    }
+                }
                 if schema_type_matches_candidate(
                     class_type,
                     &candidate.input_name,
@@ -1827,6 +1840,12 @@ fn infer_outputs(
         let Some(node) = node.as_object() else {
             continue;
         };
+        if crate::application::workflow_ui_normalizer::UiNodeMode::parse(
+            node.get("mode").and_then(Value::as_i64).unwrap_or(0),
+        ) != crate::application::workflow_ui_normalizer::UiNodeMode::Always
+        {
+            continue;
+        }
         let class_type = node
             .get("class_type")
             .and_then(Value::as_str)
@@ -1840,6 +1859,8 @@ fn infer_outputs(
         // / apng) even though their input socket is IMAGE frames.
         let output_type = if is_animated_save_class(class_type) {
             Some("video".to_owned())
+        } else if class_type.to_ascii_lowercase().starts_with("saveaudio") {
+            Some("audio".to_owned())
         } else {
             schema_output_type.clone().or(node_output_type)
         };
@@ -1848,6 +1869,14 @@ fn infer_outputs(
             .and_then(Value::as_bool)
             .unwrap_or(false)
             || schema_node.is_some_and(|node| node.output_node);
+        if !explicit
+            && matches!(
+                class_type.to_ascii_lowercase().as_str(),
+                "vaedecode" | "vaedecodetiled" | "previewimage" | "previewaudio"
+            )
+        {
+            continue;
+        }
         let terminal = graph.downstream_of(node_id).is_empty();
         let input_only = is_input_only_output_class(&lower) && !explicit;
         let media_output_role = !input_only && (output_type.is_some() || explicit);
@@ -2031,6 +2060,25 @@ fn infer_outputs(
             candidates: Vec::new(),
         }],
     };
+    let mut issues = issues;
+    if !resolution.is_resolved()
+        && outputs.is_empty()
+        && nodes.values().any(|node| {
+            node.get("class_type")
+                .and_then(Value::as_str)
+                .is_some_and(|class| {
+                    let class = class.to_ascii_lowercase();
+                    class.starts_with("save") || class == "vhs_videocombine"
+                })
+        })
+    {
+        issues.push(WorkflowAnalysisIssue {
+            code: "NO_ACTIVE_OUTPUT_NODE".to_owned(),
+            message: "没有有效执行的保存输出节点。".to_owned(),
+            field: Some("output_1".to_owned()),
+            candidates: Vec::new(),
+        });
+    }
     OutputAnalysis {
         roots: resolution
             .roots()
@@ -2265,6 +2313,11 @@ fn declared_output_media_type(
         .any(|kind| *kind == RecognitionDeclaredType::Video)
     {
         Some("video".to_owned())
+    } else if node
+        .declared_output_types
+        .contains(&RecognitionDeclaredType::Audio)
+    {
+        Some("audio".to_owned())
     } else if node.declared_output_types.iter().any(|kind| {
         matches!(
             kind,
@@ -2429,6 +2482,8 @@ fn media_output_type_from_node(node: &serde_json::Map<String, Value>) -> Option<
         if let Some(serialized) = value.as_str().map(str::trim).map(str::to_ascii_lowercase) {
             if serialized.starts_with("video/") {
                 serialized_media_types.insert("video");
+            } else if serialized.starts_with("audio/") {
+                serialized_media_types.insert("audio");
             } else if serialized.starts_with("image/") {
                 serialized_media_types.insert("image");
             }
@@ -2448,7 +2503,9 @@ fn media_output_type_from_node(node: &serde_json::Map<String, Value>) -> Option<
             continue;
         }
         let normalized_name = normalize(name);
-        if normalized_name.contains("video") || normalized_name.contains("frames") {
+        if normalized_name.contains("audio") {
+            socket_media_types.insert("audio");
+        } else if normalized_name.contains("video") || normalized_name.contains("frames") {
             socket_media_types.insert("video");
         } else if normalized_name.contains("image")
             || normalized_name.contains("mask")

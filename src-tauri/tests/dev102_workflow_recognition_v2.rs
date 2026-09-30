@@ -399,6 +399,7 @@ fn classify_output(
     let expected_type = match expected.output_type {
         ai_studio_lib::domain::OutputType::Image => "image",
         ai_studio_lib::domain::OutputType::Video => "video",
+        ai_studio_lib::domain::OutputType::Audio => "audio",
     };
     let correct = analysis.outputs.iter().any(|output| {
         output.node_id == expected.node

@@ -67,6 +67,14 @@ pub struct TaskHistoryRecord {
 
 #[async_trait]
 pub trait TaskHistoryRepository: Send + Sync {
+    async fn output_parse_warnings(
+        &self,
+        _project_id: &str,
+        _task_id: &crate::domain::TaskId,
+    ) -> Result<Vec<serde_json::Value>, RepositoryError> {
+        Ok(Vec::new())
+    }
+
     async fn list_page(
         &self,
         query: TaskHistoryQuery,

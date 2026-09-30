@@ -110,6 +110,7 @@ export interface TaskDetail {
   errorMessage?: string;
   nodeErrors?: TaskNodeError[];
   rawError?: unknown;
+  parseWarnings?: Array<{nodeId: string; outputKey: string; outputIndex?: number | null; code: string; detail: string}>;
   outputAssets: AssetView[];
   reusableDraft: ReusableDraftAvailability;
 }

@@ -1631,18 +1631,27 @@ impl GenerationService {
             .iter()
             .map(|mapping| (mapping.output_id.clone(), mapping.ordinal as usize))
             .collect();
-        let outputs = match history {
-            Some(history) => {
-                self.output_collector
-                    .collect_outputs_from_history_excluding(recipe, history, &existing_outputs)
-                    .await
-            }
+        let fetched_history;
+        let history = match history {
+            Some(history) => history,
             None => {
-                self.output_collector
-                    .collect_outputs_excluding(recipe, prompt_id, &existing_outputs)
-                    .await
+                fetched_history = match self.comfy_adapter.get_history(prompt_id).await {
+                    Ok(history) if history.prompt_id == prompt_id => history,
+                    Ok(_) => return Err(self.fail_and_preserve(task, TaskError {
+                        code: "OUTPUT_DOWNLOAD_FAILED".to_owned(), message: "history prompt identity mismatch".to_owned(), raw: None,
+                    }, GenerationServiceError::OutputCollection(crate::application::output_collector::OutputCollectorError::Protocol { message: "history prompt identity mismatch".to_owned() })).await),
+                    Err(error) => {
+                        let original = GenerationServiceError::OutputCollection(crate::application::output_collector::map_adapter_error(error));
+                        return Err(self.fail_and_preserve(task, task_error_from_output(&original), original).await);
+                    }
+                };
+                &fetched_history
             }
         };
+        let outputs = self
+            .output_collector
+            .collect_outputs_from_history_excluding(recipe, history, &existing_outputs)
+            .await;
         let outputs = match outputs {
             Ok(outputs) => outputs,
             Err(error) => {
@@ -1708,7 +1717,12 @@ impl GenerationService {
         .await?;
 
         let previous_status = task.status;
-        let event = task.succeed(self.clock.now())?;
+        let mut event = task.succeed(self.clock.now())?;
+        let warnings = history.status.parse_warnings();
+        if !warnings.is_empty() {
+            let payload = event.payload.get_or_insert_with(|| serde_json::json!({}));
+            payload["parseWarnings"] = serde_json::json!(warnings);
+        }
         if let Err(error) = self
             .task_repository
             .persist_transition(task, &event, previous_status)

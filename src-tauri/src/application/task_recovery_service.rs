@@ -365,7 +365,12 @@ impl TaskRecoveryService {
 
         let _ = prompt_id;
         let previous_status = task.status;
-        let event = task.succeed(self.clock.now())?;
+        let mut event = task.succeed(self.clock.now())?;
+        let warnings = history.status.parse_warnings();
+        if !warnings.is_empty() {
+            let payload = event.payload.get_or_insert_with(|| serde_json::json!({}));
+            payload["parseWarnings"] = serde_json::json!(warnings);
+        }
         self.task_repository
             .persist_transition(task, &event, previous_status)
             .await?;

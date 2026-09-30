@@ -3351,10 +3351,11 @@ impl WorkflowOnboardingService {
         let output_type = match request.output_type.as_str() {
             "image" => OutputType::Image,
             "video" => OutputType::Video,
+            "audio" => OutputType::Audio,
             _ => {
                 return Err(WorkflowOnboardingError::new(
                     "OUTPUT_INVALID",
-                    "output type must be image or video",
+                    "output type must be image, video or audio",
                 ))
             }
         };
@@ -4260,6 +4261,7 @@ fn normalized_recipe_signature(recipe: &Recipe, category: &str, mode: &str) -> R
             output_type: match output.output_type {
                 OutputType::Image => "image",
                 OutputType::Video => "video",
+                OutputType::Audio => "audio",
             }
             .to_owned(),
             node: output.node.clone(),
@@ -4714,6 +4716,8 @@ fn auto_inference_from_analysis(
                 label: output.label.clone(),
                 output_type: if output.output_type == "video" {
                     OutputType::Video
+                } else if output.output_type == "audio" {
+                    OutputType::Audio
                 } else {
                     OutputType::Image
                 },
@@ -5055,6 +5059,17 @@ fn workflow_kind_for_outputs(outputs: &[OutputMapping]) -> String {
     let has_video = outputs
         .iter()
         .any(|output| output.output_type == OutputType::Video);
+    let has_audio = outputs
+        .iter()
+        .any(|output| output.output_type == OutputType::Audio);
+    if has_audio {
+        return if has_image || has_video {
+            "MIXED"
+        } else {
+            "AUDIO"
+        }
+        .to_owned();
+    }
     match (has_image, has_video) {
         (true, true) => "MIXED".to_owned(),
         (false, true) => "VIDEO".to_owned(),
@@ -5277,12 +5292,24 @@ fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingVa
         }
     };
     let outputs_valid = !draft.output_mappings.is_empty()
-        && draft
-            .output_mappings
-            .iter()
-            .all(|output| workflow.node(&output.node_id).is_some());
+        && draft.output_mappings.iter().all(|output| {
+            workflow.node(&output.node_id).is_some_and(|node| {
+                crate::application::workflow_ui_normalizer::UiNodeMode::parse(
+                    node.get("mode").and_then(Value::as_i64).unwrap_or(0),
+                ) == crate::application::workflow_ui_normalizer::UiNodeMode::Always
+                    && !matches!(
+                        node.get("class_type")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_ascii_lowercase()
+                            .as_str(),
+                        "vaedecode" | "vaedecodetiled"
+                    )
+            })
+        });
     if !outputs_valid {
-        issues.push("OUTPUT_INVALID: at least one valid output is required".to_owned());
+        issues
+            .push("NO_ACTIVE_OUTPUT_NODE: at least one active final output is required".to_owned());
     }
     let bindings_valid = recipe_result
         .as_ref()
@@ -5553,7 +5580,7 @@ impl RecipeYamlWriter {
         .map(|output| {
             json!({
                 "id": output.id,
-                "type": match output.output_type { OutputType::Image => "image", OutputType::Video => "video" },
+                "type": match output.output_type { OutputType::Image => "image", OutputType::Video => "video", OutputType::Audio => "audio" },
                 "node": output.node,
                 "required": output.required,
             })
@@ -5759,6 +5786,7 @@ fn output_mapping_view(output: &OutputMapping) -> WorkflowOutputMappingView {
         output_type: match output.output_type {
             OutputType::Image => "image",
             OutputType::Video => "video",
+            OutputType::Audio => "audio",
         }
         .to_owned(),
         node_id: output.node_id.clone(),
@@ -5773,6 +5801,7 @@ fn output_view(output: &OutputDefinition) -> WorkflowOutputMappingView {
         output_type: match output.output_type {
             OutputType::Image => "image",
             OutputType::Video => "video",
+            OutputType::Audio => "audio",
         }
         .to_owned(),
         node_id: output.node.clone(),
@@ -6198,6 +6227,7 @@ fn output_root_selections_from_mappings(mappings: &[OutputMapping]) -> Vec<Outpu
             output_type: match mapping.output_type {
                 OutputType::Image => "image".to_owned(),
                 OutputType::Video => "video".to_owned(),
+                OutputType::Audio => "audio".to_owned(),
             },
         })
         .collect()
@@ -6212,6 +6242,7 @@ fn output_root_selections_from_recipe(recipe: &Recipe) -> Vec<OutputRootSelectio
             output_type: match output.output_type {
                 OutputType::Image => "image".to_owned(),
                 OutputType::Video => "video".to_owned(),
+                OutputType::Audio => "audio".to_owned(),
             },
         })
         .collect()

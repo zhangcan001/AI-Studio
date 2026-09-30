@@ -146,6 +146,17 @@ pub trait AssetStore: Send + Sync {
         ))
     }
 
+    async fn begin_audio_write(
+        &self,
+        _project_root: &Path,
+        _asset_id: &AssetId,
+        _extension: &str,
+    ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
+        Err(AssetStoreError::Write(
+            "generated audio streaming storage is not available".to_owned(),
+        ))
+    }
+
     async fn begin_video_write(
         &self,
         _project_root: &Path,

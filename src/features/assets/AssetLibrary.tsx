@@ -29,6 +29,7 @@ const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
   { value: "SOURCE_AUDIO", label: "源音频" },
   { value: "GENERATED_IMAGE", label: "生成图片" },
   { value: "GENERATED_VIDEO", label: "生成视频" },
+  { value: "GENERATED_AUDIO", label: "生成音频" },
 ];
 
 interface Props {

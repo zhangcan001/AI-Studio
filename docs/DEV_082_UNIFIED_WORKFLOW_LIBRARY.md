@@ -62,7 +62,7 @@ NEW_DB_TABLE=NO
 ## 实现收口
 
 - `workflow_recognition_service.rs` 独立负责 API/UI/非法/未知格式识别、raw/semantic/structural identity、用途与输入输出推断、Recipe freshness，以及运行能力摘要。结构指纹只用于提示，不会自动合并或覆盖。
-- API JSON 在 ComfyUI 离线或缺节点时仍可保存到工作流库；状态分别反映为 `OFFLINE` / `MISSING_NODES`，而不是把“不可运行”误报为“不可导入”。UI JSON 只识别并明确要求导出 API Format，不做不安全的 UI→API 转换。
+- API JSON 在 ComfyUI 离线或缺节点时仍可保存到工作流库；状态分别反映为 `OFFLINE` / `MISSING_NODES`，而不是把“不可运行”误报为“不可导入”。当前智能导入入口可对通过兼容性校验的 UI JSON 执行受控归一化；无法安全转换的功能仍提示「已识别但暂不支持」，不会绕过发布门禁。仅接受 API 格式的入口会明确引导使用智能导入或重新导出 API Format。
 - 已存在的 raw/semantic 工作流不会重复创建；结构相似工作流进入人工选择，可添加为新工作流或现有工作流的新版本。现有工作流和系统自带工作流均可“重新识别”，更新只生成新的 RecipeVersion，旧 Recipe 与历史 Batch 不变。
 - 系统自带工作流删除是 `REMOVE`：设置 `archived=true`、`enabled=false`，保留 Runtime Package、WorkflowVersion、Recipe 和历史数据；`ensure_installed` 只恢复缺失文件，不复活用户删除状态。用户工作流按活动任务/队列、历史引用和无引用情况选择 `BLOCKED`、`REMOVE` 或 `HARD_DELETE`。
 - 删除检查返回 `deleteAction`、`projectBindingCount` 和绑定作用域。确认删除后仅清理对应 `workflow_version_id` 的 live Project Workflow Binding，不删除 Task、Batch、Shot 或历史引用。legacy fallback、Catalog、推荐和项目候选均排除已删除工作流。

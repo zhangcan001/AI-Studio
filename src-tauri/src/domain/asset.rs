@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 pub const GENERATED_IMAGE_CATEGORY: &str = "generated_image";
 pub const GENERATED_VIDEO_CATEGORY: &str = "generated_video";
+pub const GENERATED_AUDIO_CATEGORY: &str = "generated_audio";
 pub const SOURCE_IMAGE_CATEGORY: &str = "source_image";
 pub const SOURCE_VIDEO_CATEGORY: &str = "source_video";
 pub const SOURCE_AUDIO_CATEGORY: &str = "source_audio";
@@ -242,6 +243,44 @@ impl Asset {
         Ok(asset)
     }
 
+    pub fn new_generated_audio(
+        id: AssetId,
+        project_id: impl Into<String>,
+        name: impl Into<String>,
+        original_name: impl Into<String>,
+        storage_path: impl Into<String>,
+        sha256: impl Into<String>,
+        mime_type: impl Into<String>,
+        duration_ms: Option<u64>,
+        file_size: u64,
+        source_task_id: TaskId,
+        metadata_json: Value,
+        created_at: DateTime<Utc>,
+    ) -> Result<Self, AssetDomainError> {
+        let asset = Self {
+            id,
+            project_id: project_id.into(),
+            asset_type: AssetType::Audio,
+            category: GENERATED_AUDIO_CATEGORY.to_owned(),
+            name: name.into(),
+            original_name: original_name.into(),
+            storage_path: storage_path.into(),
+            thumbnail_path: None,
+            sha256: sha256.into(),
+            mime_type: mime_type.into(),
+            width: 0,
+            height: 0,
+            duration_ms,
+            file_size,
+            source_task_id: Some(source_task_id),
+            metadata_json,
+            created_at,
+            updated_at: created_at,
+        };
+        asset.validate()?;
+        Ok(asset)
+    }
+
     pub fn new_source_video(
         id: AssetId,
         project_id: impl Into<String>,
@@ -336,6 +375,7 @@ impl Asset {
             self.category.as_str(),
             GENERATED_IMAGE_CATEGORY
                 | GENERATED_VIDEO_CATEGORY
+                | GENERATED_AUDIO_CATEGORY
                 | SOURCE_IMAGE_CATEGORY
                 | SOURCE_VIDEO_CATEGORY
                 | SOURCE_AUDIO_CATEGORY
@@ -346,7 +386,7 @@ impl Asset {
         }
         if matches!(
             self.category.as_str(),
-            GENERATED_IMAGE_CATEGORY | GENERATED_VIDEO_CATEGORY
+            GENERATED_IMAGE_CATEGORY | GENERATED_VIDEO_CATEGORY | GENERATED_AUDIO_CATEGORY
         ) && self.source_task_id.is_none()
         {
             return Err(AssetDomainError::InvalidField(
@@ -360,6 +400,11 @@ impl Asset {
         {
             return Err(AssetDomainError::InvalidField(
                 "source assets must not have a source task".to_owned(),
+            ));
+        }
+        if self.category == GENERATED_AUDIO_CATEGORY && self.asset_type != AssetType::Audio {
+            return Err(AssetDomainError::InvalidField(
+                "generated_audio must have audio asset_type".to_owned(),
             ));
         }
         if self.category == GENERATED_VIDEO_CATEGORY && self.asset_type != AssetType::Video {

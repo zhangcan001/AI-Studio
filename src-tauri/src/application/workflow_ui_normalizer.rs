@@ -249,7 +249,7 @@ pub enum UiNodeMode {
 }
 
 impl UiNodeMode {
-    fn parse(value: i64) -> Self {
+    pub(crate) fn parse(value: i64) -> Self {
         match value {
             0 => Self::Always,
             2 => Self::Never,

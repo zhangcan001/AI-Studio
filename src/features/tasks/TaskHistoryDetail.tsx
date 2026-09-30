@@ -151,6 +151,13 @@ export function TaskHistoryDetail({
         <Fact label="完成时间" value={detail.finishedAt ? formatDateTime(detail.finishedAt) : "—"} />
         <Fact label="配方 ID" value={detail.recipeId} />
       </div>
+      {!!detail.parseWarnings?.length && (
+        <section aria-label="输出解析警告"><p>部分历史输出元数据无效，已保留可安全使用的输出。</p>
+          <ul>{detail.parseWarnings.map((warning, index) => <li key={index}>
+            节点 {warning.nodeId} · {warning.outputKey} · {warning.code}
+          </li>)}</ul>
+        </section>
+      )}
       {detail.errorCode && (
         <UiErrorNotice error={{ code: detail.errorCode, message: detail.errorMessage ?? "任务未成功完成。" }} className="task-error" />
       )}

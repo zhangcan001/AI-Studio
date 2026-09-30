@@ -341,3 +341,30 @@ fn w08_animated_savers_are_video_outputs() {
     assert!(is_animated_save_class("SaveAnimatedPNG"));
     assert!(!is_animated_save_class("SaveImage"));
 }
+
+#[test]
+fn pr_e_float_schema_wins_over_integer_literal() {
+    let mut workflow = basic_t2i();
+    workflow["3"]["inputs"]["cfg"] = json!(8);
+    let report = analyze_real(workflow);
+    let cfg = report
+        .inputs
+        .iter()
+        .find(|input| input.semantic_key == "cfg")
+        .unwrap();
+    assert_eq!(cfg.field_type, "number");
+}
+
+#[test]
+fn pr_e_muted_and_bypassed_savers_do_not_promote_decode() {
+    for mode in [2, 4] {
+        let mut workflow = basic_t2i();
+        workflow["9"]["mode"] = json!(mode);
+        let report = analyze_real(workflow);
+        assert!(report.outputs.is_empty(), "{:?}", report.outputs);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "NO_ACTIVE_OUTPUT_NODE"));
+    }
+}

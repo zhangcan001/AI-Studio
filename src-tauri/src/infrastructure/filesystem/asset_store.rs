@@ -212,6 +212,15 @@ impl AssetStore for FileSystemAssetStore {
         Self::write_to_path(project_root, asset_id, "png", "thumbnails", "image", bytes).await
     }
 
+    async fn begin_audio_write(
+        &self,
+        project_root: &Path,
+        asset_id: &AssetId,
+        extension: &str,
+    ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
+        Self::begin_stream_write(project_root, asset_id, extension, "generated", "audio").await
+    }
+
     async fn begin_video_write(
         &self,
         project_root: &Path,

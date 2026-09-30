@@ -45,6 +45,32 @@ const TASK_HISTORY_SELECT: &str = "SELECT
 
 #[async_trait]
 impl TaskHistoryRepository for SqliteTaskHistoryRepository {
+    async fn output_parse_warnings(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+    ) -> Result<Vec<serde_json::Value>, RepositoryError> {
+        let payload: Option<String> = sqlx::query_scalar(
+            "SELECT e.payload_json FROM task_events e JOIN tasks t ON t.id=e.task_id
+             WHERE t.project_id=? AND t.id=? AND e.event_type='TASK_SUCCEEDED'
+             ORDER BY e.sequence DESC LIMIT 1",
+        )
+        .bind(project_id)
+        .bind(task_id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?
+        .flatten();
+        Ok(payload
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| {
+                v.get("parseWarnings")
+                    .and_then(serde_json::Value::as_array)
+                    .cloned()
+            })
+            .unwrap_or_default())
+    }
+
     async fn list_page(
         &self,
         request: TaskHistoryQuery,

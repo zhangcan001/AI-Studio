@@ -151,6 +151,7 @@ impl RecipeViewModel {
             .map(|output| match output.output_type {
                 OutputType::Image => "image".to_owned(),
                 OutputType::Video => "video".to_owned(),
+                OutputType::Audio => "audio".to_owned(),
             })
             .collect();
         let fields = recipe

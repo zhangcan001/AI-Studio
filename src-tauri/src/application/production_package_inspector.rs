@@ -1704,7 +1704,7 @@ fn valid_video_signature(extension: &str, bytes: &[u8]) -> bool {
     }
 }
 
-fn valid_audio_signature(extension: &str, bytes: &[u8]) -> bool {
+pub(crate) fn valid_audio_signature(extension: &str, bytes: &[u8]) -> bool {
     match extension {
         "wav" => is_wav(bytes),
         "flac" => bytes.starts_with(b"fLaC"),
@@ -1745,7 +1745,7 @@ fn video_mime(extension: &str) -> &'static str {
     }
 }
 
-fn audio_mime(extension: &str) -> &'static str {
+pub(crate) fn audio_mime(extension: &str) -> &'static str {
     match extension {
         "wav" => "audio/wav",
         "flac" => "audio/flac",

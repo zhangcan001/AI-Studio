@@ -1359,12 +1359,12 @@ function OutputsPane({ draft, candidates, outputDraft, onChange, onAdd, onContin
       <div className="workflow-mapping-form workflow-output-form">
         <label>输出 ID<input value={outputDraft.outputId} onChange={(event) => onChange({ ...outputDraft, outputId: event.target.value })} /></label>
         <label>显示名称<input value={outputDraft.label} onChange={(event) => onChange({ ...outputDraft, label: event.target.value })} /></label>
-        <label>类型<select value={outputDraft.type} onChange={(event) => onChange({ ...outputDraft, type: event.target.value as "image" | "video" })}><option value="image">图片</option><option value="video">视频</option></select></label>
+        <label>类型<select value={outputDraft.type} onChange={(event) => onChange({ ...outputDraft, type: event.target.value as "image" | "video" | "audio" })}><option value="image">图片</option><option value="video">视频</option><option value="audio">音频</option></select></label>
         <label>输出节点<select value={outputDraft.nodeId} onChange={(event) => onChange({ ...outputDraft, nodeId: event.target.value })}>{candidates.map((node) => <option key={node.nodeId} value={node.nodeId}>节点 {node.nodeId} · {node.classType}</option>)}</select></label>
         <label className="checkbox-label"><input type="checkbox" checked={outputDraft.required} onChange={(event) => onChange({ ...outputDraft, required: event.target.checked })} /> 必填</label>
         <button type="button" onClick={onAdd} disabled={!outputDraft.nodeId}>确认输出</button>
       </div>
-      <div className="workflow-output-list">{draft.outputMappings.map((output) => <div key={output.outputId}><strong>{output.label}</strong><span>{output.outputId} · {output.type === "video" ? "视频" : "图片"} · 节点 {output.nodeId}</span></div>)}</div>
+      <div className="workflow-output-list">{draft.outputMappings.map((output) => <div key={output.outputId}><strong>{output.label}</strong><span>{output.outputId} · {output.type === "video" ? "视频" : output.type === "audio" ? "音频" : "图片"} · 节点 {output.nodeId}</span></div>)}</div>
       <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>设置基本信息</button></div>
     </div>
   );

@@ -56,7 +56,8 @@ export type AssetCategoryFilter =
   | "SOURCE_VIDEO"
   | "SOURCE_AUDIO"
   | "GENERATED_IMAGE"
-  | "GENERATED_VIDEO";
+  | "GENERATED_VIDEO"
+  | "GENERATED_AUDIO";
 
 export type AssetMediaTypeFilter = "ALL" | "IMAGE" | "VIDEO" | "AUDIO";
 export type AssetSourceFilter = "ALL" | "SOURCE" | "GENERATED";
