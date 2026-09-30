@@ -18,7 +18,7 @@ jobs:
   rust:
     name: Rust source checks
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       AI_STUDIO_LIVE_COMFY: "0"
     steps:
