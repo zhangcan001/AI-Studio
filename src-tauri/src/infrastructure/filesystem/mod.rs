@@ -9,3 +9,6 @@ pub use asset_store::FileSystemAssetStore;
 pub use project_directory_store::FileSystemProjectDirectoryStore;
 pub use workflow_library::FileSystemWorkflowLibrarySource;
 pub use workflow_package_store::FileSystemWorkflowPackageStore;
+
+mod workflow_draft_store;
+pub use workflow_draft_store::FileSystemWorkflowDraftStore;

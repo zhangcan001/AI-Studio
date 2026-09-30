@@ -1061,6 +1061,8 @@ impl WorkflowOnboardingDraft {
 
 #[derive(Default)]
 struct WorkflowOnboardingRegistry {
+    source_store:
+        Option<Arc<dyn crate::application::ports::workflow_draft_store::WorkflowDraftStore>>,
     order: VecDeque<String>,
     drafts: BTreeMap<String, WorkflowOnboardingDraft>,
     committed_imports: BTreeMap<String, WorkflowOnboardingCommitCache>,
@@ -1075,7 +1077,19 @@ struct WorkflowOnboardingCommitCache {
 }
 
 impl WorkflowOnboardingRegistry {
-    fn insert(&mut self, draft: WorkflowOnboardingDraft) {
+    fn insert(
+        &mut self,
+        mut draft: WorkflowOnboardingDraft,
+    ) -> Result<(), WorkflowOnboardingError> {
+        if let Some(store) = &self.source_store {
+            store
+                .save_raw(&draft.draft_id, &draft.raw_bytes)
+                .map_err(|message| {
+                    WorkflowOnboardingError::new("WORKFLOW_ONBOARDING_DRAFT_STORAGE_ERROR", message)
+                })?;
+            draft.raw_bytes.clear();
+            draft.raw_bytes.shrink_to_fit();
+        }
         let id = draft.draft_id.clone();
         self.committed_imports.remove(&id);
         self.drafts.insert(id.clone(), draft);
@@ -1087,21 +1101,38 @@ impl WorkflowOnboardingRegistry {
                 self.committed_imports.remove(&oldest);
             }
         }
+        Ok(())
     }
 
     fn get(&self, draft_id: &str) -> Result<WorkflowOnboardingDraft, WorkflowOnboardingError> {
-        self.drafts.get(draft_id).cloned().ok_or_else(|| {
+        let mut draft = self.drafts.get(draft_id).cloned().ok_or_else(|| {
             WorkflowOnboardingError::new(
                 "WORKFLOW_ONBOARDING_DRAFT_NOT_FOUND",
-                format!("draft {draft_id} was not found"),
+                "draft was not found",
             )
-        })
+        })?;
+        if let Some(store) = &self.source_store {
+            draft.raw_bytes = store.read_raw(draft_id).map_err(|message| {
+                WorkflowOnboardingError::new("WORKFLOW_ONBOARDING_DRAFT_STORAGE_ERROR", message)
+            })?;
+            if sha256(&draft.raw_bytes) != draft.raw_sha256 {
+                return Err(WorkflowOnboardingError::new(
+                    "WORKFLOW_ONBOARDING_DRAFT_STORAGE_ERROR",
+                    "draft source hash mismatch",
+                ));
+            }
+        }
+        Ok(draft)
     }
 
     fn get_mut(
         &mut self,
         draft_id: &str,
     ) -> Result<&mut WorkflowOnboardingDraft, WorkflowOnboardingError> {
+        if self.source_store.is_some() {
+            let hydrated = self.get(draft_id)?;
+            self.drafts.get_mut(draft_id).unwrap().raw_bytes = hydrated.raw_bytes;
+        }
         self.committed_imports.remove(draft_id);
         self.drafts.get_mut(draft_id).ok_or_else(|| {
             WorkflowOnboardingError::new(
@@ -1285,6 +1316,17 @@ impl WorkflowOnboardingService {
             registry: Mutex::new(WorkflowOnboardingRegistry::default()),
             commit_gate: tokio::sync::Mutex::new(()),
         }
+    }
+
+    pub fn with_draft_store(
+        mut self,
+        store: Arc<dyn crate::application::ports::workflow_draft_store::WorkflowDraftStore>,
+    ) -> Self {
+        self.registry
+            .get_mut()
+            .expect("new registry is unpoisoned")
+            .source_store = Some(store);
+        self
     }
 
     pub fn with_runtime_state(
@@ -1541,7 +1583,7 @@ impl WorkflowOnboardingService {
         };
         let draft_id = draft.draft_id.clone();
         self.with_registry(|registry| {
-            registry.insert(draft);
+            registry.insert(draft)?;
             Ok(())
         })??;
         self.get(&draft_id)
@@ -1687,7 +1729,7 @@ impl WorkflowOnboardingService {
         };
         let draft_id = draft.draft_id.clone();
         self.with_registry(|registry| {
-            registry.insert(draft);
+            registry.insert(draft)?;
             Ok(())
         })??;
         self.analyze_draft(&draft_id).await
@@ -2955,7 +2997,7 @@ impl WorkflowOnboardingService {
         };
         let draft_id = draft.draft_id.clone();
         self.with_registry(|registry| {
-            registry.insert(draft);
+            registry.insert(draft)?;
             Ok(())
         })??;
         self.get(&draft_id)
@@ -3044,7 +3086,7 @@ impl WorkflowOnboardingService {
         };
         let draft_id = draft.draft_id.clone();
         self.with_registry(|registry| {
-            registry.insert(draft);
+            registry.insert(draft)?;
             Ok(())
         })??;
         let (inference, current) = self.run_current_inference(&draft_id, false).await?;
@@ -4199,7 +4241,14 @@ impl WorkflowOnboardingService {
                 "workflow onboarding registry lock was poisoned",
             )
         })?;
-        Ok(action(&mut registry))
+        let result = action(&mut registry);
+        if registry.source_store.is_some() {
+            for draft in registry.drafts.values_mut() {
+                draft.raw_bytes.clear();
+                draft.raw_bytes.shrink_to_fit();
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -6264,6 +6313,7 @@ fn evaluate_capability(
     evaluate_capability_with_schema(workflow, nodes, &schema, &BTreeSet::new())
 }
 
+#[cfg(test)]
 fn evaluate_capability_with_dynamic_targets(
     workflow: &WorkflowDocument,
     nodes: &[WorkflowNodeView],
@@ -6535,6 +6585,7 @@ fn unresolved_output_root_capability(
     }
 }
 
+#[cfg(test)]
 fn enrich_nodes_with_capability(nodes: &mut [WorkflowNodeView], object_info: &Value) {
     let schema = RecognitionSchemaContext::parse(object_info);
     enrich_nodes_with_schema(nodes, &schema);
@@ -7087,7 +7138,8 @@ fn slugify(value: &str) -> String {
 }
 
 fn filename_stem(value: &str) -> String {
-    Path::new(value)
+    // Imported filenames can come from another OS, not the host filesystem.
+    Path::new(value.rsplit(['/', '\\']).next().unwrap_or(value))
         .file_stem()
         .and_then(|stem| stem.to_str())
         .map(str::to_owned)
@@ -7095,7 +7147,7 @@ fn filename_stem(value: &str) -> String {
 }
 
 fn safe_filename(value: &str) -> String {
-    Path::new(value)
+    Path::new(value.rsplit(['/', '\\']).next().unwrap_or(value))
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
@@ -9910,47 +9962,49 @@ outputs: []
             let raw_bytes = br#"{"1":{"inputs":{},"class_type":"Test"}}"#.to_vec();
             let recognition =
                 WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
-            registry.insert(WorkflowOnboardingDraft {
-                draft_id: id,
-                raw_bytes,
-                normalized_api: Some(workflow),
-                workflow_sha256: "sha".to_owned(),
-                raw_sha256: "sha".to_owned(),
-                original_filename: "test.json".to_owned(),
-                source_format: ComfyWorkflowInputFormat::Api,
-                schema_source: "NONE".to_owned(),
-                schema_fingerprint: None,
-                recognized_at: None,
-                workflow_format_version: None,
-                frontend_version: None,
-                compatibility_context: None,
-                normalization_state: WorkflowNormalizationState::NormalizedApiReady,
-                normalization_diagnostics: Vec::new(),
-                ui_features: Vec::new(),
-                nodes: Vec::new(),
-                manifest: WorkflowManifest {
-                    schema_version: 1,
-                    id: "wfl_test".to_owned(),
-                    name: "Test".to_owned(),
-                    workflow_version: "1.0.0".to_owned(),
-                    recipe_version: "1.0.0".to_owned(),
-                    category: "image".to_owned(),
-                    mode: "text_to_image".to_owned(),
-                },
-                recipe_id: "rcp_test".to_owned(),
-                allow_existing_workflow_sha: false,
-                allocate_version_at_commit: false,
-                capability: CapabilityCheckView {
-                    state: CapabilityState::NotChecked,
-                    checked_at: None,
-                    issues: Vec::new(),
-                    profile: None,
-                },
-                input_mappings: Vec::new(),
-                output_mappings: Vec::new(),
-                analysis: None,
-                recognition,
-            });
+            registry
+                .insert(WorkflowOnboardingDraft {
+                    draft_id: id,
+                    raw_bytes,
+                    normalized_api: Some(workflow),
+                    workflow_sha256: "sha".to_owned(),
+                    raw_sha256: "sha".to_owned(),
+                    original_filename: "test.json".to_owned(),
+                    source_format: ComfyWorkflowInputFormat::Api,
+                    schema_source: "NONE".to_owned(),
+                    schema_fingerprint: None,
+                    recognized_at: None,
+                    workflow_format_version: None,
+                    frontend_version: None,
+                    compatibility_context: None,
+                    normalization_state: WorkflowNormalizationState::NormalizedApiReady,
+                    normalization_diagnostics: Vec::new(),
+                    ui_features: Vec::new(),
+                    nodes: Vec::new(),
+                    manifest: WorkflowManifest {
+                        schema_version: 1,
+                        id: "wfl_test".to_owned(),
+                        name: "Test".to_owned(),
+                        workflow_version: "1.0.0".to_owned(),
+                        recipe_version: "1.0.0".to_owned(),
+                        category: "image".to_owned(),
+                        mode: "text_to_image".to_owned(),
+                    },
+                    recipe_id: "rcp_test".to_owned(),
+                    allow_existing_workflow_sha: false,
+                    allocate_version_at_commit: false,
+                    capability: CapabilityCheckView {
+                        state: CapabilityState::NotChecked,
+                        checked_at: None,
+                        issues: Vec::new(),
+                        profile: None,
+                    },
+                    input_mappings: Vec::new(),
+                    output_mappings: Vec::new(),
+                    analysis: None,
+                    recognition,
+                })
+                .unwrap();
         }
         assert_eq!(registry.order.len(), MAX_ONBOARDING_DRAFTS);
         assert!(!registry.drafts.contains_key("onb_0"));
@@ -10622,3 +10676,55 @@ outputs: []
 #[path = "workflow_onboarding_recipe_repair.rs"]
 mod recipe_repair;
 pub use recipe_repair::{RecipeRepairCandidate, RecipeRepairKind, RecipeRepairOutcome};
+
+#[cfg(test)]
+mod pr_e_path_tests {
+    use super::*;
+    #[test]
+    fn pr_e_foreign_filename_separators_are_host_independent() {
+        for name in [
+            r"C:\Users\x\flow.json",
+            "/home/x/flow.json",
+            "/Users/x/flow.json",
+            "flow.json",
+        ] {
+            assert_eq!(filename_stem(name), "flow");
+            assert_eq!(safe_filename(name), "flow.json");
+        }
+    }
+}
+
+#[cfg(test)]
+mod pr_e_draft_residency_tests {
+    use super::*;
+    #[test]
+    fn pr_e_draft_registry_keeps_raw_on_disk_and_normalized_separate() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            crate::infrastructure::filesystem::FileSystemWorkflowDraftStore::new(
+                dir.path().to_owned(),
+            ),
+        );
+        let mut registry = WorkflowOnboardingRegistry {
+            source_store: Some(store),
+            ..Default::default()
+        };
+        let raw = r#"{"1":{"class_type":"Test","inputs":{"text":"original"}}}"#;
+        let mut draft = runtime_check_draft(raw).unwrap();
+        let id = draft.draft_id.clone();
+        draft.normalized_api = Some(
+            validate_api_workflow(
+                json!({"1":{"class_type":"Test","inputs":{"text":"normalized"}}}),
+            )
+            .unwrap(),
+        );
+        registry.insert(draft).unwrap();
+        assert!(registry.drafts[&id].raw_bytes.is_empty());
+        let loaded = registry.get(&id).unwrap();
+        assert_eq!(loaded.raw_bytes, raw.as_bytes());
+        assert_eq!(
+            loaded.normalized_workflow().unwrap().value()["1"]["inputs"]["text"],
+            "normalized"
+        );
+    }
+}

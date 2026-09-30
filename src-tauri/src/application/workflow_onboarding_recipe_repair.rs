@@ -280,7 +280,7 @@ impl WorkflowOnboardingService {
         draft.manifest = manifest;
         let draft_for_registry = draft.clone();
         self.with_registry(|registry| {
-            registry.insert(draft_for_registry);
+            registry.insert(draft_for_registry)?;
             Ok(())
         })
         .and_then(|result| result)
@@ -437,16 +437,18 @@ fn confident_analysis_target(
     semantic_key: &str,
     item_index: Option<usize>,
 ) -> Option<(String, String)> {
-    context
+    let targets = context
         .analysis
         .inputs
         .iter()
-        .find(|input| {
+        .filter(|input| {
             input.semantic_key == semantic_key
                 && input.item_index == item_index
                 && input.confidence == RecognitionConfidence::High
         })
         .map(|input| (input.node_id.clone(), input.input_name.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    (targets.len() == 1).then(|| targets.into_iter().next().unwrap())
 }
 
 fn retarget_text_mappings(
@@ -476,7 +478,21 @@ fn retarget_text_mappings(
                 mapping.target_input = input;
                 changed.push(mapping.semantic_key.clone());
             }
-            _ if !mapping.required => removed.push(mapping.semantic_key.clone()),
+            _ if !mapping.required
+                && context
+                    .analysis
+                    .inputs
+                    .iter()
+                    .filter(|input| {
+                        input.semantic_key == mapping.semantic_key
+                            && input.item_index == mapping.item_index
+                            && input.confidence == RecognitionConfidence::High
+                    })
+                    .count()
+                    == 0 =>
+            {
+                removed.push(mapping.semantic_key.clone())
+            }
             _ => review.push(mapping.semantic_key.clone()),
         }
     }
@@ -544,7 +560,7 @@ fn repair_prompt_roles(
             .analysis
             .inputs
             .iter()
-            .find(|input| {
+            .filter(|input| {
                 input.semantic_key == mapping.semantic_key
                     && input.item_index.is_none()
                     && input.confidence == RecognitionConfidence::High
@@ -553,7 +569,10 @@ fn repair_prompt_roles(
                         .iter()
                         .any(|item| item.kind == EvidenceKind::GRAPH_CONDITIONING_ROLE)
             })
-            .map(|input| (input.node_id.clone(), input.input_name.clone()));
+            .map(|input| (input.node_id.clone(), input.input_name.clone()))
+            .collect::<BTreeSet<_>>();
+        let ambiguous = replacement.len() > 1;
+        let replacement = (replacement.len() == 1).then(|| replacement.into_iter().next().unwrap());
         match replacement {
             Some((node, input))
                 if (node.as_str(), input.as_str())
@@ -565,7 +584,7 @@ fn repair_prompt_roles(
                 mapping.target_input = input;
                 changed.push(mapping.semantic_key.clone());
             }
-            _ if !mapping.required => removed.push(mapping.semantic_key.clone()),
+            _ if !mapping.required && !ambiguous => removed.push(mapping.semantic_key.clone()),
             _ => review.push(mapping.semantic_key.clone()),
         }
     }
@@ -812,6 +831,53 @@ mod tests {
             node_id: node.to_owned(),
             required: true,
         }
+    }
+
+    #[test]
+    fn pr_e_repair_target_selection_is_unique_and_order_independent() {
+        let workflow = document(t2i());
+        let bytes = serde_json::to_vec(workflow.value()).unwrap();
+        let mut analysis = WorkflowAnalysisService::analyze_workflow(&workflow, &bytes);
+        let mut first = analysis.inputs.first().unwrap().clone();
+        first.semantic_key = "prompt".to_owned();
+        first.item_index = None;
+        first.confidence = RecognitionConfidence::High;
+        first.node_id = "6".to_owned();
+        first.input_name = "text".to_owned();
+        let mut second = first.clone();
+        second.node_id = "7".to_owned();
+        analysis.inputs = vec![first.clone(), second.clone()];
+        assert!(confident_analysis_target(
+            &RepairContext {
+                workflow: &workflow,
+                analysis: &analysis
+            },
+            "prompt",
+            None
+        )
+        .is_none());
+        analysis.inputs.reverse();
+        assert!(confident_analysis_target(
+            &RepairContext {
+                workflow: &workflow,
+                analysis: &analysis
+            },
+            "prompt",
+            None
+        )
+        .is_none());
+        analysis.inputs = vec![first.clone(), first];
+        assert_eq!(
+            confident_analysis_target(
+                &RepairContext {
+                    workflow: &workflow,
+                    analysis: &analysis
+                },
+                "prompt",
+                None
+            ),
+            Some(("6".to_owned(), "text".to_owned()))
+        );
     }
 
     #[test]

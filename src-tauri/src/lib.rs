@@ -543,7 +543,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             )
             .with_runtime_state(runtime_repository.clone(), runtime_state_repository.clone())
-            .with_registry_service(workflow_registry_service.clone()));
+            .with_registry_service(workflow_registry_service.clone())
+            .with_draft_store(Arc::new(infrastructure::filesystem::FileSystemWorkflowDraftStore::new(data_dirs.root.join("drafts")))));
             let workflow_lifecycle_service = Arc::new(WorkflowLifecycleService::new(
                 workflow_library_source.clone(),
                 workflow_library_service.clone(),
