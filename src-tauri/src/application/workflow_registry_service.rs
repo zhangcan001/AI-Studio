@@ -526,6 +526,10 @@ impl WorkflowRegistryService {
     /// Workflow row.
     pub async fn list(&self) -> Result<Vec<WorkflowRegistryView>, WorkflowRegistryServiceError> {
         let (versions, states) = self.load_runtime().await?;
+        let artifacts = match &self.runtime_artifact_repository {
+            Some(repository) => repository.list().await?,
+            None => Vec::new(),
+        };
         let recipe_states = self.recipe_runtime_states().await?;
         let promotions = match &self.recipe_promotion_repository {
             Some(repository) => repository
@@ -560,6 +564,7 @@ impl WorkflowRegistryService {
                         &recipe_states,
                         &promotions,
                         Some(&record),
+                        &artifacts,
                     )
                     .await?,
                 );
@@ -574,6 +579,7 @@ impl WorkflowRegistryService {
                     &recipe_states,
                     &promotions,
                     None,
+                    &artifacts,
                 )
                 .await?,
             );
@@ -590,11 +596,50 @@ impl WorkflowRegistryService {
         &self,
         workflow_id: &str,
     ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
-        self.list()
+        let versions = self
+            .runtime_repository
+            .list_versions_for_workflow(workflow_id)
+            .await?;
+        if versions.is_empty() {
+            return Err(WorkflowRegistryServiceError::WorkflowNotFound(
+                workflow_id.to_owned(),
+            ));
+        }
+        let record = match &self.registry_repository {
+            Some(repository) => repository.get(workflow_id).await?,
+            None => None,
+        };
+        let states = self
+            .state_repository
+            .list_states()
             .await?
             .into_iter()
-            .find(|workflow| workflow.workflow_id == workflow_id)
-            .ok_or_else(|| WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned()))
+            .map(|state| (state.workflow_version_id.clone(), state))
+            .collect();
+        let artifacts = match &self.runtime_artifact_repository {
+            Some(repository) => repository.list().await?,
+            None => Vec::new(),
+        };
+        let recipe_states = self.recipe_runtime_states().await?;
+        let promotions = match &self.recipe_promotion_repository {
+            Some(repository) => repository
+                .list()
+                .await?
+                .into_iter()
+                .map(|promotion| (promotion.workflow_version_id, promotion.recipe_id))
+                .collect(),
+            None => HashMap::new(),
+        };
+        self.build_view(
+            workflow_id,
+            versions,
+            &states,
+            &recipe_states,
+            &promotions,
+            record.as_ref(),
+            &artifacts,
+        )
+        .await
     }
 
     pub async fn get_saved_version_details(
@@ -737,6 +782,19 @@ impl WorkflowRegistryService {
         } else {
             BTreeMap::new()
         };
+        // One artifact read per identity inventory, not one query per recipe.
+        let mut artifacts_by_recipe = BTreeMap::<_, Vec<_>>::new();
+        if let Some(repository) = &self.runtime_artifact_repository {
+            for artifact in repository.list().await? {
+                artifacts_by_recipe
+                    .entry((
+                        artifact.workflow_version_id.clone(),
+                        artifact.recipe_id.clone(),
+                    ))
+                    .or_default()
+                    .push(artifact);
+            }
+        }
         let mut candidates = Vec::new();
         for version in versions {
             let Some(record) = registry_records.get(&version.workflow_id) else {
@@ -774,14 +832,12 @@ impl WorkflowRegistryService {
                 continue;
             };
             for recipe in version.recipes {
-                let artifacts = match &self.runtime_artifact_repository {
-                    Some(repository) => {
-                        repository
-                            .list_for_recipe(&version.workflow_version_id, &recipe.recipe_id)
-                            .await?
-                    }
-                    None => Vec::new(),
-                };
+                let artifacts = artifacts_by_recipe
+                    .remove(&(
+                        version.workflow_version_id.clone(),
+                        recipe.recipe_id.clone(),
+                    ))
+                    .unwrap_or_default();
                 if artifacts.is_empty() {
                     candidates.push(WorkflowRegistryIdentityCandidate {
                         workflow_id: record.id.clone(),
@@ -2065,6 +2121,7 @@ impl WorkflowRegistryService {
         recipe_states: &HashMap<(String, String), WorkflowRecipeRuntimeState>,
         promotions: &HashMap<String, String>,
         record: Option<&crate::application::ports::WorkflowRegistryRecord>,
+        artifacts: &[crate::application::ports::WorkflowRuntimeArtifactRecord],
     ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
         versions.sort_by(|left, right| {
             compare_versions(&left.workflow_version, &right.workflow_version)
@@ -2074,15 +2131,15 @@ impl WorkflowRegistryService {
             .iter()
             .map(|version| version_view(version, states, recipe_states, promotions))
             .collect::<Vec<_>>();
-        if let Some(repository) = &self.runtime_artifact_repository {
+        if self.runtime_artifact_repository.is_some() {
             for version in &mut version_views {
-                let artifacts = repository
-                    .list_for_workflow_version(&version.workflow_version_id)
-                    .await?;
                 for recipe in &mut version.recipes {
                     let matching = artifacts
                         .iter()
-                        .filter(|artifact| artifact.recipe_id == recipe.recipe_id)
+                        .filter(|artifact| {
+                            artifact.workflow_version_id == version.workflow_version_id
+                                && artifact.recipe_id == recipe.recipe_id
+                        })
                         .collect::<Vec<_>>();
                     recipe.package_name =
                         (matching.len() == 1).then(|| matching[0].package_name.clone());

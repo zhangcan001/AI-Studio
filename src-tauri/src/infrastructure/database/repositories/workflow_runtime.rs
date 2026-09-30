@@ -21,6 +21,7 @@ impl SqliteWorkflowRuntimeRepository {
     async fn load(
         &self,
         workflow_version_id: Option<&str>,
+        workflow_id: Option<&str>,
     ) -> Result<Vec<RuntimeWorkflowVersionRecord>, RepositoryError> {
         let rows = sqlx::query_as::<_, RuntimeWorkflowRow>(
             "SELECT
@@ -49,11 +50,13 @@ impl SqliteWorkflowRuntimeRepository {
              FROM workflows w
              INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
              LEFT JOIN recipes r ON r.workflow_version_id = wv.id
-             WHERE (? IS NULL OR wv.id = ?)
+             WHERE (? IS NULL OR wv.id = ?) AND (? IS NULL OR w.id = ?)
              ORDER BY w.name ASC, wv.version ASC, r.version ASC",
         )
         .bind(workflow_version_id)
         .bind(workflow_version_id)
+        .bind(workflow_id)
+        .bind(workflow_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
@@ -110,7 +113,14 @@ impl SqliteWorkflowRuntimeRepository {
 #[async_trait]
 impl WorkflowRuntimeRepository for SqliteWorkflowRuntimeRepository {
     async fn list_versions(&self) -> Result<Vec<RuntimeWorkflowVersionRecord>, RepositoryError> {
-        self.load(None).await
+        self.load(None, None).await
+    }
+
+    async fn list_versions_for_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Vec<RuntimeWorkflowVersionRecord>, RepositoryError> {
+        self.load(None, Some(workflow_id)).await
     }
 
     async fn find_version(
@@ -118,7 +128,7 @@ impl WorkflowRuntimeRepository for SqliteWorkflowRuntimeRepository {
         workflow_version_id: &str,
     ) -> Result<Option<RuntimeWorkflowVersionRecord>, RepositoryError> {
         Ok(self
-            .load(Some(workflow_version_id))
+            .load(Some(workflow_version_id), None)
             .await?
             .into_iter()
             .next())

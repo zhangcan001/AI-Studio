@@ -240,6 +240,11 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
     );
     let bindings: Arc<dyn ai_studio_lib::application::ports::ProjectWorkflowBindingRepository> =
         Arc::new(SqliteProjectWorkflowBindingRepository::new(pool.clone()));
+    let counted_artifacts = Arc::new(CountingArtifacts {
+        inner: artifacts,
+        lists: std::sync::atomic::AtomicUsize::new(0),
+        individual_reads: std::sync::atomic::AtomicUsize::new(0),
+    });
     let registry = WorkflowRegistryService::new(runtime, states, bindings, Arc::new(SystemClock))
         .with_registry_repository(Arc::new(SqliteWorkflowRegistryRepository::new(
             pool.clone(),
@@ -248,9 +253,38 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
             pool.clone(),
         )))
         .with_recipe_runtime_state_repository(recipe_states)
-        .with_runtime_artifact_repository(Arc::new(artifacts));
+        .with_runtime_artifact_repository(counted_artifacts.clone());
 
     let views = registry.list().await.expect("registry list should succeed");
+    assert_eq!(
+        counted_artifacts
+            .lists
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    assert_eq!(
+        counted_artifacts
+            .individual_reads
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(registry.get("wfl_dev083").await.unwrap(), views[0]);
+    let before = counted_artifacts
+        .lists
+        .load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(registry.identity_candidates().await.unwrap().len(), 3);
+    assert_eq!(
+        counted_artifacts
+            .lists
+            .load(std::sync::atomic::Ordering::SeqCst),
+        before + 1
+    );
+    assert_eq!(
+        counted_artifacts
+            .individual_reads
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
     assert_eq!(views.len(), 1, "one logical workflow must produce one row");
     assert_eq!(views[0].versions.len(), 2);
     assert_eq!(views[0].recipes.len(), 3);
@@ -456,5 +490,63 @@ fn binding_commands_expose_only_slot_occ_mutations() {
         assert!(registration.contains(&format!("commands::project::{name}")));
         assert!(commands.contains(&format!("fn {name}")));
         assert!(client.contains(&format!("\"{name}\"")));
+    }
+}
+
+struct CountingArtifacts {
+    inner: SqliteWorkflowRuntimeArtifactRepository,
+    lists: std::sync::atomic::AtomicUsize,
+    individual_reads: std::sync::atomic::AtomicUsize,
+}
+#[async_trait::async_trait]
+impl WorkflowRuntimeArtifactRepository for CountingArtifacts {
+    async fn list(
+        &self,
+    ) -> Result<
+        Vec<WorkflowRuntimeArtifactRecord>,
+        ai_studio_lib::application::ports::RepositoryError,
+    > {
+        self.lists.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.list().await
+    }
+    async fn list_for_workflow_version(
+        &self,
+        id: &str,
+    ) -> Result<
+        Vec<WorkflowRuntimeArtifactRecord>,
+        ai_studio_lib::application::ports::RepositoryError,
+    > {
+        self.individual_reads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.list_for_workflow_version(id).await
+    }
+    async fn list_for_recipe(
+        &self,
+        id: &str,
+        recipe: &str,
+    ) -> Result<
+        Vec<WorkflowRuntimeArtifactRecord>,
+        ai_studio_lib::application::ports::RepositoryError,
+    > {
+        self.individual_reads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.list_for_recipe(id, recipe).await
+    }
+    async fn find_exact(
+        &self,
+        id: &str,
+        recipe: &str,
+        package: &str,
+    ) -> Result<
+        Option<WorkflowRuntimeArtifactRecord>,
+        ai_studio_lib::application::ports::RepositoryError,
+    > {
+        self.inner.find_exact(id, recipe, package).await
+    }
+    async fn upsert(
+        &self,
+        record: &WorkflowRuntimeArtifactRecord,
+    ) -> Result<(), ai_studio_lib::application::ports::RepositoryError> {
+        self.inner.upsert(record).await
     }
 }

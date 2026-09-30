@@ -56,6 +56,18 @@ pub struct WorkflowDeletionCounts {
 pub trait WorkflowRuntimeRepository: Send + Sync {
     async fn list_versions(&self) -> Result<Vec<RuntimeWorkflowVersionRecord>, RepositoryError>;
 
+    async fn list_versions_for_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Vec<RuntimeWorkflowVersionRecord>, RepositoryError> {
+        Ok(self
+            .list_versions()
+            .await?
+            .into_iter()
+            .filter(|version| version.workflow_id == workflow_id)
+            .collect())
+    }
+
     async fn find_version(
         &self,
         workflow_version_id: &str,
