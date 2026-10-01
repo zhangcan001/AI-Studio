@@ -1,6 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   getComfyStatus,
+  getAsset,
   getRuntimeActivityStatus,
   getProductionAdmissionStatus,
   getConsistencyScopeBinding,
@@ -28,14 +29,12 @@ import type { RecipeViewModel } from "../types/generation";
 import type { AssetView } from "../types/asset";
 import type { TemplateProjectResult } from "../types/organization";
 import type { ProjectCommandCenterNavigationRequest } from "../features/projects/ProjectCommandCenter";
-import type { ShotContextPathItem } from "../features/shots/ShotWorkspace";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
 import { useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
-import type { ProjectCommandCenterCollectionFilter } from "../types/projectCommandCenter";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import type { ShotStage } from "../types/shot";
 import type {
@@ -51,11 +50,12 @@ import type {
   ConsistencyReferenceSetOption,
   ConsistencyScopeRef,
 } from "../types/consistencyBindings";
-import { resolveWorkspaceNavigation, type Workspace } from "../types/workspaceResume";
+import { type Workspace } from "../types/workspaceResume";
 import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
-import { StudioShell } from "./StudioShell";
+import { ShellHost, readShellMode, SHELL_MODE_KEY } from "./ShellHost";
+import { ProjectOverviewPage } from "./v3/ProjectOverviewPage";
 import type { StudioBreadcrumbItem } from "../components/studio/StudioTopBar";
 import {
   defaultStudioSectionForWorkspace,
@@ -63,6 +63,13 @@ import {
   studioRouteForSection,
   type StudioSection,
 } from "./studioNavigation";
+import { useAppRoute } from "./routes/useAppRoute";
+import { useDraftConfirmation } from "./routes/useDraftConfirmation";
+import { fromLegacyLocation, toLegacyLocation, type LegacyLocation } from "./routes/legacyAdapter";
+import { readRouteResume, resolveResume, validateResumeChildren } from "./routes/resumeAdapter";
+import { productClient } from "../product/client";
+import { routeProjectId } from "./routes/types";
+import { routeTitle } from "./routes/selectors";
 import "./App.css";
 import "../styles/studioTokens.css";
 import "../styles/uiPolish.css";
@@ -80,20 +87,6 @@ const WorkflowWorkspace = lazy(() => import("../features/workflows/WorkflowWorks
 const SettingsWorkspace = lazy(() => import("../features/settings/SettingsWorkspace").then(({ SettingsWorkspace }) => ({ default: SettingsWorkspace })));
 const ShotWorkspace = lazy(() => import("../features/shots/ShotWorkspace").then(({ ShotWorkspace }) => ({ default: ShotWorkspace })));
 
-const workspaceLabels: Record<Workspace, string> = {
-  "command-center": "项目中心",
-  studio: "批量图片",
-  video: "批量视频",
-  shots: "镜头生产",
-  assets: "资产库",
-  prompts: "提示词工作台",
-  tools: "本地工具中心",
-  tasks: "任务",
-  projects: "项目",
-  workflows: "工作流",
-  settings: "设置",
-};
-
 export function workflowUseProjectDestination(
   catalog: readonly Pick<RecipeViewModel, "workflowId" | "recipeId">[],
   workflowId: string,
@@ -104,65 +97,8 @@ export function workflowUseProjectDestination(
     : undefined;
 }
 
-export interface ResolvedProjectCommandCenterNavigation {
-  projectId?: string;
-  workspace: Workspace;
-  section: StudioSection;
-  shotId?: string;
-  batchId?: string;
-  itemId?: string;
-  reviewId?: string;
-  taskId?: string;
-  assetId?: string;
-  stage?: string;
-  collectionFilter?: ProjectCommandCenterCollectionFilter;
-}
-
-export function resolveProjectCommandCenterNavigation(
-  request: ProjectCommandCenterNavigationRequest,
-): ResolvedProjectCommandCenterNavigation {
-  const reviewId = request.reviewId ?? request.itemId;
-  const target = {
-    ...(request.projectId ? { projectId: request.projectId } : {}),
-    shotId: request.shotId,
-    batchId: request.batchId,
-    ...(request.itemId ? { itemId: request.itemId } : {}),
-    ...(reviewId ? { reviewId } : {}),
-    ...(request.taskId ? { taskId: request.taskId } : {}),
-    ...(request.assetId ? { assetId: request.assetId } : {}),
-    ...(request.stage ? { stage: request.stage } : {}),
-    ...(request.collectionFilter ? { collectionFilter: request.collectionFilter } : {}),
-  };
-
-  // A review item is the primary target when present; task/batch/shot/asset
-  // IDs remain context and must not replace the review authority.
-  if (reviewId) return { ...target, workspace: "shots", section: "review" };
-  if (request.taskId) return { ...target, workspace: "tasks", section: "review" };
-  if (request.batchId) return { ...target, workspace: "shots", section: "production" };
-  if (request.assetId) return { ...target, workspace: "assets", section: "assets" };
-  if (request.shotId) {
-    const section = request.section === "production" ? "production" : "creation";
-    return { ...target, workspace: "shots", section };
-  }
-  if (request.collectionFilter?.kind === "tasks") return { ...target, workspace: "tasks", section: "review" };
-  if (request.collectionFilter?.kind === "review") return { ...target, workspace: "shots", section: "review" };
-  if (request.collectionFilter?.kind === "shots") {
-    const section = request.section === "production" ? "production" : "creation";
-    return { ...target, workspace: "shots", section };
-  }
-  if (request.section) {
-    const route = studioRouteForSection(request.section);
-    return { ...target, workspace: route.workspace, section: route.section };
-  }
-  if (request.destination === "studio" || request.destination === "shots") {
-    return { ...target, workspace: "shots", section: "creation" };
-  }
-  return {
-    ...target,
-    workspace: request.destination,
-    section: defaultStudioSectionForWorkspace(request.destination),
-  };
-}
+export { resolveProjectCommandCenterNavigation } from "./routes/commandCenterAdapter";
+import { resolveProjectCommandCenterNavigation } from "./routes/commandCenterAdapter";
 
 export type WorkflowDefaultStage = "IMAGE" | "VIDEO";
 export type WorkflowDefaultSelection = WorkflowDefaultStage | "DUAL" | "NONE";
@@ -212,16 +148,19 @@ function keepsNativeContextMenu(target: EventTarget | null): boolean {
 }
 
 function App() {
-  const [workspace, setWorkspace] = useState<Workspace>("command-center");
-  const [activeStudioSection, setActiveStudioSection] = useState<StudioSection>("project");
-  const [shotContextPath, setShotContextPath] = useState<ShotContextPathItem[]>([]);
-  const [shotContextTarget, setShotContextTarget] = useState<ShotContextPathItem>();
-  const [resumeShotId, setResumeShotId] = useState<string>();
+  const { confirm: confirmDraftDiscard, dialog: draftConfirmation } = useDraftConfirmation();
+  const { route, navigate: dispatchNavigate, restore, back, switchProject } = useAppRoute();
+  const [shellMode, setShellMode] = useState(readShellMode);
+  const location = useMemo(() => toLegacyLocation(route), [route]);
+  const workspace = location.workspace;
+  const activeStudioSection = location.section ?? defaultStudioSectionForWorkspace(workspace);
+  const resumeShotId = location.shotId;
+  const focusedTaskId = location.taskId;
+  const focusedProductionBatchId = location.batchId;
+  const focusedAssetId = location.assetId;
+  const focusedCollectionFilter = location.collectionFilter;
+  const [shotDraftDirty, setShotDraftDirty] = useState(false);
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
-  const [focusedTaskId, setFocusedTaskId] = useState<string>();
-  const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
-  const [focusedAssetId, setFocusedAssetId] = useState<string>();
-  const [focusedCollectionFilter, setFocusedCollectionFilter] = useState<ProjectCommandCenterCollectionFilter>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupAttempt, setStartupAttempt] = useState(0);
@@ -242,8 +181,8 @@ function App() {
   const [consistencyError, setConsistencyError] = useState<string>();
   const [productionAdmission, setProductionAdmission] = useState<ProductionAdmissionStatus>({ busy: false });
   const projects = useProjectStore((state) => state.projects);
-  const activeProjectId = useProjectStore((state) => state.activeProjectId);
-  const activeProject = useProjectStore((state) => state.activeProject());
+  const activeProjectId = routeProjectId(route);
+  const activeProject = projects.find((project) => project.id === activeProjectId);
   const projectLoading = useProjectStore((state) => state.loading);
   const projectError = useProjectStore((state) => state.error);
   const setProjects = useProjectStore((state) => state.setProjects);
@@ -252,9 +191,9 @@ function App() {
   const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
   const recentTasks = useTaskStore((state) => state.recentTasks);
   const loadWorkspaceResume = useWorkspaceResumeStore((state) => state.load);
-  const recordWorkspaceChange = useWorkspaceResumeStore((state) => state.recordWorkspaceChange);
-  const recordProjectChange = useWorkspaceResumeStore((state) => state.recordProjectChange);
-  const recordShotChange = useWorkspaceResumeStore((state) => state.recordShotChange);
+  useEffect(() => {
+    if (activeProjectId) useProjectStore.getState().setActiveProject(activeProjectId);
+  }, [activeProjectId]);
 
   const refreshProductionAdmission = useCallback(async () => {
     try {
@@ -332,22 +271,18 @@ function App() {
     void Promise.all([listProjects(), loadWorkspaceResume()])
       .then(async ([nextProjects, resume]) => {
         if (cancelled) return;
-        // An invalid project is deliberately passed through as an explicit empty
-        // preference so legacy localStorage cannot resurrect a deleted resume.
-        setProjects(nextProjects, resume.lastProjectId ?? "");
-        let shotIds: string[] | undefined;
-        if (
-          resume.lastWorkspace === "shots"
-          && resume.lastProjectId
-          && nextProjects.some((project) => project.id === resume.lastProjectId)
-        ) {
-          shotIds = await listShots(resume.lastProjectId).then((shots) => shots.map((shot) => shot.id)).catch(() => []);
-        }
-        if (cancelled) return;
-        const navigation = resolveWorkspaceNavigation(nextProjects, resume, shotIds);
-        setResumeShotId(navigation.shotId);
-        setWorkspace(navigation.workspace);
-        setActiveStudioSection(defaultStudioSectionForWorkspace(navigation.workspace));
+        const initial = resolveResume(readRouteResume(), resume, nextProjects.map((project) => project.id));
+        const initialProjectId = routeProjectId(initial);
+        setProjects(nextProjects, initialProjectId ?? "");
+        const checked = await validateResumeChildren(initial, {
+          shotIds: async (projectId) => (await listShots(projectId)).map((shot) => shot.id),
+          runExists: async (projectId, run) => { await productClient.run.get(projectId, run); },
+          assetExists: async (projectId, assetId) => { await getAsset(projectId, assetId); },
+        }).catch((resumeError: unknown) => {
+          if (!cancelled) setError(toUserMessage(resumeError));
+          return initial;
+        });
+        if (!cancelled) restore(checked);
       })
       .catch((loadError: unknown) => {
         if (!cancelled) {
@@ -362,7 +297,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [loadWorkspaceResume, setProjectError, setProjectLoading, setProjects]);
+  }, [loadWorkspaceResume, setProjectError, setProjectLoading, setProjects, restore]);
 
   useEffect(() => {
     setVideoBatchAssets([]);
@@ -478,113 +413,63 @@ function App() {
     return getShotContextDraft(activeProjectId ?? scope.scopeId, scope.scopeId, stage);
   }, [activeProjectId]);
 
-  function clearNavigationFocus() {
-    setResumeShotId(undefined);
-    setFocusedTaskId(undefined);
-    setFocusedProductionBatchId(undefined);
-    setFocusedAssetId(undefined);
-    setFocusedCollectionFilter(undefined);
+  async function allowProjectSwitch(projectId?: string) {
+    if (!projectId || projectId === activeProjectId) return true;
+    const studio = useStudioStore.getState();
+    if (studio.draftDirty && !await confirmDraftDiscard("当前项目有未保存的创作草稿。切换项目会放弃该草稿，是否继续？")) return false;
+    studio.resetDraft();
+    useTaskStore.getState().clear();
+    setVideoBatchAssets([]);
+    useProjectStore.getState().setActiveProject(projectId);
+    return true;
   }
-
-  function applyNavigationFocus(navigation: ResolvedProjectCommandCenterNavigation) {
-    setResumeShotId(navigation.shotId);
-    setFocusedTaskId(navigation.taskId);
-    setFocusedProductionBatchId(navigation.batchId);
-    setFocusedAssetId(navigation.assetId);
-    setFocusedCollectionFilter(navigation.collectionFilter);
-    if (navigation.shotId) void recordShotChange(navigation.shotId);
-  }
-
-  function navigateToRoute(
-    nextWorkspace: Workspace,
-    nextSection = defaultStudioSectionForWorkspace(nextWorkspace),
-    preserveFocus = false,
-  ) {
-    if (!preserveFocus) clearNavigationFocus();
-    if (nextWorkspace === workspace && nextSection === activeStudioSection) return;
-    setWorkspace(nextWorkspace);
-    setActiveStudioSection(nextSection);
-    if (nextWorkspace !== "shots") {
-      setShotContextPath([]);
-      setShotContextTarget(undefined);
+  async function navigate(next: import("./routes/types").AppRoute) {
+    const nextLegacy = toLegacyLocation(next);
+    if (shotDraftDirty && (nextLegacy.workspace !== "shots" || nextLegacy.projectId !== activeProjectId || nextLegacy.shotId !== resumeShotId || nextLegacy.section !== activeStudioSection)) {
+      if (!await confirmDraftDiscard("镜头有未保存的修改。离开会放弃这些修改，是否继续？")) return false;
     }
-    void recordWorkspaceChange(nextWorkspace, activeProjectId);
+    if (!await allowProjectSwitch(routeProjectId(next))) return false;
+    dispatchNavigate(next);
+    return true;
+  }
+  function navigateLegacy(target: LegacyLocation) {
+    const projectId = target.projectId ?? activeProjectId ?? useProjectStore.getState().activeProjectId;
+    if (projectId && !projects.some((project) => project.id === projectId)) {
+      setError("目标项目不存在或已不可用。");
+      return;
+    }
+    // Explicit user navigation event, not an effect syncing legacy state back.
+    const next = fromLegacyLocation({ ...target, projectId });
+    return navigate(next.kind === "system-settings" ? { ...next, returnTo: route.kind === "system-settings" ? route.returnTo : route } : next);
   }
 
   function navigateToWorkspace(nextWorkspace: Workspace) {
-    navigateToRoute(nextWorkspace);
+    navigateLegacy({ workspace: nextWorkspace });
   }
 
   function navigateToStudioSection(section: StudioSection) {
-    const route = studioRouteForSection(section);
-    navigateToRoute(route.workspace, route.section);
+    const target = studioRouteForSection(section);
+    navigateLegacy(target);
   }
 
-  function openTask(taskId: string) {
-    applyNavigationFocus({ workspace: "tasks", section: "review", taskId });
-    navigateToRoute("tasks", "review", true);
-  }
-
-  function openShot(shotId: string, section: StudioSection = "creation") {
-    applyNavigationFocus({ workspace: "shots", section, shotId });
-    navigateToRoute("shots", section, true);
-  }
-
+  function openTask(taskId: string) { navigateLegacy({ workspace: "tasks", section: "review", taskId }); }
+  function openShot(shotId: string, section: StudioSection = "creation") { navigateLegacy({ workspace: "shots", section, shotId }); }
   function handleShotSelected(shotId?: string) {
-    setResumeShotId(shotId);
-    void recordShotChange(shotId);
+    if (route.kind === "create") navigate({ ...route, shotId });
   }
-
-  function openProject(
-    projectId: string,
-    destination: Workspace = "command-center",
-    section: StudioSection = defaultStudioSectionForWorkspace(destination),
-  ) {
-    if (projectId === activeProjectId) {
-      navigateToRoute(destination, section);
-      return;
-    }
-    useTaskStore.getState().clear();
-    useStudioStore.getState().resetDraft();
-    useStudioStore.getState().clearPendingAssetIntent();
-    clearNavigationFocus();
-    setVideoBatchAssets([]);
-    useProjectStore.getState().setActiveProject(projectId);
-    setProjectContextLoading(true);
+  async function openProject(projectId: string, destination?: Workspace, section?: StudioSection) {
+    if (!projects.some((project) => project.id === projectId)) return;
+    if (destination) { await navigateLegacy({ projectId, workspace: destination, section }); return; }
+    if (shotDraftDirty && projectId !== activeProjectId && !await confirmDraftDiscard("镜头有未保存的修改。切换项目会放弃这些修改，是否继续？")) return;
+    if (!await allowProjectSwitch(projectId)) return;
     setError(null);
-    setResumeShotId(undefined);
-    setWorkspace(destination);
-    setActiveStudioSection(section);
-    if (destination !== "shots") {
-      setShotContextPath([]);
-      setShotContextTarget(undefined);
-    }
-    void recordProjectChange(projectId, destination);
+    switchProject(projectId);
   }
-
   function openProductionQueue() {
-    const { batchId, projectId } = productionAdmission;
-    if (batchId && projectId) {
-      const navigation: ResolvedProjectCommandCenterNavigation = { workspace: "shots", section: "production", batchId };
-      if (projectId !== activeProjectId) {
-        openProject(projectId, "shots", "production");
-        applyNavigationFocus(navigation);
-      } else {
-        applyNavigationFocus(navigation);
-        navigateToRoute("shots", "production", true);
-      }
-      return;
-    }
-    navigateToStudioSection("production");
+    navigateLegacy({ projectId: productionAdmission.projectId, workspace: "shots", section: "production", batchId: productionAdmission.batchId });
   }
-
   function openProductionQueueFromShot(batchId?: string) {
-    if (batchId) {
-      applyNavigationFocus({ workspace: "shots", section: "production", batchId });
-      navigateToRoute("shots", "production", true);
-      return;
-    }
-    navigateToStudioSection("production");
+    navigateLegacy({ workspace: "shots", section: "production", batchId });
   }
 
   async function reconnectComfy() {
@@ -779,25 +664,18 @@ function App() {
 
   function handleProjectRestored(project: ProjectView) {
     useProjectStore.getState().upsertProject(project);
-    setResumeShotId(undefined);
-    setWorkspace("shots");
-    setActiveStudioSection("creation");
-    void recordProjectChange(project.id, "shots");
+    navigate(fromLegacyLocation({ projectId: project.id, workspace: "shots", section: "creation" }));
   }
 
-  function handleTemplateProjectCreated(result: TemplateProjectResult) {
+  async function handleTemplateProjectCreated(result: TemplateProjectResult) {
     useProjectStore.getState().upsertProject(result.project);
-    setResumeShotId(undefined);
-    setWorkspace("shots");
-    setActiveStudioSection("creation");
-    void recordProjectChange(result.project.id, "shots");
+    if (!await navigate({ kind: "create", projectId: result.project.id, stage: "image", surface: "batch" })) return;
     const workflow = catalog.find((item) => item.workflowVersionId === result.workflowVersionId && item.recipeId === result.recipeId);
     if (!workflow) {
       setError("模板项目已创建，但工作流当前不可用。");
       return;
     }
     useStudioStore.getState().loadDraft(workflow, result.values);
-    navigateToWorkspace("studio");
     setError(null);
   }
 
@@ -807,34 +685,10 @@ function App() {
     setError(null);
   }
 
-  function openAssetFromShot(assetId: string) {
-    applyNavigationFocus({ workspace: "assets", section: "assets", assetId });
-    navigateToRoute("assets", "assets", true);
-  }
-
-  function openShotFromAsset(shotId: string) {
-    openShot(shotId);
-  }
-
+  function openAssetFromShot(assetId: string) { navigateLegacy({ workspace: "assets", assetId }); }
+  function openShotFromAsset(shotId: string) { openShot(shotId); }
   function navigateFromCommandCenter(request: ProjectCommandCenterNavigationRequest) {
-    const navigation = resolveProjectCommandCenterNavigation(request);
-    const targetProjectId = navigation.projectId ?? activeProjectId;
-    if (request.projectId && !projects.some((project) => project.id === request.projectId)) {
-      clearNavigationFocus();
-      setError("目标项目不存在或已不可用。");
-      return;
-    }
-    if (targetProjectId && targetProjectId !== activeProjectId) {
-      openProject(
-        targetProjectId,
-        navigation.workspace,
-        navigation.section,
-      );
-      applyNavigationFocus(navigation);
-      return;
-    }
-    applyNavigationFocus(navigation);
-    navigateToRoute(navigation.workspace, navigation.section, true);
+    navigateLegacy(resolveProjectCommandCenterNavigation(request));
   }
 
   const comfy = bootstrapState?.comfy;
@@ -846,30 +700,10 @@ function App() {
     .includes(task.status),
   );
 
-  const handleShotContextPathChange = useCallback((path: ShotContextPathItem[]) => {
-    setShotContextPath(path);
-  }, []);
-  const handleShotContextPathSelect = useCallback((item: ShotContextPathItem) => {
-    setShotContextTarget({ ...item });
-  }, []);
 
   const breadcrumbs: StudioBreadcrumbItem[] = activeProject
-    ? [
-      {
-        label: projectDisplayName(activeProject.id, activeProject.name),
-        onClick: () => navigateToStudioSection("project"),
-      },
-      ...(workspace === "shots"
-        ? shotContextPath.length
-          ? shotContextPath.map((item, index) => ({
-            label: item.label,
-            current: index === shotContextPath.length - 1,
-            onClick: index === shotContextPath.length - 1 ? undefined : () => handleShotContextPathSelect(item),
-          }))
-          : [{ label: "镜头生产", current: true }]
-        : [{ label: workspaceLabels[workspace], current: true }]),
-    ]
-    : [{ label: "项目", current: true }];
+    ? [{ label: projectDisplayName(activeProject.id, activeProject.name), onClick: () => navigate({ kind: "project", projectId: activeProject.id, page: "overview" }) }, { label: routeTitle(route), current: true }]
+    : [{ label: routeTitle(route), current: true }];
 
   const projectSelector = (
     <select
@@ -878,7 +712,7 @@ function App() {
       onChange={(event) => openProject(event.target.value)}
       disabled={projectLoading || !projects.length || projectContextLoading}
     >
-      {!activeProjectId && <option value="">正在加载项目...</option>}
+      {!activeProjectId && <option value="">{projectLoading ? "正在加载项目..." : "选择项目"}</option>}
       {projects.map((project) => <option key={project.id} value={project.id}>{projectDisplayName(project.id, project.name)}</option>)}
     </select>
   );
@@ -894,7 +728,16 @@ function App() {
         if (!keepsNativeContextMenu(event.target)) event.preventDefault();
       }}
     >
-      <StudioShell
+      {draftConfirmation}
+      <ShellHost
+        mode={shellMode}
+        onModeChange={(mode) => {
+          setShellMode(mode);
+          try { localStorage.setItem(SHELL_MODE_KEY, mode); } catch { /* Optional local preference. */ }
+        }}
+        route={route}
+        navigate={navigate}
+        back={async () => { if (!shotDraftDirty || await confirmDraftDiscard("镜头有未保存的修改。返回会放弃这些修改，是否继续？")) back(); }}
         className={`app-workspace-${workspace}`}
         workspace={workspace}
         project={activeProject ? { id: activeProject.id, name: projectDisplayName(activeProject.id, activeProject.name) } : undefined}
@@ -970,7 +813,7 @@ function App() {
             onBackToAssets={() => navigateToWorkspace("assets")}
             onRetry={() => navigateToWorkspace("command-center")}
           >
-            <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />
+            {shellMode === "v3" && activeProject ? <ProjectOverviewPage key={activeProject.id} projectId={activeProject.id} navigate={navigate} /> : <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />}
           </WorkspaceErrorBoundary>
         )}
         {activeProject && workspace === "studio" && (
@@ -985,17 +828,14 @@ function App() {
               focusProductionBatchId={focusedProductionBatchId}
               onCatalogChanged={reloadCatalog}
               onProductionAdmissionChanged={refreshProductionAdmission}
-              onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
+              onProductionBatchFocused={() => undefined}
               onOpenWorkflows={() => navigateToWorkspace("workflows")}
               onReconnectComfy={() => void reconnectComfy()}
               onOpenTask={(taskId) => {
                 openTask(taskId);
               }}
               onOpenProductionQueue={(batchId) => {
-                if (batchId) {
-                  applyNavigationFocus({ workspace: "shots", section: "production", batchId });
-                  navigateToRoute("shots", "production", true);
-                } else navigateToStudioSection("production");
+                openProductionQueueFromShot(batchId);
               }}
             />
           </section>
@@ -1030,11 +870,12 @@ function App() {
               projectName={activeProject.name}
               catalog={catalog}
               initialSelectedShotId={resumeShotId}
+              showCreationLanding={route.kind === "create"}
+              onDraftDirtyChange={setShotDraftDirty}
+              onStageSelected={(stage) => { if (route.kind === "create") dispatchNavigate({ ...route, stage }); }}
               initialCollectionFilter={focusedCollectionFilter}
               mode={shotWorkspaceModeForSection(activeStudioSection)}
               onShotSelected={handleShotSelected}
-              onContextPathChange={handleShotContextPathChange}
-              contextPathTarget={shotContextTarget}
               onOpenAsset={openAssetFromShot}
               onOpenTask={(taskId) => {
                 openTask(taskId);
@@ -1078,15 +919,12 @@ function App() {
               productionAdmission={productionAdmission}
               focusProductionBatchId={focusedProductionBatchId}
               onAdmissionChanged={refreshProductionAdmission}
-              onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
+              onProductionBatchFocused={() => undefined}
               onOpenTask={(taskId) => {
                 openTask(taskId);
               }}
               onOpenProductionQueue={(batchId) => {
-                if (batchId) {
-                  applyNavigationFocus({ workspace: "shots", section: "production", batchId });
-                  navigateToRoute("shots", "production", true);
-                } else navigateToStudioSection("production");
+                openProductionQueueFromShot(batchId);
               }}
               onBackToAssets={() => navigateToWorkspace("assets")}
               onOpenWorkflows={() => navigateToWorkspace("workflows")}
@@ -1145,7 +983,7 @@ function App() {
       {workflowNotice && <p className="workflow-notice" role="status">{workflowNotice}</p>}
       {error && <p className="error-message global-error">提示：{error}</p>}
         </div>
-      </StudioShell>
+      </ShellHost>
     </div>
   );
 }

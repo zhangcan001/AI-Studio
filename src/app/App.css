@@ -6844,3 +6844,6 @@ input[type="radio"] {
     grid-column: 1 / -1;
   }
 }
+.route-draft-confirmation { max-width: min(520px, calc(100vw - 32px)); padding: 24px; border: 1px solid #7198e7; border-radius: 8px; background: #10151e; color: #e7ebf3; }
+.route-draft-confirmation::backdrop { background: rgb(0 0 0 / 65%); }
+.route-draft-confirmation > div { display: flex; gap: 12px; flex-wrap: wrap; }

@@ -258,6 +258,10 @@ interface Props {
   catalog: RecipeViewModel[];
   initialSelectedShotId?: string;
   initialCollectionFilter?: ProjectCommandCenterCollectionFilter;
+  /** Canonical Create without a Shot opens the existing creation landing, not consistency settings. */
+  showCreationLanding?: boolean;
+  onDraftDirtyChange?: (dirty: boolean) => void;
+  onStageSelected?: (stage: ShotStage) => void;
   mode?: ShotWorkspaceMode;
   onShotSelected?: (shotId?: string) => void;
   onContextPathChange?: (path: ShotContextPathItem[]) => void;
@@ -289,7 +293,7 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, onOpenProductionQueue, comfyStatus, capabilityLoading = false, onRefreshComfyCapabilities, onOpenSettings, consistencyWorkspace }: Props) {
+export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, showCreationLanding = false, onDraftDirtyChange, onStageSelected, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, onOpenProductionQueue, comfyStatus, capabilityLoading = false, onRefreshComfyCapabilities, onOpenSettings, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -375,6 +379,12 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     [productionStructure, shots, workspaceSelection],
   );
   const shotList = useMemo(() => buildShotListView(shots, shotListControls, shotSceneIds), [shots, shotListControls, shotSceneIds]);
+  const navigationDraftDirty = Boolean(selectedShot && (dirtyStages.size > 0 || name !== selectedShot.name || promptText !== selectedShot.promptText));
+  useEffect(() => {
+    onDraftDirtyChange?.(navigationDraftDirty);
+    return () => onDraftDirtyChange?.(false);
+  }, [navigationDraftDirty, onDraftDirtyChange]);
+
   const currentDraft = stageDrafts[stage];
   const productCatalog = catalog;
   const stageRecipes = useMemo(
@@ -1328,7 +1338,9 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
       <ProductionReviewInbox projectId={projectId} mode="workspace" onNavigate={onNavigate} />
     </div>
   );
-  const contextSurface = shotContextSurface(mode, workspaceSelection.type);
+  const contextSurface = showCreationLanding && mode === "creation" && workspaceSelection.type === "project"
+    ? "shot"
+    : shotContextSurface(mode, workspaceSelection.type);
   const showWorkspaceFeedback = contextSurface !== "shot";
   const consistencyScope = consistencyScopeForSelection(workspaceSelection, projectId, projectName, productionStructure, shots);
   const showConsistencyScope = mode === "creation" && Boolean(consistencyWorkspace) && Boolean(consistencyScope) && contextSurface !== "shot";
@@ -1402,7 +1414,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
               name={name}
               onNameChange={setName}
               stage={stage}
-              onStageChange={setStage}
+              onStageChange={(nextStage) => { setStage(nextStage); onStageSelected?.(nextStage); }}
               candidates={shotCandidates}
               selectedAssetId={selectedAssetId}
               previewAsset={previewAsset}
