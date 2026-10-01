@@ -214,6 +214,8 @@ describe("DEV-080 用于当前项目持久化 UAT", () => {
       expectedBindingInstanceId: "bnd_image_default", expectedRevision: 1,
     });
     await waitFor(() => expect(document.querySelector(".workflow-notice")?.textContent).toContain("已设为当前项目图片默认工作流"));
+    expect(document.querySelector(".workflow-notice")?.textContent).not.toContain(selected.workflowVersionId);
+    expect(document.querySelector(".workflow-notice")?.textContent).not.toContain(selected.recipeId);
   });
 
   it("保存 video 默认，并保留 image 默认和全部 video mode overrides", async () => {

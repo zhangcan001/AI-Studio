@@ -589,7 +589,7 @@ function App() {
 
       openProject(currentProject.id, "projects");
       setWorkflowNotice(
-        `已设为当前项目${selection === "IMAGE" ? "图片" : "视频"}默认工作流：${recipe.name}（${recipe.workflowVersionId} · ${recipe.recipeId}）`,
+        `已设为当前项目${selection === "IMAGE" ? "图片" : "视频"}默认工作流：${recipe.name}`,
       );
       setError(null);
     } catch (openError: unknown) {
