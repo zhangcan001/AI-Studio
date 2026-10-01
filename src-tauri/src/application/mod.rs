@@ -40,6 +40,7 @@ pub mod output_collector;
 pub mod pagination;
 pub mod ports;
 pub mod preset_service;
+pub mod product;
 pub mod product_runtime_scope;
 pub mod production_audit_service;
 pub mod production_batch_runbook_service;

@@ -5,6 +5,9 @@
 //! task recovery.  The database and project asset store are real; ComfyUI is a
 //! small controlled boundary adapter.
 
+#[path = "support/product_facade_contract.rs"]
+mod product_facade_contract;
+
 use ai_studio_lib::application::{
     asset_video_prompt_service::AssetVideoPromptService,
     generation_service::GenerationService,
@@ -119,6 +122,7 @@ enum ComfyBehavior {
 
 #[derive(Clone)]
 struct ControlledComfy {
+    fail_second: bool,
     behavior: Arc<Mutex<ComfyBehavior>>,
     submit_calls: Arc<AtomicUsize>,
     uploaded_images: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -128,6 +132,7 @@ struct ControlledComfy {
 impl ControlledComfy {
     fn new(behavior: ComfyBehavior) -> Self {
         Self {
+            fail_second: false,
             behavior: Arc::new(Mutex::new(behavior)),
             submit_calls: Arc::new(AtomicUsize::new(0)),
             uploaded_images: Arc::new(Mutex::new(Vec::new())),
@@ -381,7 +386,12 @@ impl ComfyAdapter for ControlledComfy {
         prompt_id: &str,
         _workflow: Value,
     ) -> Result<PromptSubmission, ComfyAdapterError> {
-        self.submit_calls.fetch_add(1, Ordering::SeqCst);
+        let submission = self.submit_calls.fetch_add(1, Ordering::SeqCst);
+        if self.fail_second && submission == 1 {
+            return Err(ComfyAdapterError::Offline(
+                "Controlled second attempt is offline".to_owned(),
+            ));
+        }
         let behavior = *self
             .behavior
             .lock()

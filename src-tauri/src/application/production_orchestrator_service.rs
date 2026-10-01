@@ -371,6 +371,38 @@ impl ProductionOrchestratorService {
         self.load_view(project_id, run_id).await
     }
 
+    /// Read-only provenance lookup for product projections, including history
+    /// beyond the paginated UI list. No state synchronization or execution.
+    pub async fn parent_run_for_batch(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<Option<String>, ProductionOrchestratorError> {
+        validate_project_id(project_id)?;
+        let runs = self
+            .repository
+            .list_runs(project_id, i64::MAX)
+            .await
+            .map_err(repo_error)?;
+        for run in runs {
+            if let Some(snapshot) = self
+                .repository
+                .load_run_snapshot(project_id, &run.id)
+                .await
+                .map_err(repo_error)?
+            {
+                if snapshot
+                    .stages
+                    .iter()
+                    .any(|stage| stage.production_batch_id.as_deref() == Some(batch_id))
+                {
+                    return Ok(Some(run.id));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     async fn load_run(
         &self,
         project_id: &str,

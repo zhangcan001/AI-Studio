@@ -96,3 +96,4 @@ pub fn get_app_status(state: State<'_, AppState>) -> Result<AppStatus, AppError>
         version: env!("CARGO_PKG_VERSION"),
     })
 }
+pub mod product;
