@@ -147,7 +147,9 @@ async function openWorkflowAction() {
 function prepareApp(catalog: RecipeViewModel[], hasProject = true, projectList = hasProject ? [project] : []) {
   mocks.listGenerationCatalog.mockResolvedValue(catalog);
   mocks.listProjects.mockResolvedValue(projectList);
-  mocks.getWorkspaceResume.mockResolvedValue(EMPTY_WORKSPACE_RESUME);
+  // This fixture opens a chosen project. A genuinely empty resume now starts
+  // at the canonical project list, rather than silently selecting a project.
+  mocks.getWorkspaceResume.mockResolvedValue(hasProject ? { ...EMPTY_WORKSPACE_RESUME, lastProjectId: projectList[0]?.id, lastWorkspace: "command-center" } : EMPTY_WORKSPACE_RESUME);
   mocks.saveWorkspaceResume.mockImplementation(async (resume: unknown) => resume);
   mocks.getProductionAdmissionStatus.mockResolvedValue({ busy: false });
   mocks.getRuntimeActivityStatus.mockResolvedValue({ activeTaskCount: 0, productionBusy: false });
@@ -168,6 +170,9 @@ function prepareApp(catalog: RecipeViewModel[], hasProject = true, projectList =
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
+  // These legacy workspace fixtures intentionally exercise the retained rollback shell.
+  localStorage.setItem("aistudio.shellMode", "legacy");
   useProjectStore.setState({ projects: [], activeProjectId: undefined, loading: true, error: undefined });
   useWorkspaceResumeStore.setState({
     resume: EMPTY_WORKSPACE_RESUME,

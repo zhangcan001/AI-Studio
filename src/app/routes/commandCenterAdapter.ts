@@ -62,4 +62,3 @@ export function resolveProjectCommandCenterNavigation(
     section: defaultStudioSectionForWorkspace(request.destination),
   };
 }
-

@@ -152,7 +152,7 @@ function productBoundaryViolations(path, source) {
   const imports = importsFrom(source);
   const transport = path === "src/product/transport.ts";
   const product = path.startsWith("src/product/");
-  const newPage = path.startsWith("src/v3/") || path.startsWith("src/pages/");
+  const newPage = path.startsWith("src/v3/") || path.startsWith("src/app/v3/") || path.startsWith("src/app/routes/") || path.startsWith("src/pages/");
   const violations = [];
   for (const specifier of imports) {
     const directLegacy = /(?:^|\/)tauriClient(?:\.ts)?$/.test(specifier);
@@ -171,6 +171,27 @@ for (const source of ["import { x } from '../services/tauriClient';", "export * 
 if (!productBoundaryViolations("src/features/newInvalid.ts", "import { x } from '../../services/tauriClient';").length) throw new Error("PRODUCT_FACADE_BOUNDARY grandfather probe failed");
 console.log("PRODUCT_FACADE_BOUNDARY=PASS");
 export const productBoundaryVerified = true;
+
+// Canonical location has exactly one hook owner; adapters cannot own domain effects.
+const routeSources = productionFrontendFiles.filter((path) => relative(root, path).replaceAll("\\", "/").startsWith("src/app/routes/"));
+const ownerCalls = productionFrontendFiles.reduce((count, path) => {
+  const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
+  let calls = 0;
+  function visit(node) {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "useAppRoute") calls += 1;
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return count + calls;
+}, 0);
+if (ownerCalls !== 1) throw new Error("CANONICAL_ROUTE_OWNER failed: expected one hook invocation");
+for (const path of routeSources.filter((path) => /(?:legacyAdapter|resumeAdapter|commandCenterAdapter|reducer)\.ts$/.test(path))) {
+  if (importsFrom(readFileSync(path, "utf8")).some((specifier) => /(?:services|stores|@tauri-apps)\//.test(specifier))) throw new Error("ROUTE_ADAPTER_PURITY failed");
+}
+const appSource = readFileSync(join(root, "src/app/App.tsx"), "utf8");
+if (/\[\s*(?:workspace|activeStudioSection|focusedTaskId|focusedProductionBatchId|focusedAssetId|resumeShotId)\s*,/.test(appSource)) throw new Error("CANONICAL_ROUTE_OWNER failed: legacy location still owns state");
+console.log("CANONICAL_ROUTE_BOUNDARY=PASS");
+
 
 const rawInvokeImports = productionFrontendFiles.filter((path) => {
   const source = readFileSync(path, "utf8");
