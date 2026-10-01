@@ -398,6 +398,12 @@ impl WorkflowLifecycleService {
                 status: "STALE_STAGING".to_owned(),
             })
             .collect();
+        items.retain(|item| {
+            !item
+                .workflow_id
+                .as_deref()
+                .is_some_and(crate::application::product_runtime_scope::is_retired_h3_workflow)
+        });
         items.sort_by(|left, right| {
             left.name
                 .cmp(&right.name)
@@ -565,6 +571,12 @@ impl WorkflowLifecycleService {
                 status: "STALE_STAGING".to_owned(),
             })
             .collect();
+        items.retain(|item| {
+            !item
+                .workflow_id
+                .as_deref()
+                .is_some_and(crate::application::product_runtime_scope::is_retired_h3_workflow)
+        });
         items.sort_by(|left, right| {
             left.name
                 .cmp(&right.name)

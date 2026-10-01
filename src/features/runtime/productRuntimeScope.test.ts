@@ -33,16 +33,14 @@ describe("0.4.0 product runtime scope", () => {
   it("accepts the frozen Krea2 runtime and both H3 runtime families", () => {
     expect(PRODUCTION_WORKFLOW_IDS).toEqual([
       KERA2_WORKFLOW_ID,
-      MINIMAX_H3_WORKFLOW_ID,
-      MINIMAX_H3_FL2VA_WORKFLOW_ID,
       MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID,
       MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID,
       MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
       MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
     ]);
     expect(productionRuntimeForWorkflowId(KERA2_WORKFLOW_ID)).toBe("kera2Image");
-    expect(productionRuntimeForWorkflowId(MINIMAX_H3_WORKFLOW_ID)).toBe("minimaxH3Video");
-    expect(productionRuntimeForWorkflowId(MINIMAX_H3_FL2VA_WORKFLOW_ID)).toBe("minimaxH3Video");
+    expect(productionRuntimeForWorkflowId(MINIMAX_H3_WORKFLOW_ID)).toBeUndefined();
+    expect(productionRuntimeForWorkflowId(MINIMAX_H3_FL2VA_WORKFLOW_ID)).toBeUndefined();
     expect(productionRuntimeForWorkflowId(MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID)).toBe("minimaxH3Video");
     expect(productionRuntimeForWorkflowId(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID)).toBe("minimaxH3Video");
     expect(productionRuntimeForWorkflowId("wfl_other")).toBeUndefined();
@@ -57,13 +55,13 @@ describe("0.4.0 product runtime scope", () => {
       recipe(KERA2_WORKFLOW_ID, "Kera2 renamed"),
       recipe(MINIMAX_H3_WORKFLOW_ID, "H3 renamed"),
       recipe(MINIMAX_H3_FL2VA_WORKFLOW_ID, "H3 FL2VA"),
-    ]).map((item) => item.workflowId)).toEqual([KERA2_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID, MINIMAX_H3_FL2VA_WORKFLOW_ID]);
+    ]).map((item) => item.workflowId)).toEqual([KERA2_WORKFLOW_ID]);
   });
 
   it("matches each runtime only to its frozen production stage", () => {
     expect(productionRuntimeForStage("image", KERA2_WORKFLOW_ID)).toBe("kera2Image");
-    expect(productionRuntimeForStage("video", MINIMAX_H3_WORKFLOW_ID)).toBe("minimaxH3Video");
-    expect(productionRuntimeForStage("video", MINIMAX_H3_FL2VA_WORKFLOW_ID)).toBe("minimaxH3Video");
+    expect(productionRuntimeForStage("video", MINIMAX_H3_WORKFLOW_ID)).toBeUndefined();
+    expect(productionRuntimeForStage("video", MINIMAX_H3_FL2VA_WORKFLOW_ID)).toBeUndefined();
     expect(isProductionRuntimeForStage("video", KERA2_WORKFLOW_ID)).toBe(false);
     expect(isProductionRuntimeForStage("image", MINIMAX_H3_WORKFLOW_ID)).toBe(false);
   });

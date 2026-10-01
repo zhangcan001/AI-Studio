@@ -576,7 +576,7 @@ export function AssetVideoBatchWorkspace({
 }: Props) {
   const [sourceMode, setSourceMode] = useState<"ASSET_LIBRARY" | "LOCAL_FOLDER">("ASSET_LIBRARY");
   const [generationMode, setGenerationMode] = useState<H3GenerationMode>(() => h3InitialGenerationMode(initialAssets));
-  const [qualityProfile, setQualityProfile] = useState<H3QualityProfile>(H3_QUALITY_PROFILE);
+  const qualityProfile: H3QualityProfile = H3_QUALITY_PROFILE;
   const [batchPrompt, setBatchPrompt] = useState("");
   const [firstFrameAssetId, setFirstFrameAssetId] = useState<string>();
   const [lastFrameAssetId, setLastFrameAssetId] = useState<string>();
@@ -1189,16 +1189,12 @@ export function AssetVideoBatchWorkspace({
         <select
           id="h3-quality-profile"
           value={qualityProfile}
-          onChange={(event) => setQualityProfile(event.target.value as H3QualityProfile)}
-          disabled={busy}
+          disabled
         >
           <option value="QUALITY">高质量（推荐）</option>
-          <option value="FAST">快速预览</option>
         </select>
         <small>
-          {qualityProfile === "QUALITY"
-            ? "高质量：20步正式工作流，生成更慢，显存和内存占用更高。"
-            : "快速预览：4 步加速模式，速度优先，画质和参考一致性可能低于高质量模式。"}
+          高质量：20步正式工作流，单任务串行。
         </small>
       </section>
 
@@ -1206,8 +1202,8 @@ export function AssetVideoBatchWorkspace({
         <div>
           <strong>H3</strong>
           <p>模型产品能力：最高 15 秒 · 最高 2K</p>
-          <p>当前运行参数：{qualityProfile === "QUALITY" ? "20 步正式工作流" : "4 步加速预览"} · 单任务串行</p>
-          <small>{qualityProfile === "QUALITY" ? "质量模式不会因 16GB 设备自动降级；失败按正常任务失败处理。" : "快速模式仅用于快速预览，历史包保持不变。"}</small>
+          <p>当前运行参数：20 步正式工作流 · 单任务串行</p>
+          <small>质量模式不会因 16GB 设备自动降级；失败按正常任务失败处理。</small>
         </div>
         {sourceMode === "ASSET_LIBRARY" && contract.ok && (
           <ResolutionControl
@@ -1247,7 +1243,7 @@ export function AssetVideoBatchWorkspace({
           <div className="h3-project-folder-defaults" role="status">
             <strong>分段参数优先级</strong>
             <span>用户修改 → 前置元数据 → 提示词规格 → 素材比例 → 默认</span>
-          <small>无规格且无可用素材推断时使用 {qualityProfile === "QUALITY" ? "高质量模式" : "快速模式"} · 5 秒 · 960 × 544；每段可展开单独编辑。</small>
+          <small>无规格且无可用素材推断时使用 高质量模式 · 5 秒 · 960 × 544；每段可展开单独编辑。</small>
           </div>
         )}
         <small>{recipe ? `运行时已锁定：${recipe.workflowId}` : "运行时未就绪"}</small>

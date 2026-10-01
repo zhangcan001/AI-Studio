@@ -584,6 +584,11 @@ impl WorkflowRegistryService {
                 .await?,
             );
         }
+        // Keep get/saved-version/history readable, but retired preview workflows
+        // are no longer part of the active workflow-library product surface.
+        views.retain(|view| {
+            !crate::application::product_runtime_scope::is_retired_h3_workflow(&view.workflow_id)
+        });
         views.sort_by(|left, right| {
             left.name
                 .cmp(&right.name)
@@ -1227,6 +1232,12 @@ impl WorkflowRegistryService {
                 reasons: vec!["WORKFLOW_VERSION_NOT_FOUND".to_owned()],
             });
         };
+        if crate::application::product_runtime_scope::is_retired_h3_workflow(&version.workflow_id) {
+            return Ok(WorkflowAvailabilityInspection {
+                available: false,
+                reasons: vec!["WORKFLOW_REMOVED".to_owned()],
+            });
+        }
         if !version
             .recipes
             .iter()

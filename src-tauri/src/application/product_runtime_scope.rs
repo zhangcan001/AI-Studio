@@ -15,12 +15,20 @@ pub enum ProductionRuntimeKind {
     MiniMaxH3Video,
 }
 
+pub fn is_retired_h3_workflow(workflow_id: &str) -> bool {
+    matches!(
+        workflow_id,
+        MINIMAX_H3_WORKFLOW_ID
+            | MINIMAX_H3_FL2VA_WORKFLOW_ID
+            | "wfl_minimax_h3_fl2va_compatible"
+            | "wfl_aitudou_minimax_h3_lightx2v_8step_fast"
+    )
+}
+
 pub fn production_runtime_for_workflow_id(workflow_id: &str) -> Option<ProductionRuntimeKind> {
     match workflow_id {
         KERA2_WORKFLOW_ID => Some(ProductionRuntimeKind::Kera2Image),
-        MINIMAX_H3_WORKFLOW_ID
-        | MINIMAX_H3_FL2VA_WORKFLOW_ID
-        | MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID
+        MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID
         | MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID
         | MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID
         | MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID => Some(ProductionRuntimeKind::MiniMaxH3Video),
@@ -62,11 +70,11 @@ mod tests {
         );
         assert_eq!(
             production_runtime_for_workflow_id(MINIMAX_H3_WORKFLOW_ID),
-            Some(ProductionRuntimeKind::MiniMaxH3Video)
+            None
         );
         assert_eq!(
             production_runtime_for_workflow_id(MINIMAX_H3_FL2VA_WORKFLOW_ID),
-            Some(ProductionRuntimeKind::MiniMaxH3Video)
+            None
         );
         for workflow_id in [
             MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID,

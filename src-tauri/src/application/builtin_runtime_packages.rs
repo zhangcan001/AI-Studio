@@ -26,6 +26,7 @@ struct BuiltinPackageIdentity {
 }
 
 const PACKAGES: &[BuiltinPackage] = &[
+    #[cfg(test)]
     BuiltinPackage {
         directory: "minimax_h3_fl2va_compatible_1_0_0",
         manifest: include_str!(
@@ -38,12 +39,14 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/minimax_h3_fl2va_compatible_1_0_0/workflow_api.json"
         ),
     },
+    #[cfg(test)]
     BuiltinPackage {
         directory: "minimax_h3_fl2va_1_0_0",
         manifest: include_str!("../../runtime_packages/minimax_h3_fl2va_1_0_0/manifest.yaml"),
         recipe: include_str!("../../runtime_packages/minimax_h3_fl2va_1_0_0/recipe.yaml"),
         workflow: include_str!("../../runtime_packages/minimax_h3_fl2va_1_0_0/workflow_api.json"),
     },
+    #[cfg(test)]
     BuiltinPackage {
         directory: "minimax_h3_reference_video_1_3_0",
         manifest: include_str!(
@@ -54,6 +57,7 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/minimax_h3_reference_video_1_3_0/workflow_api.json"
         ),
     },
+    #[cfg(test)]
     BuiltinPackage {
         directory: "minimax_h3_fl2va_t2v_quality_2_0_0",
         manifest: include_str!(
@@ -67,6 +71,19 @@ const PACKAGES: &[BuiltinPackage] = &[
         ),
     },
     BuiltinPackage {
+        directory: "minimax_h3_fl2va_t2v_quality_2_1_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_1_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_1_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_1_0/workflow_api.json"
+        ),
+    },
+    #[cfg(test)]
+    BuiltinPackage {
         directory: "minimax_h3_fl2va_i2v_quality_2_0_0",
         manifest: include_str!(
             "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_0_0/manifest.yaml"
@@ -78,6 +95,19 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_0_0/workflow_api.json"
         ),
     },
+    BuiltinPackage {
+        directory: "minimax_h3_fl2va_i2v_quality_2_1_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_1_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_1_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_1_0/workflow_api.json"
+        ),
+    },
+    #[cfg(test)]
     BuiltinPackage {
         directory: "minimax_h3_fl2va_first_last_quality_2_0_0",
         manifest: include_str!(
@@ -91,6 +121,19 @@ const PACKAGES: &[BuiltinPackage] = &[
         ),
     },
     BuiltinPackage {
+        directory: "minimax_h3_fl2va_first_last_quality_2_1_1",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_1_1/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_1_1/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_1_1/workflow_api.json"
+        ),
+    },
+    #[cfg(test)]
+    BuiltinPackage {
         directory: "minimax_h3_reference_video_quality_2_0_0",
         manifest: include_str!(
             "../../runtime_packages/minimax_h3_reference_video_quality_2_0_0/manifest.yaml"
@@ -102,6 +145,19 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/minimax_h3_reference_video_quality_2_0_0/workflow_api.json"
         ),
     },
+    BuiltinPackage {
+        directory: "minimax_h3_reference_video_quality_2_1_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_1_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_1_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_1_0/workflow_api.json"
+        ),
+    },
+    #[cfg(test)]
     BuiltinPackage {
         directory: "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
         manifest: include_str!(
@@ -128,9 +184,33 @@ const PACKAGES: &[BuiltinPackage] = &[
     },
 ];
 
-// Older Kera2 package directory names remain product-owned for existing user
-// libraries. New installs use the immutable embedded package above.
+// Retired H3 and older quality/Krea2 identities remain product-owned for
+// existing libraries. New installs use only the active immutable packages.
 const PRODUCT_PACKAGE_IDENTITIES: &[BuiltinPackageIdentity] = &[
+    BuiltinPackageIdentity {
+        directory: "minimax_h3_fl2va_compatible_1_0_0",
+    },
+    BuiltinPackageIdentity {
+        directory: "minimax_h3_fl2va_1_0_0",
+    },
+    BuiltinPackageIdentity {
+        directory: "minimax_h3_reference_video_1_3_0",
+    },
+    BuiltinPackageIdentity {
+        directory: "minimax_h3_fl2va_t2v_quality_2_0_0",
+    },
+    BuiltinPackageIdentity {
+        directory: "minimax_h3_fl2va_i2v_quality_2_0_0",
+    },
+    BuiltinPackageIdentity {
+        directory: "minimax_h3_fl2va_first_last_quality_2_0_0",
+    },
+    BuiltinPackageIdentity {
+        directory: "minimax_h3_reference_video_quality_2_0_0",
+    },
+    BuiltinPackageIdentity {
+        directory: "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+    },
     BuiltinPackageIdentity {
         directory: "kera2_t2i_local_v2",
     },
@@ -153,8 +233,14 @@ pub fn is_builtin_package_name(package_name: &str) -> bool {
             .any(|package| package.directory == package_name)
 }
 
+fn active_package(package: &BuiltinPackage) -> bool {
+    package.directory.contains("_quality_2_1_0")
+        || package.directory == "minimax_h3_fl2va_first_last_quality_2_1_1"
+        || package.directory.starts_with("kera2_")
+}
+
 pub fn ensure_installed(root: &Path) -> Result<(), String> {
-    for package in PACKAGES {
+    for package in PACKAGES.iter().filter(|package| active_package(package)) {
         let directory = root.join(package.directory);
         if directory.exists() {
             if let Some(mismatch) = audit_package(package, &directory) {
@@ -183,6 +269,7 @@ pub struct BuiltinPackageMismatch {
 pub fn audit_installed(root: &Path) -> Vec<BuiltinPackageMismatch> {
     PACKAGES
         .iter()
+        .filter(|package| active_package(package))
         .filter_map(|package| {
             let directory = root.join(package.directory);
             directory
@@ -294,6 +381,98 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn quality_only_installation_trims_video_and_audio_to_requested_seconds() {
+        let directory = tempdir().unwrap();
+        ensure_installed(directory.path()).unwrap();
+        let installed = std::fs::read_dir(directory.path()).unwrap().count();
+        assert_eq!(installed, 5, "four quality modes and Krea2 only");
+        for package in PACKAGES
+            .iter()
+            .filter(|p| p.directory.contains("_quality_2_1_0"))
+        {
+            let graph: serde_json::Value = serde_json::from_str(package.workflow).unwrap();
+            let recipe = RecipeParser::parse(package.recipe).unwrap();
+            let workflow = WorkflowDocument::parse(graph.clone()).unwrap();
+            RecipeValidator::validate(&recipe).unwrap();
+            WorkflowValidator::validate(&workflow).unwrap();
+            BindingValidator::validate(&recipe, &workflow).unwrap();
+            assert_eq!(graph["60"]["inputs"]["expression"], "round(a * 24)");
+            assert_eq!(
+                graph["60"]["inputs"]["values.a"],
+                serde_json::json!(["22", 0])
+            );
+            assert_eq!(
+                graph["61"]["inputs"]["length"],
+                serde_json::json!(["60", 1])
+            );
+            assert_eq!(graph["61"]["class_type"], "ImageFromBatch");
+            assert_eq!(graph["62"]["class_type"], "TrimAudioDuration");
+            assert_eq!(
+                graph["62"]["inputs"]["duration"],
+                serde_json::json!(["22", 0])
+            );
+            assert_eq!(
+                graph["19"]["inputs"]["images"],
+                serde_json::json!(["61", 0])
+            );
+            assert_eq!(graph["19"]["inputs"]["audio"], serde_json::json!(["62", 0]));
+            assert_eq!(graph["19"]["inputs"]["fps"], 24);
+            assert!(!package.workflow.contains("NBH3HyperStep"));
+            for seconds in 1..=15 {
+                let frames = seconds * 24;
+                let aligned = frames + (5 - frames % 17 + 17) % 17;
+                assert!(aligned >= frames);
+                assert_eq!(aligned % 17, 5);
+                assert_eq!(frames / 24, seconds);
+            }
+        }
+    }
+
+    #[test]
+    fn first_last_quality_anchors_tail_at_delivered_last_frame() {
+        let package = PACKAGES
+            .iter()
+            .find(|p| p.directory == "minimax_h3_fl2va_first_last_quality_2_1_1")
+            .unwrap();
+        let graph: serde_json::Value = serde_json::from_str(package.workflow).unwrap();
+        let recipe = RecipeParser::parse(package.recipe).unwrap();
+        let workflow = WorkflowDocument::parse(graph.clone()).unwrap();
+        RecipeValidator::validate(&recipe).unwrap();
+        WorkflowValidator::validate(&workflow).unwrap();
+        BindingValidator::validate(&recipe, &workflow).unwrap();
+        assert!(graph["14"]["inputs"].get("last_frame").is_none());
+        assert_eq!(
+            graph["14"]["inputs"]["first_frame"],
+            serde_json::json!(["24", 0])
+        );
+        assert_eq!(graph["63"]["inputs"]["expression"], "a - 1");
+        assert_eq!(
+            graph["63"]["inputs"]["values.a"],
+            serde_json::json!(["60", 1])
+        );
+        assert_eq!(graph["64"]["class_type"], "MiniMaxH3AddGuide");
+        assert_eq!(graph["64"]["inputs"]["image"], serde_json::json!(["28", 0]));
+        assert_eq!(
+            graph["64"]["inputs"]["frame_idx"],
+            serde_json::json!(["63", 1])
+        );
+        assert_eq!(
+            graph["2"]["inputs"]["conditioning"],
+            serde_json::json!(["64", 0])
+        );
+        assert_eq!(
+            graph["61"]["inputs"]["length"],
+            serde_json::json!(["60", 1])
+        );
+        assert_eq!(graph["19"]["inputs"]["fps"], 24);
+        for seconds in 1..=15 {
+            let frames = seconds * 24;
+            let aligned = frames + (5 - frames % 17 + 17) % 17;
+            assert!(frames - 1 < aligned);
+        }
+    }
+
+    #[test]
     fn compatible_copy_only_bypasses_hyperstep_and_preserves_original_identity() {
         let original = PACKAGES
             .iter()
@@ -324,12 +503,14 @@ mod tests {
     fn installs_missing_product_packages_without_overwriting_existing_directory() {
         let directory = tempdir().expect("temp directory");
         ensure_installed(directory.path()).expect("builtin packages should install");
-        let fl2va = directory.path().join("minimax_h3_fl2va_1_0_0");
-        let ref2va = directory.path().join("minimax_h3_reference_video_1_3_0");
-        let quality_t2v = directory.path().join("minimax_h3_fl2va_t2v_quality_2_0_0");
+        let fl2va = directory.path().join("minimax_h3_fl2va_i2v_quality_2_1_0");
+        let ref2va = directory
+            .path()
+            .join("minimax_h3_reference_video_quality_2_1_0");
+        let quality_t2v = directory.path().join("minimax_h3_fl2va_t2v_quality_2_1_0");
         let quality_ref = directory
             .path()
-            .join("minimax_h3_reference_video_quality_2_0_0");
+            .join("minimax_h3_reference_video_quality_2_1_0");
         let kera2 = directory.path().join("kera2_t2i_local_v2_1_1_1_90894e9e");
         assert!(fl2va.join("manifest.yaml").is_file());
         assert!(ref2va.join("recipe.yaml").is_file());
@@ -348,7 +529,7 @@ mod tests {
     fn same_version_hash_mismatch_is_reported_without_overwrite_and_has_explicit_repair() {
         let directory = tempdir().expect("temp directory");
         ensure_installed(directory.path()).expect("builtin packages should install");
-        let package = directory.path().join("minimax_h3_fl2va_1_0_0");
+        let package = directory.path().join("minimax_h3_fl2va_i2v_quality_2_1_0");
         std::fs::write(package.join("recipe.yaml"), "user change").expect("mutate package");
 
         let mismatches = audit_installed(directory.path());
@@ -362,7 +543,7 @@ mod tests {
             "user change"
         );
 
-        repair_package(directory.path(), "minimax_h3_fl2va_1_0_0")
+        repair_package(directory.path(), "minimax_h3_fl2va_i2v_quality_2_1_0")
             .expect("explicit repair should work");
         assert!(audit_installed(directory.path()).is_empty());
         assert!(

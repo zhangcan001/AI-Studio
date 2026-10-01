@@ -468,6 +468,11 @@ impl WorkflowWorkspaceQueryService {
                 runtime: runtime_by_workflow.remove(&workflow_id).unwrap_or_default(),
             })
             .collect::<Vec<_>>();
+        items.retain(|item| {
+            !crate::application::product_runtime_scope::is_retired_h3_workflow(
+                &item.registry.workflow_id,
+            )
+        });
         items.sort_by(|left, right| {
             left.registry
                 .name

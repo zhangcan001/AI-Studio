@@ -82,8 +82,8 @@ function h3PromptKey(recipe: RecipeViewModel | undefined): string | undefined {
 
 type H3Profile = "H3_FAST" | "H3_QUALITY";
 
-function h3ProfileValue(value: string | undefined): H3Profile {
-  return value === "H3_QUALITY" ? "H3_QUALITY" : "H3_FAST";
+function h3ProfileValue(_value: string | undefined): H3Profile {
+  return "H3_QUALITY";
 }
 
 function runtimeProfileForH3Profile(profile: H3Profile): H3QualityProfile {
@@ -288,7 +288,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
   const [imageCount, setImageCount] = useState(2);
   const [videoMode, setVideoMode] = useState<ProductionRunVideoMode>("I2V");
   const [h3Prompt, setH3Prompt] = useState("");
-  const [h3Profile, setH3Profile] = useState<H3Profile>("H3_FAST");
+  const [h3Profile, setH3Profile] = useState<H3Profile>("H3_QUALITY");
   const selectedMode = modeConfig(videoMode);
   const h3Recipe = useMemo(
     () => h3RecipeForMode(catalog, selectedMode.recipeMode, runtimeProfileForH3Profile(h3Profile)),
@@ -613,7 +613,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
         <label><span>运行名称</span><input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
         <label><span>Krea2 图片数量</span><input type="number" min={videoMode === "REF2VA" ? 2 : 1} max={100} value={imageCount} onChange={(event) => setImageCount(normalizedImageCount(Number(event.target.value), videoMode))} /></label>
         <label><span>H3 模式</span><select value={videoMode} onChange={(event) => changeVideoMode(event.target.value as ProductionRunVideoMode)} disabled={busy}><option value="I2V">I2V · 单首帧</option><option value="REF2VA">REF2VA · 2–N 参考图</option></select><small>{selectedMode.description}</small></label>
-        <label><span>H3 配置档</span><select value={h3Profile} onChange={(event) => setH3Profile(h3ProfileValue(event.target.value))} disabled={busy}><option value="H3_FAST">快速</option><option value="H3_QUALITY">质量</option></select></label>
+        <label><span>H3 配置档</span><select value={h3Profile} disabled><option value="H3_QUALITY">质量</option></select></label>
         {h3ScalarNumericFields.map((field) => <label key={field.key}><span>{fieldLabel(field.key, field.label)}</span><input type="number" min={field.min} max={field.max} step={field.step} value={numericValue(h3Values, field.key) ?? ""} onChange={(event) => { const value = Number(event.target.value); if (!Number.isFinite(value)) return; setH3Values((current) => ({ ...current, [field.key]: { type: field.type, value } })); }} /></label>)}
         <label className="production-run-prompt"><span>H3 提示词</span><textarea rows={2} value={h3Prompt} onChange={(event) => updatePrompt(event.target.value)} placeholder="输入视频提示词" /></label>
       </div>

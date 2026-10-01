@@ -19,6 +19,11 @@ impl GenerationCatalogService {
         let definitions = self.repository.list_available().await?;
         definitions
             .into_iter()
+            .filter(|definition| {
+                !crate::application::product_runtime_scope::is_retired_h3_workflow(
+                    &definition.workflow_id,
+                )
+            })
             .map(RecipeViewModel::try_from_definition)
             .collect()
     }

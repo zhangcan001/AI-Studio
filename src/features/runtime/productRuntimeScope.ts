@@ -14,7 +14,7 @@ export const MINIMAX_H3_QUALITY_WORKFLOW_IDS = [
   MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
   MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
 ] as const;
-export const MINIMAX_H3_WORKFLOW_IDS = [...MINIMAX_H3_FAST_WORKFLOW_IDS, ...MINIMAX_H3_QUALITY_WORKFLOW_IDS] as const;
+export const MINIMAX_H3_WORKFLOW_IDS = [...MINIMAX_H3_QUALITY_WORKFLOW_IDS] as const;
 export const PRODUCTION_WORKFLOW_IDS = [KERA2_WORKFLOW_ID, ...MINIMAX_H3_WORKFLOW_IDS] as const;
 
 export type H3QualityProfile = "QUALITY" | "FAST";
@@ -29,8 +29,6 @@ export function productionRuntimeForWorkflowId(workflowId: string): ProductionRu
   switch (workflowId) {
     case KERA2_WORKFLOW_ID:
       return "kera2Image";
-    case MINIMAX_H3_WORKFLOW_ID:
-    case MINIMAX_H3_FL2VA_WORKFLOW_ID:
     case MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID:
     case MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID:
     case MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID:
@@ -54,13 +52,12 @@ export function h3FamilyForWorkflowId(workflowId: string): "FL2VA" | "REF2VA" | 
 
 export function h3QualityProfileForWorkflowId(workflowId: string): H3QualityProfile | undefined {
   if (MINIMAX_H3_QUALITY_WORKFLOW_IDS.includes(workflowId as typeof MINIMAX_H3_QUALITY_WORKFLOW_IDS[number])) return H3_QUALITY_PROFILE;
-  if (MINIMAX_H3_FAST_WORKFLOW_IDS.includes(workflowId as typeof MINIMAX_H3_FAST_WORKFLOW_IDS[number])) return H3_FAST_PROFILE;
   return undefined;
 }
 
 export function h3WorkflowIdForMode(mode: string, profile: H3QualityProfile): string | undefined {
   if (profile === H3_FAST_PROFILE) {
-    return mode.startsWith("FL2VA") ? MINIMAX_H3_FL2VA_WORKFLOW_ID : MINIMAX_H3_WORKFLOW_ID;
+    return undefined; // Retired profiles must never silently execute another workflow.
   }
   switch (mode) {
     case "FL2VA_TEXT_TO_VIDEO": return MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID;

@@ -3951,9 +3951,9 @@ fn validate_commit_request(request: &H3LocalImportCommitRequest) -> Result<(), H
     }
     H3CommitGenerationMode::parse(request.generation_mode.as_deref())?;
     if let Some(profile) = request.quality_profile.as_deref() {
-        if !matches!(profile, "QUALITY" | "FAST") {
+        if profile != "QUALITY" {
             return Err(H3LocalImportError::InvalidInput(
-                "H3 生成质量必须是 QUALITY 或 FAST".to_owned(),
+                "H3 快速预览已移除，仅支持 QUALITY".to_owned(),
             ));
         }
     }

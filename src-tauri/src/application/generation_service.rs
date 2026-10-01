@@ -333,6 +333,15 @@ impl GenerationService {
                 workflow_version_id: workflow_version_id.to_owned(),
                 recipe_id: recipe_id.to_owned(),
             })?;
+        if crate::application::product_runtime_scope::is_retired_h3_workflow(
+            &definition.workflow_id,
+        ) {
+            return Err(GenerationServiceError::ExecutionFailed {
+                code: WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION.to_owned(),
+                message: "H3 快速预览已移除，请选择高质量工作流。".to_owned(),
+                details: None,
+            });
+        }
         let recipe = RecipeParser::parse(&definition.recipe_yaml)
             .map_err(|error| GenerationServiceError::Compile(CompileError::from(error)))?;
         let workflow = crate::domain::WorkflowDocument::parse(definition.workflow_json.clone())
@@ -764,6 +773,15 @@ impl GenerationService {
                 workflow_version_id: request.workflow_version_id.clone(),
                 recipe_id: request.recipe_id.clone(),
             })?;
+        if crate::application::product_runtime_scope::is_retired_h3_workflow(
+            &definition.workflow_id,
+        ) {
+            return Err(GenerationServiceError::ExecutionFailed {
+                code: WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION.to_owned(),
+                message: "H3 快速预览已移除，请选择高质量工作流。".to_owned(),
+                details: None,
+            });
+        }
         let created_at = self.clock.now();
         let mut task = Task::new(
             request.project_id.clone(),
