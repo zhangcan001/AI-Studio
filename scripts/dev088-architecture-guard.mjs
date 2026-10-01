@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, relative } from "node:path";
+import ts from "typescript";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(import.meta.url), "..", "..");
@@ -134,6 +135,43 @@ function collectSourceFiles(directory) {
 
 collectSourceFiles(join(root, "src"));
 
+const legacyTransportAllowlist = new Set(JSON.parse(readFileSync(join(root, "scripts/product-legacy-transport-allowlist.json"), "utf8")));
+function importsFrom(source) {
+  const imports = [];
+  const file = ts.createSourceFile("boundary.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function visit(node) {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) imports.push(node.moduleSpecifier.text);
+    if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require")) && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) imports.push(node.arguments[0].text);
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) && node.moduleReference.expression && ts.isStringLiteral(node.moduleReference.expression)) imports.push(node.moduleReference.expression.text);
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  return imports;
+}
+function productBoundaryViolations(path, source) {
+  const imports = importsFrom(source);
+  const transport = path === "src/product/transport.ts";
+  const product = path.startsWith("src/product/");
+  const newPage = path.startsWith("src/v3/") || path.startsWith("src/pages/");
+  const violations = [];
+  for (const specifier of imports) {
+    const directLegacy = /(?:^|\/)tauriClient(?:\.ts)?$/.test(specifier);
+    const oldTransport = directLegacy || /(?:^|\/)services\/(?:ipc|workflowClient)(?:\.ts)?$/.test(specifier) || specifier === "@tauri-apps/api/core";
+    if ((product && !transport && oldTransport) || (newPage && oldTransport)) violations.push(`${path}: forbidden product/transport import ${specifier}`);
+    if (directLegacy && !transport && !legacyTransportAllowlist.has(path)) violations.push(`${path}: new legacy importer`);
+  }
+  return violations;
+}
+const productBoundaryErrors = productionFrontendFiles.flatMap((path) => productBoundaryViolations(relative(root,path).replaceAll("\\", "/"), readFileSync(path,"utf8")));
+if (productBoundaryErrors.length) throw new Error(`PRODUCT_FACADE_BOUNDARY failed:\n${productBoundaryErrors.join("\n")}`);
+// Negative probes exercise the same scanner without creating source files.
+for (const source of ["import { x } from '../services/tauriClient';", "export * from '../services/ipc';", "const x = import('../services/tauriClient');", "const x = require('../services/tauriClient');", "import x = require('../services/tauriClient');"]) {
+  if (!productBoundaryViolations("src/product/invalid.ts",source).length || !productBoundaryViolations("src/v3/invalid.ts",source).length) throw new Error("PRODUCT_FACADE_BOUNDARY negative probe failed");
+}
+if (!productBoundaryViolations("src/features/newInvalid.ts", "import { x } from '../../services/tauriClient';").length) throw new Error("PRODUCT_FACADE_BOUNDARY grandfather probe failed");
+console.log("PRODUCT_FACADE_BOUNDARY=PASS");
+export const productBoundaryVerified = true;
+
 const rawInvokeImports = productionFrontendFiles.filter((path) => {
   const source = readFileSync(path, "utf8");
   return source.includes("@tauri-apps/api/core") && resolve(path) !== ipcTransportPath;
@@ -143,6 +181,7 @@ if (rawInvokeImports.length) {
 }
 
 const transportSources = [
+  readFileSync(join(root, "src/product/client.ts"), "utf8").replaceAll("productRequest", "invokeCommand"),
   readFileSync(join(root, "src/services/tauriClient.ts"), "utf8"),
   readFileSync(join(root, "src/services/workflowClient.ts"), "utf8"),
   readFileSync(join(root, "src/features/shots/ShotBulkImportPanel.tsx"), "utf8"),
