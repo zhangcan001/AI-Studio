@@ -19,10 +19,10 @@ const catalog: RecipeViewModel[] = [
     fields: [],
   },
   {
-    workflowId: "wfl_minimax_h3_reference_video",
+    workflowId: "wfl_minimax_h3_reference_video_quality",
     workflowVersionId: "wfv_h3",
     recipeId: "rcp_h3",
-    name: "MiniMax H3 Reference Video",
+    name: "MiniMax H3 高质量全能参考",
     category: "video",
     mode: "reference_to_video",
     fields: [],
@@ -31,13 +31,21 @@ const catalog: RecipeViewModel[] = [
 
 describe("studio product UX contracts", () => {
   it("renders one selectable card per supported workflow and marks the current card", () => {
+    const retiredPreview = {
+      ...catalog[1],
+      workflowId: "wfl_minimax_h3_reference_video",
+      workflowVersionId: "wfv_retired_h3",
+      recipeId: "rcp_retired_h3",
+      name: "Retired H3 fast preview",
+    };
     const html = renderToStaticMarkup(
-      <WorkflowLauncher catalog={catalog} selectedWorkflow={catalog[1]} onSelect={vi.fn()} />,
+      <WorkflowLauncher catalog={[...catalog, retiredPreview]} selectedWorkflow={catalog[1]} onSelect={vi.fn()} />,
     );
 
     expect((html.match(/class="workflow-launcher-card/g) ?? []).length).toBe(2);
     expect(html).toContain("Krea2 文生图");
-    expect(html).toContain("H3 参考图生视频");
+    expect(html).toContain("MiniMax H3 高质量全能参考");
+    expect(html).not.toContain("Retired H3 fast preview");
     expect(html).toContain('aria-pressed="true"');
   });
 
