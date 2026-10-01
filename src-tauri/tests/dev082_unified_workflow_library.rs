@@ -514,7 +514,7 @@ mod lifecycle_e2e {
     };
     use tempfile::{tempdir, TempDir};
 
-    const PRODUCT_PACKAGE_NAME: &str = "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0";
+    const PRODUCT_PACKAGE_NAME: &str = "minimax_h3_fl2va_t2v_quality_2_1_0";
     const KERA2_PACKAGE_NAME: &str = "kera2_t2i_local_v2_1_1_1_90894e9e";
     const USER_RACE_PACKAGE_NAME: &str = "dev082_user_race";
     const USER_RACE_WORKFLOW_ID: &str = "wfl_dev082_user_race";
@@ -1283,7 +1283,9 @@ mod lifecycle_e2e {
             .sync()
             .await
             .expect("fresh runtime package discovery should sync");
-        assert_eq!(first_sync.packages_found, 9);
+        // Fresh production installs seed Kera2 and four quality H3 runtimes,
+        // not retired previews or historical cfg(test)-only packages.
+        assert_eq!(first_sync.packages_found, 5);
         assert_eq!(first_sync.invalid, 0, "{:?}", first_sync.errors);
 
         let versions = services
@@ -1291,6 +1293,25 @@ mod lifecycle_e2e {
             .list_versions()
             .await
             .expect("fresh runtime versions should be readable");
+        let mut installed_identities = versions
+            .iter()
+            .map(|version| {
+                (
+                    version.workflow_id.as_str(),
+                    version.workflow_version.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
+        installed_identities.sort_unstable();
+        let mut expected_identities = vec![
+            (KERA2_WORKFLOW_ID, "1.1.1"),
+            ("wfl_minimax_h3_fl2va_t2v_quality", "2.1.0"),
+            ("wfl_minimax_h3_fl2va_i2v_quality", "2.1.0"),
+            ("wfl_minimax_h3_fl2va_first_last_quality", "2.1.1"),
+            ("wfl_minimax_h3_reference_video_quality", "2.1.0"),
+        ];
+        expected_identities.sort_unstable();
+        assert_eq!(installed_identities, expected_identities);
         let kera2_versions = versions
             .iter()
             .filter(|version| version.workflow_id == KERA2_WORKFLOW_ID)
@@ -1377,7 +1398,7 @@ mod lifecycle_e2e {
             .sync()
             .await
             .expect("second runtime package sync should complete");
-        assert_eq!(second_sync.packages_found, 9);
+        assert_eq!(second_sync.packages_found, 5);
         assert_eq!(second_sync.invalid, 0, "{:?}", second_sync.errors);
         let repeated_versions = services
             .runtime_repository
