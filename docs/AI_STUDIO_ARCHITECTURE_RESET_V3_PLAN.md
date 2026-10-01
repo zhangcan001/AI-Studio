@@ -1,5 +1,17 @@
 # AI Studio Architecture Reset V3 — 目标与渐进迁移方案
 
+## Phase0 gate update — 2026-10-01
+
+用户已批准 Option C / KEEP_ENGINE + REBUILD_CONTROL_PLANE、PROJECT_FIRST、SINGLE_APP_ROUTE、RUN_PROJECTION、ADVANCED_WORKFLOW_LAB；不改core/database。本轮仅补证及契约，未实施。
+
+实际baseline `9f23e22bba73426534eabb080247db9228add91e`，Phase1 CI36841629302 exact head completed/success。B/C/E/F=PARTIAL，D=NOT VERIFIED；PRODUCT_CONTRACT结构已建立，但运行oracle尚有缺口，PRODUCT_CONTRACT_COMPLETE=NO，READY_FOR_PHASE_2=NO。明细见AUDIT的Phase0更新与PRODUCT_CONTRACT，旧Phase1观察不补签本轮gate。
+
+必要设计澄清：当前最强媒体检索/预览入口是Asset Library，目标Runs统一运行状态、失败恢复和来源深链，**不取代媒体库、不合并底层Task/Asset/Artifact/Shot事实**。新Shot历史候选须区分本次生成与项目复用，不造provenance。accepted真实原文并非“生成成功”，需要修的是颜色/技术ID和终态反馈，不把伪引文作为oracle。
+
+进入Phase2前仍需：完整图片queued/running/Review传播；H3同mode配置与历史关联；input修正与transient恢复；SUCCESS/FAILED/SUCCESS仅恢复失败leaf且旧attempt保留；native OCC冲突/draft与旧binding刷新/重启/显式升级；完整Shot History和输入reuse。repository OCC单项通过不能替代native冲突UX。以上仍使用隔离数据、合法UI/service和明确标识fixture，禁止SQL假状态或新GPU昂贵生成。
+
+本轮即使后续gate闭环也不实现Facade；实现阶段另需用户明确指令。
+
 日期 2026-10-01；设计依据 `master@fe00472950c12593892e6d80f97fcf6bf60776e6` 的当前源码与本轮隔离 Native 审计。对应 `AI_STUDIO_ARCHITECTURE_RESET_V3_AUDIT.md`。**这是方案，不是实现或发布验收；当前 READY_FOR_PHASE_2=NO。**
 
 ## 1. 明确决定

@@ -1,5 +1,31 @@
 # AI Studio Architecture Reset V3 — 独立现状审计
 
+## Phase0 补证更新（2026-10-01；PARTIAL）
+
+本轮 baseline `9f23e22bba73426534eabb080247db9228add91e`，fetch/pull 后 local/origin 相同、工作区干净；与原源码基线间只有两份docs。CI `36841629302` exact head 已查询 **completed/success**。用户已批准 KEEP_ENGINE / REBUILD_CONTROL_PLANE 与 project-first/single-route/Run projection/Advanced Workflow Lab；不等于实施授权。
+
+隔离根 `C:\Users\ADMIN\AppData\Local\Temp\ai-studio-phase0-ffda76db` 用只读 SQLite backup 克隆旧隔离项目，历史文件仅读取，无 SQL INSERT/UPDATE/DELETE。标准 dev build 37.04s；资源检查约17GiB空闲RAM、2.3GiB/16GiB VRAM，不并行runner，不关闭用户应用/ComfyUI。临时18788边界借鉴ControlledComfy seam，重放历史字节；新任务全部 **FIXTURE**，不是新GPU输出，不修改仓库正式fixture。真实Comfy仅GET schema/stats。
+
+初版临时夹具未回显请求prompt_id，backend拒绝为 SUBMISSION_STATE_UNCERTAIN；只修仓库外夹具。之后两个正常提交的 Task `tsk_78f34799-4d03-44c6-9b9c-0ffa0f09bd10` / `tsk_5a848b2a-59ec-4331-929c-664f45b403f7` 均 SUCCEEDED，各有两个fixture Asset。初版失败不是input/transient恢复闭环证据。
+
+|Journey|本轮实际证据|Gate / 缺口|
+|---|---|---|
+|B|Shot候选显示新fixture输出；合法确认历史真实图片 `ast_74f7051a-c289-4e3a-a198-ce6238d91eff`，selected持久化，其他Asset/Task保留|PARTIAL；完整queued/running文案、Review及全surface同时性未闭环|
+|C|历史真实H3首尾帧quality2.1.1一秒视频 `ast_dd7f218a-facc-4be5-a9d1-9287d2cfdc75` 在Shot播放、确认，selected_video持久化；Library再预览，来源Task真实运行包/版本可见|PARTIAL；当前Shot表单默认ref2va，不能当历史首尾帧任务输入；同mode配置闭环待补|
+|D|真实失败Task保留，之后正常新任务成功；Create统计0failed与Production非零有入口差异，但混合旧失败，未测单失败延迟|NOT VERIFIED；input修正/transient retry/三项partial resume/五surface传播未闭环|
+|E|native选择首尾帧generator保存，离开后重进；DB只读确认VIDEO/DEFAULT exact `wfv_ed7bd1b1-52ab-41b8-93de-f6138c1122bd` + `rcp_18d5fe30-a428-4be8-a62a-f19c7812322b`，revision1，IMAGE原slot不变|PARTIAL；native OCC冲突/draft和本轮旧binding refresh/restart/显式升级待补|
+|F|Shot历史候选可播放选用；Library图片/视频预览；“查看生成任务”打开真实H3 Task `tsk_bddec1cc-3306-43b2-bf46-b9e3a061a5ac`，quality2.1.1；“用于创作”存在|PARTIAL；Shot History完整路径、inputs reuse动作未执行，按钮存在不是PASS|
+
+接受文案原文：“已加入普通生产队列 pbt_… 并开始处理，镜头候选仍需手动选择。” **并没有字面“生成成功”**。绿色颜色/UUID/缺少完整终态反馈不应保留。Task成功、Asset存在、Review、Shot选用是不同事实，不能由Shot stage“已完成”推断Artifact review通过。
+
+新Shot未生成之前已展示同项目历史候选，未来应明确“本次输出”与“历史复用”，不造来源。当前最佳媒体入口是 **Asset Library**（检索/预览/来源任务）；Run统一执行状态/恢复仍有依据，但不能吞并Library或复制Task/Asset/Review/Selection authority。
+
+OCC既有单项 `slot_occ_requires_instance_and_revision_and_preserves_creation_time`：1 passed /1210 filtered /0.28s。直接运行9:08既有binary，源码与当前baseline间仅docs；**未重新编译test target，且repository test不是service/native UAT**。保守核心执行计数7（初版图片失败、两次fixture成功、历史视频、历史检索、binding保存/reload、OCC）；没有全量本地测试。
+
+本地截图 `windows-computer-use-*`、Temp `ai-studio-phase0-boundary-trace.json` / `ai-studio-phase0-session.json` / `ai-studio-phase0-media.json` 是仓库外证据，不是版本化永久证据包。完整PRESERVE/DO_NOT_PRESERVE及待补oracle见新增PRODUCT_CONTRACT。
+
+**PHASE0_EVIDENCE_COMPLETE=NO；PRODUCT_CONTRACT_COMPLETE=NO；READY_FOR_PHASE_2=NO。** 不修缺陷，不实施Facade/Route/Run。未验证项不能用代码阅读代签。
+
 日期：2026-10-01。代码证据基线：`master@fe00472950c12593892e6d80f97fcf6bf60776e6`。
 
 ## 1. 结论与证据等级
