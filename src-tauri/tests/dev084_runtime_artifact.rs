@@ -1860,9 +1860,9 @@ async fn dev084_archived_version_cannot_create_direct_generation() {
 #[tokio::test]
 async fn dev084_active_exact_recipe_can_create_generation() {
     let harness = registry_purge_harness(
-        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "minimax_h3_fl2va_t2v_quality_2_1_0",
         "dev084_user_active_generation",
-        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+        "wfl_minimax_h3_fl2va_t2v_quality",
     )
     .await;
     let (workflow_version_id, recipe_id) = exact_generation_identity(&harness).await;
@@ -1883,9 +1883,9 @@ async fn dev084_active_exact_recipe_can_create_generation() {
 #[tokio::test]
 async fn dev084_registry_workspace_reports_exact_artifact_missing() {
     let harness = registry_purge_harness(
-        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "minimax_h3_fl2va_t2v_quality_2_1_0",
         "dev084_user_workspace_missing",
-        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+        "wfl_minimax_h3_fl2va_t2v_quality",
     )
     .await;
     let (workflow_version_id, recipe_id) = exact_generation_identity(&harness).await;
@@ -1925,9 +1925,9 @@ async fn dev084_registry_workspace_reports_exact_artifact_missing() {
 #[tokio::test]
 async fn dev084_refresh_executes_runtime_diagnostics() {
     let harness = registry_purge_harness(
-        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "minimax_h3_fl2va_t2v_quality_2_1_0",
         "dev084_user_workspace_refresh",
-        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+        "wfl_minimax_h3_fl2va_t2v_quality",
     )
     .await;
     let (workflow_version_id, recipe_id) = exact_generation_identity(&harness).await;
@@ -1964,9 +1964,9 @@ async fn dev084_refresh_executes_runtime_diagnostics() {
 #[tokio::test]
 async fn dev084_recheck_capability_survives_registry_reload() {
     let harness = registry_purge_harness(
-        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "minimax_h3_fl2va_t2v_quality_2_1_0",
         "dev084_user_workspace_cache",
-        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+        "wfl_minimax_h3_fl2va_t2v_quality",
     )
     .await;
     let (workflow_version_id, recipe_id) = exact_generation_identity(&harness).await;
