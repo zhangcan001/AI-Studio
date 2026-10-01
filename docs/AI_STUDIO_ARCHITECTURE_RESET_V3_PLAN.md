@@ -1,5 +1,18 @@
 # AI Studio Architecture Reset V3 — 目标与渐进迁移方案
 
+## Phase0B authoritative entry gate — 2026-10-01
+
+以下当前结论覆盖下方 Phase0/Phase1 历史开工阻断条件；保留历史记录便于追溯。源码/证据 baseline `397118ffb91c7dd623ec4ff70f1e563811c09e43`，指定CI36846060015 exact head completed/success。B=PASS_WITH_KNOWN_LEGACY_DEFECTS，C/D/E/F=PASS；详细实测身份、边界、失败及限制见AUDIT最新Phase0B节。
+
+**进入实现的条件是核心domain invariants有证据 + legacy defects明确记录 + 替代product contract冻结，不是先把旧UI修到完美。** 当前 PRODUCT_CONTRACT_COMPLETE=YES、PHASE0_EVIDENCE_COMPLETE=YES、ARCHITECTURE_CONTRACT_FROZEN=YES、READY_FOR_IMPLEMENTATION_PHASE_1=YES。后续实现任务仍需用户单独下达，本轮到此停止。旧段落的 READY_FOR_PHASE_2=NO 与未补证清单仅是历史阶段状态，不能作为当前额外gate。
+
+批准方向不变：Option C project-first；single AppRoute；Run projection；Library独立持久媒体projection；Product Facade协调既有services；Workflow Lab advanced-only。KEEP_ENGINE=YES、CORE_ENGINE_REWRITE=NO、DATABASE_REWRITE=NO；不增加queue/executor/task authority。
+
+后续迁移oracle以PRODUCT_CONTRACT四类为准：PRESERVE exact identity、Queue authority、不可变history、Asset、Shot selected、独立Review、OCC instance/revision、成功leaf不重做、旧binding不自动升、Backup v20；REPLACE分裂route/入口/结果查找/失败投影/普通UUID；LEGACY_DEFECT记录accepted绿色提示、失败投影滞后、nullms/泄漏、缺编辑CTA、OCC对比绕行；ADVANCED_ONLY保留技术身份/节点/hash/path/evidence/repair诊断可达性。
+
+验证范围明确：D Native validation修正创建新Task保留旧失败；transient/三叶partial是基于原正式fixture的应用服务集成证据，非GPU/admission完整UAT；E Native stale-conflict渲染 + actual service writer，并正常refresh/restart/显式升级；C仅当前正式H3配置至Generate之前。Library完整reuse、传播延迟SLA、全平台/全量本地suite仍NOT VERIFIED，不追加本轮测试、不用旧UI缺陷阻断冻结。禁止把fixture媒体描述为新真实GPU输出。
+
+
 ## Phase0 gate update — 2026-10-01
 
 用户已批准 Option C / KEEP_ENGINE + REBUILD_CONTROL_PLANE、PROJECT_FIRST、SINGLE_APP_ROUTE、RUN_PROJECTION、ADVANCED_WORKFLOW_LAB；不改core/database。本轮仅补证及契约，未实施。

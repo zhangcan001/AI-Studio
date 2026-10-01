@@ -1,6 +1,40 @@
 # Architecture Reset V3 — Product Contract
 
-日期：2026-10-01；源码基线 `9f23e22bba73426534eabb080247db9228add91e`。本文件是迁移 oracle，不是实现方案、完整验收声明或 Phase2 开工授权。Phase0 **PARTIAL**；未验证项不能由源码推断替代。
+日期：2026-10-01；Phase0B证据基线 `397118ffb91c7dd623ec4ff70f1e563811c09e43`。指定CI36846060015 exact head completed/success。本文件作为已冻结迁移oracle，Phase0B **PASS**；实现入口资格已具备，但本轮不实施Facade。PASS只覆盖本轮收窄gate，不等于旧UI完美、全平台UAT或新GPU验收；完整实测边界见AUDIT的Phase0B权威节。
+
+## Frozen classification（所有下述domain字段按此解释）
+
+### PRESERVE
+
+- Exact WorkflowVersion + Recipe identity、项目隔离；名称和current version不决定身份。
+- Production Queue唯一执行authority；Studio Store唯一创作state authority；Facade仅协调现有service/repository ports，不新建executor/task model。
+- Task/attempt历史不可变；原失败保留，新运行/attempt独立id及合法lineage；Asset媒体/来源/历史保留。
+- Shot selected result持久化；选用不删除其他candidate；Task状态、Asset存在、Artifact Review、Shot选用互不等价，Review独立。
+- OCC revision + binding instance保护，包括ABA；冲突不静默覆盖，保留draft并可见serverlatest。
+- partial success只恢复可恢复失败leaf；成功项不得重新执行，其Task/Asset/SHA保持。
+- old generator binding不随catalog/library刷新/restart自动升级，仅用户明确select/save改变exact pair。
+- Backup v20兼容、历史运行/媒体引用；route locator/resume保留project/Shot/Task/Asset身份及dirty-draft意图。
+
+### REPLACE
+
+- workspace + section竞争式routing → single AppRoute；普通生成入口收敛到单Create上下文。
+- 分裂的结果查找/失败状态投影 → Runs统一执行事实及恢复导航，链接而非吞并Library/Shot。
+- 普通UI原始技术ID → 友好Generator/模式/版本/输入；exact identity仍内部使用。
+- 当前input-error缺直接编辑CTA、OCC必须去另一readiness面板比server值 → 明确修正/冲突确认路径；不改变底层immutable snapshot/OCC。
+
+### LEGACY_DEFECT
+
+- accepted/started绿色通知可像成功；原文没有“生成成功”，禁止伪引文；Create缺完整独立queued/running反馈。
+- 同一failed Task的Create/Shot History状态滞后、queue strip失败计数不同、Overview只聚合且返回入口需猜测。
+- nullms；Production英文raw error/code、WFV/Recipe/asset UUID及内部mode泄漏。
+- 新Shot显示项目历史候选却缺明确来源范围；未保存参数可能被其它子表单保存重载复位；保存动作需清晰。
+- 以上是迁移排除项，不先修旧UI作为本轮开工门槛，不描述成本轮已修复。
+
+### ADVANCED_ONLY
+
+WorkflowVersion ID、Recipe ID、Task/batch/execution诊断ID、Node ID、hash、package path、mapping evidence、repair internals、runtime provenance/telemetry/raw diagnostics。保留真实可达技术详情，不作为普通使用的唯一解释；旧Task无Shot也可诊断，不造假关联。
+
+下方每节的PRESERVE属于上述保留域；DO_NOT_PRESERVE是REPLACE/LEGACY_DEFECT的历史用语，技术详情迁至ADVANCED_ONLY。其余规范性句子描述替代产品目标，不自动等于已实现。
 
 ## 1. Product mental model
 
@@ -22,7 +56,7 @@ PRESERVE：既有 batch/item/task/execution identity、幂等 admission、不可
 
 投影需覆盖 Create、Production、Task、Shot History、Overview，不向 UI 复制一套执行 authority。状态订阅/刷新必须项目作用域；切换项目不能把前项目响应写回新项目。
 
-核心恢复 oracle：SUCCESS/FAILED/SUCCESS 批次只恢复失败 leaf；成功项 1/3 不再提交；旧失败 attempt 保留并关联新 attempt。**本轮该三项运行 fixture 未执行，不能宣称已验证。**
+核心恢复 oracle：SUCCESS/FAILED/SUCCESS 批次只恢复失败 leaf；成功项 1/3 不再提交；旧失败 attempt 保留并关联新 attempt。**Phase0B已用正式dev061b服务fixture扩展验证**：A/C item、Task与Asset/SHA不变；旧B失败保留，仅新增B child/Task并成功。COMFY_OFFLINE先安全暂停，需显式继续剩余C后进入三叶partial场景。集成证据不是完整Native/GPU/admission UAT。
 
 ## 4. Result contract
 
@@ -42,9 +76,9 @@ OCC 必须携带 binding_instance_id + revision；陈旧 update/remove 不能覆
 
 旧 binding 在 catalog/library refresh、app restart 后保持 exact pair；只有显式选择并保存才升级。不可用旧版本显示不可用及原因，不自动替换。Backup v20 兼容不因 UI 改造改变。
 
-本轮 native 普通保存/reload：MiniMax H3 高质量首尾帧视频，WFV `wfv_ed7bd1b1-52ab-41b8-93de-f6138c1122bd` + Recipe `rcp_18d5fe30-a428-4be8-a62a-f19c7812322b`，VIDEO/DEFAULT revision=1。显示完整 UUID，选择器不显示友好版本号，属于 DO_NOT_PRESERVE。
+上一轮Phase0A native 普通保存/reload：MiniMax H3 高质量首尾帧视频，WFV `wfv_ed7bd1b1-52ab-41b8-93de-f6138c1122bd` + Recipe `rcp_18d5fe30-a428-4be8-a62a-f19c7812322b`，VIDEO/DEFAULT revision=1。显示完整 UUID，选择器不显示友好版本号，属于 DO_NOT_PRESERVE。
 
-既有 repository OCC 单项测试通过；它不是 service/native 双窗口 UAT。Native conflict rendering、本地草稿保留和本轮旧版本刷新/重启/显式升级仍 **NOT VERIFIED**。
+Phase0B用Native stale form + 独立实际service writer完成OCC：中文“项目工作流绑定已被其他操作修改，请确认最新绑定后重试。”、draft保留、server不覆盖；最新server选择经“检查开工条件”可见，非内联比较（legacy）。I2V2.0 old pair经catalog/library刷新及app restart保持revision3/instance；Native显式选择I2V2.1、Save/reload得到 `wfv_cf180eea-ff88-4938-bb7b-6bee4a65633a` + `rcp_201e838e-1880-40ab-8a3c-fc6bc1fccd93`，revision4，同instance。SAVE_RELOAD/OCC/EXPLICIT_UPGRADE=PASS，AUTO_UPGRADE/SILENT_OVERWRITE=NO。普通picker友好version仍缺，exactpairUUID泄漏不应保留。
 
 ## 6. Failure/recovery contract
 
@@ -52,7 +86,7 @@ OCC 必须携带 binding_instance_id + revision；陈旧 update/remove 不能覆
 
 恢复必须保留旧 Task/错误详情/原 exact pair 与 lineage，成功 leaf 不重做。用户能看到失败事实、原因与有效操作；不能仅导航到 Production 才刷新失败。
 
-临时夹具初版错误返回不同 prompt_id，真实 backend 拒绝为 SUBMISSION_STATE_UNCERTAIN；修正夹具后新提交成功。该 incident **不是 input-error recovery 或 transient retry 的替代证据**。未改业务代码，也未伪造状态。
+Phase0B Native同镜头width=0创建 FAILED `tsk_56d50ee8-b565-48e8-baeb-222c104201b5` / INPUT_OUT_OF_RANGE；Task提示中文、transient retry禁用。手工回Create镜头定位编辑width=64，新batch `pbt_4b44267a1e74447896dcd862f9ada9db` / Task `tsk_518f0919-4384-4e13-9f39-501a64fc0581` SUCCEEDED（媒体FIXTURE），旧失败完整行未变。D2原正式offline recovery用例PASS，D3三叶fixture仅B新attempt，A/C不重做。输入修正可用但缺直接edit CTA；Create/History投影不同步仍legacy，不改业务代码。旧轮prompt_id不一致incident仍只算夹具错误，不充当本轮recovery证据。
 
 ## 7. Route/resume contract
 
@@ -77,7 +111,7 @@ PRESERVE：Production Queue 单执行 authority；Studio Store authority；repos
 |ID|Observed / required evidence|User impact / authority|Expected V3 / regression oracle|
 |---|---|---|---|
 |L-ACCEPT|原文 accepted/started，绿色提示含 batch UUID；完整 queued/running 文案缺口|提交提示不等于 Task 终态；Queue/Task authority|分别呈现 accepted/queued/running/succeeded；延迟成功/失败场景|
-|L-FAIL-PROJECTION|Create 队列统计 0 failed，Production 显示 failed；新夹具失败及旧失败混合，不据此估算单一失败延迟|错误可见性依赖入口；不能当五 surface 单事实闭环|同一 Task 五 surface project-scoped projection；完整延迟测量待补|
+|L-FAIL-PROJECTION|Phase0B同一INPUT_OUT_OF_RANGE Task：Create strip 0失败、History已排队，Production/Task失败、Overview聚合失败；AUDIT记录五surface|同一事实的错误可见性依赖入口和重开；不是底层Task丢失|五surface project-scoped Run投影一致；毫秒传播SLA未测|
 |L-IDENTITY|项目 picker 完整 WFV/Recipe UUID；Shot recipe UUID、内部 ref2va；Task 包/目标/ID|普通用户理解负担；底层 identity 正确保留|普通友好标签，Advanced 显示诊断；exact-pair parity|
 |L-RESULT-SCOPE|新 Shot 在未生成前已有项目历史候选|可能误认本 Shot 已有结果；Asset 与 selected Shot 分离|明确本次输出/历史复用；选用不造 provenance|
 |L-NULL-TIME|Phase1 已观察 nullms；本轮不重复复现|缺失时长被当有效数字|缺值显示未知；零值与缺值分开|
@@ -85,14 +119,29 @@ PRESERVE：Production Queue 单执行 authority；Studio Store authority；repos
 
 以上是排除的 UX 缺陷，不是本轮修复记录。不得将规范性要求标为已经实机通过。
 
-## Evidence closure gate
+## Evidence closure gate（Phase0B权威）
 
 |Journey|Current evidence|Gate|
 |---|---|---|
-|B|正常 fixture Task 成功、Asset/candidate、历史图片选用；完整 queued/running、Review 与全 surface 同时性未闭环|PARTIAL|
-|C|历史真实 H3 quality 首尾帧2.1.1一秒视频在 Shot/Library 展示、播放、合法关联；当前 Shot form 是 ref2va，不宣称为该历史任务输入|PARTIAL|
-|D|失败拒绝/新成功任务可观察；输入修正、正式 transient retry、三项 partial resume、五 surface propagation 未闭环|NOT VERIFIED|
-|E|native exact pair 保存/reload + repository OCC test；native conflict/localdraft/old-binding cycle 未闭环|PARTIAL|
-|F|Shot 候选、Library 预览和来源 Task 跳转；Shot History/open/select、输入 reuse 完整路径未闭环|PARTIAL|
+|B|正常fixture成功Task/Assets与候选、历史图片合法选用/持久化及Task/Asset保留；缺独立queued/running和部分投影滞后已列legacy|PASS_WITH_KNOWN_LEGACY_DEFECTS|
+|C|镜头03同Create Video：正式I2V2.1 + reference + prompt编辑应用 + duration_seconds=1并保存，Generate可见但未点击；历史真实quality2.1.1播放沿用既有证据，不混称同一输出|PASS|
+|D|Native确定性validation修正后新Task成功、旧失败完整保留；原transient测试 + 三叶partial集成PASS；同失败Task五surface差异明确记录|PASS|
+|E|普通Save/reload、Native冲突渲染/草稿保留/serverlatest、不覆盖；旧pair刷新/restart不升级；显式2.1升级持久化|PASS|
+|F|用户已收窄并接受角色：Runs执行状态/恢复，Library持久媒体发现/复用，Shot创作/选用；不追加完整reuseUAT|PASS|
 
-PRODUCT_CONTRACT_STRUCTURE_COMPLETE=YES；PRODUCT_CONTRACT_COMPLETE=NO（未验证 oracle 仍在）；PHASE0_EVIDENCE_COMPLETE=NO；READY_FOR_PHASE_2=NO。
+核心domain invariants有实测证据 + legacy defects明确 + replacement contract冻结，是当前entry gate。旧UI无需先完美。详细case身份、fixture适用范围、失败重跑与10项预算见AUDIT；全平台/完整Library reuse/传播时延SLA仍NOT VERIFIED。
+
+```ini
+PRESERVE_SECTION=YES
+REPLACE_SECTION=YES
+LEGACY_DEFECT_SECTION=YES
+ADVANCED_ONLY_SECTION=YES
+DOMAIN_INVARIANTS_FROZEN=YES
+PRODUCT_CONTRACT_COMPLETE=YES
+PHASE0_EVIDENCE_COMPLETE=YES
+ARCHITECTURE_CONTRACT_FROZEN=YES
+READY_FOR_IMPLEMENTATION_PHASE_1=YES
+ARCHITECTURE_IMPLEMENTATION_STARTED=NO
+```
+
+到此停止；不自动开始Facade、Route或Run实现。后续重构必须用本契约回归，不把暂存fixture媒体充作新真实GPU结果。

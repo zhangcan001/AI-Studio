@@ -1,5 +1,135 @@
 # AI Studio Architecture Reset V3 — 独立现状审计
 
+## Phase0B final closure — 2026-10-01（当前权威结论）
+
+本节覆盖下方历史 Phase0 PARTIAL gate，保留历史记录，不把旧未执行项改签为旧轮 PASS。
+
+- START_HEAD / ACTUAL_BASELINE：`397118ffb91c7dd623ec4ff70f1e563811c09e43`；master fetch/pull ff-only，无外部更新。
+- 指定 Source-only CI [36846060015](https://github.com/zhangcan001/AI-Studio/actions/runs/36846060015)：同一 exact head，**completed / success**；Frontend tests、TypeScript、build、Rust fmt/check/tests 全部 success。Rust job 09:57:36Z–10:15:39Z，18m03s。新文档提交的自动 CI 不在此伪签 PASS。
+- 只补 D/E、B 状态/C 配置；F 按用户收窄 gate 冻结。仅修改三份文档，没有实现 Facade/Route/Run、业务修复、迁移或运行包修改。
+- 隔离项目 `prj_14526f0d-e3f5-4562-bb30-bc41e97c7bb0`；Native 用标准 `pnpm tauri dev`，根仍为 Temp `ai-studio-phase0-ffda76db`。只读 DB 对照，无手写 SQL 创建/修改 Task、Asset、状态、绑定。独立绑定 writer 使用实际 application service + repository ports，不是 SQL 注入或替代 executor。
+- 临时 ControlledComfy 边界在 18788；本轮唯一成功 Native 图片提交重放历史字节，标记 **FIXTURE**，没有新 GPU 生成。历史真实 H3 播放证据沿用上轮，不重复播放验收。真实 Comfy 只读 schema/stats，不重启/关闭。
+
+### D1 — Native 输入错误与新运行
+
+在同一 `镜头03 / sht_80d8520d-d243-4e95-9f47-564696ac6483`，IMAGE 配方 acceptance_image 的 width=0，经普通 Generate → 正式 Queue 后产生确定性 validation failure：
+
+```ini
+INITIAL_RUN_ID=pbt_b6014f56aa5f428a84932115b93ceb4b
+INITIAL_TASK_ID=tsk_56d50ee8-b565-48e8-baeb-222c104201b5
+ERROR_CODE=INPUT_OUT_OF_RANGE
+ERROR_USER_MESSAGE=输入值超出允许范围。
+INPUT_ERROR_ACTION=RETURN_TO_CREATE_AND_USE_SHOT_LOCATOR_TO_EDIT_INPUT
+NEW_RUN_ID=pbt_4b44267a1e74447896dcd862f9ada9db
+NEW_TASK_ID=tsk_518f0919-4384-4e13-9f39-501a64fc0581
+NEW_TASK_STATUS=SUCCEEDED
+INPUT_RECOVERY=PASS
+OLD_FAILED_TASK_PRESERVED=YES
+```
+
+Production 技术错误明确 `input "width" value 0 is outside range [1, 16384]`；Task 普通提示是中文，上述详细英文/code 在 Production 泄漏属于 legacy。Task 的“重试一次”禁用，并说明“该失败未被归类为临时错误”，没有盲目 retry 同一 invalid snapshot。Task 当前没有直接“编辑该镜头”CTA；实际通过创作侧栏、镜头定位搜索“镜头03”、选择原 Shot 回到编辑，width 改64，再 Generate。该路径可用但绕行必须 REPLACE，不能描述成现有一键恢复。
+
+新 Task 两个 fixture Asset：`ast_f1aae2a3-23f4-4c72-a0e9-856737fdcf1d`、`ast_3a133d88-465f-43cc-8aa6-dfe9619ae922`。旧 Task 完整行与修正前只读快照相等，FAILED/error/finished_at 没被改成功。旧 batch/item 和旧 Shot generation history 仍在，新 Task 与 batch 使用不同 idempotency key；这是输入修正的新运行，不伪造 transient retry lineage。
+
+### D2/D3 — 正式 recovery fixture（无 GPU）
+
+从仓库已有 `src-tauri/tests/dev061b_queue_recovery.rs` 在 Temp 构建 test harness，链接本轮正常 dev 构建的当前 application library；未修改仓库 fixture 或正式断言。保留原 fixture 的 workflow/recipe definition seed；Task/Asset/状态全部由实际 Queue/Generation/repository 服务产生。`start_for_test` 是原正式 fixture 的 doc-hidden 测试入口，**不是 Native production admission 完整 UAT**。
+
+1. 原用例 `restart_keeps_package_batch_idle_then_explicit_start_recovers_offline_and_retries_frozen_asset`：1 passed /4 filtered /1.83s。COMFY_OFFLINE 可正式恢复；child/new Task 使用 frozen input/exact pair；旧失败保留，重复 partial resume 幂等，不重读原 package 素材。Input validation 不能据此当 transient。
+2. Temp 扩展用例 `phase0b_three_leaf_partial_recovery_preserves_success_and_failed_history`：复用上述真实服务/ControlledComfy，adapter 第2次明确 offline，构成 A-success/B-failed/C-success。初次用例误以为 continue_on_failure 会越过 offline，C 实际 Pending，断言失败；**没有隐藏失败或改业务语义**。正确 fixture 先显式继续离线暂停后的剩余 C，再开始 partial recovery。修正后 1 passed /4 filtered /3.68s。
+
+```ini
+TRANSIENT_ERROR_CODE=COMFY_OFFLINE
+TRANSIENT_RETRY_SUPPORTED=YES
+THREE_LEAF_BATCH=pbt_bc01860644724ac58253f7f3d98357f9
+A_TASK=tsk_3823adec-37ea-49bf-85cc-cdeb78e0e739
+OLD_B_TASK=tsk_fe089675-567f-4b55-b29c-44ef978ac65c
+C_TASK=tsk_54a239cb-5631-490a-8ad5-904a44596a93
+NEW_B_TASK=tsk_dbdb50f2-184b-4aaa-950f-6c1a6d212d59
+NEW_B_RETRY_OF=pbi_b42e5477211c4c50a08934909a3531d6
+A_REEXECUTED=NO
+C_REEXECUTED=NO
+B_RECOVERED=YES
+OLD_B_FAILURE_PRESERVED=YES
+A_ASSET_PRESERVED=YES
+C_ASSET_PRESERVED=YES
+SUBMISSIONS_TOTAL=4
+TASKS_TOTAL=4
+```
+
+A/C 完整 batch item（含 Task id/时间）前后相等；两个 Asset id/source Task/SHA 不变；资产2→3。旧 B item 与 Task 保留 FAILED，child B SUCCEEDED，values/exact pair/frozen snapshot 保持。Offline 暂停是既有安全行为，不能为三叶场景重做整个批次。
+
+### D4 — 同一失败 Task 五 surface（不修 legacy）
+
+以下都关联 D1 的同一 failed Task/Shot/batch，不混算其他旧失败。以实测 navigation/重开为界，不声称采集毫秒级传播 SLA。
+
+|Surface|实际 status|是否需手工刷新/重开|正确错误可见性|
+|---|---|---|---|
+|Create|失败后起初仍待启动/图片待执行；queue strip 0失败；重新定位 Shot 后为失败需要处理|需要重开/重新定位才能取得新投影|没有 width 错误；“下一步”仍填提示词，与 acceptance_image 原因不符|
+|Production / Queue|对应 batch 已结束，有失败项目；item FAILED，Task id一致|导航入口读最新，无额外 refresh 按钮|明确 INPUT_OUT_OF_RANGE + width=0/range；普通页泄漏英文/code|
+|Task History|同 Task 失败；普通中文“输入值超出允许范围”|从 Overview 对应 Shot 定位运行任务打开，无额外 refresh|正确中文；重试一次禁用；技术信息/多项 nullms 仍露出|
+|Shot History|18:32:04 对应唯一输入失败运行仍“已排队”，0候选|仅点 History 未得到正确终态；后来重开 Shot 可更新 Shot stage，不据此断言 History 已同步|未显示输入错误|
+|Project Overview|失败计数2→3；对应镜头03位于需要处理并可定位上述 Task|重新进入 Overview 读最新，无 refresh click|聚合失败可见但不呈现 width 原因，部分英文/ID露出|
+
+FAILURE_PROJECTION_DIVERGENCE=YES。普通用户缺直接编辑CTA、accepted 绿色条仍保留、Create/History滞后、Overview聚合不等于Task错误，是 V3 Run projection 需要替换的缺陷，**不阻断已验证 domain recovery gate**。
+
+### E — Native OCC、旧绑定与显式升级
+
+因单实例 Native，采用独立 context A（实际 ProjectWorkflowBindingService/upsert，SQLite repositories）+ context B（Native stale form）构成 OCC race，不使用 DevTools invoke 或修改 IPC。临时 helper 使用 service 的 legacy 无 registry 构造器；验证 slot OCC + exact runtime pair，不额外声称跨 context registry lock/完整 admission UAT。
+
+- A/B 同读 VIDEO/DEFAULT revision1、instance `bnd_c14989c8db1d4775a1ddeb7f7de38d96`。
+- A 保存 I2V2.1，revision2；B仍持 revision1、在普通 picker 选择全能参考版本并保存 → **CONFLICT**。
+- 实际 Native 文案：**“项目工作流绑定已被其他操作修改，请确认最新绑定后重试。”** 普通信息没有仅用 revision mismatch。
+- B本地全能参考 draft 保留；server仍为A的I2V2.1/revision2，SILENT_OVERWRITE=NO。
+- Native “检查开工条件”使用最新 server config，显示I2V2.1；上方picker仍Bdraft。SERVER_LATEST_VISIBLE=YES **经 readiness 面板**，不是已实现内联server/draft对比。额外点击与分裂UX归入legacy。
+
+旧 binding 通过同一 actual service 合法保存为 I2V2.0/revision3：
+
+```ini
+OLD_WFV=wfv_081229d2-3c41-4b02-b57b-b207b8f3fea3
+OLD_RECIPE=rcp_dacfb43b-e6d8-4573-9369-8a0c3ccac7ea
+AFTER_CATALOG_AND_LIBRARY_REFRESH_PAIR=UNCHANGED
+AFTER_APP_RESTART_PAIR=UNCHANGED
+AUTO_UPGRADE=NO
+NEW_WFV=wfv_cf180eea-ff88-4938-bb7b-6bee4a65633a
+NEW_RECIPE=rcp_201e838e-1880-40ab-8a3c-fc6bc1fccd93
+NEW_REVISION=4
+BINDING_INSTANCE_ID=bnd_c14989c8db1d4775a1ddeb7f7de38d96
+USER_EXPLICIT_UPGRADE=YES
+NEW_PAIR_PERSISTED=YES
+SAVE_RELOAD=PASS
+```
+
+Workflow Library 原“刷新”刷新 catalog/library，随后只关闭本任务隔离 Native/dev runner，再以相同标准dev/root重启。Old pair、revision3/instance/updatedAt不变；UI显示不可用并说明“不静默改写”。最后在普通视频默认选择器明确选择“MiniMax H3 高质量图生视频”（registry版本2.1），Save后离开/重开，服务只读确认上述新pair/revision4；IMAGE slot未变。普通picker露WFV/Recipe而未给友好版本号：VISIBLE_WORKFLOW_VERSION_ID/RECIPE_ID=YES，DISPLAY_VERSION=NOT_SHOWN（版本来自真实registry，不虚称UI显示）。隔离历史包存在hash/readiness警告，本轮不改包、不把可保存绑定当GPU准入PASS。
+
+### B/C/F 与最终 gate
+
+- B：沿用已完成正常fixture成功输出、候选选择、selectedImage持久化、旧Task/Asset保留证据；本轮输入修正新增成功Task不删除失败。REQUEST_ACCEPTED与Task终态明确不同；正常Create未完整独立呈现QUEUED/RUNNING，STATUS_STATES_DISTINCT=NO / B_STATUS_SEMANTICS_INCOMPLETE=YES。B_GATE=PASS_WITH_KNOWN_LEGACY_DEFECTS，不能为缺label无限补测。
+- C：同一镜头03 Create，Video → 当前正式I2V2.1 exact pair；参考选 `ast_67bc78db-81d1-4c6a-ac37-d39729b022c0` 并保存；提示词编辑/应用“紫砂茶壶静置于木桌，镜头缓慢推近，窗边柔和自然光，保持参考图主体与构图。”；duration_seconds=1，544×960并普通保存配置。只读DB确认reference、prompt_text、scalar config同Shot。生成按钮可见，**未点击视频Generate**。未保存时长曾因参考保存重载恢复默认5，随后重新编辑并明确Save；final为1，草稿保存顺序UX需改进。C_CONFIGURATION_COMPLETE_IN_ONE_CREATE_CONTEXT=YES；历史真实quality2.1.1视频播放沿用上轮，不伪称为本轮I2V新输出。RAW_TECH_LEAKS=YES（recipe UUID/内部fl2va_image_to_video/asset ID）。C_GATE=PASS。
+- F：按用户本轮明确收窄的角色判断冻结PASS：Runs=执行状态与恢复；Library=持久媒体发现/复用；Shot=当前创作/选用结果。不追加输入reuse/Library完整UAT，未执行者仍NOT VERIFIED，不再作为本轮gate。
+- D_GATE=PASS；E_GATE=PASS；Product Contract四类分类及domain invariants已冻结。READY_FOR_IMPLEMENTATION_PHASE_1=YES只是入口资格，**本轮停止，不实施Facade**。
+
+### 测试预算与证据位置
+
+保守计数10项：①Native OCC race；②原正式transient fixture；③扩展三叶初次失败；④修正fixture重跑；⑤旧binding refresh/restart；⑥显式升级/reload；⑦Native输入错误；⑧同Shot修正提交；⑨H3配置（不提交）；⑩同失败五surface投影。准备编译失败非用例执行；实际测试/编译前约17–18GiB可用RAM、VRAM约2.0–2.1GiB/16GiB，串行且没有其它build/test并发；未使用内存清理器/GPU reset/用户进程终止。未做本地全量Rust/Vitest或额外GPU验收；指定已有远程完整CI是独立权威。
+
+仓库外本地证据：Temp `ai-studio-phase0b-occ-writer.log`、`ai-studio-phase0b-old-binding-before.log` / `after-refresh.log` / `after-restart.log`、`ai-studio-phase0b-explicit-upgrade.log`、`ai-studio-phase0b-transient-result.log`、`ai-studio-phase0b-partial-result.log`（初次失败）/`partial-result-final.log`、`ai-studio-phase0b-input-recovery.json`、`ai-studio-phase0b-h3-config.json`、`ai-studio-phase0b-boundary-trace.json` 与工具Native截图。日志/JSON/本地DB/运行缓存不提交；本节摘录身份、动作、断言、失败及适用范围作为版本化审计摘要，不虚称已提交永久媒体证据包。
+
+```ini
+PHASE0_DOCS_CI=PASS
+B_GATE=PASS_WITH_KNOWN_LEGACY_DEFECTS
+C_GATE=PASS
+D_GATE=PASS
+E_GATE=PASS
+F_GATE=PASS
+PRODUCT_CONTRACT_COMPLETE=YES
+PHASE0_EVIDENCE_COMPLETE=YES
+ARCHITECTURE_CONTRACT_FROZEN=YES
+READY_FOR_IMPLEMENTATION_PHASE_1=YES
+ARCHITECTURE_IMPLEMENTATION_STARTED=NO
+```
+
+
 ## Phase0 补证更新（2026-10-01；PARTIAL）
 
 本轮 baseline `9f23e22bba73426534eabb080247db9228add91e`，fetch/pull 后 local/origin 相同、工作区干净；与原源码基线间只有两份docs。CI `36841629302` exact head 已查询 **completed/success**。用户已批准 KEEP_ENGINE / REBUILD_CONTROL_PLANE 与 project-first/single-route/Run projection/Advanced Workflow Lab；不等于实施授权。
