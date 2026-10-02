@@ -55,6 +55,7 @@ import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
 import { normalCreate } from "../features/create/createModel";
+import { normalLibrary } from "../features/library/libraryModel";
 import { normalRuns } from "../features/runs/runsModel";
 import { invalidateRuns } from "../product/runInvalidation";
 import { ShellHost, readShellMode, SHELL_MODE_KEY } from "./ShellHost";
@@ -84,6 +85,7 @@ const PromptStudio = lazy(() => import("../features/prompts/PromptStudio").then(
 const LocalToolHub = lazy(() => import("../features/tools/LocalToolHub").then(({ LocalToolHub }) => ({ default: LocalToolHub })));
 const AssetVideoBatchWorkspace = lazy(() => import("../features/assets/AssetVideoBatchWorkspace").then(({ AssetVideoBatchWorkspace }) => ({ default: AssetVideoBatchWorkspace })));
 const TaskHistory = lazy(() => import("../features/tasks/TaskHistory").then(({ TaskHistory }) => ({ default: TaskHistory })));
+const LibraryPage = lazy(() => import("../features/library/LibraryPage").then(({ LibraryPage }) => ({ default: LibraryPage })));
 const RunsPage = lazy(() => import("../features/runs/RunsPage").then(({ RunsPage }) => ({ default: RunsPage })));
 const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspace").then(({ ProjectWorkspace }) => ({ default: ProjectWorkspace })));
 const ProjectCommandCenter = lazy(() => import("../features/projects/ProjectCommandCenter").then(({ ProjectCommandCenter }) => ({ default: ProjectCommandCenter })));
@@ -283,6 +285,7 @@ function App() {
         const checked = await validateResumeChildren(initial, {
           shotIds: async (projectId) => (await listShots(projectId)).map((shot) => shot.id),
           runExists: async (projectId, run) => { await productClient.run.get(projectId, run); },
+          resourceExists: async (projectId, resource) => { await productClient.library.get(projectId, resource); },
           assetExists: async (projectId, assetId) => { await getAsset(projectId, assetId); },
         }).catch((resumeError: unknown) => {
           if (!cancelled) setError(toUserMessage(resumeError));
@@ -290,6 +293,7 @@ function App() {
         });
         if (!cancelled) {
           if (initial.kind === "runs" && initial.run && checked.kind === "runs" && !checked.run) setError("运行已不存在或不可访问。请从列表选择其他运行。");
+          if (initial.kind === "library" && initial.resource && checked.kind === "library" && !checked.resource) setError("资源不存在或不可访问，已返回资源列表。");
           restore(checked);
         }
       })
@@ -818,6 +822,7 @@ function App() {
 
       {!activeProject && projectError && <p className="error-message global-error">项目加载失败：{projectError}</p>}
       <Suspense fallback={<p className="workspace-loading" role="status">正在加载工作区...</p>}>
+        {activeProject && normalLibrary(route, shellMode) && route.kind === "library" && <LibraryPage key={activeProject.id} route={route} navigate={navigate} />}
         {activeProject && normalRuns(route, shellMode) && route.kind === "runs" && <RunsPage key={activeProject.id} route={route} navigate={navigate} />}
         {workspace === "command-center" && (
           <WorkspaceErrorBoundary
@@ -852,7 +857,7 @@ function App() {
             />
           </section>
         )}
-        {activeProject && workspace === "assets" && (
+        {activeProject && workspace === "assets" && !normalLibrary(route, shellMode) && (
           <AssetWorkspace
             projectId={activeProject.id}
             initialAssetId={focusedAssetId}
@@ -864,7 +869,7 @@ function App() {
             onOpenShot={openShotFromAsset}
           />
         )}
-        {activeProject && workspace === "prompts" && (
+        {activeProject && workspace === "prompts" && !normalLibrary(route, shellMode) && (
           <PromptStudio
             projectId={activeProject.id}
             onOpenTaskHistory={() => navigateToWorkspace("tasks")}

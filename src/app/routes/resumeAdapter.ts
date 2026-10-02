@@ -41,7 +41,7 @@ export function parseRoute(value: unknown, depth = 0): AppRoute | undefined {
     case "library": {
       const r = v.resource as Record<string, unknown> | undefined;
       if (r !== undefined && (!r || !["asset", "prompt", "profile", "reference-set"].includes(String(r.kind)) || !text(r.id))) return undefined;
-      return { kind: "library", projectId, resource: r ? { kind: r.kind as "asset" | "prompt" | "profile" | "reference-set", id: r.id as string } : undefined, filter: v.filter === "prompts" ? "prompts" : undefined };
+      return { kind: "library", projectId, resource: r ? { kind: r.kind as "asset" | "prompt" | "profile" | "reference-set", id: r.id as string } : undefined, filter: ["all","media","images","videos","audio","prompts","profiles","reference-sets","advanced-assets","advanced-prompts"].includes(String(v.filter)) ? String(v.filter) : undefined };
     }
     default: return undefined;
   }
@@ -65,6 +65,7 @@ export function resolveResume(payload: unknown, legacy: WorkspaceResume, project
 export interface ResumeReaders {
   shotIds: (projectId: string) => Promise<readonly string[]>;
   runExists: (projectId: string, run: NonNullable<Extract<AppRoute, { kind: "runs" }>["run"]>) => Promise<void>;
+  resourceExists?: (projectId: string, resource: NonNullable<Extract<AppRoute,{kind:"library"}>["resource"]>) => Promise<void>;
   assetExists: (projectId: string, assetId: string) => Promise<void>;
 }
 export async function validateResumeChildren(route: AppRoute, readers: ResumeReaders): Promise<AppRoute> {
@@ -72,11 +73,14 @@ export async function validateResumeChildren(route: AppRoute, readers: ResumeRea
   if (route.kind === "create" && route.shotId) return withoutMissingShot(route, await readers.shotIds(route.projectId));
   try {
     if (route.kind === "runs" && route.run) await readers.runExists(route.projectId, route.run);
-    if (route.kind === "library" && route.resource?.kind === "asset") await readers.assetExists(route.projectId, route.resource.id);
+    if (route.kind === "library" && route.resource) {
+      if(readers.resourceExists) await readers.resourceExists(route.projectId,route.resource);
+      else if(route.resource.kind === "asset") await readers.assetExists(route.projectId,route.resource.id);
+    }
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
     // An unavailable transport is not evidence that a child was deleted.
-    if (code !== "RUN_NOT_FOUND" && code !== "ASSET_NOT_FOUND" && code !== "PROJECT_SCOPE_VIOLATION") throw error;
+    if (code !== "LIBRARY_RESOURCE_NOT_FOUND" && code !== "RUN_NOT_FOUND" && code !== "ASSET_NOT_FOUND" && code !== "PROJECT_SCOPE_VIOLATION") throw error;
     if (route.kind === "runs") return { kind: "runs", projectId: route.projectId, filter: route.filter };
     if (route.kind === "library") return { kind: "library", projectId: route.projectId, filter: route.filter };
   }

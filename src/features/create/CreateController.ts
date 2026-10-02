@@ -99,6 +99,31 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     if (fields.length === 1) { setValue(fields[0].key, mediaValue(fields[0], [asset.id])); useStudioStore.getState().clearPendingAssetIntent(); }
     else setError("请在明确的首帧、尾帧或素材输入框中选择此素材。");
   }, [intent, generator, loading, context, key]);
+  const libraryIntent = useStudioStore(state => state.pendingLibraryIntent);
+  useEffect(() => {
+    if (!libraryIntent) return;
+    if (libraryIntent.projectId !== route.projectId) { useStudioStore.getState().setPendingLibraryIntent(undefined); return; }
+    if (loading || !context) return;
+    if (libraryIntent.kind === "prompt" && context.selectedShot && generator?.fields.some(field => field.key === "prompt" && field.type === "textarea")) {
+      setValue("prompt", {type:"string",value:libraryIntent.text});
+      useStudioStore.getState().setPendingLibraryIntent(undefined);
+    }
+    if (libraryIntent.kind !== "asset" || context.mediaInputs.some(a => a.id === libraryIntent.assetId)) return;
+    let alive=true;
+    void productClient.library.get(route.projectId,{kind:"asset",id:libraryIntent.assetId}).then(detail=>{
+      if(!alive || detail.kind!=="asset")return;
+      setContext(current=>current ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==detail.asset.id),{id:detail.asset.id,name:detail.asset.name,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
+    }).catch(error=>{if(alive)setError(normalizeProductError(error).message);});
+    return()=>{alive=false;};
+  },[libraryIntent,loading,context,generator,key]);
+  const librarySlots = libraryIntent?.kind === "asset" ? generator?.fields.filter(field=>mediaKind(field)===libraryIntent.mediaKind) ?? [] : [];
+  function applyLibraryAsset(fieldKey:string) {
+    if(libraryIntent?.kind!=="asset" || libraryIntent.projectId!==route.projectId || !context?.selectedShot)return;
+    const field=librarySlots.find(f=>f.key===fieldKey);
+    if(!field || !context.mediaInputs.some(a=>a.id===libraryIntent.assetId && a.mediaKind===libraryIntent.mediaKind))return;
+    setValue(field.key,mediaValue(field,[libraryIntent.assetId]));
+    useStudioStore.getState().setPendingLibraryIntent(undefined);
+  }
   function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
   function removeValue(field: string) { attempt.current = null; useStudioStore.getState().removeValue(field); }
   function chooseGenerator(ref: string) {
@@ -128,7 +153,7 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); setRun(next); setRunRef(next.ref); setAccepted(null); });
-  return { context, generators, generator, selection, values, readiness, accepted, run, runRef, error, loading, busy,
+  return { libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, accepted, run, runRef, error, loading, busy,
     setValue, removeValue, chooseGenerator, generate, createShot, selectResult, setReferences, retry,
     refresh: () => mutate(() => refreshContext()),
     selectShot: (shotId: string) => navigate({ ...route, shotId }),

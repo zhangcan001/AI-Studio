@@ -1,7 +1,8 @@
 import type { RunRef } from "../../product/types";
 import type { ProjectCommandCenterCollectionFilter } from "../../types/projectCommandCenter";
 
-export type ResourceRef = { kind: "asset" | "prompt" | "profile" | "reference-set"; id: string };
+export type { ResourceRef } from "../../product/libraryTypes";
+import type { ResourceRef } from "../../product/libraryTypes";
 /** Compatibility context, not another location owner. Removed with the old pages. */
 export interface LegacyRunContext {
   shotId?: string;

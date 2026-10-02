@@ -8,6 +8,8 @@ import type {
 } from "../types/generation";
 
 interface StudioState {
+  pendingLibraryIntent?: import("../product/libraryTypes").LibraryCreateIntent;
+  setPendingLibraryIntent: (intent: StudioState["pendingLibraryIntent"]) => void;
   pendingRunIntent?: { projectId: string; selectionRef: string; stage: "image" | "video"; values: GenerationValues };
   setPendingRunIntent: (intent: StudioState["pendingRunIntent"]) => void;
   selectedWorkflow?: RecipeViewModel;
@@ -33,6 +35,7 @@ interface StudioState {
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
+  setPendingLibraryIntent: (pendingLibraryIntent) => set({ pendingLibraryIntent }),
   setPendingRunIntent: (pendingRunIntent) => set({ pendingRunIntent }),
   values: {},
   draftDirty: false,
@@ -75,6 +78,7 @@ export const useStudioStore = create<StudioState>((set) => ({
       validationErrors: {},
       pendingAssetIntent: undefined,
       pendingRunIntent: undefined,
+      pendingLibraryIntent: undefined,
       reuseProvenance: undefined,
     })),
 }));

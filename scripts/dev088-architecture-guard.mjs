@@ -152,7 +152,7 @@ function productBoundaryViolations(path, source) {
   const imports = importsFrom(source);
   const transport = path === "src/product/transport.ts";
   const product = path.startsWith("src/product/");
-  const newPage = path.startsWith("src/v3/") || path.startsWith("src/app/v3/") || path.startsWith("src/app/routes/") || path.startsWith("src/pages/") || path.startsWith("src/features/create/") || path.startsWith("src/features/runs/");
+  const newPage = path.startsWith("src/v3/") || path.startsWith("src/app/v3/") || path.startsWith("src/app/routes/") || path.startsWith("src/pages/") || path.startsWith("src/features/create/") || path.startsWith("src/features/runs/") || path.startsWith("src/features/library/");
   const violations = [];
   for (const specifier of imports) {
     const directLegacy = /(?:^|\/)tauriClient(?:\.ts)?$/.test(specifier);
@@ -171,6 +171,7 @@ for (const source of ["import { x } from '../services/tauriClient';", "export * 
 if (!productBoundaryViolations("src/features/newInvalid.ts", "import { x } from '../../services/tauriClient';").length) throw new Error("PRODUCT_FACADE_BOUNDARY grandfather probe failed");
 for (const source of ["import { invokeCommand } from '../../services/ipc';", "export * from '../../services/workflowClient';", "import { invoke } from '@tauri-apps/api/core';"]) {
   if (!productBoundaryViolations("src/features/create/invalid.ts", source).length) throw new Error("CREATE_PRODUCT_BOUNDARY negative probe failed");
+  if (!productBoundaryViolations("src/features/library/invalid.ts", source).length) throw new Error("LIBRARY_PRODUCT_BOUNDARY negative probe failed");
   if (!productBoundaryViolations("src/features/runs/invalid.ts", source).length) throw new Error("RUNS_PRODUCT_BOUNDARY negative probe failed");
 }
 console.log("PRODUCT_FACADE_BOUNDARY=PASS");
