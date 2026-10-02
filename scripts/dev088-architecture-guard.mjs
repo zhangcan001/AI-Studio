@@ -152,7 +152,7 @@ function productBoundaryViolations(path, source) {
   const imports = importsFrom(source);
   const transport = path === "src/product/transport.ts";
   const product = path.startsWith("src/product/");
-  const newPage = path.startsWith("src/v3/") || path.startsWith("src/app/v3/") || path.startsWith("src/app/routes/") || path.startsWith("src/pages/");
+  const newPage = path.startsWith("src/v3/") || path.startsWith("src/app/v3/") || path.startsWith("src/app/routes/") || path.startsWith("src/pages/") || path.startsWith("src/features/create/");
   const violations = [];
   for (const specifier of imports) {
     const directLegacy = /(?:^|\/)tauriClient(?:\.ts)?$/.test(specifier);
@@ -169,8 +169,25 @@ for (const source of ["import { x } from '../services/tauriClient';", "export * 
   if (!productBoundaryViolations("src/product/invalid.ts",source).length || !productBoundaryViolations("src/v3/invalid.ts",source).length) throw new Error("PRODUCT_FACADE_BOUNDARY negative probe failed");
 }
 if (!productBoundaryViolations("src/features/newInvalid.ts", "import { x } from '../../services/tauriClient';").length) throw new Error("PRODUCT_FACADE_BOUNDARY grandfather probe failed");
+for (const source of ["import { invokeCommand } from '../../services/ipc';", "export * from '../../services/workflowClient';", "import { invoke } from '@tauri-apps/api/core';"]) {
+  if (!productBoundaryViolations("src/features/create/invalid.ts", source).length) throw new Error("CREATE_PRODUCT_BOUNDARY negative probe failed");
+}
 console.log("PRODUCT_FACADE_BOUNDARY=PASS");
 export const productBoundaryVerified = true;
+
+// The product transport uses a generic invoke wrapper: literal-call scans alone
+// do not cover its command map. Verify the actual typed command keys as well.
+const productTransportAst = ts.createSourceFile("transport.ts", readFileSync(join(root, "src/product/transport.ts"), "utf8"), ts.ScriptTarget.Latest, true);
+const productCommandMap = productTransportAst.statements.find((node) => ts.isInterfaceDeclaration(node) && node.name.text === "ProductCommands");
+if (!productCommandMap || !productCommandMap.members.length) throw new Error("PRODUCT_COMMAND_PARITY failed: command map missing");
+const registeredProductCommands = readFileSync(join(root, "src-tauri/src/lib.rs"), "utf8");
+const productCommandDefinitions = readFileSync(join(root, "src-tauri/src/commands/product.rs"), "utf8");
+for (const member of productCommandMap.members) {
+  if (!ts.isPropertySignature(member) || !member.name || !ts.isIdentifier(member.name)) throw new Error("PRODUCT_COMMAND_PARITY failed: nonliteral command key");
+  const command = member.name.text;
+  if (!registeredProductCommands.includes(`commands::product::${command},`) || !new RegExp(`pub async fn ${command}\\s*\\(`).test(productCommandDefinitions)) throw new Error(`PRODUCT_COMMAND_PARITY failed: ${command} not registered/defined`);
+}
+console.log(`PRODUCT_COMMAND_PARITY=PASS (${productCommandMap.members.length} commands)`);
 
 // Canonical location has exactly one hook owner; adapters cannot own domain effects.
 const routeSources = productionFrontendFiles.filter((path) => relative(root, path).replaceAll("\\", "/").startsWith("src/app/routes/"));

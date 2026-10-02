@@ -12,7 +12,7 @@ describe("product facade client", () => {
     expect(guard.productBoundaryVerified).toBe(true);
   }, 15_000); // Whole-repo AST scan; CI measured ~5.6s, beyond Vitest's 5s default.
   beforeEach(() => { invokeCommand.mockReset(); });
-  it("routes exactly five typed use cases through the single transport", async () => {
+  it("routes the five original typed use cases through the single transport", async () => {
     invokeCommand.mockResolvedValue([]);
     const ref = { source: "queue-batch", id: "batch" } as const;
     await productClient.project.getOverview("project");
@@ -23,6 +23,23 @@ describe("product facade client", () => {
     expect(invokeCommand.mock.calls.map(call => call[0])).toEqual(["product_project_overview", "product_generators_list", "product_generator_binding_set", "product_run_get", "product_run_retry"]);
     expect(invokeCommand).toHaveBeenNthCalledWith(4, "product_run_get", { projectId: "project", runRef: ref });
     expect(invokeCommand).toHaveBeenNthCalledWith(5, "product_run_retry", { projectId: "project", request: { ref, selectedItemIds: ["failed-source"] } });
+  });
+  it("routes creation context and mutations through the product transport", async () => {
+    invokeCommand.mockResolvedValue(undefined);
+    await productClient.creation.get("project", null, "image");
+    await productClient.creation.createShot("project");
+    await productClient.creation.updateShot("project", { shotId: "shot", name: "镜头二" });
+    await productClient.creation.deleteShot("project", "shot");
+    await productClient.creation.referencesSet("project", "shot", "video", ["first", "last"]);
+    await productClient.creation.selectResult("project", "shot", "image", "candidate");
+    expect(invokeCommand.mock.calls).toEqual([
+      ["product_creation_get", { projectId: "project", shotId: null, stage: "image" }],
+      ["product_creation_shot_create", { projectId: "project" }],
+      ["product_creation_shot_update", { projectId: "project", request: { shotId: "shot", name: "镜头二" } }],
+      ["product_creation_shot_delete", { projectId: "project", shotId: "shot" }],
+      ["product_creation_references_set", { projectId: "project", shotId: "shot", stage: "video", assetIds: ["first", "last"] }],
+      ["product_creation_result_select", { projectId: "project", shotId: "shot", stage: "image", assetId: "candidate" }],
+    ]);
   });
   it("preserves conflict code/current state without raw diagnostic messages", async () => {
     const currentBinding = { stage: "VIDEO", mode: "DEFAULT", selectionRef: "opaque", revision: 2, bindingInstanceId: "instance" };

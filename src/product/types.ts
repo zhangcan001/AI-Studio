@@ -49,3 +49,24 @@ export interface ProductRun {
   availableActions: string[];
 }
 export interface RunRetryRequest { ref: RunRef; selectedItemIds: string[] }
+
+export interface CreationShotSummary { id: string; name: string; ordinal: number }
+export interface CreationShot {
+  summary: CreationShotSummary;
+  prompt: string;
+  selectionRef: string | null;
+  values: Record<string, import("../types/generation").DraftValue>;
+  referenceAssetIds: string[];
+  selectedResultId: string | null;
+  recentRun: RunRef | null;
+}
+export interface CreationAsset { id: string; name: string; mediaKind: "image" | "video"; selected: boolean }
+export interface CreationContext {
+  projectId: string;
+  projectName: string;
+  stage: "image" | "video";
+  shots: CreationShotSummary[];
+  selectedShot: CreationShot | null;
+  candidates: CreationAsset[];
+}
+export interface CreationShotUpdate { shotId: string; name: string }

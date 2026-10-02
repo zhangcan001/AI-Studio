@@ -19,6 +19,9 @@ use ai_studio_lib::application::{
 use ai_studio_lib::infrastructure::database::*;
 use std::collections::BTreeMap;
 
+#[path = "creation_context_contract.rs"]
+mod creation_context_contract;
+
 fn command_center(pool: &SqlitePool) -> Arc<ProjectCommandCenterService> {
     Arc::new(ProjectCommandCenterService::new(
         Arc::new(SqliteProjectCommandCenterRepository::new(pool.clone())),

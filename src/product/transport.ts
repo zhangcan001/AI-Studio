@@ -1,8 +1,14 @@
 import { invokeCommand } from "../services/ipc";
 import { normalizeProductError } from "./errors";
-import type { GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest } from "./types";
+import type { CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest } from "./types";
 
 interface ProductCommands {
+  product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };
+  product_creation_shot_create: { args: { projectId: string }; result: CreationShotSummary };
+  product_creation_shot_update: { args: { projectId: string; request: CreationShotUpdate }; result: CreationShotSummary };
+  product_creation_shot_delete: { args: { projectId: string; shotId: string }; result: void };
+  product_creation_references_set: { args: { projectId: string; shotId: string; stage: "image" | "video"; assetIds: string[] }; result: CreationShot };
+  product_creation_result_select: { args: { projectId: string; shotId: string; stage: "image" | "video"; assetId: string }; result: CreationShot };
   product_project_overview: { args: { projectId: string }; result: ProjectOverview };
   product_generators_list: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: GeneratorOption[] };
   product_generator_binding_set: { args: { projectId: string; request: GeneratorBindingSetRequest }; result: GeneratorBindingSummary[] };

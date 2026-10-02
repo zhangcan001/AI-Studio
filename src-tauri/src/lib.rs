@@ -1171,6 +1171,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
         })
         .invoke_handler(tauri::generate_handler![
             commands::product::product_project_overview,
+            commands::product::product_creation_get,
+            commands::product::product_creation_shot_create,
+            commands::product::product_creation_shot_update,
+            commands::product::product_creation_shot_delete,
+            commands::product::product_creation_references_set,
+            commands::product::product_creation_result_select,
             commands::product::product_generators_list,
             commands::product::product_generator_binding_set,
             commands::product::product_run_get,

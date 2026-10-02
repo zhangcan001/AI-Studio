@@ -7,6 +7,9 @@ use crate::application::{
 use serde::Serialize;
 use std::sync::Arc;
 
+mod context;
+pub use context::*;
+
 pub struct ProductCreationFacade {
     catalog: Arc<GenerationCatalogService>,
     bindings: Arc<ProjectWorkflowBindingService>,
