@@ -54,6 +54,7 @@ import { type Workspace } from "../types/workspaceResume";
 import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
+import { normalCreate } from "../features/create/createModel";
 import { ShellHost, readShellMode, SHELL_MODE_KEY } from "./ShellHost";
 import { ProjectOverviewPage } from "./v3/ProjectOverviewPage";
 import type { StudioBreadcrumbItem } from "../components/studio/StudioTopBar";
@@ -85,6 +86,7 @@ const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspac
 const ProjectCommandCenter = lazy(() => import("../features/projects/ProjectCommandCenter").then(({ ProjectCommandCenter }) => ({ default: ProjectCommandCenter })));
 const WorkflowWorkspace = lazy(() => import("../features/workflows/WorkflowWorkspace").then(({ WorkflowWorkspace }) => ({ default: WorkflowWorkspace })));
 const SettingsWorkspace = lazy(() => import("../features/settings/SettingsWorkspace").then(({ SettingsWorkspace }) => ({ default: SettingsWorkspace })));
+const CreatePage = lazy(() => import("../features/create/CreatePage").then(({ CreatePage }) => ({ default: CreatePage })));
 const ShotWorkspace = lazy(() => import("../features/shots/ShotWorkspace").then(({ ShotWorkspace }) => ({ default: ShotWorkspace })));
 
 export function workflowUseProjectDestination(
@@ -654,7 +656,8 @@ function App() {
       assetType: assetType as StudioAssetType,
     });
     setError(null);
-    navigateToWorkspace("studio");
+    if (shellMode === "v3") void navigate({ kind: "create", projectId: activeProjectId, stage: assetType === "image" ? "image" : "video" });
+    else navigateToWorkspace("studio");
   }
 
   function handleProjectUpdated(project: ProjectView) {
@@ -731,7 +734,8 @@ function App() {
       {draftConfirmation}
       <ShellHost
         mode={shellMode}
-        onModeChange={(mode) => {
+        onModeChange={async (mode) => {
+          if (shotDraftDirty && !await confirmDraftDiscard("创作有未保存的修改。切换界面会放弃这些修改，是否继续？")) return;
           setShellMode(mode);
           try { localStorage.setItem(SHELL_MODE_KEY, mode); } catch { /* Optional local preference. */ }
         }}
@@ -865,7 +869,7 @@ function App() {
             onBackToAssets={() => navigateToWorkspace("assets")}
             onRetry={() => navigateToWorkspace("shots")}
           >
-            <ShotWorkspace
+            {normalCreate(route, shellMode) && route.kind === "create" ? <CreatePage key={activeProject.id} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} /> : <ShotWorkspace
               projectId={activeProject.id}
               projectName={activeProject.name}
               catalog={catalog}
@@ -898,7 +902,7 @@ function App() {
                 loadContext: loadConsistencyContext,
                 onOpenAssets: () => navigateToWorkspace("assets"),
               }}
-            />
+            />}
           </WorkspaceErrorBoundary>
         )}
         {activeProject && workspace === "video" && (

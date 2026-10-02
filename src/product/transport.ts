@@ -1,5 +1,8 @@
 import { invokeCommand } from "../services/ipc";
 import { normalizeProductError } from "./errors";
+import { buildAssetMediaUrl } from "../services/mediaUrl";
+
+export const productMediaUrl = buildAssetMediaUrl;
 import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest } from "./types";
 
 interface ProductCommands {

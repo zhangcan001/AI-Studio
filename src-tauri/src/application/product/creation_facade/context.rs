@@ -42,6 +42,7 @@ pub struct CreationAsset {
     pub name: String,
     pub media_kind: String,
     pub selected: bool,
+    pub thumbnail_bytes: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -54,6 +55,17 @@ pub struct CreationContext {
     // No implicit selection: the consumer must navigate to a canonical Shot route.
     pub selected_shot: Option<CreationShot>,
     pub candidates: Vec<CreationAsset>,
+    // Picker inputs are deliberately separate from linked generation candidates.
+    pub media_inputs: Vec<CreationAsset>,
+    pub prompt_choices: Vec<CreationPromptChoice>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreationPromptChoice {
+    pub name: String,
+    pub version: i64,
+    pub text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -166,6 +178,7 @@ fn candidate(asset: AssetSummaryView, selected_result_id: Option<&str>) -> Creat
         id: asset.id,
         name: asset.name,
         media_kind: asset.asset_type,
+        thumbnail_bytes: None,
     }
 }
 
@@ -227,6 +240,40 @@ impl ProductCreationFacade {
                 }
             }
         }
+        // Bounded thumbnails only; failures never erase valid candidate metadata.
+        for item in candidates
+            .iter_mut()
+            .filter(|item| item.media_kind == "image")
+            .take(12)
+        {
+            if let Ok(binary) = assets.read_thumbnail(project_id, &item.id).await {
+                if binary.bytes.len() <= 256 * 1024 {
+                    item.thumbnail_bytes = Some(binary.bytes);
+                }
+            }
+        }
+        let mut media_inputs: Vec<_> = assets
+            .list_recent(project_id, 100)
+            .await
+            .map_err(ProductError::internal)?
+            .into_iter()
+            .map(|asset| candidate(asset, None))
+            .collect();
+        if let Some(shot) = selected {
+            let ids = shot
+                .reference_assets
+                .iter()
+                .map(|item| item.asset_id.as_str())
+                .chain(shot.selected_image_asset_id.as_deref())
+                .chain(shot.selected_video_asset_id.as_deref());
+            for id in ids {
+                if !media_inputs.iter().any(|item| item.id == id) {
+                    if let Ok(asset) = assets.get(project_id, id).await {
+                        media_inputs.push(candidate(asset, None));
+                    }
+                }
+            }
+        }
         Ok(CreationContext {
             project_id: project.id,
             project_name: project.name,
@@ -234,7 +281,34 @@ impl ProductCreationFacade {
             shots: shots.iter().map(summary).collect(),
             selected_shot,
             candidates,
+            media_inputs,
+            prompt_choices: Vec::new(),
         })
+    }
+
+    pub async fn project_prompt_choices(
+        &self,
+        context: &mut CreationContext,
+        prompts: &crate::application::prompt_library_service::PromptLibraryService,
+    ) -> Result<(), ProductError> {
+        let page = prompts
+            .list(&context.project_id, None, None, None, None, Some(20))
+            .await
+            .map_err(ProductError::internal)?;
+        for entry in page.items {
+            let entry = prompts
+                .get(&context.project_id, &entry.id)
+                .await
+                .map_err(ProductError::internal)?;
+            if let Some(version) = entry.versions.iter().max_by_key(|version| version.version) {
+                context.prompt_choices.push(CreationPromptChoice {
+                    name: entry.name,
+                    version: version.version,
+                    text: version.text.clone(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub async fn create_shot(&self, project_id: &str) -> Result<CreationShotSummary, ProductError> {

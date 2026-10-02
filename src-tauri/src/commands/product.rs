@@ -121,7 +121,8 @@ pub async fn product_creation_get(
     shot_id: Option<String>,
     stage: String,
 ) -> Result<CreationContext, ProductError> {
-    creation(&state)
+    let facade = creation(&state);
+    let mut context = facade
         .get(
             &state.projects.command_center,
             &state.assets.query,
@@ -129,7 +130,11 @@ pub async fn product_creation_get(
             shot_id.as_deref(),
             &stage,
         )
-        .await
+        .await?;
+    facade
+        .project_prompt_choices(&mut context, &state.catalog.prompt_library)
+        .await?;
+    Ok(context)
 }
 
 #[tauri::command(rename_all = "camelCase")]

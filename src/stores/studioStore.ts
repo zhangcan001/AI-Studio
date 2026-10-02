@@ -18,6 +18,7 @@ interface StudioState {
   reuseProvenance?: StudioReuseProvenance;
   setSelectedWorkflow: (workflow?: RecipeViewModel) => void;
   loadDraft: (workflow: RecipeViewModel, values: GenerationValues, modelVersionId?: string, promptVersionId?: string) => void;
+  loadCreationDraft: (values: GenerationValues, dirty?: boolean) => void;
   clearPromptVersion: () => void;
   setPendingAssetIntent: (intent: PendingStudioAssetIntent) => void;
   clearPendingAssetIntent: () => void;
@@ -45,6 +46,8 @@ export const useStudioStore = create<StudioState>((set) => ({
     }),
   loadDraft: (workflow, values, selectedModelVersionId, selectedPromptVersionId) =>
     set({ selectedWorkflow: workflow, selectedModelVersionId, selectedPromptVersionId, values, draftDirty: false, validationErrors: {} }),
+  loadCreationDraft: (values, draftDirty = false) => set({ selectedWorkflow: undefined,
+    selectedModelVersionId: undefined, selectedPromptVersionId: undefined, values, draftDirty, validationErrors: {}, reuseProvenance: undefined }),
   clearPromptVersion: () => set({ selectedPromptVersionId: undefined }),
   setPendingAssetIntent: (pendingAssetIntent) => set({ pendingAssetIntent }),
   clearPendingAssetIntent: () => set({ pendingAssetIntent: undefined }),
@@ -72,7 +75,7 @@ export const useStudioStore = create<StudioState>((set) => ({
     })),
 }));
 
-export function defaultGenerationValues(workflow: RecipeViewModel): GenerationValues {
+export function defaultGenerationValues(workflow: Pick<RecipeViewModel, "fields">): GenerationValues {
   return Object.fromEntries(
     workflow.fields.map((field) => {
       switch (field.type) {
