@@ -8,6 +8,8 @@ import type {
 } from "../types/generation";
 
 interface StudioState {
+  pendingRunIntent?: { projectId: string; selectionRef: string; stage: "image" | "video"; values: GenerationValues };
+  setPendingRunIntent: (intent: StudioState["pendingRunIntent"]) => void;
   selectedWorkflow?: RecipeViewModel;
   selectedModelVersionId?: string;
   selectedPromptVersionId?: string;
@@ -31,6 +33,7 @@ interface StudioState {
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
+  setPendingRunIntent: (pendingRunIntent) => set({ pendingRunIntent }),
   values: {},
   draftDirty: false,
   validationErrors: {},
@@ -71,6 +74,7 @@ export const useStudioStore = create<StudioState>((set) => ({
       draftDirty: false,
       validationErrors: {},
       pendingAssetIntent: undefined,
+      pendingRunIntent: undefined,
       reuseProvenance: undefined,
     })),
 }));

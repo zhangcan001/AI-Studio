@@ -55,6 +55,8 @@ import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
 import { normalCreate } from "../features/create/createModel";
+import { normalRuns } from "../features/runs/runsModel";
+import { invalidateRuns } from "../product/runInvalidation";
 import { ShellHost, readShellMode, SHELL_MODE_KEY } from "./ShellHost";
 import { ProjectOverviewPage } from "./v3/ProjectOverviewPage";
 import type { StudioBreadcrumbItem } from "../components/studio/StudioTopBar";
@@ -82,6 +84,7 @@ const PromptStudio = lazy(() => import("../features/prompts/PromptStudio").then(
 const LocalToolHub = lazy(() => import("../features/tools/LocalToolHub").then(({ LocalToolHub }) => ({ default: LocalToolHub })));
 const AssetVideoBatchWorkspace = lazy(() => import("../features/assets/AssetVideoBatchWorkspace").then(({ AssetVideoBatchWorkspace }) => ({ default: AssetVideoBatchWorkspace })));
 const TaskHistory = lazy(() => import("../features/tasks/TaskHistory").then(({ TaskHistory }) => ({ default: TaskHistory })));
+const RunsPage = lazy(() => import("../features/runs/RunsPage").then(({ RunsPage }) => ({ default: RunsPage })));
 const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspace").then(({ ProjectWorkspace }) => ({ default: ProjectWorkspace })));
 const ProjectCommandCenter = lazy(() => import("../features/projects/ProjectCommandCenter").then(({ ProjectCommandCenter }) => ({ default: ProjectCommandCenter })));
 const WorkflowWorkspace = lazy(() => import("../features/workflows/WorkflowWorkspace").then(({ WorkflowWorkspace }) => ({ default: WorkflowWorkspace })));
@@ -211,6 +214,7 @@ function App() {
     let admissionRefreshTimer: number | undefined;
 
     void subscribeTaskUpdates((task) => {
+      invalidateRuns(task.projectId);
       if (admissionRefreshTimer !== undefined) window.clearTimeout(admissionRefreshTimer);
       admissionRefreshTimer = window.setTimeout(() => void refreshProductionAdmission(), 1_000);
       const currentProjectId = useProjectStore.getState().activeProjectId;
@@ -284,7 +288,10 @@ function App() {
           if (!cancelled) setError(toUserMessage(resumeError));
           return initial;
         });
-        if (!cancelled) restore(checked);
+        if (!cancelled) {
+          if (initial.kind === "runs" && initial.run && checked.kind === "runs" && !checked.run) setError("运行已不存在或不可访问。请从列表选择其他运行。");
+          restore(checked);
+        }
       })
       .catch((loadError: unknown) => {
         if (!cancelled) {
@@ -811,6 +818,7 @@ function App() {
 
       {!activeProject && projectError && <p className="error-message global-error">项目加载失败：{projectError}</p>}
       <Suspense fallback={<p className="workspace-loading" role="status">正在加载工作区...</p>}>
+        {activeProject && normalRuns(route, shellMode) && route.kind === "runs" && <RunsPage key={activeProject.id} route={route} navigate={navigate} />}
         {workspace === "command-center" && (
           <WorkspaceErrorBoundary
             resetKey={activeProject?.id ?? "no-project"}
@@ -863,7 +871,7 @@ function App() {
           />
         )}
         {workspace === "tools" && <LocalToolHub />}
-        {activeProject && workspace === "shots" && (
+        {activeProject && workspace === "shots" && !normalRuns(route, shellMode) && (
           <WorkspaceErrorBoundary
             resetKey={activeProject.id}
             onBackToAssets={() => navigateToWorkspace("assets")}
@@ -935,7 +943,7 @@ function App() {
             />
           </WorkspaceErrorBoundary>
         )}
-        {activeProject && workspace === "tasks" && (
+        {activeProject && workspace === "tasks" && !normalRuns(route, shellMode) && (
           <TaskHistory
             projectId={activeProject.id}
             comfyConnected={isConnected}

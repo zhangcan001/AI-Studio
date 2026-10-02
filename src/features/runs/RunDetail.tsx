@@ -1,0 +1,16 @@
+import type { RunsProps, RunsController } from "./RunsController";
+import { friendlyGenerator, inputText, labels } from "./runsModel";
+import { RunResults } from "./RunResults";
+export function RunDetail(props: RunsProps & { controller: RunsController }) {
+  const c = props.controller; const run = c.detail;
+  if (!run) return <section className="run-detail"><p>{c.missing ? "运行已不存在或不可访问。请从列表选择其他运行。" : "选择一个运行查看详情。"}</p></section>;
+  return <section className="run-detail" aria-label="运行详情"><header><h2>{run.title}</h2><span className={`run-status status-${run.status.toLowerCase()}`}>{labels[run.status]}</span></header>
+    <section><h3>进度</h3><p>{run.progress.succeeded}/{run.progress.total} 已完成 · {run.progress.failed} 项失败 · {run.progress.cancelled} 项取消</p><progress max={Math.max(1, run.progress.total)} value={run.progress.succeeded + run.progress.failed + run.progress.cancelled} /></section>
+    <div className="run-actions">{(["START", "PAUSE", "CANCEL", "RETRY"] as const).filter(action => run.availableActions.includes(action)).map(action => <button type="button" disabled={c.busy} key={action} onClick={() => void c.action(action)}>{action === "START" ? run.status === "PAUSED" ? "继续运行" : "启动 / 重新启动" : action === "PAUSE" ? "暂停" : action === "CANCEL" ? "取消未完成项" : "仅重试可恢复失败项"}</button>)}</div>
+    {run.errorSummary && <section role="status"><h3>错误与恢复</h3><p>{run.errorSummary}</p>{run.availableActions.includes("EDIT_INPUT") && <p>输入错误不能盲目重试。请使用下方历史输入重新编辑后创作。</p>}{!run.availableActions.includes("RETRY") && run.progress.failed > 0 && <p>没有可自动重试的失败项，请检查输入或使用高级恢复。</p>}</section>}
+    <section><h3>来源</h3>{run.detail?.sources.map(source => <button type="button" key={`${source.id}:${source.stage}`} onClick={() => props.navigate({ kind: "create", projectId: props.route.projectId, shotId: source.id, stage: source.stage === "video" ? "video" : "image" })}>{source.name} · {source.stage === "video" ? "视频" : "图片"}</button>)}{!run.detail?.sources.length && <p>历史独立运行，没有关联镜头。</p>}</section>
+    <section><h3>输入摘要</h3>{run.detail?.inputs.map((input, index) => <article className="run-input" key={input.taskId ?? input.itemId}><h4>{friendlyGenerator(input.generatorName)} · 输入 {index + 1}</h4>{inputText(input).map(item => <p key={item.key}><strong>{item.label}：</strong>{item.value}</p>)}{input.errorMessage && <p>失败原因：{input.errorMessage}</p>}<button type="button" disabled={c.busy || !input.selectionRef} onClick={() => void c.reuse(input)}>使用这些输入重新创作</button>{input.reuseUnavailableReason && <p>{input.reuseUnavailableReason}</p>}</article>)}{!run.detail?.inputs.length && <p>尚未创建任务；启动前准入会重新检查输入。</p>}</section>
+    <RunResults {...props} />
+    <details><summary>高级技术详情</summary><pre>{JSON.stringify({ ref: run.ref, phase: run.phase, parent: run.preferredParent, inputs: run.detail?.inputs.map(input => ({ taskId: input.taskId, selectionRef: input.selectionRef })) }, null, 2)}</pre></details>
+  </section>;
+}

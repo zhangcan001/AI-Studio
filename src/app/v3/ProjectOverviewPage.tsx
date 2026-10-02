@@ -14,7 +14,7 @@ export function overviewAction(projectId: string, action: ProjectOverview["nextA
     case "STRUCTURAL_BLOCKED": return { label: "检查项目设置", route: { kind: "project-settings", projectId, section: "general" } };
     case "ACTIVE_PRODUCTION":
     case "REVIEW_REQUIRED":
-    case "AUTO_RESUMABLE": return { label: action.kind === "ACTIVE_PRODUCTION" ? "查看进行中的运行" : "查看待处理运行", route: { kind: "runs", projectId, run: action.taskId ? { source: "task", id: action.taskId } : action.batchId ? { source: "queue-batch", id: action.batchId } : undefined, filter: action.kind === "ACTIVE_PRODUCTION" ? "production" : "review", context: { shotId } } };
+    case "AUTO_RESUMABLE": return { label: action.kind === "ACTIVE_PRODUCTION" ? "查看进行中的运行" : "查看待处理运行", route: { kind: "runs", projectId, run: action.taskId ? { source: "task", id: action.taskId } : action.batchId ? { source: "queue-batch", id: action.batchId } : undefined, filter: action.kind === "ACTIVE_PRODUCTION" ? "active" : "failed", context: { shotId } } };
     case "IMAGE_REVIEW": return { label: "查看图片结果", route: { kind: "create", projectId, shotId, stage: "image" } };
     case "VIDEO_REVIEW": return { label: "查看视频结果", route: { kind: "create", projectId, shotId, stage: "video" } };
     case "COMPLETE": return { label: "查看完成的结果", route: { kind: "library", projectId, resource: action.assetId ? { kind: "asset", id: action.assetId } : undefined } };

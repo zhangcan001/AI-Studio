@@ -42,9 +42,13 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
       .then(([next, options]) => {
         if (cancelled || token !== epoch.current) return;
         const saved = snapshots.current.get(key);
-        const selected = options.find(item => item.selectionRef === saved?.selection) ?? options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
+        const intent = useStudioStore.getState().pendingRunIntent;
+        const reuse = intent?.projectId === route.projectId && intent.stage === route.stage ? intent : undefined;
+        const selected = options.find(item => item.selectionRef === reuse?.selectionRef) ?? options.find(item => item.selectionRef === saved?.selection) ?? options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
         initialized = true; setContext(next); setGenerators(options); setSelection(selected?.selectionRef ?? "");
-        useStudioStore.getState().loadCreationDraft(saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), saved?.dirty ?? false);
+        const reused = reuse && selected?.selectionRef === reuse.selectionRef && next.selectedShot;
+        useStudioStore.getState().loadCreationDraft(reused ? draftFor(selected, next.selectedShot, reuse.values) : saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), reused ? true : saved?.dirty ?? false);
+        if (reused) useStudioStore.getState().setPendingRunIntent(undefined);
         setRunRef(saved?.runRef ?? next.selectedShot?.recentRun ?? null); setAccepted(saved?.accepted ?? null);
       }).catch(error => { if (!cancelled) setError(normalizeProductError(error).message); })
       .finally(() => { if (!cancelled) setLoading(false); });
