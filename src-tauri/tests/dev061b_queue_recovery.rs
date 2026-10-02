@@ -122,6 +122,7 @@ enum ComfyBehavior {
 
 #[derive(Clone)]
 struct ControlledComfy {
+    object_info: Option<Value>,
     fail_second: bool,
     behavior: Arc<Mutex<ComfyBehavior>>,
     submit_calls: Arc<AtomicUsize>,
@@ -132,6 +133,7 @@ struct ControlledComfy {
 impl ControlledComfy {
     fn new(behavior: ComfyBehavior) -> Self {
         Self {
+            object_info: None,
             fail_second: false,
             behavior: Arc::new(Mutex::new(behavior)),
             submit_calls: Arc::new(AtomicUsize::new(0)),
@@ -303,7 +305,7 @@ impl ComfyAdapter for ControlledComfy {
     }
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
-        Ok(json!({}))
+        Ok(self.object_info.clone().unwrap_or_else(|| json!({})))
     }
 
     async fn upload_input_file(
@@ -518,6 +520,23 @@ impl AssetStore for GuardedAssetStore {
         }
         self.inner.read(project_root, path).await
     }
+
+    async fn open_read_stream(
+        &self,
+        project_root: &Path,
+        path: &Path,
+    ) -> Result<Box<dyn ai_studio_lib::application::ports::AssetReadStream>, AssetStoreError> {
+        self.reads
+            .lock()
+            .expect("asset read mutex should work")
+            .push(path.to_path_buf());
+        if path.starts_with(&self.package_root) {
+            return Err(AssetStoreError::Read(
+                "retry attempted to stream package disk".to_owned(),
+            ));
+        }
+        self.inner.open_read_stream(project_root, path).await
+    }
 }
 
 struct Services {
@@ -540,9 +559,10 @@ fn build_services(pool: &SqlitePool, comfy: Arc<ControlledComfy>, package_root: 
         Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
     let definition_repository: Arc<dyn GenerationDefinitionRepository> =
         Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone()));
+    let creation_preflight = comfy.object_info.is_some();
     let comfy_adapter: Arc<dyn ComfyAdapter> = comfy;
 
-    let generation_service = Arc::new(GenerationService::new(
+    let generation_service = GenerationService::new(
         task_repository.clone(),
         snapshot_repository.clone(),
         definition_repository.clone(),
@@ -551,7 +571,44 @@ fn build_services(pool: &SqlitePool, comfy: Arc<ControlledComfy>, package_root: 
         asset_store.clone(),
         asset_repository.clone(),
         clock.clone(),
-    ));
+    );
+    // Opt-in schema fixture; all existing recovery fixtures keep their old setup.
+    let generation_service = if creation_preflight {
+        use ai_studio_lib::application::{
+            workflow_library_service::WorkflowLibraryService,
+            workflow_onboarding_service::WorkflowOnboardingService,
+        };
+        use ai_studio_lib::infrastructure::database::{
+            SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+        };
+        use ai_studio_lib::infrastructure::filesystem::{
+            FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore,
+        };
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(
+            package_root.join("library"),
+        ));
+        let library = Arc::new(WorkflowLibraryService::new(
+            source.clone(),
+            Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
+            clock.clone(),
+        ));
+        generation_service.with_workflow_compatibility_service(Arc::new(
+            WorkflowOnboardingService::new(
+                source,
+                comfy_adapter.clone(),
+                library,
+                Arc::new(SqliteWorkflowRunRepository::new(pool.clone())),
+                Arc::new(FileSystemWorkflowPackageStore::new(
+                    package_root.join("library"),
+                    package_root.join("staging"),
+                )),
+                clock.clone(),
+            ),
+        ))
+    } else {
+        generation_service
+    };
+    let generation_service = Arc::new(generation_service);
     let task_recovery_service = Arc::new(TaskRecoveryService::new(
         task_repository.clone(),
         snapshot_repository,

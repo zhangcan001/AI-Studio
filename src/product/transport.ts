@@ -1,8 +1,10 @@
 import { invokeCommand } from "../services/ipc";
 import { normalizeProductError } from "./errors";
-import type { CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest } from "./types";
+import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest } from "./types";
 
 interface ProductCommands {
+  product_creation_readiness_get: { args: { request: CreationSubmission }; result: CreationReadiness };
+  product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };
   product_creation_shot_create: { args: { projectId: string }; result: CreationShotSummary };
   product_creation_shot_update: { args: { projectId: string; request: CreationShotUpdate }; result: CreationShotSummary };

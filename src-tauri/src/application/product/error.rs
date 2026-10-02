@@ -18,7 +18,7 @@ pub struct ProductErrorDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_binding: Option<super::project_facade::GeneratorBindingSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub field: Option<&'static str>,
+    pub field: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<&'static str>,
     pub retryable: bool,
@@ -108,7 +108,7 @@ impl ProductError {
             code: "GENERATOR_UNAVAILABLE",
             message: "生成器选择无效，请重新选择。",
             details: ProductErrorDetails {
-                field: Some("selectionRef"),
+                field: Some("selectionRef".to_owned()),
                 action: Some("SELECT_GENERATOR"),
                 ..Default::default()
             },

@@ -55,13 +55,36 @@ describe("product facade client", () => {
     }
     expect(invokeCommand).toHaveBeenCalledTimes(1);
   });
+  it("sends the same typed draft to readiness and generate without persisting media references", async () => {
+    const request = { projectId: "project", shotId: "shot", stage: "video", selectionRef: "opaque",
+      values: { reference_video: { type: "video_asset", assetId: "video" }, prompt: { type: "string", value: "draft" } },
+      submissionIdempotencyKey: "same-attempt" } as const;
+    invokeCommand.mockResolvedValueOnce({ ready: true, issues: [], fieldErrors: [], actions: [] });
+    const readiness = await productClient.creation.readinessGet(request);
+    expect(readiness.ready).toBe(true);
+    const accepted = { accepted: true, runRef: { source: "queue-batch", id: "persisted" }, startOutcome: "FAILED_TO_START", startIssue: null };
+    invokeCommand.mockResolvedValueOnce(accepted);
+    expect(await productClient.creation.generate(request)).toEqual(accepted);
+    expect(invokeCommand.mock.calls).toEqual([
+      ["product_creation_readiness_get", { request }], ["product_creation_generate", { request }],
+    ]);
+    expect(accepted).not.toHaveProperty("success");
+  });
+  it("keeps typed readiness fields and hides raw runtime diagnostics", () => {
+    for (const code of ["MISSING_INPUT", "INPUT_OUT_OF_RANGE", "ASSET_TYPE_MISMATCH", "ASSET_PROJECT_MISMATCH", "RUNTIME_BLOCKED"] as const) {
+      const error = normalizeProductError({ code, message: "node=secret input=secret", details: { field: "reference_video", action: "EDIT_INPUT", technicalDetails: "diagnostic" } });
+      expect(error.code).toBe(code);
+      expect(error.details.field).toBe("reference_video");
+      expect(error.message).not.toContain("secret");
+    }
+  });
   it("falls back safely for unknown errors", () => {
     const error = normalizeProductError({ code: "UNKNOWN_DATABASE_ERROR", message: "secret path" });
     expect(error.code).toBe("INTERNAL_ERROR"); expect(error.message).not.toContain("secret");
     expect(error.details.technicalDetails).toBeDefined();
   });
   it("exposes product types without raw generator identity", () => {
-    expectTypeOf<keyof GeneratorOption>().exclude<"selectionRef" | "name" | "version" | "mode" | "mediaKind" | "availability" | "availabilityReason" | "recommended">().toEqualTypeOf<never>();
+    expectTypeOf<keyof GeneratorOption>().exclude<"selectionRef" | "name" | "version" | "mode" | "mediaKind" | "availability" | "availabilityReason" | "recommended" | "fields">().toEqualTypeOf<never>();
     expectTypeOf(productClient.project.getOverview).returns.resolves.toEqualTypeOf<ProjectOverview>();
     expectTypeOf(productClient.run.get).returns.resolves.toEqualTypeOf<ProductRun>();
   });

@@ -1,6 +1,6 @@
 use super::*;
 
-fn creation_context_services(
+pub(super) fn creation_context_services(
     pool: &SqlitePool,
 ) -> (
     ProductCreationFacade,

@@ -1,6 +1,13 @@
 import type { GeneratorBindingSummary, RunRef } from "./types";
 
 const messages = {
+  MISSING_INPUT: "请填写必需输入。",
+  INPUT_TYPE_MISMATCH: "输入类型不匹配，请重新选择。",
+  INPUT_OUT_OF_RANGE: "输入超出允许范围或数量，请调整。",
+  ASSET_PROJECT_MISMATCH: "输入素材不属于当前项目。",
+  ASSET_TYPE_MISMATCH: "输入素材类型不匹配。",
+  ASSET_UNAVAILABLE: "输入素材不存在或无法读取，请重新选择。",
+  RUNTIME_BLOCKED: "运行环境暂时不可用，请检查连接或稍后重试。",
   PROJECT_NOT_FOUND: "项目不存在，请返回项目列表。",
   PROJECT_SCOPE_VIOLATION: "无法访问其他项目的数据。",
   GENERATOR_UNAVAILABLE: "生成器当前不可用，请重新选择。",

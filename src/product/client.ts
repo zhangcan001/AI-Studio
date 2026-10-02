@@ -1,5 +1,5 @@
 import { productRequest } from "./transport";
-import type { CreationShotUpdate, GeneratorBindingSetRequest, RunRef, RunRetryRequest } from "./types";
+import type { CreationSubmission, CreationShotUpdate, GeneratorBindingSetRequest, RunRef, RunRetryRequest } from "./types";
 
 export const productClient = {
   project: {
@@ -7,6 +7,8 @@ export const productClient = {
     generatorBindingSet: (projectId: string, request: GeneratorBindingSetRequest) => productRequest("product_generator_binding_set", { projectId, request }),
   },
   creation: {
+    readinessGet: (request: CreationSubmission) => productRequest("product_creation_readiness_get", { request }),
+    generate: (request: CreationSubmission) => productRequest("product_creation_generate", { request }),
     get: (projectId: string, shotId: string | null, stage: "image" | "video") => productRequest("product_creation_get", { projectId, shotId, stage }),
     createShot: (projectId: string) => productRequest("product_creation_shot_create", { projectId }),
     updateShot: (projectId: string, request: CreationShotUpdate) => productRequest("product_creation_shot_update", { projectId, request }),

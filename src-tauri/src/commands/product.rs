@@ -2,8 +2,9 @@ use crate::{
     app_state::AppState,
     application::product::{
         creation_facade::{
-            CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate,
-            GeneratorOption, ProductCreationFacade,
+            CreationAccepted, CreationContext, CreationReadiness, CreationShot,
+            CreationShotSummary, CreationShotUpdate, CreationSubmission, GeneratorOption,
+            ProductCreationFacade,
         },
         error::ProductError,
         project_facade::{
@@ -14,6 +15,87 @@ use crate::{
     },
 };
 use tauri::State;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreationSubmissionDto {
+    project_id: String,
+    shot_id: String,
+    stage: String,
+    selection_ref: String,
+    values: std::collections::BTreeMap<String, super::generation::InputValueDto>,
+    submission_idempotency_key: String,
+}
+
+impl CreationSubmissionDto {
+    fn into_application(self) -> Result<CreationSubmission, ProductError> {
+        let values = self
+            .values
+            .into_iter()
+            .map(|(key, value)| {
+                value
+                    .into_application(&key)
+                    .map(|value| (key.clone(), value))
+                    .map_err(|error| {
+                        let mut result = ProductError::new(
+                            "INVALID_INPUT",
+                            "输入格式无效。",
+                            Some("EDIT_INPUT"),
+                        );
+                        result.details.field = Some(key);
+                        result.details.technical_details = Some(error.to_string());
+                        result
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(CreationSubmission {
+            project_id: self.project_id,
+            shot_id: self.shot_id,
+            stage: self.stage,
+            selection_ref: self.selection_ref,
+            values,
+            submission_idempotency_key: self.submission_idempotency_key,
+        })
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_creation_readiness_get(
+    state: State<'_, AppState>,
+    request: CreationSubmissionDto,
+) -> Result<CreationReadiness, ProductError> {
+    Ok(creation(&state)
+        .readiness_get(&state.production.queue, request.into_application()?)
+        .await)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_creation_generate(
+    state: State<'_, AppState>,
+    request: CreationSubmissionDto,
+) -> Result<CreationAccepted, ProductError> {
+    let admission = state.production.admission.clone();
+    creation(&state)
+        .generate(
+            &state.production.queue,
+            request.into_application()?,
+            move |project_id, batch_id| async move {
+                admission
+                    .start(&project_id, &batch_id)
+                    .await
+                    .map_err(|error| {
+                        let mut result = ProductError::new(
+                            "RUNTIME_BLOCKED",
+                            "生成已加入队列，但暂时无法启动。",
+                            Some("OPEN_RUN"),
+                        );
+                        result.details.technical_details = Some(error.to_string());
+                        result
+                    })
+            },
+        )
+        .await
+}
 
 fn runs(state: &AppState) -> ProductRunFacade {
     ProductRunFacade::new(

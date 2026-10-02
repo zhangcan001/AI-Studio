@@ -550,3 +550,6 @@ async fn product_contract_standalone_input_error_denies_retry_without_side_effec
     assert_eq!(count(&pool, "tasks").await, 1);
     assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 0);
 }
+
+#[path = "creation_submission_contract.rs"]
+mod creation_submission_contract;

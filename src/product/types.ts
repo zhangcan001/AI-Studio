@@ -8,6 +8,7 @@ export interface GeneratorOption {
   availability: boolean;
   availabilityReason: string | null;
   recommended: boolean;
+  fields: import("../types/generation").RecipeField[];
 }
 export interface GeneratorBindingSummary {
   stage: string;
@@ -70,3 +71,23 @@ export interface CreationContext {
   candidates: CreationAsset[];
 }
 export interface CreationShotUpdate { shotId: string; name: string }
+export interface CreationSubmission {
+  projectId: string;
+  shotId: string;
+  stage: "image" | "video";
+  selectionRef: string;
+  values: Record<string, import("../types/generation").DraftValue>;
+  submissionIdempotencyKey: string;
+}
+export interface CreationReadiness {
+  ready: boolean;
+  issues: { code: import("./errors").ProductErrorCode; message: string; details: import("./errors").ProductErrorDetails }[];
+  fieldErrors: CreationReadiness["issues"];
+  actions: string[];
+}
+export interface CreationAccepted {
+  accepted: boolean;
+  runRef: RunRef;
+  startOutcome: "STARTED" | "FAILED_TO_START" | "ALREADY_ACCEPTED";
+  startIssue: CreationReadiness["issues"][number] | null;
+}
