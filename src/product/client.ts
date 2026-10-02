@@ -1,5 +1,5 @@
 import { productRequest, productMediaUrl } from "./transport";
-import type { CreationSubmission, CreationShotUpdate, GeneratorBindingSetRequest, RunRef, RunRetryRequest } from "./types";
+import type { CreationSubmission, CreationShotUpdate, GeneratorBindingSetRequest, RunRef, RunRetryRequest, RunListFilter } from "./types";
 
 export const productClient = {
   project: {
@@ -19,6 +19,12 @@ export const productClient = {
     generatorsList: (projectId: string, stage: "image" | "video", shotId: string | null = null) => productRequest("product_generators_list", { projectId, shotId, stage }),
   },
   run: {
+    resultsGet: (projectId: string, runRef: RunRef) => productRequest("product_run_results_get", { projectId, runRef }),
+    resultReview: (projectId: string, request: import("./types").RunResultReviewRequest) => productRequest("product_run_result_review", { projectId, request }),
+    list: (projectId: string, filter: RunListFilter = "all", cursor: string | null = null) => productRequest("product_run_list", { projectId, filter, cursor }),
+    start: (projectId: string, runRef: RunRef) => productRequest("product_run_start", { projectId, runRef }),
+    pause: (projectId: string, runRef: RunRef) => productRequest("product_run_pause", { projectId, runRef }),
+    cancel: (projectId: string, runRef: RunRef) => productRequest("product_run_cancel", { projectId, runRef }),
     get: (projectId: string, runRef: RunRef) => productRequest("product_run_get", { projectId, runRef }),
     retry: (projectId: string, request: RunRetryRequest) => productRequest("product_run_retry", { projectId, request }),
   },

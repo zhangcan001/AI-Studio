@@ -8,6 +8,11 @@ use crate::domain::{ProductionBatchItemStatus, ProductionBatchStatus};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 
+mod workspace;
+pub use workspace::{RunList, RunListFilter};
+mod detail;
+pub use detail::*;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunRef {
@@ -65,6 +70,8 @@ pub struct ProductRun {
     pub error_summary: Option<String>,
     pub preferred_parent: Option<RunRef>,
     pub available_actions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<RunDetail>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -179,6 +186,7 @@ impl ProductRunFacade {
         let mut retry_item_ids = Vec::new();
         let mut review_required = 0;
         let mut preferred_parent = None;
+        let mut available_actions = Vec::new();
         let (title, status, phase, created_at, updated_at) = match run_ref.source {
             RunSource::QueueBatch => {
                 let detail = self
@@ -192,6 +200,38 @@ impl ProductRunFacade {
                         "无法访问其他项目的运行。",
                         None,
                     ));
+                }
+                if detail.batch.archived_at.is_none() {
+                    let pending = detail
+                        .items
+                        .iter()
+                        .any(|item| item.status == ProductionBatchItemStatus::Pending);
+                    let active = detail.items.iter().any(|item| {
+                        matches!(
+                            item.status,
+                            ProductionBatchItemStatus::Dispatching
+                                | ProductionBatchItemStatus::Dispatched
+                        )
+                    });
+                    if pending
+                        && matches!(
+                            detail.batch.status,
+                            ProductionBatchStatus::Ready | ProductionBatchStatus::Paused
+                        )
+                    {
+                        available_actions.push("START".to_owned());
+                    }
+                    if matches!(
+                        detail.batch.status,
+                        ProductionBatchStatus::Ready | ProductionBatchStatus::Running
+                    ) {
+                        available_actions.push("PAUSE".to_owned());
+                    }
+                    // Existing batch cancellation cancels pending items, not active tasks.
+                    if pending && !active && detail.batch.status != ProductionBatchStatus::Completed
+                    {
+                        available_actions.push("CANCEL".to_owned());
+                    }
                 }
                 let plan = self
                     .queue
@@ -268,6 +308,12 @@ impl ProductRunFacade {
                         None,
                     ));
                 }
+                if !matches!(
+                    task.status.as_str(),
+                    "SUCCEEDED" | "FAILED" | "CANCELLED" | "CANCEL_REQUESTED"
+                ) {
+                    available_actions.push("CANCEL".to_owned());
+                }
                 progress.total = 1;
                 progress.succeeded = usize::from(task.status == "SUCCEEDED");
                 progress.failed = usize::from(task.status == "FAILED");
@@ -314,7 +360,7 @@ impl ProductRunFacade {
             RunSource::ProductionRun => {
                 let run = self
                     .production
-                    .get(project_id, &run_ref.id)
+                    .get_projection(project_id, &run_ref.id)
                     .await
                     .map_err(production_error)?;
                 if run.project_id != project_id {
@@ -323,6 +369,17 @@ impl ProductRunFacade {
                         "无法访问其他项目的运行。",
                         None,
                     ));
+                }
+                if run.status == "READY"
+                    && run
+                        .stages
+                        .iter()
+                        .any(|stage| stage.ordinal == 0 && stage.status == "READY")
+                {
+                    available_actions.push("START".to_owned());
+                }
+                if !matches!(run.status.as_str(), "SUCCEEDED" | "CANCELLED") {
+                    available_actions.push("CANCEL".to_owned());
                 }
                 for stage in &run.stages {
                     let parents: HashSet<&str> = stage
@@ -345,7 +402,7 @@ impl ProductRunFacade {
                         }
                     }
                 }
-                let status = match run.status.as_str() {
+                let mut status = match run.status.as_str() {
                     "PARTIAL_FAILED" => "PARTIAL",
                     "SUCCEEDED" => terminal_status(&progress),
                     "FAILED" => "FAILED",
@@ -354,10 +411,69 @@ impl ProductRunFacade {
                     "WAITING_FOR_SELECTION" => "PAUSED",
                     _ => "QUEUED",
                 };
-                let can_retry_video = run
+                let mut can_retry_video = run
                     .stages
                     .iter()
                     .any(|stage| stage.ordinal == 2 && stage.status == "FAILED");
+                // Parent lifecycle persistence can lag its child queue. Project current
+                // facts without invoking the legacy synchronizing read or changing state.
+                if run.status != "CANCELLED" {
+                    if let Some(stage) = run
+                        .stages
+                        .iter()
+                        .rev()
+                        .find(|stage| stage.ordinal != 1 && stage.production_batch_id.is_some())
+                    {
+                        let batch_id = stage.production_batch_id.as_deref().unwrap();
+                        let batch = self
+                            .queue
+                            .get(project_id, batch_id)
+                            .await
+                            .map_err(queue_error)?;
+                        let plan = self
+                            .queue
+                            .partial_resume_plan(project_id, batch_id)
+                            .await
+                            .map_err(queue_error)?;
+                        progress = RunProgress {
+                            total: plan.logical_total,
+                            succeeded: plan.resolved,
+                            ..RunProgress::default()
+                        };
+                        for entry in &plan.entries {
+                            if let Some(item) = batch
+                                .items
+                                .iter()
+                                .find(|item| item.id.as_str() == entry.leaf_item_id)
+                            {
+                                progress.failed +=
+                                    usize::from(item.status == ProductionBatchItemStatus::Failed);
+                                progress.cancelled += usize::from(matches!(
+                                    item.status,
+                                    ProductionBatchItemStatus::Cancelled
+                                        | ProductionBatchItemStatus::Skipped
+                                ));
+                            }
+                        }
+                        status = match batch.batch.status {
+                            ProductionBatchStatus::Ready => "QUEUED",
+                            ProductionBatchStatus::Running => "RUNNING",
+                            ProductionBatchStatus::Paused => "PAUSED",
+                            ProductionBatchStatus::Completed
+                                if stage.ordinal == 0 && progress.succeeded > 0 =>
+                            {
+                                "PAUSED"
+                            }
+                            ProductionBatchStatus::Completed => terminal_status(&progress),
+                        };
+                        can_retry_video = stage.ordinal == 2
+                            && progress.failed > 0
+                            && !plan
+                                .entries
+                                .iter()
+                                .any(|entry| entry.eligibility == "REVIEW_REQUIRED");
+                    }
+                }
                 if can_retry_video {
                     retry_item_ids.push(run.id.clone());
                 }
@@ -370,7 +486,6 @@ impl ProductRunFacade {
                 )
             }
         };
-        let mut available_actions = Vec::new();
         if !retry_item_ids.is_empty() {
             available_actions.push("RETRY".to_owned());
         }
@@ -401,6 +516,7 @@ impl ProductRunFacade {
             error_summary,
             preferred_parent,
             available_actions,
+            detail: None,
         })
     }
 

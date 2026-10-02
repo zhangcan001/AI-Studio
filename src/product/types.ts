@@ -48,6 +48,7 @@ export interface ProductRun {
   errorSummary: string | null;
   preferredParent: RunRef | null;
   availableActions: string[];
+  detail?: { sources: RunShotContext[]; inputs: RunInput[] };
 }
 export interface RunRetryRequest { ref: RunRef; selectedItemIds: string[] }
 
@@ -93,3 +94,10 @@ export interface CreationAccepted {
   startOutcome: "STARTED" | "FAILED_TO_START" | "ALREADY_ACCEPTED";
   startIssue: CreationReadiness["issues"][number] | null;
 }
+
+export type RunListFilter = "all" | "active" | "failed" | "completed";
+export interface RunList { items: ProductRun[]; nextCursor: string | null; coverage: string }
+export interface RunShotContext { id: string; name: string; stage: string }
+export interface RunInput { taskId: string | null; itemId?: string | null; generatorName: string; selectionRef: string | null; values: Record<string, import("../types/generation").DraftValue>; reuseUnavailableReason: string | null; errorMessage: string | null }
+export interface RunResult { assetId: string; name: string; mediaKind: string | null; assetExists: boolean; availability: string | null; reviewState: string | null; reviewRevision: number | null; selectedShotIds: string[]; thumbnailBytes: number[] | null }
+export interface RunResultReviewRequest { runRef: RunRef; assetId: string; decision: "APPROVED" | "REJECTED"; comment: string; expectedRevision: number }

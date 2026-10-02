@@ -371,6 +371,17 @@ impl ProductionOrchestratorService {
         self.load_view(project_id, run_id).await
     }
 
+    /// Product readers must not run the legacy state synchronization mutation.
+    pub async fn get_projection(
+        &self,
+        project_id: &str,
+        run_id: &str,
+    ) -> Result<ProductionRunView, ProductionOrchestratorError> {
+        validate_project_id(project_id)?;
+        self.load_run(project_id, run_id).await?;
+        self.load_view(project_id, run_id).await
+    }
+
     /// Read-only provenance lookup for product projections, including history
     /// beyond the paginated UI list. No state synchronization or execution.
     pub async fn parent_run_for_batch(

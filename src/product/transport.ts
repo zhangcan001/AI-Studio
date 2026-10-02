@@ -3,9 +3,15 @@ import { normalizeProductError } from "./errors";
 import { buildAssetMediaUrl } from "../services/mediaUrl";
 
 export const productMediaUrl = buildAssetMediaUrl;
-import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest } from "./types";
+import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest, RunList, RunListFilter } from "./types";
 
 interface ProductCommands {
+  product_run_results_get: { args: { projectId: string; runRef: RunRef }; result: import("./types").RunResult[] };
+  product_run_result_review: { args: { projectId: string; request: import("./types").RunResultReviewRequest }; result: void };
+  product_run_list: { args: { projectId: string; filter: RunListFilter; cursor: string | null }; result: RunList };
+  product_run_start: { args: { projectId: string; runRef: RunRef }; result: ProductRun };
+  product_run_pause: { args: { projectId: string; runRef: RunRef }; result: ProductRun };
+  product_run_cancel: { args: { projectId: string; runRef: RunRef }; result: ProductRun };
   product_creation_readiness_get: { args: { request: CreationSubmission }; result: CreationReadiness };
   product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };

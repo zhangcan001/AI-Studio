@@ -200,6 +200,47 @@ impl ArtifactService {
         }
     }
 
+    /// Read outputs for exact, project-owned tasks, including standalone history.
+    pub async fn task_artifacts(
+        &self,
+        project_id: &str,
+        task_ids: &[String],
+    ) -> Result<Vec<ArtifactView>, ArtifactServiceError> {
+        let ids = task_ids
+            .iter()
+            .map(|id| {
+                TaskId::parse(id.clone())
+                    .map_err(|error| ArtifactServiceError::InvalidInput(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let tasks = self.task_repository.find_many_by_ids(&ids).await?;
+        if tasks.len() != ids.len() || tasks.iter().any(|task| task.project_id != project_id) {
+            return Err(ArtifactServiceError::NotFound(
+                "task outside project".to_owned(),
+            ));
+        }
+        let root = self
+            .project_repository
+            .get_storage_root(project_id)
+            .await?
+            .ok_or_else(|| {
+                ArtifactServiceError::InvalidInput("project storage unavailable".to_owned())
+            })?;
+        let records = self
+            .artifact_repository
+            .list_for_tasks(project_id, &ids)
+            .await?;
+        Ok(records
+            .into_iter()
+            .filter(|record| {
+                record.artifact.asset.project_id == project_id
+                    && record.artifact.asset.source_task_id.as_ref()
+                        == Some(&record.artifact.task_id)
+            })
+            .map(|record| artifact_view(&record.artifact, record.review.as_ref(), &root))
+            .collect())
+    }
+
     pub async fn production_batch_artifacts(
         &self,
         project_id: &str,

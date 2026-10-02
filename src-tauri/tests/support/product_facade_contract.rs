@@ -553,3 +553,6 @@ async fn product_contract_standalone_input_error_denies_retry_without_side_effec
 
 #[path = "creation_submission_contract.rs"]
 mod creation_submission_contract;
+
+#[path = "run_workspace_contract.rs"]
+mod run_workspace_contract;
