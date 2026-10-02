@@ -122,7 +122,7 @@ fn production_execution_requires_queue_start() {
             "submitGeneration({",
         ),
         (
-            "../src/features/workflows/WorkflowWorkspace.tsx",
+            "../src/features/workflows/useWorkflowLabController.ts",
             "submitGeneration({",
         ),
         (

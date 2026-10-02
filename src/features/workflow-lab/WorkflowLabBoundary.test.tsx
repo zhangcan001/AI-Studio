@@ -38,6 +38,12 @@ it("phase6_target15 Advanced seam whitelists existing clients only and exact sel
     expect(read(`src/features/workflow-lab/${file}`)).not.toMatch(/from ["'][^"']*(?:tauriClient|workflowClient)["']|\binvoke\(|\bsqlx\b|CREATE TABLE|create\(.*set/);
   }
   expect(read("src/services/workflowLabClient.ts")).not.toMatch(/export \*|\binvoke\(|fetch\(|\/prompt|INSERT INTO/);
+  // The frozen Queue assertions follow the extracted execution owner, not its thin legacy wrapper.
+  expect(read("src-tauri/tests/production_execution_authority_boundary.rs")).toContain("../src/features/workflows/useWorkflowLabController.ts");
+  const executionOwner = read("src/features/workflows/useWorkflowLabController.ts");
+  expect(executionOwner).toContain("submitGeneration({");
+  expect(executionOwner).toContain("startProductionQueue(");
+  expect(executionOwner).not.toMatch(/createGeneration\(\{|generateShot\(\{/);
   const ref = labCreationSelection("wfv:旧版本/🖼", "recipe:准确配方");
   expect(ref).toBe("generator:v1:" + Array.from(new TextEncoder().encode(JSON.stringify(["wfv:旧版本/🖼", "recipe:准确配方"])), b => b.toString(16).padStart(2, "0")).join(""));
   expect(ref).not.toContain("recipe:");
