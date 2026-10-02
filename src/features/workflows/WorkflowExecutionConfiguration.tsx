@@ -1,15 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  createWorkflowExecution,
-  createWorkflowExecutionBatch,
-  cancelPendingProductionQueue,
-  getProductionQueue,
-  getTaskDetail,
-  getWorkflowExecutionSummary,
-  getWorkflowRecipeHistory,
-  preflightWorkflowExecution,
-  startProductionQueue,
-} from "../../services/tauriClient";
+import { createWorkflowExecution, createWorkflowExecutionBatch, cancelPendingProductionQueue, getProductionQueue, getTaskDetail, getWorkflowExecutionSummary, getWorkflowRecipeHistory, preflightWorkflowExecution, startProductionQueue } from "../../services/workflowLabClient";
 import { defaultGenerationValues } from "../../stores/studioStore";
 import type { DraftValue, GenerationValues, RecipeViewModel } from "../../types/generation";
 import type { ExecutionSummary, ExecutionValueSource, ProductionBatchDetail, ProductionBatchPreflightIssue } from "../../types/productionQueue";

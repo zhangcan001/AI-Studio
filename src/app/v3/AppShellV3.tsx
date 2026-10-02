@@ -42,9 +42,10 @@ export function AppShellV3({ route, projectName, projectSelector, navigate, back
         {projectId && <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "general" })}>项目设置</button>}
         {route.kind === "project-settings" && projectId && <nav aria-label="项目设置选项">
           <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>生成器</button>
-          <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "advanced-workflows" })}>高级工作流</button>
+          <button type="button" onClick={() => navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: route })}>高级工作流</button>
         </nav>}
         {route.kind === "system-settings" && <button type="button" onClick={() => navigate({ kind: "system-settings", section: "advanced-tools", returnTo: route.returnTo })}>高级工具</button>}
+        {route.kind === "system-settings" && <button type="button" onClick={() => navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: route.returnTo })}>高级工作流</button>}
         {route.kind === "library" && projectId && <button type="button" onClick={() => navigate({ kind: "library", projectId, filter: "prompts" })}>提示词</button>}
       </aside>
       <main id="v3-main" className="v3-main" tabIndex={-1}>

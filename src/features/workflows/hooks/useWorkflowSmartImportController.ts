@@ -1,15 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import {
-  analyzeWorkflowImport,
-  commitWorkflowImport,
-  getOnboardingDraft,
-  reanalyzeWorkflowImport,
-  rerecognizeWorkflow,
-  setOnboardingInputMapping,
-  setOnboardingMetadata,
-  setOnboardingOutputMapping,
-} from "../../../services/workflowClient";
+import { analyzeWorkflowImport, commitWorkflowImport, getOnboardingDraft, reanalyzeWorkflowImport, rerecognizeWorkflow, setOnboardingInputMapping, setOnboardingMetadata, setOnboardingOutputMapping } from "../../../services/workflowLabClient";
 import { useWorkflowOnboardingStore } from "../../../stores/workflowOnboardingStore";
 import type {
   WorkflowAutoIssueCandidateView,

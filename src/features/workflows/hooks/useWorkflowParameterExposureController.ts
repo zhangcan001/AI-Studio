@@ -1,14 +1,5 @@
 import { useCallback, useState } from "react";
-import {
-  checkOnboardingCapability,
-  commitWorkflowImport,
-  discardOnboarding,
-  duplicateWorkflowRecipe,
-  getOnboardingDraft,
-  removeOnboardingInputMapping,
-  setOnboardingInputMapping,
-  validateOnboarding,
-} from "../../../services/workflowClient";
+import { checkOnboardingCapability, commitWorkflowImport, discardOnboarding, duplicateWorkflowRecipe, getOnboardingDraft, removeOnboardingInputMapping, setOnboardingInputMapping, validateOnboarding } from "../../../services/workflowLabClient";
 import type {
   WorkflowInputView,
   WorkflowOnboardingDraftView,

@@ -1,0 +1,4 @@
+.workflow-lab { min-width: 0; overflow-wrap: anywhere; }
+.workflow-lab > header { padding: 16px 20px; }
+.workflow-lab .workflow-workspace { min-width: 0; }
+.workflow-lab input, .workflow-lab select, .workflow-lab code { max-width: 100%; }

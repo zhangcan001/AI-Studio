@@ -72,6 +72,7 @@
   "src/features/workflows/WorkflowExecutionConfiguration.tsx",
   "src/features/workflows/WorkflowWorkspace.tsx",
   "src/services/workflowClient.ts",
+  "src/services/workflowLabClient.ts",
   "src/stores/workspaceResumeStore.ts",
   "src/types/workflowOnboarding.ts"
 ]

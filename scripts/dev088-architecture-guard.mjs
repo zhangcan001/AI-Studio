@@ -290,7 +290,12 @@ if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegm
   throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must delegate local import commands");
 }
 
-const workflowWorkspaceSource = readFileSync(join(root, "src/features/workflows/WorkflowWorkspace.tsx"), "utf8");
+// Phase6 extracts the existing control plane, preserving all ownership guards.
+const workflowWorkspaceSource = [
+  "src/features/workflows/WorkflowWorkspace.tsx",
+  "src/features/workflows/useWorkflowLabController.ts",
+  "src/features/workflow-lab/WorkflowLabSurface.tsx",
+].map(path => readFileSync(join(root, path), "utf8")).join("\n");
 const workflowWorkspaceAdaptersSource = readFileSync(join(root, "src/features/workflows/workflowWorkspaceAdapters.ts"), "utf8");
 const recipeHistoryServiceSource = readFileSync(join(root, "src-tauri/src/application/recipe_history_query_service.rs"), "utf8");
 const recipeHistoryPortSource = readFileSync(join(root, "src-tauri/src/application/ports/recipe_history_query_repository.rs"), "utf8");

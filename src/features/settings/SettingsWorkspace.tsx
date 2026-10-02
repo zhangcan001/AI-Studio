@@ -27,6 +27,7 @@ import { ComfyStatus as ComfyStatusCard } from "../comfy/ComfyStatus";
 import { RepairJobsStatusSection } from "./RepairJobsStatusSection";
 
 interface Props {
+  showWorkflowRepairStatus?: boolean;
   comfy?: ComfyStatus;
   connectionLoading: boolean;
   capabilityLoading: boolean;
@@ -42,6 +43,7 @@ export function SettingsWorkspace({
   onReconnect,
   onRefreshCapabilities,
   onEndpointApplied,
+  showWorkflowRepairStatus = true,
 }: Props) {
   const [summary, setSummary] = useState<DiagnosticsSummary>();
   const [loading, setLoading] = useState(true);
@@ -461,7 +463,7 @@ export function SettingsWorkspace({
         {preflight && <PreflightReportView report={preflight} />}
       </section>
 
-      <RepairJobsStatusSection />
+      {showWorkflowRepairStatus && <RepairJobsStatusSection />}
     </section>
   );
 }

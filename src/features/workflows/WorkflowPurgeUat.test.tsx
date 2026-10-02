@@ -14,6 +14,7 @@ const workflowMocks = vi.hoisted(() => ({
   queryWorkflowWorkspace: vi.fn(),
   inspectWorkflowPurge: vi.fn(),
   purgeWorkflow: vi.fn(),
+  restoreWorkflow: vi.fn(),
 }));
 
 vi.mock("../../services/workflowClient", async () => {
@@ -113,8 +114,8 @@ function purgeInspection(canPurge: boolean, blockingReasons: string[] = []): Wor
   };
 }
 
-function renderWorkspace(refreshResponse: WorkflowWorkspaceQueryResponse = { items: [], staging: [] }) {
-  workflowMocks.queryWorkflowWorkspace.mockResolvedValueOnce(workspaceResponse()).mockResolvedValueOnce(refreshResponse);
+function renderWorkspace(refreshResponse: WorkflowWorkspaceQueryResponse = { items: [], staging: [] }, initialResponse = workspaceResponse()) {
+  workflowMocks.queryWorkflowWorkspace.mockResolvedValueOnce(initialResponse).mockResolvedValueOnce(refreshResponse);
   const onCatalogChanged = vi.fn().mockResolvedValue(undefined);
   render(
     <WorkflowWorkspace
@@ -140,7 +141,10 @@ describe("DEV-084 purge safety UAT", () => {
   it("后端检查阻塞时显示精确原因且不会调用永久删除", async () => {
     const user = userEvent.setup();
     workflowMocks.inspectWorkflowPurge.mockResolvedValue(purgeInspection(false, ["仍有 1 个任务引用"]));
-    renderWorkspace();
+    const removedWithLiveRuntime = workspaceResponse();
+    removedWithLiveRuntime.items[0].runtime[0].archived = false;
+    workflowMocks.restoreWorkflow.mockResolvedValue({ enabled: true, capability: "READY" });
+    renderWorkspace(undefined, removedWithLiveRuntime);
 
     await waitFor(() => expect(workflowMocks.queryWorkflowWorkspace).toHaveBeenCalledWith("FAST"));
     await user.selectOptions(screen.getByLabelText("工作流筛选"), "archived");
@@ -152,6 +156,9 @@ describe("DEV-084 purge safety UAT", () => {
     expect(workflowMocks.inspectWorkflowPurge).toHaveBeenCalledWith("WF_PURGE");
     expect(workflowMocks.purgeWorkflow).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "彻底删除工作流" })).toBeNull();
+    await user.click(row.getByRole("button", { name: "恢复工作流" }));
+    await waitFor(() => expect(workflowMocks.restoreWorkflow).toHaveBeenCalledWith("WF_PURGE"));
+    expect(await screen.findByText("Purge Workflow 已恢复并重新启用，现在可以正常使用。")).toBeTruthy();
   });
 
   it("永久删除已提交但隔离清理待补偿时显示成功而不是失败", async () => {

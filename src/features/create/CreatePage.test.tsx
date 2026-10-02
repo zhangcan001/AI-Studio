@@ -11,6 +11,7 @@ import { useStudioStore } from "../../stores/studioStore";
 import type { CreationContext, GeneratorOption, ProductRun, CreationAsset } from "../../product/types";
 import type { AppRoute } from "../../app/routes/types";
 import { normalCreate, mediaValue, modeLabel } from "./createModel";
+import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
 const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), bindingSet: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, project: { generatorBindingSet: api.bindingSet } } }));
 const prompt = { type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" } as const;
@@ -137,4 +138,20 @@ describe("Target16 architecture", () => {
     const guard = execFileSync("node", ["scripts/dev088-architecture-guard.mjs"], { encoding: "utf8" }); expect(guard).toContain("FRONTEND_NO_RAW_INVOKE=PASS");
     render(<Host />); await loaded(); fireEvent.click(screen.getByText("高级")); fireEvent.click(screen.getByRole("button", { name: "批量生成 / Experiment" })); expect(navigations).toHaveBeenLastCalledWith(expect.objectContaining({ surface: "batch", kind: "create" }));
   }, 15000);
+});
+it("phase6_target4 canonical Lab routes and legacy deep links preserve Create draft on return", async () => {
+  const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "image" } as const;
+  const navigate = vi.fn();
+  const view = render(<CreatePage route={route} navigate={navigate} />); await loaded();
+  fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "Lab return draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "工作流 / Benchmark" }));
+  expect(navigate).toHaveBeenCalledWith({ kind: "system-settings", section: "advanced-workflows", returnTo: route });
+  view.unmount();
+  expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "Lab return draft" });
+  render(<CreatePage route={route} navigate={navigate} />); await loaded();
+  expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("Lab return draft");
+  expect(api.generate).not.toHaveBeenCalled(); expect(api.bindingSet).not.toHaveBeenCalled();
+  expect(toLegacyLocation({kind:"project-settings",projectId:"project",section:"generators"}).workspace).toBe("projects");
+  expect(toLegacyLocation({kind:"project-settings",projectId:"project",section:"advanced-workflows"}).workspace).toBe("workflows");
+  expect(fromLegacyLocation({projectId:"project",workspace:"workflows"})).toEqual({kind:"project-settings",projectId:"project",section:"advanced-workflows"});
 });

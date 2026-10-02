@@ -326,9 +326,18 @@ pub async fn product_project_overview(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<ProjectOverview, ProductError> {
-    ProductProjectFacade::new(state.projects.command_center.clone())
+    let mut overview = ProductProjectFacade::new(state.projects.command_center.clone())
         .get_overview(&project_id)
-        .await
+        .await?;
+    overview.generator_bindings = crate::application::product::project_facade::binding_summaries(
+        state
+            .projects
+            .workflow_binding
+            .get(&project_id)
+            .await
+            .map_err(ProductError::binding)?,
+    )?;
+    Ok(overview)
 }
 
 #[tauri::command(rename_all = "camelCase")]

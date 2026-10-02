@@ -8,6 +8,8 @@ import type {
 } from "../types/generation";
 
 interface StudioState {
+  creationLabReturn?: { scope: string; selectionRef: string; runRef: import("../product/types").RunRef | null; accepted: import("../product/types").CreationAccepted | null };
+  setCreationLabReturn: (intent: StudioState["creationLabReturn"]) => void;
   pendingLibraryIntent?: import("../product/libraryTypes").LibraryCreateIntent;
   setPendingLibraryIntent: (intent: StudioState["pendingLibraryIntent"]) => void;
   pendingRunIntent?: { projectId: string; selectionRef: string; stage: "image" | "video"; values: GenerationValues };
@@ -35,6 +37,7 @@ interface StudioState {
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
+  setCreationLabReturn: (creationLabReturn) => set({ creationLabReturn }),
   setPendingLibraryIntent: (pendingLibraryIntent) => set({ pendingLibraryIntent }),
   setPendingRunIntent: (pendingRunIntent) => set({ pendingRunIntent }),
   values: {},
@@ -78,6 +81,7 @@ export const useStudioStore = create<StudioState>((set) => ({
       validationErrors: {},
       pendingAssetIntent: undefined,
       pendingRunIntent: undefined,
+      creationLabReturn: undefined,
       pendingLibraryIntent: undefined,
       reuseProvenance: undefined,
     })),

@@ -22,6 +22,7 @@ import { ProjectWorkflowPreflight } from "./ProjectWorkflowPreflight";
 import { ProjectProductionReadiness } from "./ProjectProductionReadiness";
 
 interface Props {
+  showWorkflowSettings?: boolean;
   projects: ProjectView[];
   activeProjectId?: string;
   catalog: RecipeViewModel[];
@@ -33,7 +34,7 @@ interface Props {
 
 type FormMode = { kind: "create" } | { kind: "edit"; project: ProjectView };
 
-export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, onProjectUpdated, onProjectRestored, onTemplateProjectCreated }: Props) {
+export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, onProjectUpdated, onProjectRestored, onTemplateProjectCreated, showWorkflowSettings = true }: Props) {
   const [formMode, setFormMode] = useState<FormMode>();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -285,7 +286,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
         </form>
       )}
 
-      {activeProjectId && (
+      {activeProjectId && showWorkflowSettings && (
         <>
           <ProjectWorkflowSettings
             projectId={activeProjectId}

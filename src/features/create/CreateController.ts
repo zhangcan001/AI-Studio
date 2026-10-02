@@ -37,19 +37,22 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     setLoading(true); setContext(undefined); setReadiness(undefined); setRun(undefined); setError(undefined);
     attempt.current = null;
     const store = useStudioStore.getState();
-    store.loadCreationDraft({});
+    const labReturn = store.creationLabReturn?.scope === key ? { ...store.creationLabReturn, values: store.values, dirty: store.draftDirty } : undefined;
+    if (!labReturn) store.loadCreationDraft({});
     Promise.all([productClient.creation.get(route.projectId, route.shotId ?? null, route.stage), productClient.creation.generatorsList(route.projectId, route.stage, route.shotId ?? null)])
       .then(([next, options]) => {
         if (cancelled || token !== epoch.current) return;
-        const saved = snapshots.current.get(key);
+        const saved = labReturn ? { selection: labReturn.selectionRef, values: labReturn.values, dirty: labReturn.dirty, runRef: labReturn.runRef, accepted: labReturn.accepted } : snapshots.current.get(key);
         const intent = useStudioStore.getState().pendingRunIntent;
         const reuse = intent?.projectId === route.projectId && intent.stage === route.stage ? intent : undefined;
-        const selected = options.find(item => item.selectionRef === reuse?.selectionRef) ?? options.find(item => item.selectionRef === saved?.selection) ?? options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
+        const selected = reuse ? options.find(item => item.selectionRef === reuse.selectionRef) : saved ? options.find(item => item.selectionRef === saved.selection) : options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
+        if ((reuse || saved) && !selected) setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
         initialized = true; setContext(next); setGenerators(options); setSelection(selected?.selectionRef ?? "");
         const reused = reuse && selected?.selectionRef === reuse.selectionRef && next.selectedShot;
         useStudioStore.getState().loadCreationDraft(reused ? draftFor(selected, next.selectedShot, reuse.values) : saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), reused ? true : saved?.dirty ?? false);
         if (reused) useStudioStore.getState().setPendingRunIntent(undefined);
         setRunRef(saved?.runRef ?? next.selectedShot?.recentRun ?? null); setAccepted(saved?.accepted ?? null);
+        useStudioStore.getState().setCreationLabReturn(undefined);
       }).catch(error => { if (!cancelled) setError(normalizeProductError(error).message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => {
@@ -59,7 +62,7 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     };
   }, [key]); // Canonical route is the only Shot/stage owner.
   useEffect(() => { onDirtyChange?.(dirty || [...snapshots.current.entries()].some(([scope, item]) => scope !== key && item.dirty)); }, [dirty, key, loading, onDirtyChange]);
-  useEffect(() => () => { onDirtyChange?.(false); useStudioStore.getState().loadCreationDraft({}); }, [onDirtyChange]);
+  useEffect(() => () => { onDirtyChange?.(false); const store = useStudioStore.getState(); if (!store.creationLabReturn) store.loadCreationDraft({}); }, [onDirtyChange]);
   function submission() {
     return { projectId: route.projectId, shotId: route.shotId ?? "", stage: route.stage, selectionRef: selection, values: useStudioStore.getState().values, submissionIdempotencyKey: attempt.current ?? "readiness-only" };
   }
@@ -128,6 +131,7 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   function removeValue(field: string) { attempt.current = null; useStudioStore.getState().removeValue(field); }
   function chooseGenerator(ref: string) {
     const option = generators.find(item => item.selectionRef === ref); if (!option) return;
+    useStudioStore.getState().setPendingRunIntent(undefined);
     attempt.current = null; setSelection(ref); setAccepted(null);
     useStudioStore.getState().loadCreationDraft(draftFor(option, context?.selectedShot ?? null, values), true);
   }
@@ -159,7 +163,10 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     selectShot: (shotId: string) => navigate({ ...route, shotId }),
     selectStage: (stage: "image" | "video") => navigate({ ...route, stage }),
     openRun: () => runRef && navigate({ kind: "runs", projectId: route.projectId, run: runRef }),
-    openAdvanced: (section: "batch" | "production" | "workflows") => navigate(section === "batch" ? { ...route, surface: "batch" } : section === "production" ? { kind: "runs", projectId: route.projectId, filter: "production" } : { kind: "project-settings", projectId: route.projectId, section: "advanced-workflows" }),
+    openAdvanced: (section: "batch" | "production" | "workflows") => {
+      if (section === "workflows") useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });
+      return navigate(section === "batch" ? { ...route, surface: "batch" } : section === "production" ? { kind: "runs", projectId: route.projectId, filter: "production" } : { kind: "system-settings", section: "advanced-workflows", returnTo: route });
+    },
   };
 }
 export type CreateController = ReturnType<typeof useCreateController>;

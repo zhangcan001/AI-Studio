@@ -25,6 +25,7 @@ export interface GeneratorBindingSetRequest {
   expectedBindingInstanceId: string | null;
 }
 export interface ProjectOverview {
+  generatorBindings?: GeneratorBindingSummary[];
   blockingState: "HEALTHY" | "WARNING" | "BLOCKED";
   project: { id: string; name: string; description: string | null; createdAt: string; updatedAt: string };
   progress: { total: number; completed: number; failed: number };

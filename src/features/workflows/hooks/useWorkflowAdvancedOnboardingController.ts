@@ -1,15 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  checkOnboardingCapability,
-  commitWorkflowImport,
-  discardOnboarding,
-  getOnboardingDraft,
-  removeOnboardingInputMapping,
-  setOnboardingInputMapping,
-  setOnboardingMetadata,
-  setOnboardingOutputMapping,
-  validateOnboarding,
-} from "../../../services/workflowClient";
+import { checkOnboardingCapability, commitWorkflowImport, discardOnboarding, getOnboardingDraft, removeOnboardingInputMapping, setOnboardingInputMapping, setOnboardingMetadata, setOnboardingOutputMapping, validateOnboarding } from "../../../services/workflowLabClient";
 import { useWorkflowOnboardingStore } from "../../../stores/workflowOnboardingStore";
 import type {
   WorkflowInputView,
@@ -72,6 +62,8 @@ export function useWorkflowAdvancedOnboardingController({
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
   const [published, setPublished] = useState<{ workflowId: string; recipeId: string }>();
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Explicit user action, never inferred from a workflow name/current version.
+  const [recipeCreationTarget, setRecipeCreationTarget] = useState<{ draftId: string; workflowId: string }>();
 
   const draft = useWorkflowOnboardingStore((state) => state.draft);
   const step = useWorkflowOnboardingStore((state) => state.step);
@@ -109,6 +101,7 @@ export function useWorkflowAdvancedOnboardingController({
   }, [draft?.draftId]);
 
   const resetSession = useCallback(() => {
+    setRecipeCreationTarget(undefined);
     setMappingDrafts({});
     setOutputDraft(createDefaultOutputDraft());
     setMetadataDraft(undefined);
@@ -116,7 +109,10 @@ export function useWorkflowAdvancedOnboardingController({
     setShowAdvanced(false);
   }, []);
 
-  const openAdvanced = useCallback((nextDraft?: WorkflowOnboardingDraftView) => {
+  const openAdvanced = useCallback((nextDraft?: WorkflowOnboardingDraftView, duplicateRecipe = false) => {
+    setRecipeCreationTarget(duplicateRecipe && nextDraft
+      ? { draftId: nextDraft.draftId, workflowId: nextDraft.manifest.workflowId }
+      : undefined);
     if (nextDraft) setDraft(nextDraft);
     setShowAdvanced(true);
   }, [setDraft]);
@@ -160,7 +156,8 @@ export function useWorkflowAdvancedOnboardingController({
     await runDraftAction(async () => {
       const result = await commitWorkflowImport({
         draftId: draft.draftId,
-        action: "NEW_WORKFLOW",
+        action: recipeCreationTarget?.draftId === draft.draftId ? "NEW_RECIPE" : "NEW_WORKFLOW",
+        workflowId: recipeCreationTarget?.draftId === draft.draftId ? recipeCreationTarget.workflowId : undefined,
         setCurrent: false,
       });
       setPublished({ workflowId: result.workflowId, recipeId: result.recipeId });
@@ -169,7 +166,7 @@ export function useWorkflowAdvancedOnboardingController({
       await onCatalogChanged();
       setStep("publish");
     });
-  }, [draft, onCatalogChanged, onLoadWorkspace, runDraftAction, setNotice, setStep]);
+  }, [draft, recipeCreationTarget, onCatalogChanged, onLoadWorkspace, runDraftAction, setNotice, setStep]);
 
   const discardDraft = useCallback(async () => {
     if (!draft) return;

@@ -12,7 +12,7 @@ import {
   saveWorkflowBenchmarkQuality,
   setWorkflowBenchmarkRecommendation,
   setWorkflowBenchmarkWinner,
-} from "../../services/tauriClient";
+} from "../../services/workflowLabClient";
 import { toUserMessage } from "../../i18n/errorMessages";
 import type { AssetView } from "../../types/asset";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";

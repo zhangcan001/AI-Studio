@@ -74,6 +74,7 @@ import { readRouteResume, resolveResume, validateResumeChildren } from "./routes
 import { productClient } from "../product/client";
 import { routeProjectId } from "./routes/types";
 import { routeTitle } from "./routes/selectors";
+import { labCreationSelection } from "../services/workflowLabClient";
 import "./App.css";
 import "../styles/studioTokens.css";
 import "../styles/uiPolish.css";
@@ -90,6 +91,8 @@ const RunsPage = lazy(() => import("../features/runs/RunsPage").then(({ RunsPage
 const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspace").then(({ ProjectWorkspace }) => ({ default: ProjectWorkspace })));
 const ProjectCommandCenter = lazy(() => import("../features/projects/ProjectCommandCenter").then(({ ProjectCommandCenter }) => ({ default: ProjectCommandCenter })));
 const WorkflowWorkspace = lazy(() => import("../features/workflows/WorkflowWorkspace").then(({ WorkflowWorkspace }) => ({ default: WorkflowWorkspace })));
+const WorkflowLabPage = lazy(() => import("../features/workflow-lab/WorkflowLabPage").then(({ WorkflowLabPage }) => ({ default: WorkflowLabPage })));
+const GeneratorSettingsPage = lazy(() => import("../features/generators/GeneratorSettingsPage").then(({ GeneratorSettingsPage }) => ({ default: GeneratorSettingsPage })));
 const SettingsWorkspace = lazy(() => import("../features/settings/SettingsWorkspace").then(({ SettingsWorkspace }) => ({ default: SettingsWorkspace })));
 const CreatePage = lazy(() => import("../features/create/CreatePage").then(({ CreatePage }) => ({ default: CreatePage })));
 const ShotWorkspace = lazy(() => import("../features/shots/ShotWorkspace").then(({ ShotWorkspace }) => ({ default: ShotWorkspace })));
@@ -438,7 +441,8 @@ function App() {
   }
   async function navigate(next: import("./routes/types").AppRoute) {
     const nextLegacy = toLegacyLocation(next);
-    if (shotDraftDirty && (nextLegacy.workspace !== "shots" || nextLegacy.projectId !== activeProjectId || nextLegacy.shotId !== resumeShotId || nextLegacy.section !== activeStudioSection)) {
+    const preserveLabDraft = next.kind === "system-settings" && next.section === "advanced-workflows" && next.returnTo?.kind === "create" && next.returnTo.projectId === activeProjectId;
+    if (!preserveLabDraft && shotDraftDirty && (nextLegacy.workspace !== "shots" || nextLegacy.projectId !== activeProjectId || nextLegacy.shotId !== resumeShotId || nextLegacy.section !== activeStudioSection)) {
       if (!await confirmDraftDiscard("镜头有未保存的修改。离开会放弃这些修改，是否继续？")) return false;
     }
     if (!await allowProjectSwitch(routeProjectId(next))) return false;
@@ -959,8 +963,10 @@ function App() {
             onOpenShot={(shotId) => openShot(shotId)}
           />
         )}
-        {workspace === "projects" && (
+        {shellMode === "v3" && route.kind === "project-settings" && route.section === "generators" && <GeneratorSettingsPage key={route.projectId} projectId={route.projectId} navigate={navigate} />}
+        {workspace === "projects" && !(shellMode === "v3" && route.kind === "project-settings" && route.section === "generators") && (
           <ProjectWorkspace
+            showWorkflowSettings={shellMode !== "v3"}
             projects={projects}
             activeProjectId={activeProjectId}
             catalog={catalog}
@@ -970,7 +976,28 @@ function App() {
             onTemplateProjectCreated={handleTemplateProjectCreated}
           />
         )}
-        {workspace === "workflows" && (
+        {workspace === "workflows" && shellMode === "v3" && (
+          <WorkflowLabPage
+            projectId={activeProject?.id}
+            catalog={catalog}
+            comfyConnected={isConnected}
+            onCatalogChanged={reloadCatalog}
+            onOpenStudio={async (workflowId, recipeId) => {
+              const candidates = catalog.filter(item => item.workflowId === workflowId && item.recipeId === recipeId);
+              if (!activeProject || candidates.length !== 1) throw new Error("无法确定生成器的确切版本，请刷新后重新选择。");
+              const selected = candidates[0];
+              const destination = route.kind === "system-settings" && route.returnTo?.kind === "create" ? { ...route.returnTo, stage: selected.outputTypes?.includes("video") ? "video" as const : "image" as const } : { kind: "create" as const, projectId: activeProject.id, stage: selected.outputTypes?.includes("video") ? "video" as const : "image" as const };
+              useStudioStore.getState().setPendingRunIntent({ projectId: activeProject.id, stage: destination.stage, selectionRef: labCreationSelection(selected.workflowVersionId, selected.recipeId), values: useStudioStore.getState().values });
+              await navigate(destination);
+            }}
+            onUseInProject={openWorkflowForProject}
+            onOpenProjectSettings={() => void navigate({ kind: "project-settings", projectId: activeProject!.id, section: "generators" })}
+            onOpenTask={(taskId) => { openTask(taskId); }}
+            returnTo={route.kind === "system-settings" ? route.returnTo : route.kind === "project-settings" ? { kind: "project-settings", projectId: route.projectId, section: "generators" } : undefined}
+            navigate={navigate}
+          />
+        )}
+        {workspace === "workflows" && shellMode !== "v3" && (
           <WorkflowWorkspace
             projectId={activeProject?.id}
             catalog={catalog}
@@ -986,6 +1013,7 @@ function App() {
         )}
         {workspace === "settings" && (
           <SettingsWorkspace
+            showWorkflowRepairStatus={shellMode !== "v3"}
             comfy={comfy}
             connectionLoading={connectionLoading}
             capabilityLoading={capabilityLoading}

@@ -75,6 +75,9 @@ export interface WorkflowWorkspaceQueryResponse {
 
 /** The renderer's existing row shape, flattened from the exact query item. */
 export interface WorkflowWorkspaceItem extends WorkflowProductionWorkspaceView {
+  /** Technical read projection for the exact runtime pair, never a fallback identity. */
+  recipeId?: string;
+  packageSourcePath?: string;
   /** False only for the test-only legacy response adapter. */
   registryBacked: boolean;
   sourceKind: string;
@@ -214,6 +217,8 @@ export function normalizeWorkspaceItem(item: WorkflowWorkspaceQueryItem): Workfl
     builtin: sourceKind === "PRODUCT",
     source: sourceKind,
     archived: runtime?.archived ?? libraryState === "REMOVED",
+    recipeId: runtime?.recipeId,
+    packageSourcePath: runtime?.packageSourcePath ?? undefined,
     archivedAt: runtime?.archivedAt ?? undefined,
     packageStatus: runtime?.packageStatus ?? "MISSING",
     workflowId: registry.workflowId,

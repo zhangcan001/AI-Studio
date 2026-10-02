@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { useState } from "react";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecipeViewModel } from "../../types/generation";
@@ -17,6 +17,7 @@ import { ProjectWorkflowSettings } from "../projects/ProjectWorkflowSettings";
 import { WorkflowImportFormatIssue } from "./WorkflowImportIssues";
 import { WorkflowSmartImport, workflowImportFormat } from "./WorkflowSmartImport";
 import { WorkflowWorkspace } from "./WorkflowWorkspace";
+import { useWorkflowAdvancedOnboardingController } from "./hooks/useWorkflowAdvancedOnboardingController";
 
 const serviceMocks = vi.hoisted(() => ({
   autoOnboardWorkflow: vi.fn(),
@@ -560,5 +561,34 @@ describe("DEV-079 添加工作流前端 UAT", () => {
       "dev079-p1-draft",
       expect.objectContaining({ targetNode: "63", targetInput: "width", defaultValue: undefined }),
     ));
+    // Capability refresh can change output candidates without changing draftId.
+    // A stale controlled select must not visually pretend the first option is selected.
+    act(() => useWorkflowOnboardingStore.getState().updateDraft({ ...linkedDraft, nodes: [
+      { ...linkedDraft.nodes[0], isOutputNode: false },
+      { nodeId: "42", classType: "SaveVideo", title: "保存视频", isOutputNode: true, inputs: [] },
+    ] }));
+    await user.click(screen.getByRole("tab", { name: "输出映射" }));
+    expect((screen.getByLabelText("输出节点") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "确认输出" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.selectOptions(screen.getByLabelText("输出节点"), "42");
+    expect((screen.getByRole("button", { name: "确认输出" }) as HTMLButtonElement).disabled).toBe(false);
+      cleanup();
+      useWorkflowOnboardingStore.getState().reset();
+      serviceMocks.commitWorkflowImport.mockResolvedValue(publishedPlan(recipe).published);
+      const controller = renderHook(() => useWorkflowAdvancedOnboardingController({
+        onLoadWorkspace: vi.fn().mockResolvedValue(undefined),
+        onCatalogChanged: vi.fn().mockResolvedValue(undefined),
+      }));
+      act(() => controller.result.current.openAdvanced(linkedDraft, true));
+      await act(async () => { await controller.result.current.publishDraft(); });
+      expect(serviceMocks.commitWorkflowImport).toHaveBeenLastCalledWith({
+        draftId: linkedDraft.draftId, action: "NEW_RECIPE",
+        workflowId: linkedDraft.manifest.workflowId, setCurrent: false,
+      });
+      act(() => controller.result.current.openAdvanced({ ...linkedDraft, draftId: "fresh-import" }));
+      await act(async () => { await controller.result.current.publishDraft(); });
+      expect(serviceMocks.commitWorkflowImport).toHaveBeenLastCalledWith({
+        draftId: "fresh-import", action: "NEW_WORKFLOW", workflowId: undefined, setCurrent: false,
+      });
   });
 });

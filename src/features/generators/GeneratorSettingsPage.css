@@ -1,0 +1,5 @@
+.generator-settings { padding: 20px; min-width: 0; overflow-wrap: anywhere; }
+.generator-settings article { margin: 16px 0; padding: 16px; border: 1px solid var(--border-color, #38404f); border-radius: 10px; }
+.generator-settings label { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.generator-settings select { max-width: 100%; min-width: 0; }
+.generator-settings details { margin-top: 24px; }

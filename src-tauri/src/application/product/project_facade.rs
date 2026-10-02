@@ -66,6 +66,7 @@ pub fn binding_summaries(
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectOverview {
+    pub generator_bindings: Vec<GeneratorBindingSummary>,
     pub blocking_state: crate::application::production_audit_service::ProductionAuditHealth,
     pub project: ProjectCommandCenterProjectView,
     pub progress: ProjectProgress,
@@ -110,6 +111,7 @@ pub struct ResultsSummary {
 impl From<ProjectCommandCenterView> for ProjectOverview {
     fn from(view: ProjectCommandCenterView) -> Self {
         Self {
+            generator_bindings: Vec::new(),
             blocking_state: view.audit.health,
             project: view.project,
             progress: ProjectProgress {
