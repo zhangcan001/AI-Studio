@@ -51,6 +51,17 @@ pub struct PromptLibraryService {
 }
 
 impl PromptLibraryService {
+    pub async fn usage(
+        &self,
+        project_id: &str,
+        prompt_id: &str,
+    ) -> Result<
+        Vec<crate::application::ports::prompt_library_repository::PromptUsageRecord>,
+        PromptLibraryError,
+    > {
+        self.get(project_id, prompt_id).await?;
+        Ok(self.repository.usage(project_id, prompt_id).await?)
+    }
     pub fn new(repository: Arc<dyn PromptLibraryRepository>, clock: Arc<dyn Clock>) -> Self {
         Self { repository, clock }
     }

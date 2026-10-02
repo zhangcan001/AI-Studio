@@ -19,6 +19,120 @@ use crate::{
 };
 use tauri::State;
 
+use crate::application::product::library_facade::{
+    LibraryCreateIntent, LibraryDeletionInspection, LibraryDetail, LibraryEditRequest, LibraryList,
+    LibraryOperations, LibraryQuery, LibraryRelation, LibraryServices, LibraryVersions,
+    ResourceRef,
+};
+
+fn library(state: &AppState) -> LibraryServices<'_> {
+    LibraryServices {
+        assets: &state.assets.library,
+        asset_detail: &state.assets.query,
+        prompts: &state.catalog.prompt_library,
+        profiles: &state.shots.consistency_profile,
+        reference_sets: &state.shots.reference_set,
+    }
+}
+
+fn library_operations(state: &AppState) -> LibraryOperations<'_> {
+    LibraryOperations {
+        library: library(state),
+        usage: &state.assets.usage,
+        deletion: &state.assets.deletion,
+        data: &state.assets.data,
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_image_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+) -> Result<Vec<u8>, ProductError> {
+    library(&state).image_get(&project_id, &resource).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_relations_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+) -> Result<Vec<LibraryRelation>, ProductError> {
+    library_operations(&state)
+        .relations_get(&project_id, &resource)
+        .await
+}
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_versions_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+) -> Result<LibraryVersions, ProductError> {
+    library_operations(&state)
+        .versions_get(&project_id, &resource)
+        .await
+}
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_use_in_creation(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+) -> Result<LibraryCreateIntent, ProductError> {
+    library_operations(&state)
+        .use_in_creation(&project_id, &resource)
+        .await
+}
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_deletion_inspect(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+) -> Result<LibraryDeletionInspection, ProductError> {
+    library_operations(&state)
+        .deletion_inspect(&project_id, &resource)
+        .await
+}
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_delete(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+    confirmed: bool,
+) -> Result<(), ProductError> {
+    library_operations(&state)
+        .delete(&project_id, &resource, confirmed)
+        .await
+}
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_resource_edit(
+    state: State<'_, AppState>,
+    project_id: String,
+    request: LibraryEditRequest,
+) -> Result<LibraryDetail, ProductError> {
+    library_operations(&state)
+        .resource_edit(&project_id, request)
+        .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_list(
+    state: State<'_, AppState>,
+    project_id: String,
+    query: LibraryQuery,
+) -> Result<LibraryList, ProductError> {
+    library(&state).list(&project_id, query).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+) -> Result<LibraryDetail, ProductError> {
+    library(&state).get(&project_id, &resource).await
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreationSubmissionDto {

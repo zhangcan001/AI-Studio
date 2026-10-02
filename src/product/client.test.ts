@@ -6,6 +6,27 @@ const { invokeCommand } = vi.hoisted(() => ({ invokeCommand: vi.fn() }));
 vi.mock("../services/ipc", () => ({ invokeCommand }));
 
 describe("product facade client", () => {
+  it("phase5 target8 transports typed library details and preserves missing-resource errors", async () => {
+    const query = { category: "prompts", keyword: "中文", cursor: null, limit: 20 } as const;
+    const page = { items: [], nextCursor: null, coverage: "keyset-page", coverageMessage: "数据库分页" };
+    invokeCommand.mockResolvedValueOnce(page);
+    expect(await productClient.library.list("project-a", query)).toEqual(page);
+    for (const kind of ["asset", "prompt", "profile", "reference-set"] as const) {
+      const ref = { kind, id: `${kind}-owned` };
+      invokeCommand.mockResolvedValueOnce({ kind });
+      await productClient.library.get("project-a", ref);
+      expect(invokeCommand).toHaveBeenLastCalledWith("product_library_get", { projectId: "project-a", resource: ref });
+    }
+    invokeCommand.mockRejectedValueOnce({ code: "LIBRARY_RESOURCE_NOT_FOUND", message: "secret db path" });
+    await expect(productClient.library.get("project-b", { kind: "asset", id: "missing" })).rejects.toMatchObject({ code: "LIBRARY_RESOURCE_NOT_FOUND", message: "资源已删除或不属于当前项目，请返回资源库。" });
+    const ref = {kind:"asset",id:"owned"} as const;
+    invokeCommand.mockResolvedValue(undefined);
+    for(const [call,command] of [[()=>productClient.library.imageGet("project-a",ref),"product_library_image_get"],[()=>productClient.library.relationsGet("project-a",ref),"product_library_relations_get"],[()=>productClient.library.versionsGet("project-a",ref),"product_library_versions_get"],[()=>productClient.library.useInCreation("project-a",ref),"product_library_use_in_creation"],[()=>productClient.library.deletionInspect("project-a",ref),"product_library_deletion_inspect"]] as const){await call();expect(invokeCommand).toHaveBeenLastCalledWith(command,{projectId:"project-a",resource:ref});}
+    await productClient.library.delete("project-a",ref,true);expect(invokeCommand).toHaveBeenLastCalledWith("product_library_delete",{projectId:"project-a",resource:ref,confirmed:true});
+    const edit={kind:"prompt",id:"prompt-a",text:"new",modelVersionId:null} as const;
+    await productClient.library.resourceEdit("project-a",edit);expect(invokeCommand).toHaveBeenLastCalledWith("product_library_resource_edit",{projectId:"project-a",request:edit});
+    expectTypeOf(productClient.library.get).returns.resolves.toEqualTypeOf<import("./libraryTypes").LibraryDetail>();
+  });
   it("enforces the existing architecture guard in ordinary frontend CI", async () => {
     const script = new URL("../../scripts/dev088-architecture-guard.mjs", import.meta.url).href;
     const guard = await import(/* @vite-ignore */ script);

@@ -37,6 +37,16 @@ pub struct PromptLibraryQuery {
 
 #[async_trait]
 pub trait PromptLibraryRepository: Send + Sync {
+    /// Exact persisted version/entry references, never inferred from text.
+    async fn usage(
+        &self,
+        _project_id: &str,
+        _prompt_id: &str,
+    ) -> Result<Vec<PromptUsageRecord>, RepositoryError> {
+        Err(RepositoryError::integrity(
+            "prompt usage projection unsupported",
+        ))
+    }
     async fn list_page(
         &self,
         query: PromptLibraryQuery,
@@ -81,4 +91,18 @@ pub trait PromptLibraryRepository: Send + Sync {
     ) -> Result<Option<PromptEntryRecord>, RepositoryError>;
 
     async fn delete(&self, project_id: &str, prompt_id: &str) -> Result<bool, RepositoryError>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PromptUsageKind {
+    Shot,
+    Snapshot,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PromptUsageRecord {
+    pub kind: PromptUsageKind,
+    pub entity_id: String,
+    pub display_name: String,
+    pub stage: Option<String>,
 }

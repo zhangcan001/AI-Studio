@@ -8,7 +8,16 @@ pub struct AssetDeletionReferences {
     pub active_production_item_ids: Vec<String>,
     pub active_task_ids: Vec<TaskId>,
     pub historical_task_ids: Vec<TaskId>,
+    /// Immutable execution inputs, independent of Task status.
+    pub snapshot_input_task_ids: Vec<TaskId>,
+    /// Terminal source outputs are warnings, not immutable input blockers.
+    pub historical_source_task_ids: Vec<TaskId>,
+    pub historical_production_output_ids: Vec<String>,
     pub historical_review_ids: Vec<String>,
+    /// Actual audit facts must survive schema-038 cascade deletion.
+    pub meaningful_artifact_review_ids: Vec<String>,
+    /// Automatic pending rows contain no human review fact.
+    pub placeholder_artifact_review_ids: Vec<String>,
     /// Immutable provenance edges that point at one of this asset's versions.
     /// These are hard blockers: removing the asset would destroy lineage.
     pub generation_asset_version_ids: Vec<String>,
@@ -30,4 +39,9 @@ pub trait AssetDeletionRepository: Send + Sync {
         project_id: &str,
         asset_ids: &[AssetId],
     ) -> Result<Vec<AssetDeletionReferences>, RepositoryError>;
+}
+
+/// Shared application policy, including whitespace-only comments. Unknown states fail closed.
+pub fn artifact_review_is_placeholder(decision: &str, revision: i64, comment: &str) -> bool {
+    decision == "PENDING" && revision == 0 && comment.trim().is_empty()
 }

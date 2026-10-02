@@ -1,6 +1,11 @@
 import type { GeneratorBindingSummary, RunRef } from "./types";
 
 const messages = {
+  LIBRARY_DELETE_CONFIRMATION_REQUIRED: "请先查看删除影响并明确确认。",
+  LIBRARY_DELETE_BLOCKED: "资源仍有受保护的引用，不能删除。请刷新使用位置。",
+  LIBRARY_EDIT_INVALID: "修改未保存，请检查名称、正文或成员是否有效。",
+  LIBRARY_RESOURCE_NOT_FOUND: "资源已删除或不属于当前项目，请返回资源库。",
+  LIBRARY_QUERY_INVALID: "资源库查询已变化，请重新加载当前分类。",
   MISSING_INPUT: "请填写必需输入。",
   INPUT_TYPE_MISMATCH: "输入类型不匹配，请重新选择。",
   INPUT_OUT_OF_RANGE: "输入超出允许范围或数量，请调整。",

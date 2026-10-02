@@ -360,6 +360,21 @@ impl AssetRepository for SqliteAssetRepository {
         }
 
         for asset_id in asset_ids {
+            // Re-read classification inside the delete transaction: inspection
+            // cannot authorize a review that subsequently gained actual audit facts.
+            let review: Option<(String, i64, String)> = sqlx::query_as(
+                "SELECT decision, revision, comment FROM artifact_reviews WHERE project_id = ? AND artifact_id = ? LIMIT 1",
+            )
+            .bind(project_id)
+            .bind(asset_id.as_str())
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+            if review.is_some_and(|(decision, revision, comment)| !crate::application::ports::asset_deletion_repository::artifact_review_is_placeholder(&decision, revision, &comment)) {
+                return Err(RepositoryError::integrity(
+                    "meaningful artifact review history prevents safe Asset deletion under schema 038",
+                ));
+            }
             let lineage_id: Option<String> = sqlx::query_scalar(
                 "SELECT lineage.id
                  FROM generation_asset_versions lineage
@@ -1033,10 +1048,11 @@ mod tests {
             .await
             .expect("asset and mapping should insert");
 
+        // Schema038 creates only an automatic placeholder; it is not audit history.
         repository
             .delete_by_ids("project-1", std::slice::from_ref(&image.id))
             .await
-            .expect("asset should delete transactionally");
+            .expect("placeholder-only output should delete transactionally");
         assert!(repository.find_by_id(&image.id).await.unwrap().is_none());
         assert!(repository
             .list_output_mappings(&task.id)

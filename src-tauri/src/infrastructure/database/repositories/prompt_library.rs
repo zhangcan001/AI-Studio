@@ -20,6 +20,40 @@ impl SqlitePromptLibraryRepository {
 
 #[async_trait]
 impl PromptLibraryRepository for SqlitePromptLibraryRepository {
+    async fn usage(
+        &self,
+        project_id: &str,
+        prompt_id: &str,
+    ) -> Result<
+        Vec<crate::application::ports::prompt_library_repository::PromptUsageRecord>,
+        RepositoryError,
+    > {
+        use crate::application::ports::prompt_library_repository::{
+            PromptUsageKind, PromptUsageRecord,
+        };
+        let shots: Vec<(String,String,String)> = sqlx::query_as(
+            "SELECT s.id, s.name, p.stage FROM shots s JOIN shot_stage_prompts p ON p.shot_id=s.id WHERE s.project_id=? AND (p.prompt_entry_id=? OR p.prompt_version_id IN (SELECT v.id FROM prompt_versions v JOIN prompt_entries e ON e.id=v.prompt_id WHERE e.project_id=? AND e.id=?)) UNION SELECT s.id,s.name,'image' FROM shots s WHERE s.project_id=? AND (s.prompt_entry_id=? OR s.prompt_version_id IN (SELECT v.id FROM prompt_versions v JOIN prompt_entries e ON e.id=v.prompt_id WHERE e.project_id=? AND e.id=?)) ORDER BY 1,3"
+        ).bind(project_id).bind(prompt_id).bind(project_id).bind(prompt_id).bind(project_id).bind(prompt_id).bind(project_id).bind(prompt_id).fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+        let snapshots: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT t.id FROM generation_snapshots s JOIN tasks t ON t.id=s.task_id JOIN prompt_versions v ON v.id=s.prompt_version_id JOIN prompt_entries e ON e.id=v.prompt_id WHERE t.project_id=? AND e.project_id=? AND e.id=? ORDER BY t.id"
+        ).bind(project_id).bind(project_id).bind(prompt_id).fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+        let mut items: Vec<_> = shots
+            .into_iter()
+            .map(|(id, name, stage)| PromptUsageRecord {
+                kind: PromptUsageKind::Shot,
+                entity_id: id,
+                display_name: name,
+                stage: Some(stage),
+            })
+            .collect();
+        items.extend(snapshots.into_iter().map(|(id,)| PromptUsageRecord {
+            kind: PromptUsageKind::Snapshot,
+            entity_id: id,
+            display_name: "历史生成固定提示词".into(),
+            stage: None,
+        }));
+        Ok(items)
+    }
     async fn list_page(
         &self,
         request: PromptLibraryQuery,

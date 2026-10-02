@@ -191,6 +191,7 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
                     .expect("selected asset reference");
                 let task_id = TaskId::parse(row.task_id.clone())
                     .map_err(|error| map_domain_error("task id", error))?;
+                push_unique(&mut reference.snapshot_input_task_ids, task_id.clone());
                 if status.is_terminal() {
                     push_unique(&mut reference.historical_task_ids, task_id);
                 } else {
@@ -203,7 +204,7 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
             "SELECT a.id AS asset_id, t.id AS task_id, t.status
              FROM assets a
              INNER JOIN tasks t ON t.id = a.source_task_id
-             WHERE a.project_id = ?",
+             WHERE a.project_id = ? AND t.project_id = a.project_id",
         )
         .bind(project_id)
         .fetch_all(&self.pool)
@@ -221,9 +222,24 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
                 .get_mut(&row.asset_id)
                 .expect("selected asset reference");
             if status.is_terminal() {
+                push_unique(&mut reference.historical_source_task_ids, task_id.clone());
                 push_unique(&mut reference.historical_task_ids, task_id);
             } else {
                 push_unique(&mut reference.active_task_ids, task_id);
+            }
+        }
+
+        let artifact_reviews = sqlx::query_as::<_, (String, String, String, i64, String)>(
+            "SELECT id, artifact_id, decision, revision, comment FROM artifact_reviews WHERE project_id = ?",
+        ).bind(project_id).fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+        for (id, asset, decision, revision, comment) in artifact_reviews {
+            if let Some(reference) = references.get_mut(&asset) {
+                let target = if crate::application::ports::asset_deletion_repository::artifact_review_is_placeholder(&decision, revision, &comment) {
+                    &mut reference.placeholder_artifact_review_ids
+                } else {
+                    &mut reference.meaningful_artifact_review_ids
+                };
+                push_unique(target, id);
             }
         }
 
@@ -389,6 +405,14 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
             .map_err(map_sqlx_error)?;
         for row in rows {
             if !is_live_production_status(&row.status) {
+                if let Some(asset_id) = row.asset_id.as_deref() {
+                    if let Some(reference) = references.get_mut(asset_id) {
+                        push_unique(
+                            &mut reference.historical_production_output_ids,
+                            row.stage_item_id.clone(),
+                        );
+                    }
+                }
                 continue;
             }
             let mut referenced_assets = row
@@ -449,6 +473,12 @@ fn collect_asset_ids(value: &Value, output: &mut HashSet<String>) {
             .iter()
             .for_each(|item| collect_asset_ids(item, output)),
         Value::Object(object) => {
+            // Official resolved snapshot media shape has no `type` tag.
+            if object.contains_key("sha256") && object.contains_key("comfy") {
+                if let Some(id) = object.get("assetId").and_then(Value::as_str) {
+                    output.insert(id.to_owned());
+                }
+            }
             if let Some(kind) = object.get("type").and_then(Value::as_str) {
                 let is_asset = matches!(
                     kind,

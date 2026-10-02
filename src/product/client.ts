@@ -2,6 +2,18 @@ import { productRequest, productMediaUrl } from "./transport";
 import type { CreationSubmission, CreationShotUpdate, GeneratorBindingSetRequest, RunRef, RunRetryRequest, RunListFilter } from "./types";
 
 export const productClient = {
+  library: {
+    imageGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_image_get", { projectId, resource }),
+    relationsGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_relations_get", { projectId, resource }),
+    versionsGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_versions_get", { projectId, resource }),
+    useInCreation: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_use_in_creation", { projectId, resource }),
+    deletionInspect: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_deletion_inspect", { projectId, resource }),
+    delete: (projectId: string, resource: import("./libraryTypes").ResourceRef, confirmed: boolean) => productRequest("product_library_delete", { projectId, resource, confirmed }),
+    resourceEdit: (projectId: string, request: import("./libraryTypes").LibraryEditRequest) => productRequest("product_library_resource_edit", { projectId, request }),
+    list: (projectId: string, query: import("./libraryTypes").LibraryQuery) => productRequest("product_library_list", { projectId, query }),
+    get: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_get", { projectId, resource }),
+    mediaUrl: productMediaUrl,
+  },
   project: {
     getOverview: (projectId: string) => productRequest("product_project_overview", { projectId }),
     generatorBindingSet: (projectId: string, request: GeneratorBindingSetRequest) => productRequest("product_generator_binding_set", { projectId, request }),

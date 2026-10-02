@@ -669,7 +669,7 @@ async fn load_asset_usage(
         "SELECT t.id AS task_id, t.status
          FROM assets a
          INNER JOIN tasks t ON t.id = a.source_task_id
-         WHERE a.project_id = ? AND a.id = ?",
+         WHERE a.project_id = ? AND t.project_id = a.project_id AND a.id = ?",
     )
     .bind(project_id)
     .bind(asset_id.as_str())
@@ -869,7 +869,7 @@ async fn load_asset_usage(
                 None,
                 None,
                 None,
-                !status.is_terminal(),
+                true,
                 if status.is_terminal() {
                     "历史生成快照仍记录此素材输入。"
                 } else {
@@ -1579,6 +1579,12 @@ fn collect_asset_ids(value: &Value, output: &mut HashSet<String>) {
             }
         }
         Value::Object(object) => {
+            // GenerationInputPreparer's resolved media projection is untagged.
+            if object.contains_key("sha256") && object.contains_key("comfy") {
+                if let Some(id) = object.get("assetId").and_then(Value::as_str) {
+                    output.insert(id.to_owned());
+                }
+            }
             if let Some(kind) = object.get("type").and_then(Value::as_str) {
                 if matches!(
                     kind,

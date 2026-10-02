@@ -6,6 +6,15 @@ export const productMediaUrl = buildAssetMediaUrl;
 import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest, RunList, RunListFilter } from "./types";
 
 interface ProductCommands {
+  product_library_image_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: number[] };
+  product_library_relations_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryRelation[] };
+  product_library_versions_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryVersions };
+  product_library_use_in_creation: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryCreateIntent };
+  product_library_deletion_inspect: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryDeletionInspection };
+  product_library_delete: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef; confirmed: boolean }; result: void };
+  product_library_resource_edit: { args: { projectId: string; request: import("./libraryTypes").LibraryEditRequest }; result: import("./libraryTypes").LibraryDetail };
+  product_library_list: { args: { projectId: string; query: import("./libraryTypes").LibraryQuery }; result: import("./libraryTypes").LibraryList };
+  product_library_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryDetail };
   product_run_results_get: { args: { projectId: string; runRef: RunRef }; result: import("./types").RunResult[] };
   product_run_result_review: { args: { projectId: string; request: import("./types").RunResultReviewRequest }; result: void };
   product_run_list: { args: { projectId: string; filter: RunListFilter; cursor: string | null }; result: RunList };

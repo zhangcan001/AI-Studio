@@ -78,6 +78,17 @@ pub struct AssetDeletionService {
 }
 
 impl AssetDeletionService {
+    pub async fn references(
+        &self,
+        project_id: &str,
+        asset_id_values: &[String],
+    ) -> Result<Vec<AssetDeletionReferences>, AssetDeletionError> {
+        let (asset_ids, _, _) = self.load_targets(project_id, asset_id_values).await?;
+        self.reference_repository
+            .references_for(project_id, &asset_ids)
+            .await
+            .map_err(AssetDeletionError::Repository)
+    }
     pub fn new(
         asset_repository: Arc<dyn AssetRepository>,
         reference_repository: Arc<dyn AssetDeletionRepository>,
@@ -122,6 +133,12 @@ impl AssetDeletionService {
                     ..Default::default()
                 });
             let mut blocking_reasons = Vec::new();
+            if !reference.meaningful_artifact_review_ids.is_empty() {
+                blocking_reasons.push("该素材已经形成审核记录。当前数据库结构中删除素材会同时删除审核历史，因此为保护审计记录，暂不允许删除该素材。".to_owned());
+            }
+            if !reference.snapshot_input_task_ids.is_empty() {
+                blocking_reasons.push("该素材已作为历史生成任务的固定输入保存。删除会破坏该任务的输入复现与精确重试，请保留该素材。".to_owned());
+            }
             if !reference.active_production_item_ids.is_empty() {
                 blocking_reasons.push(
                     "该素材正在被生产队列使用，请等待任务完成或取消对应批次后再删除。".to_owned(),
@@ -196,19 +213,19 @@ impl AssetDeletionService {
                 .map_err(map_store_error)?;
 
             let mut warnings = Vec::new();
-            if !reference.historical_task_ids.is_empty()
+            if !reference.historical_source_task_ids.is_empty()
+                || !reference.historical_production_output_ids.is_empty()
                 || !reference.historical_review_ids.is_empty()
             {
                 historical_references.push(asset.id.as_str().to_owned());
-                warnings.push(
-                    if reference.historical_review_ids.is_empty() {
-                        "该素材已被历史生成任务使用。删除后历史记录仍保留，但无法再次读取该素材，基于该历史输入的重试可能需要重新选择素材。"
-                            .to_owned()
-                    } else {
-                        "该素材已被历史生成任务或审片版本引用。删除后历史记录仍保留，但无法再次读取该素材，基于该历史输入的重试可能需要重新选择素材。"
-                            .to_owned()
-                    },
-                );
+                if !reference.historical_source_task_ids.is_empty()
+                    || !reference.historical_production_output_ids.is_empty()
+                {
+                    warnings.push("该素材属于历史生成结果。删除后任务和运行记录仍会保留，但该媒体将无法再预览。".to_owned());
+                }
+                if !reference.historical_review_ids.is_empty() {
+                    warnings.push("审核记录仍保留，但该媒体之后不能预览。".to_owned());
+                }
             }
             let can_delete = blocking_reasons.is_empty();
             if can_delete {
@@ -683,6 +700,7 @@ mod tests {
             vec![AssetDeletionReferences {
                 asset_id: asset.id.clone(),
                 historical_task_ids: vec![TaskId::parse("tsk_history").expect("task id")],
+                historical_source_task_ids: vec![TaskId::parse("tsk_history").expect("task id")],
                 ..Default::default()
             }],
             false,
@@ -694,7 +712,7 @@ mod tests {
             .expect("historical reference should be deletable");
         assert!(inspection.blocked.is_empty());
         assert_eq!(inspection.historical_references, vec!["ast_reference"]);
-        assert!(inspection.items[0].warnings[0].contains("基于该历史输入的重试"));
+        assert!(inspection.items[0].warnings[0].contains("媒体将无法再预览"));
     }
 
     #[tokio::test]
