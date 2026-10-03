@@ -75,10 +75,3 @@
 }
 
 /* Shared controls inside the desktop shell inherit the neutral palette. */
-.studio-shell :where(button, input, select, textarea) { border-radius: var(--studio-radius-sm); }
-.studio-shell button { border-color: var(--studio-border-strong); color: var(--studio-text); background: var(--studio-surface-2); }
-.studio-shell button:hover:not(:disabled) { border-color: var(--studio-accent); background: var(--studio-surface-3); }
-.studio-shell .quiet-button { border-color: var(--studio-border); color: var(--studio-text-secondary); background: transparent; }
-.studio-shell input,
-.studio-shell select,
-.studio-shell textarea { border-color: var(--studio-border); color: var(--studio-text); background: var(--studio-surface-2); }

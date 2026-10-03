@@ -6,32 +6,6 @@
  * changing feature behavior or interaction state.
  */
 
-.studio-shell {
-  --ux-surface-0: var(--studio-bg);
-  --ux-surface-1: var(--studio-surface-1);
-  --ux-surface-2: var(--studio-surface-2);
-  --ux-surface: var(--studio-surface-2);
-  --ux-surface-raised: var(--studio-surface-3);
-  --ux-border: var(--studio-border);
-  --ux-border-strong: var(--studio-border-strong);
-  --ux-text: var(--studio-text);
-  --ux-muted: var(--studio-text-secondary);
-  --ux-accent: var(--studio-accent);
-  --ux-accent-strong: var(--studio-accent-strong);
-  --ux-accent-contrast: #ffffff;
-  --ux-success: var(--studio-success);
-  --ux-warning: var(--studio-warning);
-  --ux-danger: var(--studio-danger);
-  --ux-shadow: 0 18px 48px rgb(0 0 0 / 24%);
-  --ux-shadow-soft: 0 8px 24px rgb(0 0 0 / 18%);
-  color-scheme: dark;
-}
-
-.studio-shell__main {
-  container: studio-main / inline-size;
-  scrollbar-gutter: stable;
-}
-
 .app-main-content {
   box-sizing: border-box;
   width: min(100%, 1920px);
@@ -72,14 +46,6 @@
 .settings-card-heading p,
 .project-command-project-copy p {
   color: var(--studio-text-secondary);
-}
-
-.studio-shell :where(button, input, select, textarea) {
-  font-family: inherit;
-}
-
-.studio-shell :where(button, input, select, textarea):disabled {
-  opacity: 0.58;
 }
 
 /* Project command center: one quiet canvas, with status cards as accents. */

@@ -27,7 +27,9 @@ it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=
  expect(backend).toHaveLength(manifest.backendSourceSnapshot.files);
  expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(manifest.backendSourceSnapshot.sha256);
  expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend);
- for(const [path,digest] of Object.entries(manifest.compatibilityFiles))expect(createHash("sha256").update(read(path).replace(/\r\n/g,"\n")).digest("hex"),path).toBe(digest);
+ // Phase9 authorizes CSS only. Every other Phase8 consumer stays exactly frozen.
+ const phase9=JSON.parse(read("docs/architecture/phase9-style-cleanup.json"));
+ for(const [path,digest] of Object.entries(manifest.compatibilityFiles))expect(createHash("sha256").update(read(path).replace(/\r\n/g,"\n")).digest("hex"),path).toBe(path==='src/app/App.css'?phase9.styleSnapshots[path]:digest);
  expect(read('src-tauri/src/application/project_backup_service.rs')).toContain('const BACKUP_VERSION: u32 = 20;');
 });
 });

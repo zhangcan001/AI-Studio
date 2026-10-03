@@ -1,0 +1,5 @@
+.model-version-selector { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--ux-border); border-radius: 10px; color: var(--ux-muted); background: var(--ux-surface-1); font-size: 0.78rem; }
+.model-version-selector > label { display: grid; gap: 6px; max-width: 520px; }
+.model-version-selector > label > span { color: var(--ux-text); font-weight: 700; }
+.model-version-selector select { width: 100%; min-width: 0; }
+.model-version-selector p { margin: 0; }

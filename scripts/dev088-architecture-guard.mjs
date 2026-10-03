@@ -2,9 +2,14 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import ts from "typescript";
 import { backendBoundary } from "./backend-boundary-guard.mjs";
+import { styleBoundary } from "./style-boundary-guard.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(import.meta.url), "..", "..");
+const styleManifest = JSON.parse(readFileSync(join(root, "docs/architecture/phase9-style-cleanup.json"), "utf8"));
+const styleResult = styleBoundary(root, styleManifest);
+if (styleResult.violations.length) throw new Error(`STYLE_ARCHITECTURE_BOUNDARY failed: ${styleResult.violations.join("; ")}`);
+console.log("STYLE_ARCHITECTURE_GUARD=PASS");
 const backendManifest = JSON.parse(readFileSync(join(root, "docs/architecture/phase8-backend-decomposition.json"), "utf8"));
 const backendResult = backendBoundary(root, backendManifest);
 if (backendResult.violations.length) throw new Error(`BACKEND_DIRECT_SQL_BOUNDARY failed: ${backendResult.violations.join("; ")}`);
