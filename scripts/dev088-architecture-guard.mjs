@@ -3,9 +3,14 @@ import { join, resolve, relative } from "node:path";
 import ts from "typescript";
 import { backendBoundary } from "./backend-boundary-guard.mjs";
 import { styleBoundary } from "./style-boundary-guard.mjs";
+import { frontendBoundary } from "./frontend-boundary-guard.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(import.meta.url), "..", "..");
+const frontendManifest = JSON.parse(readFileSync(join(root, "docs/architecture/phase10-frontend-architecture.json"), "utf8"));
+const frontendResult = frontendBoundary(root, frontendManifest);
+if (frontendResult.violations.length) throw new Error(`FRONTEND_ARCHITECTURE_BOUNDARY failed: ${frontendResult.violations.join("; ")}`);
+console.log("FRONTEND_ARCHITECTURE_GUARD=PASS");
 const styleManifest = JSON.parse(readFileSync(join(root, "docs/architecture/phase9-style-cleanup.json"), "utf8"));
 const styleResult = styleBoundary(root, styleManifest);
 if (styleResult.violations.length) throw new Error(`STYLE_ARCHITECTURE_BOUNDARY failed: ${styleResult.violations.join("; ")}`);

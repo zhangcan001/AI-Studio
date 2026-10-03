@@ -1,5 +1,5 @@
 // Phase9 extends DEV-088; PostCSS is Vite's existing parser, not a new dependency.
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -81,8 +81,15 @@ export function canonical(ast) {
 export function styleBoundary(root,manifest) {
   const inv=styleInventory(root,false),violations=debtViolations(debt(inv.rows,root),manifest.grandfathered);
   for(const r of inv.rows){const match=manifest.ownedFiles[r.path];if(match&&(!match.some(prefix=>r.selector_or_scope.startsWith(prefix))||/\.(?:runs?|create|library|asset|project|prompt-studio)-/.test(r.selector_or_scope)))violations.push(`ownership:${r.path}:${r.selector_or_scope}`);if(r.selector_or_scope.includes('.studio-shell'))violations.push(`retired-root:${r.path}`);}
-  for(const [path,digest] of Object.entries(manifest.productionFrontendSnapshot))if(hash(read(`${root}/${path}`))!==digest)violations.push(`behavior:${path}`);
-  for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')))if(!(path in manifest.productionFrontendSnapshot))violations.push(`new-production-source:${path}`);
+  // Phase10 authorizes only reviewed seam paths; CSS and every other source stay frozen.
+  const successorPath=`${root}/docs/architecture/phase10-frontend-architecture.json`;
+  const successor=existsSync(successorPath)?JSON.parse(read(successorPath)):undefined;
+  const allowed=new Set(successor?.seams.flatMap(s=>s.paths)||[]);
+  const scoped=successor?.frontendSuccessor||{};
+  for(const path of Object.keys(scoped))if(!allowed.has(path))violations.push(`unscoped-successor:${path}`);
+  const productionSnapshot={...manifest.productionFrontendSnapshot,...Object.fromEntries(Object.entries(scoped).filter(([p])=>allowed.has(p)))};
+  for(const [path,digest] of Object.entries(productionSnapshot))if(hash(read(`${root}/${path}`))!==digest)violations.push(`behavior:${path}`);
+  for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')))if(!(path in productionSnapshot))violations.push(`new-production-source:${path}`);
   for(const [path,digest] of Object.entries(manifest.styleSnapshots))if(hash(read(`${root}/${path}`))!==digest)violations.push(`unreviewed-style:${path}`);
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.(css|scss)$/.test(p)))if(!(path in manifest.styleSnapshots))violations.push(`unreviewed-style:${path}`);
   return {violations,inventory:inv};
