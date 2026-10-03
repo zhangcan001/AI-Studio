@@ -1,0 +1,2215 @@
+{
+  "phase": 12,
+  "status": "NATIVE_NAVIGATION_BASELINE_MEASURED_OTHER_BOUNDARIES_PENDING",
+  "baselineHead": "0bb137303bbcf4baa98a109e7558d5899ef236fc",
+  "baselineCi": 37107002128,
+  "criticalPaths": [
+    "startup",
+    "project-open",
+    "project-switch",
+    "resume",
+    "create",
+    "runs",
+    "library",
+    "workflow-lab"
+  ],
+  "environment": {
+    "buildMode": "DEBUG",
+    "machine": "Same local Windows machine",
+    "dataset": "Owned isolated Phase11 fixture copy; never real project data",
+    "warmupRuns": 1,
+    "measuredRuns": 5,
+    "coldOsCacheControlled": false,
+    "frontendMode": "PRODUCTION_BUNDLE",
+    "backendBuildMode": "DEBUG"
+  },
+  "candidates": [
+    {
+      "path": "src-tauri/src/lib.rs",
+      "symbol": "run_application",
+      "area": "startup",
+      "critical_path": "startup",
+      "suspected_cost": "Bootstrap/composition",
+      "measurement_method": "Native launch and existing database-ready logs",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 4,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 1
+      }
+    },
+    {
+      "path": "src-tauri/src/infrastructure/database/pool.rs",
+      "symbol": "initialize",
+      "area": "query",
+      "critical_path": "startup",
+      "suspected_cost": "Connection/pragmas/migration check",
+      "measurement_method": "Existing logs plus real migrated fixture benchmark",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 3,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src/app/App.tsx",
+      "symbol": "App",
+      "area": "frontend",
+      "critical_path": "startup/project-switch",
+      "suspected_cost": "Root subscriptions and state fan-out",
+      "measurement_method": "React commit observation and scoped IPC counts",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 5,
+        "memoization": 2,
+        "derivations": 7,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 1
+      }
+    },
+    {
+      "path": "src/app/v3/AppShellV3.tsx",
+      "symbol": "AppShellV3",
+      "area": "frontend",
+      "critical_path": "route-switch",
+      "suspected_cost": "Navigation renders/listener lifetime",
+      "measurement_method": "React commits and five real transitions",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 1,
+        "memoization": 0,
+        "derivations": 1,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src/app/routes/resumeAdapter.ts",
+      "symbol": "writeRouteResume",
+      "area": "filesystem",
+      "critical_path": "resume",
+      "suspected_cost": "localStorage serialization",
+      "measurement_method": "Real process restart; do not substitute navigation",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 0,
+        "serialization": 2,
+        "storage": 2,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src/product/client.ts",
+      "symbol": "productClient",
+      "area": "IPC",
+      "critical_path": "all",
+      "suspected_cost": "Command frequency/payload",
+      "measurement_method": "CDP actual POST requests; Phase11 preflight classifier",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 0,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src/product/transport.ts",
+      "symbol": "productRequest",
+      "area": "IPC",
+      "critical_path": "all",
+      "suspected_cost": "IPC latency/serialization",
+      "measurement_method": "CDP completion timestamps and encoded response bytes",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 0,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src/features/create/CreateController.ts",
+      "symbol": "useCreateController",
+      "area": "frontend",
+      "critical_path": "create",
+      "suspected_cost": "Preparation/readiness/submission",
+      "measurement_method": "Native readiness separately from generation; typed controlled guards",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 7,
+        "memoization": 0,
+        "derivations": 3,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 3
+      }
+    },
+    {
+      "path": "src/features/runs/RunsController.ts",
+      "symbol": "refresh",
+      "area": "IPC",
+      "critical_path": "runs",
+      "suspected_cost": "List then detail/results; polling",
+      "measurement_method": "Native action counts/elapsed; controlled dependency tests",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 1,
+        "memoization": 1,
+        "derivations": 0,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 3
+      }
+    },
+    {
+      "path": "src/features/runs/RunsPage.tsx",
+      "symbol": "RunsPage",
+      "area": "frontend",
+      "critical_path": "runs-large",
+      "suspected_cost": "List rendering/date formatting",
+      "measurement_method": "Representative 50 recent-task dataset and commits",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 2,
+        "serialization": 1,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src/features/library/LibraryController.ts",
+      "symbol": "refresh",
+      "area": "IPC",
+      "critical_path": "library",
+      "suspected_cost": "Page reload/detail fan-out",
+      "measurement_method": "Native initial/selection/edit IPC counts and transitions",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 1,
+        "memoization": 1,
+        "derivations": 0,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 3
+      }
+    },
+    {
+      "path": "src/features/library/LibraryPage.tsx",
+      "symbol": "LibraryPage",
+      "area": "frontend",
+      "critical_path": "library-large",
+      "suspected_cost": "Card render/filter/selection",
+      "measurement_method": "Representative isolated dataset/commits",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 2,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src/features/workflows/useWorkflowLabController.ts",
+      "symbol": "useWorkflowLabController",
+      "area": "IPC",
+      "critical_path": "workflow-lab",
+      "suspected_cost": "Metadata/binding/workspace loads",
+      "measurement_method": "Native command timings; file/OCC paths separately",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURED_ASSOCIATED_HOTSPOT_TRACE_BENCHMARK_OWNER",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 4,
+        "memoization": 9,
+        "derivations": 11,
+        "serialization": 1,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src-tauri/src/application/product/run_facade/workspace.rs",
+      "symbol": "ProductRunFacade::list",
+      "area": "query",
+      "critical_path": "runs-large",
+      "suspected_cost": "Per-run projection and task lookups",
+      "measurement_method": "Real SQL/repository counters, not source-call counts",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 0,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src-tauri/src/application/product/run_facade.rs",
+      "symbol": "ProductRunFacade::get",
+      "area": "query",
+      "critical_path": "runs",
+      "suspected_cost": "Resume plan/result enrichment",
+      "measurement_method": "Real SQLite query count and elapsed time",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 5,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src-tauri/src/application/product/library_facade/list.rs",
+      "symbol": "LibraryServices::list",
+      "area": "query",
+      "critical_path": "library",
+      "suspected_cost": "Read-model composition",
+      "measurement_method": "Real category query counts and elapsed time",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 10,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src-tauri/src/application/product/project_facade.rs",
+      "symbol": "ProductProjectFacade",
+      "area": "query",
+      "critical_path": "project-open/project-switch",
+      "suspected_cost": "Overview composition",
+      "measurement_method": "Native IPC and real repository queries",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 3,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src-tauri/src/infrastructure/database/repositories/workflow_registry.rs",
+      "symbol": "SqliteWorkflowRegistryRepository",
+      "area": "query",
+      "critical_path": "workflow-lab",
+      "suspected_cost": "Version/registry lookup",
+      "measurement_method": "Real migrated SQLite with representative registry",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 4,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src-tauri/src/application/workflow_registry_service.rs",
+      "symbol": "WorkflowRegistryService",
+      "area": "filesystem",
+      "critical_path": "workflow-lab",
+      "suspected_cost": "Workspace assembly and artifact reads",
+      "measurement_method": "Existing diagnostic spans plus controlled file counters",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 44,
+        "serialization": 4,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src-tauri/src/application/production_queue_service.rs",
+      "symbol": "ProductionQueueService",
+      "area": "runtime",
+      "critical_path": "runs/create",
+      "suspected_cost": "Queue read/probe/poll lifecycle",
+      "measurement_method": "Measure probes; preserve execution authority",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 51,
+        "serialization": 3,
+        "storage": 0,
+        "polling": 1
+      }
+    },
+    {
+      "path": "src-tauri/src/application/comfy_preflight_service.rs",
+      "symbol": "ComfyPreflightService",
+      "area": "runtime",
+      "critical_path": "create",
+      "suspected_cost": "External schema/runtime probe",
+      "measurement_method": "Separate local admission from external runtime delay",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 2,
+        "serialization": 0,
+        "storage": 0,
+        "polling": 0
+      }
+    },
+    {
+      "path": "src-tauri/src/infrastructure/comfy/client.rs",
+      "symbol": "ComfyUIClient",
+      "area": "runtime",
+      "critical_path": "create",
+      "suspected_cost": "HTTP/poll/serialization",
+      "measurement_method": "No real generation required for local performance baseline",
+      "classification": "STATIC_CANDIDATE",
+      "baseline": "NOT_MEASURED",
+      "decision": "MEASURE_BEFORE_OPTIMIZATION",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Preserve authority, scope, freshness, errors and ordering",
+      "tests": "Existing Phase11 behavior map; add count guard only after measured hotspot",
+      "staticSignals": {
+        "effects": 0,
+        "memoization": 0,
+        "derivations": 22,
+        "serialization": 16,
+        "storage": 0,
+        "polling": 10
+      }
+    },
+    {
+      "path": "src/features/experiments/WorkflowBenchmarkPanel.tsx",
+      "symbol": "WorkflowBenchmarkPanel preset load effect",
+      "area": "IPC",
+      "critical_path": "workflow-lab",
+      "suspected_cost": "Repeated identical preset reads",
+      "measurement_method": "Actual Native production-bundle requests: one warmup/five actions",
+      "classification": "MEASURED_HOTSPOT",
+      "baseline": {
+        "realIpc": 10,
+        "presetReads": 4,
+        "repeatedSemanticCalls": 2,
+        "samples": 5
+      },
+      "decision": "OPTIMIZE_EXACT_CANDIDATE_IDENTITY_DEPENDENCY",
+      "optimization": null,
+      "after": "NOT_MEASURED",
+      "risk": "Keep project and exact recipe scope, remount freshness, cancellation and independent attempts",
+      "tests": "Add count, project-switch, recipe-change guard"
+    }
+  ],
+  "blockedUnknown": [],
+  "measurements": {
+    "nativeNavigation": {
+      "phase": 12,
+      "type": "NATIVE_BASELINE",
+      "buildMode": "DEBUG",
+      "frontendMode": "PRODUCTION_BUNDLE",
+      "dataKind": "owned isolated Phase11 fixture copy",
+      "sourceHead": "0bb137303bbcf4baa98a109e7558d5899ef236fc",
+      "timingBoundary": "actual user action -> visible completion + actual IPC completion + animation frame",
+      "osColdCacheControlled": false,
+      "queryCount": "NOT_MEASURED",
+      "renderCount": "NOT_MEASURED",
+      "startup": "NOT_MEASURED; no navigation/reload substituted for process launch",
+      "resume": "NOT_MEASURED; requires separate actual process relaunch measurement",
+      "scenarios": {
+        "project-overview": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.1279999999997,
+          "median": 19.277399999999943,
+          "max": 19.33849999999984,
+          "raw": [
+            {
+              "elapsedMs": 19.221799999999803,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 10.861199999999826,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.33849999999984,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 11.701499999999669,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.1279999999997,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 11.108000000000175,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.277399999999943,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 10.893599999999878,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.2815999999998,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 10.42410000000018,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "project-switch": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 11.543000000000575,
+          "median": 11.579399999999623,
+          "max": 19.38760000000002,
+          "raw": [
+            {
+              "elapsedMs": 11.579399999999623,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 6.2620999999999185,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.4697000000005573,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.284599999999955,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.5585999999993874,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.551800000000185,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 5.503000000000611,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.6333000000004176,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.31670000000031,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.6103000000002794,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.639200000000528,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 5.578500000000531,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.5617000000002008,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 1.8674999999993815,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.5207000000000335,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.38760000000002,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 6.22440000000006,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.75879999999961,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.564900000000307,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 2.3789000000006126,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.543000000000575,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 6.120099999999184,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.8195999999998094,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.5601000000006024,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.8342000000002372,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "create-ready": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.096599999999853,
+          "median": 19.199999999999818,
+          "max": 19.261500000000524,
+          "raw": [
+            {
+              "elapsedMs": 19.199999999999818,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.42410000000018,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 13.022799999999734,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.242600000000493,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.604899999999361,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 13.223799999999756,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.261500000000524,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 14.030099999999948,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 13.512099999999919,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.17579999999998,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.603499999999258,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 13.061599999999999,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.096599999999853,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.5020999999997,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 12.663899999999558,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "runs-load": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.170000000000073,
+          "median": 19.265300000000025,
+          "max": 26.92540000000008,
+          "raw": [
+            {
+              "elapsedMs": 26.92540000000008,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 15.624300000000403,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.170000000000073,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.796400000000176,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.265300000000025,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.669299999999566,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.463999999999942,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.415500000000065,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.239800000000287,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.514799999999923,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "runs-refresh": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.13459999999941,
+          "median": 19.193099999999504,
+          "max": 19.273600000000442,
+          "raw": [
+            {
+              "elapsedMs": 19.273600000000442,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.216100000000552,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.251500000000306,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 13.21639999999934,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.13459999999941,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 12.866300000000592,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.170600000000377,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 13.986499999999978,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.193099999999504,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.808500000000095,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "library-load": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 11.555699999999888,
+          "median": 11.634299999999712,
+          "max": 11.66990000000078,
+          "raw": [
+            {
+              "elapsedMs": 11.555699999999888,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 4.030699999999342,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.66990000000078,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 4.443000000000211,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.654300000000148,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 4.685800000000199,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.634299999999712,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 3.713400000000547,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.583700000000135,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 4.159299999999348,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "library-prompts": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 11.558200000000397,
+          "median": 11.6246000000001,
+          "max": 13.425700000000688,
+          "raw": [
+            {
+              "elapsedMs": 11.558200000000397,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.7385000000003856,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.6246000000001,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.7429000000001906,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.609000000000378,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.7665999999999258,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 13.392000000000735,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.6995999999999185,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 13.425700000000688,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.7328999999999724,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "workflow-lab": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.247200000001612,
+          "median": 23.069900000000416,
+          "max": 24.954200000000128,
+          "raw": [
+            {
+              "elapsedMs": 23.069900000000416,
+              "ipc": {
+                "realIpc": 10,
+                "uniqueCommands": 7,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 4,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 2,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 674,
+                "responseBytes": 35317,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 4.229800000000978,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.022899999999936,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.1252000000004045,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 4.452300000000832,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 6.972000000001572,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 4.389900000000125,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 6.471700000000055,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 3.7516000000014174,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.054500000000189,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.058199999999488,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.818999999999505,
+              "ipc": {
+                "realIpc": 10,
+                "uniqueCommands": 7,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 4,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 2,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 674,
+                "responseBytes": 35317,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 4.085700000001452,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.0649000000012165,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.076699999999619,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 4.193599999998696,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 6.17660000000069,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 3.805099999999584,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 5.8127000000004045,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 3.6291000000001077,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.5877000000000407,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.572099999999409,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.247200000001612,
+              "ipc": {
+                "realIpc": 10,
+                "uniqueCommands": 7,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 4,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 2,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 674,
+                "responseBytes": 35317,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 4.1974000000009255,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.159300000001167,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.129299999998693,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 4.153000000000247,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 7.821799999999712,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 4.200800000000527,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 5.940599999999904,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 3.962599999998929,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.9400000000005093,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.912900000001173,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 24.954200000000128,
+              "ipc": {
+                "realIpc": 10,
+                "uniqueCommands": 7,
+                "preflights": 8,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 4,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 2,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 674,
+                "responseBytes": 35317,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 3.9547999999995227,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.1075999999993655,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.000699999998687,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 4.804599999999482,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 9.024999999999636,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 4.755800000000818,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 8.524500000001353,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 4.101800000000367,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.5877000000000407,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.977899999999863,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 23.1841000000004,
+              "ipc": {
+                "realIpc": 10,
+                "uniqueCommands": 7,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 4,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 2,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 674,
+                "responseBytes": 35317,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 4.204999999999927,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.231899999998859,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.153800000000047,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 4.1414999999997235,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 10.74619999999959,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 4.007499999999709,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 6.292100000000573,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 3.5568999999995867,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.787399999999252,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.773800000000847,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "limitations": [
+        "Encoded transport bytes are not decoded DTO size",
+        "Repeated semantic calls require intent/retry review",
+        "No global heap-leak absence claim"
+      ]
+    },
+    "developmentReview": {
+      "frontendMode": "DEVELOPMENT_STRICT_EFFECTS",
+      "interpretation": "Mount-time doubled reads are intentional StrictMode development probes, not production duplicate proof; do not compare timings to production bundle"
+    }
+  },
+  "optimizations": [],
+  "limitations": [
+    "Static counts are NOT measured query/render counts",
+    "OS cold cache cannot be controlled safely",
+    "CDP wire bytes are not decoded DTO bytes",
+    "No heap-leak absence claim without lifetime evidence",
+    "Navigation baseline covers five required critical path domains plus subpaths, NOT all eight; startup, actual resume, true project-open, Create submission, SQL/render counters and large dataset remain pending"
+  ],
+  "freeze": {
+    "databaseVersion": 42,
+    "backupVersion": 20,
+    "schemaChange": false,
+    "ipcBreakingChange": false,
+    "routeChange": false,
+    "nextPhaseStarted": false
+  }
+}
