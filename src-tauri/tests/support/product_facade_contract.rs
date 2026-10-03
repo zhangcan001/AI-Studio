@@ -41,7 +41,7 @@ fn bindings(pool: &SqlitePool) -> Arc<ProjectWorkflowBindingService> {
     ))
 }
 
-fn run_facade(
+pub(super) fn run_facade(
     pool: &SqlitePool,
     queue: Arc<ProductionQueueService>,
 ) -> (ProductRunFacade, Arc<ProductionOrchestratorService>) {

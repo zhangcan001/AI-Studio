@@ -125,6 +125,7 @@ impl ProductRunFacade {
                 items.push(projected);
             }
         }
+        let mut parent_reads = TaskParentReads::default();
         for task in self
             .tasks
             .list_recent(project_id, 50)
@@ -135,12 +136,13 @@ impl ProductRunFacade {
                 continue;
             }
             items.push(
-                self.get(
+                self.get_with_parent_reads(
                     project_id,
                     RunRef {
                         source: RunSource::Task,
                         id: task.id,
                     },
+                    Some(&mut parent_reads),
                 )
                 .await?,
             );

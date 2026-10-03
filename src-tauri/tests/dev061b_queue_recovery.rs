@@ -548,6 +548,26 @@ struct Services {
     asset_reads: Arc<Mutex<Vec<PathBuf>>>,
 }
 
+// Acceptance-only read composition; reuses the real authorities and offline adapter.
+#[allow(dead_code)]
+pub fn phase12_read_facade(
+    pool: &SqlitePool,
+    root: &Path,
+) -> (
+    ai_studio_lib::application::product::run_facade::ProductRunFacade,
+    Arc<ProductionQueueService>,
+) {
+    let services = build_services(
+        pool,
+        Arc::new(ControlledComfy::new(ComfyBehavior::Offline)),
+        root,
+    );
+    (
+        product_facade_contract::run_facade(pool, services.queue.clone()).0,
+        services.queue,
+    )
+}
+
 fn build_services(pool: &SqlitePool, comfy: Arc<ControlledComfy>, package_root: &Path) -> Services {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let project_repository: Arc<dyn ProjectRepository> =
@@ -1243,3 +1263,6 @@ fn sha256(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     format!("{:x}", Sha256::digest(bytes))
 }
+
+#[path = "support/phase12_query_regression.rs"]
+mod phase12_query_regression;

@@ -159,3 +159,33 @@ and case10 remain reserved for the selected backend and frontend optimizations.
 Architecture guard and JavaScript syntax checks passed. Full local final gates,
 final Native correctness and final-head CI remain pending; checkpoint CI success
 does not close Phase12 or authorize Phase13.
+
+## Final-closeout checkpoint: measured parent-read amplification
+
+The newest instruction formally selects Library edit as optimization3; the earlier
+"not selected" statement above is historical. SQL profiling now uses actual SQLx
+query-completion events in a standalone acceptance process, with one warmup/five
+samples. Only dedicated named SQLite workers are counted. Calibration requires
+exactly one real SELECT. Markers surround the application operation only, excluding
+setup, lookup IDs, migration and polling. Outputs retain statement digests, category
+and duration, never SQL text, values or prompt bodies. No production telemetry.
+
+Optimization2 reuses ordered parent reads only within one Runs list request. Lazy
+reads retain archived-parent discovery, first-match ordering and the earlier-match
+error boundary. Public detail/actions still make live authoritative reads. No schema,
+index, queue/state-machine, DTO or output projection change.
+
+5-task/55-task total SQL: **81/741 -> 72/300**. Queue-category work after is **34/34**
+versus **43/475** before. All five projection digests match for every measured read
+scenario. Large list median **109.395ms -> 47.577ms** under this instrumented local
+fixture, not a general production latency promise. Detail37 and results42 SQL remain
+unchanged. Residual per-task asset fan-out remains: this is not an all-N+1-cleared claim.
+Library prompt list/get/relations/versions SQL is 1/2/6/2; one resourceEdit is8 on
+an explicitly writable owned copy. The previously reported get3 included a fixture
+ID lookup inside the marker and has been corrected, not used as command evidence.
+
+Case9 passed one exact Rust test, proving queue work is constant across5/55tasks,
+list matches live detail projections, archived parents survive and cross-project
+reads fail. The first unqualified exact filter matched zero tests and is not a PASS.
+Local core cases are now9/10; case10 remains reserved. Final Native/static/finalCI
+and optimization3 before/after/freshness are still pending. Phase12 remains PARTIAL.

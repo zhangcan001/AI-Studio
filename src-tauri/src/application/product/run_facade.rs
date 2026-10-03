@@ -6,7 +6,17 @@ use crate::application::{
 };
 use crate::domain::{ProductionBatchItemStatus, ProductionBatchStatus};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
+/// One list call owns these reads. Live detail/action requests never reuse them.
+#[derive(Default)]
+struct TaskParentReads {
+    batch_ids: Option<Vec<String>>,
+    items: HashMap<String, Vec<(String, String)>>,
+}
 
 mod workspace;
 pub use workspace::{RunList, RunListFilter};
@@ -179,6 +189,62 @@ impl ProductRunFacade {
     }
 
     pub async fn get(&self, project_id: &str, run_ref: RunRef) -> Result<ProductRun, ProductError> {
+        self.get_with_parent_reads(project_id, run_ref, None).await
+    }
+
+    async fn task_parent_with_reads(
+        &self,
+        project_id: &str,
+        task_id: &str,
+        reads: &mut TaskParentReads,
+    ) -> Result<Option<(String, String)>, ProductError> {
+        if reads.batch_ids.is_none() {
+            reads.batch_ids = Some(
+                self.queue
+                    .list(project_id)
+                    .await
+                    .map_err(queue_error)?
+                    .into_iter()
+                    .map(|batch| batch.id.as_str().to_owned())
+                    .collect(),
+            );
+        }
+        // Preserve queue order, archived parents and first matching item. Load lazily:
+        // a later unread batch must not introduce an error after an earlier match.
+        for batch_id in reads.batch_ids.as_ref().unwrap() {
+            if !reads.items.contains_key(batch_id) {
+                let detail = self
+                    .queue
+                    .get(project_id, batch_id)
+                    .await
+                    .map_err(queue_error)?;
+                reads.items.insert(
+                    batch_id.clone(),
+                    detail
+                        .items
+                        .into_iter()
+                        .filter_map(|item| {
+                            item.task_id.map(|task| (task, item.id.as_str().to_owned()))
+                        })
+                        .collect(),
+                );
+            }
+            if let Some((_, item_id)) = reads.items[batch_id]
+                .iter()
+                .find(|(task, _)| task == task_id)
+            {
+                return Ok(Some((batch_id.clone(), item_id.clone())));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn get_with_parent_reads(
+        &self,
+        project_id: &str,
+        run_ref: RunRef,
+        parent_reads: Option<&mut TaskParentReads>,
+    ) -> Result<ProductRun, ProductError> {
         crate::domain::validate_project_id(project_id)
             .map_err(|_| ProductError::new("INVALID_INPUT", "项目标识无效。", None))?;
         let mut progress = RunProgress::default();
@@ -318,8 +384,14 @@ impl ProductRunFacade {
                 progress.succeeded = usize::from(task.status == "SUCCEEDED");
                 progress.failed = usize::from(task.status == "FAILED");
                 progress.cancelled = usize::from(task.status == "CANCELLED");
-                if let Some((batch_id, item_id)) = self.task_parent(project_id, &run_ref.id).await?
-                {
+                let parent = match parent_reads {
+                    Some(reads) => {
+                        self.task_parent_with_reads(project_id, &run_ref.id, reads)
+                            .await?
+                    }
+                    None => self.task_parent(project_id, &run_ref.id).await?,
+                };
+                if let Some((batch_id, item_id)) = parent {
                     preferred_parent = Some(RunRef {
                         source: RunSource::QueueBatch,
                         id: batch_id.clone(),
