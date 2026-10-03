@@ -798,7 +798,15 @@
     "existing_case": "BackendBoundary target2",
     "existing_case_reruns_only": true,
     "full_local_suite": "NOT_RUN",
-    "final_result": "10 distinct cases PASS; initial target2 assertion repaired, dependency-wiring cases rerun after typed-port adjustment."
+    "final_result": "10 distinct cases PASS; initial target2 assertion repaired, dependency-wiring cases rerun after typed-port adjustment.",
+    "ci_contract_repairs": {
+      "classification": "TEST_FAILURE_OWNERSHIP_ASSERTIONS",
+      "previous_run": 37100656122,
+      "previous_frontend_result": "990 passed, 3 failed: normal Create/Runs/Library source assertions still inspected App.tsx",
+      "fix": "Retain all normal/Advanced assertions, inspect normal JSX at NormalProductPages, additionally prove App mounts that owner with the existing route/dirty callbacks.",
+      "local_extra_cases": "NOT_RUN: ten distinct local core cases already used; authoritative full CI will validate these existing contract cases.",
+      "production_changed": false
+    }
   },
   "static": {
     "tsc": "PASS",

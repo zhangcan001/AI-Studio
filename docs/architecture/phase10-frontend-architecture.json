@@ -5140,9 +5140,11 @@
       "decision": "KEEP",
       "replacement": null,
       "risk": "Existing regression evidence.",
-      "tests": [],
+      "tests": [
+        "Exact-head remote CI required; local10-case limit exhausted"
+      ],
       "test": true,
-      "lines": 157,
+      "lines": 160,
       "components": 1,
       "hooks": 0,
       "imports": [
@@ -6067,9 +6069,11 @@
       "decision": "KEEP",
       "replacement": null,
       "risk": "Existing regression evidence.",
-      "tests": [],
+      "tests": [
+        "Exact-head remote CI required; local10-case limit exhausted"
+      ],
       "test": true,
-      "lines": 74,
+      "lines": 77,
       "components": 0,
       "hooks": 0,
       "imports": [
@@ -9265,9 +9269,11 @@
       "decision": "KEEP",
       "replacement": null,
       "risk": "Existing regression evidence.",
-      "tests": [],
+      "tests": [
+        "Exact-head remote CI required; local10-case limit exhausted"
+      ],
       "test": true,
-      "lines": 112,
+      "lines": 115,
       "components": 1,
       "hooks": 0,
       "imports": [

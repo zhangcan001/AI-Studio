@@ -108,5 +108,8 @@ it("phase4_target_16 ordinary Runs entry converges with explicit legacy bridges 
   expect(normalRuns({ kind: "runs", projectId: "p", run: ref })).toBe(true);
   for (const filter of ["tasks", "production", "review"]) expect(normalRuns({ kind: "runs", projectId: "p", filter })).toBe(true);
   expect(normalRuns({ kind: "runs", projectId: "p" })).toBe(true);
-  const app = readFileSync("src/app/App.tsx", "utf8"); expect(app).toContain("<RunsPage"); expect(app).toContain('route.section === "advanced-tasks"'); expect(app).toContain('["advanced-shots", "advanced-production", "advanced-review"].includes(route.section)'); expect(app).toContain("<TaskHistory"); expect(app).toContain("<ShotWorkspace");
+  const app = readFileSync("src/app/App.tsx", "utf8"); // Phase10: retain the normal-route proof at its actual composition owner.
+    const pages = readFileSync("src/app/NormalProductPages.tsx", "utf8");
+    expect(app).toContain("<NormalProductPages project={activeProject} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />");
+    expect(pages).toContain("<RunsPage"); expect(app).toContain('route.section === "advanced-tasks"'); expect(app).toContain('["advanced-shots", "advanced-production", "advanced-review"].includes(route.section)'); expect(app).toContain("<TaskHistory"); expect(app).toContain("<ShotWorkspace");
 });

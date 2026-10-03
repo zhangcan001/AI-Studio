@@ -131,7 +131,10 @@ describe("Target16 architecture", () => {
     expect(normalCreate({ kind: "create", projectId: "p", stage: "image" })).toBe(true);
     expect(normalCreate({ kind: "create", projectId: "p", stage: "video", surface: "batch" })).toBe(false);
     expect(normalCreate({ kind: "create", projectId: "p", stage: "video" })).toBe(true);
-    const app = readFileSync("src/app/App.tsx", "utf8"); expect(app).toContain('normalCreate(route) && route.kind === "create"');
+    const app = readFileSync("src/app/App.tsx", "utf8"); // Phase10: retain the normal-route proof at its actual composition owner.
+    const pages = readFileSync("src/app/NormalProductPages.tsx", "utf8");
+    expect(app).toContain("<NormalProductPages project={activeProject} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />");
+    expect(pages).toContain('normalCreate(route) && route.kind === "create"');
     for (const path of readdirSync("src/features/create").filter((path: string) => /\.(tsx?|css)$/.test(path) && !path.includes("test"))) {
       const source = readFileSync(`src/features/create/${path}`, "utf8"); expect(source).not.toMatch(/tauriClient|@tauri-apps|services\/ipc|create\s*\(.*=>/); expect(source).not.toMatch(/<ShotWorkspace|<GenerationStudio|<DirectGenerationEntry/);
     }

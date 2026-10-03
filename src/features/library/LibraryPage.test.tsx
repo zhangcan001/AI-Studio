@@ -67,7 +67,10 @@ it("phase5_target15 Product boundary command parity and no competing Library aut
 it("phase5_target16 one normal entry real page legacy rollback and responsive structure",async()=>{
  expect(normalLibrary(route)).toBe(true);expect(normalLibrary({...route,filter:"advanced-assets"})).toBe(false);expect(normalLibrary(route)).toBe(true);
  expect(toLegacyLocation({...route,filter:"advanced-assets"}).workspace).toBe("assets");expect(toLegacyLocation({...route,filter:"advanced-prompts"}).workspace).toBe("prompts");
- const app=readFileSync("src/app/App.tsx","utf8");expect(app).toContain('<LibraryPage key={activeProject.id}');expect(app).toContain('route.filter === "advanced-assets"');expect(app).toContain('route.filter === "advanced-prompts"');
+ const app=readFileSync("src/app/App.tsx","utf8");// Phase10: retain the normal-route proof at its actual composition owner.
+    const pages = readFileSync("src/app/NormalProductPages.tsx", "utf8");
+    expect(app).toContain("<NormalProductPages project={activeProject} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />");
+    expect(pages).toContain('<LibraryPage key={activeProject.id}');expect(app).toContain('route.filter === "advanced-assets"');expect(app).toContain('route.filter === "advanced-prompts"');
  for(const path of ["src/features/assets/AssetWorkspace.tsx","src/features/prompts/PromptStudio.tsx","src/features/assets/ConsistencyProfileLibrary.tsx","src/features/assets/ReferenceSetEditor.tsx"])expect(readFileSync(path,"utf8").length).toBeGreaterThan(0);
  render(<LibraryPage route={{kind:"library",projectId:"project-a"}} navigate={vi.fn()}/>);await screen.findByRole("button",{name:/测试提示词/});expect(screen.getByRole("navigation",{name:"资源分类"})).toBeTruthy();expect(screen.getByRole("button",{name:"近期资源"})).toBeTruthy();expect(screen.queryByText("全部资源")).toBeNull();
  expect(readFileSync("src/features/library/LibraryPage.css","utf8")).toContain(".v3-shell:has(.library-page)");
