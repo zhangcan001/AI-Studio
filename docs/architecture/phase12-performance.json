@@ -1,6 +1,6 @@
 {
   "phase": 12,
-  "status": "THREE_MEASURED_OPTIMIZATIONS_VERIFIED_FINAL_GATES_PENDING",
+  "status": "LOCAL_CLOSEOUT_GATES_PASS_EXACT_HEAD_CI_PENDING",
   "baselineHead": "0bb137303bbcf4baa98a109e7558d5899ef236fc",
   "baselineCi": 37107002128,
   "criticalPaths": [
@@ -18452,7 +18452,23 @@
       "live action validation",
       "asset fallback and ordering",
       "public DTOs"
-    ]
+    ],
+    "sourceFreeze": {
+      "beforeAggregateHash": "70a28807fb358ef046e0f11b16ebebc94e61d011122eab41a837c992027e96b9",
+      "afterAggregateHash": "22bf6637d39d861004a2853bd6d11f97a5158dc02ccbd88e25a72fb72823b222",
+      "untouchedAggregateHash": "6cf526258b9d41088f736eb95cae48dbe4388b7ffeba5853c98312ac685987f3",
+      "files": 343,
+      "paths": {
+        "src-tauri/src/application/product/run_facade.rs": {
+          "beforeHash": "7d56b1ec62bf9bf6d24a68afb4d9222415893464dadf1dd539034ddb6389e5cf",
+          "afterHash": "a3a8b6c629a40ed6585cef44324cec353948aff8fc3dde5bf2d52b8f40f5ccc7"
+        },
+        "src-tauri/src/application/product/run_facade/workspace.rs": {
+          "beforeHash": "cf85581585c9eaf61616669fc3e52e3673a12c30c3dc8963ea3acbd5ce0788a4",
+          "afterHash": "df70a71aac9e07cc3e0684b97ddd041c2ae9a10b10bd67287912ba13552286a8"
+        }
+      }
+    }
   },
   "closeoutCoreCasesUsed": 10,
   "finalCloseoutDeepNative": {
@@ -31081,8 +31097,3614 @@
     "frontendBuild": "PASS",
     "rustAllTargetsCheck": "PASS",
     "coreCasesUsed": 10,
-    "finalNative": "PENDING",
+    "finalNative": "PASS",
     "finalHeadCi": "PENDING",
-    "nextPhaseStarted": false
+    "nextPhaseStarted": false,
+    "resourceLifetime": "PASS_NATIVE_20_CYCLES_PLUS_CASE10_PRIVATE_SUBSCRIPTIONS",
+    "startupGate": "PASS_TIMING",
+    "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+    "startupIpcCountClaim": "NONE",
+    "workflowDeepPath": "PASS_READ_AND_OCC",
+    "createSubmit": "PASS_SAFE_NO_GPU",
+    "maxMigrationVersion": 42,
+    "tableCount": 71,
+    "migration043": false,
+    "backupFormatVersion": 20
+  },
+  "finalCloseoutNativeActions": {
+    "workflowRead": {
+      "warmupCount": 1,
+      "samples": 5,
+      "min": 23.115800000000007,
+      "median": 23.150499999999994,
+      "max": 26.897800000000004,
+      "raw": [
+        {
+          "elapsedMs": 26.897800000000004,
+          "ipc": {
+            "realIpc": 1,
+            "uniqueCommands": 1,
+            "preflights": 0,
+            "probes": 0,
+            "pending": 0,
+            "byCommand": {
+              "workflow_get_saved_version_details": 1
+            },
+            "repeatedSemanticCalls": 0,
+            "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+            "payloadBytes": 64,
+            "responseBytes": 8263,
+            "calls": [
+              {
+                "command": "workflow_get_saved_version_details",
+                "elapsedMs": 1.682699999999997,
+                "payloadBytes": 64,
+                "responseBytes": 8263,
+                "failed": false
+              }
+            ]
+          },
+          "readOnly": true
+        },
+        {
+          "elapsedMs": 24.798599999999993,
+          "ipc": {
+            "realIpc": 1,
+            "uniqueCommands": 1,
+            "preflights": 0,
+            "probes": 0,
+            "pending": 0,
+            "byCommand": {
+              "workflow_get_saved_version_details": 1
+            },
+            "repeatedSemanticCalls": 0,
+            "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+            "payloadBytes": 64,
+            "responseBytes": 8263,
+            "calls": [
+              {
+                "command": "workflow_get_saved_version_details",
+                "elapsedMs": 3.0863999999999976,
+                "payloadBytes": 64,
+                "responseBytes": 8263,
+                "failed": false
+              }
+            ]
+          },
+          "readOnly": true
+        },
+        {
+          "elapsedMs": 23.131200000000007,
+          "ipc": {
+            "realIpc": 1,
+            "uniqueCommands": 1,
+            "preflights": 0,
+            "probes": 0,
+            "pending": 0,
+            "byCommand": {
+              "workflow_get_saved_version_details": 1
+            },
+            "repeatedSemanticCalls": 0,
+            "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+            "payloadBytes": 64,
+            "responseBytes": 8263,
+            "calls": [
+              {
+                "command": "workflow_get_saved_version_details",
+                "elapsedMs": 2.810399999999987,
+                "payloadBytes": 64,
+                "responseBytes": 8263,
+                "failed": false
+              }
+            ]
+          },
+          "readOnly": true
+        },
+        {
+          "elapsedMs": 23.150499999999994,
+          "ipc": {
+            "realIpc": 1,
+            "uniqueCommands": 1,
+            "preflights": 0,
+            "probes": 0,
+            "pending": 0,
+            "byCommand": {
+              "workflow_get_saved_version_details": 1
+            },
+            "repeatedSemanticCalls": 0,
+            "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+            "payloadBytes": 64,
+            "responseBytes": 8263,
+            "calls": [
+              {
+                "command": "workflow_get_saved_version_details",
+                "elapsedMs": 2.9581000000000017,
+                "payloadBytes": 64,
+                "responseBytes": 8263,
+                "failed": false
+              }
+            ]
+          },
+          "readOnly": true
+        },
+        {
+          "elapsedMs": 23.115800000000007,
+          "ipc": {
+            "realIpc": 1,
+            "uniqueCommands": 1,
+            "preflights": 0,
+            "probes": 0,
+            "pending": 0,
+            "byCommand": {
+              "workflow_get_saved_version_details": 1
+            },
+            "repeatedSemanticCalls": 0,
+            "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+            "payloadBytes": 64,
+            "responseBytes": 8263,
+            "calls": [
+              {
+                "command": "workflow_get_saved_version_details",
+                "elapsedMs": 1.557799999999986,
+                "payloadBytes": 64,
+                "responseBytes": 8263,
+                "failed": false
+              }
+            ]
+          },
+          "readOnly": true
+        }
+      ]
+    },
+    "workflowOcc": {
+      "samples": {
+        "warmupCount": 1,
+        "samples": 5,
+        "min": 45.376300000000015,
+        "median": 45.44470000000001,
+        "max": 49.204599999999985,
+        "raw": [
+          {
+            "elapsedMs": 49.204599999999985,
+            "ipc": {
+              "realIpc": 4,
+              "uniqueCommands": 3,
+              "preflights": 0,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_generator_binding_set": 1,
+                "product_project_overview": 1,
+                "product_generators_list": 2
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 506,
+              "responseBytes": 9122,
+              "calls": [
+                {
+                  "command": "product_generator_binding_set",
+                  "elapsedMs": 9.857100000000003,
+                  "payloadBytes": 365,
+                  "responseBytes": 765,
+                  "failed": false
+                },
+                {
+                  "command": "product_project_overview",
+                  "elapsedMs": 12.188699999999983,
+                  "payloadBytes": 27,
+                  "responseBytes": 1654,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 13.194300000000013,
+                  "payloadBytes": 57,
+                  "responseBytes": 2200,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 13.561200000000014,
+                  "payloadBytes": 57,
+                  "responseBytes": 4503,
+                  "failed": false
+                }
+              ]
+            }
+          },
+          {
+            "elapsedMs": 45.45009999999999,
+            "ipc": {
+              "realIpc": 4,
+              "uniqueCommands": 3,
+              "preflights": 0,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_generator_binding_set": 1,
+                "product_project_overview": 1,
+                "product_generators_list": 2
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 506,
+              "responseBytes": 9122,
+              "calls": [
+                {
+                  "command": "product_generator_binding_set",
+                  "elapsedMs": 9.720399999999984,
+                  "payloadBytes": 365,
+                  "responseBytes": 765,
+                  "failed": false
+                },
+                {
+                  "command": "product_project_overview",
+                  "elapsedMs": 11.80279999999999,
+                  "payloadBytes": 27,
+                  "responseBytes": 1654,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 12.238499999999988,
+                  "payloadBytes": 57,
+                  "responseBytes": 2200,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 13.430600000000027,
+                  "payloadBytes": 57,
+                  "responseBytes": 4503,
+                  "failed": false
+                }
+              ]
+            }
+          },
+          {
+            "elapsedMs": 45.44470000000001,
+            "ipc": {
+              "realIpc": 4,
+              "uniqueCommands": 3,
+              "preflights": 0,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_generator_binding_set": 1,
+                "product_project_overview": 1,
+                "product_generators_list": 2
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 506,
+              "responseBytes": 9122,
+              "calls": [
+                {
+                  "command": "product_generator_binding_set",
+                  "elapsedMs": 9.367099999999994,
+                  "payloadBytes": 365,
+                  "responseBytes": 765,
+                  "failed": false
+                },
+                {
+                  "command": "product_project_overview",
+                  "elapsedMs": 13.128299999999996,
+                  "payloadBytes": 27,
+                  "responseBytes": 1654,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 13.231599999999986,
+                  "payloadBytes": 57,
+                  "responseBytes": 2200,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 14.698300000000017,
+                  "payloadBytes": 57,
+                  "responseBytes": 4503,
+                  "failed": false
+                }
+              ]
+            }
+          },
+          {
+            "elapsedMs": 45.376300000000015,
+            "ipc": {
+              "realIpc": 4,
+              "uniqueCommands": 3,
+              "preflights": 0,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_generator_binding_set": 1,
+                "product_project_overview": 1,
+                "product_generators_list": 2
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 506,
+              "responseBytes": 9122,
+              "calls": [
+                {
+                  "command": "product_generator_binding_set",
+                  "elapsedMs": 9.204199999999986,
+                  "payloadBytes": 365,
+                  "responseBytes": 765,
+                  "failed": false
+                },
+                {
+                  "command": "product_project_overview",
+                  "elapsedMs": 12.584900000000005,
+                  "payloadBytes": 27,
+                  "responseBytes": 1654,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 13.692799999999977,
+                  "payloadBytes": 57,
+                  "responseBytes": 2200,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 14.281000000000006,
+                  "payloadBytes": 57,
+                  "responseBytes": 4503,
+                  "failed": false
+                }
+              ]
+            }
+          },
+          {
+            "elapsedMs": 45.430499999999995,
+            "ipc": {
+              "realIpc": 4,
+              "uniqueCommands": 3,
+              "preflights": 0,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_generator_binding_set": 1,
+                "product_project_overview": 1,
+                "product_generators_list": 2
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 506,
+              "responseBytes": 9122,
+              "calls": [
+                {
+                  "command": "product_generator_binding_set",
+                  "elapsedMs": 8.892700000000048,
+                  "payloadBytes": 365,
+                  "responseBytes": 765,
+                  "failed": false
+                },
+                {
+                  "command": "product_project_overview",
+                  "elapsedMs": 12.0702,
+                  "payloadBytes": 27,
+                  "responseBytes": 1654,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 12.312099999999987,
+                  "payloadBytes": 57,
+                  "responseBytes": 2200,
+                  "failed": false
+                },
+                {
+                  "command": "product_generators_list",
+                  "elapsedMs": 13.55600000000004,
+                  "payloadBytes": 57,
+                  "responseBytes": 4503,
+                  "failed": false
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "conflictRejected": true,
+      "conflictMessage": "生成器设置已被更新，请查看最新设置后再保存。",
+      "fixtureIndependentWriter": true
+    },
+    "safeSubmit": {
+      "scenario": "SAFE_FRESH_SUBMIT_THEN_FAILED_EXECUTION_NO_GPU",
+      "result": {
+        "warmupCount": 1,
+        "samples": 5,
+        "min": 1706.1270999999988,
+        "median": 1711.5106000000014,
+        "max": 1719.1209,
+        "raw": [
+          {
+            "elapsedMs": 1719.1209,
+            "ipc": {
+              "realIpc": 6,
+              "uniqueCommands": 5,
+              "preflights": 2,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_creation_readiness_get": 1,
+                "production_queue_admission_status": 1,
+                "product_creation_generate": 1,
+                "product_run_get": 2,
+                "product_creation_get": 1
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 1084,
+              "responseBytes": 633299,
+              "calls": [
+                {
+                  "command": "product_creation_readiness_get",
+                  "elapsedMs": 314.9224999999997,
+                  "payloadBytes": 390,
+                  "responseBytes": 196,
+                  "failed": false
+                },
+                {
+                  "command": "production_queue_admission_status",
+                  "elapsedMs": 3.073699999999917,
+                  "payloadBytes": 2,
+                  "responseBytes": 223,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_generate",
+                  "elapsedMs": 1367.3851999999997,
+                  "payloadBytes": 390,
+                  "responseBytes": 278,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 10.585699999999633,
+                  "payloadBytes": 102,
+                  "responseBytes": 1321,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_get",
+                  "elapsedMs": 51.55329999999958,
+                  "payloadBytes": 95,
+                  "responseBytes": 630179,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 7.388699999999517,
+                  "payloadBytes": 105,
+                  "responseBytes": 1102,
+                  "failed": false
+                }
+              ]
+            },
+            "acceptedNotSucceeded": true
+          },
+          {
+            "elapsedMs": 1706.1270999999988,
+            "ipc": {
+              "realIpc": 6,
+              "uniqueCommands": 5,
+              "preflights": 1,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_creation_readiness_get": 1,
+                "production_queue_admission_status": 1,
+                "product_creation_generate": 1,
+                "product_run_get": 2,
+                "product_creation_get": 1
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 1084,
+              "responseBytes": 633299,
+              "calls": [
+                {
+                  "command": "product_creation_readiness_get",
+                  "elapsedMs": 306.9384999999993,
+                  "payloadBytes": 390,
+                  "responseBytes": 196,
+                  "failed": false
+                },
+                {
+                  "command": "production_queue_admission_status",
+                  "elapsedMs": 2.4408000000003085,
+                  "payloadBytes": 2,
+                  "responseBytes": 223,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_generate",
+                  "elapsedMs": 1380.982399999999,
+                  "payloadBytes": 390,
+                  "responseBytes": 278,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 10.076500000000124,
+                  "payloadBytes": 102,
+                  "responseBytes": 1321,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_get",
+                  "elapsedMs": 53.757300000000214,
+                  "payloadBytes": 95,
+                  "responseBytes": 630179,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 7.8070000000006985,
+                  "payloadBytes": 105,
+                  "responseBytes": 1102,
+                  "failed": false
+                }
+              ]
+            },
+            "acceptedNotSucceeded": true
+          },
+          {
+            "elapsedMs": 1714.8689000000013,
+            "ipc": {
+              "realIpc": 6,
+              "uniqueCommands": 5,
+              "preflights": 2,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_creation_readiness_get": 1,
+                "production_queue_admission_status": 1,
+                "product_creation_generate": 1,
+                "product_run_get": 2,
+                "product_creation_get": 1
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 1084,
+              "responseBytes": 633299,
+              "calls": [
+                {
+                  "command": "product_creation_readiness_get",
+                  "elapsedMs": 329.9243000000006,
+                  "payloadBytes": 390,
+                  "responseBytes": 196,
+                  "failed": false
+                },
+                {
+                  "command": "production_queue_admission_status",
+                  "elapsedMs": 2.8101000000006024,
+                  "payloadBytes": 2,
+                  "responseBytes": 223,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_generate",
+                  "elapsedMs": 1352.3991000000005,
+                  "payloadBytes": 390,
+                  "responseBytes": 278,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 9.793299999999363,
+                  "payloadBytes": 102,
+                  "responseBytes": 1321,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_get",
+                  "elapsedMs": 53.77900000000045,
+                  "payloadBytes": 95,
+                  "responseBytes": 630179,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 9.484400000001187,
+                  "payloadBytes": 105,
+                  "responseBytes": 1102,
+                  "failed": false
+                }
+              ]
+            },
+            "acceptedNotSucceeded": true
+          },
+          {
+            "elapsedMs": 1708.7315000000017,
+            "ipc": {
+              "realIpc": 6,
+              "uniqueCommands": 5,
+              "preflights": 1,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_creation_readiness_get": 1,
+                "production_queue_admission_status": 1,
+                "product_creation_generate": 1,
+                "product_run_get": 2,
+                "product_creation_get": 1
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 1084,
+              "responseBytes": 633308,
+              "calls": [
+                {
+                  "command": "product_creation_readiness_get",
+                  "elapsedMs": 306.67109999999957,
+                  "payloadBytes": 390,
+                  "responseBytes": 196,
+                  "failed": false
+                },
+                {
+                  "command": "production_queue_admission_status",
+                  "elapsedMs": 2.6859000000004016,
+                  "payloadBytes": 2,
+                  "responseBytes": 223,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_generate",
+                  "elapsedMs": 1369.9482000000007,
+                  "payloadBytes": 390,
+                  "responseBytes": 278,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 10.155700000001161,
+                  "payloadBytes": 102,
+                  "responseBytes": 1321,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_get",
+                  "elapsedMs": 53.167199999999866,
+                  "payloadBytes": 95,
+                  "responseBytes": 630179,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 8.16189999999915,
+                  "payloadBytes": 105,
+                  "responseBytes": 1111,
+                  "failed": false
+                }
+              ]
+            },
+            "acceptedNotSucceeded": true
+          },
+          {
+            "elapsedMs": 1711.5106000000014,
+            "ipc": {
+              "realIpc": 6,
+              "uniqueCommands": 5,
+              "preflights": 2,
+              "probes": 0,
+              "pending": 0,
+              "byCommand": {
+                "product_creation_readiness_get": 1,
+                "production_queue_admission_status": 1,
+                "product_creation_generate": 1,
+                "product_run_get": 2,
+                "product_creation_get": 1
+              },
+              "repeatedSemanticCalls": 0,
+              "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+              "payloadBytes": 1084,
+              "responseBytes": 633296,
+              "calls": [
+                {
+                  "command": "product_creation_readiness_get",
+                  "elapsedMs": 301.46839999999975,
+                  "payloadBytes": 390,
+                  "responseBytes": 196,
+                  "failed": false
+                },
+                {
+                  "command": "production_queue_admission_status",
+                  "elapsedMs": 2.9734000000007654,
+                  "payloadBytes": 2,
+                  "responseBytes": 223,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_generate",
+                  "elapsedMs": 1388.984199999999,
+                  "payloadBytes": 390,
+                  "responseBytes": 278,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 10.592599999999948,
+                  "payloadBytes": 102,
+                  "responseBytes": 1318,
+                  "failed": false
+                },
+                {
+                  "command": "product_creation_get",
+                  "elapsedMs": 52.634799999999814,
+                  "payloadBytes": 95,
+                  "responseBytes": 630179,
+                  "failed": false
+                },
+                {
+                  "command": "product_run_get",
+                  "elapsedMs": 10.295200000000477,
+                  "payloadBytes": 105,
+                  "responseBytes": 1102,
+                  "failed": false
+                }
+              ]
+            },
+            "acceptedNotSucceeded": true
+          }
+        ]
+      }
+    },
+    "safeSubmitProof": {
+      "before": {
+        "batchId": "pbt_efa39b9035e34293b2d8c8d4d57c801d",
+        "batchStatus": "PAUSED",
+        "tasks": 63,
+        "batchItems": 14,
+        "submissionKeyPresent": true,
+        "snapshotPresent": true,
+        "snapshotDigest": "87ac67a6eec5b1266fad300a3bd90d42b10d7cd5dc1da51f1c433a8209902899",
+        "frozenValuesDigest": "701d31470a05d9de471c706eb6228afc64bc0d992e3c021e34949d17297ec8fb"
+      },
+      "after": {
+        "batchId": "pbt_efa39b9035e34293b2d8c8d4d57c801d",
+        "batchStatus": "PAUSED",
+        "tasks": 63,
+        "batchItems": 14,
+        "submissionKeyPresent": true,
+        "snapshotPresent": true,
+        "snapshotDigest": "87ac67a6eec5b1266fad300a3bd90d42b10d7cd5dc1da51f1c433a8209902899",
+        "frozenValuesDigest": "701d31470a05d9de471c706eb6228afc64bc0d992e3c021e34949d17297ec8fb"
+      },
+      "idempotencyPreserved": true,
+      "snapshotPreserved": true,
+      "runtime": {
+        "get": 34,
+        "postBlocked": 0,
+        "gpuForwarded": 0
+      },
+      "endpointRestored": true,
+      "limitation": "Task fails safely before GPU submission; not an image/video quality acceptance. Earlier selector and Node DOM harness failures were discarded, not PASS samples."
+    },
+    "behaviors": {
+      "ctrlK": "PASS_FROM_REAL_INPUT_EVENT",
+      "occConflict": "PASS_REJECTED",
+      "dirtyLeave": {
+        "open": true,
+        "focused": true
+      },
+      "dirtyDiscard": "PASS",
+      "deletionInspection": {
+        "open": true,
+        "text": "无法删除暂不支持提示词安全删除；不可变版本和引用关系将保留。删除资源不可撤销；已有任务、运行和生成快照记录仍保留。返回"
+      },
+      "mainNavKeyboard": "PASS_REAL_ENTER",
+      "settings": "PASS",
+      "advancedBridge": "advanced-tools",
+      "back": {
+        "kind": "runs",
+        "projectId": "prj_default"
+      },
+      "projectSwitch": "PASS",
+      "focusUsable": true
+    },
+    "realResume": {
+      "phase": 12,
+      "type": "REAL_PROCESS_RESUME",
+      "sourceHead": "c56b4e742d1f98bb9a5fb5e45f3e1a0e933027df",
+      "sourceWorktreeDirty": false,
+      "frontendBundleIndexSha256": "c42412642d5b3ecfd795c78ac51cb366a6522178b3ff7cd048d122f15ab0e114",
+      "backendSourceHead": "8623842179602fd9337c21e463349b9c1d926c03",
+      "backendExecutableSha256": "68c28988f3169f5415b46d47878363cc47ca98230c5524c30261aa98d3b41c43",
+      "dataset": {
+        "rootKind": "owned isolated Phase11 fixture copy / ai-studio-phase12-native",
+        "inventory": {
+          "tasks": 63,
+          "assets": 108,
+          "prompt_entries": 51
+        }
+      },
+      "buildMode": "DEBUG",
+      "frontendMode": "PRODUCTION_BUNDLE",
+      "osColdCacheControlled": false,
+      "timingBoundary": "OS spawn request -> actual window handle + visible canonical route + observed IPC settled",
+      "samplePolicy": {
+        "warmup": 1,
+        "measured": 5
+      },
+      "groups": {
+        "create-shot": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 4487.816200000001,
+          "median": 4559.619899999998,
+          "max": 5076.943600000002,
+          "visible": {
+            "samples": 5,
+            "min": 3853.567299999999,
+            "median": 3906.803899999999,
+            "max": 4433.3291999999965
+          },
+          "raw": [
+            {
+              "elapsedMs": 4615.388500000001,
+              "visibleMs": 3941.745500000001,
+              "debuggerAttachedMs": 336.3024999999998,
+              "actualNativeWindow": true,
+              "canonicalRoute": "create-shot",
+              "childKind": "shot",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 51,
+              "databaseReadyMs": 362,
+              "librarySyncedMs": 375,
+              "recoveryCompleteMs": 377,
+              "startupIpc": {
+                "realIpc": 19,
+                "uniqueCommands": 18,
+                "preflights": 18,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "shot_list": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "costume_variant_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "runtime_activity_status": 1,
+                  "product_creation_get": 2,
+                  "product_generators_list": 1,
+                  "product_run_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 685,
+                "responseBytes": 1287147,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 6.307399999999689,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.58179999999993,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.650099999998929,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 25.586699999999837,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 7.042199999999866,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 7.325799999998708,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 4.970499999999447,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 4.489299999999275,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "shot_list",
+                    "elapsedMs": 9.736899999999878,
+                    "payloadBytes": 27,
+                    "responseBytes": 8133,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 6.079600000000937,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.5208999999995285,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 3.2146000000011554,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 3.211699999999837,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3018.2240999999995,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 9.398000000001048,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 64.62439999999697,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 23.475500000000466,
+                    "payloadBytes": 95,
+                    "responseBytes": 2200,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 13.802899999998772,
+                    "payloadBytes": 102,
+                    "responseBytes": 1321,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 53.78350000000137,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4616.0897
+            },
+            {
+              "elapsedMs": 4534.414200000003,
+              "visibleMs": 3887.544100000003,
+              "debuggerAttachedMs": 339.8230000000003,
+              "actualNativeWindow": true,
+              "canonicalRoute": "create-shot",
+              "childKind": "shot",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 49,
+              "databaseReadyMs": 363,
+              "librarySyncedMs": 376,
+              "recoveryCompleteMs": 378,
+              "startupIpc": {
+                "realIpc": 19,
+                "uniqueCommands": 18,
+                "preflights": 18,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "shot_list": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "costume_variant_list": 1,
+                  "runtime_activity_status": 1,
+                  "product_creation_get": 2,
+                  "product_generators_list": 1,
+                  "product_run_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 685,
+                "responseBytes": 1287147,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 5.664199999999255,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 4.761600000001636,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 4.595499999999447,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 19.998399999996764,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 7.919000000001688,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 7.5688999999983935,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 4.771300000000338,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 4.436000000001513,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "shot_list",
+                    "elapsedMs": 9.948699999997189,
+                    "payloadBytes": 27,
+                    "responseBytes": 8133,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 6.47780000000057,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.808499999999185,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 3.5208999999995285,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 2983.966400000001,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.5455000000001746,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 9.057099999998172,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 60.027500000000146,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 23.109199999998964,
+                    "payloadBytes": 95,
+                    "responseBytes": 2200,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 15.256199999999808,
+                    "payloadBytes": 102,
+                    "responseBytes": 1321,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 55.09870000000228,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4535.153200000001
+            },
+            {
+              "elapsedMs": 4487.816200000001,
+              "visibleMs": 3853.567299999999,
+              "debuggerAttachedMs": 335.5650999999998,
+              "actualNativeWindow": true,
+              "canonicalRoute": "create-shot",
+              "childKind": "shot",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 48,
+              "databaseReadyMs": 362,
+              "librarySyncedMs": 376,
+              "recoveryCompleteMs": 378,
+              "startupIpc": {
+                "realIpc": 19,
+                "uniqueCommands": 18,
+                "preflights": 18,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "shot_list": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "costume_variant_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "runtime_activity_status": 1,
+                  "product_creation_get": 2,
+                  "product_generators_list": 1,
+                  "product_run_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 684,
+                "responseBytes": 1287147,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 6.148199999999633,
+                    "payloadBytes": 70,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.3607000000010885,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 6.0777000000016415,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 29.20890000000145,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 7.799999999999272,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.176399999996647,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.991099999999278,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.749299999999494,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "shot_list",
+                    "elapsedMs": 9.363500000003114,
+                    "payloadBytes": 27,
+                    "responseBytes": 8133,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 6.0625,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.4566999999988184,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 6.2365999999965425,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.48949999999968,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 2935.4763999999996,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.81710000000021,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 61.12280000000101,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 25.395699999997305,
+                    "payloadBytes": 95,
+                    "responseBytes": 2200,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 16.035400000000664,
+                    "payloadBytes": 102,
+                    "responseBytes": 1321,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 56.31970000000001,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4488.521100000002
+            },
+            {
+              "elapsedMs": 5076.943600000002,
+              "visibleMs": 4433.3291999999965,
+              "debuggerAttachedMs": 332.90190000000075,
+              "actualNativeWindow": true,
+              "canonicalRoute": "create-shot",
+              "childKind": "shot",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 48,
+              "databaseReadyMs": 357,
+              "librarySyncedMs": 370,
+              "recoveryCompleteMs": 372,
+              "startupIpc": {
+                "realIpc": 19,
+                "uniqueCommands": 18,
+                "preflights": 18,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "shot_list": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "costume_variant_list": 1,
+                  "runtime_activity_status": 1,
+                  "product_creation_get": 2,
+                  "product_generators_list": 1,
+                  "product_run_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 683,
+                "responseBytes": 1287147,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 6.070599999999104,
+                    "payloadBytes": 69,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.520799999998417,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.469500000002881,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 20.076199999999517,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 7.9848000000019965,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.08730000000287,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.564099999999598,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.375500000001921,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "shot_list",
+                    "elapsedMs": 9.593799999998737,
+                    "payloadBytes": 27,
+                    "responseBytes": 8133,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 5.782899999998335,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.2942000000002736,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 6.035800000001473,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3531.7953000000016,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.4500000000007276,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.445299999999406,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 59.65219999999681,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 23.814500000000407,
+                    "payloadBytes": 95,
+                    "responseBytes": 2200,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 15.608000000000175,
+                    "payloadBytes": 102,
+                    "responseBytes": 1321,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 54.81910000000062,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 5077.622299999999
+            },
+            {
+              "elapsedMs": 4559.619899999998,
+              "visibleMs": 3906.803899999999,
+              "debuggerAttachedMs": 341.82189999999537,
+              "actualNativeWindow": true,
+              "canonicalRoute": "create-shot",
+              "childKind": "shot",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 50,
+              "databaseReadyMs": 366,
+              "librarySyncedMs": 379,
+              "recoveryCompleteMs": 381,
+              "startupIpc": {
+                "realIpc": 19,
+                "uniqueCommands": 18,
+                "preflights": 18,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "shot_list": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "costume_variant_list": 1,
+                  "runtime_activity_status": 1,
+                  "product_creation_get": 2,
+                  "product_generators_list": 1,
+                  "product_run_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 684,
+                "responseBytes": 1287147,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 5.773000000001048,
+                    "payloadBytes": 70,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 4.973000000005413,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.114799999995739,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 24.010300000001735,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 6.643900000002759,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 7.292999999997846,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 4.850800000000163,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 4.566700000003038,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "shot_list",
+                    "elapsedMs": 13.149700000001758,
+                    "payloadBytes": 27,
+                    "responseBytes": 8133,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 8.819999999999709,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.776799999999639,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 2.7788000000000466,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 2995.2931000000026,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.264999999999418,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 9.397699999994074,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 64.23450000000594,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 24.752300000000105,
+                    "payloadBytes": 95,
+                    "responseBytes": 2200,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 14.60290000000532,
+                    "payloadBytes": 102,
+                    "responseBytes": 1321,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 52.62000000000262,
+                    "payloadBytes": 95,
+                    "responseBytes": 630179,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4560.374799999998
+            }
+          ],
+          "primaryTiming": "visible; elapsedMs includes external window-handle verification overhead"
+        },
+        "runs-run": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 4726.087299999999,
+          "median": 4760.338200000013,
+          "max": 5383.355200000005,
+          "visible": {
+            "samples": 5,
+            "min": 4059.3715999999986,
+            "median": 4093.397100000002,
+            "max": 4709.554799999998
+          },
+          "raw": [
+            {
+              "elapsedMs": 5038.831300000005,
+              "visibleMs": 4382.302500000005,
+              "debuggerAttachedMs": 335.6496000000043,
+              "actualNativeWindow": true,
+              "canonicalRoute": "runs-run",
+              "childKind": "run",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 50,
+              "databaseReadyMs": 362,
+              "librarySyncedMs": 376,
+              "recoveryCompleteMs": 377,
+              "startupIpc": {
+                "realIpc": 18,
+                "uniqueCommands": 17,
+                "preflights": 17,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_run_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "costume_variant_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "runtime_activity_status": 1,
+                  "product_run_list": 1,
+                  "product_run_results_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 641,
+                "responseBytes": 47645,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 6.105100000000675,
+                    "payloadBytes": 70,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.4438999999983935,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 6.197899999999208,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 34.13040000000183,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 8.100200000000768,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.071799999997893,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.715300000003481,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.519999999996799,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 14.313600000001315,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 4.949699999997392,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.462199999994482,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 5.5376000000032946,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.726300000002084,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3514.0005999999994,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.531800000004296,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 50.127300000000105,
+                    "payloadBytes": 56,
+                    "responseBytes": 29816,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 14.488799999999173,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_results_get",
+                    "elapsedMs": 9.384300000005169,
+                    "payloadBytes": 105,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 5039.477300000006
+            },
+            {
+              "elapsedMs": 4732.417300000001,
+              "visibleMs": 4059.3715999999986,
+              "debuggerAttachedMs": 342.4100000000035,
+              "actualNativeWindow": true,
+              "canonicalRoute": "runs-run",
+              "childKind": "run",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 51,
+              "databaseReadyMs": 368,
+              "librarySyncedMs": 382,
+              "recoveryCompleteMs": 384,
+              "startupIpc": {
+                "realIpc": 18,
+                "uniqueCommands": 17,
+                "preflights": 17,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_run_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "costume_variant_list": 1,
+                  "runtime_activity_status": 1,
+                  "product_run_list": 1,
+                  "product_run_results_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 642,
+                "responseBytes": 47645,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 6.343199999995704,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.961000000002969,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.949300000000221,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 34.08649999999761,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 7.790099999998347,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.068899999998393,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.978799999997136,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.727500000000873,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 16.685199999999895,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 8.619800000000396,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 8.61819999999716,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 2.7969000000011874,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3190.3231000000014,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 11.289499999998952,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 9.042900000000373,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 53.6875,
+                    "payloadBytes": 56,
+                    "responseBytes": 29816,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 15.303899999998976,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_results_get",
+                    "elapsedMs": 9.85229999999865,
+                    "payloadBytes": 105,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4733.080199999997
+            },
+            {
+              "elapsedMs": 4760.338200000013,
+              "visibleMs": 4093.397100000002,
+              "debuggerAttachedMs": 353.3539000000019,
+              "actualNativeWindow": true,
+              "canonicalRoute": "runs-run",
+              "childKind": "run",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 50,
+              "databaseReadyMs": 378,
+              "librarySyncedMs": 390,
+              "recoveryCompleteMs": 392,
+              "startupIpc": {
+                "realIpc": 18,
+                "uniqueCommands": 17,
+                "preflights": 17,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_run_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "costume_variant_list": 1,
+                  "runtime_activity_status": 1,
+                  "product_run_list": 1,
+                  "product_run_results_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 642,
+                "responseBytes": 47645,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 9.60910000000149,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 8.902100000006612,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 9.033299999995506,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 28.17850000000908,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 9.541999999986729,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 9.593399999997928,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 8.82390000000305,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 8.659699999989243,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 16.737899999992806,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 5.480999999999767,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.032599999991362,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 2.524199999999837,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3227.2592000000004,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.7105000000010477,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.543799999999464,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 46.25990000000456,
+                    "payloadBytes": 56,
+                    "responseBytes": 29816,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 9.973499999992782,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_results_get",
+                    "elapsedMs": 9.497799999997369,
+                    "payloadBytes": 105,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4761.276600000012
+            },
+            {
+              "elapsedMs": 5383.355200000005,
+              "visibleMs": 4709.554799999998,
+              "debuggerAttachedMs": 365.55599999999686,
+              "actualNativeWindow": true,
+              "canonicalRoute": "runs-run",
+              "childKind": "run",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 51,
+              "databaseReadyMs": 392,
+              "librarySyncedMs": 408,
+              "recoveryCompleteMs": 410,
+              "startupIpc": {
+                "realIpc": 18,
+                "uniqueCommands": 17,
+                "preflights": 17,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_run_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "costume_variant_list": 1,
+                  "runtime_activity_status": 1,
+                  "product_run_list": 1,
+                  "product_run_results_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 641,
+                "responseBytes": 47645,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 5.829200000007404,
+                    "payloadBytes": 70,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.247700000007171,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.411999999996624,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 31.1310000000085,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 8.219700000001467,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.40350000000035,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.789199999999255,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.365200000000186,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 16.30580000000191,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 10.872400000007474,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 10.95339999999851,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 10.923299999994924,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3801.6964000000007,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 16.716199999995297,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.552500000005239,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 61.52799999999115,
+                    "payloadBytes": 56,
+                    "responseBytes": 29816,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 14.125700000004144,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_results_get",
+                    "elapsedMs": 11.473700000002282,
+                    "payloadBytes": 105,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 5384.0533
+            },
+            {
+              "elapsedMs": 4726.087299999999,
+              "visibleMs": 4066.9465000000055,
+              "debuggerAttachedMs": 435.5243000000046,
+              "actualNativeWindow": true,
+              "canonicalRoute": "runs-run",
+              "childKind": "run",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 52,
+              "databaseReadyMs": 461,
+              "librarySyncedMs": 475,
+              "recoveryCompleteMs": 477,
+              "startupIpc": {
+                "realIpc": 18,
+                "uniqueCommands": 17,
+                "preflights": 17,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_run_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "costume_variant_list": 1,
+                  "runtime_activity_status": 1,
+                  "product_run_list": 1,
+                  "product_run_results_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 642,
+                "responseBytes": 47645,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 5.63310000000638,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.163000000000466,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.622399999992922,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 24.019200000009732,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 8.778200000000652,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.882299999997485,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.779399999999441,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.370199999990291,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 15.551000000006752,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 5.183499999999185,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.683099999994738,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 5.657899999991059,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3098.1275999999925,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.6367000000027474,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.376900000002934,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 49.84230000000389,
+                    "payloadBytes": 56,
+                    "responseBytes": 29816,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_get",
+                    "elapsedMs": 13.936600000000908,
+                    "payloadBytes": 105,
+                    "responseBytes": 1276,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_run_results_get",
+                    "elapsedMs": 9.313099999999395,
+                    "payloadBytes": 105,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4726.941600000006
+            }
+          ],
+          "primaryTiming": "visible; elapsedMs includes external window-handle verification overhead"
+        },
+        "library-resource": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 4621.838500000013,
+          "median": 4689.412000000011,
+          "max": 5376.7880000000005,
+          "visible": {
+            "samples": 5,
+            "min": 3957.421100000007,
+            "median": 4018.6008,
+            "max": 4711.235100000005
+          },
+          "raw": [
+            {
+              "elapsedMs": 5256.333700000003,
+              "visibleMs": 4587.633199999997,
+              "debuggerAttachedMs": 343.3542000000016,
+              "actualNativeWindow": true,
+              "canonicalRoute": "library-resource",
+              "childKind": "resource",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 51,
+              "databaseReadyMs": 367,
+              "librarySyncedMs": 381,
+              "recoveryCompleteMs": 383,
+              "startupIpc": {
+                "realIpc": 20,
+                "uniqueCommands": 19,
+                "preflights": 19,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_library_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "costume_variant_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "runtime_activity_status": 1,
+                  "product_library_list": 1,
+                  "product_library_relations_get": 1,
+                  "product_library_versions_get": 1,
+                  "product_library_image_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 878,
+                "responseBytes": 1110862,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 5.855799999990268,
+                    "payloadBytes": 69,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.42259999999078,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.732699999993201,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 30.76270000000659,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 8.734299999996438,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.412400000001071,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.8562999999994645,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.569800000012037,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 2.6450999999942724,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 5.271899999992456,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.7537999999913154,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 2.381600000007893,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.446800000005169,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3717.926900000006,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.43990000001213,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 6.280500000008033,
+                    "payloadBytes": 94,
+                    "responseBytes": 6269,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 2.3300000000017462,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_relations_get",
+                    "elapsedMs": 10.439700000002631,
+                    "payloadBytes": 103,
+                    "responseBytes": 373,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_versions_get",
+                    "elapsedMs": 3.113999999986845,
+                    "payloadBytes": 103,
+                    "responseBytes": 170,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_image_get",
+                    "elapsedMs": 46.22469999999157,
+                    "payloadBytes": 103,
+                    "responseBytes": 1087711,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 5257.035199999998
+            },
+            {
+              "elapsedMs": 4683.569100000008,
+              "visibleMs": 4008.7265000000043,
+              "debuggerAttachedMs": 356.79060000000754,
+              "actualNativeWindow": true,
+              "canonicalRoute": "library-resource",
+              "childKind": "resource",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 52,
+              "databaseReadyMs": 380,
+              "librarySyncedMs": 394,
+              "recoveryCompleteMs": 396,
+              "startupIpc": {
+                "realIpc": 20,
+                "uniqueCommands": 19,
+                "preflights": 19,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_library_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "costume_variant_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "runtime_activity_status": 1,
+                  "product_library_list": 1,
+                  "product_library_relations_get": 1,
+                  "product_library_versions_get": 1,
+                  "product_library_image_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 880,
+                "responseBytes": 1110862,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 7.045899999997346,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 6.596900000004098,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 6.663400000004913,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 49.48060000000987,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 7.749499999990803,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 7.936900000000605,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.86250000000291,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.702999999994063,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 2.523300000000745,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 6.114499999996042,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.029100000014296,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 2.365299999990384,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.6710000000020955,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3110.647299999997,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.18760000000475,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 6.746100000003935,
+                    "payloadBytes": 94,
+                    "responseBytes": 6269,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 2.5991999999969266,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_relations_get",
+                    "elapsedMs": 9.100400000010268,
+                    "payloadBytes": 103,
+                    "responseBytes": 373,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_versions_get",
+                    "elapsedMs": 2.518100000001141,
+                    "payloadBytes": 103,
+                    "responseBytes": 170,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_image_get",
+                    "elapsedMs": 45.00239999999758,
+                    "payloadBytes": 103,
+                    "responseBytes": 1087711,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4684.4302000000025
+            },
+            {
+              "elapsedMs": 4621.838500000013,
+              "visibleMs": 3957.421100000007,
+              "debuggerAttachedMs": 358.37450000000536,
+              "actualNativeWindow": true,
+              "canonicalRoute": "library-resource",
+              "childKind": "resource",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 51,
+              "databaseReadyMs": 383,
+              "librarySyncedMs": 397,
+              "recoveryCompleteMs": 399,
+              "startupIpc": {
+                "realIpc": 20,
+                "uniqueCommands": 19,
+                "preflights": 19,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_library_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "costume_variant_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "runtime_activity_status": 1,
+                  "product_library_list": 1,
+                  "product_library_relations_get": 1,
+                  "product_library_versions_get": 1,
+                  "product_library_image_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 880,
+                "responseBytes": 1110862,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 6.308499999999185,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.220499999995809,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.89770000000135,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 41.7045000000071,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 8.671300000001793,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 9.501299999988987,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 6.388800000000629,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.751600000003236,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 3.1667000000015832,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 6.162299999996321,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.4104999999981374,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 2.919900000008056,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.4686000000074273,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3068.9985000000015,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.716199999995297,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 6.321000000010827,
+                    "payloadBytes": 94,
+                    "responseBytes": 6269,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 2.078699999998207,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_relations_get",
+                    "elapsedMs": 10.33629999999539,
+                    "payloadBytes": 103,
+                    "responseBytes": 373,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_versions_get",
+                    "elapsedMs": 2.5921000000089407,
+                    "payloadBytes": 103,
+                    "responseBytes": 170,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_image_get",
+                    "elapsedMs": 44.698199999998906,
+                    "payloadBytes": 103,
+                    "responseBytes": 1087711,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4622.58660000001
+            },
+            {
+              "elapsedMs": 5376.7880000000005,
+              "visibleMs": 4711.235100000005,
+              "debuggerAttachedMs": 356.6564000000071,
+              "actualNativeWindow": true,
+              "canonicalRoute": "library-resource",
+              "childKind": "resource",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 52,
+              "databaseReadyMs": 382,
+              "librarySyncedMs": 395,
+              "recoveryCompleteMs": 397,
+              "startupIpc": {
+                "realIpc": 20,
+                "uniqueCommands": 19,
+                "preflights": 19,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_library_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "costume_variant_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "runtime_activity_status": 1,
+                  "product_library_list": 1,
+                  "product_library_relations_get": 1,
+                  "product_library_versions_get": 1,
+                  "product_library_image_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 880,
+                "responseBytes": 1110862,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 5.6701000000030035,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.354300000006333,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.5380999999906635,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 22.296199999997043,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 7.841599999999744,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.189400000002934,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.220000000001164,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.073499999998603,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 3.156700000006822,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 6.485899999999674,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 3.1425000000017462,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 2.6287999999913154,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 3.016199999998207,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3834.229800000001,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 9.295199999993201,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 6.64869999999064,
+                    "payloadBytes": 94,
+                    "responseBytes": 6269,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 2.1882000000041444,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_relations_get",
+                    "elapsedMs": 10.542600000000675,
+                    "payloadBytes": 103,
+                    "responseBytes": 373,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_versions_get",
+                    "elapsedMs": 2.841599999999744,
+                    "payloadBytes": 103,
+                    "responseBytes": 170,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_image_get",
+                    "elapsedMs": 45.28210000001127,
+                    "payloadBytes": 103,
+                    "responseBytes": 1087711,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 5377.476699999999
+            },
+            {
+              "elapsedMs": 4689.412000000011,
+              "visibleMs": 4018.6008,
+              "debuggerAttachedMs": 365.2222000000038,
+              "actualNativeWindow": true,
+              "canonicalRoute": "library-resource",
+              "childKind": "resource",
+              "exactPersistedLocatorPreserved": true,
+              "applicationStartMs": 50,
+              "databaseReadyMs": 392,
+              "librarySyncedMs": 407,
+              "recoveryCompleteMs": 409,
+              "startupIpc": {
+                "realIpc": 20,
+                "uniqueCommands": 19,
+                "preflights": 19,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "plugin:event|listen": 1,
+                  "ping": 1,
+                  "get_app_status": 1,
+                  "comfy_get_status": 1,
+                  "generation_catalog_list": 1,
+                  "production_queue_admission_status": 1,
+                  "project_list": 1,
+                  "workspace_resume_get": 1,
+                  "product_library_get": 2,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1,
+                  "costume_variant_list": 1,
+                  "comfy_refresh_capabilities": 1,
+                  "runtime_activity_status": 1,
+                  "product_library_list": 1,
+                  "product_library_relations_get": 1,
+                  "product_library_versions_get": 1,
+                  "product_library_image_get": 1
+                },
+                "repeatedSemanticCalls": 1,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 880,
+                "responseBytes": 1110862,
+                "calls": [
+                  {
+                    "command": "plugin:event|listen",
+                    "elapsedMs": 5.33200000000943,
+                    "payloadBytes": 71,
+                    "responseBytes": 141,
+                    "failed": false
+                  },
+                  {
+                    "command": "ping",
+                    "elapsedMs": 5.035699999993085,
+                    "payloadBytes": 2,
+                    "responseBytes": 146,
+                    "failed": false
+                  },
+                  {
+                    "command": "get_app_status",
+                    "elapsedMs": 5.523000000001048,
+                    "payloadBytes": 2,
+                    "responseBytes": 205,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_get_status",
+                    "elapsedMs": 37.68420000000333,
+                    "payloadBytes": 2,
+                    "responseBytes": 535,
+                    "failed": false
+                  },
+                  {
+                    "command": "generation_catalog_list",
+                    "elapsedMs": 8.676599999991595,
+                    "payloadBytes": 2,
+                    "responseBytes": 5975,
+                    "failed": false
+                  },
+                  {
+                    "command": "production_queue_admission_status",
+                    "elapsedMs": 8.702699999994365,
+                    "payloadBytes": 2,
+                    "responseBytes": 223,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_list",
+                    "elapsedMs": 5.673399999999674,
+                    "payloadBytes": 2,
+                    "responseBytes": 481,
+                    "failed": false
+                  },
+                  {
+                    "command": "workspace_resume_get",
+                    "elapsedMs": 5.473199999993085,
+                    "payloadBytes": 2,
+                    "responseBytes": 251,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 3.6640000000043074,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 6.360599999999977,
+                    "payloadBytes": 38,
+                    "responseBytes": 5398,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 5.547500000000582,
+                    "payloadBytes": 27,
+                    "responseBytes": 737,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 4.025100000013481,
+                    "payloadBytes": 27,
+                    "responseBytes": 508,
+                    "failed": false
+                  },
+                  {
+                    "command": "costume_variant_list",
+                    "elapsedMs": 2.842799999998533,
+                    "payloadBytes": 90,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "comfy_refresh_capabilities",
+                    "elapsedMs": 3115.1486000000004,
+                    "payloadBytes": 2,
+                    "responseBytes": 209,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_activity_status",
+                    "elapsedMs": 8.258300000001327,
+                    "payloadBytes": 2,
+                    "responseBytes": 184,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 7.243699999991804,
+                    "payloadBytes": 94,
+                    "responseBytes": 6269,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_get",
+                    "elapsedMs": 1.8447999999916647,
+                    "payloadBytes": 103,
+                    "responseBytes": 602,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_relations_get",
+                    "elapsedMs": 9.650099999998929,
+                    "payloadBytes": 103,
+                    "responseBytes": 373,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_versions_get",
+                    "elapsedMs": 2.3003999999928055,
+                    "payloadBytes": 103,
+                    "responseBytes": 170,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_library_image_get",
+                    "elapsedMs": 44.84360000000743,
+                    "payloadBytes": 103,
+                    "responseBytes": 1087711,
+                    "failed": false
+                  }
+                ]
+              },
+              "startupIpcCoverage": "ATTACHMENT_ONWARD_ONLY",
+              "windowVerificationCompletedMs": 4690.162400000001
+            }
+          ],
+          "primaryTiming": "visible; elapsedMs includes external window-handle verification overhead"
+        }
+      },
+      "limitations": [
+        "Process-cold only, OS caches not flushed",
+        "CDP startup IPC is captured only after debugger attachment; early calls may be missed",
+        "Database migration and task recovery log timestamps are stage timings, not all-service readiness",
+        "Debug backend / production frontend, not release binary latency"
+      ]
+    }
   }
 }

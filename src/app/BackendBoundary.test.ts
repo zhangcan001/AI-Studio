@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 // @ts-expect-error Node helpers are used only by this source-boundary test.
 import { createHash } from "node:crypto";
 // @ts-expect-error Build-time architecture module, not browser production code.
-import { backendBoundary, productionRust, sqlFootprint, rustFiles } from "../../scripts/backend-boundary-guard.mjs";
+import { backendPerformanceBoundary, backendBoundary, productionRust, sqlFootprint, rustFiles } from "../../scripts/backend-boundary-guard.mjs";
 const read=(p:string):string=>readFileSync(p,"utf8");
 const manifest=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json"));
 describe("Phase8 backend compatibility",()=>{
@@ -25,7 +25,9 @@ it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=
  expect(commands).toEqual(manifest.ipcContracts);
  const backend=rustFiles("src-tauri/src").map((p:string)=>p.replace(/\\/g,"/")).sort();
  expect(backend).toHaveLength(manifest.backendSourceSnapshot.files);
- expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(manifest.backendSourceSnapshot.sha256);
+ const reviewed=backendPerformanceBoundary(".",manifest.backendSourceSnapshot,JSON.parse(read("docs/architecture/phase12-performance.json")));
+ expect(reviewed.violations).toEqual([]);
+ expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(reviewed.sha256);
  expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend);
  // Phase10 advances only explicitly scoped frontend seam pins; backend/IPC remain exact.
  const phase9=JSON.parse(read("docs/architecture/phase9-style-cleanup.json"));

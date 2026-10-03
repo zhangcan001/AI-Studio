@@ -7,6 +7,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 // @ts-expect-error Node helpers are test-only.
 import { createHash } from "node:crypto";
+// @ts-expect-error Build-time boundary helper, never browser production.
+import { backendPerformanceBoundary } from "../../scripts/backend-boundary-guard.mjs";
 import ts from "typescript";
 import { ShellHost } from "./ShellHost";
 import { fromLegacyLocation } from "./routes/legacyAdapter";
@@ -97,6 +99,7 @@ it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()
  // Migrations and all other historical boundaries remain pinned.
  const phase8=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json")) as {backendSourceSnapshot:{files:number;sha256:string}};
  const phase9=JSON.parse(read("docs/architecture/phase9-style-cleanup.json"));
- for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?phase8.backendSourceSnapshot:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
+ const reviewed=backendPerformanceBoundary('.',phase8.backendSourceSnapshot,JSON.parse(read('docs/architecture/phase12-performance.json')));expect(reviewed.violations).toEqual([]);
+ for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
 
 });

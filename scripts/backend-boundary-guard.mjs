@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 // Lightweight lexical masking keeps offsets, including nested Rust comments and raw strings.
@@ -40,4 +41,25 @@ export function backendBoundary(root,manifest){const violations=[];let checked=0
   checked++;const footprint=sqlFootprint(source);const budget=manifest.grandfatheredSql.find(e=>e.path===path)?.budget??{sqlx:0,pools:0,sql:0};for(const key of Object.keys(footprint))if(footprint[key]>budget[key])violations.push(`${path}: ${key} ${footprint[key]} > ${budget[key]}`);
  }
  return {checked,violations};
+}
+
+// A measured Phase12 successor, not a new historical baseline. Every untouched
+// Rust file and the complete new aggregate remain pinned; only these two existing
+// read-projection paths may advance. No new source, IPC, DB or authority exemption.
+export function backendPerformanceBoundary(root, snapshot, review) {
+ const seam=review?.backendOptimization2,proof=seam?.sourceFreeze;
+ if(!proof)return {sha256:snapshot.sha256,violations:[]};
+ const allowed=['src-tauri/src/application/product/run_facade.rs','src-tauri/src/application/product/run_facade/workspace.rs'];
+ const files=rustFiles(join(root,'src-tauri/src')).map(p=>relative(root,p).replaceAll('\\','/')).sort();
+ const text=p=>readFileSync(join(root,p),'utf8').replaceAll('\r\n','\n');
+ const hash=s=>createHash('sha256').update(s).digest('hex');
+ const aggregate=list=>hash(list.map(p=>p+'\n'+text(p)).join('\n'));
+ const violations=[];
+ if(seam.status!=='MEASURED_VERIFIED'||!Number.isFinite(seam.baseline?.samples)||!Number.isFinite(seam.after?.samples)||seam.baseline.samples<5||seam.after.samples<5||
+    proof.beforeAggregateHash!==snapshot.sha256||proof.files!==snapshot.files||files.length!==snapshot.files||
+    JSON.stringify(Object.keys(proof.paths||{}).sort())!==JSON.stringify([...allowed].sort()))violations.push('invalid-backend-performance-scope');
+ for(const path of allowed)if(!/^[a-f0-9]{64}$/.test(proof.paths?.[path]?.beforeHash||'')||hash(text(path))!==proof.paths?.[path]?.afterHash)violations.push(`unreviewed-backend-seam:${path}`);
+ if(aggregate(files.filter(p=>!allowed.includes(p)))!==proof.untouchedAggregateHash)violations.push('unreviewed-backend-untouched-source');
+ if(aggregate(files)!==proof.afterAggregateHash)violations.push('unreviewed-backend-aggregate');
+ return {sha256:proof.afterAggregateHash,violations};
 }

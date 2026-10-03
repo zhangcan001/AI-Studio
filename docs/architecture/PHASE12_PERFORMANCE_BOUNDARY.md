@@ -213,3 +213,52 @@ Rust all-target check passed. Deep Native after data covers project open, Create
 load/shot switch, Runs list/detail/results, Library load/media/prompt/edit and20
 resource cycles. **Safe submit, Workflow deep OCC, remaining final behavior checks
 and exact-final-head CI still pending**. No Phase13 and no overall Phase12 PASS.
+
+## Final local/Native acceptance and strict backend successor
+
+The two historical aggregate tests correctly rejected opt2 because backend source
+changed. Historical Phase7/8 manifests are retained. A shared successor now pins
+only `run_facade.rs` and `run_facade/workspace.rs`, anchors the original aggregate,
+checks every untouched source through an aggregate, checks both new path digests,
+checks file count and the full new aggregate, and requires five measured before/
+after samples. IPC signature/direct-SQL/schema checks remain unchanged. Missing,
+extra or wrong-source review cannot bypass the frozen boundary. The two existing
+tests consume this scoped proof; neither is removed, skipped or blindly repinned.
+Their local rerun is NOT VERIFIED because10/10 cases are exhausted; full CI owns it.
+
+Final Native covers project open/switch, Create load/shot, Runs list/details/results,
+Library list/media/prompt/edit, Lab version read, binding OCC, Settings, Advanced,
+Back, keyboard and representative interactions. Dirty-leave modal has usable focus;
+cancel stays in Create and discard leaves. Prompt deletion remains a **blocked inline
+inspection**, not a newly invented modal. Real Ctrl-K and native Enter activation
+work; the CDP Enter event includes its character event, not just a keyDown.
+
+Workflow saved-version read: one warmup/five samples,1IPC, median23.1505ms.
+Binding save: one warmup/five samples,4IPC, median45.4447ms. Each operation retains
+expected instance/revision; an independent writer to the owned fixture advances
+revision, and stale UI save is rejected with the existing conflict notice. No silent
+retry. Binding edits only alter the isolated fixture, not real projects.
+
+Safe Create submit uses an owned HTTP fixture serving a read-only schema snapshot
+and rejecting every non-GET, with **no GPU forwarding**. Generate→authoritative
+validation→persisted queue/task/snapshot→visible RunRef is measured on fresh
+controller mounts, one warmup/five samples:6IPC, median1711.5106ms. The task safely
+fails; accepted is not succeeded. A same-attempt repeat leaves batch/task counts,
+RunRef, frozen values and generation snapshot digests unchanged. Fixture endpoint
+is restored to127.0.0.1:8188 afterward; owned mock server is stopped. These mutations
+expand the owned fixture from55to63tasks only **after** the opt2 before/after pair;
+no speedup comparison is made across the mutated datasets. Harness selector failures
+and a Node-context DOM mistake were discarded, not successful samples.
+
+Final actual restart repeats Create+shot, Runs+RunRef and Library+ResourceRef, each
+with one warmup/five process launches and exact child validation. No reload is
+reported as resume. Startup remains PASS_TIMING with attachment-onward IPC only
+and no full startup-count claim or startup optimization. Native20 resource cycles
+again retain listeners148→148/global3→3 and release timers/object URLs. Private
+notification subscriptions are proved separately by case10, not by a production
+debug API or a heap-leak claim.
+
+All three optimizations now have real before/after evidence. Local cases remain
+**10/10**, no new GPU workload, MAX42/TABLE_COUNT71/no043/backup20. Exact final-head
+full Source-only CI is still required. Until its completed success, Phase12 overall
+remains PARTIAL and next phase is not authorized.

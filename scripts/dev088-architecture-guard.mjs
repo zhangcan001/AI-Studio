@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import ts from "typescript";
-import { backendBoundary } from "./backend-boundary-guard.mjs";
+import { backendPerformanceBoundary, backendBoundary } from "./backend-boundary-guard.mjs";
 import { styleBoundary } from "./style-boundary-guard.mjs";
 import { frontendBoundary } from "./frontend-boundary-guard.mjs";
 import { fileURLToPath } from "node:url";
@@ -801,3 +801,8 @@ console.log(`SHOT_WORKSPACE_MULTI_PACKAGE_CONTROLLER=PASS`);
 console.log(`ASSET_VIDEO_WORKFLOW_CONTROLLER=PASS`);
 console.log(`ASSET_VIDEO_LIBRARY_CONTROLLER=PASS`);
 console.log(`ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER=PASS`);
+
+const performanceReview=JSON.parse(readFileSync(`${root}/docs/architecture/phase12-performance.json`,'utf8'));
+const backendPerformance=backendPerformanceBoundary(root,backendManifest.backendSourceSnapshot,performanceReview);
+if(backendPerformance.violations.length)throw Error(backendPerformance.violations.join('\n'));
+console.log('BACKEND_PERFORMANCE_SUCCESSOR=PASS');
