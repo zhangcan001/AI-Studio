@@ -76,4 +76,6 @@ jobs:
         run: pnpm exec tsc --noEmit
 
       - name: Frontend build
-        run: pnpm build
+        # TypeScript was checked immediately above; build the same Vite bundle
+        # without repeating tsc. Keep both independent authoritative gates.
+        run: pnpm exec vite build

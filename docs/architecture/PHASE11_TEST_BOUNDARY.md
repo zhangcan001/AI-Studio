@@ -62,3 +62,41 @@ Phase10 owners, existing route/state/client authorities, IPC contracts, migratio
 offline CI must not enable them by accident. Native acceptance must use a fresh
 copy of an owned isolated fixture, real close/relaunch and close the owned app.
 Historical Native evidence is not proof of this phase's acceptance.
+
+## Verified local/native checkpoint
+
+Ten distinct automated local cases passed: seven frontend and three real SQLite
+integration cases. No additional cases or full local suites ran. Existing
+FrontendConsolidation target9 exercised valid and forbidden guard fixtures;
+the existing Product client case executed the full unchanged DEV-088 runner.
+tsc/build, architecture command, fmt and queue-recovery target compilation passed.
+No production bug was found and no production source was changed.
+
+One implementation-text assertion became stronger accepted-result navigation
+coverage. No test case was removed, skipped or ignored: four redundant full
+runner launches (five to one existing owner) were removed; feature assertions
+stayed intact. Four frontend and two Rust integration cases were added. One
+owning DB fixture replaces five bootstrap copies; real migrations/seeding remain.
+The source scanner still reports mixed/source groups and port/sleep candidates
+for review; these are not proof of flaky execution. The new IPC classifier case
+contains a fake localhost URL only, not network I/O. Three selected previously
+unverified lifecycle scenarios now have deterministic coverage.
+
+The CI frontend build runs `pnpm exec vite build` after the unchanged explicit
+TypeScript step, removing proven duplicate tsc from `pnpm build`. Full frontend
+and serial all-target Rust tests, caches, timeouts and independent jobs are intact.
+Before/after timing comes from actual CI logs; one run cannot establish causality
+or promise overall critical-path acceleration.
+
+Fresh isolated Native acceptance passed normal Create, Runs, Library, Workflow
+Lab, Advanced bridges, Back/keyboard/dialogs/project switch and a genuine
+close/relaunch preserving route and settings. The observer measured one real
+task/profile/reference-list load on project switch. Both own Native apps closed.
+The copied fixture already had an environment endpoint: creating that same URL
+was correctly rejected; editing the existing profile using Update Environment
+saved and survived restart. This was a harness/fixture adaptation, not a product
+bug or a retry masking failure. Current-phase sanitized evidence is recorded in
+`phase11-native-acceptance.json`; historical screenshots are not claimed current.
+
+Final exact-head CI remains the full-suite authority. Its final measurements are
+reported in chat rather than making a new evidence commit that changes CI_HEAD.

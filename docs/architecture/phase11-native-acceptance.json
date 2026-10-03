@@ -1,0 +1,333 @@
+{
+  "phase": 11,
+  "sourceCommit": "905171f",
+  "dataRootKind": "fresh SQLite backup of own Phase10 isolated fixture; no real user project access",
+  "processes": [
+    {
+      "pid": 23792,
+      "closed": true
+    },
+    {
+      "pid": 28824,
+      "closed": true
+    }
+  ],
+  "checks": {
+    "APP_LAUNCH": "PASS",
+    "NORMAL_CREATE": "PASS",
+    "RUNS": "PASS",
+    "LIBRARY": "PASS",
+    "WORKFLOW_LAB": "PASS",
+    "PROJECT_SWITCH": "PASS",
+    "RESUME_REAL_RESTART": "PASS",
+    "SETTINGS": "PASS",
+    "ADVANCED_BRIDGES": "PASS",
+    "BACK": "PASS",
+    "KEYBOARD": "PASS",
+    "DIALOGS": "PASS"
+  },
+  "routes": [
+    {
+      "name": "runs-all",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "filter": "all"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "runs-active",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "filter": "active"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "runs-failed",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "filter": "failed"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "runs-completed",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "filter": "completed"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "advanced-project",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-project"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "advanced-shots",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-shots"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "advanced-production",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-production"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "advanced-review",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-review"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "advanced-tasks",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-tasks"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "generators",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "generators"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "advanced-assets",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_default",
+        "filter": "advanced-assets"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "advanced-prompts",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_default",
+        "filter": "advanced-prompts"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "prompts",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_default",
+        "filter": "prompts"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "advanced-tools",
+      "route": {
+        "kind": "system-settings",
+        "section": "advanced-tools"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "legacy-lab",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-workflows"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "project-switch",
+      "route": {
+        "kind": "project",
+        "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+        "page": "overview"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "ctrl-k",
+      "route": {
+        "kind": "create",
+        "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+        "stage": "image"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "settings-nav",
+      "route": {
+        "kind": "system-settings",
+        "section": "general",
+        "returnTo": {
+          "kind": "create",
+          "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+          "stage": "image"
+        }
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "settings-save",
+      "route": {
+        "kind": "system-settings",
+        "section": "general",
+        "returnTo": {
+          "kind": "create",
+          "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+          "stage": "image"
+        }
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "settings-update-existing-environment",
+      "route": {
+        "kind": "system-settings",
+        "section": "general",
+        "returnTo": {
+          "kind": "create",
+          "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+          "stage": "image"
+        }
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "restart-ready",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98"
+      },
+      "legacyShell": false
+    }
+  ],
+  "ipcProjectLoads": {
+    "task_list_recent": 1,
+    "consistency_profile_list": 1,
+    "reference_set_list": 1
+  },
+  "ipcObserver": "scripts/testing/native-ipc-observer.mjs; actual POST JSON only; preflights/probes excluded; new request IDs retained",
+  "dialogs": {
+    "logs": [
+      {
+        "width": 1920,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 719.2000122070312,
+          "right": 1200.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      },
+      {
+        "width": 1440,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 479.20001220703125,
+          "right": 960.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      },
+      {
+        "width": 1180,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 349.20001220703125,
+          "right": 830.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      }
+    ],
+    "focus": {
+      "cls": "v3-skip",
+      "outline": "solid",
+      "top": 0
+    },
+    "draftPreserved": true,
+    "projectSwitch": {
+      "kind": "project",
+      "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+      "page": "overview"
+    },
+    "advancedBridge": true
+  },
+  "realRestart": [
+    {
+      "name": "real-restart",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98"
+      },
+      "legacyShell": false
+    },
+    {
+      "name": "settings-persisted-after-real-restart",
+      "route": {
+        "kind": "system-settings",
+        "section": "general",
+        "returnTo": {
+          "kind": "library",
+          "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98"
+        }
+      },
+      "legacyShell": false
+    }
+  ],
+  "settingsProfilePersisted": true,
+  "fixtureAdaptation": "Initial attempt to create an environment with copied existing endpoint was correctly rejected. Edited existing profile using Update Environment; save and real restart verified. No production fix/retry policy change.",
+  "maxVersion": 42,
+  "043Present": false,
+  "backupVersion": 20,
+  "appClosed": true,
+  "duration": "NOT_MEASURED as one aggregate; individual acceptance commands and artifacts recorded",
+  "coverageScope": "Specific named isolated cases, not exhaustive E2E for every screen; no generation, queue start or user ComfyUI mutation."
+}

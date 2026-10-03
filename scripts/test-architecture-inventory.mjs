@@ -6,6 +6,7 @@ import ts from 'typescript';
 
 export function testInventory(root) {
   const rows = [], ignored = [], helpers = [];
+  const backendMap = new Map(JSON.parse(readFileSync(`${root}/docs/architecture/phase8-backend-decomposition.json`, 'utf8')).rows.map(r => [r.path, r.bounded_context]));
   function walk(dir) {
     if (!existsSync(dir)) return;
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -43,7 +44,8 @@ export function testInventory(root) {
     const mock = /vi\.mock|mockResolvedValue|Mock[A-Z]|Fake[A-Z]|Stub[A-Z]/.test(source);
     const layer = architecture ? 'ARCHITECTURE' : /contract|ipc|serialization/i.test(path) ? 'CONTRACT' : path.startsWith('src-tauri/tests') ? 'INTEGRATION' : db ? 'REPOSITORY' : /src-tauri\/src\/application/.test(path) ? 'APPLICATION' : /src-tauri\/src\/domain/.test(path) ? 'DOMAIN' : /\.tsx$/.test(path) ? 'FEATURE' : 'UNIT';
     const sleeps = [...source.matchAll(/(?:thread::sleep|tokio::time::sleep|\bsleep|setTimeout)\s*\(/g)].length;
-    rows.push({ path, suite: path.replace(/\.(?:test|spec)?\.?[a-z]+$/, ''), owner, bounded_context: owner,
+    const inferredContext = /workflow|recipe|binding/i.test(path) ? 'Workflow' : /production|generation|queue|run_|runtime|task|artifact/i.test(path) ? 'Production/Runs' : /asset|prompt|library|consistency|reference/i.test(path) ? 'Library/Assets' : /project|backup/i.test(path) ? 'Project' : /create|studio/i.test(path) ? 'Create/Studio' : 'System/Application';
+    rows.push({ path, suite: path.replace(/\.(?:test|spec)?\.?[a-z]+$/, ''), owner, bounded_context: backendMap.get(path) ?? inferredContext,
       test_layer: layer, behavior_covered: tests.map(t => t.name), failure_mode: architecture ? 'Boundary drift / forbidden ownership' : 'Behavior, error, isolation or compatibility regression: see named cases',
       uses_mock: mock, uses_real_db: db, uses_real_fs: /tempdir|TempDir|mkdtemp|FileSystem|write_file/.test(source),
       uses_real_ipc: false, uses_real_process: /Command::new|execFileSync|spawn\(/.test(source), uses_native_app: false,
