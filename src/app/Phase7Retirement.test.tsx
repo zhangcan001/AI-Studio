@@ -96,6 +96,9 @@ it("phase7_target15 keyboard skip focus and active navigation survive single she
 it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()=>{
  expect(readdirSync("src-tauri/migrations").some((f:string)=>f.startsWith("043"))).toBe(false);expect(read("src-tauri/src/application/project_backup_service.rs")).toContain("const BACKUP_VERSION: u32 = 20;");
  function allFiles(dir:string):string[]{return readdirSync(dir,{withFileTypes:true}).flatMap((e:{name:string;isDirectory:()=>boolean})=>e.isDirectory()?allFiles(`${dir}/${e.name}`):[`${dir}/${e.name}`]).sort();}
- for(const [root,expected] of Object.entries(matrix.frozenSources)){const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
+ // Phase8 intentionally changes backend structure, not migrations or CSS. Keep a pinned
+ // successor snapshot instead of treating the historical Phase7 backend as immutable forever.
+ const phase8=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json")) as {backendSourceSnapshot:{files:number;sha256:string}};
+ for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?phase8.backendSourceSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
 
 });

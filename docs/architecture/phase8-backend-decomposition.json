@@ -161,7 +161,17 @@
       "production_lines": 183,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 196
+      }
     },
     {
       "path": "src-tauri/src/application/artifact_service.rs",
@@ -194,7 +204,17 @@
       "production_lines": 623,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 774
+      }
     },
     {
       "path": "src-tauri/src/application/asset_data_service.rs",
@@ -227,7 +247,17 @@
       "production_lines": 151,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 534
+      }
     },
     {
       "path": "src-tauri/src/application/asset_deletion_service.rs",
@@ -260,7 +290,17 @@
       "production_lines": 370,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 803
+      }
     },
     {
       "path": "src-tauri/src/application/asset_import_service.rs",
@@ -296,7 +336,17 @@
       "production_lines": 601,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1139
+      }
     },
     {
       "path": "src-tauri/src/application/asset_library_service.rs",
@@ -328,7 +378,17 @@
       "production_lines": 87,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 96
+      }
     },
     {
       "path": "src-tauri/src/application/asset_query_service.rs",
@@ -362,7 +422,17 @@
       "production_lines": 356,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 584
+      }
     },
     {
       "path": "src-tauri/src/application/asset_usage_service.rs",
@@ -394,7 +464,17 @@
       "production_lines": 181,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 341
+      }
     },
     {
       "path": "src-tauri/src/application/asset_video_prompt_service.rs",
@@ -427,7 +507,17 @@
       "production_lines": 154,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 307
+      }
     },
     {
       "path": "src-tauri/src/application/batch_workflow_preset_service.rs",
@@ -464,7 +554,17 @@
       "production_lines": 313,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 454
+      }
     },
     {
       "path": "src-tauri/src/application/binding_lifecycle_race_tests.rs",
@@ -491,7 +591,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 3,
+          "pools": 1,
+          "sql": 2
+        },
+        "direct_fs": false,
+        "production_lines": 307
+      }
     },
     {
       "path": "src-tauri/src/application/build_info.rs",
@@ -518,7 +628,17 @@
       "production_lines": 3,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 5
+      }
     },
     {
       "path": "src-tauri/src/application/builtin_runtime_packages.rs",
@@ -549,7 +669,17 @@
       "production_lines": 266,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 760
+      }
     },
     {
       "path": "src-tauri/src/application/cancellation_e2e.rs",
@@ -576,7 +706,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 6,
+          "pools": 2,
+          "sql": 5
+        },
+        "direct_fs": true,
+        "production_lines": 1095
+      }
     },
     {
       "path": "src-tauri/src/application/comfy_execution_failure.rs",
@@ -603,7 +743,17 @@
       "production_lines": 16,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 37
+      }
     },
     {
       "path": "src-tauri/src/application/comfy_memory_service.rs",
@@ -634,7 +784,17 @@
       "production_lines": 94,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 309
+      }
     },
     {
       "path": "src-tauri/src/application/comfy_preflight_service.rs",
@@ -667,7 +827,17 @@
       "production_lines": 489,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 769
+      }
     },
     {
       "path": "src-tauri/src/application/comfy_service.rs",
@@ -703,7 +873,17 @@
       "production_lines": 319,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 550
+      }
     },
     {
       "path": "src-tauri/src/application/consistency_profile_service.rs",
@@ -734,7 +914,17 @@
       "production_lines": 894,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 957
+      }
     },
     {
       "path": "src-tauri/src/application/consistency_scope_binding_service.rs",
@@ -766,7 +956,17 @@
       "production_lines": 961,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1004
+      }
     },
     {
       "path": "src-tauri/src/application/dev027_e2e.rs",
@@ -793,7 +993,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1049
+      }
     },
     {
       "path": "src-tauri/src/application/dev031_e2e.rs",
@@ -820,7 +1030,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 359
+      }
     },
     {
       "path": "src-tauri/src/application/diagnostics_service.rs",
@@ -855,7 +1075,17 @@
       "production_lines": 287,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 379
+      }
     },
     {
       "path": "src-tauri/src/application/episode_production_service.rs",
@@ -890,7 +1120,17 @@
       "production_lines": 740,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1319
+      }
     },
     {
       "path": "src-tauri/src/application/external_production_handoff_service.rs",
@@ -926,7 +1166,17 @@
       "production_lines": 1048,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1108
+      }
     },
     {
       "path": "src-tauri/src/application/generation_catalog_service.rs",
@@ -959,7 +1209,17 @@
       "production_lines": 305,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 431
+      }
     },
     {
       "path": "src-tauri/src/application/generation_e2e.rs",
@@ -986,7 +1246,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1256
+      }
     },
     {
       "path": "src-tauri/src/application/generation_input_preparer.rs",
@@ -1019,7 +1289,17 @@
       "production_lines": 956,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1628
+      }
     },
     {
       "path": "src-tauri/src/application/generation_service.rs",
@@ -1065,7 +1345,17 @@
       "production_lines": 2324,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 2918
+      }
     },
     {
       "path": "src-tauri/src/application/h3_local_import_service.rs",
@@ -1108,7 +1398,17 @@
       "production_lines": 4081,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 5896
+      }
     },
     {
       "path": "src-tauri/src/application/image_inspection.rs",
@@ -1139,7 +1439,17 @@
       "production_lines": 69,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 79
+      }
     },
     {
       "path": "src-tauri/src/application/media_probe.rs",
@@ -1170,7 +1480,17 @@
       "production_lines": 171,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 198
+      }
     },
     {
       "path": "src-tauri/src/application/media_protocol.rs",
@@ -1201,7 +1521,17 @@
       "production_lines": 216,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 590
+      }
     },
     {
       "path": "src-tauri/src/application/mod.rs",
@@ -1228,7 +1558,17 @@
       "production_lines": 98,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 111
+      }
     },
     {
       "path": "src-tauri/src/application/model_service.rs",
@@ -1262,7 +1602,17 @@
       "production_lines": 291,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 427
+      }
     },
     {
       "path": "src-tauri/src/application/ordered_reference_binding.rs",
@@ -1294,7 +1644,17 @@
       "production_lines": 82,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 141
+      }
     },
     {
       "path": "src-tauri/src/application/organization_service.rs",
@@ -1325,7 +1685,17 @@
       "production_lines": 221,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 259
+      }
     },
     {
       "path": "src-tauri/src/application/output_collector.rs",
@@ -1356,7 +1726,17 @@
       "production_lines": 346,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 761
+      }
     },
     {
       "path": "src-tauri/src/application/pagination.rs",
@@ -1386,7 +1766,17 @@
       "production_lines": 21,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 25
+      }
     },
     {
       "path": "src-tauri/src/application/ports/artifact_repository.rs",
@@ -1417,7 +1807,17 @@
       "production_lines": 55,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 66
+      }
     },
     {
       "path": "src-tauri/src/application/ports/asset_browse_repository.rs",
@@ -1449,7 +1849,17 @@
       "production_lines": 78,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 87
+      }
     },
     {
       "path": "src-tauri/src/application/ports/asset_deletion_repository.rs",
@@ -1480,7 +1890,17 @@
       "production_lines": 44,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 48
+      }
     },
     {
       "path": "src-tauri/src/application/ports/asset_repository.rs",
@@ -1512,7 +1932,17 @@
       "production_lines": 149,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 168
+      }
     },
     {
       "path": "src-tauri/src/application/ports/asset_store.rs",
@@ -1543,7 +1973,17 @@
       "production_lines": 244,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 270
+      }
     },
     {
       "path": "src-tauri/src/application/ports/asset_usage_repository.rs",
@@ -1576,7 +2016,17 @@
       "production_lines": 281,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 300
+      }
     },
     {
       "path": "src-tauri/src/application/ports/asset_video_prompt_repository.rs",
@@ -1607,7 +2057,17 @@
       "production_lines": 24,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 30
+      }
     },
     {
       "path": "src-tauri/src/application/ports/clock.rs",
@@ -1637,7 +2097,17 @@
       "production_lines": 32,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 37
+      }
     },
     {
       "path": "src-tauri/src/application/ports/comfy_adapter.rs",
@@ -1670,7 +2140,17 @@
       "production_lines": 703,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1101
+      }
     },
     {
       "path": "src-tauri/src/application/ports/consistency_profile_repository.rs",
@@ -1701,7 +2181,17 @@
       "production_lines": 98,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 114
+      }
     },
     {
       "path": "src-tauri/src/application/ports/consistency_scope_repository.rs",
@@ -1732,7 +2222,17 @@
       "production_lines": 51,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 57
+      }
     },
     {
       "path": "src-tauri/src/application/ports/database_health_probe.rs",
@@ -1761,7 +2261,17 @@
       "production_lines": 5,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 7
+      }
     },
     {
       "path": "src-tauri/src/application/ports/external_production_handoff_repository.rs",
@@ -1793,7 +2303,17 @@
       "production_lines": 138,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 157
+      }
     },
     {
       "path": "src-tauri/src/application/ports/generation_definition_repository.rs",
@@ -1824,7 +2344,17 @@
       "production_lines": 70,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 78
+      }
     },
     {
       "path": "src-tauri/src/application/ports/generation_snapshot_repository.rs",
@@ -1855,7 +2385,17 @@
       "production_lines": 11,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 14
+      }
     },
     {
       "path": "src-tauri/src/application/ports/mod.rs",
@@ -1882,7 +2422,17 @@
       "production_lines": 191,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 198
+      }
     },
     {
       "path": "src-tauri/src/application/ports/model_repository.rs",
@@ -1913,7 +2463,17 @@
       "production_lines": 22,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 32
+      }
     },
     {
       "path": "src-tauri/src/application/ports/organization_repository.rs",
@@ -1946,7 +2506,17 @@
       "production_lines": 123,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 129
+      }
     },
     {
       "path": "src-tauri/src/application/ports/preset_repository.rs",
@@ -1977,7 +2547,17 @@
       "production_lines": 28,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 35
+      }
     },
     {
       "path": "src-tauri/src/application/ports/production_audit_repository.rs",
@@ -2007,7 +2587,17 @@
       "production_lines": 162,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 179
+      }
     },
     {
       "path": "src-tauri/src/application/ports/production_orchestrator_repository.rs",
@@ -2037,7 +2627,17 @@
       "production_lines": 235,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 272
+      }
     },
     {
       "path": "src-tauri/src/application/ports/production_queue_repository.rs",
@@ -2069,7 +2669,17 @@
       "production_lines": 196,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 220
+      }
     },
     {
       "path": "src-tauri/src/application/ports/production_structure_repository.rs",
@@ -2100,7 +2710,17 @@
       "production_lines": 102,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 110
+      }
     },
     {
       "path": "src-tauri/src/application/ports/project_backup_repository.rs",
@@ -2133,7 +2753,17 @@
       "production_lines": 108,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 119
+      }
     },
     {
       "path": "src-tauri/src/application/ports/project_command_center_repository.rs",
@@ -2163,7 +2793,17 @@
       "production_lines": 136,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 153
+      }
     },
     {
       "path": "src-tauri/src/application/ports/project_directory_store.rs",
@@ -2193,7 +2833,17 @@
       "production_lines": 33,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 39
+      }
     },
     {
       "path": "src-tauri/src/application/ports/project_manifest_repository.rs",
@@ -2223,7 +2873,17 @@
       "production_lines": 238,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 264
+      }
     },
     {
       "path": "src-tauri/src/application/ports/project_repository.rs",
@@ -2255,7 +2915,17 @@
       "production_lines": 34,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 42
+      }
     },
     {
       "path": "src-tauri/src/application/ports/project_workflow_binding_repository.rs",
@@ -2286,7 +2956,17 @@
       "production_lines": 121,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 132
+      }
     },
     {
       "path": "src-tauri/src/application/ports/prompt_library_repository.rs",
@@ -2317,7 +2997,17 @@
       "production_lines": 96,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 109
+      }
     },
     {
       "path": "src-tauri/src/application/ports/provenance_lineage_repository.rs",
@@ -2348,7 +3038,17 @@
       "production_lines": 24,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 29
+      }
     },
     {
       "path": "src-tauri/src/application/ports/recipe_history_query_repository.rs",
@@ -2380,7 +3080,17 @@
       "production_lines": 145,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 159
+      }
     },
     {
       "path": "src-tauri/src/application/ports/reference_anchor_repository.rs",
@@ -2411,7 +3121,17 @@
       "production_lines": 32,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 39
+      }
     },
     {
       "path": "src-tauri/src/application/ports/reference_set_repository.rs",
@@ -2442,7 +3162,17 @@
       "production_lines": 55,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 64
+      }
     },
     {
       "path": "src-tauri/src/application/ports/repair_job_repository.rs",
@@ -2473,7 +3203,17 @@
       "production_lines": 38,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 46
+      }
     },
     {
       "path": "src-tauri/src/application/ports/repository_error.rs",
@@ -2502,7 +3242,17 @@
       "production_lines": 116,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 127
+      }
     },
     {
       "path": "src-tauri/src/application/ports/settings_store.rs",
@@ -2535,7 +3285,17 @@
       "production_lines": 119,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 133
+      }
     },
     {
       "path": "src-tauri/src/application/ports/shot_batch_repository.rs",
@@ -2567,7 +3327,17 @@
       "production_lines": 136,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 151
+      }
     },
     {
       "path": "src-tauri/src/application/ports/shot_bulk_repository.rs",
@@ -2600,7 +3370,17 @@
       "production_lines": 68,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 76
+      }
     },
     {
       "path": "src-tauri/src/application/ports/shot_consistency_repository.rs",
@@ -2631,7 +3411,17 @@
       "production_lines": 68,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 76
+      }
     },
     {
       "path": "src-tauri/src/application/ports/shot_repository.rs",
@@ -2664,7 +3454,17 @@
       "production_lines": 103,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 120
+      }
     },
     {
       "path": "src-tauri/src/application/ports/task_history_repository.rs",
@@ -2696,7 +3496,17 @@
       "production_lines": 83,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 94
+      }
     },
     {
       "path": "src-tauri/src/application/ports/task_repository.rs",
@@ -2727,7 +3537,17 @@
       "production_lines": 47,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 57
+      }
     },
     {
       "path": "src-tauri/src/application/ports/task_update_sink.rs",
@@ -2758,7 +3578,17 @@
       "production_lines": 78,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 112
+      }
     },
     {
       "path": "src-tauri/src/application/ports/tool_repository.rs",
@@ -2789,7 +3619,17 @@
       "production_lines": 32,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 47
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_benchmark_repository.rs",
@@ -2819,7 +3659,17 @@
       "production_lines": 180,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 201
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_draft_store.rs",
@@ -2846,7 +3696,17 @@
       "production_lines": 6,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 7
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_library_repository.rs",
@@ -2878,7 +3738,17 @@
       "production_lines": 36,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 40
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_library_source.rs",
@@ -2908,7 +3778,17 @@
       "production_lines": 34,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 41
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_package_store.rs",
@@ -2939,7 +3819,17 @@
       "production_lines": 138,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 164
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_recipe_promotion_repository.rs",
@@ -2970,7 +3860,17 @@
       "production_lines": 26,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 31
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_recipe_runtime_state_repository.rs",
@@ -3001,7 +3901,17 @@
       "production_lines": 29,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 34
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_registry_repository.rs",
@@ -3032,7 +3942,17 @@
       "production_lines": 112,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 128
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_run_repository.rs",
@@ -3062,7 +3982,17 @@
       "production_lines": 12,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 14
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_runtime_artifact_repository.rs",
@@ -3093,7 +4023,17 @@
       "production_lines": 42,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 49
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_runtime_repository.rs",
@@ -3124,7 +4064,17 @@
       "production_lines": 84,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 95
+      }
     },
     {
       "path": "src-tauri/src/application/ports/workflow_runtime_state_repository.rs",
@@ -3155,7 +4105,17 @@
       "production_lines": 35,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 42
+      }
     },
     {
       "path": "src-tauri/src/application/preset_service.rs",
@@ -3193,7 +4153,17 @@
       "production_lines": 540,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 758
+      }
     },
     {
       "path": "src-tauri/src/application/product/creation_facade.rs",
@@ -3225,7 +4195,17 @@
       "production_lines": 217,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 223
+      }
     },
     {
       "path": "src-tauri/src/application/product/creation_facade/context.rs",
@@ -3259,7 +4239,17 @@
       "production_lines": 409,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 428
+      }
     },
     {
       "path": "src-tauri/src/application/product/creation_facade/submission.rs",
@@ -3292,7 +4282,17 @@
       "production_lines": 265,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 273
+      }
     },
     {
       "path": "src-tauri/src/application/product/error.rs",
@@ -3321,7 +4321,17 @@
       "production_lines": 112,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 118
+      }
     },
     {
       "path": "src-tauri/src/application/product/library_facade/detail.rs",
@@ -3352,7 +4362,17 @@
       "production_lines": 110,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 112
+      }
     },
     {
       "path": "src-tauri/src/application/product/library_facade/list.rs",
@@ -3383,7 +4403,17 @@
       "production_lines": 263,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 270
+      }
     },
     {
       "path": "src-tauri/src/application/product/library_facade/mod.rs",
@@ -3413,7 +4443,17 @@
       "production_lines": 36,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 42
+      }
     },
     {
       "path": "src-tauri/src/application/product/library_facade/operations.rs",
@@ -3444,7 +4484,17 @@
       "production_lines": 351,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 358
+      }
     },
     {
       "path": "src-tauri/src/application/product/library_facade/relations.rs",
@@ -3475,7 +4525,17 @@
       "production_lines": 204,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 207
+      }
     },
     {
       "path": "src-tauri/src/application/product/library_facade/types.rs",
@@ -3507,7 +4567,17 @@
       "production_lines": 253,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 274
+      }
     },
     {
       "path": "src-tauri/src/application/product/mod.rs",
@@ -3534,7 +4604,17 @@
       "production_lines": 7,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 8
+      }
     },
     {
       "path": "src-tauri/src/application/product/project_facade.rs",
@@ -3569,7 +4649,17 @@
       "production_lines": 189,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 205
+      }
     },
     {
       "path": "src-tauri/src/application/product/run_facade.rs",
@@ -3602,7 +4692,17 @@
       "production_lines": 605,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 667
+      }
     },
     {
       "path": "src-tauri/src/application/product/run_facade/detail.rs",
@@ -3633,7 +4733,17 @@
       "production_lines": 394,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 407
+      }
     },
     {
       "path": "src-tauri/src/application/product/run_facade/workspace.rs",
@@ -3664,7 +4774,17 @@
       "production_lines": 260,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 269
+      }
     },
     {
       "path": "src-tauri/src/application/product/selection_ref.rs",
@@ -3693,7 +4813,17 @@
       "production_lines": 61,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 100
+      }
     },
     {
       "path": "src-tauri/src/application/product_runtime_scope.rs",
@@ -3722,7 +4852,17 @@
       "production_lines": 47,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 113
+      }
     },
     {
       "path": "src-tauri/src/application/production_audit_service.rs",
@@ -3757,7 +4897,17 @@
       "production_lines": 1517,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1961
+      }
     },
     {
       "path": "src-tauri/src/application/production_batch_runbook_service.rs",
@@ -3793,7 +4943,17 @@
       "production_lines": 486,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 888
+      }
     },
     {
       "path": "src-tauri/src/application/production_orchestrator_service.rs",
@@ -3835,7 +4995,17 @@
       "production_lines": 1622,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 2709
+      }
     },
     {
       "path": "src-tauri/src/application/production_package_discovery_service.rs",
@@ -3867,7 +5037,17 @@
       "production_lines": 286,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 311
+      }
     },
     {
       "path": "src-tauri/src/application/production_package_inspector.rs",
@@ -3903,7 +5083,17 @@
       "production_lines": 1697,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 2176
+      }
     },
     {
       "path": "src-tauri/src/application/production_package_service.rs",
@@ -3933,9 +5123,9 @@
       "direct_fs": true,
       "direct_runtime": false,
       "business_logic": true,
-      "target_role": "Move existing bootstrap H3 default selection into existing configuration owner, unchanged semantics",
+      "target_role": "Existing ProductionPackageH3Config owns bootstrap selection, not a new domain authority",
       "target_boundary": "Production/Runs",
-      "decision": "EXTRACT_DOMAIN_POLICY",
+      "decision": "EXTRACT_APPLICATION_SERVICE",
       "risk": "MEDIUM",
       "migration_order": 3,
       "tests": [
@@ -3946,7 +5136,17 @@
       "production_lines": 1173,
       "commands": [],
       "god_module": true,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1466
+      }
     },
     {
       "path": "src-tauri/src/application/production_preparation_service.rs",
@@ -3986,7 +5186,17 @@
       "production_lines": 770,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 887
+      }
     },
     {
       "path": "src-tauri/src/application/production_queue_service.rs",
@@ -4027,7 +5237,17 @@
       "production_lines": 2980,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 3889
+      }
     },
     {
       "path": "src-tauri/src/application/production_start_admission_service.rs",
@@ -4061,7 +5281,17 @@
       "production_lines": 609,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1096
+      }
     },
     {
       "path": "src-tauri/src/application/production_structure_service.rs",
@@ -4095,7 +5325,17 @@
       "production_lines": 603,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 754
+      }
     },
     {
       "path": "src-tauri/src/application/project_backup_service.rs",
@@ -4133,7 +5373,17 @@
       "production_lines": 4697,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 10465
+      }
     },
     {
       "path": "src-tauri/src/application/project_bootstrap.rs",
@@ -4164,7 +5414,17 @@
       "production_lines": 59,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 68
+      }
     },
     {
       "path": "src-tauri/src/application/project_command_center_service.rs",
@@ -4202,7 +5462,17 @@
       "production_lines": 1875,
       "commands": [],
       "god_module": true,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 2316
+      }
     },
     {
       "path": "src-tauri/src/application/project_manifest_service.rs",
@@ -4240,7 +5510,17 @@
       "production_lines": 877,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1177
+      }
     },
     {
       "path": "src-tauri/src/application/project_service.rs",
@@ -4274,7 +5554,17 @@
       "production_lines": 183,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 345
+      }
     },
     {
       "path": "src-tauri/src/application/project_template_service.rs",
@@ -4310,7 +5600,17 @@
       "production_lines": 245,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 347
+      }
     },
     {
       "path": "src-tauri/src/application/project_workflow_binding_service.rs",
@@ -4344,7 +5644,17 @@
       "production_lines": 716,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 919
+      }
     },
     {
       "path": "src-tauri/src/application/prompt_context_builder.rs",
@@ -4375,7 +5685,17 @@
       "production_lines": 214,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 313
+      }
     },
     {
       "path": "src-tauri/src/application/prompt_library_service.rs",
@@ -4409,7 +5729,17 @@
       "production_lines": 378,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 620
+      }
     },
     {
       "path": "src-tauri/src/application/provenance_lineage_service.rs",
@@ -4443,7 +5773,17 @@
       "production_lines": 433,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 722
+      }
     },
     {
       "path": "src-tauri/src/application/recipe_history_query_service.rs",
@@ -4476,7 +5816,17 @@
       "production_lines": 329,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 458
+      }
     },
     {
       "path": "src-tauri/src/application/reference_anchor_service.rs",
@@ -4510,7 +5860,17 @@
       "production_lines": 307,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 671
+      }
     },
     {
       "path": "src-tauri/src/application/reference_set_service.rs",
@@ -4542,7 +5902,17 @@
       "production_lines": 578,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 625
+      }
     },
     {
       "path": "src-tauri/src/application/repair_jobs/mod.rs",
@@ -4574,7 +5944,17 @@
       "production_lines": 299,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 784
+      }
     },
     {
       "path": "src-tauri/src/application/repair_jobs/recipe_jobs.rs",
@@ -4608,7 +5988,17 @@
       "production_lines": 443,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 463
+      }
     },
     {
       "path": "src-tauri/src/application/repair_jobs/registry_jobs.rs",
@@ -4640,7 +6030,17 @@
       "production_lines": 135,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 144
+      }
     },
     {
       "path": "src-tauri/src/application/scene_production_service.rs",
@@ -4676,7 +6076,17 @@
       "production_lines": 520,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 730
+      }
     },
     {
       "path": "src-tauri/src/application/scheduler.rs",
@@ -4708,7 +6118,17 @@
       "production_lines": 101,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 209
+      }
     },
     {
       "path": "src-tauri/src/application/series_production_service.rs",
@@ -4743,7 +6163,17 @@
       "production_lines": 725,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 815
+      }
     },
     {
       "path": "src-tauri/src/application/settings_service.rs",
@@ -4778,7 +6208,17 @@
       "production_lines": 642,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1219
+      }
     },
     {
       "path": "src-tauri/src/application/shot_batch_service.rs",
@@ -4817,7 +6257,17 @@
       "production_lines": 957,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1944
+      }
     },
     {
       "path": "src-tauri/src/application/shot_bulk_service.rs",
@@ -4853,7 +6303,17 @@
       "production_lines": 944,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1532
+      }
     },
     {
       "path": "src-tauri/src/application/shot_consistency_binding_service.rs",
@@ -4886,7 +6346,17 @@
       "production_lines": 514,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 543
+      }
     },
     {
       "path": "src-tauri/src/application/shot_context_resolver.rs",
@@ -4926,7 +6396,17 @@
       "production_lines": 1257,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1283
+      }
     },
     {
       "path": "src-tauri/src/application/shot_readiness_evaluator.rs",
@@ -4963,7 +6443,17 @@
       "production_lines": 843,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 933
+      }
     },
     {
       "path": "src-tauri/src/application/shot_readiness_service.rs",
@@ -5003,7 +6493,17 @@
       "production_lines": 480,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 508
+      }
     },
     {
       "path": "src-tauri/src/application/shot_reference_pack_builder.rs",
@@ -5036,7 +6536,17 @@
       "production_lines": 558,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 726
+      }
     },
     {
       "path": "src-tauri/src/application/shot_service.rs",
@@ -5078,7 +6588,17 @@
       "production_lines": 1271,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1537
+      }
     },
     {
       "path": "src-tauri/src/application/shot_service/creation.rs",
@@ -5107,7 +6627,17 @@
       "production_lines": 114,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 116
+      }
     },
     {
       "path": "src-tauri/src/application/shot_workflow_compatibility.rs",
@@ -5137,7 +6667,17 @@
       "production_lines": 116,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 269
+      }
     },
     {
       "path": "src-tauri/src/application/source_asset_import_service.rs",
@@ -5173,7 +6713,17 @@
       "production_lines": 717,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 1278
+      }
     },
     {
       "path": "src-tauri/src/application/task_cancellation_service.rs",
@@ -5205,7 +6755,17 @@
       "production_lines": 130,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 313
+      }
     },
     {
       "path": "src-tauri/src/application/task_execution_registry.rs",
@@ -5236,7 +6796,17 @@
       "production_lines": 48,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 93
+      }
     },
     {
       "path": "src-tauri/src/application/task_history_service.rs",
@@ -5273,7 +6843,17 @@
       "production_lines": 933,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1232
+      }
     },
     {
       "path": "src-tauri/src/application/task_query_service.rs",
@@ -5305,7 +6885,17 @@
       "production_lines": 136,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 186
+      }
     },
     {
       "path": "src-tauri/src/application/task_recovery_service.rs",
@@ -5342,7 +6932,17 @@
       "production_lines": 562,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1771
+      }
     },
     {
       "path": "src-tauri/src/application/tool_service.rs",
@@ -5376,7 +6976,17 @@
       "production_lines": 438,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 594
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_analysis_recipe_correctness_tests.rs",
@@ -5403,7 +7013,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 371
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_analysis_service.rs",
@@ -5436,7 +7056,17 @@
       "production_lines": 3039,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 4740
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_benchmark_service.rs",
@@ -5476,7 +7106,17 @@
       "production_lines": 1832,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 2478
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_graph_analysis.rs",
@@ -5507,7 +7147,17 @@
       "production_lines": 378,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 587
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_library_service.rs",
@@ -5544,7 +7194,17 @@
       "production_lines": 228,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 326
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_lifecycle_coordinator.rs",
@@ -5575,7 +7235,17 @@
       "production_lines": 292,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 312
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_lifecycle_service.rs",
@@ -5613,7 +7283,17 @@
       "production_lines": 2750,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 4068
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_manifest.rs",
@@ -5642,7 +7322,17 @@
       "production_lines": 45,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 72
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_onboarding_recipe_repair.rs",
@@ -5675,7 +7365,17 @@
       "production_lines": 725,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1119
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_onboarding_service.rs",
@@ -5711,7 +7411,17 @@
       "production_lines": 6891,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 10731
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_recognition_provenance.rs",
@@ -5740,7 +7450,17 @@
       "production_lines": 87,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 131
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_recognition_schema.rs",
@@ -5771,7 +7491,17 @@
       "production_lines": 495,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 708
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_recognition_service.rs",
@@ -5804,7 +7534,17 @@
       "production_lines": 612,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 847
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_recognition_v3_replay.rs",
@@ -5831,7 +7571,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 929
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_registry_service.rs",
@@ -5867,7 +7617,17 @@
       "production_lines": 2641,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 2892
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_semantic_graph.rs",
@@ -5899,7 +7659,17 @@
       "production_lines": 2570,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 5243
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_semantic_identity.rs",
@@ -5930,7 +7700,17 @@
       "production_lines": 32,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 168
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_ui_compatibility.rs",
@@ -5961,7 +7741,17 @@
       "production_lines": 1006,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1963
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_ui_normalizer.rs",
@@ -5994,7 +7784,17 @@
       "production_lines": 6704,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 7832
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_ui_serialization.rs",
@@ -6026,7 +7826,17 @@
       "production_lines": 1641,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1811
+      }
     },
     {
       "path": "src-tauri/src/application/workflow_workspace_query_service.rs",
@@ -6063,7 +7873,17 @@
       "production_lines": 1103,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1242
+      }
     },
     {
       "path": "src-tauri/src/commands/artifact.rs",
@@ -6110,7 +7930,17 @@
         "artifact_review_reset"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 282
+      }
     },
     {
       "path": "src-tauri/src/commands/asset.rs",
@@ -6179,7 +8009,17 @@
         "asset_read_thumbnail"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 712
+      }
     },
     {
       "path": "src-tauri/src/commands/batch_workflow_preset.rs",
@@ -6218,7 +8058,17 @@
         "batch_workflow_preset_delete"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 50
+      }
     },
     {
       "path": "src-tauri/src/commands/catalog.rs",
@@ -6252,7 +8102,17 @@
         "generation_catalog_list"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 17
+      }
     },
     {
       "path": "src-tauri/src/commands/comfy.rs",
@@ -6294,7 +8154,17 @@
         "comfy_free_memory"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 88
+      }
     },
     {
       "path": "src-tauri/src/commands/consistency_assets.rs",
@@ -6378,7 +8248,17 @@
         "reference_set_usage_get"
       ],
       "god_module": true,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1179
+      }
     },
     {
       "path": "src-tauri/src/commands/consistency_bindings.rs",
@@ -6427,7 +8307,17 @@
         "shot_context_draft_get"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 582
+      }
     },
     {
       "path": "src-tauri/src/commands/diagnostics.rs",
@@ -6466,7 +8356,17 @@
         "diagnostics_export"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 54
+      }
     },
     {
       "path": "src-tauri/src/commands/episode_production.rs",
@@ -6505,7 +8405,17 @@
         "episode_production_prepare"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 117
+      }
     },
     {
       "path": "src-tauri/src/commands/external_production_handoff.rs",
@@ -6546,7 +8456,17 @@
         "external_production_handoff_mappings"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 90
+      }
     },
     {
       "path": "src-tauri/src/commands/generation.rs",
@@ -6591,7 +8511,17 @@
         "generation_create_batch"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 521
+      }
     },
     {
       "path": "src-tauri/src/commands/h3_local_import.rs",
@@ -6633,7 +8563,17 @@
         "h3_local_import_update_project_segment_draft"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 393
+      }
     },
     {
       "path": "src-tauri/src/commands/mod.rs",
@@ -6664,7 +8604,17 @@
       "production_lines": 92,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 100
+      }
     },
     {
       "path": "src-tauri/src/commands/model.rs",
@@ -6718,7 +8668,17 @@
         "model_version_create"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 185
+      }
     },
     {
       "path": "src-tauri/src/commands/organization.rs",
@@ -6780,7 +8740,17 @@
         "project_template_create_project"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 246
+      }
     },
     {
       "path": "src-tauri/src/commands/preflight.rs",
@@ -6813,7 +8783,17 @@
         "comfy_preflight_current"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 12
+      }
     },
     {
       "path": "src-tauri/src/commands/preset.rs",
@@ -6859,7 +8839,17 @@
         "preset_set_preferred"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 186
+      }
     },
     {
       "path": "src-tauri/src/commands/product.rs",
@@ -6948,7 +8938,17 @@
         "product_run_cancel"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 469
+      }
     },
     {
       "path": "src-tauri/src/commands/production_audit.rs",
@@ -6991,7 +8991,17 @@
         "production_audit_snapshot_detail"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 118
+      }
     },
     {
       "path": "src-tauri/src/commands/production_batch_runbook.rs",
@@ -7026,7 +9036,17 @@
         "production_batch_runbook"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 28
+      }
     },
     {
       "path": "src-tauri/src/commands/production_orchestrator.rs",
@@ -7086,7 +9106,17 @@
         "production_run_template_list"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 298
+      }
     },
     {
       "path": "src-tauri/src/commands/production_package.rs",
@@ -7127,7 +9157,17 @@
         "production_package_create_batches"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 413
+      }
     },
     {
       "path": "src-tauri/src/commands/production_package_discovery.rs",
@@ -7157,7 +9197,17 @@
       "production_lines": 34,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 39
+      }
     },
     {
       "path": "src-tauri/src/commands/production_package_provenance.rs",
@@ -7192,7 +9242,17 @@
         "production_package_bindings_list"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 53
+      }
     },
     {
       "path": "src-tauri/src/commands/production_preparation.rs",
@@ -7237,7 +9297,17 @@
         "project_production_admit"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 375
+      }
     },
     {
       "path": "src-tauri/src/commands/production_queue.rs",
@@ -7306,7 +9376,17 @@
         "production_queue_partial_resume"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 761
+      }
     },
     {
       "path": "src-tauri/src/commands/production_structure.rs",
@@ -7371,7 +9451,17 @@
         "production_scene_reorder_shots"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 362
+      }
     },
     {
       "path": "src-tauri/src/commands/project.rs",
@@ -7425,7 +9515,17 @@
         "project_manifest_export"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 233
+      }
     },
     {
       "path": "src-tauri/src/commands/project_command_center.rs",
@@ -7458,7 +9558,17 @@
         "project_command_center_get"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 30
+      }
     },
     {
       "path": "src-tauri/src/commands/prompt_library.rs",
@@ -7506,7 +9616,17 @@
         "prompt_library_delete"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 160
+      }
     },
     {
       "path": "src-tauri/src/commands/provenance_lineage.rs",
@@ -7550,7 +9670,17 @@
         "generation_asset_version_link_list"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 113
+      }
     },
     {
       "path": "src-tauri/src/commands/recipe_history.rs",
@@ -7584,7 +9714,17 @@
         "workflow_recipe_history_get"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 48
+      }
     },
     {
       "path": "src-tauri/src/commands/reference_anchor.rs",
@@ -7627,7 +9767,17 @@
         "reference_anchor_delete"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 140
+      }
     },
     {
       "path": "src-tauri/src/commands/repair_jobs.rs",
@@ -7661,7 +9811,17 @@
         "repair_jobs_status"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 16
+      }
     },
     {
       "path": "src-tauri/src/commands/scene_production.rs",
@@ -7700,7 +9860,17 @@
         "scene_production_prepare"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 132
+      }
     },
     {
       "path": "src-tauri/src/commands/series_production.rs",
@@ -7739,7 +9909,17 @@
         "series_production_prepare"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 105
+      }
     },
     {
       "path": "src-tauri/src/commands/settings.rs",
@@ -7786,7 +9966,17 @@
         "runtime_profiles_delete"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 124
+      }
     },
     {
       "path": "src-tauri/src/commands/shot.rs",
@@ -7841,7 +10031,17 @@
         "shot_generate"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 315
+      }
     },
     {
       "path": "src-tauri/src/commands/shot_batch.rs",
@@ -7879,7 +10079,17 @@
         "shot_batch_create"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 72
+      }
     },
     {
       "path": "src-tauri/src/commands/shot_bulk.rs",
@@ -7923,7 +10133,17 @@
         "bulk_set_shot_stage_config"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 182
+      }
     },
     {
       "path": "src-tauri/src/commands/shot_readiness.rs",
@@ -7964,7 +10184,17 @@
         "scene_preflight"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 90
+      }
     },
     {
       "path": "src-tauri/src/commands/task.rs",
@@ -8010,7 +10240,17 @@
         "task_get_reusable_draft"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 242
+      }
     },
     {
       "path": "src-tauri/src/commands/tool.rs",
@@ -8075,7 +10315,17 @@
         "tool_capability_create"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 279
+      }
     },
     {
       "path": "src-tauri/src/commands/workflow_benchmark.rs",
@@ -8133,7 +10383,17 @@
         "workflow_benchmark_delete"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 342
+      }
     },
     {
       "path": "src-tauri/src/commands/workflow_library.rs",
@@ -8167,7 +10427,17 @@
         "workflow_library_refresh"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 17
+      }
     },
     {
       "path": "src-tauri/src/commands/workflow_lifecycle.rs",
@@ -8236,7 +10506,17 @@
         "workflow_restore_version"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 307
+      }
     },
     {
       "path": "src-tauri/src/commands/workflow_onboarding.rs",
@@ -8285,7 +10565,17 @@
         "workflow_workspace_list"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 238
+      }
     },
     {
       "path": "src-tauri/src/commands/workflow_registry.rs",
@@ -8353,7 +10643,17 @@
         "workflow_rerecognize"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 333
+      }
     },
     {
       "path": "src-tauri/src/commands/workflow_workspace.rs",
@@ -8387,7 +10687,17 @@
         "workflow_workspace_query"
       ],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 22
+      }
     },
     {
       "path": "src-tauri/src/compiler/binding.rs",
@@ -8417,7 +10727,17 @@
       "production_lines": 76,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 166
+      }
     },
     {
       "path": "src-tauri/src/compiler/errors.rs",
@@ -8447,7 +10767,17 @@
       "production_lines": 270,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 277
+      }
     },
     {
       "path": "src-tauri/src/compiler/final_validator.rs",
@@ -8480,7 +10810,17 @@
       "production_lines": 282,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 645
+      }
     },
     {
       "path": "src-tauri/src/compiler/mod.rs",
@@ -8507,7 +10847,17 @@
       "production_lines": 20,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 23
+      }
     },
     {
       "path": "src-tauri/src/compiler/parser.rs",
@@ -8538,7 +10888,17 @@
       "production_lines": 331,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 627
+      }
     },
     {
       "path": "src-tauri/src/compiler/seed.rs",
@@ -8569,7 +10929,17 @@
       "production_lines": 41,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 112
+      }
     },
     {
       "path": "src-tauri/src/compiler/validator.rs",
@@ -8599,7 +10969,17 @@
       "production_lines": 342,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 659
+      }
     },
     {
       "path": "src-tauri/src/compiler/workflow_compiler.rs",
@@ -8631,7 +11011,17 @@
       "production_lines": 581,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1444
+      }
     },
     {
       "path": "src-tauri/src/domain/artifact.rs",
@@ -8663,7 +11053,17 @@
       "production_lines": 172,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 260
+      }
     },
     {
       "path": "src-tauri/src/domain/asset.rs",
@@ -8696,7 +11096,17 @@
       "production_lines": 637,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 679
+      }
     },
     {
       "path": "src-tauri/src/domain/consistency/binding.rs",
@@ -8728,7 +11138,17 @@
       "production_lines": 102,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 114
+      }
     },
     {
       "path": "src-tauri/src/domain/consistency/ids.rs",
@@ -8758,7 +11178,17 @@
       "production_lines": 135,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 153
+      }
     },
     {
       "path": "src-tauri/src/domain/consistency/mod.rs",
@@ -8785,7 +11215,17 @@
       "production_lines": 36,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 42
+      }
     },
     {
       "path": "src-tauri/src/domain/consistency/profile.rs",
@@ -8816,7 +11256,17 @@
       "production_lines": 228,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 254
+      }
     },
     {
       "path": "src-tauri/src/domain/consistency/reference_set.rs",
@@ -8848,7 +11298,17 @@
       "production_lines": 73,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 82
+      }
     },
     {
       "path": "src-tauri/src/domain/consistency/scope_binding.rs",
@@ -8881,7 +11341,17 @@
       "production_lines": 78,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 107
+      }
     },
     {
       "path": "src-tauri/src/domain/consistency/tests.rs",
@@ -8908,7 +11378,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 594
+      }
     },
     {
       "path": "src-tauri/src/domain/consistency/validation.rs",
@@ -8940,7 +11420,17 @@
       "production_lines": 274,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 300
+      }
     },
     {
       "path": "src-tauri/src/domain/generation_snapshot.rs",
@@ -8973,7 +11463,17 @@
       "production_lines": 145,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 223
+      }
     },
     {
       "path": "src-tauri/src/domain/mod.rs",
@@ -9000,7 +11500,17 @@
       "production_lines": 107,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 110
+      }
     },
     {
       "path": "src-tauri/src/domain/model.rs",
@@ -9032,7 +11542,17 @@
       "production_lines": 176,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 255
+      }
     },
     {
       "path": "src-tauri/src/domain/preset.rs",
@@ -9064,7 +11584,17 @@
       "production_lines": 117,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 130
+      }
     },
     {
       "path": "src-tauri/src/domain/production_item_review.rs",
@@ -9093,7 +11623,17 @@
       "production_lines": 47,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 76
+      }
     },
     {
       "path": "src-tauri/src/domain/production_package.rs",
@@ -9125,7 +11665,17 @@
       "production_lines": 587,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 822
+      }
     },
     {
       "path": "src-tauri/src/domain/production_preparation.rs",
@@ -9157,7 +11707,17 @@
       "production_lines": 290,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 310
+      }
     },
     {
       "path": "src-tauri/src/domain/production_queue.rs",
@@ -9189,7 +11749,17 @@
       "production_lines": 151,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 173
+      }
     },
     {
       "path": "src-tauri/src/domain/production_run.rs",
@@ -9216,7 +11786,17 @@
       "production_lines": 147,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 191
+      }
     },
     {
       "path": "src-tauri/src/domain/production_structure.rs",
@@ -9247,7 +11827,17 @@
       "production_lines": 88,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 103
+      }
     },
     {
       "path": "src-tauri/src/domain/project_id.rs",
@@ -9277,7 +11867,17 @@
       "production_lines": 50,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 94
+      }
     },
     {
       "path": "src-tauri/src/domain/provenance_lineage.rs",
@@ -9310,7 +11910,17 @@
       "production_lines": 200,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 285
+      }
     },
     {
       "path": "src-tauri/src/domain/recipe.rs",
@@ -9339,7 +11949,17 @@
       "production_lines": 239,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 265
+      }
     },
     {
       "path": "src-tauri/src/domain/reference_anchor.rs",
@@ -9372,7 +11992,17 @@
       "production_lines": 99,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 115
+      }
     },
     {
       "path": "src-tauri/src/domain/shot.rs",
@@ -9403,7 +12033,17 @@
       "production_lines": 171,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 232
+      }
     },
     {
       "path": "src-tauri/src/domain/shot_context.rs",
@@ -9437,7 +12077,17 @@
       "production_lines": 301,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 333
+      }
     },
     {
       "path": "src-tauri/src/domain/shot_readiness.rs",
@@ -9467,7 +12117,17 @@
       "production_lines": 237,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 366
+      }
     },
     {
       "path": "src-tauri/src/domain/task.rs",
@@ -9499,7 +12159,17 @@
       "production_lines": 1219,
       "commands": [],
       "god_module": true,
-      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams."
+      "defer_reason": "Existing authority is already port-backed; separate migration needed, outside the selected small seams.",
+      "status": "DEFERRED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1837
+      }
     },
     {
       "path": "src-tauri/src/domain/tool.rs",
@@ -9532,7 +12202,17 @@
       "production_lines": 290,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 380
+      }
     },
     {
       "path": "src-tauri/src/domain/workflow.rs",
@@ -9562,7 +12242,17 @@
       "production_lines": 65,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 82
+      }
     },
     {
       "path": "src-tauri/src/error.rs",
@@ -9593,7 +12283,17 @@
       "production_lines": 302,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 2,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 422
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/comfy/client.rs",
@@ -9631,7 +12331,17 @@
       "production_lines": 1632,
       "commands": [],
       "god_module": true,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 3325
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/comfy/dto.rs",
@@ -9661,7 +12371,17 @@
       "production_lines": 64,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 72
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/comfy/mod.rs",
@@ -9688,7 +12408,17 @@
       "production_lines": 4,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 7
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/dev033_benchmark.rs",
@@ -9715,7 +12445,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 16,
+          "pools": 6,
+          "sql": 8
+        },
+        "direct_fs": false,
+        "production_lines": 285
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/dev048_consistency_e2e.rs",
@@ -9742,7 +12482,17 @@
       "production_lines": 0,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 59,
+          "pools": 12,
+          "sql": 29
+        },
+        "direct_fs": false,
+        "production_lines": 1611
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/mod.rs",
@@ -9769,7 +12519,17 @@
       "production_lines": 24,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 35
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/pool.rs",
@@ -9800,7 +12560,17 @@
       "production_lines": 44,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 5,
+          "pools": 3,
+          "sql": 3
+        },
+        "direct_fs": false,
+        "production_lines": 1237
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/artifact.rs",
@@ -9833,7 +12603,17 @@
       "production_lines": 324,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 10,
+          "pools": 3,
+          "sql": 9
+        },
+        "direct_fs": false,
+        "production_lines": 654
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/asset.rs",
@@ -9866,7 +12646,17 @@
       "production_lines": 694,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 24,
+          "pools": 3,
+          "sql": 21
+        },
+        "direct_fs": false,
+        "production_lines": 1264
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/asset_browse.rs",
@@ -9900,7 +12690,17 @@
       "production_lines": 221,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 2,
+          "pools": 3,
+          "sql": 2
+        },
+        "direct_fs": false,
+        "production_lines": 882
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/asset_deletion.rs",
@@ -9935,7 +12735,17 @@
       "production_lines": 481,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 6,
+          "pools": 3,
+          "sql": 10
+        },
+        "direct_fs": false,
+        "production_lines": 744
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/asset_usage.rs",
@@ -9971,7 +12781,17 @@
       "production_lines": 1545,
       "commands": [],
       "god_module": true,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 34,
+          "pools": 6,
+          "sql": 16
+        },
+        "direct_fs": false,
+        "production_lines": 1642
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/asset_video_prompt.rs",
@@ -10003,7 +12823,17 @@
       "production_lines": 96,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 3,
+          "pools": 3,
+          "sql": 3
+        },
+        "direct_fs": false,
+        "production_lines": 154
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/consistency_profile.rs",
@@ -10036,7 +12866,17 @@
       "production_lines": 976,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 43,
+          "pools": 11,
+          "sql": 23
+        },
+        "direct_fs": false,
+        "production_lines": 1022
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/consistency_scope.rs",
@@ -10069,7 +12909,17 @@
       "production_lines": 328,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 9,
+          "pools": 3,
+          "sql": 6
+        },
+        "direct_fs": false,
+        "production_lines": 350
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/database_health.rs",
@@ -10100,7 +12950,17 @@
       "production_lines": 21,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 2,
+          "pools": 3,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 25
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/external_production_handoff.rs",
@@ -10132,7 +12992,17 @@
       "production_lines": 418,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 23,
+          "pools": 4,
+          "sql": 18
+        },
+        "direct_fs": false,
+        "production_lines": 435
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/generation_definition.rs",
@@ -10164,7 +13034,17 @@
       "production_lines": 256,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 7,
+          "pools": 3,
+          "sql": 6
+        },
+        "direct_fs": false,
+        "production_lines": 453
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/generation_snapshot.rs",
@@ -10197,7 +13077,17 @@
       "production_lines": 137,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 4,
+          "pools": 3,
+          "sql": 1
+        },
+        "direct_fs": false,
+        "production_lines": 297
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/mod.rs",
@@ -10229,7 +13119,17 @@
       "production_lines": 181,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 4,
+          "pools": 0,
+          "sql": 2
+        },
+        "direct_fs": false,
+        "production_lines": 234
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/model.rs",
@@ -10262,7 +13162,17 @@
       "production_lines": 249,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 10,
+          "pools": 3,
+          "sql": 7
+        },
+        "direct_fs": false,
+        "production_lines": 355
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/organization.rs",
@@ -10296,7 +13206,17 @@
       "production_lines": 523,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 36,
+          "pools": 3,
+          "sql": 32
+        },
+        "direct_fs": false,
+        "production_lines": 792
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/preset.rs",
@@ -10329,7 +13249,17 @@
       "production_lines": 187,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 10,
+          "pools": 3,
+          "sql": 3
+        },
+        "direct_fs": false,
+        "production_lines": 199
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/production_audit.rs",
@@ -10361,7 +13291,17 @@
       "production_lines": 292,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 15,
+          "pools": 3,
+          "sql": 7
+        },
+        "direct_fs": false,
+        "production_lines": 301
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/production_orchestrator.rs",
@@ -10394,7 +13334,17 @@
       "production_lines": 908,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 42,
+          "pools": 3,
+          "sql": 43
+        },
+        "direct_fs": false,
+        "production_lines": 950
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/production_queue.rs",
@@ -10431,7 +13381,17 @@
       "production_lines": 1839,
       "commands": [],
       "god_module": true,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 67,
+          "pools": 3,
+          "sql": 56
+        },
+        "direct_fs": false,
+        "production_lines": 3911
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/production_structure.rs",
@@ -10466,7 +13426,17 @@
       "production_lines": 947,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 37,
+          "pools": 3,
+          "sql": 33
+        },
+        "direct_fs": false,
+        "production_lines": 1247
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/project.rs",
@@ -10500,7 +13470,17 @@
       "production_lines": 136,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 7,
+          "pools": 3,
+          "sql": 5
+        },
+        "direct_fs": false,
+        "production_lines": 255
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/project_backup.rs",
@@ -10539,7 +13519,17 @@
       "production_lines": 6189,
       "commands": [],
       "god_module": true,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 240,
+          "pools": 4,
+          "sql": 133
+        },
+        "direct_fs": false,
+        "production_lines": 6376
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/project_command_center.rs",
@@ -10571,7 +13561,17 @@
       "production_lines": 343,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 15,
+          "pools": 3,
+          "sql": 29
+        },
+        "direct_fs": false,
+        "production_lines": 351
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/project_manifest.rs",
@@ -10603,7 +13603,17 @@
       "production_lines": 437,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 24,
+          "pools": 3,
+          "sql": 13
+        },
+        "direct_fs": false,
+        "production_lines": 448
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/project_workflow_binding.rs",
@@ -10635,7 +13645,17 @@
       "production_lines": 277,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 12,
+          "pools": 4,
+          "sql": 7
+        },
+        "direct_fs": false,
+        "production_lines": 587
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/prompt_library.rs",
@@ -10668,7 +13688,17 @@
       "production_lines": 354,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 14,
+          "pools": 3,
+          "sql": 15
+        },
+        "direct_fs": false,
+        "production_lines": 613
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/provenance_lineage.rs",
@@ -10701,7 +13731,17 @@
       "production_lines": 246,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 5,
+          "pools": 3,
+          "sql": 7
+        },
+        "direct_fs": false,
+        "production_lines": 479
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/recipe_history_query.rs",
@@ -10734,7 +13774,17 @@
       "production_lines": 690,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 20,
+          "pools": 3,
+          "sql": 25
+        },
+        "direct_fs": false,
+        "production_lines": 761
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/reference_anchor.rs",
@@ -10768,7 +13818,17 @@
       "production_lines": 277,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 14,
+          "pools": 3,
+          "sql": 9
+        },
+        "direct_fs": false,
+        "production_lines": 540
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/reference_set.rs",
@@ -10801,7 +13861,17 @@
       "production_lines": 363,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 14,
+          "pools": 3,
+          "sql": 17
+        },
+        "direct_fs": false,
+        "production_lines": 488
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/repair_job.rs",
@@ -10834,7 +13904,17 @@
       "production_lines": 118,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 7,
+          "pools": 3,
+          "sql": 5
+        },
+        "direct_fs": false,
+        "production_lines": 163
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/shot.rs",
@@ -10870,7 +13950,17 @@
       "production_lines": 927,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 41,
+          "pools": 4,
+          "sql": 31
+        },
+        "direct_fs": false,
+        "production_lines": 1193
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/shot_consistency.rs",
@@ -10903,7 +13993,17 @@
       "production_lines": 369,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 16,
+          "pools": 3,
+          "sql": 9
+        },
+        "direct_fs": false,
+        "production_lines": 498
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/task.rs",
@@ -10936,7 +14036,17 @@
       "production_lines": 899,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 14,
+          "pools": 3,
+          "sql": 6
+        },
+        "direct_fs": false,
+        "production_lines": 1747
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/task_history.rs",
@@ -10971,7 +14081,17 @@
       "production_lines": 497,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 5,
+          "pools": 3,
+          "sql": 3
+        },
+        "direct_fs": false,
+        "production_lines": 960
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/tool.rs",
@@ -11004,7 +14124,17 @@
       "production_lines": 356,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 15,
+          "pools": 3,
+          "sql": 14
+        },
+        "direct_fs": false,
+        "production_lines": 497
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_benchmark.rs",
@@ -11036,7 +14166,17 @@
       "production_lines": 742,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 26,
+          "pools": 3,
+          "sql": 51
+        },
+        "direct_fs": false,
+        "production_lines": 1053
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_library.rs",
@@ -11069,7 +14209,17 @@
       "production_lines": 261,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 15,
+          "pools": 3,
+          "sql": 11
+        },
+        "direct_fs": false,
+        "production_lines": 458
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_recipe_promotion.rs",
@@ -11102,7 +14252,17 @@
       "production_lines": 181,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 10,
+          "pools": 3,
+          "sql": 8
+        },
+        "direct_fs": false,
+        "production_lines": 426
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_recipe_runtime_state.rs",
@@ -11135,7 +14295,17 @@
       "production_lines": 114,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 6,
+          "pools": 3,
+          "sql": 4
+        },
+        "direct_fs": false,
+        "production_lines": 192
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_registry.rs",
@@ -11168,7 +14338,17 @@
       "production_lines": 617,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 28,
+          "pools": 4,
+          "sql": 79
+        },
+        "direct_fs": false,
+        "production_lines": 1093
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_run.rs",
@@ -11199,7 +14379,17 @@
       "production_lines": 35,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 2,
+          "pools": 3,
+          "sql": 1
+        },
+        "direct_fs": false,
+        "production_lines": 81
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_runtime.rs",
@@ -11233,7 +14423,17 @@
       "production_lines": 326,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 13,
+          "pools": 3,
+          "sql": 29
+        },
+        "direct_fs": false,
+        "production_lines": 509
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_runtime_artifact.rs",
@@ -11265,7 +14465,17 @@
       "production_lines": 299,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 11,
+          "pools": 3,
+          "sql": 3
+        },
+        "direct_fs": false,
+        "production_lines": 483
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/database/repositories/workflow_runtime_state.rs",
@@ -11297,7 +14507,17 @@
       "production_lines": 157,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 8,
+          "pools": 3,
+          "sql": 6
+        },
+        "direct_fs": false,
+        "production_lines": 226
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/filesystem/app_data_dirs.rs",
@@ -11327,7 +14547,17 @@
       "production_lines": 59,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 127
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/filesystem/asset_store.rs",
@@ -11360,7 +14590,17 @@
       "production_lines": 577,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 763
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/filesystem/mod.rs",
@@ -11387,7 +14627,17 @@
       "production_lines": 12,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 18
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/filesystem/project_directory_store.rs",
@@ -11419,7 +14669,17 @@
       "production_lines": 52,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 109
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/filesystem/workflow_draft_store.rs",
@@ -11449,7 +14709,17 @@
       "production_lines": 62,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 85
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/filesystem/workflow_library.rs",
@@ -11480,7 +14750,17 @@
       "production_lines": 99,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 141
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/filesystem/workflow_package_store.rs",
@@ -11512,7 +14792,17 @@
       "production_lines": 452,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 576
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/logging.rs",
@@ -11544,7 +14834,17 @@
       "production_lines": 208,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 283
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/mod.rs",
@@ -11571,7 +14871,17 @@
       "production_lines": 7,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 8
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/settings/mod.rs",
@@ -11604,7 +14914,17 @@
       "production_lines": 134,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 346
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/tauri/mod.rs",
@@ -11631,7 +14951,17 @@
       "production_lines": 2,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 4
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/tauri/task_update_sink.rs",
@@ -11662,7 +14992,17 @@
       "production_lines": 20,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 24
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/time/mod.rs",
@@ -11689,7 +15029,17 @@
       "production_lines": 2,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 4
+      }
     },
     {
       "path": "src-tauri/src/infrastructure/time/system_clock.rs",
@@ -11719,7 +15069,17 @@
       "production_lines": 9,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 12
+      }
     },
     {
       "path": "src-tauri/src/lib.rs",
@@ -11756,7 +15116,17 @@
       "production_lines": 1536,
       "commands": [],
       "god_module": true,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 1515
+      }
     },
     {
       "path": "src-tauri/src/main.rs",
@@ -11783,7 +15153,233 @@
       "production_lines": 5,
       "commands": [],
       "god_module": false,
-      "defer_reason": null
+      "defer_reason": null,
+      "status": "RETAINED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 7
+      }
+    },
+    {
+      "path": "src-tauri/src/application/ports/workflow_file_store.rs",
+      "symbol": "workflow_file_store",
+      "bounded_context": "Workflow",
+      "current_role": "Domain-specific persistence/I/O port",
+      "current_dependencies": [
+        "async_trait::async_trait",
+        "std::path::Path",
+        "case.\r\n#[async_trait]\r\npub trait WorkflowFileStore: Send + Sync {\r\n    async fn size(&self, path: &Path) -> Result<u64, String>"
+      ],
+      "direct_sql": {
+        "sqlx": 0,
+        "pools": 0,
+        "sql": 0
+      },
+      "direct_fs": false,
+      "business_logic": false,
+      "target_role": "Explicit existing-authority seam",
+      "decision": "EXTRACT_REPOSITORY",
+      "risk": "MEDIUM",
+      "migration_order": 3,
+      "production_lines": 11,
+      "god_module": false,
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 11
+      },
+      "tests": [
+        "phase8_target1..4",
+        "Existing authoritative full CI",
+        "Isolated Native smoke"
+      ],
+      "target_boundary": "Workflow",
+      "direct_runtime": false,
+      "commands": []
+    },
+    {
+      "path": "src-tauri/src/application/workflow_file_service.rs",
+      "symbol": "workflow_file_service",
+      "bounded_context": "Workflow",
+      "current_role": "Application use case",
+      "current_dependencies": [
+        "cases extracted verbatim from the transport adapters.\n//! Dialog cancellation stays in commands",
+        "crate::{\n    application::{\n        ports::WorkflowFileStore, workflow_lifecycle_service::MAX_WORKFLOW_ARCHIVE_BYTES,\n        workflow_onboarding_service::MAX_WORKFLOW_IMPORT_BYTES,\n    },\n    error::AppError,\n}",
+        "std::{path::Path, sync::Arc}",
+        "super::*",
+        "crate::infrastructure::filesystem::FileSystemWorkflowFileStore",
+        "tempfile::tempdir"
+      ],
+      "direct_sql": {
+        "sqlx": 0,
+        "pools": 0,
+        "sql": 0
+      },
+      "direct_fs": false,
+      "business_logic": true,
+      "target_role": "Explicit existing-authority seam",
+      "decision": "EXTRACT_APPLICATION_SERVICE",
+      "risk": "MEDIUM",
+      "migration_order": 3,
+      "production_lines": 179,
+      "god_module": false,
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 179
+      },
+      "tests": [
+        "phase8_target1..4",
+        "Existing authoritative full CI",
+        "Isolated Native smoke"
+      ],
+      "target_boundary": "Workflow",
+      "direct_runtime": false,
+      "commands": []
+    },
+    {
+      "path": "src-tauri/src/composition/mod.rs",
+      "symbol": "mod",
+      "bounded_context": "Project",
+      "current_role": "Existing context composition",
+      "current_dependencies": [],
+      "direct_sql": {
+        "sqlx": 0,
+        "pools": 0,
+        "sql": 0
+      },
+      "direct_fs": false,
+      "business_logic": false,
+      "target_role": "Explicit existing-authority seam",
+      "decision": "MOVE_TO_CONTEXT",
+      "risk": "MEDIUM",
+      "migration_order": 2,
+      "production_lines": 3,
+      "god_module": false,
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 3
+      },
+      "tests": [
+        "phase8_target5",
+        "Existing authoritative full CI",
+        "Isolated Native smoke"
+      ],
+      "target_boundary": "Project",
+      "direct_runtime": false,
+      "commands": []
+    },
+    {
+      "path": "src-tauri/src/composition/project.rs",
+      "symbol": "project",
+      "bounded_context": "Project",
+      "current_role": "Existing context composition",
+      "current_dependencies": [
+        "crate::app_state::ProjectServices",
+        "crate::application::{\n    comfy_preflight_service::ComfyPreflightService,\n    comfy_service::ComfyService,\n    ports::{\n        Clock, ProjectBackupRepository, ProjectCommandCenterRepository, ProjectDirectoryStore,\n        ProjectManifestRepository, ProjectRepository,\n    },\n    production_audit_service::ProductionAuditService,\n    project_backup_service::ProjectBackupService,\n    project_command_center_service::ProjectCommandCenterService,\n    project_manifest_service::ProjectManifestService,\n    project_service::ProjectService,\n    project_workflow_binding_service::ProjectWorkflowBindingService,\n}",
+        "std::{path::PathBuf, sync::Arc}",
+        "super::*",
+        "crate::infrastructure::{\n        database::*, filesystem::FileSystemProjectDirectoryStore, time::SystemClock,\n    }"
+      ],
+      "direct_sql": {
+        "sqlx": 0,
+        "pools": 0,
+        "sql": 0
+      },
+      "direct_fs": false,
+      "business_logic": false,
+      "target_role": "Explicit existing-authority seam",
+      "decision": "MOVE_TO_CONTEXT",
+      "risk": "MEDIUM",
+      "migration_order": 2,
+      "production_lines": 132,
+      "god_module": false,
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": false,
+        "production_lines": 138
+      },
+      "tests": [
+        "phase8_target5",
+        "Existing authoritative full CI",
+        "Isolated Native smoke"
+      ],
+      "target_boundary": "Project",
+      "direct_runtime": false,
+      "commands": []
+    },
+    {
+      "path": "src-tauri/src/infrastructure/filesystem/workflow_file_store.rs",
+      "symbol": "workflow_file_store",
+      "bounded_context": "Workflow",
+      "current_role": "Filesystem adapter",
+      "current_dependencies": [
+        "crate::application::ports::WorkflowFileStore",
+        "async_trait::async_trait",
+        "std::path::Path"
+      ],
+      "direct_sql": {
+        "sqlx": 0,
+        "pools": 0,
+        "sql": 0
+      },
+      "direct_fs": true,
+      "business_logic": false,
+      "target_role": "Explicit existing-authority seam",
+      "decision": "EXTRACT_REPOSITORY",
+      "risk": "MEDIUM",
+      "migration_order": 3,
+      "production_lines": 23,
+      "god_module": false,
+      "defer_reason": null,
+      "status": "IMPLEMENTED",
+      "after": {
+        "direct_sql": {
+          "sqlx": 0,
+          "pools": 0,
+          "sql": 0
+        },
+        "direct_fs": true,
+        "production_lines": 23
+      },
+      "tests": [
+        "phase8_target1..4",
+        "Existing authoritative full CI",
+        "Isolated Native smoke"
+      ],
+      "target_boundary": "Workflow",
+      "direct_runtime": false,
+      "commands": []
     }
   ],
   "ipcContracts": [
@@ -13245,5 +16841,31 @@
       "command_center_and_audit_reads_do_not_mutate_queue_state",
       "audit_exposes_preparation_lineage_activity_and_lazy_historical_detail"
     ]
+  },
+  "currentInventory": {
+    "filesScanned": 343,
+    "commandsScanned": 335,
+    "unclassified": 0
+  },
+  "compatibilityProof": {
+    "queryRepositories": "Reuse existing SqliteProjectCommandCenterRepository, SqliteProjectManifestRepository and SqliteProjectBackupRepository; implementations and SQL unchanged",
+    "authorities": "Same audit/OCC Arc and database pool, no new Queue/Task/Asset/registry owner",
+    "filesystem": "Operation order, limits, errors, dialog cancellation and opaque bytes preserved",
+    "bootstrap": "Exact workflowVersionId/recipeId and original first-match/fallback rules preserved",
+    "phase7Freeze": "Only backend snapshot advances for authorized Phase8; original migrations and CSS freeze retained"
+  },
+  "backendSourceSnapshot": {
+    "files": 343,
+    "sha256": "70a28807fb358ef046e0f11b16ebebc94e61d011122eab41a837c992027e96b9"
+  },
+  "validation": {
+    "localFocusedCases": 10,
+    "rustCases": 8,
+    "frontendCases": 2,
+    "localFullSuite": "NOT RUN — resource/test budget; authoritative full suite required in exact-head CI",
+    "static": "fmt/check/tsc/build and dev088 PASS",
+    "native": "PASS — isolated Tauri launch, Create/Runs/Library/Workflow Lab, typed Project/OCC/diagnostics reads, Advanced bridges, project switch, real process restart resume; own app closed",
+    "remoteCi": "REQUIRED AFTER PUSH",
+    "acceptanceData": "Temporary Phase8 data cloned from prior isolated test fixture; no user project writes or GPU submissions"
   }
 }

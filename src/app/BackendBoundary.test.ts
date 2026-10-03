@@ -23,6 +23,10 @@ it("target1 prevents production SQL growth while recognizing only real test scop
 it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=>{
  const commands=rustFiles("src-tauri/src/commands").flatMap((p:string)=>[...read(p).matchAll(/#\[tauri::command[^\]]*\]\s*pub\s+async\s+fn\s+(\w+)[\s\S]*?(?=\{)/g)].map(x=>({name:x[1],signature:x[0].replace(/\s+/g," ").trim()}))).sort((a:{name:string},b:{name:string})=>a.name.localeCompare(b.name));
  expect(commands).toEqual(manifest.ipcContracts);
+ const backend=rustFiles("src-tauri/src").map((p:string)=>p.replace(/\\/g,"/")).sort();
+ expect(backend).toHaveLength(manifest.backendSourceSnapshot.files);
+ expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(manifest.backendSourceSnapshot.sha256);
+ expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend);
  for(const [path,digest] of Object.entries(manifest.compatibilityFiles))expect(createHash("sha256").update(read(path).replace(/\r\n/g,"\n")).digest("hex"),path).toBe(digest);
  expect(read('src-tauri/src/application/project_backup_service.rs')).toContain('const BACKUP_VERSION: u32 = 20;');
 });
