@@ -2,6 +2,7 @@ mod app_state;
 pub mod application;
 mod commands;
 pub mod compiler;
+mod composition;
 pub mod domain;
 mod error;
 pub mod infrastructure;
@@ -66,11 +67,7 @@ use application::{
     production_queue_service::ProductionQueueService,
     production_start_admission_service::ProductionStartAdmissionService,
     production_structure_service::ProductionStructureService,
-    project_backup_service::ProjectBackupService,
     project_bootstrap::DefaultProjectBootstrap,
-    project_command_center_service::ProjectCommandCenterService,
-    project_manifest_service::ProjectManifestService,
-    project_service::ProjectService,
     project_template_service::ProjectTemplateService,
     project_workflow_binding_service::ProjectWorkflowBindingService,
     prompt_library_service::PromptLibraryService,
@@ -750,32 +747,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 definition_repository.list_available(),
             )
             .unwrap_or_default();
-            let default_h3_definition = package_generation_definitions
-                .iter()
-                .find(|definition| definition.mode == "fl2va")
-                .or_else(|| {
-                    package_generation_definitions
-                        .iter()
-                        .find(|definition| definition.category == "video")
-                });
-            let ref2va_definition = package_generation_definitions
-                .iter()
-                .find(|definition| definition.mode == "ref2va");
-            let package_h3_config = ProductionPackageH3Config {
-                workflow_version_id: default_h3_definition
-                    .map(|definition| definition.workflow_version_id.clone())
-                    .unwrap_or_else(|| "unconfigured-h3-workflow".to_owned()),
-                recipe_id: default_h3_definition
-                    .map(|definition| definition.recipe_id.clone())
-                    .unwrap_or_else(|| "unconfigured-h3-recipe".to_owned()),
-                fl2va_workflow_version_id: None,
-                fl2va_recipe_id: None,
-                ref2va_workflow_version_id: ref2va_definition
-                    .map(|definition| definition.workflow_version_id.clone()),
-                ref2va_recipe_id: ref2va_definition.map(|definition| definition.recipe_id.clone()),
-                quality_profile: None,
-                quality_recipes: Vec::new(),
-            };
+            let package_h3_config = ProductionPackageH3Config::from_available_definitions(&package_generation_definitions);
             let production_package_service = Arc::new(ProductionPackageService::new(
                 ProductionPackageInspector::new(),
                 h3_local_import_service.clone(),
@@ -814,23 +786,19 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 workflow_lifecycle_service.clone(),
                 production_structure_repository.clone(),
             ));
-            let project_command_center_service = Arc::new(
-                ProjectCommandCenterService::new(
-                    Arc::new(database::SqliteProjectCommandCenterRepository::new(
-                        database_pool.clone(),
-                    )),
-                    production_audit_service.clone(),
-                )
-                    .with_comfy_cache_services(
-                        comfy_service.clone(),
-                        comfy_preflight_service.clone(),
-                    ),
-            );
-            let project_service = Arc::new(ProjectService::new(
-                project_repository.clone(),
-                project_directory_store,
-                clock.clone(),
-            ));
+            let project_context = ProjectServices::build(composition::project::ProjectContextDependencies {
+                projects: project_repository.clone(),
+                directories: project_directory_store,
+                clock: clock.clone(),
+                overview_query: Arc::new(database::SqliteProjectCommandCenterRepository::new(database_pool.clone())),
+                manifest_query: Arc::new(database::SqliteProjectManifestRepository::new(database_pool.clone())),
+                backup: Arc::new(SqliteProjectBackupRepository::new(database_pool.clone())),
+                audit: production_audit_service.clone(),
+                workflow_binding: project_workflow_binding_service.clone(),
+                comfy_cache: Some((comfy_service.clone(), comfy_preflight_service.clone())),
+                projects_dir: data_dirs.projects.clone(),
+                cache_dir: data_dirs.cache.clone(),
+            });
             let organization_service = Arc::new(OrganizationService::new(
                 organization_repository.clone(),
                 clock.clone(),
@@ -838,19 +806,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let project_template_service = Arc::new(ProjectTemplateService::new(
                 organization_repository,
                 definition_repository.clone(),
-                project_service.clone(),
+                project_context.project.clone(),
                 clock.clone(),
             ));
-            let project_backup_repository: Arc<dyn ProjectBackupRepository> =
-                Arc::new(SqliteProjectBackupRepository::new(database_pool.clone()));
-            let project_backup_service = Arc::new(ProjectBackupService::new(
-                project_backup_repository,
-                data_dirs.projects.clone(),
-                data_dirs.cache.clone(),
-            ));
-            let project_manifest_service = Arc::new(ProjectManifestService::new(Arc::new(
-                database::SqliteProjectManifestRepository::new(database_pool.clone()),
-            )));
             let preset_service = Arc::new(PresetService::new(
                 preset_repository.clone(),
                 definition_repository.clone(),
@@ -997,13 +955,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     source_import: source_asset_import_service,
                     artifact: artifact_service,
                 },
-                ProjectServices {
-                    command_center: project_command_center_service,
-                    project: project_service,
-                    backup: project_backup_service,
-                    manifest: project_manifest_service,
-                    workflow_binding: project_workflow_binding_service,
-                },
+                project_context,
                 ShotServices {
                     shot: shot_service,
                     batch: shot_batch_service,

@@ -78,6 +78,38 @@ impl ResolvedPackageRecipe {
 }
 
 impl ProductionPackageH3Config {
+    /// Preserve the existing bootstrap selection order, exact pair and unconfigured fallbacks.
+    /// This is configuration selection only, never Queue execution or product readiness.
+    pub fn from_available_definitions(
+        definitions: &[crate::application::ports::AvailableGenerationDefinition],
+    ) -> Self {
+        let default_h3_definition = definitions
+            .iter()
+            .find(|definition| definition.mode == "fl2va")
+            .or_else(|| {
+                definitions
+                    .iter()
+                    .find(|definition| definition.category == "video")
+            });
+        let ref2va_definition = definitions
+            .iter()
+            .find(|definition| definition.mode == "ref2va");
+        Self {
+            workflow_version_id: default_h3_definition
+                .map(|definition| definition.workflow_version_id.clone())
+                .unwrap_or_else(|| "unconfigured-h3-workflow".to_owned()),
+            recipe_id: default_h3_definition
+                .map(|definition| definition.recipe_id.clone())
+                .unwrap_or_else(|| "unconfigured-h3-recipe".to_owned()),
+            fl2va_workflow_version_id: None,
+            fl2va_recipe_id: None,
+            ref2va_workflow_version_id: ref2va_definition
+                .map(|definition| definition.workflow_version_id.clone()),
+            ref2va_recipe_id: ref2va_definition.map(|definition| definition.recipe_id.clone()),
+            quality_profile: None,
+            quality_recipes: Vec::new(),
+        }
+    }
     fn validate(&self) -> Result<(), ProductionPackageError> {
         if self.workflow_version_id.trim().is_empty() || self.recipe_id.trim().is_empty() {
             return Err(ProductionPackageError::InvalidInput(
@@ -1384,5 +1416,50 @@ mod tests {
         assert_eq!(old[0].recipe_id, "recipe-a");
         assert_eq!(new[0].workflow_version_id, "workflow-b");
         assert_eq!(new[0].recipe_id, "recipe-b");
+    }
+}
+
+#[cfg(test)]
+mod phase8_defaults {
+    use super::*;
+    use crate::application::ports::AvailableGenerationDefinition;
+    #[test]
+    fn phase8_target6_bootstrap_preserves_exact_pairs_order_and_defaults() {
+        fn definition(id: &str, mode: &str, category: &str) -> AvailableGenerationDefinition {
+            AvailableGenerationDefinition {
+                workflow_id: "same-name".into(),
+                workflow_version_id: format!("version-{id}"),
+                recipe_id: format!("recipe-{id}"),
+                recipe_version: "1".into(),
+                name: "same-name".into(),
+                category: category.into(),
+                mode: mode.into(),
+                recipe_yaml: String::new(),
+            }
+        }
+        let empty = ProductionPackageH3Config::from_available_definitions(&[]);
+        assert_eq!(empty.workflow_version_id, "unconfigured-h3-workflow");
+        assert_eq!(empty.recipe_id, "unconfigured-h3-recipe");
+        assert!(empty.ref2va_recipe_id.is_none());
+        let defs = vec![
+            definition("video", "i2va", "video"),
+            definition("ref", "ref2va", "video"),
+            definition("first", "fl2va", "video"),
+            definition("second", "fl2va", "video"),
+        ];
+        let config = ProductionPackageH3Config::from_available_definitions(&defs);
+        assert_eq!(
+            (
+                config.workflow_version_id.as_str(),
+                config.recipe_id.as_str()
+            ),
+            ("version-first", "recipe-first")
+        );
+        assert_eq!(config.ref2va_recipe_id.as_deref(), Some("recipe-ref"));
+        assert!(config.fl2va_recipe_id.is_none());
+        assert!(config.quality_profile.is_none());
+        assert!(config.quality_recipes.is_empty());
+        let fallback = ProductionPackageH3Config::from_available_definitions(&defs[..2]);
+        assert_eq!(fallback.recipe_id, "recipe-video");
     }
 }
