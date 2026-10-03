@@ -13,6 +13,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   const [queryError,setQueryError]=useState<string>();const [actionError,setActionError]=useState<string>();const [notice,setNotice]=useState<string>();
   const [inspection,setInspection]=useState<LibraryDeletionInspection>();const [busy,setBusy]=useState(false);const [loading,setLoading]=useState(true);
   const inspectionOpen=useRef(false);const epoch=useRef(0);const actionLock=useRef(false);const pageCount=useRef(1);
+  const selfEditInvalidation=useRef(false);
   const category=categoryFor(route);const scope=`${route.projectId}:${category}:${search.trim()}:${resourceKey(route.resource)}`;
   const liveScope=useRef(scope);liveScope.current=scope;
   const previousProject=useRef(route.projectId);
@@ -46,7 +47,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     if(previousProject.current!==route.projectId){previousProject.current=route.projectId;setSearch("");setNotice(undefined);}
     pageCount.current=1;void refresh();
     let event:ReturnType<typeof setTimeout>|undefined;
-    const unsubscribe=subscribeRunInvalidation(project=>{if(project!==route.projectId)return;clearTimeout(event);event=setTimeout(()=>void refresh(),150);});
+    const unsubscribe=subscribeRunInvalidation(project=>{if(project!==route.projectId)return;if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}clearTimeout(event);event=setTimeout(()=>void refresh(),150);});
     const timer=setInterval(()=>void refresh(),5000);
     return()=>{++epoch.current;unsubscribe();clearTimeout(event);clearInterval(timer);};
   },[refresh]);
@@ -57,7 +58,11 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   }
   const inspectDelete=()=>mutate(async()=>{if(!route.resource)return;const result=await productClient.library.deletionInspect(route.projectId,route.resource);if(liveScope.current===scope){inspectionOpen.current=true;setInspection(result);}});
   const confirmDelete=()=>mutate(async()=>{if(!route.resource||!inspection?.allowed)return;await productClient.library.delete(route.projectId,route.resource,true);invalidateRuns(route.projectId);if(liveScope.current===scope){inspectionOpen.current=false;setInspection(undefined);setNotice("资源已删除；历史任务和运行记录仍保留。");navigate({...route,resource:undefined});}});
-  const edit=(request:LibraryEditRequest)=>mutate(async()=>{await productClient.library.resourceEdit(route.projectId,request);invalidateRuns(route.projectId);if(liveScope.current===scope){inspectionOpen.current=false;setInspection(undefined);await refresh();}});
+  const edit=(request:LibraryEditRequest)=>mutate(async()=>{await productClient.library.resourceEdit(route.projectId,request);
+    // Dispatch is synchronous: only this publication is self-originated. Never
+    // suppress later external events or the polling fallback.
+    selfEditInvalidation.current=true;try{invalidateRuns(route.projectId);}finally{selfEditInvalidation.current=false;}
+    if(liveScope.current===scope){inspectionOpen.current=false;setInspection(undefined);await refresh();}});
   const useInCreation=()=>mutate(async()=>{if(!route.resource)return;const intent=await productClient.library.useInCreation(route.projectId,route.resource);if(liveScope.current!==scope)return;useStudioStore.getState().setPendingLibraryIntent(intent);navigate({kind:"create",projectId:route.projectId,stage:intent.kind==="asset"?"video":"image"});});
   return {category,search,setSearch,list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
     loadMore:()=>{if(current?.list.nextCursor){pageCount.current++;void refresh();}},

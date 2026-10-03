@@ -189,3 +189,27 @@ list matches live detail projections, archived parents survive and cross-project
 reads fail. The first unqualified exact filter matched zero tests and is not a PASS.
 Local core cases are now9/10; case10 remains reserved. Final Native/static/finalCI
 and optimization3 before/after/freshness are still pending. Phase12 remains PARTIAL.
+
+## Optimization3 measured checkpoint (final closure still pending)
+
+Prompt edit now marks only its synchronous self-originated publication. Its own
+listener consumes the token, `finally` clears it immediately, and explicit refresh
+remains part of completion. All other listeners still receive the event. Delete
+and polling are unchanged; no time-window suppression or competing state/cache.
+
+Production-bundle Native, one warmup/five samples on the same large owned fixture:
+**9 -> 5 IPC**, **4 -> 0 repeated reads**, median **184.2762 -> 38.1205ms**,
+**4 -> 3 React root commits**. Each sample has one edit and one list/get/relations/
+versions refresh. Counts and commit reduction are demonstrated; instrumented local
+median is not a universal latency guarantee. Backend executable is rebuilt from
+optimization2 checkpoint; bundle includes the measured uncommitted opt3 source.
+Both source and artifact provenance are recorded.
+
+Case10 passed the sole focused frontend case: immediate one refresh, subsequent
+external freshness, project freshness, unchanged5s poll, and20 mount/unmount cycles
+of real Runs/Library notification subscriptions and timers. Local budget **10/10**
+is exhausted. No additional local core cases will run. tsc, production build and
+Rust all-target check passed. Deep Native after data covers project open, Create
+load/shot switch, Runs list/detail/results, Library load/media/prompt/edit and20
+resource cycles. **Safe submit, Workflow deep OCC, remaining final behavior checks
+and exact-final-head CI still pending**. No Phase13 and no overall Phase12 PASS.
