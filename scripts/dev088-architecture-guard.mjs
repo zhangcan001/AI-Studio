@@ -1,9 +1,16 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import ts from "typescript";
+import { backendBoundary } from "./backend-boundary-guard.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(import.meta.url), "..", "..");
+const backendManifest = JSON.parse(readFileSync(join(root, "docs/architecture/phase8-backend-decomposition.json"), "utf8"));
+const backendResult = backendBoundary(root, backendManifest);
+if (backendResult.violations.length) throw new Error(`BACKEND_DIRECT_SQL_BOUNDARY failed: ${backendResult.violations.join("; ")}`);
+console.log("NEW_DIRECT_SQLX_FROM_COMMANDS=0");
+console.log("NEW_DIRECT_SQLX_FROM_APPLICATION=0");
+console.log(`BACKEND_DIRECT_SQL_GUARD=PASS (${backendResult.checked} production files)`);
 const ipcTransportPath = resolve(root, "src/services/ipc.ts");
 const productionFrontendFiles = [];
 
