@@ -2,7 +2,10 @@
   "definitions": {
     "large_tsx": ">=500 lines",
     "god_candidate": ">=500 TSX lines and >=8 local state or >=5 effects; review candidate only",
-    "prop_depth": "Property-chain proxy; not asserted as true component drilling depth"
+    "prop_depth": "Property-chain proxy; not asserted as true component drilling depth",
+    "components": "PascalCase named function declarations (AST candidates, not React runtime instances)",
+    "hooks": "use-prefixed named function declarations",
+    "clients": "Module directory candidates in src/services and src/product, including contract/presentation modules; this does not count new IPC layers."
   },
   "rows": [
     {
@@ -57,7 +60,7 @@
     },
     {
       "path": "src/app/App.tsx",
-      "symbol": "workflowUseProjectDestination, workflowDefaultSelection, bindingInput, projectWorkflowBindingsForRecipe, keepsNativeContextMenu, App, allowProjectSwitch, navigate, navigateLegacy, navigateToWorkspace, navigateToStudioSection, openTask, openShot, handleShotSelected, openProject, openProductionQueue, openProductionQueueFromShot, reconnectComfy, retryStartup, refreshCapabilities, refreshRuntimeAfterEndpoint, reloadCatalog, openWorkflowForProject, reconcileTasks, loadHistoricalInputs, useAssetInStudio, handleProjectUpdated, handleProjectRestored, handleTemplateProjectCreated, openVideoBatch, openAssetFromShot, openShotFromAsset, navigateFromCommandCenter",
+      "symbol": "workflowUseProjectDestination, workflowDefaultSelection, bindingInput, projectWorkflowBindingsForRecipe, keepsNativeContextMenu, App, allowProjectSwitch, navigate, navigateLegacy, navigateToWorkspace, navigateToStudioSection, openTask, openShot, handleShotSelected, openProject, openProductionQueue, openProductionQueueFromShot, reconnectComfy, retryStartup, refreshCapabilities, refreshRuntimeAfterEndpoint, reloadCatalog, openWorkflowForProject, loadHistoricalInputs, useAssetInStudio, handleProjectUpdated, handleProjectRestored, handleTemplateProjectCreated, openVideoBatch, openAssetFromShot, openShotFromAsset, navigateFromCommandCenter",
       "current_role": "APP_COMPOSITION",
       "target_role": "APP_COMPOSITION",
       "feature_owner": "app",
@@ -94,9 +97,9 @@
         "max_property_chain": 2,
         "note": "AST proxy, actual seam prop handoff reviewed separately"
       },
-      "local_state_count": 21,
-      "effect_count": 7,
-      "decision": "EXTRACT_PAGE_CONTAINER",
+      "local_state_count": 13,
+      "effect_count": 5,
+      "decision": "KEEP",
       "replacement": [
         {
           "name": "normal-page-composition",
@@ -118,17 +121,21 @@
           ]
         }
       ],
-      "risk": "Retain global startup, navigation and overlays; move bounded normal-page and feature effect owners.",
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
       "tests": [
-        "Phase7 route regression",
-        "Phase10 scoped owner regressions",
-        "Native isolated real restart"
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
       ],
       "test": false,
-      "lines": 973,
+      "lines": 827,
       "components": 1,
       "hooks": 1,
       "imports": [
+        "../features/tasks/useProjectTaskRecovery",
+        "./NormalProductPages",
+        "../features/shots/useShotConsistencyController",
         "react",
         "../services/tauriClient",
         "../services/taskEvents",
@@ -146,16 +153,11 @@
         "../types/generation",
         "../types/project",
         "../types/productionQueue",
-        "../types/shot",
         "../types/projectWorkflow",
-        "../types/consistencyBindings",
         "../types/workspaceResume",
         "../i18n/errorMessages",
         "../i18n/statusLabels",
         "./StartupScreen",
-        "../features/create/createModel",
-        "../features/library/libraryModel",
-        "../features/runs/runsModel",
         "../product/runInvalidation",
         "./ShellHost",
         "./v3/ProjectOverviewPage",
@@ -174,6 +176,9 @@
         "./routes/commandCenterAdapter"
       ],
       "resolvedImports": [
+        "src/features/tasks/useProjectTaskRecovery",
+        "src/app/NormalProductPages",
+        "src/features/shots/useShotConsistencyController",
         "react",
         "src/services/tauriClient",
         "src/services/taskEvents",
@@ -191,16 +196,11 @@
         "src/types/generation",
         "src/types/project",
         "src/types/productionQueue",
-        "src/types/shot",
         "src/types/projectWorkflow",
-        "src/types/consistencyBindings",
         "src/types/workspaceResume",
         "src/i18n/errorMessages",
         "src/i18n/statusLabels",
         "src/app/StartupScreen",
-        "src/features/create/createModel",
-        "src/features/library/libraryModel",
-        "src/features/runs/runsModel",
         "src/product/runInvalidation",
         "src/app/ShellHost",
         "src/app/v3/ProjectOverviewPage",
@@ -219,11 +219,11 @@
         "src/app/routes/commandCenterAdapter"
       ],
       "counts": {
-        "useState": 21,
-        "useEffect": 7,
+        "useState": 13,
+        "useEffect": 5,
         "useLayoutEffect": 0,
         "useMemo": 1,
-        "useCallback": 4,
+        "useCallback": 1,
         "contexts": 0,
         "localStorage": 0,
         "sessionStorage": 0,
@@ -232,7 +232,8 @@
         "subscriptions": 1
       },
       "deep_relative_imports": 0,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "EXTRACT_PAGE_CONTAINER"
     },
     {
       "path": "src/app/BackendBoundary.test.ts",
@@ -257,7 +258,7 @@
       "risk": "Existing regression evidence.",
       "tests": [],
       "test": true,
-      "lines": 35,
+      "lines": 36,
       "components": 0,
       "hooks": 0,
       "imports": [
@@ -287,6 +288,161 @@
       },
       "deep_relative_imports": 1,
       "deep_feature_imports": 0
+    },
+    {
+      "path": "src/app/FrontendConsolidation.test.tsx",
+      "symbol": "deferred",
+      "current_role": "TEST",
+      "target_role": "TEST",
+      "feature_owner": "app",
+      "state_owner": [
+        "src/stores/projectStore",
+        "src/stores/taskStore"
+      ],
+      "effect_owner": "none",
+      "route_dependency": [
+        "src/app/routes/types"
+      ],
+      "client_dependency": [
+        "src/product/generatorPresentation",
+        "src/product/types"
+      ],
+      "store_dependency": [
+        "src/stores/projectStore",
+        "src/stores/taskStore"
+      ],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 3,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 0,
+      "effect_count": 0,
+      "decision": "KEEP",
+      "replacement": null,
+      "risk": "Existing regression evidence.",
+      "tests": [],
+      "test": true,
+      "lines": 110,
+      "components": 0,
+      "hooks": 0,
+      "imports": [
+        "react",
+        "@testing-library/react",
+        "vitest",
+        "node:fs",
+        "../../scripts/frontend-boundary-guard.mjs",
+        "../../scripts/frontend-architecture-inventory.mjs",
+        "../features/tasks/useProjectTaskRecovery",
+        "../features/shots/useShotConsistencyController",
+        "../stores/projectStore",
+        "../stores/taskStore",
+        "../types/task",
+        "./NormalProductPages",
+        "../types/project",
+        "./routes/types",
+        "../product/generatorPresentation",
+        "../product/types"
+      ],
+      "resolvedImports": [
+        "react",
+        "@testing-library/react",
+        "vitest",
+        "node:fs",
+        "scripts/frontend-boundary-guard.mjs",
+        "scripts/frontend-architecture-inventory.mjs",
+        "src/features/tasks/useProjectTaskRecovery",
+        "src/features/shots/useShotConsistencyController",
+        "src/stores/projectStore",
+        "src/stores/taskStore",
+        "src/types/task",
+        "src/app/NormalProductPages",
+        "src/types/project",
+        "src/app/routes/types",
+        "src/product/generatorPresentation",
+        "src/product/types"
+      ],
+      "counts": {
+        "useState": 0,
+        "useEffect": 0,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 2,
+      "deep_feature_imports": 0
+    },
+    {
+      "path": "src/app/NormalProductPages.tsx",
+      "symbol": "NormalProductPages",
+      "current_role": "PAGE_CONTAINER",
+      "target_role": "PAGE_CONTAINER",
+      "feature_owner": "app",
+      "state_owner": "none",
+      "effect_owner": "none",
+      "route_dependency": [
+        "src/app/routes/types"
+      ],
+      "client_dependency": [],
+      "store_dependency": [],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 1,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 0,
+      "effect_count": 0,
+      "decision": "KEEP",
+      "replacement": null,
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
+      "test": false,
+      "lines": 29,
+      "components": 1,
+      "hooks": 0,
+      "imports": [
+        "react",
+        "./routes/types",
+        "../types/project",
+        "../features/create/createModel",
+        "../features/library/libraryModel",
+        "../features/runs/runsModel"
+      ],
+      "resolvedImports": [
+        "react",
+        "src/app/routes/types",
+        "src/types/project",
+        "src/features/create/createModel",
+        "src/features/library/libraryModel",
+        "src/features/runs/runsModel"
+      ],
+      "counts": {
+        "useState": 0,
+        "useEffect": 0,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 0,
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     },
     {
       "path": "src/app/Phase7Retirement.test.tsx",
@@ -614,7 +770,7 @@
       "risk": "Existing regression evidence.",
       "tests": [],
       "test": true,
-      "lines": 48,
+      "lines": 49,
       "components": 0,
       "hooks": 0,
       "imports": [
@@ -5151,7 +5307,7 @@
     },
     {
       "path": "src/features/create/createModel.ts",
-      "symbol": "normalCreate, modeLabel, generatorLabel, fieldLabel, mediaKind, mediaValue, assetIds, draftFor, compatible, candidateForStage",
+      "symbol": "normalCreate, mediaKind, mediaValue, assetIds, draftFor, compatible, candidateForStage",
       "current_role": "FEATURE_MODEL",
       "target_role": "FEATURE_MODEL",
       "feature_owner": "create",
@@ -5175,12 +5331,17 @@
       },
       "local_state_count": 0,
       "effect_count": 0,
-      "decision": "DEFER",
+      "decision": "KEEP_COMPAT",
       "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
-      "lines": 55,
+      "lines": 41,
       "components": 0,
       "hooks": 0,
       "imports": [
@@ -5209,7 +5370,8 @@
         "subscriptions": 0
       },
       "deep_relative_imports": 4,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     },
     {
       "path": "src/features/experiments/ExperimentPlannerPanel.tsx",
@@ -5680,22 +5842,26 @@
       "client_dependency": [
         "src/product/client",
         "src/product/errors",
-        "src/product/types"
+        "src/product/types",
+        "src/product/generatorPresentation"
       ],
       "store_dependency": [],
-      "cross_feature_dependencies": [
-        "src/features/create/createModel"
-      ],
+      "cross_feature_dependencies": [],
       "prop_depth": {
         "max_property_chain": 2,
         "note": "AST proxy, actual seam prop handoff reviewed separately"
       },
       "local_state_count": 7,
       "effect_count": 1,
-      "decision": "DEFER",
+      "decision": "KEEP",
       "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
       "lines": 84,
       "components": 1,
@@ -5706,7 +5872,7 @@
         "../../product/errors",
         "../../product/types",
         "../../app/routes/types",
-        "../create/createModel",
+        "../../product/generatorPresentation",
         "./GeneratorSettingsPage.css"
       ],
       "resolvedImports": [
@@ -5715,7 +5881,7 @@
         "src/product/errors",
         "src/product/types",
         "src/app/routes/types",
-        "src/features/create/createModel",
+        "src/product/generatorPresentation",
         "src/features/generators/GeneratorSettingsPage.css"
       ],
       "counts": {
@@ -5731,8 +5897,9 @@
         "timers": 0,
         "subscriptions": 0
       },
-      "deep_relative_imports": 4,
-      "deep_feature_imports": 0
+      "deep_relative_imports": 5,
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     },
     {
       "path": "src/features/library/LibraryController.ts",
@@ -14704,6 +14871,66 @@
       "deep_feature_imports": 0
     },
     {
+      "path": "src/features/shots/useShotConsistencyController.ts",
+      "symbol": "useShotConsistencyController",
+      "current_role": "FEATURE_CONTROLLER",
+      "target_role": "FEATURE_CONTROLLER",
+      "feature_owner": "shots",
+      "state_owner": "module local state",
+      "effect_owner": "module lifecycle",
+      "route_dependency": [],
+      "client_dependency": [],
+      "store_dependency": [],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 1,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 5,
+      "effect_count": 1,
+      "decision": "KEEP",
+      "replacement": null,
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
+      "test": false,
+      "lines": 112,
+      "components": 0,
+      "hooks": 1,
+      "imports": [
+        "react",
+        "../../i18n/errorMessages",
+        "../../types/shot",
+        "../../types/consistencyBindings"
+      ],
+      "resolvedImports": [
+        "react",
+        "src/i18n/errorMessages",
+        "src/types/shot",
+        "src/types/consistencyBindings"
+      ],
+      "counts": {
+        "useState": 5,
+        "useEffect": 1,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 3,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 3,
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
+    },
+    {
       "path": "src/features/stability/dev039Stability.test.ts",
       "symbol": "createCommandCenterSource, resetFrontendStores, installStorage",
       "current_role": "TEST",
@@ -19020,6 +19247,74 @@
       "deep_feature_imports": 0
     },
     {
+      "path": "src/features/tasks/useProjectTaskRecovery.ts",
+      "symbol": "useProjectTaskRecovery, reconcileTasks",
+      "current_role": "FEATURE_CONTROLLER",
+      "target_role": "FEATURE_CONTROLLER",
+      "feature_owner": "tasks",
+      "state_owner": [
+        "src/stores/projectStore",
+        "src/stores/taskStore"
+      ],
+      "effect_owner": "module lifecycle",
+      "route_dependency": [],
+      "client_dependency": [],
+      "store_dependency": [
+        "src/stores/projectStore",
+        "src/stores/taskStore"
+      ],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 1,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 3,
+      "effect_count": 2,
+      "decision": "KEEP",
+      "replacement": null,
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
+      "test": false,
+      "lines": 72,
+      "components": 0,
+      "hooks": 1,
+      "imports": [
+        "react",
+        "../../types/task",
+        "../../stores/projectStore",
+        "../../stores/taskStore",
+        "../../i18n/errorMessages"
+      ],
+      "resolvedImports": [
+        "react",
+        "src/types/task",
+        "src/stores/projectStore",
+        "src/stores/taskStore",
+        "src/i18n/errorMessages"
+      ],
+      "counts": {
+        "useState": 3,
+        "useEffect": 2,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 4,
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
+    },
+    {
       "path": "src/features/tools/LocalToolHub.test.tsx",
       "symbol": "module",
       "current_role": "TEST",
@@ -22616,6 +22911,64 @@
       "deep_feature_imports": 0
     },
     {
+      "path": "src/product/generatorPresentation.ts",
+      "symbol": "modeLabel, generatorLabel, fieldLabel",
+      "current_role": "AUTHORITY_OR_CONTRACT",
+      "target_role": "SHARED_PRESENTATION_MODEL",
+      "feature_owner": "product",
+      "state_owner": "none",
+      "effect_owner": "none",
+      "route_dependency": [],
+      "client_dependency": [
+        "src/product/types"
+      ],
+      "store_dependency": [],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 2,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 0,
+      "effect_count": 0,
+      "decision": "KEEP",
+      "replacement": null,
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
+      "test": false,
+      "lines": 19,
+      "components": 0,
+      "hooks": 0,
+      "imports": [
+        "./types",
+        "../types/generation"
+      ],
+      "resolvedImports": [
+        "src/product/types",
+        "src/types/generation"
+      ],
+      "counts": {
+        "useState": 0,
+        "useEffect": 0,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 0,
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
+    },
+    {
       "path": "src/product/libraryTypes.ts",
       "symbol": "module",
       "current_role": "AUTHORITY_OR_CONTRACT",
@@ -26159,7 +26512,7 @@
   ],
   "baseline": "95319c89d575bd724bd6d7f6554565c9f5836a84",
   "BLOCKED_UNKNOWN": 0,
-  "status": "MIGRATED_PENDING_ACCEPTANCE",
+  "status": "LOCAL_ACCEPTANCE_VERIFIED",
   "before": {
     "ts": 144,
     "tsx": 134,
@@ -26754,10 +27107,35 @@
       },
       "local_state_count": 13,
       "effect_count": 5,
-      "decision": "DEFER",
-      "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "decision": "KEEP",
+      "replacement": [
+        {
+          "name": "normal-page-composition",
+          "paths": [
+            "src/app/App.tsx",
+            "src/app/NormalProductPages.tsx"
+          ]
+        },
+        {
+          "name": "shot-consistency",
+          "paths": [
+            "src/features/shots/useShotConsistencyController.ts"
+          ]
+        },
+        {
+          "name": "project-task-recovery",
+          "paths": [
+            "src/features/tasks/useProjectTaskRecovery.ts"
+          ]
+        }
+      ],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
       "lines": 827,
       "components": 1,
@@ -26862,7 +27240,8 @@
         "subscriptions": 1
       },
       "deep_relative_imports": 0,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "EXTRACT_PAGE_CONTAINER"
     },
     {
       "path": "src/app/NormalProductPages.tsx",
@@ -26884,10 +27263,15 @@
       },
       "local_state_count": 0,
       "effect_count": 0,
-      "decision": "DEFER",
+      "decision": "KEEP",
       "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
       "lines": 29,
       "components": 1,
@@ -26922,7 +27306,8 @@
         "subscriptions": 0
       },
       "deep_relative_imports": 0,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     },
     {
       "path": "src/features/create/createModel.ts",
@@ -26950,10 +27335,15 @@
       },
       "local_state_count": 0,
       "effect_count": 0,
-      "decision": "DEFER",
+      "decision": "KEEP_COMPAT",
       "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
       "lines": 41,
       "components": 0,
@@ -26984,7 +27374,8 @@
         "subscriptions": 0
       },
       "deep_relative_imports": 4,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     },
     {
       "path": "src/features/generators/GeneratorSettingsPage.tsx",
@@ -27011,10 +27402,15 @@
       },
       "local_state_count": 7,
       "effect_count": 1,
-      "decision": "DEFER",
+      "decision": "KEEP",
       "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
       "lines": 84,
       "components": 1,
@@ -27051,7 +27447,8 @@
         "subscriptions": 0
       },
       "deep_relative_imports": 5,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     },
     {
       "path": "src/features/shots/useShotConsistencyController.ts",
@@ -27071,10 +27468,15 @@
       },
       "local_state_count": 5,
       "effect_count": 1,
-      "decision": "DEFER",
+      "decision": "KEEP",
       "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
       "lines": 112,
       "components": 0,
@@ -27105,7 +27507,8 @@
         "subscriptions": 0
       },
       "deep_relative_imports": 3,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     },
     {
       "path": "src/features/tasks/useProjectTaskRecovery.ts",
@@ -27131,10 +27534,15 @@
       },
       "local_state_count": 3,
       "effect_count": 2,
-      "decision": "DEFER",
+      "decision": "KEEP",
       "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
       "lines": 72,
       "components": 0,
@@ -27167,13 +27575,14 @@
         "subscriptions": 0
       },
       "deep_relative_imports": 4,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     },
     {
       "path": "src/product/generatorPresentation.ts",
       "symbol": "modeLabel, generatorLabel, fieldLabel",
       "current_role": "AUTHORITY_OR_CONTRACT",
-      "target_role": "AUTHORITY_OR_CONTRACT",
+      "target_role": "SHARED_PRESENTATION_MODEL",
       "feature_owner": "product",
       "state_owner": "none",
       "effect_owner": "none",
@@ -27189,10 +27598,15 @@
       },
       "local_state_count": 0,
       "effect_count": 0,
-      "decision": "DEFER",
+      "decision": "KEEP",
       "replacement": null,
-      "risk": "Retain behavior; no migration without reviewed authority boundary.",
-      "tests": [],
+      "risk": "Reviewed bounded ownership migration; preserve DOM, existing store authority, service ports, route and persistence semantics.",
+      "tests": [
+        "FrontendConsolidation targets1–9",
+        "BackendBoundary target2",
+        "isolated Native acceptance",
+        "exact-head remote Source-only CI"
+      ],
       "test": false,
       "lines": 19,
       "components": 0,
@@ -27219,7 +27633,8 @@
         "subscriptions": 0
       },
       "deep_relative_imports": 0,
-      "deep_feature_imports": 0
+      "deep_feature_imports": 0,
+      "migration_decision": "DEFER"
     }
   ],
   "afterTop20Tsx": [
@@ -27303,5 +27718,382 @@
       "path": "src/features/assets/AssetLibrary.tsx",
       "lines": 456
     }
-  ]
+  ],
+  "beforeRoot": {
+    "path": "src/app/App.tsx",
+    "symbol": "workflowUseProjectDestination, workflowDefaultSelection, bindingInput, projectWorkflowBindingsForRecipe, keepsNativeContextMenu, App, allowProjectSwitch, navigate, navigateLegacy, navigateToWorkspace, navigateToStudioSection, openTask, openShot, handleShotSelected, openProject, openProductionQueue, openProductionQueueFromShot, reconnectComfy, retryStartup, refreshCapabilities, refreshRuntimeAfterEndpoint, reloadCatalog, openWorkflowForProject, reconcileTasks, loadHistoricalInputs, useAssetInStudio, handleProjectUpdated, handleProjectRestored, handleTemplateProjectCreated, openVideoBatch, openAssetFromShot, openShotFromAsset, navigateFromCommandCenter",
+    "current_role": "APP_COMPOSITION",
+    "target_role": "APP_COMPOSITION",
+    "feature_owner": "app",
+    "state_owner": [
+      "src/stores/taskStore",
+      "src/stores/projectStore",
+      "src/stores/workspaceResumeStore",
+      "src/stores/studioStore"
+    ],
+    "effect_owner": "module lifecycle",
+    "route_dependency": [
+      "src/app/routes/useAppRoute",
+      "src/app/routes/useDraftConfirmation",
+      "src/app/routes/legacyAdapter",
+      "src/app/routes/resumeAdapter",
+      "src/app/routes/types",
+      "src/app/routes/commandCenterAdapter"
+    ],
+    "client_dependency": [
+      "src/services/tauriClient",
+      "src/services/taskEvents",
+      "src/product/runInvalidation",
+      "src/product/client",
+      "src/services/workflowLabClient"
+    ],
+    "store_dependency": [
+      "src/stores/taskStore",
+      "src/stores/projectStore",
+      "src/stores/workspaceResumeStore",
+      "src/stores/studioStore"
+    ],
+    "cross_feature_dependencies": [],
+    "prop_depth": {
+      "max_property_chain": 2,
+      "note": "AST proxy, actual seam prop handoff reviewed separately"
+    },
+    "local_state_count": 21,
+    "effect_count": 7,
+    "decision": "EXTRACT_PAGE_CONTAINER",
+    "replacement": [
+      {
+        "name": "normal-page-composition",
+        "paths": [
+          "src/app/App.tsx",
+          "src/app/NormalProductPages.tsx"
+        ]
+      },
+      {
+        "name": "shot-consistency",
+        "paths": [
+          "src/features/shots/useShotConsistencyController.ts"
+        ]
+      },
+      {
+        "name": "project-task-recovery",
+        "paths": [
+          "src/features/tasks/useProjectTaskRecovery.ts"
+        ]
+      }
+    ],
+    "risk": "Retain global startup, navigation and overlays; move bounded normal-page and feature effect owners.",
+    "tests": [
+      "Phase7 route regression",
+      "Phase10 scoped owner regressions",
+      "Native isolated real restart"
+    ],
+    "test": false,
+    "lines": 973,
+    "components": 1,
+    "hooks": 1,
+    "imports": [
+      "react",
+      "../services/tauriClient",
+      "../services/taskEvents",
+      "../stores/taskStore",
+      "../stores/projectStore",
+      "../stores/workspaceResumeStore",
+      "../types/generation",
+      "../types/asset",
+      "../types/organization",
+      "../features/projects/ProjectCommandCenter",
+      "./bootstrap",
+      "./WorkspaceErrorBoundary",
+      "../stores/studioStore",
+      "../types/history",
+      "../types/generation",
+      "../types/project",
+      "../types/productionQueue",
+      "../types/shot",
+      "../types/projectWorkflow",
+      "../types/consistencyBindings",
+      "../types/workspaceResume",
+      "../i18n/errorMessages",
+      "../i18n/statusLabels",
+      "./StartupScreen",
+      "../features/create/createModel",
+      "../features/library/libraryModel",
+      "../features/runs/runsModel",
+      "../product/runInvalidation",
+      "./ShellHost",
+      "./v3/ProjectOverviewPage",
+      "./studioNavigation",
+      "./routes/useAppRoute",
+      "./routes/useDraftConfirmation",
+      "./routes/legacyAdapter",
+      "./routes/resumeAdapter",
+      "../product/client",
+      "./routes/types",
+      "../services/workflowLabClient",
+      "./App.css",
+      "../styles/studioTokens.css",
+      "../styles/uiPolish.css",
+      "../styles/studioQuality.css",
+      "./routes/commandCenterAdapter"
+    ],
+    "resolvedImports": [
+      "react",
+      "src/services/tauriClient",
+      "src/services/taskEvents",
+      "src/stores/taskStore",
+      "src/stores/projectStore",
+      "src/stores/workspaceResumeStore",
+      "src/types/generation",
+      "src/types/asset",
+      "src/types/organization",
+      "src/features/projects/ProjectCommandCenter",
+      "src/app/bootstrap",
+      "src/app/WorkspaceErrorBoundary",
+      "src/stores/studioStore",
+      "src/types/history",
+      "src/types/generation",
+      "src/types/project",
+      "src/types/productionQueue",
+      "src/types/shot",
+      "src/types/projectWorkflow",
+      "src/types/consistencyBindings",
+      "src/types/workspaceResume",
+      "src/i18n/errorMessages",
+      "src/i18n/statusLabels",
+      "src/app/StartupScreen",
+      "src/features/create/createModel",
+      "src/features/library/libraryModel",
+      "src/features/runs/runsModel",
+      "src/product/runInvalidation",
+      "src/app/ShellHost",
+      "src/app/v3/ProjectOverviewPage",
+      "src/app/studioNavigation",
+      "src/app/routes/useAppRoute",
+      "src/app/routes/useDraftConfirmation",
+      "src/app/routes/legacyAdapter",
+      "src/app/routes/resumeAdapter",
+      "src/product/client",
+      "src/app/routes/types",
+      "src/services/workflowLabClient",
+      "src/app/App.css",
+      "src/styles/studioTokens.css",
+      "src/styles/uiPolish.css",
+      "src/styles/studioQuality.css",
+      "src/app/routes/commandCenterAdapter"
+    ],
+    "counts": {
+      "useState": 21,
+      "useEffect": 7,
+      "useLayoutEffect": 0,
+      "useMemo": 1,
+      "useCallback": 4,
+      "contexts": 0,
+      "localStorage": 0,
+      "sessionStorage": 0,
+      "listeners": 0,
+      "timers": 1,
+      "subscriptions": 1
+    },
+    "deep_relative_imports": 0,
+    "deep_feature_imports": 0
+  },
+  "afterTop20Controllers": [
+    {
+      "path": "src/features/workflows/useWorkflowLabController.ts",
+      "lines": 835
+    },
+    {
+      "path": "src/features/workflows/hooks/useWorkflowSmartImportController.ts",
+      "lines": 390
+    },
+    {
+      "path": "src/features/shots/hooks/useShotQueueController.ts",
+      "lines": 376
+    },
+    {
+      "path": "src/features/shots/hooks/useShotMultiPackageController.ts",
+      "lines": 343
+    },
+    {
+      "path": "src/features/studio/hooks/useGenerationBatchController.ts",
+      "lines": 293
+    },
+    {
+      "path": "src/features/workflows/hooks/useWorkflowAdvancedOnboardingController.ts",
+      "lines": 281
+    },
+    {
+      "path": "src/features/assets/hooks/useAssetVideoLocalImportController.ts",
+      "lines": 256
+    },
+    {
+      "path": "src/features/studio/hooks/useGenerationPresetController.ts",
+      "lines": 241
+    },
+    {
+      "path": "src/features/workflows/hooks/useWorkflowParameterExposureController.ts",
+      "lines": 241
+    },
+    {
+      "path": "src/features/assets/hooks/useAssetVideoWorkflowController.ts",
+      "lines": 196
+    },
+    {
+      "path": "src/features/create/CreateController.ts",
+      "lines": 172
+    },
+    {
+      "path": "src/features/studio/hooks/useGenerationWorkflowSelectionController.ts",
+      "lines": 165
+    },
+    {
+      "path": "src/features/studio/hooks/useGenerationExperimentController.ts",
+      "lines": 159
+    },
+    {
+      "path": "src/features/assets/hooks/useAssetVideoLibraryController.ts",
+      "lines": 137
+    },
+    {
+      "path": "src/features/studio/hooks/useGenerationSubmissionController.ts",
+      "lines": 120
+    },
+    {
+      "path": "src/features/shots/hooks/useShotProductionMonitor.ts",
+      "lines": 114
+    },
+    {
+      "path": "src/features/shots/useShotConsistencyController.ts",
+      "lines": 112
+    },
+    {
+      "path": "src/features/shots/hooks/useShotWorkspaceSelection.ts",
+      "lines": 108
+    },
+    {
+      "path": "src/features/studio/hooks/useGenerationAssetIntentController.ts",
+      "lines": 104
+    },
+    {
+      "path": "src/features/studio/hooks/useGenerationProjectTemplateController.ts",
+      "lines": 97
+    }
+  ],
+  "evidence": "docs/architecture/phase10-native-acceptance.json",
+  "rootOwnership": {
+    "local_state_before": 21,
+    "local_state_after": 13,
+    "selected_feature_state_before": 8,
+    "selected_feature_state_after": 0,
+    "feature_effects_before": 3,
+    "feature_effects_after": 1,
+    "retained_feature_effect": "Advanced video batch asset reset on project change; explicitly deferred with Advanced composition.",
+    "new_state_authorities": 0,
+    "duplicate_authorities_confirmed_in_reviewed_seams": 0
+  },
+  "effectOwnership": [
+    {
+      "owner": "App",
+      "classification": [
+        "APPLICATION_LIFECYCLE",
+        "TRANSPORT_SUBSCRIPTION"
+      ],
+      "responsibility": "Bootstrap, task event channel, global runtime admission; existing cancellation, late-unlisten and admission timer cleanup preserved."
+    },
+    {
+      "owner": "App/useAppRoute",
+      "classification": [
+        "ROUTE_LIFECYCLE",
+        "PERSISTENCE"
+      ],
+      "responsibility": "Project/resume bootstrap, route/store scope; existing sole route reducer and persistence adapter unchanged."
+    },
+    {
+      "owner": "App",
+      "classification": [
+        "FEATURE_LIFECYCLE"
+      ],
+      "responsibility": "Advanced video-batch asset reset retained; do not claim all feature orchestration eliminated."
+    },
+    {
+      "owner": "shots/useShotConsistencyController",
+      "classification": [
+        "FEATURE_LIFECYCLE"
+      ],
+      "responsibility": "Project option requests and binding commands; canceled effects cannot publish stale options."
+    },
+    {
+      "owner": "tasks/useProjectTaskRecovery",
+      "classification": [
+        "FEATURE_LIFECYCLE"
+      ],
+      "responsibility": "Project recent task requests and manual reconciliation; cancellation/epoch protects existing TaskStore and operation callbacks."
+    },
+    {
+      "owner": "AppShellV3/useDraftConfirmation",
+      "classification": [
+        "COMPONENT_LIFECYCLE"
+      ],
+      "responsibility": "Existing keyboard listener removeEventListener and pending dialog cleanup unchanged."
+    }
+  ],
+  "stateAuthorityMap": [
+    {
+      "domain": "Application",
+      "owner": "bootstrap/global runtime subscription",
+      "classification": "FEATURE_STATE"
+    },
+    {
+      "domain": "Project",
+      "owner": "ProjectStore + existing AppRoute/resume adapter",
+      "classification": "PROJECT_STATE/PERSISTED_STATE"
+    },
+    {
+      "domain": "Studio/Create",
+      "owner": "StudioStore + existing CreateController",
+      "classification": "FEATURE_STATE/SERVER_DERIVED_STATE"
+    },
+    {
+      "domain": "Shots",
+      "owner": "ShotWorkspace + scoped consistency hook options",
+      "classification": "LOCAL_EPHEMERAL/SERVER_DERIVED_STATE"
+    },
+    {
+      "domain": "Runs/Tasks",
+      "owner": "TaskStore + RunsController + task recovery request lifecycle",
+      "classification": "SERVER_DERIVED_STATE"
+    },
+    {
+      "domain": "Library/Assets",
+      "owner": "existing LibraryController and asset controllers",
+      "classification": "SERVER_DERIVED_STATE"
+    },
+    {
+      "domain": "Prompts",
+      "owner": "LibraryController + Advanced PromptStudio editing",
+      "classification": "SERVER_DERIVED_STATE/LOCAL_EPHEMERAL"
+    },
+    {
+      "domain": "Workflow Lab",
+      "owner": "existing useWorkflowLabController; backend registry authority",
+      "classification": "SERVER_DERIVED_STATE"
+    },
+    {
+      "domain": "Settings",
+      "owner": "existing operation state and backend persisted settings",
+      "classification": "LOCAL_EPHEMERAL/PERSISTED_STATE"
+    },
+    {
+      "domain": "Advanced",
+      "owner": "retain explicit existing feature owners",
+      "classification": "FEATURE_STATE"
+    },
+    {
+      "domain": "Dialogs/Overlays",
+      "owner": "existing application draft confirmation and feature-local dialogs",
+      "classification": "LOCAL_EPHEMERAL"
+    }
+  ],
+  "remoteGate": "Final exact-head master Source-only CI must complete successfully. Outcome reported after push without creating another CI-evidence-only source commit."
 }

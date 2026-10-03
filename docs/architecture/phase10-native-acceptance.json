@@ -1,0 +1,813 @@
+{
+  "status": "LOCAL_ACCEPTANCE_VERIFIED_REMOTE_CI_REQUIRED",
+  "source_commit": "8d3c7fa077a329cf03688c37acb5d8be6e987bed",
+  "isolation": "Own Phase9 fixture cloned using SQLite read-only backup into a fresh TEMP Phase10 root; no real project data or user applications changed.",
+  "application": "Actual Tauri/WebView2 dev binary, first PID22864 closed and a new PID22416 launched with same isolated persisted directories; both closed via targeted Alt-F4.",
+  "responsive": [
+    {
+      "page": "overview",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "studio",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "create",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "runs",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "library",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "lab",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "settings",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "project",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "advanced",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "tasks",
+      "width": 1920,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "overview",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "studio",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "create",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "runs",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "library",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "lab",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "settings",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "project",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "advanced",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "tasks",
+      "width": 1440,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "overview",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "studio",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "create",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "runs",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "library",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "lab",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "settings",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "project",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "advanced",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "tasks",
+      "width": 1180,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "overview",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "studio",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "create",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "runs",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "library",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "lab",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "settings",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "project",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "advanced",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    },
+    {
+      "page": "tasks",
+      "width": 1024,
+      "overflow": false,
+      "style_differences": 0,
+      "rect_differences": 0,
+      "unmatched_nodes": 0
+    }
+  ],
+  "comparison_scope": "Phase9 frozen post-cleanup captures vs Phase10: ten page families, four widths, first120 visible sampled nodes and computed layout properties; no claim of exhaustive pixel coverage. CSS source hashes unchanged. Create screenshot manually inspected.",
+  "controls": [
+    {
+      "width": 1920,
+      "reference": [
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        }
+      ],
+      "picker": {
+        "open": true,
+        "inside": true,
+        "x": 700,
+        "right": 1220,
+        "width": 520,
+        "focus": "原生验收提示词 · 版本 2",
+        "bg": "rgb(32, 36, 45)"
+      }
+    },
+    {
+      "width": 1440,
+      "reference": [
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        }
+      ],
+      "picker": {
+        "open": true,
+        "inside": true,
+        "x": 460,
+        "right": 980,
+        "width": 520,
+        "focus": "原生验收提示词 · 版本 2",
+        "bg": "rgb(32, 36, 45)"
+      }
+    },
+    {
+      "width": 1180,
+      "reference": [
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        }
+      ],
+      "picker": {
+        "open": true,
+        "inside": true,
+        "x": 330,
+        "right": 850,
+        "width": 520,
+        "focus": "原生验收提示词 · 版本 2",
+        "bg": "rgb(32, 36, 45)"
+      }
+    }
+  ],
+  "dialogs": {
+    "logs": [
+      {
+        "width": 1920,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 719.2000122070312,
+          "right": 1200.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      },
+      {
+        "width": 1440,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 479.20001220703125,
+          "right": 960.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      },
+      {
+        "width": 1180,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 349.20001220703125,
+          "right": 830.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      }
+    ],
+    "focus": {
+      "cls": "v3-skip",
+      "outline": "solid",
+      "top": 0
+    },
+    "draftPreserved": true,
+    "projectSwitch": {
+      "kind": "project",
+      "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+      "page": "overview"
+    },
+    "advancedBridge": true
+  },
+  "behaviors": [
+    {
+      "name": "runs-all",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "filter": "all"
+      },
+      "counts": null
+    },
+    {
+      "name": "runs-active",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "filter": "active"
+      },
+      "counts": null
+    },
+    {
+      "name": "runs-failed",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "filter": "failed"
+      },
+      "counts": null
+    },
+    {
+      "name": "runs-completed",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "filter": "completed"
+      },
+      "counts": null
+    },
+    {
+      "name": "advanced-project",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-project"
+      },
+      "counts": null
+    },
+    {
+      "name": "advanced-shots",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-shots"
+      },
+      "counts": null
+    },
+    {
+      "name": "advanced-production",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-production"
+      },
+      "counts": null
+    },
+    {
+      "name": "advanced-review",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-review"
+      },
+      "counts": null
+    },
+    {
+      "name": "advanced-tasks",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-tasks"
+      },
+      "counts": null
+    },
+    {
+      "name": "generators",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "generators"
+      },
+      "counts": null
+    },
+    {
+      "name": "advanced-assets",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_default",
+        "filter": "advanced-assets"
+      },
+      "counts": null
+    },
+    {
+      "name": "advanced-prompts",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_default",
+        "filter": "advanced-prompts"
+      },
+      "counts": null
+    },
+    {
+      "name": "prompts",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_default",
+        "filter": "prompts"
+      },
+      "counts": null
+    },
+    {
+      "name": "advanced-tools",
+      "route": {
+        "kind": "system-settings",
+        "section": "advanced-tools"
+      },
+      "counts": null
+    },
+    {
+      "name": "legacy-lab",
+      "route": {
+        "kind": "project-settings",
+        "projectId": "prj_default",
+        "section": "advanced-workflows"
+      },
+      "counts": null
+    },
+    {
+      "name": "project-switch",
+      "route": {
+        "kind": "project",
+        "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+        "page": "overview"
+      },
+      "counts": null
+    },
+    {
+      "name": "project-load-counts",
+      "route": null,
+      "counts": {
+        "task_list_recent": 1,
+        "consistency_profile_list": 1,
+        "reference_set_list": 1
+      }
+    },
+    {
+      "name": "ctrl-k",
+      "route": {
+        "kind": "create",
+        "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+        "stage": "image"
+      },
+      "counts": null
+    },
+    {
+      "name": "settings-nav",
+      "route": {
+        "kind": "system-settings",
+        "section": "general",
+        "returnTo": {
+          "kind": "create",
+          "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+          "stage": "image"
+        }
+      },
+      "counts": null
+    },
+    {
+      "name": "settings-save",
+      "route": {
+        "kind": "system-settings",
+        "section": "general",
+        "returnTo": {
+          "kind": "create",
+          "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+          "stage": "image"
+        }
+      },
+      "counts": null
+    },
+    {
+      "name": "restart-ready",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98"
+      },
+      "counts": null
+    }
+  ],
+  "run_details": [
+    {
+      "name": "task-detail",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "run": {
+          "source": "task",
+          "id": "tsk_f17373c3-c6c2-4c58-8eb8-9d084f87589f"
+        }
+      }
+    },
+    {
+      "name": "queue-partial-review",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "run": {
+          "source": "queue-batch",
+          "id": "pbt_phase4_partial"
+        }
+      }
+    },
+    {
+      "name": "paused-queue",
+      "route": {
+        "kind": "runs",
+        "projectId": "prj_default",
+        "run": {
+          "source": "queue-batch",
+          "id": "pbt_phase4_paused"
+        }
+      }
+    },
+    {
+      "name": "asset-detail",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_default",
+        "resource": {
+          "kind": "asset",
+          "id": "ast_phase3_image"
+        }
+      }
+    },
+    {
+      "name": "prompt-detail",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_default",
+        "resource": {
+          "kind": "prompt",
+          "id": "prm_ff5aaca7-3823-4366-ad5d-a57d2f64c1f0"
+        }
+      }
+    }
+  ],
+  "real_restart": [
+    {
+      "name": "real-restart",
+      "route": {
+        "kind": "library",
+        "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98"
+      },
+      "persisted_profile_visible": false
+    },
+    {
+      "name": "settings-persisted-after-real-restart",
+      "route": {
+        "kind": "system-settings",
+        "section": "general",
+        "returnTo": {
+          "kind": "library",
+          "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98"
+        }
+      },
+      "persisted_profile_visible": true
+    }
+  ],
+  "migration": {
+    "max": 42,
+    "named_domain_tables": 71,
+    "total_non_sqlite_tables": 75,
+    "043_present": false,
+    "backup_format": 20
+  },
+  "focused_tests": {
+    "distinct_cases": 10,
+    "new_cases": 9,
+    "existing_case": "BackendBoundary target2",
+    "existing_case_reruns_only": true,
+    "full_local_suite": "NOT_RUN",
+    "final_result": "10 distinct cases PASS; initial target2 assertion repaired, dependency-wiring cases rerun after typed-port adjustment."
+  },
+  "static": {
+    "tsc": "PASS",
+    "build": "PASS",
+    "DEV088": "PASS",
+    "cargo_fmt": "PASS",
+    "cargo_check": "PASS"
+  },
+  "harness_note": "An initial IPC-count probe failed because the readonly __TAURI_INTERNALS__.invoke assignment was ignored; rerun observed actual CDP Network JSON POST requests, excluding preflights. No production modification made to satisfy the probe.",
+  "app_closed": true,
+  "next_phase_started": false
+}

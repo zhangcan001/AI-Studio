@@ -61,3 +61,33 @@ No full local suite. TypeScript/build, DEV-088 and fmt/check separately.
 Native isolated route/project/real-restart acceptance and responsive three widths
 are required before PASS; exact final-head master Source-only CI is full-suite
 authority. Until those finish, this phase is not PASS.
+
+## Verified local checkpoint
+
+The four seams are production-migrated. App changed from 973 to 827 lines;
+local root state sites 21 to 13, root effect sites 7 to 5. Two selected feature
+effects moved; the Advanced video-batch reset remains explicitly retained.
+Global effect sites increased 242 to 243 due to the task request epoch cleanup.
+Cross-feature imports fell 118 to 117; shared generator labels preserve their
+existing Create reexports. Six existing stores remain authoritative.
+
+App retains its established compatibility-facade importer and supplies stable
+typed service ports to the two hooks. This is composition wiring, not another
+IPC layer or an expansion of the legacy transport allowlist.
+
+Ten distinct focused local cases passed (nine new, one existing backend boundary);
+only existing cases were rerun. No repository-wide test suite ran locally.
+TypeScript/build, DEV-088, cargo fmt/check passed. Rust warnings were not changed.
+The Native evidence artifact records 40 page/width pairs, three dialog widths,
+three picker/reference widths, exact task/queue/resource details, Advanced paths,
+legacy Lab, keyboard/Back, one actual IPC load per project-scoped seam, and a real
+close/relaunch preserving route and an isolated settings profile. Both owned
+Native processes are closed. Historical Phase9 sampled computed styles and
+rectangles matched at all40 pairs; this is not an exhaustive pixel comparison.
+
+The backend's migration test counts 71 explicitly named domain tables, not all
+SQLite tables: the isolated database has 75 non-sqlite tables including ancillary
+tables. MAX migration remains42, no043, backup20.
+
+The exact final-head remote CI result is the remaining authority gate; recording
+its outcome in chat avoids an infinite documentation-commit/CI-head loop.
