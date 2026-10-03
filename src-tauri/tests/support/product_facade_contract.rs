@@ -91,8 +91,8 @@ fn binding_request(instance: Option<String>, revision: Option<i64>) -> Generator
 
 #[tokio::test]
 async fn product_contract_overview_and_occ_preserve_authority() {
-    let dir = tempdir().unwrap();
-    let pool = initialize(&dir.path().join("product.db")).await.unwrap();
+    let dir = super::project_database::ProjectDatabase::new("product.db").await;
+    let pool = dir.pool.clone();
     seed_database(&pool, dir.path()).await;
     let center = command_center(&pool);
     let legacy = center.get(PROJECT_ID).await.unwrap();
@@ -204,8 +204,8 @@ async fn product_contract_overview_and_occ_preserve_authority() {
 
 #[tokio::test]
 async fn product_contract_catalog_retirement_unavailable_and_no_raw_identity() {
-    let dir = tempdir().unwrap();
-    let pool = initialize(&dir.path().join("product.db")).await.unwrap();
+    let dir = super::project_database::ProjectDatabase::new("product.db").await;
+    let pool = dir.pool.clone();
     seed_database(&pool, dir.path()).await;
     for (id, category, yaml) in [
         (
@@ -310,8 +310,8 @@ async fn product_contract_catalog_retirement_unavailable_and_no_raw_identity() {
 
 #[tokio::test]
 async fn product_contract_partial_retry_idempotent_preserves_history_and_scope() {
-    let dir = tempdir().unwrap();
-    let pool = initialize(&dir.path().join("product.db")).await.unwrap();
+    let dir = super::project_database::ProjectDatabase::new("product.db").await;
+    let pool = dir.pool.clone();
     seed_database(&pool, dir.path()).await;
     let mut adapter = ControlledComfy::new(ComfyBehavior::Success);
     adapter.fail_second = true;
@@ -491,8 +491,8 @@ async fn product_contract_partial_retry_idempotent_preserves_history_and_scope()
 #[tokio::test]
 async fn product_contract_standalone_input_error_denies_retry_without_side_effects() {
     use ai_studio_lib::domain::{Task, TaskError, TaskStatus};
-    let dir = tempdir().unwrap();
-    let pool = initialize(&dir.path().join("product.db")).await.unwrap();
+    let dir = super::project_database::ProjectDatabase::new("product.db").await;
+    let pool = dir.pool.clone();
     seed_database(&pool, dir.path()).await;
     let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Success));
     let services = build_services(&pool, comfy.clone(), dir.path());

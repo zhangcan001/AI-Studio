@@ -1,4 +1,6 @@
 //! Phase 5 targets 1, 2 and 8: real project-scoped authorities and typed reads.
+#[path = "support/project_database.rs"]
+mod project_database;
 use ai_studio_lib::application::{
     asset_data_service::AssetDataService,
     asset_deletion_service::AssetDeletionService,
@@ -19,12 +21,12 @@ use ai_studio_lib::infrastructure::{
     database::*, filesystem::FileSystemAssetStore, time::SystemClock,
 };
 use chrono::Utc;
+use project_database::ProjectDatabase;
 use sqlx::SqlitePool;
 use std::{collections::HashSet, sync::Arc};
-use tempfile::{tempdir, TempDir};
 
 struct Fixture {
-    _dir: TempDir,
+    _dir: ProjectDatabase,
     pool: SqlitePool,
     assets: AssetLibraryService,
     asset_detail: AssetQueryService,
@@ -37,8 +39,8 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
-        let dir = tempdir().unwrap();
-        let pool = initialize(&dir.path().join("library.db")).await.unwrap();
+        let dir = ProjectDatabase::new("library.db").await;
+        let pool = dir.pool.clone();
         let projects = Arc::new(SqliteProjectRepository::new(pool.clone()));
         for id in ["prj_default", "prj_11111111-1111-4111-8111-111111111111"] {
             projects

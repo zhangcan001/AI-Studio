@@ -5,6 +5,9 @@
 //! task recovery.  The database and project asset store are real; ComfyUI is a
 //! small controlled boundary adapter.
 
+#[path = "support/project_database.rs"]
+mod project_database;
+
 #[path = "support/product_facade_contract.rs"]
 mod product_facade_contract;
 
