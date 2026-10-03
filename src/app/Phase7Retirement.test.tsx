@@ -44,7 +44,7 @@ it("phase7_target3 all eleven legacy locators have canonical destinations",()=>{
 it("phase7_target4 normal Create never renders batch or shot legacy UI",()=>{
  expect(normalCreate(fromLegacyLocation({workspace:"shots",projectId:project,shotId:"s"}))).toBe(true);
  for(const workspace of ["studio","video"] as const){const r=fromLegacyLocation({workspace,projectId:project});expect(r).toMatchObject({kind:"create",surface:"batch",stage:workspace==="studio"?"image":"video"});expect(normalCreate(r)).toBe(false);}
- expect(app()).toContain('normalCreate(route) && route.kind === "create"');expect(app()).toContain('["advanced-shots", "advanced-production", "advanced-review"].includes(route.section)');
+ expect(read('src/app/NormalProductPages.tsx')).toContain('normalCreate(route) && route.kind === "create"');expect(app()).toContain('["advanced-shots", "advanced-production", "advanced-review"].includes(route.section)');
 });
 it("phase7_target5 task production review locators use Runs and preserve exact context",()=>{
  for(const workspace of ["tasks","shots"] as const)for(const section of ["production","review"] as const){const r=fromLegacyLocation({workspace,section,projectId:project,taskId:"t",batchId:"b",itemId:"i",reviewId:"r",shotId:"s",assetId:"a",stage:"VIDEO"});expect(normalRuns(r)).toBe(true);expect(r).toMatchObject({run:{source:"queue-batch",id:"b"},context:{reviewId:"r",itemId:"i",taskId:"t",batchId:"b",assetId:"a",shotId:"s"}});expect(parseRoute(r)).toEqual(r);}

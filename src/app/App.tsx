@@ -1,25 +1,29 @@
+import { useProjectTaskRecovery } from "../features/tasks/useProjectTaskRecovery";
+import { NormalProductPages } from "./NormalProductPages";
+import { useShotConsistencyController } from "../features/shots/useShotConsistencyController";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   getComfyStatus,
-  getAsset,
-  getRuntimeActivityStatus,
-  getProductionAdmissionStatus,
+  listRecentTasks,
   getConsistencyScopeBinding,
   getShotConsistencyBinding,
   getShotContextDraft,
-  listGenerationCatalog,
   listConsistencyProfiles,
   listCostumeVariants,
   listReferenceSets,
+  replaceConsistencyScopeBinding,
+  replaceShotConsistencyBinding,
+
+  getAsset,
+  getRuntimeActivityStatus,
+  getProductionAdmissionStatus,
+  listGenerationCatalog,
   listProjects,
-  listRecentTasks,
   listShots,
   reconcileActiveTasks,
   refreshComfyCapabilities,
-  replaceConsistencyScopeBinding,
   getProjectWorkflowConfig,
   upsertProjectWorkflowBinding,
-  replaceShotConsistencyBinding,
 } from "../services/tauriClient";
 import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
@@ -36,27 +40,15 @@ import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
-import type { ShotStage } from "../types/shot";
 import type {
   ProjectWorkflowBindingInput,
   ProjectWorkflowBindingView,
   ProjectWorkflowConfigView,
 } from "../types/projectWorkflow";
-import type {
-  ConsistencyContextPreview,
-  ConsistencyBindingReplaceInput,
-  ConsistencyCostumeOption,
-  ConsistencyProfileOption,
-  ConsistencyReferenceSetOption,
-  ConsistencyScopeRef,
-} from "../types/consistencyBindings";
 import { type Workspace } from "../types/workspaceResume";
 import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
-import { normalCreate } from "../features/create/createModel";
-import { normalLibrary } from "../features/library/libraryModel";
-import { normalRuns } from "../features/runs/runsModel";
 import { invalidateRuns } from "../product/runInvalidation";
 import { ShellHost } from "./ShellHost";
 import { ProjectOverviewPage } from "./v3/ProjectOverviewPage";
@@ -83,14 +75,11 @@ const PromptStudio = lazy(() => import("../features/prompts/PromptStudio").then(
 const LocalToolHub = lazy(() => import("../features/tools/LocalToolHub").then(({ LocalToolHub }) => ({ default: LocalToolHub })));
 const AssetVideoBatchWorkspace = lazy(() => import("../features/assets/AssetVideoBatchWorkspace").then(({ AssetVideoBatchWorkspace }) => ({ default: AssetVideoBatchWorkspace })));
 const TaskHistory = lazy(() => import("../features/tasks/TaskHistory").then(({ TaskHistory }) => ({ default: TaskHistory })));
-const LibraryPage = lazy(() => import("../features/library/LibraryPage").then(({ LibraryPage }) => ({ default: LibraryPage })));
-const RunsPage = lazy(() => import("../features/runs/RunsPage").then(({ RunsPage }) => ({ default: RunsPage })));
 const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspace").then(({ ProjectWorkspace }) => ({ default: ProjectWorkspace })));
 const ProjectCommandCenter = lazy(() => import("../features/projects/ProjectCommandCenter").then(({ ProjectCommandCenter }) => ({ default: ProjectCommandCenter })));
 const WorkflowLabPage = lazy(() => import("../features/workflow-lab/WorkflowLabPage").then(({ WorkflowLabPage }) => ({ default: WorkflowLabPage })));
 const GeneratorSettingsPage = lazy(() => import("../features/generators/GeneratorSettingsPage").then(({ GeneratorSettingsPage }) => ({ default: GeneratorSettingsPage })));
 const SettingsWorkspace = lazy(() => import("../features/settings/SettingsWorkspace").then(({ SettingsWorkspace }) => ({ default: SettingsWorkspace })));
-const CreatePage = lazy(() => import("../features/create/CreatePage").then(({ CreatePage }) => ({ default: CreatePage })));
 const ShotWorkspace = lazy(() => import("../features/shots/ShotWorkspace").then(({ ShotWorkspace }) => ({ default: ShotWorkspace })));
 
 export function workflowUseProjectDestination(
@@ -153,6 +142,11 @@ function keepsNativeContextMenu(target: EventTarget | null): boolean {
     || target.closest('[contenteditable="true"]') !== null;
 }
 
+// Reuse the existing compatibility facade at its established application importer.
+// Stable use-case ports are composition dependencies, not a new IPC/client layer.
+const taskRecoveryServices = { listRecentTasks, reconcileActiveTasks };
+const shotConsistencyServices = { getConsistencyScopeBinding, getShotConsistencyBinding, getShotContextDraft, listConsistencyProfiles, listCostumeVariants, listReferenceSets, replaceConsistencyScopeBinding, replaceShotConsistencyBinding };
+
 function App() {
   const { confirm: confirmDraftDiscard, dialog: draftConfirmation } = useDraftConfirmation();
   const { route, navigate: dispatchNavigate, restore, back, switchProject } = useAppRoute();
@@ -175,26 +169,18 @@ function App() {
   const [taskEventError, setTaskEventError] = useState<string | undefined>();
   const [connectionLoading, setConnectionLoading] = useState(false);
   const [capabilityLoading, setCapabilityLoading] = useState(false);
-  const [reconciling, setReconciling] = useState(false);
-  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [workflowNotice, setWorkflowNotice] = useState<string | null>(null);
-  const [projectContextLoading, setProjectContextLoading] = useState(false);
-  const [consistencyProfiles, setConsistencyProfiles] = useState<ConsistencyProfileOption[]>([]);
-  const [consistencyReferenceSets, setConsistencyReferenceSets] = useState<ConsistencyReferenceSetOption[]>([]);
-  const [consistencyCostumes, setConsistencyCostumes] = useState<Record<string, ConsistencyCostumeOption[]>>({});
-  const [consistencyLoading, setConsistencyLoading] = useState(false);
-  const [consistencyError, setConsistencyError] = useState<string>();
   const [productionAdmission, setProductionAdmission] = useState<ProductionAdmissionStatus>({ busy: false });
   const projects = useProjectStore((state) => state.projects);
   const activeProjectId = routeProjectId(route);
   const activeProject = projects.find((project) => project.id === activeProjectId);
+  const { recentTasks, projectContextLoading, reconciling, recoveryNotice, setRecoveryNotice, reconcileTasks } = useProjectTaskRecovery(activeProjectId, setError, taskRecoveryServices);
+  const { consistencyProfiles, consistencyReferenceSets, consistencyCostumes, consistencyLoading, consistencyError, loadConsistencyBindingPack, saveConsistencyBindingPack, loadConsistencyContext } = useShotConsistencyController(activeProjectId, shotConsistencyServices);
   const projectLoading = useProjectStore((state) => state.loading);
   const projectError = useProjectStore((state) => state.error);
   const setProjects = useProjectStore((state) => state.setProjects);
   const setProjectLoading = useProjectStore((state) => state.setLoading);
   const setProjectError = useProjectStore((state) => state.setError);
-  const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
-  const recentTasks = useTaskStore((state) => state.recentTasks);
   const loadWorkspaceResume = useWorkspaceResumeStore((state) => state.load);
   useEffect(() => {
     if (activeProjectId) useProjectStore.getState().setActiveProject(activeProjectId);
@@ -312,116 +298,6 @@ function App() {
 
   useEffect(() => {
     setVideoBatchAssets([]);
-  }, [activeProjectId]);
-
-  useEffect(() => {
-    if (!activeProjectId) return;
-    const requestedProjectId = activeProjectId;
-    let cancelled = false;
-    setProjectContextLoading(true);
-    void listRecentTasks(requestedProjectId, 10)
-      .then((tasks) => {
-        if (!cancelled && useProjectStore.getState().activeProjectId === requestedProjectId) {
-          setRecentTasks(tasks);
-        }
-      })
-      .catch((loadError: unknown) => {
-        if (!cancelled && useProjectStore.getState().activeProjectId === requestedProjectId) {
-          setError(toUserMessage(loadError));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setProjectContextLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeProjectId, setRecentTasks]);
-
-  useEffect(() => {
-    if (!activeProjectId) {
-      setConsistencyProfiles([]);
-      setConsistencyReferenceSets([]);
-      setConsistencyCostumes({});
-      setConsistencyError(undefined);
-      setConsistencyLoading(false);
-      return;
-    }
-    const requestedProjectId = activeProjectId;
-    let cancelled = false;
-    setConsistencyLoading(true);
-    setConsistencyError(undefined);
-    void Promise.all([
-      listConsistencyProfiles(requestedProjectId),
-      listReferenceSets(requestedProjectId),
-    ])
-      .then(async ([profiles, referenceSets]) => {
-        const characterProfiles = profiles.filter((profile) => profile.profileType === "CHARACTER");
-        const costumeEntries = await Promise.all(
-          characterProfiles.map(async (profile) => [
-            profile.id,
-            await listCostumeVariants(requestedProjectId, profile.id).catch(() => []),
-          ] as const),
-        );
-        if (cancelled) return;
-        setConsistencyProfiles(profiles.map((profile) => ({
-          id: profile.id,
-          projectId: profile.projectId,
-          profileType: profile.profileType,
-          name: profile.name,
-          description: profile.description,
-        })));
-        setConsistencyReferenceSets(referenceSets.map((referenceSet) => ({
-          id: referenceSet.id,
-          projectId: referenceSet.projectId,
-          name: referenceSet.name,
-          purpose: referenceSet.purpose,
-          itemCount: referenceSet.itemCount,
-          imageCount: referenceSet.imageCount,
-        })));
-        setConsistencyCostumes(Object.fromEntries(costumeEntries.map(([profileId, costumes]) => [
-          profileId,
-          costumes.map((costume) => ({
-            id: costume.id,
-            characterProfileId: costume.characterProfileId,
-            name: costume.name,
-            promptFragment: costume.promptFragment,
-            referenceSetId: costume.referenceSetId,
-            isDefault: costume.isDefault,
-          })),
-        ])));
-      })
-      .catch((loadError: unknown) => {
-        if (!cancelled) setConsistencyError(toUserMessage(loadError));
-      })
-      .finally(() => {
-        if (!cancelled) setConsistencyLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeProjectId]);
-
-  const loadConsistencyBindingPack = useCallback(async (scope: ConsistencyScopeRef) => {
-    if (scope.scopeType === "SHOT") {
-      return getShotConsistencyBinding(activeProjectId ?? scope.scopeId, scope.scopeId);
-    }
-    return getConsistencyScopeBinding(activeProjectId ?? scope.scopeId, scope.scopeType, scope.scopeId);
-  }, [activeProjectId]);
-
-  const saveConsistencyBindingPack = useCallback(async (input: ConsistencyBindingReplaceInput) => {
-    if (input.scopeType === "SHOT") {
-      await replaceShotConsistencyBinding(input);
-    } else {
-      await replaceConsistencyScopeBinding(input);
-    }
-  }, []);
-
-  const loadConsistencyContext = useCallback(async (scope: ConsistencyScopeRef, stage: ShotStage): Promise<ConsistencyContextPreview | null> => {
-    if (scope.scopeType !== "SHOT") {
-      return null;
-    }
-    return getShotContextDraft(activeProjectId ?? scope.scopeId, scope.scopeId, stage);
   }, [activeProjectId]);
 
   async function allowProjectSwitch(projectId?: string) {
@@ -591,23 +467,6 @@ function App() {
     }
   }
 
-  async function reconcileTasks() {
-    if (!activeProjectId) return;
-    setReconciling(true);
-    setRecoveryNotice(null);
-    try {
-      const report = await reconcileActiveTasks();
-      setRecentTasks(await listRecentTasks(activeProjectId, 10));
-      setRecoveryNotice(
-        `已检查 ${report.examined} 个任务：${report.succeeded} 个已更新，${report.deferred} 个等待后续同步，${report.unresolved} 个状态未确定。`,
-      );
-    } catch (recoveryError: unknown) {
-      setRecoveryNotice(toUserMessage(recoveryError));
-    } finally {
-      setReconciling(false);
-    }
-  }
-
   function loadHistoricalInputs(draft: ReusableGenerationDraft) {
     if (!activeProjectId || draft.projectId !== activeProjectId) {
       setError("当前任务属于其他项目，请先切换到对应项目。");
@@ -774,12 +633,7 @@ function App() {
 
       {!activeProject && projectError && <p className="error-message global-error">项目加载失败：{projectError}</p>}
       <Suspense fallback={<p className="workspace-loading" role="status">正在加载工作区...</p>}>
-        {activeProject && normalCreate(route) && route.kind === "create" && <>
-          <CreatePage key={activeProject.id} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />
-          <details><summary>高级创作</summary><button type="button" onClick={() => void navigate({ ...route, surface: "batch" })}>批量创作</button></details>
-        </>}
-        {activeProject && normalLibrary(route) && route.kind === "library" && <LibraryPage key={activeProject.id} route={route} navigate={navigate} />}
-        {activeProject && normalRuns(route) && route.kind === "runs" && <RunsPage key={activeProject.id} route={route} navigate={navigate} />}
+        <NormalProductPages project={activeProject} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />
         {activeProject && (route.kind === "project" || (route.kind === "project-settings" && route.section === "advanced-project")) && (
           <WorkspaceErrorBoundary
             resetKey={activeProject?.id ?? "no-project"}

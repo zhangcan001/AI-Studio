@@ -26159,7 +26159,7 @@
   ],
   "baseline": "95319c89d575bd724bd6d7f6554565c9f5836a84",
   "BLOCKED_UNKNOWN": 0,
-  "status": "INVENTORY_BEFORE_MIGRATION",
+  "status": "MIGRATED_PENDING_ACCEPTANCE",
   "before": {
     "ts": 144,
     "tsx": 134,
@@ -26203,16 +26203,39 @@
       "paths": [
         "src/features/tasks/useProjectTaskRecovery.ts"
       ]
+    },
+    {
+      "name": "shared-generator-presentation",
+      "paths": [
+        "src/product/generatorPresentation.ts",
+        "src/features/create/createModel.ts",
+        "src/features/generators/GeneratorSettingsPage.tsx"
+      ]
     }
   ],
-  "frontendSuccessor": {},
-  "retiredRootResponsibilities": [],
+  "frontendSuccessor": {
+    "src/app/App.tsx": "ccb1f09504ff835cbe0a7234224770fe7976515759ca31abcb0afacbdd078e21",
+    "src/app/NormalProductPages.tsx": "941418a8940aaaaa2f8c3540472eae87509df1390585d99e196466c312921668",
+    "src/features/shots/useShotConsistencyController.ts": "78d3644f70797822f4ca8e00be7b8d48021b40253a7f56586ed6c4de45fa80fd",
+    "src/features/tasks/useProjectTaskRecovery.ts": "d79cb3b605411e46af5e14f85cb9ecd2fd96f709589b4adc2e7fe8821baea6a7",
+    "src/product/generatorPresentation.ts": "bf3960a399a1b3a306259fe49a5e2f6b551ac824f3c9f2b55c3b6744a0c1deab",
+    "src/features/create/createModel.ts": "a2eaedc9f53745f357462f4f1265fa7de71da691c7c4cd8c71e5473157d0e086",
+    "src/features/generators/GeneratorSettingsPage.tsx": "bc22aee331760b4dcbc1b135c037422c2ce6716370358aa66883e46dc18db3df"
+  },
+  "retiredRootResponsibilities": [
+    "listConsistencyProfiles(",
+    "listReferenceSets(",
+    "listCostumeVariants(",
+    "listRecentTasks(",
+    "normalCreate(route)",
+    "normalRuns(route)",
+    "normalLibrary(route)"
+  ],
   "importDebt": {
     "src/app/App.tsx": [
       "src/features/projects/ProjectCommandCenter",
-      "src/features/create/createModel",
-      "src/features/library/libraryModel",
-      "src/features/runs/runsModel"
+      "src/features/shots/useShotConsistencyController",
+      "src/features/tasks/useProjectTaskRecovery"
     ],
     "src/app/ShellHost.tsx": [],
     "src/app/StartupScreen.tsx": [],
@@ -26302,9 +26325,7 @@
       "src/features/runtime/pack05"
     ],
     "src/features/experiments/workflowBenchmarkUi.ts": [],
-    "src/features/generators/GeneratorSettingsPage.tsx": [
-      "src/features/create/createModel"
-    ],
+    "src/features/generators/GeneratorSettingsPage.tsx": [],
     "src/features/library/LibraryController.ts": [],
     "src/features/library/LibraryDetail.tsx": [],
     "src/features/library/LibraryPage.tsx": [],
@@ -26662,5 +26683,625 @@
     "src/services/taskEvents.ts": [
       "@tauri-apps/api/event"
     ]
-  }
+  },
+  "after": {
+    "ts": 147,
+    "tsx": 135,
+    "tests": 179,
+    "components": 266,
+    "hooks": 32,
+    "contexts": 0,
+    "stores": 6,
+    "clients": 13,
+    "largeTsx": 16,
+    "godCandidates": 12,
+    "useState": 876,
+    "useEffect": 243,
+    "useMemo": 140,
+    "useCallback": 180,
+    "localStorage": 16,
+    "sessionStorage": 0,
+    "listeners": 9,
+    "timers": 20,
+    "subscriptions": 9,
+    "crossFeature": 117,
+    "deepFeature": 28,
+    "deepRelative": 597
+  },
+  "app": {
+    "before": 973,
+    "after": 827
+  },
+  "currentRows": [
+    {
+      "path": "src/app/App.tsx",
+      "symbol": "workflowUseProjectDestination, workflowDefaultSelection, bindingInput, projectWorkflowBindingsForRecipe, keepsNativeContextMenu, App, allowProjectSwitch, navigate, navigateLegacy, navigateToWorkspace, navigateToStudioSection, openTask, openShot, handleShotSelected, openProject, openProductionQueue, openProductionQueueFromShot, reconnectComfy, retryStartup, refreshCapabilities, refreshRuntimeAfterEndpoint, reloadCatalog, openWorkflowForProject, loadHistoricalInputs, useAssetInStudio, handleProjectUpdated, handleProjectRestored, handleTemplateProjectCreated, openVideoBatch, openAssetFromShot, openShotFromAsset, navigateFromCommandCenter",
+      "current_role": "APP_COMPOSITION",
+      "target_role": "APP_COMPOSITION",
+      "feature_owner": "app",
+      "state_owner": [
+        "src/stores/taskStore",
+        "src/stores/projectStore",
+        "src/stores/workspaceResumeStore",
+        "src/stores/studioStore"
+      ],
+      "effect_owner": "module lifecycle",
+      "route_dependency": [
+        "src/app/routes/useAppRoute",
+        "src/app/routes/useDraftConfirmation",
+        "src/app/routes/legacyAdapter",
+        "src/app/routes/resumeAdapter",
+        "src/app/routes/types",
+        "src/app/routes/commandCenterAdapter"
+      ],
+      "client_dependency": [
+        "src/services/tauriClient",
+        "src/services/taskEvents",
+        "src/product/runInvalidation",
+        "src/product/client",
+        "src/services/workflowLabClient"
+      ],
+      "store_dependency": [
+        "src/stores/taskStore",
+        "src/stores/projectStore",
+        "src/stores/workspaceResumeStore",
+        "src/stores/studioStore"
+      ],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 2,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 13,
+      "effect_count": 5,
+      "decision": "DEFER",
+      "replacement": null,
+      "risk": "Retain behavior; no migration without reviewed authority boundary.",
+      "tests": [],
+      "test": false,
+      "lines": 827,
+      "components": 1,
+      "hooks": 1,
+      "imports": [
+        "../features/tasks/useProjectTaskRecovery",
+        "./NormalProductPages",
+        "../features/shots/useShotConsistencyController",
+        "react",
+        "../services/tauriClient",
+        "../services/taskEvents",
+        "../stores/taskStore",
+        "../stores/projectStore",
+        "../stores/workspaceResumeStore",
+        "../types/generation",
+        "../types/asset",
+        "../types/organization",
+        "../features/projects/ProjectCommandCenter",
+        "./bootstrap",
+        "./WorkspaceErrorBoundary",
+        "../stores/studioStore",
+        "../types/history",
+        "../types/generation",
+        "../types/project",
+        "../types/productionQueue",
+        "../types/projectWorkflow",
+        "../types/workspaceResume",
+        "../i18n/errorMessages",
+        "../i18n/statusLabels",
+        "./StartupScreen",
+        "../product/runInvalidation",
+        "./ShellHost",
+        "./v3/ProjectOverviewPage",
+        "./studioNavigation",
+        "./routes/useAppRoute",
+        "./routes/useDraftConfirmation",
+        "./routes/legacyAdapter",
+        "./routes/resumeAdapter",
+        "../product/client",
+        "./routes/types",
+        "../services/workflowLabClient",
+        "./App.css",
+        "../styles/studioTokens.css",
+        "../styles/uiPolish.css",
+        "../styles/studioQuality.css",
+        "./routes/commandCenterAdapter"
+      ],
+      "resolvedImports": [
+        "src/features/tasks/useProjectTaskRecovery",
+        "src/app/NormalProductPages",
+        "src/features/shots/useShotConsistencyController",
+        "react",
+        "src/services/tauriClient",
+        "src/services/taskEvents",
+        "src/stores/taskStore",
+        "src/stores/projectStore",
+        "src/stores/workspaceResumeStore",
+        "src/types/generation",
+        "src/types/asset",
+        "src/types/organization",
+        "src/features/projects/ProjectCommandCenter",
+        "src/app/bootstrap",
+        "src/app/WorkspaceErrorBoundary",
+        "src/stores/studioStore",
+        "src/types/history",
+        "src/types/generation",
+        "src/types/project",
+        "src/types/productionQueue",
+        "src/types/projectWorkflow",
+        "src/types/workspaceResume",
+        "src/i18n/errorMessages",
+        "src/i18n/statusLabels",
+        "src/app/StartupScreen",
+        "src/product/runInvalidation",
+        "src/app/ShellHost",
+        "src/app/v3/ProjectOverviewPage",
+        "src/app/studioNavigation",
+        "src/app/routes/useAppRoute",
+        "src/app/routes/useDraftConfirmation",
+        "src/app/routes/legacyAdapter",
+        "src/app/routes/resumeAdapter",
+        "src/product/client",
+        "src/app/routes/types",
+        "src/services/workflowLabClient",
+        "src/app/App.css",
+        "src/styles/studioTokens.css",
+        "src/styles/uiPolish.css",
+        "src/styles/studioQuality.css",
+        "src/app/routes/commandCenterAdapter"
+      ],
+      "counts": {
+        "useState": 13,
+        "useEffect": 5,
+        "useLayoutEffect": 0,
+        "useMemo": 1,
+        "useCallback": 1,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 1,
+        "subscriptions": 1
+      },
+      "deep_relative_imports": 0,
+      "deep_feature_imports": 0
+    },
+    {
+      "path": "src/app/NormalProductPages.tsx",
+      "symbol": "NormalProductPages",
+      "current_role": "PAGE_CONTAINER",
+      "target_role": "PAGE_CONTAINER",
+      "feature_owner": "app",
+      "state_owner": "none",
+      "effect_owner": "none",
+      "route_dependency": [
+        "src/app/routes/types"
+      ],
+      "client_dependency": [],
+      "store_dependency": [],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 1,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 0,
+      "effect_count": 0,
+      "decision": "DEFER",
+      "replacement": null,
+      "risk": "Retain behavior; no migration without reviewed authority boundary.",
+      "tests": [],
+      "test": false,
+      "lines": 29,
+      "components": 1,
+      "hooks": 0,
+      "imports": [
+        "react",
+        "./routes/types",
+        "../types/project",
+        "../features/create/createModel",
+        "../features/library/libraryModel",
+        "../features/runs/runsModel"
+      ],
+      "resolvedImports": [
+        "react",
+        "src/app/routes/types",
+        "src/types/project",
+        "src/features/create/createModel",
+        "src/features/library/libraryModel",
+        "src/features/runs/runsModel"
+      ],
+      "counts": {
+        "useState": 0,
+        "useEffect": 0,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 0,
+      "deep_feature_imports": 0
+    },
+    {
+      "path": "src/features/create/createModel.ts",
+      "symbol": "normalCreate, mediaKind, mediaValue, assetIds, draftFor, compatible, candidateForStage",
+      "current_role": "FEATURE_MODEL",
+      "target_role": "FEATURE_MODEL",
+      "feature_owner": "create",
+      "state_owner": [
+        "src/stores/studioStore"
+      ],
+      "effect_owner": "none",
+      "route_dependency": [
+        "src/app/routes/types"
+      ],
+      "client_dependency": [
+        "src/product/types"
+      ],
+      "store_dependency": [
+        "src/stores/studioStore"
+      ],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 2,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 0,
+      "effect_count": 0,
+      "decision": "DEFER",
+      "replacement": null,
+      "risk": "Retain behavior; no migration without reviewed authority boundary.",
+      "tests": [],
+      "test": false,
+      "lines": 41,
+      "components": 0,
+      "hooks": 0,
+      "imports": [
+        "../../app/routes/types",
+        "../../product/types",
+        "../../types/generation",
+        "../../stores/studioStore"
+      ],
+      "resolvedImports": [
+        "src/app/routes/types",
+        "src/product/types",
+        "src/types/generation",
+        "src/stores/studioStore"
+      ],
+      "counts": {
+        "useState": 0,
+        "useEffect": 0,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 4,
+      "deep_feature_imports": 0
+    },
+    {
+      "path": "src/features/generators/GeneratorSettingsPage.tsx",
+      "symbol": "bindingModes, GeneratorSettingsPage, refresh, save",
+      "current_role": "PAGE_CONTAINER",
+      "target_role": "PAGE_CONTAINER",
+      "feature_owner": "generators",
+      "state_owner": "module local state",
+      "effect_owner": "module lifecycle",
+      "route_dependency": [
+        "src/app/routes/types"
+      ],
+      "client_dependency": [
+        "src/product/client",
+        "src/product/errors",
+        "src/product/types",
+        "src/product/generatorPresentation"
+      ],
+      "store_dependency": [],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 2,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 7,
+      "effect_count": 1,
+      "decision": "DEFER",
+      "replacement": null,
+      "risk": "Retain behavior; no migration without reviewed authority boundary.",
+      "tests": [],
+      "test": false,
+      "lines": 84,
+      "components": 1,
+      "hooks": 0,
+      "imports": [
+        "react",
+        "../../product/client",
+        "../../product/errors",
+        "../../product/types",
+        "../../app/routes/types",
+        "../../product/generatorPresentation",
+        "./GeneratorSettingsPage.css"
+      ],
+      "resolvedImports": [
+        "react",
+        "src/product/client",
+        "src/product/errors",
+        "src/product/types",
+        "src/app/routes/types",
+        "src/product/generatorPresentation",
+        "src/features/generators/GeneratorSettingsPage.css"
+      ],
+      "counts": {
+        "useState": 7,
+        "useEffect": 1,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 5,
+      "deep_feature_imports": 0
+    },
+    {
+      "path": "src/features/shots/useShotConsistencyController.ts",
+      "symbol": "useShotConsistencyController",
+      "current_role": "FEATURE_CONTROLLER",
+      "target_role": "FEATURE_CONTROLLER",
+      "feature_owner": "shots",
+      "state_owner": "module local state",
+      "effect_owner": "module lifecycle",
+      "route_dependency": [],
+      "client_dependency": [],
+      "store_dependency": [],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 1,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 5,
+      "effect_count": 1,
+      "decision": "DEFER",
+      "replacement": null,
+      "risk": "Retain behavior; no migration without reviewed authority boundary.",
+      "tests": [],
+      "test": false,
+      "lines": 112,
+      "components": 0,
+      "hooks": 1,
+      "imports": [
+        "react",
+        "../../i18n/errorMessages",
+        "../../types/shot",
+        "../../types/consistencyBindings"
+      ],
+      "resolvedImports": [
+        "react",
+        "src/i18n/errorMessages",
+        "src/types/shot",
+        "src/types/consistencyBindings"
+      ],
+      "counts": {
+        "useState": 5,
+        "useEffect": 1,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 3,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 3,
+      "deep_feature_imports": 0
+    },
+    {
+      "path": "src/features/tasks/useProjectTaskRecovery.ts",
+      "symbol": "useProjectTaskRecovery, reconcileTasks",
+      "current_role": "FEATURE_CONTROLLER",
+      "target_role": "FEATURE_CONTROLLER",
+      "feature_owner": "tasks",
+      "state_owner": [
+        "src/stores/projectStore",
+        "src/stores/taskStore"
+      ],
+      "effect_owner": "module lifecycle",
+      "route_dependency": [],
+      "client_dependency": [],
+      "store_dependency": [
+        "src/stores/projectStore",
+        "src/stores/taskStore"
+      ],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 1,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 3,
+      "effect_count": 2,
+      "decision": "DEFER",
+      "replacement": null,
+      "risk": "Retain behavior; no migration without reviewed authority boundary.",
+      "tests": [],
+      "test": false,
+      "lines": 72,
+      "components": 0,
+      "hooks": 1,
+      "imports": [
+        "react",
+        "../../types/task",
+        "../../stores/projectStore",
+        "../../stores/taskStore",
+        "../../i18n/errorMessages"
+      ],
+      "resolvedImports": [
+        "react",
+        "src/types/task",
+        "src/stores/projectStore",
+        "src/stores/taskStore",
+        "src/i18n/errorMessages"
+      ],
+      "counts": {
+        "useState": 3,
+        "useEffect": 2,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 4,
+      "deep_feature_imports": 0
+    },
+    {
+      "path": "src/product/generatorPresentation.ts",
+      "symbol": "modeLabel, generatorLabel, fieldLabel",
+      "current_role": "AUTHORITY_OR_CONTRACT",
+      "target_role": "AUTHORITY_OR_CONTRACT",
+      "feature_owner": "product",
+      "state_owner": "none",
+      "effect_owner": "none",
+      "route_dependency": [],
+      "client_dependency": [
+        "src/product/types"
+      ],
+      "store_dependency": [],
+      "cross_feature_dependencies": [],
+      "prop_depth": {
+        "max_property_chain": 2,
+        "note": "AST proxy, actual seam prop handoff reviewed separately"
+      },
+      "local_state_count": 0,
+      "effect_count": 0,
+      "decision": "DEFER",
+      "replacement": null,
+      "risk": "Retain behavior; no migration without reviewed authority boundary.",
+      "tests": [],
+      "test": false,
+      "lines": 19,
+      "components": 0,
+      "hooks": 0,
+      "imports": [
+        "./types",
+        "../types/generation"
+      ],
+      "resolvedImports": [
+        "src/product/types",
+        "src/types/generation"
+      ],
+      "counts": {
+        "useState": 0,
+        "useEffect": 0,
+        "useLayoutEffect": 0,
+        "useMemo": 0,
+        "useCallback": 0,
+        "contexts": 0,
+        "localStorage": 0,
+        "sessionStorage": 0,
+        "listeners": 0,
+        "timers": 0,
+        "subscriptions": 0
+      },
+      "deep_relative_imports": 0,
+      "deep_feature_imports": 0
+    }
+  ],
+  "afterTop20Tsx": [
+    {
+      "path": "src/features/assets/AssetVideoBatchWorkspace.tsx",
+      "lines": 1901
+    },
+    {
+      "path": "src/features/shots/ShotWorkspace.tsx",
+      "lines": 1822
+    },
+    {
+      "path": "src/features/projects/ProjectCommandCenter.tsx",
+      "lines": 1190
+    },
+    {
+      "path": "src/features/production/ProductionPackageWorkspace.tsx",
+      "lines": 881
+    },
+    {
+      "path": "src/features/studio/ProductionQueuePanel.tsx",
+      "lines": 822
+    },
+    {
+      "path": "src/app/App.tsx",
+      "lines": 812
+    },
+    {
+      "path": "src/features/studio/GenerationStudio.tsx",
+      "lines": 743
+    },
+    {
+      "path": "src/features/production/ProductionRunPanel.tsx",
+      "lines": 741
+    },
+    {
+      "path": "src/features/experiments/WorkflowBenchmarkPanel.tsx",
+      "lines": 647
+    },
+    {
+      "path": "src/features/production/ProductionQueueDrawer.tsx",
+      "lines": 647
+    },
+    {
+      "path": "src/features/settings/SettingsWorkspace.tsx",
+      "lines": 560
+    },
+    {
+      "path": "src/features/production/ProductionPackagePreview.tsx",
+      "lines": 536
+    },
+    {
+      "path": "src/features/prompts/PromptStudio.tsx",
+      "lines": 530
+    },
+    {
+      "path": "src/features/workflows/WorkflowImportIssues.tsx",
+      "lines": 529
+    },
+    {
+      "path": "src/features/workflows/WorkflowExecutionConfiguration.tsx",
+      "lines": 518
+    },
+    {
+      "path": "src/features/production/ProductionAuditCenter.tsx",
+      "lines": 508
+    },
+    {
+      "path": "src/features/shots/ProjectStructureTree.tsx",
+      "lines": 489
+    },
+    {
+      "path": "src/features/assets/ConsistencyProfileLibrary.tsx",
+      "lines": 487
+    },
+    {
+      "path": "src/features/production/MultiPackageProductionBoard.tsx",
+      "lines": 473
+    },
+    {
+      "path": "src/features/assets/AssetLibrary.tsx",
+      "lines": 456
+    }
+  ]
 }

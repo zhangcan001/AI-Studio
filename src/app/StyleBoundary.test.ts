@@ -43,6 +43,7 @@ it('phase9_target7 lowers specificity and merges only the redundant media rule',
 });
 it('phase9_target8 pins style successor while preserving all historical non-CSS freezes',()=>{
  const phase8=JSON.parse(read('docs/architecture/phase8-backend-decomposition.json'));
- for(const [path,digest] of Object.entries(phase8.compatibilityFiles))if(!path.endsWith('.css'))expect(hash(read(path)),path).toBe(digest);
+ const phase10=JSON.parse(read('docs/architecture/phase10-frontend-architecture.json'));
+ for(const [path,digest] of Object.entries(phase8.compatibilityFiles))if(!path.endsWith('.css'))expect(hash(read(path)),path).toBe(phase10.frontendSuccessor[path]??digest);
  expect(m.after.inline).toBe(m.before.inline);expect(m.proofs.containment.selectors).toBeGreaterThan(0);
 });

@@ -3,7 +3,7 @@ import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import type { GeneratorBindingSummary, GeneratorOption } from "../../product/types";
 import type { AppRoute } from "../../app/routes/types";
-import { generatorLabel, fieldLabel } from "../create/createModel";
+import { generatorLabel, fieldLabel } from "../../product/generatorPresentation";
 import "./GeneratorSettingsPage.css";
 
 const bindingModeLabels: Record<string, string> = { FL2VA_TEXT_TO_VIDEO: "文生视频", FL2VA_IMAGE_TO_VIDEO: "图生视频", FL2VA_FIRST_LAST: "首尾帧视频", REF2VA_IMAGE: "参考图视频", REF2VA_VIDEO_IMAGE: "参考视频与参考图", REF2VA_AUDIO: "历史参考音频模式", REF2VA_IMAGE_AUDIO: "历史图音频模式" };

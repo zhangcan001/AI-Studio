@@ -3,7 +3,7 @@
 Inventory precedes production migration. Baseline: Phase9, with backend, route
 contracts, persistence formats, IPC, CSS and migrations unchanged.
 
-## Selected seams (3)
+## Selected seams (4)
 
 1. Application normal-page composition: normal Create/Runs/Library rendering and
    lazy imports move to one route container. The existing AppRoute remains sole
@@ -16,6 +16,9 @@ contracts, persistence formats, IPC, CSS and migrations unchanged.
 3. Project task recovery: recent-task loading and manual reconciliation move to
    tasks. TaskStore remains the only task projection. Application task-event
    bootstrap stays global (it serves more than one feature).
+4. Generator presentation vocabulary shared by Create and generator settings.
+   Move the already-identical labels to product presentation, preserving Create's
+   compatibility reexports and removing settings' cross-feature model dependency.
 
 ## State/effect ownership
 
@@ -35,7 +38,7 @@ contracts, persistence formats, IPC, CSS and migrations unchanged.
 
 No duplicate authority was proven: do not delete state just to reduce metrics.
 Contexts found: zero createContext sites; do not introduce a new global provider.
-Prop handoffs for the new page container are one level, five explicit props.
+Prop handoffs for the new page container are one level, four explicit props.
 Inventory property-chain depth is an AST proxy, not actual prop-drilling depth.
 Large/God candidate counts identify review candidates, not automatic violations.
 
