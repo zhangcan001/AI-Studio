@@ -1,0 +1,525 @@
+{
+  "scope": "Isolated real Tauri WebView; fixture cloned via SQLite read-only backup from previous task-owned acceptance data, not user data.",
+  "comparisons": [
+    {
+      "page": "overview",
+      "width": 1920,
+      "nodeCount": 29,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "studio",
+      "width": 1920,
+      "nodeCount": 56,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "create",
+      "width": 1920,
+      "nodeCount": 74,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "runs",
+      "width": 1920,
+      "nodeCount": 29,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "library",
+      "width": 1920,
+      "nodeCount": 43,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "lab",
+      "width": 1920,
+      "nodeCount": 120,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "settings",
+      "width": 1920,
+      "nodeCount": 32,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "project",
+      "width": 1920,
+      "nodeCount": 33,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "advanced",
+      "width": 1920,
+      "nodeCount": 41,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "tasks",
+      "width": 1920,
+      "nodeCount": 42,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "overview",
+      "width": 1440,
+      "nodeCount": 29,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "studio",
+      "width": 1440,
+      "nodeCount": 56,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "create",
+      "width": 1440,
+      "nodeCount": 74,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "runs",
+      "width": 1440,
+      "nodeCount": 29,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "library",
+      "width": 1440,
+      "nodeCount": 43,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "lab",
+      "width": 1440,
+      "nodeCount": 120,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "settings",
+      "width": 1440,
+      "nodeCount": 32,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "project",
+      "width": 1440,
+      "nodeCount": 33,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "advanced",
+      "width": 1440,
+      "nodeCount": 41,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "tasks",
+      "width": 1440,
+      "nodeCount": 42,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "overview",
+      "width": 1180,
+      "nodeCount": 29,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "studio",
+      "width": 1180,
+      "nodeCount": 56,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "create",
+      "width": 1180,
+      "nodeCount": 74,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "runs",
+      "width": 1180,
+      "nodeCount": 29,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "library",
+      "width": 1180,
+      "nodeCount": 43,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "lab",
+      "width": 1180,
+      "nodeCount": 120,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "settings",
+      "width": 1180,
+      "nodeCount": 32,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "project",
+      "width": 1180,
+      "nodeCount": 33,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "advanced",
+      "width": 1180,
+      "nodeCount": 41,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "tasks",
+      "width": 1180,
+      "nodeCount": 42,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "overview",
+      "width": 1024,
+      "nodeCount": 29,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "studio",
+      "width": 1024,
+      "nodeCount": 56,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "create",
+      "width": 1024,
+      "nodeCount": 74,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "runs",
+      "width": 1024,
+      "nodeCount": 29,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "library",
+      "width": 1024,
+      "nodeCount": 43,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "lab",
+      "width": 1024,
+      "nodeCount": 120,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "settings",
+      "width": 1024,
+      "nodeCount": 32,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "project",
+      "width": 1024,
+      "nodeCount": 33,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "advanced",
+      "width": 1024,
+      "nodeCount": 41,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    },
+    {
+      "page": "tasks",
+      "width": 1024,
+      "nodeCount": 42,
+      "stylesEqual": true,
+      "boundsEqual": true,
+      "pageOverflow": false
+    }
+  ],
+  "dialogs": {
+    "logs": [
+      {
+        "width": 1920,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 719.2000122070312,
+          "right": 1200.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      },
+      {
+        "width": 1440,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 479.20001220703125,
+          "right": 960.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      },
+      {
+        "width": 1180,
+        "modal": {
+          "open": true,
+          "host": true,
+          "x": 349.20001220703125,
+          "right": 830.8000183105469,
+          "h2": "18.88px",
+          "button": {
+            "color": "rgb(241, 245, 249)",
+            "background": "rgba(0, 0, 0, 0)",
+            "padding": "9px 14px"
+          },
+          "focused": true,
+          "baselineComputedEqual": true
+        }
+      }
+    ],
+    "focus": {
+      "cls": "v3-skip",
+      "outline": "solid",
+      "top": 0
+    },
+    "draftPreserved": true,
+    "projectSwitch": {
+      "kind": "project",
+      "projectId": "prj_19ce69c5-f438-44a3-a0fb-92e41c569f98",
+      "page": "overview"
+    },
+    "advancedBridge": true
+  },
+  "referenceAndPicker": [
+    {
+      "width": 1920,
+      "reference": [
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        }
+      ],
+      "picker": {
+        "open": true,
+        "inside": true,
+        "x": 700,
+        "right": 1220,
+        "width": 520,
+        "focus": "原生验收提示词 · 版本 2",
+        "bg": "rgb(32, 36, 45)"
+      }
+    },
+    {
+      "width": 1440,
+      "reference": [
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        }
+      ],
+      "picker": {
+        "open": true,
+        "inside": true,
+        "x": 460,
+        "right": 980,
+        "width": 520,
+        "focus": "原生验收提示词 · 版本 2",
+        "bg": "rgb(32, 36, 45)"
+      }
+    },
+    {
+      "width": 1180,
+      "reference": [
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        },
+        {
+          "direction": "row",
+          "display": "flex"
+        }
+      ],
+      "picker": {
+        "open": true,
+        "inside": true,
+        "x": 330,
+        "right": 850,
+        "width": 520,
+        "focus": "原生验收提示词 · 版本 2",
+        "bg": "rgb(32, 36, 45)"
+      }
+    }
+  ],
+  "actualViewportAsserted": true,
+  "emulationConnection": "persistent",
+  "screenshots": "Local task-owned TEMP evidence; runtime/cache/media/database are not committed.",
+  "appClosed": true,
+  "localCases": "8 StyleBoundary + 2 BackendBoundary; ten distinct cases, no full local suite.",
+  "staticGates": {
+    "tsc": "PASS",
+    "frontendBuild": "PASS",
+    "cargoFmt": "PASS",
+    "cargoCheck": "PASS",
+    "dev088": "PASS"
+  },
+  "limitations": [
+    "Sampled visible node computed styles/bounds, not exhaustive pixel-diff across every scroll position.",
+    "1024 is supplementary; final two 1024 baseline pages overlapped initial CSS editing, mandatory 1920/1440/1180 captures are all pre-change.",
+    "Mixed compatibility CSS remains explicitly DEFER; no claim of zero global/deep/inline debt."
+  ]
+}
