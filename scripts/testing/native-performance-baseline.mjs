@@ -1,5 +1,7 @@
 // Explicit isolated Native acceptance only. Not a CI timing threshold.
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createRuntimeMeasurement, measureScenario } from './runtime-performance.mjs';
 
@@ -60,7 +62,11 @@ async function switchProject(projectId) {
 }
 const result = { phase: 12, type: 'NATIVE_BASELINE', buildMode: 'DEBUG',
   frontendMode: process.env.AI_STUDIO_PERF_FRONTEND_MODE ?? 'DEVELOPMENT_STRICT_EFFECTS',
-  dataKind: 'owned isolated Phase11 fixture copy', sourceHead: '0bb137303bbcf4baa98a109e7558d5899ef236fc',
+  dataKind: 'owned isolated Phase11 fixture copy',
+  sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  sourceWorktreeDirty: Boolean(execFileSync('git', ['status', '--porcelain', '--', 'src'], { encoding: 'utf8' }).trim()),
+  frontendBundleIndexSha256: createHash('sha256').update(readFileSync('dist/index.html')).digest('hex'),
+  backendSourceHead: process.env.AI_STUDIO_PERF_BACKEND_SOURCE_HEAD ?? 'NOT_RECORDED',
   timingBoundary: 'actual user action -> visible completion + actual IPC completion + animation frame',
   osColdCacheControlled: false, queryCount: 'NOT_MEASURED', renderCount: 'NOT_MEASURED',
   startup: 'NOT_MEASURED; no navigation/reload substituted for process launch',

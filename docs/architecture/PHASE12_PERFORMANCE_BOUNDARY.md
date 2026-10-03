@@ -73,6 +73,14 @@ the claim is reproducible work-count reduction only. Other measured navigation
 paths retain their counts. The completed harness observed five repeated route
 transitions per scenario, not a general heap/listener leak-free proof.
 
+Future runs record actual checkout revision, production-source dirty state and
+frontend bundle-index digest instead of a hardcoded baseline revision. Record the
+matching backend revision with `AI_STUDIO_PERF_BACKEND_SOURCE_HEAD`; otherwise it
+is explicitly NOT_RECORDED. The initial before dataset used the baseline revision;
+seam1 after data was measured on the inventory commit plus the reviewed uncommitted
+component change, pinned by its source digest. Do not retroactively fabricate a
+missing initial bundle digest.
+
 The Phase9 whole-source hash guard correctly rejected the authorized behavior
 edit. Keep its historical manifest intact. Its successor handling now accepts
 only an existing app/feature source path with a measured review, five before/after

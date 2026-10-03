@@ -2195,7 +2195,9 @@
         "Encoded transport bytes are not decoded DTO size",
         "Repeated semantic calls require intent/retry review",
         "No global heap-leak absence claim"
-      ]
+      ],
+      "backendSourceHead": "0bb137303bbcf4baa98a109e7558d5899ef236fc",
+      "frontendBundleIndexSha256": "NOT_RECORDED"
     },
     "developmentReview": {
       "frontendMode": "DEVELOPMENT_STRICT_EFFECTS",
@@ -2207,7 +2209,7 @@
       "buildMode": "DEBUG",
       "frontendMode": "PRODUCTION_BUNDLE",
       "dataKind": "owned isolated Phase11 fixture copy",
-      "sourceHead": "WORKTREE_AFTER_SEAM1",
+      "sourceHead": "1f694174d4e08799a185de959b14528b1c0c98b5",
       "timingBoundary": "actual user action -> visible completion + actual IPC completion + animation frame",
       "osColdCacheControlled": false,
       "queryCount": "NOT_MEASURED",
@@ -3767,7 +3769,11 @@
         "Encoded transport bytes are not decoded DTO size",
         "Repeated semantic calls require intent/retry review",
         "No global heap-leak absence claim"
-      ]
+      ],
+      "sourceWorktreeDirty": true,
+      "reviewedSourceDigest": "9ceead51f7d8a31f92edd7d12e33675e45d02f72e73c78112bc57b561048a6f1",
+      "backendSourceHead": "0bb137303bbcf4baa98a109e7558d5899ef236fc",
+      "frontendBundleIndexSha256": "NOT_RECORDED"
     }
   },
   "optimizations": [
