@@ -70,7 +70,6 @@
   "src/features/tasks/TaskHistoryDetail.tsx",
   "src/features/tools/LocalToolHub.tsx",
   "src/features/workflows/WorkflowExecutionConfiguration.tsx",
-  "src/features/workflows/WorkflowWorkspace.tsx",
   "src/services/workflowClient.ts",
   "src/services/workflowLabClient.ts",
   "src/stores/workspaceResumeStore.ts",

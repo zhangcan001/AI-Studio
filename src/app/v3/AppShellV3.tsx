@@ -43,6 +43,13 @@ export function AppShellV3({ route, projectName, projectSelector, navigate, back
         {route.kind === "project-settings" && projectId && <nav aria-label="项目设置选项">
           <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>生成器</button>
           <button type="button" onClick={() => navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: route })}>高级工作流</button>
+          <details><summary>高级项目操作</summary>
+            <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "advanced-project" })}>生产分析与 Handoff 导入</button>
+            <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "advanced-shots" })}>镜头结构与一致性编辑</button>
+            <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "advanced-production" })}>高级生产编辑</button>
+            <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "advanced-review" })}>产物审核工作区</button>
+            <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "advanced-tasks" })}>任务审计与诊断</button>
+          </details>
         </nav>}
         {route.kind === "system-settings" && <button type="button" onClick={() => navigate({ kind: "system-settings", section: "advanced-tools", returnTo: route.returnTo })}>高级工具</button>}
         {route.kind === "system-settings" && <button type="button" onClick={() => navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: route.returnTo })}>高级工作流</button>}

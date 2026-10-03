@@ -29,8 +29,8 @@ it("phase6_target14 normal surfaces have no technical Lab transport dependency a
     expect(read(file)).not.toMatch(/from ["'][^"']*(?:workflowClient|workflowLabClient|tauriClient|WorkflowWorkspace)["']/);
   }
   const host = read("src/app/App.tsx");
-  expect(host).toContain('showWorkflowSettings={shellMode !== "v3"}');
-  expect(host).toContain('showWorkflowRepairStatus={shellMode !== "v3"}');
+  expect(host).toContain('showWorkflowSettings={false}');
+  expect(host).toContain('showWorkflowRepairStatus={false}');
   expect(read("src/features/generators/GeneratorSettingsPage.tsx")).not.toMatch(/\.workflowVersionId|\.recipeId|\.targetNode/);
 });
 it("phase6_target15 Advanced seam whitelists existing clients only and exact selection transport is canonical without new authority", () => {
@@ -50,10 +50,10 @@ it("phase6_target15 Advanced seam whitelists existing clients only and exact sel
   expect(() => labCreationSelection("", "r")).toThrow();
   expect(() => labCreationSelection("x".repeat(5000), "r")).toThrow();
 });
-it("phase6_target16 real normal GeneratorSettings, advanced-only Lab and legacy rollback remain explicit without new migration", () => {
+it("phase6_target16 real normal GeneratorSettings, advanced-only Lab and compatibility adapters remain explicit without new migration", () => {
   const host = read("src/app/App.tsx");
-  expect(host).toContain('<GeneratorSettingsPage'); expect(host).toContain('<WorkflowLabPage'); expect(host).toContain('workspace === "workflows" && shellMode !== "v3"');
-  expect(read("src/features/workflows/WorkflowWorkspace.tsx")).toContain("useWorkflowLabController(props)");
+  expect(host).toContain('<GeneratorSettingsPage'); expect(host).toContain('<WorkflowLabPage'); expect(host).not.toContain("shellMode");
+  expect(read("src/features/workflow-lab/WorkflowLabPage.tsx")).toContain("useWorkflowLabController(");
   const nav = read("src/app/v3/AppShellV3.tsx").split('const pages =')[1].split('return <div')[0];
   expect(nav).not.toMatch(/workflow|advanced|generators/);
   expect(readdirSync("src-tauri/migrations").some((f: string) => f.startsWith("043"))).toBe(false);

@@ -3,8 +3,11 @@ import type { ProjectCommandCenterCollectionFilter } from "../../types/projectCo
 
 export type { ResourceRef } from "../../product/libraryTypes";
 import type { ResourceRef } from "../../product/libraryTypes";
-/** Compatibility context, not another location owner. Removed with the old pages. */
+/** Historical intent carried by canonical Runs; never an alternate UI owner. */
 export interface LegacyRunContext {
+  taskId?: string;
+  batchId?: string;
+  assetId?: string;
   shotId?: string;
   itemId?: string;
   reviewId?: string;

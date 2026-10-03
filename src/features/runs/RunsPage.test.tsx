@@ -103,10 +103,10 @@ it("phase4_target_15 Runs boundary and registered typed commands are guarded", a
 it("phase4_target_16 ordinary Runs entry converges with explicit legacy bridges preserved", () => {
   for (const kind of ["ACTIVE_PRODUCTION", "REVIEW_REQUIRED", "AUTO_RESUMABLE"]) {
     const action = overviewAction("p", { kind, priority: 1, reasonCode: "", reason: "", shotId: null, batchId: "b", taskId: null, assetId: null });
-    expect(normalRuns(action.route, "v3")).toBe(true);
+    expect(normalRuns(action.route)).toBe(true);
   }
-  expect(normalRuns({ kind: "runs", projectId: "p", run: ref }, "v3")).toBe(true);
-  for (const filter of ["tasks", "production", "review"]) expect(normalRuns({ kind: "runs", projectId: "p", filter }, "v3")).toBe(false);
-  expect(normalRuns({ kind: "runs", projectId: "p" }, "legacy")).toBe(false);
-  const app = readFileSync("src/app/App.tsx", "utf8"); expect(app).toContain("<RunsPage"); expect(app).toContain('workspace === "tasks" && !normalRuns'); expect(app).toContain('workspace === "shots" && !normalRuns'); expect(app).toContain("<TaskHistory"); expect(app).toContain("<ShotWorkspace");
+  expect(normalRuns({ kind: "runs", projectId: "p", run: ref })).toBe(true);
+  for (const filter of ["tasks", "production", "review"]) expect(normalRuns({ kind: "runs", projectId: "p", filter })).toBe(true);
+  expect(normalRuns({ kind: "runs", projectId: "p" })).toBe(true);
+  const app = readFileSync("src/app/App.tsx", "utf8"); expect(app).toContain("<RunsPage"); expect(app).toContain('route.section === "advanced-tasks"'); expect(app).toContain('["advanced-shots", "advanced-production", "advanced-review"].includes(route.section)'); expect(app).toContain("<TaskHistory"); expect(app).toContain("<ShotWorkspace");
 });

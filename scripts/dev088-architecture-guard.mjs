@@ -292,7 +292,7 @@ if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegm
 
 // Phase6 extracts the existing control plane, preserving all ownership guards.
 const workflowWorkspaceSource = [
-  "src/features/workflows/WorkflowWorkspace.tsx",
+  "src/features/workflow-lab/WorkflowLabPage.tsx",
   "src/features/workflows/useWorkflowLabController.ts",
   "src/features/workflow-lab/WorkflowLabSurface.tsx",
 ].map(path => readFileSync(join(root, path), "utf8")).join("\n");

@@ -8,7 +8,7 @@ import type { WorkflowPurgeInspection, WorkflowPurgeResult } from "../../types/w
 import { useWorkflowOnboardingStore } from "../../stores/workflowOnboardingStore";
 import { useWorkflowWorkspaceStore } from "../../stores/workflowWorkspaceStore";
 import type { WorkflowWorkspaceQueryResponse } from "./workflowWorkspaceAdapters";
-import { WorkflowWorkspace } from "./WorkflowWorkspace";
+import { WorkflowLabControlPlaneHarness as WorkflowWorkspace } from "../workflow-lab/testing/WorkflowLabControlPlaneHarness";
 
 const workflowMocks = vi.hoisted(() => ({
   queryWorkflowWorkspace: vi.fn(),

@@ -62,9 +62,9 @@ it("phase5_target15 Product boundary command parity and no competing Library aut
  expect(readdirSync("src/stores")).not.toContain("libraryStore.ts");expect(readdirSync("src-tauri/migrations").some((f:string)=>f.startsWith("043"))).toBe(false);
 });
 it("phase5_target16 one normal entry real page legacy rollback and responsive structure",async()=>{
- expect(normalLibrary(route,"v3")).toBe(true);expect(normalLibrary({...route,filter:"advanced-assets"},"v3")).toBe(false);expect(normalLibrary(route,"legacy")).toBe(false);
+ expect(normalLibrary(route)).toBe(true);expect(normalLibrary({...route,filter:"advanced-assets"})).toBe(false);expect(normalLibrary(route)).toBe(true);
  expect(toLegacyLocation({...route,filter:"advanced-assets"}).workspace).toBe("assets");expect(toLegacyLocation({...route,filter:"advanced-prompts"}).workspace).toBe("prompts");
- const app=readFileSync("src/app/App.tsx","utf8");expect(app).toContain('<LibraryPage key={activeProject.id}');expect(app).toContain('workspace === "assets" && !normalLibrary');expect(app).toContain('workspace === "prompts" && !normalLibrary');
+ const app=readFileSync("src/app/App.tsx","utf8");expect(app).toContain('<LibraryPage key={activeProject.id}');expect(app).toContain('route.filter === "advanced-assets"');expect(app).toContain('route.filter === "advanced-prompts"');
  for(const path of ["src/features/assets/AssetWorkspace.tsx","src/features/prompts/PromptStudio.tsx","src/features/assets/ConsistencyProfileLibrary.tsx","src/features/assets/ReferenceSetEditor.tsx"])expect(readFileSync(path,"utf8").length).toBeGreaterThan(0);
  render(<LibraryPage route={{kind:"library",projectId:"project-a"}} navigate={vi.fn()}/>);await screen.findByRole("button",{name:/测试提示词/});expect(screen.getByRole("navigation",{name:"资源分类"})).toBeTruthy();expect(screen.getByRole("button",{name:"近期资源"})).toBeTruthy();expect(screen.queryByText("全部资源")).toBeNull();
  expect(readFileSync("src/features/library/LibraryPage.css","utf8")).toContain(".v3-shell:has(.library-page)");

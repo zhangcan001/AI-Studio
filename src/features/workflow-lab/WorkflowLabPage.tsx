@@ -10,7 +10,7 @@ import { WorkflowLabSurface } from "./WorkflowLabSurface";
 /** Advanced view over existing Onboarding/Registry/Queue authorities, not a store. */
 export function WorkflowLabPage({ returnTo, navigate, ...props }: WorkflowWorkspaceProps & { returnTo?: AppRoute; navigate: (route: AppRoute) => unknown }) {
   const [actionError, setActionError] = useState<string>();
-  const controller = useWorkflowLabController({ ...props, advancedLab: true, onOpenStudio: async (workflowId, recipeId) => {
+  const controller = useWorkflowLabController({ ...props, onOpenStudio: async (workflowId, recipeId) => {
     setActionError(undefined);
     try { await props.onOpenStudio(workflowId, recipeId); } catch (error) { setActionError(toUserMessage(error)); }
   }, onUseInProject: async (workflowId, recipeId) => {

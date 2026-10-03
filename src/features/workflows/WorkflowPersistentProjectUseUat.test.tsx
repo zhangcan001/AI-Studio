@@ -12,7 +12,7 @@ import type {
   WorkflowProductionWorkspaceView,
   WorkflowRestoreResult,
 } from "../../types/workflowOnboarding";
-import { WorkflowWorkspace } from "./WorkflowWorkspace";
+import { WorkflowLabControlPlaneHarness as WorkflowWorkspace } from "../workflow-lab/testing/WorkflowLabControlPlaneHarness";
 
 const tauriMocks = vi.hoisted(() => ({
   listWorkflowProductionWorkspace: vi.fn(),

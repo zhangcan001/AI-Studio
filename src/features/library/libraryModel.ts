@@ -4,7 +4,7 @@ export type LibraryRoute = Extract<AppRoute, { kind: "library" }>;
 export const categories: { key: LibraryCategory; label: string }[] = [{key:"all",label:"近期资源"},{key:"media",label:"媒体"},{key:"images",label:"图片"},{key:"videos",label:"视频"},{key:"audio",label:"音频"},{key:"prompts",label:"提示词"},{key:"profiles",label:"角色 / 场景 / 道具 / 风格"},{key:"reference-sets",label:"参考集"}];
 export const categoryFor = (route: LibraryRoute): LibraryCategory => categories.find(c=>c.key===route.filter)?.key ?? "all";
 export const resourceKey = (resource?: ResourceRef) => resource ? `${resource.kind}:${resource.id}` : "";
-export const normalLibrary = (route: AppRoute, mode: string) => mode==="v3" && route.kind==="library" && !["advanced-assets","advanced-prompts"].includes(route.filter ?? "");
+export const normalLibrary = (route: AppRoute) => route.kind==="library" && !["advanced-assets","advanced-prompts"].includes(route.filter ?? "");
 export const subtypeLabel = (type: string) => ({image:"图片",video:"视频",audio:"音频",prompt:"提示词",snippet:"片段",CHARACTER:"角色设定",SCENE:"场景设定",PROP:"道具设定",STYLE:"风格设定",SHOT:"镜头参考集",COSTUME:"服装参考集"} as Record<string,string>)[type] ?? "参考资源";
 export function profileValue(detail: Extract<LibraryDetail,{kind:"profile"}>) {
   const p=detail.profile;

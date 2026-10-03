@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowInputView } from "../../types/workflowOnboarding";
-import {
-  createDefaultOutputDraft,
-  isExposableWorkflowInput,
-  latestCatalogRecipeForWorkflowItem,
-  normalizeWorkspaceItem,
-  resolveImplicitWorkflowRecipe,
-} from "./WorkflowWorkspace";
+import { createDefaultOutputDraft } from "./hooks/useWorkflowAdvancedOnboardingController";
+import { isExposableWorkflowInput } from "./workflowParameterExposureModel";
+import { latestCatalogRecipeForWorkflowItem, normalizeWorkspaceItem, resolveImplicitWorkflowRecipe } from "./workflowWorkspaceAdapters";
 import { resolveProjectWorkflow } from "../runtime/projectWorkflowResolution";
 
 describe("工作流输出映射默认值", () => {

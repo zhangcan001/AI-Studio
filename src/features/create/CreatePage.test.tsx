@@ -127,11 +127,11 @@ describe("Target15 candidates", () => {
   });
 });
 describe("Target16 architecture", () => {
-  it("converges normal entry and preserves advanced/legacy paths without a new owner", async () => {
-    expect(normalCreate({ kind: "create", projectId: "p", stage: "image" }, "v3")).toBe(true);
-    expect(normalCreate({ kind: "create", projectId: "p", stage: "video", surface: "batch" }, "v3")).toBe(false);
-    expect(normalCreate({ kind: "create", projectId: "p", stage: "video" }, "legacy")).toBe(false);
-    const app = readFileSync("src/app/App.tsx", "utf8"); expect(app).toContain('normalCreate(route, shellMode) && route.kind === "create" ? <CreatePage');
+  it("converges normal entry and preserves explicit advanced paths without a new owner", async () => {
+    expect(normalCreate({ kind: "create", projectId: "p", stage: "image" })).toBe(true);
+    expect(normalCreate({ kind: "create", projectId: "p", stage: "video", surface: "batch" })).toBe(false);
+    expect(normalCreate({ kind: "create", projectId: "p", stage: "video" })).toBe(true);
+    const app = readFileSync("src/app/App.tsx", "utf8"); expect(app).toContain('normalCreate(route) && route.kind === "create"');
     for (const path of readdirSync("src/features/create").filter((path: string) => /\.(tsx?|css)$/.test(path) && !path.includes("test"))) {
       const source = readFileSync(`src/features/create/${path}`, "utf8"); expect(source).not.toMatch(/tauriClient|@tauri-apps|services\/ipc|create\s*\(.*=>/); expect(source).not.toMatch(/<ShotWorkspace|<GenerationStudio|<DirectGenerationEntry/);
     }

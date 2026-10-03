@@ -20,6 +20,14 @@ export function appRouteReducer(state: RouteState, action: RouteAction): RouteSt
   if (action.type === "restore") return { ...state, current: action.route, history: [], projectLocations: locations };
   if (action.type === "switch-project") return { current: locations[action.projectId] ?? { kind: "project", projectId: action.projectId, page: "overview" }, history: [], projectLocations: locations };
   if (action.type === "back") {
+    // Advanced Library is an explicit editor bridge, not a resource detail parent.
+    // Return to the canonical Library origin; a resumed editor has no history.
+    if (state.current.kind === "library" && ["advanced-assets", "advanced-prompts"].includes(state.current.filter ?? "")) {
+      const origin = state.history[state.history.length - 1];
+      const current: AppRoute = origin?.kind === "library" && origin.projectId === state.current.projectId && !["advanced-assets", "advanced-prompts"].includes(origin.filter ?? "")
+        ? origin : { ...state.current, filter: state.current.filter === "advanced-prompts" ? "prompts" : "all" };
+      return { current, history: state.history.slice(0, -1), projectLocations: locations };
+    }
     // Details always return to their collection, even when entered by a deep link.
     const detail = (state.current.kind === "runs" && state.current.run) || (state.current.kind === "library" && state.current.resource) || (state.current.kind === "create" && state.current.shotId) || state.current.kind === "system-settings" || state.current.kind === "project-settings";
     return { current: detail ? parent(state.current) : state.history[state.history.length - 1] ?? parent(state.current), history: state.history.slice(0, -1), projectLocations: locations };

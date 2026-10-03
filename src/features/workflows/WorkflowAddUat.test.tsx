@@ -16,7 +16,7 @@ import { useWorkflowWorkspaceStore } from "../../stores/workflowWorkspaceStore";
 import { ProjectWorkflowSettings } from "../projects/ProjectWorkflowSettings";
 import { WorkflowImportFormatIssue } from "./WorkflowImportIssues";
 import { WorkflowSmartImport, workflowImportFormat } from "./WorkflowSmartImport";
-import { WorkflowWorkspace } from "./WorkflowWorkspace";
+import { WorkflowLabControlPlaneHarness as WorkflowWorkspace } from "../workflow-lab/testing/WorkflowLabControlPlaneHarness";
 import { useWorkflowAdvancedOnboardingController } from "./hooks/useWorkflowAdvancedOnboardingController";
 
 const serviceMocks = vi.hoisted(() => ({

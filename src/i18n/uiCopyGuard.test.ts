@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDefaultOutputDraft } from "../features/workflows/WorkflowWorkspace";
+import { createDefaultOutputDraft } from "../features/workflows/hooks/useWorkflowAdvancedOnboardingController";
 
 const forbiddenExactCopy = [
   "Studio",

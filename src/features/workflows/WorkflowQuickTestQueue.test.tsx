@@ -8,7 +8,7 @@ import type { ProductionBatchDetail } from "../../types/productionQueue";
 import type { WorkflowWorkspaceQueryResponse } from "./workflowWorkspaceAdapters";
 import { useWorkflowOnboardingStore } from "../../stores/workflowOnboardingStore";
 import { useWorkflowWorkspaceStore } from "../../stores/workflowWorkspaceStore";
-import { WorkflowWorkspace } from "./WorkflowWorkspace";
+import { WorkflowLabControlPlaneHarness as WorkflowWorkspace } from "../workflow-lab/testing/WorkflowLabControlPlaneHarness";
 
 const mocks = vi.hoisted(() => ({
   queryWorkflowWorkspace: vi.fn(),

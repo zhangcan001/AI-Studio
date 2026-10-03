@@ -41,7 +41,6 @@ resolveImplicitWorkflowRecipe
 } from "./workflowWorkspaceAdapters";
 
 export interface WorkflowWorkspaceProps {
-  advancedLab?: boolean;
   projectId?: string;
   catalog: RecipeViewModel[];
   comfyConnected: boolean;
@@ -70,7 +69,7 @@ interface WorkflowDeletionTarget {
   mode: WorkflowDeletionMode;
 }
 
-export function useWorkflowLabController({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onUseInProject, onOpenProjectSettings, onOpenTask, advancedLab = false }: WorkflowWorkspaceProps) {
+export function useWorkflowLabController({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onUseInProject, onOpenProjectSettings, onOpenTask }: WorkflowWorkspaceProps) {
   const [items, setItems] = useState<WorkflowWorkspaceItem[]>([]);
   const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>([]);
   const [search, setSearch] = useState("");
@@ -720,14 +719,9 @@ export function useWorkflowLabController({ projectId, catalog, comfyConnected, o
     }
     const values = quickTestValues(recipe);
     if (!values) {
-      if (advancedLab) {
-        setNotice("高级验证需要素材，请在执行配置中补充必需输入。尚未提交队列或修改创作草稿。");
-        await openSavedVersionDetails(recipe.workflowVersionId);
-        setShowExecutionConfig(true);
-        return;
-      }
-      setNotice("该工作流需要图片、视频或音频素材，请打开创作页补充最低必需输入。");
-      await onOpenStudio(recipe.workflowId, recipe.recipeId);
+      setNotice("高级验证需要素材，请在执行配置中补充必需输入。尚未提交队列或修改创作草稿。");
+      await openSavedVersionDetails(recipe.workflowVersionId);
+      setShowExecutionConfig(true);
       return;
     }
     if (quickTestInProgressRef.current) return;

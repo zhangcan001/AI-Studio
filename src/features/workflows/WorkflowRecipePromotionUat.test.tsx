@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowWorkspaceQueryResponse } from "./workflowWorkspaceAdapters";
 import { useWorkflowOnboardingStore } from "../../stores/workflowOnboardingStore";
 import { useWorkflowWorkspaceStore } from "../../stores/workflowWorkspaceStore";
-import { WorkflowWorkspace } from "./WorkflowWorkspace";
+import { WorkflowLabControlPlaneHarness as WorkflowWorkspace } from "../workflow-lab/testing/WorkflowLabControlPlaneHarness";
 
 const workflowMocks = vi.hoisted(() => ({
   queryWorkflowWorkspace: vi.fn(),

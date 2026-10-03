@@ -21,12 +21,12 @@ export function fromLegacyLocation(location: LegacyLocation): AppRoute {
     case "tasks":
     case "shots": {
       if (workspace === "shots" && section !== "production" && section !== "review") return { kind: "create", projectId, shotId, stage: (location.stage === "VIDEO" || location.stage === "video") ? "video" : "image" };
-      const context = { shotId, itemId: location.itemId, reviewId: location.reviewId, stage: location.stage, collectionFilter: location.collectionFilter };
-      return { kind: "runs", projectId, run: location.taskId && !location.reviewId ? { source: "task", id: location.taskId } : location.batchId ? { source: "queue-batch", id: location.batchId } : undefined, filter: workspace === "tasks" ? "tasks" : section === "review" ? "review" : "production", context };
+      const context = { shotId, taskId: location.taskId, batchId: location.batchId, assetId: location.assetId, itemId: location.itemId, reviewId: location.reviewId, stage: location.stage, collectionFilter: location.collectionFilter };
+      return { kind: "runs", projectId, run: location.taskId && !location.reviewId ? { source: "task", id: location.taskId } : location.batchId ? { source: "queue-batch", id: location.batchId } : location.taskId ? { source: "task", id: location.taskId } : undefined, filter: workspace === "tasks" ? "tasks" : section === "review" ? "review" : "production", context };
     }
     case "studio": return { kind: "create", projectId, stage: "image", surface: "batch" };
     case "video": return { kind: "create", projectId, stage: "video", surface: "batch" };
-    default: return { kind: "project", projectId, page: "overview" };
+    default: return section === "analysis" ? { kind: "project-settings", projectId, section: "advanced-project" } : { kind: "project", projectId, page: "overview" };
   }
 }
 /** Pure, one-way projection. No store reads, persistence, or domain mutation. */

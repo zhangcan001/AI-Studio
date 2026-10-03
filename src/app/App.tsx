@@ -58,12 +58,10 @@ import { normalCreate } from "../features/create/createModel";
 import { normalLibrary } from "../features/library/libraryModel";
 import { normalRuns } from "../features/runs/runsModel";
 import { invalidateRuns } from "../product/runInvalidation";
-import { ShellHost, readShellMode, SHELL_MODE_KEY } from "./ShellHost";
+import { ShellHost } from "./ShellHost";
 import { ProjectOverviewPage } from "./v3/ProjectOverviewPage";
-import type { StudioBreadcrumbItem } from "../components/studio/StudioTopBar";
 import {
   defaultStudioSectionForWorkspace,
-  shotWorkspaceModeForSection,
   studioRouteForSection,
   type StudioSection,
 } from "./studioNavigation";
@@ -73,7 +71,6 @@ import { fromLegacyLocation, toLegacyLocation, type LegacyLocation } from "./rou
 import { readRouteResume, resolveResume, validateResumeChildren } from "./routes/resumeAdapter";
 import { productClient } from "../product/client";
 import { routeProjectId } from "./routes/types";
-import { routeTitle } from "./routes/selectors";
 import { labCreationSelection } from "../services/workflowLabClient";
 import "./App.css";
 import "../styles/studioTokens.css";
@@ -90,7 +87,6 @@ const LibraryPage = lazy(() => import("../features/library/LibraryPage").then(({
 const RunsPage = lazy(() => import("../features/runs/RunsPage").then(({ RunsPage }) => ({ default: RunsPage })));
 const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspace").then(({ ProjectWorkspace }) => ({ default: ProjectWorkspace })));
 const ProjectCommandCenter = lazy(() => import("../features/projects/ProjectCommandCenter").then(({ ProjectCommandCenter }) => ({ default: ProjectCommandCenter })));
-const WorkflowWorkspace = lazy(() => import("../features/workflows/WorkflowWorkspace").then(({ WorkflowWorkspace }) => ({ default: WorkflowWorkspace })));
 const WorkflowLabPage = lazy(() => import("../features/workflow-lab/WorkflowLabPage").then(({ WorkflowLabPage }) => ({ default: WorkflowLabPage })));
 const GeneratorSettingsPage = lazy(() => import("../features/generators/GeneratorSettingsPage").then(({ GeneratorSettingsPage }) => ({ default: GeneratorSettingsPage })));
 const SettingsWorkspace = lazy(() => import("../features/settings/SettingsWorkspace").then(({ SettingsWorkspace }) => ({ default: SettingsWorkspace })));
@@ -160,7 +156,6 @@ function keepsNativeContextMenu(target: EventTarget | null): boolean {
 function App() {
   const { confirm: confirmDraftDiscard, dialog: draftConfirmation } = useDraftConfirmation();
   const { route, navigate: dispatchNavigate, restore, back, switchProject } = useAppRoute();
-  const [shellMode, setShellMode] = useState(readShellMode);
   const location = useMemo(() => toLegacyLocation(route), [route]);
   const workspace = location.workspace;
   const activeStudioSection = location.section ?? defaultStudioSectionForWorkspace(workspace);
@@ -538,24 +533,6 @@ function App() {
     setCatalog(await listGenerationCatalog());
   }
 
-  async function openPublishedWorkflow(workflowId: string, recipeId: string) {
-    try {
-      const nextCatalog = await listGenerationCatalog();
-      setCatalog(nextCatalog);
-      const workflow = nextCatalog.find((recipe) => recipe.workflowId === workflowId && recipe.recipeId === recipeId)
-        ?? nextCatalog.find((recipe) => recipe.workflowId === workflowId);
-      if (!workflow) {
-        setError("发布的工作流暂时还没有出现在运行目录中。");
-        return;
-      }
-      useStudioStore.getState().setSelectedWorkflow(workflow);
-      navigateToWorkspace("studio");
-      setError(null);
-    } catch (openError: unknown) {
-      setError(toUserMessage(openError));
-    }
-  }
-
   async function openWorkflowForProject(workflowId: string, recipeId: string) {
     setError(null);
     setWorkflowNotice(null);
@@ -671,8 +648,7 @@ function App() {
       assetType: assetType as StudioAssetType,
     });
     setError(null);
-    if (shellMode === "v3") void navigate({ kind: "create", projectId: activeProjectId, stage: assetType === "image" ? "image" : "video" });
-    else navigateToWorkspace("studio");
+    void navigate({ kind: "create", projectId: activeProjectId, stage: assetType === "image" ? "image" : "video" });
   }
 
   function handleProjectUpdated(project: ProjectView) {
@@ -719,10 +695,6 @@ function App() {
   );
 
 
-  const breadcrumbs: StudioBreadcrumbItem[] = activeProject
-    ? [{ label: projectDisplayName(activeProject.id, activeProject.name), onClick: () => navigate({ kind: "project", projectId: activeProject.id, page: "overview" }) }, { label: routeTitle(route), current: true }]
-    : [{ label: routeTitle(route), current: true }];
-
   const projectSelector = (
     <select
       aria-label="当前项目"
@@ -748,35 +720,11 @@ function App() {
     >
       {draftConfirmation}
       <ShellHost
-        mode={shellMode}
-        onModeChange={async (mode) => {
-          if (shotDraftDirty && !await confirmDraftDiscard("创作有未保存的修改。切换界面会放弃这些修改，是否继续？")) return;
-          setShellMode(mode);
-          try { localStorage.setItem(SHELL_MODE_KEY, mode); } catch { /* Optional local preference. */ }
-        }}
         route={route}
         navigate={navigate}
         back={async () => { if (!shotDraftDirty || await confirmDraftDiscard("镜头有未保存的修改。返回会放弃这些修改，是否继续？")) back(); }}
-        className={`app-workspace-${workspace}`}
-        workspace={workspace}
-        project={activeProject ? { id: activeProject.id, name: projectDisplayName(activeProject.id, activeProject.name) } : undefined}
+        projectName={activeProject?.name}
         projectSelector={projectSelector}
-        comfyStatus={comfy}
-        comfyLoading={connectionLoading}
-        breadcrumbs={breadcrumbs}
-        currentSection={activeStudioSection}
-        onNavigate={(_destination, item) => {
-          if (item.id === "production") {
-            openProductionQueue();
-            return;
-          }
-          navigateToStudioSection(item.id);
-        }}
-        onSearch={() => navigateToStudioSection("creation")}
-        searchLabel="搜索镜头 / 场景"
-        searchShortcut="Ctrl K"
-        onSettings={() => navigateToStudioSection("settings")}
-        onBrandClick={() => navigateToStudioSection("project")}
       >
         <div className="app-main-content" id="app-main-content" tabIndex={-1}>
 
@@ -826,18 +774,22 @@ function App() {
 
       {!activeProject && projectError && <p className="error-message global-error">项目加载失败：{projectError}</p>}
       <Suspense fallback={<p className="workspace-loading" role="status">正在加载工作区...</p>}>
-        {activeProject && normalLibrary(route, shellMode) && route.kind === "library" && <LibraryPage key={activeProject.id} route={route} navigate={navigate} />}
-        {activeProject && normalRuns(route, shellMode) && route.kind === "runs" && <RunsPage key={activeProject.id} route={route} navigate={navigate} />}
-        {workspace === "command-center" && (
+        {activeProject && normalCreate(route) && route.kind === "create" && <>
+          <CreatePage key={activeProject.id} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />
+          <details><summary>高级创作</summary><button type="button" onClick={() => void navigate({ ...route, surface: "batch" })}>批量创作</button></details>
+        </>}
+        {activeProject && normalLibrary(route) && route.kind === "library" && <LibraryPage key={activeProject.id} route={route} navigate={navigate} />}
+        {activeProject && normalRuns(route) && route.kind === "runs" && <RunsPage key={activeProject.id} route={route} navigate={navigate} />}
+        {activeProject && (route.kind === "project" || (route.kind === "project-settings" && route.section === "advanced-project")) && (
           <WorkspaceErrorBoundary
             resetKey={activeProject?.id ?? "no-project"}
             onBackToAssets={() => navigateToWorkspace("assets")}
             onRetry={() => navigateToWorkspace("command-center")}
           >
-            {shellMode === "v3" && activeProject ? <ProjectOverviewPage key={activeProject.id} projectId={activeProject.id} navigate={navigate} /> : <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />}
+            {route.kind === "project" ? <ProjectOverviewPage key={activeProject.id} projectId={activeProject.id} navigate={navigate} /> : <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />}
           </WorkspaceErrorBoundary>
         )}
-        {activeProject && workspace === "studio" && (
+        {activeProject && route.kind === "create" && route.surface === "batch" && route.stage === "image" && (
           <section className="studio-layout">
             <GenerationStudio
               projectId={activeProject.id}
@@ -861,7 +813,7 @@ function App() {
             />
           </section>
         )}
-        {activeProject && workspace === "assets" && !normalLibrary(route, shellMode) && (
+        {activeProject && route.kind === "library" && route.filter === "advanced-assets" && (
           <AssetWorkspace
             projectId={activeProject.id}
             initialAssetId={focusedAssetId}
@@ -873,29 +825,28 @@ function App() {
             onOpenShot={openShotFromAsset}
           />
         )}
-        {activeProject && workspace === "prompts" && !normalLibrary(route, shellMode) && (
+        {activeProject && route.kind === "library" && route.filter === "advanced-prompts" && (
           <PromptStudio
             projectId={activeProject.id}
             onOpenTaskHistory={() => navigateToWorkspace("tasks")}
           />
         )}
-        {workspace === "tools" && <LocalToolHub />}
-        {activeProject && workspace === "shots" && !normalRuns(route, shellMode) && (
+        {route.kind === "system-settings" && route.section === "advanced-tools" && <LocalToolHub />}
+        {activeProject && route.kind === "project-settings" && ["advanced-shots", "advanced-production", "advanced-review"].includes(route.section) && (
           <WorkspaceErrorBoundary
             resetKey={activeProject.id}
             onBackToAssets={() => navigateToWorkspace("assets")}
             onRetry={() => navigateToWorkspace("shots")}
           >
-            {normalCreate(route, shellMode) && route.kind === "create" ? <CreatePage key={activeProject.id} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} /> : <ShotWorkspace
+            <ShotWorkspace
               projectId={activeProject.id}
               projectName={activeProject.name}
               catalog={catalog}
               initialSelectedShotId={resumeShotId}
-              showCreationLanding={route.kind === "create"}
+              showCreationLanding={false}
               onDraftDirtyChange={setShotDraftDirty}
-              onStageSelected={(stage) => { if (route.kind === "create") dispatchNavigate({ ...route, stage }); }}
               initialCollectionFilter={focusedCollectionFilter}
-              mode={shotWorkspaceModeForSection(activeStudioSection)}
+              mode={route.section === "advanced-review" ? "review" : route.section === "advanced-production" ? "production" : "creation"}
               onShotSelected={handleShotSelected}
               onOpenAsset={openAssetFromShot}
               onOpenTask={(taskId) => {
@@ -919,10 +870,10 @@ function App() {
                 loadContext: loadConsistencyContext,
                 onOpenAssets: () => navigateToWorkspace("assets"),
               }}
-            />}
+            />
           </WorkspaceErrorBoundary>
         )}
-        {activeProject && workspace === "video" && (
+        {activeProject && route.kind === "create" && route.surface === "batch" && route.stage === "video" && (
           <WorkspaceErrorBoundary
             resetKey={`${activeProject.id}:${videoBatchAssets.map((asset) => asset.id).join(",")}`}
             onBackToAssets={() => navigateToWorkspace("assets")}
@@ -952,7 +903,7 @@ function App() {
             />
           </WorkspaceErrorBoundary>
         )}
-        {activeProject && workspace === "tasks" && !normalRuns(route, shellMode) && (
+        {activeProject && route.kind === "project-settings" && route.section === "advanced-tasks" && (
           <TaskHistory
             projectId={activeProject.id}
             comfyConnected={isConnected}
@@ -963,10 +914,10 @@ function App() {
             onOpenShot={(shotId) => openShot(shotId)}
           />
         )}
-        {shellMode === "v3" && route.kind === "project-settings" && route.section === "generators" && <GeneratorSettingsPage key={route.projectId} projectId={route.projectId} navigate={navigate} />}
-        {workspace === "projects" && !(shellMode === "v3" && route.kind === "project-settings" && route.section === "generators") && (
+        {route.kind === "project-settings" && route.section === "generators" && <GeneratorSettingsPage key={route.projectId} projectId={route.projectId} navigate={navigate} />}
+        {(route.kind === "project-list" || (route.kind === "project-settings" && !["generators", "advanced-workflows", "advanced-project", "advanced-shots", "advanced-production", "advanced-review", "advanced-tasks"].includes(route.section))) && (
           <ProjectWorkspace
-            showWorkflowSettings={shellMode !== "v3"}
+            showWorkflowSettings={false}
             projects={projects}
             activeProjectId={activeProjectId}
             catalog={catalog}
@@ -976,7 +927,7 @@ function App() {
             onTemplateProjectCreated={handleTemplateProjectCreated}
           />
         )}
-        {workspace === "workflows" && shellMode === "v3" && (
+        {(route.kind === "system-settings" || route.kind === "project-settings") && route.section === "advanced-workflows" && (
           <WorkflowLabPage
             projectId={activeProject?.id}
             catalog={catalog}
@@ -997,23 +948,9 @@ function App() {
             navigate={navigate}
           />
         )}
-        {workspace === "workflows" && shellMode !== "v3" && (
-          <WorkflowWorkspace
-            projectId={activeProject?.id}
-            catalog={catalog}
-            comfyConnected={isConnected}
-            onCatalogChanged={reloadCatalog}
-            onOpenStudio={openPublishedWorkflow}
-            onUseInProject={openWorkflowForProject}
-            onOpenProjectSettings={() => navigateToWorkspace("projects")}
-            onOpenTask={(taskId) => {
-              openTask(taskId);
-            }}
-          />
-        )}
-        {workspace === "settings" && (
+        {route.kind === "system-settings" && !["advanced-tools", "advanced-workflows"].includes(route.section) && (
           <SettingsWorkspace
-            showWorkflowRepairStatus={shellMode !== "v3"}
+            showWorkflowRepairStatus={false}
             comfy={comfy}
             connectionLoading={connectionLoading}
             capabilityLoading={capabilityLoading}

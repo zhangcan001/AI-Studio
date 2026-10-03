@@ -4,7 +4,7 @@ import type { DraftValue, GenerationValues, RecipeField } from "../../types/gene
 import { defaultGenerationValues } from "../../stores/studioStore";
 export type CreateRoute = Extract<AppRoute, { kind: "create" }>;
 export const scopeKey = (route: CreateRoute) => `${route.projectId}:${route.shotId ?? ""}:${route.stage}`;
-export function normalCreate(route: AppRoute, shellMode: string) { return shellMode === "v3" && route.kind === "create" && route.surface !== "batch"; }
+export function normalCreate(route: AppRoute) { return route.kind === "create" && route.surface !== "batch"; }
 export function modeLabel(generator: GeneratorOption): string {
   if (generator.mediaKind === "image") return generator.fields.some(f => f.type === "image" || f.type === "images") ? "参考图生图" : "文生图";
   if (generator.fields.some(f => f.type === "video" || f.type === "videos")) return "参考视频";

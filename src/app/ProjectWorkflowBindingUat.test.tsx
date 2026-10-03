@@ -41,18 +41,18 @@ vi.mock("../services/tauriClient", async () => {
 
 vi.mock("./bootstrap", () => bootstrapMock);
 vi.mock("../services/taskEvents", () => taskEventsMock);
-vi.mock("./StudioShell", () => ({
-  StudioShell: ({ children, onNavigate }: { children: ReactNode; onNavigate: (destination: unknown, item: { id: string }) => void }) => (
+vi.mock("./ShellHost", () => ({
+  ShellHost: ({ children, navigate }: { children: ReactNode; navigate: (route: import("./routes/types").AppRoute) => void }) => (
     <>
-      <button type="button" onClick={() => onNavigate("workflows", { id: "workflows" })}>工作流</button>
+      <button type="button" onClick={() => navigate({ kind: "system-settings", section: "advanced-workflows" })}>工作流</button>
       {children}
     </>
   ),
 }));
 vi.mock("./StartupScreen", () => ({ StartupScreen: ({ onRetry }: { onRetry: () => void }) => <button onClick={onRetry}>重试</button> }));
 vi.mock("./WorkspaceErrorBoundary", () => ({ WorkspaceErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</> }));
-vi.mock("../features/workflows/WorkflowWorkspace", () => ({
-  WorkflowWorkspace: ({ onUseInProject }: { onUseInProject: (workflowId: string, recipeId: string) => Promise<void> }) => (
+vi.mock("../features/workflow-lab/WorkflowLabPage", () => ({
+  WorkflowLabPage: ({ onUseInProject }: { onUseInProject: (workflowId: string, recipeId: string) => Promise<void> }) => (
     <button
       type="button"
       onClick={() => void onUseInProject(mocks.selectedWorkflow.workflowId, mocks.selectedWorkflow.recipeId)}
@@ -61,11 +61,11 @@ vi.mock("../features/workflows/WorkflowWorkspace", () => ({
     </button>
   ),
 }));
-vi.mock("../features/projects/ProjectCommandCenter", () => ({
-  ProjectCommandCenter: ({ onNavigate }: { onNavigate?: (request: { destination: "shots"; section: "creation"; projectId: string; shotId: string }) => void }) => (
+vi.mock("./v3/ProjectOverviewPage", () => ({
+  ProjectOverviewPage: ({ navigate }: { navigate: (route: import("./routes/types").AppRoute) => void }) => (
     <button
       type="button"
-      onClick={() => onNavigate?.({ destination: "shots", section: "creation", projectId: "project-2", shotId: "shot-2" })}
+      onClick={() => navigate({ kind: "create", projectId: "project-2", shotId: "shot-2", stage: "image" })}
     >
       打开跨项目镜头
     </button>
@@ -76,9 +76,9 @@ vi.mock("../features/studio/GenerationStudio", () => ({ GenerationStudio: () => 
 vi.mock("../features/assets/AssetWorkspace", () => ({ AssetWorkspace: () => null }));
 vi.mock("../features/assets/AssetVideoBatchWorkspace", () => ({ AssetVideoBatchWorkspace: () => null }));
 vi.mock("../features/tasks/TaskHistory", () => ({ TaskHistory: () => null }));
-vi.mock("../features/shots/ShotWorkspace", () => ({
-  ShotWorkspace: ({ projectId, initialSelectedShotId, mode }: { projectId: string; initialSelectedShotId?: string; mode?: string }) => (
-    <output data-testid="shot-workspace-target">{projectId}:{initialSelectedShotId ?? "none"}:{mode ?? "none"}</output>
+vi.mock("../features/create/CreatePage", () => ({
+  CreatePage: ({ route }: { route: Extract<import("./routes/types").AppRoute, { kind: "create" }> }) => (
+    <output data-testid="shot-workspace-target">{route.projectId}:{route.shotId ?? "none"}:creation</output>
   ),
 }));
 vi.mock("../features/settings/SettingsWorkspace", () => ({ SettingsWorkspace: () => null }));
@@ -171,7 +171,7 @@ function prepareApp(catalog: RecipeViewModel[], hasProject = true, projectList =
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
-  // These legacy workspace fixtures intentionally exercise the retained rollback shell.
+  // Deprecated preference must no longer select a legacy UI; binding invariants remain.
   localStorage.setItem("aistudio.shellMode", "legacy");
   useProjectStore.setState({ projects: [], activeProjectId: undefined, loading: true, error: undefined });
   useWorkspaceResumeStore.setState({

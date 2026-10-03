@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { SeedModeSelect } from "./WorkflowWorkspace";
+import { SeedModeSelect } from "../workflow-lab/labViewHelpers";
 import { mappingToDraft, seedModeRequest } from "./workflowParameterExposureModel";
 import type { WorkflowInputMappingView } from "../../types/workflowOnboarding";
 

@@ -35,7 +35,7 @@ export function parseRoute(value: unknown, depth = 0): AppRoute | undefined {
       if (r !== undefined && (!r || !["production-run", "queue-batch", "task"].includes(String(r.source)) || !text(r.id))) return undefined;
       if (v.filter !== undefined && !["all", "completed", "review", "production", "failed", "active", "tasks"].includes(String(v.filter))) return { kind: "runs", projectId };
       const c = v.context && typeof v.context === "object" ? v.context as Record<string, unknown> : {};
-      const context = { shotId: text(c.shotId) ? c.shotId : undefined, itemId: text(c.itemId) ? c.itemId : undefined, reviewId: text(c.reviewId) ? c.reviewId : undefined, stage: c.stage === "IMAGE" || c.stage === "VIDEO" ? c.stage : undefined, collectionFilter: parseCollectionFilter(c.collectionFilter) };
+      const context = { taskId: text(c.taskId) ? c.taskId : undefined, batchId: text(c.batchId) ? c.batchId : undefined, assetId: text(c.assetId) ? c.assetId : undefined, shotId: text(c.shotId) ? c.shotId : undefined, itemId: text(c.itemId) ? c.itemId : undefined, reviewId: text(c.reviewId) ? c.reviewId : undefined, stage: c.stage === "IMAGE" || c.stage === "VIDEO" ? c.stage : undefined, collectionFilter: parseCollectionFilter(c.collectionFilter) };
       return { kind: "runs", projectId, run: r ? { source: r.source as "production-run" | "queue-batch" | "task", id: r.id as string } : undefined, filter: v.filter as string | undefined, context: Object.values(context).some(Boolean) ? context : undefined };
     }
     case "library": {
