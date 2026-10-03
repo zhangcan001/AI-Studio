@@ -23,9 +23,14 @@ export function productionRust(source){
   for(;p<mask.length;p++){const c=mask[p];if(c==='(')round++;else if(c===')')round--;else if(c==='[')square++;else if(c===']')square--;else if(!round&&!square&&c===';'){end=p+1;break;}else if(!round&&!square&&c==='{'){let depth=1;for(p++;p<mask.length&&depth;p++){if(mask[p]==='{')depth++;if(mask[p]==='}')depth--;}end=p;break;}}
   for(let k=m.index;k<end;k++)if(out[k]!=='\n'&&out[k]!=='\r')out[k]=' ';re.lastIndex=end;
  }
- return out.join('');
+ // Removed tail test modules need not be scanned repeatedly as whitespace.
+ return out.join('').trimEnd();
 }
-export function sqlFootprint(source){const production=productionRust(source),code=maskRust(production),withStrings=maskRust(production,false);
+export function sqlFootprint(source){
+ // This is a deliberately broader superset of every token counted below.
+ // A file without any such text cannot gain SQL through comment/test masking.
+ if(!/sqlx|Sqlite|Pool|SELECT|INSERT|UPDATE|DELETE|PRAGMA/i.test(source))return {sqlx:0,pools:0,sql:0};
+ const production=productionRust(source),code=maskRust(production),withStrings=maskRust(production,false);
  return {sqlx:(code.match(/\bsqlx\s*::/g)||[]).length,pools:(code.match(/\b(?:SqlitePool|SqliteConnection|SqliteTransaction|Pool\s*<\s*(?:sqlx\s*::\s*)?Sqlite)\b/g)||[]).length,sql:(withStrings.match(/\b(?:SELECT\s+[\s\S]{0,100}?\bFROM\b|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|DELETE\s+FROM\b|PRAGMA\s+\w+)/gi)||[]).length};}
 export function rustFiles(root){return readdirSync(root,{withFileTypes:true}).flatMap(e=>e.isDirectory()?rustFiles(join(root,e.name)):e.name.endsWith('.rs')?[join(root,e.name)]:[]).sort();}
 export function backendBoundary(root,manifest){const violations=[];let checked=0;

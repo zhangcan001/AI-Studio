@@ -60,7 +60,10 @@ it("phase5_target15 Product boundary command parity and no competing Library aut
  for(const file of readdirSync("src/features/library").filter((f:string)=>!f.includes(".test.")&&/\.tsx?$/.test(f))){expect(readFileSync(`src/features/library/${file}`,"utf8")).not.toMatch(/services\/(tauriClient|ipc)|@tauri-apps\/api|SELECT\s|INSERT\s|create\(.*zustand/);}
  for(const file of readdirSync("src-tauri/src/application/product/library_facade")){expect(readFileSync(`src-tauri/src/application/product/library_facade/${file}`,"utf8")).not.toMatch(/sqlx::query|SqlitePool|LibraryRepository/);}
  expect(readdirSync("src/stores")).not.toContain("libraryStore.ts");expect(readdirSync("src-tauri/migrations").some((f:string)=>f.startsWith("043"))).toBe(false);
-});
+// Like the Create boundary target, this invokes the full architecture guard.
+// Phase8 adds all backend production files; keep every assertion with a bounded
+// static-scan budget rather than applying a UI interaction's default 5 seconds.
+},15000);
 it("phase5_target16 one normal entry real page legacy rollback and responsive structure",async()=>{
  expect(normalLibrary(route)).toBe(true);expect(normalLibrary({...route,filter:"advanced-assets"})).toBe(false);expect(normalLibrary(route)).toBe(true);
  expect(toLegacyLocation({...route,filter:"advanced-assets"}).workspace).toBe("assets");expect(toLegacyLocation({...route,filter:"advanced-prompts"}).workspace).toBe("prompts");
