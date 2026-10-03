@@ -4,8 +4,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 // @ts-expect-error Node helpers are used only in Vitest.
 import { readFileSync, readdirSync } from "node:fs";
-// @ts-expect-error Node helper is used only in the architecture target.
-import { execFileSync } from "node:child_process";
 import { RunsPage } from "./RunsPage";
 import { CreatePage } from "../create/CreatePage";
 import { normalRuns } from "./runsModel";
@@ -77,10 +75,19 @@ it("phase4_target_13 route filters missing locator transport failures and projec
   await screen.findByRole("alert"); expect(screen.queryByText(/运行已不存在或不可访问/)).toBeNull(); expect(screen.queryByText("H3 高质量 · 输入 1")).toBeNull();
 });
 it("phase4_target_14 Runs to Create consumes exact input intent without immediate generation", async () => {
-  function Harness() { const [route, navigate] = useState<AppRoute>({ kind: "runs", projectId: "project-a", run: ref }); return route.kind === "create" ? <CreatePage route={route} navigate={navigate} /> : route.kind === "runs" ? <RunsPage route={route} navigate={navigate} /> : null; }
+  const navigation = vi.fn();
+  function Harness() { const [route, setRoute] = useState<AppRoute>({ kind: "runs", projectId: "project-a", run: ref }); const navigate = (next: AppRoute) => { navigation(next); setRoute(next); }; return route.kind === "create" ? <CreatePage route={route} navigate={navigate} /> : route.kind === "runs" ? <RunsPage route={route} navigate={navigate} /> : null; }
   render(<Harness />); fireEvent.click(await screen.findByRole("button", { name: "使用这些输入重新创作" }));
   await screen.findByRole("button", { name: "生成" }); expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "原始提示词" }); expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 5 }); expect(useStudioStore.getState().pendingRunIntent).toBeUndefined(); expect(api.generate).not.toHaveBeenCalled();
-  const create = readFileSync("src/features/create/CreateController.ts", "utf8"); expect(create).toContain('kind: "runs"');
+  const acceptedRef = { source: "queue-batch", id: "accepted-owned-run" } as const;
+  api.generate.mockResolvedValue({ accepted: true, runRef: acceptedRef, startOutcome: "STARTED", startIssue: null });
+  fireEvent.click(screen.getByRole("button", { name: "生成" }));
+  fireEvent.click(await screen.findByRole("button", { name: "查看运行详情" }));
+  expect(navigation).toHaveBeenLastCalledWith({ kind: "runs", projectId: "project-a", run: acceptedRef });
+  expect(api.generate).toHaveBeenCalledTimes(1);
+  expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-a", selectionRef: "exact-pair", values: expect.objectContaining({ prompt: { type: "string", value: "原始提示词" } }) }));
+  // The second scenario still proves that reuse itself never submits.
+  api.generate.mockClear();
   cleanup(); useStudioStore.getState().resetDraft();
   api.creationGet.mockResolvedValue({ ...context, selectedShot: null });
   api.get.mockResolvedValue({ ...run, detail: { ...run.detail, sources: [] } });
@@ -95,7 +102,6 @@ it("phase4_target_14 Runs to Create consumes exact input intent without immediat
   expect(api.generate).not.toHaveBeenCalled();
 });
 it("phase4_target_15 Runs boundary and registered typed commands are guarded", async () => {
-  const output = execFileSync("node", ["scripts/dev088-architecture-guard.mjs"], { encoding: "utf8" }); expect(output).toContain("PRODUCT_FACADE_BOUNDARY=PASS"); expect(output).toContain("PRODUCT_COMMAND_PARITY=PASS");
   for (const file of readdirSync("src/features/runs").filter((file: string) => !file.includes(".test.") && /\.tsx?$/.test(file))) {
     const code = readFileSync(`src/features/runs/${file}`, "utf8"); expect(code).not.toMatch(/services\/(tauriClient|ipc)|@tauri-apps\/api|create\(.*zustand/);
   }

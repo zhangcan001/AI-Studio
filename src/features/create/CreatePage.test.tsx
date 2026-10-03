@@ -4,8 +4,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error Node helpers execute only in Vitest; application excludes Node types.
 import { readFileSync, readdirSync } from "node:fs";
-// @ts-expect-error Node subprocess is used only by this architecture target.
-import { execFileSync } from "node:child_process";
 import { CreatePage } from "./CreatePage";
 import { useStudioStore } from "../../stores/studioStore";
 import type { CreationContext, GeneratorOption, ProductRun, CreationAsset } from "../../product/types";
@@ -138,7 +136,6 @@ describe("Target16 architecture", () => {
     for (const path of readdirSync("src/features/create").filter((path: string) => /\.(tsx?|css)$/.test(path) && !path.includes("test"))) {
       const source = readFileSync(`src/features/create/${path}`, "utf8"); expect(source).not.toMatch(/tauriClient|@tauri-apps|services\/ipc|create\s*\(.*=>/); expect(source).not.toMatch(/<ShotWorkspace|<GenerationStudio|<DirectGenerationEntry/);
     }
-    const guard = execFileSync("node", ["scripts/dev088-architecture-guard.mjs"], { encoding: "utf8" }); expect(guard).toContain("FRONTEND_NO_RAW_INVOKE=PASS");
     render(<Host />); await loaded(); fireEvent.click(screen.getByText("高级")); fireEvent.click(screen.getByRole("button", { name: "批量生成 / Experiment" })); expect(navigations).toHaveBeenLastCalledWith(expect.objectContaining({ surface: "batch", kind: "create" }));
   }, 15000);
 });

@@ -3,8 +3,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 // @ts-expect-error Node helpers are test-only.
 import { readFileSync, readdirSync } from "node:fs";
-// @ts-expect-error Node subprocess is test-only.
-import { execFileSync } from "node:child_process";
 import { LibraryPage } from "./LibraryPage";
 import { CreatePage } from "../create/CreatePage";
 import { normalLibrary, relationRoute, deletionMessage } from "./libraryModel";
@@ -56,13 +54,11 @@ it("phase5_target14 event refresh typed edits blocked delete warnings and action
  api.deletionInspect.mockResolvedValue({allowed:true,blockers:[],warnings:["历史仍保留，媒体无法预览"],relations:[],consequences:[]});fireEvent.click(screen.getByRole("button",{name:"删除"}));fireEvent.click(await screen.findByRole("button",{name:"确认删除资源"}));await waitFor(()=>expect(api.delete).toHaveBeenCalledWith("project-a",resource,true));
 });
 it("phase5_target15 Product boundary command parity and no competing Library authority",()=>{
- expect(execFileSync("node",["scripts/dev088-architecture-guard.mjs"],{encoding:"utf8"})).toContain("PRODUCT_COMMAND_PARITY=PASS");
  for(const file of readdirSync("src/features/library").filter((f:string)=>!f.includes(".test.")&&/\.tsx?$/.test(f))){expect(readFileSync(`src/features/library/${file}`,"utf8")).not.toMatch(/services\/(tauriClient|ipc)|@tauri-apps\/api|SELECT\s|INSERT\s|create\(.*zustand/);}
  for(const file of readdirSync("src-tauri/src/application/product/library_facade")){expect(readFileSync(`src-tauri/src/application/product/library_facade/${file}`,"utf8")).not.toMatch(/sqlx::query|SqlitePool|LibraryRepository/);}
  expect(readdirSync("src/stores")).not.toContain("libraryStore.ts");expect(readdirSync("src-tauri/migrations").some((f:string)=>f.startsWith("043"))).toBe(false);
-// Like the Create boundary target, this invokes the full architecture guard.
-// Phase8 adds all backend production files; keep every assertion with a bounded
-// static-scan budget rather than applying a UI interaction's default 5 seconds.
+// Full DEV-088 execution is owned by product/client.test.ts.
+// These per-feature ownership assertions remain independent and unchanged.
 },15000);
 it("phase5_target16 one normal entry real page legacy rollback and responsive structure",async()=>{
  expect(normalLibrary(route)).toBe(true);expect(normalLibrary({...route,filter:"advanced-assets"})).toBe(false);expect(normalLibrary(route)).toBe(true);

@@ -4,8 +4,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 // @ts-expect-error Node helpers are test-only, matching repository configuration.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 // @ts-expect-error Node helpers are test-only.
-import { execFileSync } from "node:child_process";
-// @ts-expect-error Node helpers are test-only.
 import { resolve, dirname } from "node:path";
 // @ts-expect-error Node helpers are test-only.
 import { createHash } from "node:crypto";
@@ -77,7 +75,6 @@ it("phase7_target11 Advanced capabilities remain explicitly reachable",()=>{
  expect(read("src/features/workflow-lab/WorkflowLabPage.tsx")).toContain("LabDiagnosticsPane");for(const r of matrix.rows.filter(r=>r.decision==="KEEP_ADVANCED"))expect(existsSync(r.file)).toBe(true);
 });
 it("phase7_target12 Product and Advanced transport guards remain intact",()=>{
- const output=execFileSync("node",["scripts/dev088-architecture-guard.mjs"],{encoding:"utf8"});expect(output).toContain("FRONTEND_NO_RAW_INVOKE=PASS");
  for(const dir of ["src/features/create","src/features/runs","src/features/library"]){for(const file of files(dir).filter(f=>!f.includes('.test.')))expect(read(file)).not.toMatch(/from ["'][^"']*(?:tauriClient|services\/ipc)["']|@tauri-apps\/api/);}
 },20000);
 it("phase7_target13 invariant tests survive UI retirement at actual owners",()=>{
