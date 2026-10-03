@@ -1,0 +1,1105 @@
+{
+  "schemaVersion": 1,
+  "policy": "Deletion requires Native V3-only gate, zero runtime/dynamic/route importers, migrated invariant tests and canonical old-locator destination. Initial imports are audit evidence, not final proof.",
+  "rows": [
+    {
+      "entry": "legacy shell",
+      "file": "src/app/StudioShell.tsx",
+      "decision": "DELETE_NOW",
+      "replacement": "AppShellV3",
+      "compatibility": "V3-only host; old preference ignored. Delete only after pre-deletion Native gate.",
+      "reason": "V3-only host; old preference ignored. Delete only after pre-deletion Native gate.",
+      "initialImporters": [
+        {
+          "from": "src/app/ShellHost.tsx",
+          "to": "src/app/StudioShell.tsx",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/StudioShell.test.tsx",
+          "to": "src/app/StudioShell.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/app/WorkflowNavigationUat.test.tsx",
+          "to": "src/app/StudioShell.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "AppShellV3",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "RETIRED",
+      "proof": {
+        "nativePreDeletion": "V3 startup, project switch, Overview/Create/Runs/Library/project-settings/system-settings/Lab/tools observed before deletion",
+        "runtimeImports": 0,
+        "dynamicImports": 0,
+        "routeOwners": 0,
+        "normalNav": 0,
+        "tests": "Existing invariant tests retained and migrated to V3 or shared Lab control-plane harness; old shell rail presentation assertions migrated to canonical navigation.",
+        "compatibility": "legacyAdapter and WorkspaceResume parser retained; canonical old-locator destinations unchanged in identity",
+        "dataAuthority": "Unchanged",
+        "css": "Global CSS untouched"
+      }
+    },
+    {
+      "entry": "legacy shell CSS",
+      "file": "src/app/StudioShell.css",
+      "decision": "DELETE_NOW",
+      "replacement": "AppShellV3.css",
+      "compatibility": "Component-local stylesheet; remove after sole owner retires; no global CSS cleanup.",
+      "reason": "Component-local stylesheet; remove after sole owner retires; no global CSS cleanup.",
+      "initialImporters": [
+        {
+          "from": "src/app/StudioShell.tsx",
+          "to": "src/app/StudioShell.css",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "AppShellV3.css",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "RETIRED",
+      "proof": {
+        "nativePreDeletion": "V3 startup, project switch, Overview/Create/Runs/Library/project-settings/system-settings/Lab/tools observed before deletion",
+        "runtimeImports": 0,
+        "dynamicImports": 0,
+        "routeOwners": 0,
+        "normalNav": 0,
+        "tests": "Existing invariant tests retained and migrated to V3 or shared Lab control-plane harness; old shell rail presentation assertions migrated to canonical navigation.",
+        "compatibility": "legacyAdapter and WorkspaceResume parser retained; canonical old-locator destinations unchanged in identity",
+        "dataAuthority": "Unchanged",
+        "css": "Only owner StudioShell retired; no other stylesheet importers"
+      }
+    },
+    {
+      "entry": "shell host",
+      "file": "src/app/ShellHost.tsx",
+      "decision": "KEEP_SHARED",
+      "replacement": "AppShellV3",
+      "compatibility": "Retain thin V3 composition, remove preference and toggles.",
+      "reason": "Retain thin V3 composition, remove preference and toggles.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/app/ShellHost.tsx",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "AppShellV3",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "workflows",
+      "file": "src/features/workflows/WorkflowWorkspace.tsx",
+      "decision": "DELETE_NOW",
+      "replacement": "WorkflowLabPage / WorkflowLabSurface",
+      "compatibility": "Move tests to real Lab or existing helper owners, remove wrapper after Native gate.",
+      "reason": "Move tests to real Lab or existing helper owners, remove wrapper after Native gate.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/app/WorkflowNavigationUat.test.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/workflows/WorkflowAddUat.test.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/workflows/WorkflowPersistentProjectUseUat.test.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/workflows/WorkflowPurgeUat.test.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/workflows/WorkflowQuickTestQueue.test.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/workflows/WorkflowRecipePromotionUat.test.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/workflows/workflowSeedMode.test.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/workflows/WorkflowVersionDelete.test.tsx",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/workflows/WorkflowWorkspace.test.ts",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/i18n/uiCopyGuard.test.ts",
+          "to": "src/features/workflows/WorkflowWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "WorkflowLabPage / WorkflowLabSurface",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "RETIRED",
+      "proof": {
+        "nativePreDeletion": "V3 startup, project switch, Overview/Create/Runs/Library/project-settings/system-settings/Lab/tools observed before deletion",
+        "runtimeImports": 0,
+        "dynamicImports": 0,
+        "routeOwners": 0,
+        "normalNav": 0,
+        "tests": "Existing invariant tests retained and migrated to V3 or shared Lab control-plane harness; old shell rail presentation assertions migrated to canonical navigation.",
+        "compatibility": "legacyAdapter and WorkspaceResume parser retained; canonical old-locator destinations unchanged in identity",
+        "dataAuthority": "Unchanged",
+        "css": "Global CSS untouched"
+      }
+    },
+    {
+      "entry": "command-center",
+      "file": "src/features/projects/ProjectCommandCenter.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Overview; project-settings advanced-project",
+      "compatibility": "Retain Handoff import/preflight and production analysis via explicit Advanced bridge.",
+      "reason": "Retain Handoff import/preflight and production analysis via explicit Advanced bridge.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/projects/ProjectCommandCenter.tsx",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/projects/ProjectCommandCenter.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/commandCenterAdapter.ts",
+          "to": "src/features/projects/ProjectCommandCenter.tsx",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/production/ProductionReviewInbox.tsx",
+          "to": "src/features/projects/ProjectCommandCenter.tsx",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/projects/ProjectCommandCenter.test.tsx",
+          "to": "src/features/projects/ProjectCommandCenter.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/shots/ShotWorkspace.tsx",
+          "to": "src/features/projects/ProjectCommandCenter.tsx",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Overview; project-settings advanced-project",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "studio",
+      "file": "src/features/studio/GenerationStudio.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Create; create surface=batch image",
+      "compatibility": "Retain approved batch generation and production controls, never normal single Create.",
+      "reason": "Retain approved batch generation and production controls, never normal single Create.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/studio/GenerationStudio.tsx",
+          "kind": "dynamic",
+          "test": false
+        }
+      ],
+      "routePolicy": "Create; create surface=batch image",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "video",
+      "file": "src/features/assets/AssetVideoBatchWorkspace.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Create; create surface=batch video",
+      "compatibility": "Preserve explicitly selected batch-video assets; old video intent maps to batch.",
+      "reason": "Preserve explicitly selected batch-video assets; old video intent maps to batch.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/assets/AssetVideoBatchWorkspace.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/features/assets/AssetVideoBatchWorkspace.test.tsx",
+          "to": "src/features/assets/AssetVideoBatchWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/assets/AssetVideoGenericQueueSubmission.test.tsx",
+          "to": "src/features/assets/AssetVideoBatchWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Create; create surface=batch video",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "shots",
+      "file": "src/features/shots/ShotWorkspace.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Create/Runs; project-settings advanced-shots / advanced-production / advanced-review",
+      "compatibility": "Retain consistency/structure/reference editing, advanced production/review operations.",
+      "reason": "Retain consistency/structure/reference editing, advanced production/review operations.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/shots/ShotWorkspace.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/features/shots/ProjectWorkflowFormalProductionUat.test.tsx",
+          "to": "src/features/shots/ShotWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/shots/referenceAnchorApply.test.ts",
+          "to": "src/features/shots/ShotWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/shots/ShotWorkspace.multiPackagePolling.test.tsx",
+          "to": "src/features/shots/ShotWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/shots/ShotWorkspace.production.test.tsx",
+          "to": "src/features/shots/ShotWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/shots/ShotWorkspace.sequentialBatchStart.test.tsx",
+          "to": "src/features/shots/ShotWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/shots/ShotWorkspace.test.ts",
+          "to": "src/features/shots/ShotWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Create/Runs; project-settings advanced-shots / advanced-production / advanced-review",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "direct-generation",
+      "file": "src/features/production/DirectGenerationEntry.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Create; advanced ShotWorkspace",
+      "compatibility": "Still imported by retained advanced ShotWorkspace; not safe to delete.",
+      "reason": "Still imported by retained advanced ShotWorkspace; not safe to delete.",
+      "initialImporters": [
+        {
+          "from": "src/features/production/DirectGenerationEntry.test.tsx",
+          "to": "src/features/production/DirectGenerationEntry.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/shots/ShotWorkspace.tsx",
+          "to": "src/features/production/DirectGenerationEntry.tsx",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Create; advanced ShotWorkspace",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "assets",
+      "file": "src/features/assets/AssetWorkspace.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Library; library advanced-assets",
+      "compatibility": "Import and advanced asset/profile/reference operations remain.",
+      "reason": "Import and advanced asset/profile/reference operations remain.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/assets/AssetWorkspace.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/features/assets/AssetWorkspace.test.tsx",
+          "to": "src/features/assets/AssetWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Library; library advanced-assets",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "prompts",
+      "file": "src/features/prompts/PromptStudio.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Library prompts; library advanced-prompts",
+      "compatibility": "Advanced prompt experiments/version operations remain.",
+      "reason": "Advanced prompt experiments/version operations remain.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/prompts/PromptStudio.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/features/prompts/PromptStudio.test.tsx",
+          "to": "src/features/prompts/PromptStudio.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Library prompts; library advanced-prompts",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "tasks",
+      "file": "src/features/tasks/TaskHistory.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Runs; project-settings advanced-tasks",
+      "compatibility": "Retain production audit and detailed provenance/telemetry only at explicit Advanced entry.",
+      "reason": "Retain production audit and detailed provenance/telemetry only at explicit Advanced entry.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/tasks/TaskHistory.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/features/tasks/TaskHistory.test.tsx",
+          "to": "src/features/tasks/TaskHistory.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Runs; project-settings advanced-tasks",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "task list",
+      "file": "src/features/tasks/TaskHistoryList.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Runs; advanced TaskHistory",
+      "compatibility": "Retained advanced history filtering.",
+      "reason": "Retained advanced history filtering.",
+      "initialImporters": [
+        {
+          "from": "src/features/tasks/TaskHistory.tsx",
+          "to": "src/features/tasks/TaskHistoryList.tsx",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Runs; advanced TaskHistory",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "task detail",
+      "file": "src/features/tasks/TaskHistoryDetail.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Runs; advanced TaskHistory",
+      "compatibility": "Telemetry/provenance and retry invariants preserved, not normal Run routing.",
+      "reason": "Telemetry/provenance and retry invariants preserved, not normal Run routing.",
+      "initialImporters": [
+        {
+          "from": "src/features/tasks/TaskHistory.tsx",
+          "to": "src/features/tasks/TaskHistoryDetail.tsx",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/tasks/TaskHistoryDetail.provenance.test.tsx",
+          "to": "src/features/tasks/TaskHistoryDetail.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/tasks/TaskHistoryDetail.queueSubmission.test.tsx",
+          "to": "src/features/tasks/TaskHistoryDetail.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/tasks/TaskHistoryDetail.test.tsx",
+          "to": "src/features/tasks/TaskHistoryDetail.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Runs; advanced TaskHistory",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "production run",
+      "file": "src/features/production/ProductionRunPanel.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Runs; batch GenerationStudio",
+      "compatibility": "Retained approved advanced batch orchestration.",
+      "reason": "Retained approved advanced batch orchestration.",
+      "initialImporters": [
+        {
+          "from": "src/features/production/ProductionRunPanel.test.tsx",
+          "to": "src/features/production/ProductionRunPanel.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/studio/GenerationStudio.tsx",
+          "to": "src/features/production/ProductionRunPanel.tsx",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Runs; batch GenerationStudio",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "production drawer",
+      "file": "src/features/production/ProductionQueueDrawer.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Runs; advanced ShotWorkspace",
+      "compatibility": "Retained explicit advanced shot queue operations.",
+      "reason": "Retained explicit advanced shot queue operations.",
+      "initialImporters": [
+        {
+          "from": "src/features/production/ProductionQueueDrawer.test.tsx",
+          "to": "src/features/production/ProductionQueueDrawer.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/shots/ShotWorkspace.tsx",
+          "to": "src/features/production/ProductionQueueDrawer.tsx",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Runs; advanced ShotWorkspace",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "production review",
+      "file": "src/features/production/ProductionReviewInbox.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Runs; advanced project/shot bridges",
+      "compatibility": "Preserve production-review authority and invariant tests.",
+      "reason": "Preserve production-review authority and invariant tests.",
+      "initialImporters": [
+        {
+          "from": "src/features/production/ProductionReviewInbox.test.tsx",
+          "to": "src/features/production/ProductionReviewInbox.tsx",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/projects/ProjectCommandCenter.tsx",
+          "to": "src/features/production/ProductionReviewInbox.tsx",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/shots/ShotWorkspace.tsx",
+          "to": "src/features/production/ProductionReviewInbox.tsx",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Runs; advanced project/shot bridges",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "production queue",
+      "file": "src/features/studio/ProductionQueuePanel.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Runs; advanced batch image/video",
+      "compatibility": "Still used by both advanced batch UIs.",
+      "reason": "Still used by both advanced batch UIs.",
+      "initialImporters": [
+        {
+          "from": "src/features/assets/AssetVideoBatchWorkspace.tsx",
+          "to": "src/features/studio/ProductionQueuePanel.tsx",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/studio/GenerationStudio.tsx",
+          "to": "src/features/studio/ProductionQueuePanel.tsx",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Runs; advanced batch image/video",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "queue outcome",
+      "file": "src/features/studio/productionQueueOutcome.ts",
+      "decision": "KEEP_SHARED",
+      "replacement": "Workflow Lab / advanced queue",
+      "compatibility": "Shared outcome labels, not UI authority.",
+      "reason": "Shared outcome labels, not UI authority.",
+      "initialImporters": [
+        {
+          "from": "src/features/studio/productionQueueOutcome.test.ts",
+          "to": "src/features/studio/productionQueueOutcome.ts",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/studio/ProductionQueuePanel.tsx",
+          "to": "src/features/studio/productionQueueOutcome.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/workflows/WorkflowExecutionConfiguration.tsx",
+          "to": "src/features/studio/productionQueueOutcome.ts",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Workflow Lab / advanced queue",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "queue policy",
+      "file": "src/features/studio/productionQueuePolicy.ts",
+      "decision": "KEEP_SHARED",
+      "replacement": "Workflow Lab / advanced queue",
+      "compatibility": "Shared Queue Start/retry policy must remain.",
+      "reason": "Shared Queue Start/retry policy must remain.",
+      "initialImporters": [
+        {
+          "from": "src/features/studio/GenerationStudio.tsx",
+          "to": "src/features/studio/productionQueuePolicy.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/studio/ProductionQueuePanel.tsx",
+          "to": "src/features/studio/productionQueuePolicy.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/studio/productionQueuePolicy.test.ts",
+          "to": "src/features/studio/productionQueuePolicy.ts",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/tasks/TaskHistoryDetail.tsx",
+          "to": "src/features/studio/productionQueuePolicy.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/workflows/WorkflowExecutionConfiguration.tsx",
+          "to": "src/features/studio/productionQueuePolicy.ts",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Workflow Lab / advanced queue",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "queue review",
+      "file": "src/features/studio/productionQueueReview.ts",
+      "decision": "KEEP_SHARED",
+      "replacement": "Advanced output/review helpers",
+      "compatibility": "Review invariant helper; preserve tests.",
+      "reason": "Review invariant helper; preserve tests.",
+      "initialImporters": [
+        {
+          "from": "src/features/studio/productionQueueReview.test.ts",
+          "to": "src/features/studio/productionQueueReview.ts",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Advanced output/review helpers",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "queue selection",
+      "file": "src/features/studio/productionQueueSelection.ts",
+      "decision": "KEEP_SHARED",
+      "replacement": "Advanced production queue",
+      "compatibility": "Shared selection policy; preserve stability tests.",
+      "reason": "Shared selection policy; preserve stability tests.",
+      "initialImporters": [
+        {
+          "from": "src/features/stability/dev039Stability.test.ts",
+          "to": "src/features/studio/productionQueueSelection.ts",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/studio/ProductionQueuePanel.tsx",
+          "to": "src/features/studio/productionQueueSelection.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/studio/productionQueueSelection.test.ts",
+          "to": "src/features/studio/productionQueueSelection.ts",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Advanced production queue",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "legacy adapter",
+      "file": "src/app/routes/legacyAdapter.ts",
+      "decision": "KEEP_COMPAT",
+      "replacement": "Canonical AppRoute",
+      "compatibility": "Preserve all 11 old workspace locators and exact child context.",
+      "reason": "Preserve all 11 old workspace locators and exact child context.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/app/routes/legacyAdapter.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/resumeAdapter.ts",
+          "to": "src/app/routes/legacyAdapter.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/route.test.ts",
+          "to": "src/app/routes/legacyAdapter.ts",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/create/CreatePage.test.tsx",
+          "to": "src/app/routes/legacyAdapter.ts",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/library/LibraryPage.test.tsx",
+          "to": "src/app/routes/legacyAdapter.ts",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Canonical AppRoute",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_COMPAT"
+    },
+    {
+      "entry": "resume adapter",
+      "file": "src/app/routes/resumeAdapter.ts",
+      "decision": "KEEP_COMPAT",
+      "replacement": "Canonical route persistence",
+      "compatibility": "Read old workspace resume; new writes canonical route only.",
+      "reason": "Read old workspace resume; new writes canonical route only.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/app/routes/resumeAdapter.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/resume.test.ts",
+          "to": "src/app/routes/resumeAdapter.ts",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/app/routes/useAppRoute.ts",
+          "to": "src/app/routes/resumeAdapter.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/features/library/LibraryPage.test.tsx",
+          "to": "src/app/routes/resumeAdapter.ts",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/features/runs/RunsPage.test.tsx",
+          "to": "src/app/routes/resumeAdapter.ts",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Canonical route persistence",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_COMPAT"
+    },
+    {
+      "entry": "workspace types",
+      "file": "src/types/workspaceResume.ts",
+      "decision": "KEEP_COMPAT",
+      "replacement": "Legacy resume parser",
+      "compatibility": "Historical persisted workspace vocabulary must remain readable.",
+      "reason": "Historical persisted workspace vocabulary must remain readable.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/commandCenterAdapter.ts",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/legacyAdapter.ts",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/resumeAdapter.ts",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/resumeAdapter.ts",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/studioNavigation.ts",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/StudioShell.tsx",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/components/studio/StudioGlobalRail.tsx",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/services/tauriClient.ts",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/stores/workspaceResumeStore.ts",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/stores/workspaceResumeStore.ts",
+          "to": "src/types/workspaceResume.ts",
+          "kind": "static",
+          "test": false
+        }
+      ],
+      "routePolicy": "Legacy resume parser",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_COMPAT"
+    },
+    {
+      "entry": "studio navigation",
+      "file": "src/app/studioNavigation.ts",
+      "decision": "KEEP_COMPAT",
+      "replacement": "Legacy adapter / advanced callbacks",
+      "compatibility": "No normal rendering ownership; retain mapping helpers.",
+      "reason": "No normal rendering ownership; retain mapping helpers.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/app/studioNavigation.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/commandCenterAdapter.ts",
+          "to": "src/app/studioNavigation.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/legacyAdapter.ts",
+          "to": "src/app/studioNavigation.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/routes/legacyAdapter.ts",
+          "to": "src/app/studioNavigation.ts",
+          "kind": "static",
+          "test": false
+        },
+        {
+          "from": "src/app/studioNavigation.test.ts",
+          "to": "src/app/studioNavigation.ts",
+          "kind": "static",
+          "test": true
+        },
+        {
+          "from": "src/app/StudioShell.test.tsx",
+          "to": "src/app/studioNavigation.ts",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Legacy adapter / advanced callbacks",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_COMPAT"
+    },
+    {
+      "entry": "workflow client",
+      "file": "src/services/workflowClient.ts",
+      "decision": "KEEP_SHARED",
+      "replacement": "Workflow Lab typed seam",
+      "compatibility": "Not Legacy UI; keep commands and authority.",
+      "reason": "Not Legacy UI; keep commands and authority.",
+      "initialImporters": [
+        {
+          "from": "src/services/workflowLabClient.ts",
+          "to": "src/services/workflowClient.ts",
+          "kind": "reexport",
+          "test": false
+        }
+      ],
+      "routePolicy": "Workflow Lab typed seam",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "projects",
+      "file": "src/features/projects/ProjectWorkspace.tsx",
+      "decision": "KEEP_SHARED",
+      "replacement": "Project list/settings",
+      "compatibility": "Owns project management/backup/template controls still in V3.",
+      "reason": "Owns project management/backup/template controls still in V3.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/projects/ProjectWorkspace.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/features/projects/ProjectWorkspace.test.tsx",
+          "to": "src/features/projects/ProjectWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "Project list/settings",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "settings",
+      "file": "src/features/settings/SettingsWorkspace.tsx",
+      "decision": "KEEP_SHARED",
+      "replacement": "System settings",
+      "compatibility": "Repair technical status already lives in Lab diagnostics.",
+      "reason": "Repair technical status already lives in Lab diagnostics.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/settings/SettingsWorkspace.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/features/settings/settingsUx.test.tsx",
+          "to": "src/features/settings/SettingsWorkspace.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "System settings",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "tools",
+      "file": "src/features/tools/LocalToolHub.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "System settings advanced-tools",
+      "compatibility": "Explicit advanced tools, unchanged backend.",
+      "reason": "Explicit advanced tools, unchanged backend.",
+      "initialImporters": [
+        {
+          "from": "src/app/App.tsx",
+          "to": "src/features/tools/LocalToolHub.tsx",
+          "kind": "dynamic",
+          "test": false
+        },
+        {
+          "from": "src/features/tools/LocalToolHub.test.tsx",
+          "to": "src/features/tools/LocalToolHub.tsx",
+          "kind": "static",
+          "test": true
+        }
+      ],
+      "routePolicy": "System settings advanced-tools",
+      "cssPolicy": "No global CSS deletion; component-local CSS only with zero remaining importers",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "task state",
+      "file": "src/features/tasks/taskHistoryState.ts",
+      "decision": "KEEP_SHARED",
+      "replacement": "Advanced TaskHistory",
+      "compatibility": "Paging/filter state is still used by retained Advanced history.",
+      "reason": "Paging/filter state is still used by retained Advanced history.",
+      "initialImporters": [
+        "src\\features\\tasks\\taskHistoryState.test.ts:2:import { mergeTaskHistoryItems } from \"./taskHistoryState\";",
+        "src\\features\\tasks\\TaskHistory.tsx:12:import { mergeTaskHistoryItems } from \"./taskHistoryState\";"
+      ],
+      "routePolicy": "Advanced TaskHistory",
+      "cssPolicy": "Preserved",
+      "status": "KEEP_SHARED"
+    },
+    {
+      "entry": "profile editor",
+      "file": "src/features/assets/ConsistencyProfileEditor.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Library advanced-assets",
+      "compatibility": "Existing full profile editor retained; normal Library remains Product only.",
+      "reason": "Existing full profile editor retained; normal Library remains Product only.",
+      "initialImporters": [
+        "src\\features\\assets\\ConsistencyProfileEditor.test.tsx:8:import { ConsistencyProfileEditor } from \"./ConsistencyProfileEditor\";",
+        "src\\features\\assets\\ConsistencyProfileEditor.test.tsx:48:describe(\"ConsistencyProfileEditor\", () => {",
+        "src\\features\\assets\\ConsistencyProfileEditor.test.tsx:51:      <ConsistencyProfileEditor",
+        "src\\features\\assets\\ConsistencyProfileEditor.test.tsx:57:      <ConsistencyProfileEditor",
+        "src\\features\\assets\\ConsistencyProfileEditor.tsx:98:export function ConsistencyProfileEditor({",
+        "src\\features\\assets\\ConsistencyProfileLibrary.tsx:34:import { ConsistencyProfileEditor } from \"./ConsistencyProfileEditor\";",
+        "src\\features\\assets\\ConsistencyProfileLibrary.tsx:454:            <ConsistencyProfileEditor"
+      ],
+      "routePolicy": "Library advanced-assets",
+      "cssPolicy": "Preserved",
+      "status": "KEEP_ADVANCED"
+    },
+    {
+      "entry": "reference editor",
+      "file": "src/features/assets/ReferenceSetEditor.tsx",
+      "decision": "KEEP_ADVANCED",
+      "replacement": "Library advanced-assets",
+      "compatibility": "Existing full reference editor retained; no competing authority.",
+      "reason": "Existing full reference editor retained; no competing authority.",
+      "initialImporters": [
+        "src\\features\\library\\LibraryPage.test.tsx:68: for(const path of [\"src/features/assets/AssetWorkspace.tsx\",\"src/features/prompts/PromptStudio.tsx\",\"src/features/assets/ConsistencyProfileLibrary.tsx\",\"src/features/assets/ReferenceSetEditor.tsx\"])expect(readFileSync(path,\"utf8\").length).toBeGreaterThan(0);\r",
+        "src\\features\\assets\\ReferenceSetLibrary.tsx:25:import { ReferenceSetEditor, purposeLabels } from \"./ReferenceSetEditor\";",
+        "src\\features\\assets\\ReferenceSetLibrary.tsx:374:            <ReferenceSetEditor",
+        "src\\features\\assets\\ReferenceSetEditor.tsx:93:export function ReferenceSetEditor({",
+        "src\\features\\assets\\ReferenceSetEditor.test.tsx:5:import { normalizeReferenceSetItems, ReferenceSetEditor } from \"./ReferenceSetEditor\";",
+        "src\\features\\assets\\ReferenceSetEditor.test.tsx:33:describe(\"ReferenceSetEditor\", () => {",
+        "src\\features\\assets\\ReferenceSetEditor.test.tsx:46:      <ReferenceSetEditor"
+      ],
+      "routePolicy": "Library advanced-assets",
+      "cssPolicy": "Preserved",
+      "status": "KEEP_ADVANCED"
+    }
+  ],
+  "frozenSources": {
+    "src-tauri/src": {
+      "files": 338,
+      "sha256": "5400a27677e806e95c2d4c659dca533edab9ba1ff26e498bafadf41f5c5d7f2a"
+    },
+    "src-tauri/migrations": {
+      "files": 42,
+      "sha256": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24"
+    },
+    "src/app/App.css": {
+      "files": 1,
+      "sha256": "a74a25fe92f08c4c09eaf3d0d8592cf9a7a0a1ad19c4b20160cfa49e2fb1dadc"
+    }
+  },
+  "fingerprintPolicy": "SHA256 over sorted repository-relative file paths and LF-normalized source text; works in shallow CI without historical Git objects."
+}
