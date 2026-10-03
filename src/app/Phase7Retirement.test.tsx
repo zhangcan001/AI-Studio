@@ -99,4 +99,3 @@ it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()
  for(const [root,expected] of Object.entries(matrix.frozenSources)){const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
 
 });
-
