@@ -79,6 +79,7 @@ pub struct ProductionServices {
 }
 
 pub struct WorkflowServices {
+    pub files: Arc<crate::application::workflow_file_service::WorkflowFileService>,
     pub library: Arc<WorkflowLibraryService>,
     pub registry: Arc<WorkflowRegistryService>,
     pub workspace_query: Arc<WorkflowWorkspaceQueryService>,

@@ -106,3 +106,5 @@ pub mod workflow_ui_compatibility;
 pub mod workflow_ui_normalizer;
 pub mod workflow_ui_serialization;
 pub mod workflow_workspace_query_service;
+
+pub mod workflow_file_service;

@@ -92,7 +92,8 @@ pub async fn workflow_analyze_import(
     existing_workflow_id: Option<String>,
 ) -> Result<Option<WorkflowAutoOnboardingPlanView>, AppError> {
     let Some((bytes, original_filename)) =
-        super::workflow_onboarding::pick_api_workflow_file(&app_handle).await?
+        super::workflow_onboarding::pick_api_workflow_file(&app_handle, &state.workflow.files)
+            .await?
     else {
         return Ok(None);
     };

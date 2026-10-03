@@ -4,7 +4,7 @@ use crate::{
     application::workflow_lifecycle_service::{
         WorkflowDeletionInspection, WorkflowDeletionResult, WorkflowExportView,
         WorkflowLifecycleError, WorkflowProductionWorkspaceResponse, WorkflowRestoreResult,
-        WorkflowRestoreView, WorkflowVersionDiffView, MAX_WORKFLOW_ARCHIVE_BYTES,
+        WorkflowRestoreView, WorkflowVersionDiffView,
     },
     error::AppError,
 };
@@ -191,11 +191,11 @@ pub async fn workflow_export_package(
     let path = file
         .into_path()
         .map_err(|_| AppError::filesystem("export destination is unavailable"))?;
-    tokio::fs::write(path, &export.bytes)
-        .await
-        .map_err(|error| {
-            AppError::filesystem(format!("workflow package export failed: {error}"))
-        })?;
+    state
+        .workflow
+        .files
+        .write_archive(&path, &export.bytes)
+        .await?;
     Ok(Some(export))
 }
 
@@ -215,29 +215,7 @@ pub async fn workflow_import_package_backup(
     let path = file
         .into_path()
         .map_err(|_| AppError::filesystem("workflow package source is unavailable"))?;
-    let is_zip = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"));
-    if !is_zip {
-        return Err(AppError::workflow_onboarding(
-            "PACKAGE_ARCHIVE_INVALID: select a .zip AI Studio workflow package",
-        ));
-    }
-    let size = tokio::fs::metadata(&path)
-        .await
-        .map_err(|_| AppError::filesystem("workflow package source could not be inspected"))?
-        .len();
-    if size > MAX_WORKFLOW_ARCHIVE_BYTES as u64 {
-        return Err(AppError::workflow_onboarding(
-            "PACKAGE_ARCHIVE_TOO_LARGE: archive exceeds the 64 MiB compressed limit",
-        ));
-    }
-    let bytes = tokio::fs::read(path).await.map_err(|error| {
-        AppError::filesystem(format!(
-            "workflow package source could not be read: {error}"
-        ))
-    })?;
+    let bytes = state.workflow.files.read_archive(&path).await?;
     state
         .workflow
         .lifecycle

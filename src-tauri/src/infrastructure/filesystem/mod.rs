@@ -12,3 +12,6 @@ pub use workflow_package_store::FileSystemWorkflowPackageStore;
 
 mod workflow_draft_store;
 pub use workflow_draft_store::FileSystemWorkflowDraftStore;
+
+mod workflow_file_store;
+pub use workflow_file_store::FileSystemWorkflowFileStore;

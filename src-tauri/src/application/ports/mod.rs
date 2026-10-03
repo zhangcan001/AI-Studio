@@ -192,3 +192,6 @@ pub use workflow_runtime_repository::{
 pub use workflow_runtime_state_repository::{WorkflowRuntimeState, WorkflowRuntimeStateRepository};
 
 pub mod workflow_draft_store;
+
+pub mod workflow_file_store;
+pub use workflow_file_store::WorkflowFileStore;

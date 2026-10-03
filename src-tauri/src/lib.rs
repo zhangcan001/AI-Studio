@@ -936,6 +936,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     external_handoff: external_production_handoff_service,
                 },
                 WorkflowServices {
+                    files: Arc::new(application::workflow_file_service::WorkflowFileService::new(Arc::new(infrastructure::filesystem::FileSystemWorkflowFileStore))),
                     library: workflow_library_service,
                     registry: workflow_registry_service,
                     workspace_query: workflow_workspace_query_service,

@@ -5,7 +5,7 @@ use crate::{
         WorkflowOnboardingInputMappingRequest, WorkflowOnboardingMetadataRequest,
         WorkflowOnboardingOutputMappingRequest, WorkflowOnboardingPublishView,
         WorkflowOnboardingRemoveInputMappingRequest, WorkflowOnboardingValidationView,
-        WorkflowWorkspaceView, MAX_WORKFLOW_IMPORT_BYTES,
+        WorkflowWorkspaceView,
     },
     error::AppError,
 };
@@ -18,6 +18,7 @@ fn map_onboarding_error(error: WorkflowOnboardingError) -> AppError {
 
 pub(crate) async fn pick_api_workflow_file(
     app_handle: &AppHandle,
+    files: &crate::application::workflow_file_service::WorkflowFileService,
 ) -> Result<Option<(Vec<u8>, String)>, AppError> {
     let Some(file) = app_handle
         .dialog()
@@ -31,34 +32,7 @@ pub(crate) async fn pick_api_workflow_file(
     let path = file
         .into_path()
         .map_err(|_| AppError::filesystem("selected workflow file is unavailable"))?;
-    let is_json = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
-    if !is_json {
-        return Err(AppError::workflow_onboarding(
-            "WORKFLOW_FILE_TYPE: select a .json ComfyUI workflow",
-        ));
-    }
-    let original_filename = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or("workflow.json")
-        .to_owned();
-    let file_size = tokio::fs::metadata(&path)
-        .await
-        .map_err(|_| AppError::filesystem("selected workflow file could not be inspected"))?
-        .len();
-    if file_size > MAX_WORKFLOW_IMPORT_BYTES {
-        return Err(AppError::workflow_onboarding(format!(
-            "WORKFLOW_FILE_TOO_LARGE: workflow import is {file_size} bytes; maximum is {MAX_WORKFLOW_IMPORT_BYTES} bytes"
-        )));
-    }
-    let bytes = tokio::fs::read(&path)
-        .await
-        .map_err(|_| AppError::filesystem("selected workflow file could not be read"))?;
-    Ok(Some((bytes, original_filename)))
+    files.read_json(&path).await.map(Some)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -67,7 +41,9 @@ pub async fn workflow_onboarding_pick_api_workflow(
     state: State<'_, AppState>,
     existing_workflow_id: Option<String>,
 ) -> Result<Option<WorkflowOnboardingDraftView>, AppError> {
-    let Some((bytes, original_filename)) = pick_api_workflow_file(&app_handle).await? else {
+    let Some((bytes, original_filename)) =
+        pick_api_workflow_file(&app_handle, &state.workflow.files).await?
+    else {
         return Ok(None);
     };
     state
@@ -86,7 +62,9 @@ pub async fn workflow_onboarding_auto_import_api_workflow(
     state: State<'_, AppState>,
     existing_workflow_id: Option<String>,
 ) -> Result<Option<WorkflowAutoOnboardingPlanView>, AppError> {
-    let Some((bytes, original_filename)) = pick_api_workflow_file(&app_handle).await? else {
+    let Some((bytes, original_filename)) =
+        pick_api_workflow_file(&app_handle, &state.workflow.files).await?
+    else {
         return Ok(None);
     };
     state
