@@ -36,8 +36,15 @@ impl ProjectDatabase {
 
     #[allow(dead_code)]
     pub async fn close(self) {
-        self.pool.close().await;
-        // Directory removal happens only after the real SQLite connections close.
-        drop(self);
+        let Self {
+            pool, directory, ..
+        } = self;
+        pool.close().await;
+        drop(pool);
+        // TempDir::drop deliberately discards cleanup errors. Explicit close
+        // reports a real filesystem failure instead of an unexplained exists().
+        directory
+            .close()
+            .expect("closed project database directory must be removed");
     }
 }

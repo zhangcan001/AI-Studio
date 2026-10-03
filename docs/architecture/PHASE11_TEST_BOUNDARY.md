@@ -100,3 +100,20 @@ bug or a retry masking failure. Current-phase sanitized evidence is recorded in
 
 Final exact-head CI remains the full-suite authority. Its final measurements are
 reported in chat rather than making a new evidence commit that changes CI_HEAD.
+
+## CI correctness follow-up
+
+The first Phase11 CI passed all997 frontend cases but failed the new directory
+removal self-test. This is a test/fixture lifetime failure, not evidence of a
+production bug or grounds for a flake retry. TempDir Drop discards removal errors;
+explicit close must report them. The self-tests now own pooled connections and
+await their explicit close, reopen through one real owned SqliteConnection and
+await its worker shutdown, then explicitly remove the directory. The retained
+directory-absence assertion is unchanged. No sleep, retry, ignore or timeout
+was added. The initial log did not identify the exact Windows lock holder.
+
+The ten local cases were already exhausted: the minimal follow-up received
+fmt/check compilation only, NOT a further local test run. A new commit's full
+remote CI is required to validate the repaired behavior. Native product bytes
+remain unchanged, so the completed current-phase isolated acceptance still
+applies; no user app/runtime action is necessary.

@@ -40,7 +40,7 @@ export function testInventory(root) {
     const owner = path.startsWith('src/features/') ? path.split('/')[2] : path.startsWith('src-tauri/src/') ? path.split('/')[2] : path.startsWith('src-tauri/tests') ? 'backend integration' : path.startsWith('src/app') ? 'application' : path.split('/')[1];
     const architecture = /Boundary|Retirement|Architecture|Consolidation|guard/i.test(path);
     const sourceAssertion = /readFileSync|read_to_string|include_str!/.test(source);
-    const db = /initialize\(|SqlitePool|Sqlite.*Repository/.test(source);
+    const db = /initialize\(|SqlitePool|SqliteConnection|ProjectDatabase::new|Sqlite.*Repository/.test(source);
     const mock = /vi\.mock|mockResolvedValue|Mock[A-Z]|Fake[A-Z]|Stub[A-Z]/.test(source);
     const layer = architecture ? 'ARCHITECTURE' : /contract|ipc|serialization/i.test(path) ? 'CONTRACT' : path.startsWith('src-tauri/tests') ? 'INTEGRATION' : db ? 'REPOSITORY' : /src-tauri\/src\/application/.test(path) ? 'APPLICATION' : /src-tauri\/src\/domain/.test(path) ? 'DOMAIN' : /\.tsx$/.test(path) ? 'FEATURE' : 'UNIT';
     const sleeps = [...source.matchAll(/(?:thread::sleep|tokio::time::sleep|\bsleep|setTimeout)\s*\(/g)].length;

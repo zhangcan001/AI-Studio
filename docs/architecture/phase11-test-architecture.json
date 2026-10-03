@@ -1,6 +1,6 @@
 {
   "phase": 11,
-  "status": "LOCAL_AND_NATIVE_ACCEPTANCE_VERIFIED_REMOTE_GATE_PENDING",
+  "status": "LOCAL_NATIVE_VERIFIED_CI_FIX_COMPILE_VERIFIED_FULL_GATE_PENDING",
   "baseline": {
     "head": "dc8e57c1b1b632af5c925e2862453c3bdee31331",
     "ci": {
@@ -54063,5 +54063,1367 @@
       "replacement": null,
       "risk": "Named smoke cases only; not exhaustive generation/runtime acceptance"
     }
-  ]
+  ],
+  "ciCorrectnessFollowup": {
+    "failedRun": 37105201488,
+    "failedHead": "719223a28c7fb692ce857fc23c0627930fb716a1",
+    "classification": "TEST_BUG fixture lifetime/cleanup; exact OS lock holder not identified",
+    "failure": "Directory remained after best-effort TempDir Drop; original assertion kept",
+    "fix": "Own query/reopen leases; await Connection::close worker barriers; close/drop pool; explicit TempDir::close reports errors",
+    "testsRemoved": 0,
+    "newSleep": 0,
+    "newRetry": 0,
+    "newIgnored": 0,
+    "productionBug": false,
+    "localBehaviorRerun": "NOT_RUN; ten-case budget exhausted",
+    "localCompile": "fmt/check PASS",
+    "authority": "NEW_HEAD_FULL_CI_REQUIRED",
+    "failedRunMeasurements": {
+      "run": 37105201488,
+      "head": "719223a28c7fb692ce857fc23c0627930fb716a1",
+      "status": "completed",
+      "conclusion": "failure",
+      "frontendTests": 997,
+      "frontendFiles": 181,
+      "frontendSuiteSeconds": 136.44,
+      "frontendSuites": [
+        {
+          "path": "src/features/shots/ProjectWorkflowFormalProductionUat.test.tsx",
+          "tests": 4,
+          "milliseconds": 1734
+        },
+        {
+          "path": "src/features/projects/ProjectCommandCenter.test.tsx",
+          "tests": 36,
+          "milliseconds": 3519
+        },
+        {
+          "path": "src/features/shots/ShotWorkspace.production.test.tsx",
+          "tests": 22,
+          "milliseconds": 6260
+        },
+        {
+          "path": "src/features/workflows/WorkflowAddUat.test.tsx",
+          "tests": 10,
+          "milliseconds": 3725
+        },
+        {
+          "path": "src/features/shots/ShotWorkspace.sequentialBatchStart.test.tsx",
+          "tests": 10,
+          "milliseconds": 2288
+        },
+        {
+          "path": "src/features/production/ProductionPackageWorkspace.test.tsx",
+          "tests": 13,
+          "milliseconds": 9779
+        },
+        {
+          "path": "src/features/production/MultiPackageProductionBoard.test.tsx",
+          "tests": 18,
+          "milliseconds": 3132
+        },
+        {
+          "path": "src/features/workflows/WorkflowImportIssues.test.tsx",
+          "tests": 11,
+          "milliseconds": 1741
+        },
+        {
+          "path": "src/features/studio/hooks/useGenerationWorkflowSelectionController.test.tsx",
+          "tests": 22,
+          "milliseconds": 730
+        },
+        {
+          "path": "src/features/shots/ShotWorkspace.multiPackagePolling.test.tsx",
+          "tests": 6,
+          "milliseconds": 2447
+        },
+        {
+          "path": "src/features/create/CreatePage.test.tsx",
+          "tests": 12,
+          "milliseconds": 2215
+        },
+        {
+          "path": "src/features/workflows/hooks/useWorkflowSmartImportController.test.tsx",
+          "tests": 12,
+          "milliseconds": 114
+        },
+        {
+          "path": "src/features/studio/hooks/useGenerationBatchController.test.tsx",
+          "tests": 15,
+          "milliseconds": 247
+        },
+        {
+          "path": "src/features/workflows/hooks/useWorkflowParameterExposureController.test.tsx",
+          "tests": 12,
+          "milliseconds": 77
+        },
+        {
+          "path": "src/features/workflows/WorkflowExecutionConfiguration.test.tsx",
+          "tests": 11,
+          "milliseconds": 1735
+        },
+        {
+          "path": "src/features/studio/hooks/useGenerationPresetController.test.tsx",
+          "tests": 12,
+          "milliseconds": 860
+        },
+        {
+          "path": "src/app/ProjectWorkflowBindingUat.test.tsx",
+          "tests": 8,
+          "milliseconds": 1535
+        },
+        {
+          "path": "src/app/Phase7Retirement.test.tsx",
+          "tests": 16,
+          "milliseconds": 3294
+        },
+        {
+          "path": "src/features/projects/ProjectProductionReadiness.test.tsx",
+          "tests": 12,
+          "milliseconds": 1240
+        },
+        {
+          "path": "src/features/runs/RunsPage.test.tsx",
+          "tests": 6,
+          "milliseconds": 2156
+        },
+        {
+          "path": "src/features/projects/ProjectWorkflowUat.test.tsx",
+          "tests": 7,
+          "milliseconds": 1037
+        },
+        {
+          "path": "src/features/projects/ProjectProductionReadinessUat.test.tsx",
+          "tests": 7,
+          "milliseconds": 1509
+        },
+        {
+          "path": "src/features/library/LibraryPage.test.tsx",
+          "tests": 5,
+          "milliseconds": 1664
+        },
+        {
+          "path": "src/features/studio/hooks/useGenerationExperimentController.test.tsx",
+          "tests": 9,
+          "milliseconds": 130
+        },
+        {
+          "path": "src/features/shots/hooks/useShotMultiPackageController.test.tsx",
+          "tests": 10,
+          "milliseconds": 85
+        },
+        {
+          "path": "src/features/studio/hooks/useGenerationAssetIntentController.test.tsx",
+          "tests": 15,
+          "milliseconds": 243
+        },
+        {
+          "path": "src/features/workflows/hooks/useWorkflowAdvancedOnboardingController.test.tsx",
+          "tests": 7,
+          "milliseconds": 91
+        },
+        {
+          "path": "src/features/production/ProductionReviewInbox.test.tsx",
+          "tests": 8,
+          "milliseconds": 1162
+        },
+        {
+          "path": "src/features/studio/hooks/useGenerationSubmissionController.test.tsx",
+          "tests": 17,
+          "milliseconds": 139
+        },
+        {
+          "path": "src/features/workflows/WorkflowPersistentProjectUseUat.test.tsx",
+          "tests": 7,
+          "milliseconds": 1515
+        },
+        {
+          "path": "src/features/production/ProductionQueueDrawer.test.tsx",
+          "tests": 11,
+          "milliseconds": 567
+        },
+        {
+          "path": "src/features/assets/hooks/useAssetVideoLocalImportController.test.tsx",
+          "tests": 6,
+          "milliseconds": 72
+        },
+        {
+          "path": "src/features/production/ProductionPackagePreview.test.tsx",
+          "tests": 7,
+          "milliseconds": 5502
+        },
+        {
+          "path": "src/features/shots/ShotCreationWorkspace.test.tsx",
+          "tests": 7,
+          "milliseconds": 1144
+        },
+        {
+          "path": "src/features/assets/hooks/useAssetVideoWorkflowController.test.tsx",
+          "tests": 8,
+          "milliseconds": 519
+        },
+        {
+          "path": "src/features/prompts/PromptStudio.test.tsx",
+          "tests": 10,
+          "milliseconds": 1554
+        },
+        {
+          "path": "src/features/shots/EpisodeProductionPanel.test.tsx",
+          "tests": 6,
+          "milliseconds": 299
+        },
+        {
+          "path": "src/features/shots/ScopeConsistencyWorkspace.test.tsx",
+          "tests": 8,
+          "milliseconds": 1031
+        },
+        {
+          "path": "src/features/studio/hooks/useGenerationProjectTemplateController.test.tsx",
+          "tests": 7,
+          "milliseconds": 96
+        },
+        {
+          "path": "src/app/FrontendConsolidation.test.tsx",
+          "tests": 9,
+          "milliseconds": 13190
+        },
+        {
+          "path": "src/features/projects/ProjectWorkflowSettings.test.tsx",
+          "tests": 6,
+          "milliseconds": 1184
+        },
+        {
+          "path": "src/features/shots/ShotWorkspace.test.ts",
+          "tests": 8,
+          "milliseconds": 526
+        },
+        {
+          "path": "src/features/workflows/WorkflowRecipePromotionUat.test.tsx",
+          "tests": 6,
+          "milliseconds": 1342
+        },
+        {
+          "path": "src/features/projects/ProjectImportDryRunWorkspace.test.tsx",
+          "tests": 6,
+          "milliseconds": 1013
+        },
+        {
+          "path": "src/features/assets/hooks/useAssetVideoLibraryController.test.tsx",
+          "tests": 8,
+          "milliseconds": 1497
+        },
+        {
+          "path": "src/features/production/ProductionAuditCenter.test.tsx",
+          "tests": 9,
+          "milliseconds": 597
+        },
+        {
+          "path": "src/features/workflows/WorkflowPurgeUat.test.tsx",
+          "tests": 2,
+          "milliseconds": 1149
+        },
+        {
+          "path": "src/features/production/ProductionMonitor.test.tsx",
+          "tests": 7,
+          "milliseconds": 1858
+        },
+        {
+          "path": "src/features/shots/hooks/useShotProductionMonitor.test.tsx",
+          "tests": 6,
+          "milliseconds": 404
+        },
+        {
+          "path": "src/features/production/DirectGenerationEntry.test.tsx",
+          "tests": 3,
+          "milliseconds": 888
+        },
+        {
+          "path": "src/features/workflows/WorkflowQuickTestQueue.test.tsx",
+          "tests": 2,
+          "milliseconds": 1063
+        },
+        {
+          "path": "src/features/shots/SeriesProductionPanel.test.tsx",
+          "tests": 5,
+          "milliseconds": 304
+        },
+        {
+          "path": "src/app/v3/v3.test.tsx",
+          "tests": 6,
+          "milliseconds": 557
+        },
+        {
+          "path": "src/features/projects/ProjectWorkflowPreflight.test.tsx",
+          "tests": 4,
+          "milliseconds": 596
+        },
+        {
+          "path": "src/features/workflows/WorkflowVersionDelete.test.tsx",
+          "tests": 3,
+          "milliseconds": 932
+        },
+        {
+          "path": "src/features/tasks/TaskHistoryDetail.queueSubmission.test.tsx",
+          "tests": 2,
+          "milliseconds": 524
+        },
+        {
+          "path": "src/features/projects/ProjectWorkspace.test.tsx",
+          "tests": 3,
+          "milliseconds": 733
+        },
+        {
+          "path": "src/app/FeatureLifecycle.test.tsx",
+          "tests": 3,
+          "milliseconds": 57
+        },
+        {
+          "path": "src/features/projects/ExternalAgentHandoffPanel.test.tsx",
+          "tests": 4,
+          "milliseconds": 804
+        },
+        {
+          "path": "src/features/shots/ConsistencyBindingEditor.test.tsx",
+          "tests": 2,
+          "milliseconds": 1232
+        },
+        {
+          "path": "src/features/workflow-lab/WorkflowLabBoundary.test.tsx",
+          "tests": 4,
+          "milliseconds": 402
+        },
+        {
+          "path": "src/features/tools/LocalToolHub.test.tsx",
+          "tests": 5,
+          "milliseconds": 670
+        },
+        {
+          "path": "src/features/assets/AssetPreview.test.tsx",
+          "tests": 3,
+          "milliseconds": 407
+        },
+        {
+          "path": "src/features/workflows/WorkflowDeleteDialog.test.tsx",
+          "tests": 4,
+          "milliseconds": 528
+        },
+        {
+          "path": "src/features/shots/hooks/useShotQueueController.test.tsx",
+          "tests": 2,
+          "milliseconds": 298
+        },
+        {
+          "path": "src/features/generators/GeneratorSettingsPage.test.tsx",
+          "tests": 3,
+          "milliseconds": 647
+        },
+        {
+          "path": "src/features/assets/AssetVideoGenericQueueSubmission.test.tsx",
+          "tests": 1,
+          "milliseconds": 566
+        },
+        {
+          "path": "src/features/assets/AssetLibrary.test.tsx",
+          "tests": 4,
+          "milliseconds": 619
+        },
+        {
+          "path": "src/features/tasks/TaskHistoryDetail.provenance.test.tsx",
+          "tests": 3,
+          "milliseconds": 449
+        },
+        {
+          "path": "src/app/routes/resume.test.ts",
+          "tests": 5,
+          "milliseconds": 14
+        },
+        {
+          "path": "src/features/workflows/RecipeHistoryPane.test.tsx",
+          "tests": 2,
+          "milliseconds": 420
+        },
+        {
+          "path": "src/features/shots/hooks/useShotWorkspaceSelection.test.tsx",
+          "tests": 3,
+          "milliseconds": 526
+        },
+        {
+          "path": "src/features/studio/DynamicFormRenderer.resolution.test.tsx",
+          "tests": 5,
+          "milliseconds": 587
+        },
+        {
+          "path": "src/features/shots/hooks/useShotTaskEvents.test.tsx",
+          "tests": 2,
+          "milliseconds": 49
+        },
+        {
+          "path": "src/features/production/CreationDashboard.test.tsx",
+          "tests": 1,
+          "milliseconds": 488
+        },
+        {
+          "path": "src/app/WorkflowNavigationUat.test.tsx",
+          "tests": 1,
+          "milliseconds": 571
+        },
+        {
+          "path": "src/features/assets/AssetUsagePanel.test.tsx",
+          "tests": 3,
+          "milliseconds": 400
+        },
+        {
+          "path": "src/features/tasks/TaskHistory.test.tsx",
+          "tests": 2,
+          "milliseconds": 98
+        },
+        {
+          "path": "src/features/assets/assetOrganization.test.tsx",
+          "tests": 3,
+          "milliseconds": 148
+        },
+        {
+          "path": "src/features/settings/RepairJobsStatusSection.test.tsx",
+          "tests": 3,
+          "milliseconds": 152
+        },
+        {
+          "path": "src/features/assets/assetVideoBatch.test.ts",
+          "tests": 11,
+          "milliseconds": 24
+        },
+        {
+          "path": "src/features/shots/ShotProductionProgress.test.tsx",
+          "tests": 1,
+          "milliseconds": 452
+        },
+        {
+          "path": "src/features/stability/dev042Stability.test.ts",
+          "tests": 8,
+          "milliseconds": 113
+        },
+        {
+          "path": "src/features/workflows/WorkflowWorkspace.test.ts",
+          "tests": 22,
+          "milliseconds": 12
+        },
+        {
+          "path": "src/features/shots/SceneProductionPreparation.test.tsx",
+          "tests": 4,
+          "milliseconds": 449
+        },
+        {
+          "path": "src/features/workflows/WorkflowProductionProfiles.test.tsx",
+          "tests": 1,
+          "milliseconds": 303
+        },
+        {
+          "path": "src/features/runtime/projectProductionReadiness.test.ts",
+          "tests": 11,
+          "milliseconds": 15
+        },
+        {
+          "path": "src/features/stability/dev039Stability.test.ts",
+          "tests": 7,
+          "milliseconds": 85
+        },
+        {
+          "path": "src/features/runtime/projectWorkflowPreflight.test.ts",
+          "tests": 9,
+          "milliseconds": 19
+        },
+        {
+          "path": "src/features/stability/dev041Stability.test.ts",
+          "tests": 8,
+          "milliseconds": 17
+        },
+        {
+          "path": "src/i18n/localization.test.ts",
+          "tests": 12,
+          "milliseconds": 43
+        },
+        {
+          "path": "src/features/shots/shotProductionState.test.ts",
+          "tests": 5,
+          "milliseconds": 11
+        },
+        {
+          "path": "src/features/runtime/pack05.test.ts",
+          "tests": 10,
+          "milliseconds": 17
+        },
+        {
+          "path": "src/features/studio/DynamicFormRenderer.test.ts",
+          "tests": 10,
+          "milliseconds": 12
+        },
+        {
+          "path": "src/features/runtime/workflowCapabilities.test.ts",
+          "tests": 5,
+          "milliseconds": 15
+        },
+        {
+          "path": "src/features/shots/ShotReadinessInspector.test.tsx",
+          "tests": 4,
+          "milliseconds": 44
+        },
+        {
+          "path": "src/features/shots/SceneProductionPanel.test.tsx",
+          "tests": 3,
+          "milliseconds": 30
+        },
+        {
+          "path": "src/app/App.navigation.test.ts",
+          "tests": 6,
+          "milliseconds": 8
+        },
+        {
+          "path": "src/features/assets/AssetVideoBatchWorkspace.test.tsx",
+          "tests": 5,
+          "milliseconds": 120
+        },
+        {
+          "path": "src/features/experiments/experimentPlanner.test.ts",
+          "tests": 6,
+          "milliseconds": 18
+        },
+        {
+          "path": "src/features/runtime/projectWorkflowResolution.test.ts",
+          "tests": 7,
+          "milliseconds": 13
+        },
+        {
+          "path": "src/features/shots/shotMultiPackageModel.test.ts",
+          "tests": 5,
+          "milliseconds": 9
+        },
+        {
+          "path": "src/features/shots/shotListQuery.test.ts",
+          "tests": 7,
+          "milliseconds": 11
+        },
+        {
+          "path": "src/features/shots/ProjectProductionPipeline.test.ts",
+          "tests": 4,
+          "milliseconds": 12
+        },
+        {
+          "path": "src/features/stability/dev040Stability.test.ts",
+          "tests": 5,
+          "milliseconds": 13
+        },
+        {
+          "path": "src/features/workflows/workflowExecutionBatch.test.ts",
+          "tests": 7,
+          "milliseconds": 11
+        },
+        {
+          "path": "src/features/runtime/shotWorkflowCompatibility.test.ts",
+          "tests": 7,
+          "milliseconds": 11
+        },
+        {
+          "path": "src/app/routes/route.test.ts",
+          "tests": 6,
+          "milliseconds": 13
+        },
+        {
+          "path": "src/features/runtime/productRuntimeScope.test.ts",
+          "tests": 5,
+          "milliseconds": 6
+        },
+        {
+          "path": "src/features/studio/studioUx.test.tsx",
+          "tests": 5,
+          "milliseconds": 26
+        },
+        {
+          "path": "src/features/shots/ShotInspector.test.tsx",
+          "tests": 3,
+          "milliseconds": 25
+        },
+        {
+          "path": "src/features/shots/ProjectStructureTree.test.tsx",
+          "tests": 4,
+          "milliseconds": 41
+        },
+        {
+          "path": "src/features/production/ProductionRunPanel.test.tsx",
+          "tests": 5,
+          "milliseconds": 8
+        },
+        {
+          "path": "src/features/workflows/workflowCenterModel.test.ts",
+          "tests": 3,
+          "milliseconds": 10
+        },
+        {
+          "path": "src/features/runtime/resolution.test.ts",
+          "tests": 4,
+          "milliseconds": 11
+        },
+        {
+          "path": "src/features/studio/productionQueuePolicy.test.ts",
+          "tests": 9,
+          "milliseconds": 6
+        },
+        {
+          "path": "src/features/production/ProductionBatchRunbookPanel.test.tsx",
+          "tests": 3,
+          "milliseconds": 34
+        },
+        {
+          "path": "src/features/prompts/promptLibrary.test.ts",
+          "tests": 4,
+          "milliseconds": 10
+        },
+        {
+          "path": "src/product/client.test.ts",
+          "tests": 9,
+          "milliseconds": 11131
+        },
+        {
+          "path": "src/features/studio/ProductionPartialResumePanel.test.tsx",
+          "tests": 3,
+          "milliseconds": 27
+        },
+        {
+          "path": "src/features/shots/shotQueueState.test.ts",
+          "tests": 4,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/stores/studioStore.test.ts",
+          "tests": 3,
+          "milliseconds": 6
+        },
+        {
+          "path": "src/app/BackendBoundary.test.ts",
+          "tests": 2,
+          "milliseconds": 1415
+        },
+        {
+          "path": "src/i18n/ui-localization.test.tsx",
+          "tests": 2,
+          "milliseconds": 14
+        },
+        {
+          "path": "src/types/projectImport.test.ts",
+          "tests": 5,
+          "milliseconds": 12
+        },
+        {
+          "path": "src/features/shots/ShotBulkImportPanel.test.tsx",
+          "tests": 3,
+          "milliseconds": 24
+        },
+        {
+          "path": "src/features/production/productionUx.test.ts",
+          "tests": 3,
+          "milliseconds": 29
+        },
+        {
+          "path": "src/features/shots/shotDomain.test.ts",
+          "tests": 3,
+          "milliseconds": 6
+        },
+        {
+          "path": "src/features/studio/batchDraft.test.ts",
+          "tests": 3,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/tasks/TaskHistoryDetail.test.tsx",
+          "tests": 2,
+          "milliseconds": 44
+        },
+        {
+          "path": "src/features/assets/ConsistencyProfileEditor.test.tsx",
+          "tests": 1,
+          "milliseconds": 22
+        },
+        {
+          "path": "src/features/studio/assetPicker.test.ts",
+          "tests": 4,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/assets/ReferenceSetEditor.test.tsx",
+          "tests": 2,
+          "milliseconds": 38
+        },
+        {
+          "path": "src/features/studio/assetIntent.test.ts",
+          "tests": 4,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/shots/productionStructureState.test.ts",
+          "tests": 3,
+          "milliseconds": 10
+        },
+        {
+          "path": "src/features/shots/shotProductionMonitorModel.test.ts",
+          "tests": 3,
+          "milliseconds": 8
+        },
+        {
+          "path": "src/app/StyleBoundary.test.ts",
+          "tests": 8,
+          "milliseconds": 9357
+        },
+        {
+          "path": "src/features/studio/batchImport.test.ts",
+          "tests": 2,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/assets/h3LocalImport.test.ts",
+          "tests": 3,
+          "milliseconds": 35
+        },
+        {
+          "path": "src/services/ipc.test.ts",
+          "tests": 4,
+          "milliseconds": 14
+        },
+        {
+          "path": "src/features/shots/ProductionStructurePanel.test.tsx",
+          "tests": 1,
+          "milliseconds": 22
+        },
+        {
+          "path": "src/app/studioNavigation.test.ts",
+          "tests": 2,
+          "milliseconds": 8
+        },
+        {
+          "path": "src/features/workflows/workflowSeedMode.test.tsx",
+          "tests": 3,
+          "milliseconds": 21
+        },
+        {
+          "path": "src/features/shots/referenceAnchorApply.test.ts",
+          "tests": 6,
+          "milliseconds": 9
+        },
+        {
+          "path": "src/app/NativeIpcObservation.test.ts",
+          "tests": 1,
+          "milliseconds": 9
+        },
+        {
+          "path": "src/stores/projectStore.test.ts",
+          "tests": 2,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/features/studio/productionQueueSelection.test.ts",
+          "tests": 3,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/assets/referenceAnchorState.test.ts",
+          "tests": 2,
+          "milliseconds": 9
+        },
+        {
+          "path": "src/features/shots/ShotBulkConfigPanel.test.ts",
+          "tests": 3,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/components/studio/StudioGlobalRail.test.tsx",
+          "tests": 6,
+          "milliseconds": 45
+        },
+        {
+          "path": "src/features/experiments/workflowBenchmarkUi.test.ts",
+          "tests": 3,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/assets/ConsistencyProfileLibrary.test.tsx",
+          "tests": 2,
+          "milliseconds": 26
+        },
+        {
+          "path": "src/app/StudioShell.test.tsx",
+          "tests": 4,
+          "milliseconds": 37
+        },
+        {
+          "path": "src/features/assets/ReferenceSetLibrary.test.tsx",
+          "tests": 2,
+          "milliseconds": 23
+        },
+        {
+          "path": "src/features/assets/assetCompare.test.ts",
+          "tests": 3,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/features/tasks/retryPolicy.test.ts",
+          "tests": 3,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/features/shots/ZoomableImagePreview.test.tsx",
+          "tests": 3,
+          "milliseconds": 24
+        },
+        {
+          "path": "src/stores/workflowOnboardingStore.test.ts",
+          "tests": 1,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/stores/taskStore.test.ts",
+          "tests": 3,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/shots/ShotListToolbar.test.tsx",
+          "tests": 1,
+          "milliseconds": 19
+        },
+        {
+          "path": "src/features/workflows/workflowImportResultVersion.test.tsx",
+          "tests": 1,
+          "milliseconds": 25
+        },
+        {
+          "path": "src/i18n/uiCopyGuard.test.ts",
+          "tests": 1,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/features/studio/generationBlockedReason.test.ts",
+          "tests": 2,
+          "milliseconds": 6
+        },
+        {
+          "path": "src/features/assets/AssetWorkspace.test.tsx",
+          "tests": 1,
+          "milliseconds": 31
+        },
+        {
+          "path": "src/features/settings/settingsUx.test.tsx",
+          "tests": 1,
+          "milliseconds": 27
+        },
+        {
+          "path": "src/features/shots/shotBatchDomain.test.ts",
+          "tests": 1,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/studio/fields/MediaField.test.ts",
+          "tests": 2,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/features/shots/ShotProgressDashboard.test.ts",
+          "tests": 1,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/stores/workflowWorkspaceStore.test.ts",
+          "tests": 2,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/studio/productionQueueReview.test.ts",
+          "tests": 2,
+          "milliseconds": 4
+        },
+        {
+          "path": "src/features/assets/assetDeleteDialog.test.tsx",
+          "tests": 1,
+          "milliseconds": 21
+        },
+        {
+          "path": "src/services/mediaUrl.test.ts",
+          "tests": 3,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/features/tasks/taskHistoryState.test.ts",
+          "tests": 2,
+          "milliseconds": 6
+        },
+        {
+          "path": "src/features/assets/assetLibraryState.test.ts",
+          "tests": 2,
+          "milliseconds": 4
+        },
+        {
+          "path": "src/features/studio/noWorkflowGuide.test.tsx",
+          "tests": 1,
+          "milliseconds": 24
+        },
+        {
+          "path": "src/features/studio/productionQueueOutcome.test.ts",
+          "tests": 2,
+          "milliseconds": 5
+        },
+        {
+          "path": "src/app/startupUx.test.tsx",
+          "tests": 2,
+          "milliseconds": 21
+        },
+        {
+          "path": "src/app/shouldWarnBeforeClose.test.ts",
+          "tests": 3,
+          "milliseconds": 6
+        },
+        {
+          "path": "src/features/assets/ReferenceAnchorEditor.test.tsx",
+          "tests": 1,
+          "milliseconds": 21
+        },
+        {
+          "path": "src/features/workflows/workflowSmartImportModel.test.ts",
+          "tests": 1,
+          "milliseconds": 7
+        },
+        {
+          "path": "src/app/WorkspaceErrorBoundary.test.tsx",
+          "tests": 1,
+          "milliseconds": 13
+        }
+      ],
+      "rustSuites": [
+        {
+          "target": "src\\lib.rs",
+          "passed": 1219,
+          "failed": 0,
+          "ignored": 1,
+          "seconds": 317.9
+        },
+        {
+          "target": "src\\main.rs",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0
+        },
+        {
+          "target": "app_state_composition_boundary.rs",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0
+        },
+        {
+          "target": "artifact_review_boundary.rs",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0
+        },
+        {
+          "target": "build_commit_provenance.rs",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.07
+        },
+        {
+          "target": "dev035_structure_e2e.rs",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 5.14
+        },
+        {
+          "target": "dev039_stability.rs",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 1.96
+        },
+        {
+          "target": "dev040_safety.rs",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0
+        },
+        {
+          "target": "dev041_safety.rs",
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.1
+        },
+        {
+          "target": "dev042_safety.rs",
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.01
+        },
+        {
+          "target": "dev049_context_resolver.rs",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 1.2
+        },
+        {
+          "target": "dev050_readiness.rs",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.01
+        },
+        {
+          "target": "dev051_consistency_assets.rs",
+          "passed": 28,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 15.79
+        },
+        {
+          "target": "dev052_production_preparation.rs",
+          "passed": 30,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.01
+        },
+        {
+          "target": "dev052_runtime_integration.rs",
+          "passed": 31,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 26.48
+        },
+        {
+          "target": "dev054_command_center_audit.rs",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 1.7
+        },
+        {
+          "target": "dev054_consistency_bindings.rs",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 1.61
+        },
+        {
+          "target": "dev054_narrative_integration.rs",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.94
+        },
+        {
+          "target": "dev055_live_comfy.rs",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 1,
+          "seconds": 0
+        },
+        {
+          "target": "dev055_release_compatibility.rs",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 9.29
+        },
+        {
+          "target": "dev055_release_performance.rs",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 2.38
+        },
+        {
+          "target": "dev059_production_package.rs",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 9.21
+        },
+        {
+          "target": "dev061b_production_package_hardening.rs",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 4.63
+        },
+        {
+          "target": "dev061b_queue_recovery.rs",
+          "passed": 22,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 26.97
+        },
+        {
+          "target": "dev069_production_package_discovery.rs",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 3.06
+        },
+        {
+          "target": "dev078_production_start_admission.rs",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.01
+        },
+        {
+          "target": "dev079_workflow_add.rs",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 18.8
+        },
+        {
+          "target": "dev081_complex_workflow_onboarding.rs",
+          "passed": 10,
+          "failed": 0,
+          "ignored": 1,
+          "seconds": 11.25
+        },
+        {
+          "target": "dev082_unified_workflow_library.rs",
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 11.02
+        },
+        {
+          "target": "dev083_workflow_registry.rs",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 2.27
+        },
+        {
+          "target": "dev084_runtime_artifact.rs",
+          "passed": 35,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 49.79
+        },
+        {
+          "target": "dev086_project_backup_boundary.rs",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0
+        },
+        {
+          "target": "dev087_application_data_boundary.rs",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.03
+        },
+        {
+          "target": "dev087b1_workflow_benchmark_boundary.rs",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 1.32
+        },
+        {
+          "target": "dev087b2_production_orchestrator_boundary.rs",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 4.67
+        },
+        {
+          "target": "dev088_ipc_error_contract.rs",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0
+        },
+        {
+          "target": "dev100_authoring_removal.rs",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0
+        },
+        {
+          "target": "dev101_external_production_handoff.rs",
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 7.7
+        },
+        {
+          "target": "dev102_workflow_recognition_v2.rs",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.09
+        },
+        {
+          "target": "dev103_workflow_ui_normalizer.rs",
+          "passed": 60,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 13.53
+        },
+        {
+          "target": "dev104_workflow_ui_onboarding.rs",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 6.32
+        },
+        {
+          "target": "product_library_contract.rs",
+          "passed": 11,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 15.57
+        },
+        {
+          "target": "production_execution_authority_boundary.rs",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.01
+        }
+      ],
+      "rustPassed": 1632,
+      "rustIgnored": 3,
+      "rustSuiteSeconds": 570.84,
+      "totalCiSeconds": 1187,
+      "jobs": [
+        {
+          "name": "Rust source checks",
+          "seconds": 1187,
+          "steps": [
+            {
+              "name": "Set up job",
+              "seconds": 1,
+              "conclusion": "success"
+            },
+            {
+              "name": "Checkout",
+              "seconds": 6,
+              "conclusion": "success"
+            },
+            {
+              "name": "Install Rust stable",
+              "seconds": 16,
+              "conclusion": "success"
+            },
+            {
+              "name": "Cache Rust build",
+              "seconds": 2,
+              "conclusion": "success"
+            },
+            {
+              "name": "Rust format check",
+              "seconds": 3,
+              "conclusion": "success"
+            },
+            {
+              "name": "Rust check",
+              "seconds": 151,
+              "conclusion": "success"
+            },
+            {
+              "name": "Rust tests",
+              "seconds": 1000,
+              "conclusion": "failure"
+            },
+            {
+              "name": "Post Cache Rust build",
+              "seconds": 0,
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Post Checkout",
+              "seconds": 5,
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "seconds": 1,
+              "conclusion": "success"
+            }
+          ]
+        },
+        {
+          "name": "Frontend source checks",
+          "seconds": 191,
+          "steps": [
+            {
+              "name": "Set up job",
+              "seconds": 1,
+              "conclusion": "success"
+            },
+            {
+              "name": "Checkout",
+              "seconds": 6,
+              "conclusion": "success"
+            },
+            {
+              "name": "Set up pnpm 10",
+              "seconds": 4,
+              "conclusion": "success"
+            },
+            {
+              "name": "Set up Node 22",
+              "seconds": 8,
+              "conclusion": "success"
+            },
+            {
+              "name": "Install frontend dependencies",
+              "seconds": 3,
+              "conclusion": "success"
+            },
+            {
+              "name": "Frontend tests",
+              "seconds": 138,
+              "conclusion": "success"
+            },
+            {
+              "name": "TypeScript check",
+              "seconds": 21,
+              "conclusion": "success"
+            },
+            {
+              "name": "Frontend build",
+              "seconds": 6,
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Set up Node 22",
+              "seconds": 0,
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Set up pnpm 10",
+              "seconds": 0,
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Checkout",
+              "seconds": 2,
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "seconds": 0,
+              "conclusion": "success"
+            }
+          ]
+        }
+      ]
+    }
+  }
 }
