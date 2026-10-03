@@ -1,5 +1,5 @@
 // Static discovery is a measurement queue, never evidence of a bottleneck.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 const candidates = [
   ['src-tauri/src/lib.rs', 'run_application', 'startup', 'startup', 'Bootstrap/composition', 'Native launch and existing database-ready logs'],
   ['src-tauri/src/infrastructure/database/pool.rs', 'initialize', 'query', 'startup', 'Connection/pragmas/migration check', 'Existing logs plus real migrated fixture benchmark'],
@@ -48,6 +48,17 @@ const output = { phase: 12, status: 'INVENTORY_COMPLETE_MEASUREMENT_PENDING',
     'CDP wire bytes are not decoded DTO bytes', 'No heap-leak absence claim without lifetime evidence'],
   freeze: { databaseVersion: 42, backupVersion: 20, schemaChange: false, ipcBreakingChange: false,
     routeChange: false, nextPhaseStarted: false } };
-writeFileSync('docs/architecture/phase12-performance.json', JSON.stringify(output, null, 2) + '\n');
+const destination = 'docs/architecture/phase12-performance.json';
+// Refresh static discovery without erasing previously measured evidence/reviews.
+if (existsSync(destination)) {
+  const existing = JSON.parse(readFileSync(destination, 'utf8'));
+  const previous = new Map(existing.candidates.map(candidate => [candidate.path, candidate]));
+  output.candidates = rows.map(row => ({ ...row, ...previous.get(row.path), staticSignals: row.staticSignals }));
+  output.candidates.push(...existing.candidates.filter(candidate => !rows.some(row => row.path === candidate.path)));
+  for (const key of ['status', 'environment', 'measurements', 'optimizations', 'limitations']) {
+    if (existing[key] !== undefined) output[key] = existing[key];
+  }
+}
+writeFileSync(destination, JSON.stringify(output, null, 2) + '\n');
 console.log(JSON.stringify({ candidates: rows.length, paths: output.criticalPaths.length,
   byArea: Object.fromEntries([...new Set(rows.map(r => r.area))].map(area => [area, rows.filter(r => r.area === area).length])) }));

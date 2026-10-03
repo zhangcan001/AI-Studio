@@ -54,6 +54,33 @@ duplicate-free claim follows from these navigation samples.
 Keep schema42, backup20, typed transport, route/product semantics and Phase8–11
 ownership. No telemetry platform, second cache/store/queue, blanket memoization,
 test deletion, new ignored cases or timing-based flaky CI assertion.
-Local automated case budget remains10; initial two measurement-helper cases passed.
+Local automated case budget remains10; executed cases are recorded at each checkpoint.
 Full suite authority remains the final-head remote CI. Do not mark the checkpoint
 CI as final performance acceptance. Close owned app/server after acceptance.
+
+## Verified first optimization checkpoint
+
+Benchmark preset loading now depends on the exact unique reference set and project,
+not the candidate array, labels or order. No second cache is introduced. Existing
+effect cancellation remains; project change, reference-set change and remount
+still read fresh data. A count-based regression case proves initial two reads,
+no reload for label editing, and fresh reads on project switch and remount.
+
+Same-machine, same owned fixture, same debug backend and production frontend
+mode, one warmup/five samples: Lab IPC10→8, preset reads4→2, repeated identical
+calls2→0. Median23.0699→23.0207ms does **not** establish wall-clock acceleration;
+the claim is reproducible work-count reduction only. Other measured navigation
+paths retain their counts. The completed harness observed five repeated route
+transitions per scenario, not a general heap/listener leak-free proof.
+
+The Phase9 whole-source hash guard correctly rejected the authorized behavior
+edit. Keep its historical manifest intact. Its successor handling now accepts
+only an existing app/feature source path with a measured review, five before/after
+samples, the exact frozen parent digest and a new pinned digest. New files,
+transport/CSS changes, wrong parents and insufficient evidence remain rejected;
+positive/negative self-tests protect this boundary. No debt entry was added.
+
+This checkpoint completes **one** optimization, not the required three. Eight
+navigation scenarios are not eight fully covered required path domains. Remaining
+baseline/profiling/large-data, two additional measured optimizations and complete
+correctness Native acceptance must finish before Phase12 can pass.

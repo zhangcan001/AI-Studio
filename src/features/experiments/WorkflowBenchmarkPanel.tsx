@@ -190,6 +190,11 @@ export function WorkflowBenchmarkPanel({
   const [qualityDrafts, setQualityDrafts] = useState<Record<string, WorkflowBenchmarkQuality>>({});
 
   const availableRecipes = useMemo(() => mediaRecipes(catalog, mediaType), [catalog, mediaType]);
+  // Presets depend on exact recipe references, not candidate labels/order or a
+  // freshly allocated reset array. Native profiling showed two reads per pair
+  // on a single Lab opening. Scope stays local; remount/project/recipe changes
+  // still fetch fresh data and cleanup still rejects abandoned responses.
+  const presetTargets = JSON.stringify([...new Set(candidates.map(recipeKey))].sort());
   useEffect(() => {
     setCandidates(initialCandidates(catalog, baseRecipe, mediaType));
     setPreview(undefined);
@@ -207,7 +212,7 @@ export function WorkflowBenchmarkPanel({
 
   useEffect(() => {
     let active = true;
-    const keys = [...new Set(candidates.map((candidate) => recipeKey(candidate)))];
+    const keys = JSON.parse(presetTargets) as string[];
     void Promise.all(keys.map(async (key) => {
       const [workflowVersionId, recipeId] = key.split(":");
       try {
@@ -220,7 +225,7 @@ export function WorkflowBenchmarkPanel({
       setPresets((current) => ({ ...current, ...Object.fromEntries(entries) }));
     });
     return () => { active = false; };
-  }, [candidates, projectId]);
+  }, [presetTargets, projectId]);
 
   function updateCandidate(key: string, patch: Partial<CandidateDraft>) {
     setCandidates((current) => current.map((candidate) => candidate.key === key ? { ...candidate, ...patch } : candidate));

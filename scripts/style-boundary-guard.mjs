@@ -78,6 +78,24 @@ export function canonical(ast) {
   ast.walkRules(r=>output.push({context:context(r),selectors:r.selectors.map(compact),declarations:r.nodes.filter(n=>n.type==='decl').map(n=>[n.prop,compact(n.value),!!n.important])}));
   return hash(JSON.stringify(output));
 }
+// Later measured behavior work must explicitly chain from the frozen digest.
+// This does not authorize CSS, new files, transport changes or debt expansion.
+export function performanceSuccessor(snapshot, review) {
+  const next={...snapshot},violations=[],seen=new Set();
+  for(const seam of review?.optimizations||[]) {
+    if(seam.status!=='MEASURED_VERIFIED')continue;
+    const path=seam.path,proof=seam.sourceFreeze;
+    if(seen.has(path)||!/^src\/(?:features|app)\/.+\.tsx?$/.test(path)||
+      !Object.hasOwn(snapshot,path)||proof?.beforeHash!==snapshot[path]||
+      !/^[a-f0-9]{64}$/.test(proof?.afterHash||'')||
+      seam.baseline?.samples<5||seam.after?.samples<5||
+      !Number.isFinite(seam.baseline?.samples)||!Number.isFinite(seam.after?.samples)) {
+      violations.push(`unreviewed-performance-successor:${path}`);continue;
+    }
+    seen.add(path);next[path]=proof.afterHash;
+  }
+  return {snapshot:next,violations};
+}
 export function styleBoundary(root,manifest) {
   const inv=styleInventory(root,false),violations=debtViolations(debt(inv.rows,root),manifest.grandfathered);
   for(const r of inv.rows){const match=manifest.ownedFiles[r.path];if(match&&(!match.some(prefix=>r.selector_or_scope.startsWith(prefix))||/\.(?:runs?|create|library|asset|project|prompt-studio)-/.test(r.selector_or_scope)))violations.push(`ownership:${r.path}:${r.selector_or_scope}`);if(r.selector_or_scope.includes('.studio-shell'))violations.push(`retired-root:${r.path}`);}
@@ -87,7 +105,12 @@ export function styleBoundary(root,manifest) {
   const allowed=new Set(successor?.seams.flatMap(s=>s.paths)||[]);
   const scoped=successor?.frontendSuccessor||{};
   for(const path of Object.keys(scoped))if(!allowed.has(path))violations.push(`unscoped-successor:${path}`);
-  const productionSnapshot={...manifest.productionFrontendSnapshot,...Object.fromEntries(Object.entries(scoped).filter(([p])=>allowed.has(p)))};
+  const priorSnapshot={...manifest.productionFrontendSnapshot,...Object.fromEntries(Object.entries(scoped).filter(([p])=>allowed.has(p)))};
+  const performancePath=`${root}/docs/architecture/phase12-performance.json`;
+  const performanceReview=existsSync(performancePath)?JSON.parse(read(performancePath)):undefined;
+  const reviewed=performanceSuccessor(priorSnapshot,performanceReview);
+  violations.push(...reviewed.violations);
+  const productionSnapshot=reviewed.snapshot;
   for(const [path,digest] of Object.entries(productionSnapshot))if(hash(read(`${root}/${path}`))!==digest)violations.push(`behavior:${path}`);
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')))if(!(path in productionSnapshot))violations.push(`new-production-source:${path}`);
   for(const [path,digest] of Object.entries(manifest.styleSnapshots))if(hash(read(`${root}/${path}`))!==digest)violations.push(`unreviewed-style:${path}`);

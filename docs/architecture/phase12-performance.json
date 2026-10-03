@@ -1,6 +1,6 @@
 {
   "phase": 12,
-  "status": "NATIVE_NAVIGATION_BASELINE_MEASURED_OTHER_BOUNDARIES_PENDING",
+  "status": "ONE_MEASURED_OPTIMIZATION_VERIFIED_PHASE12_INCOMPLETE",
   "baselineHead": "0bb137303bbcf4baa98a109e7558d5899ef236fc",
   "baselineCi": 37107002128,
   "criticalPaths": [
@@ -545,8 +545,14 @@
         "samples": 5
       },
       "decision": "OPTIMIZE_EXACT_CANDIDATE_IDENTITY_DEPENDENCY",
-      "optimization": null,
-      "after": "NOT_MEASURED",
+      "optimization": "Stable exact-reference set dependency, component-local scope and existing cancellation retained",
+      "after": {
+        "samples": 5,
+        "realIpc": 8,
+        "presetReads": 2,
+        "repeatedSemanticCalls": 0,
+        "medianMs": 23.020700000000943
+      },
       "risk": "Keep project and exact recipe scope, remount freshness, cancellation and independent attempts",
       "tests": "Add count, project-switch, recipe-change guard"
     }
@@ -2194,9 +2200,1609 @@
     "developmentReview": {
       "frontendMode": "DEVELOPMENT_STRICT_EFFECTS",
       "interpretation": "Mount-time doubled reads are intentional StrictMode development probes, not production duplicate proof; do not compare timings to production bundle"
+    },
+    "afterSeam1": {
+      "phase": 12,
+      "type": "NATIVE_BASELINE",
+      "buildMode": "DEBUG",
+      "frontendMode": "PRODUCTION_BUNDLE",
+      "dataKind": "owned isolated Phase11 fixture copy",
+      "sourceHead": "WORKTREE_AFTER_SEAM1",
+      "timingBoundary": "actual user action -> visible completion + actual IPC completion + animation frame",
+      "osColdCacheControlled": false,
+      "queryCount": "NOT_MEASURED",
+      "renderCount": "NOT_MEASURED",
+      "startup": "NOT_MEASURED; no navigation/reload substituted for process launch",
+      "resume": "NOT_MEASURED; requires separate actual process relaunch measurement",
+      "scenarios": {
+        "project-overview": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.198899999999867,
+          "median": 19.312800000000152,
+          "max": 19.461199999999735,
+          "raw": [
+            {
+              "elapsedMs": 19.34770000000026,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 11.582600000000184,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.198899999999867,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 11.427300000000287,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.248999999999796,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 9.63859999999977,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.312800000000152,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 11.552900000000136,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.461199999999735,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 27,
+                "responseBytes": 1650,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 9.915000000000418,
+                    "payloadBytes": 27,
+                    "responseBytes": 1650,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "project-switch": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 11.542500000000473,
+          "median": 11.58809999999994,
+          "max": 11.696399999999812,
+          "raw": [
+            {
+              "elapsedMs": 11.696399999999812,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 5.282899999999245,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.354300000000876,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.145300000000134,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.5879000000004453,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.545399999999972,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 5.239300000000185,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.4989999999997963,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.1253999999998996,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.7420000000001892,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.542500000000473,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 5.69840000000022,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.7452000000002954,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.07970000000023,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.6999000000005253,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.595100000000457,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 5.3937000000005355,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.7492000000002008,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.357199999999466,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.95049999999992,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.58809999999994,
+              "ipc": {
+                "realIpc": 4,
+                "uniqueCommands": 4,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_project_overview": 1,
+                  "task_list_recent": 1,
+                  "consistency_profile_list": 1,
+                  "reference_set_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 235,
+                "responseBytes": 1348,
+                "calls": [
+                  {
+                    "command": "product_project_overview",
+                    "elapsedMs": 5.440100000000712,
+                    "payloadBytes": 56,
+                    "responseBytes": 922,
+                    "failed": false
+                  },
+                  {
+                    "command": "task_list_recent",
+                    "elapsedMs": 1.6826000000000931,
+                    "payloadBytes": 67,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "consistency_profile_list",
+                    "elapsedMs": 2.3301000000001295,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "reference_set_list",
+                    "elapsedMs": 1.8506999999999607,
+                    "payloadBytes": 56,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "create-ready": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.159200000000055,
+          "median": 19.264000000000124,
+          "max": 19.28769999999986,
+          "raw": [
+            {
+              "elapsedMs": 19.28769999999986,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.53060000000005,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 13.33390000000054,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.159200000000055,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.187399999999798,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 12.979999999999563,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.28099999999995,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.393999999999323,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 13.110400000000482,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.264000000000124,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.566499999999905,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 13.676000000000386,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.233099999999467,
+              "ipc": {
+                "realIpc": 2,
+                "uniqueCommands": 2,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_creation_get": 1,
+                  "product_generators_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 114,
+                "responseBytes": 3669,
+                "calls": [
+                  {
+                    "command": "product_creation_get",
+                    "elapsedMs": 13.945099999999911,
+                    "payloadBytes": 57,
+                    "responseBytes": 1469,
+                    "failed": false
+                  },
+                  {
+                    "command": "product_generators_list",
+                    "elapsedMs": 13.776300000000447,
+                    "payloadBytes": 57,
+                    "responseBytes": 2200,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "runs-load": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.13550000000032,
+          "median": 19.220000000000255,
+          "max": 26.845800000000054,
+          "raw": [
+            {
+              "elapsedMs": 19.13550000000032,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.230499999999665,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.324800000000323,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.707000000000335,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 26.845800000000054,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.654300000000148,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.139500000000226,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 13.951600000000326,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.220000000000255,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.35280000000057,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "runs-refresh": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 18.870600000000195,
+          "median": 19.25969999999961,
+          "max": 19.362599999999475,
+          "raw": [
+            {
+              "elapsedMs": 19.096199999999953,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.110999999999876,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.28729999999996,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 13.348399999999856,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.362599999999475,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 13.454899999999725,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.25969999999961,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 14.065499999999702,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 18.870600000000195,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_run_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 56,
+                "responseBytes": 3238,
+                "calls": [
+                  {
+                    "command": "product_run_list",
+                    "elapsedMs": 13.158800000000156,
+                    "payloadBytes": 56,
+                    "responseBytes": 3238,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "library-load": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 11.45719999999983,
+          "median": 11.509500000000116,
+          "max": 11.543900000000576,
+          "raw": [
+            {
+              "elapsedMs": 11.534300000000258,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 4.2645000000002256,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.480899999999565,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 3.8100000000004,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.509500000000116,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 3.124800000000505,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.543900000000576,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 3.9862999999995736,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.45719999999983,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 94,
+                "responseBytes": 2906,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 4.177100000000792,
+                    "payloadBytes": 94,
+                    "responseBytes": 2906,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "library-prompts": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 11.545399999999972,
+          "median": 11.61199999999917,
+          "max": 12.839600000000246,
+          "raw": [
+            {
+              "elapsedMs": 11.597700000000259,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.7687999999998283,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 12.839600000000246,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.8337000000001353,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.545399999999972,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.6847999999999956,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.61199999999917,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.7780000000002474,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 11.928600000000188,
+              "ipc": {
+                "realIpc": 1,
+                "uniqueCommands": 1,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "product_library_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 98,
+                "responseBytes": 498,
+                "calls": [
+                  {
+                    "command": "product_library_list",
+                    "elapsedMs": 1.717000000000553,
+                    "payloadBytes": 98,
+                    "responseBytes": 498,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "workflow-lab": {
+          "warmupCount": 1,
+          "samples": 5,
+          "min": 19.05240000000049,
+          "median": 23.020700000000943,
+          "max": 24.13420000000042,
+          "raw": [
+            {
+              "elapsedMs": 23.020700000000943,
+              "ipc": {
+                "realIpc": 8,
+                "uniqueCommands": 7,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 2,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 386,
+                "responseBytes": 35033,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 3.174700000001394,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.1249000000007072,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 2.859599999999773,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 3.4161999999996624,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 10.82010000000082,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 3.0785999999989144,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 5.46769999999924,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 2.6283000000003085,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 23.525900000000547,
+              "ipc": {
+                "realIpc": 8,
+                "uniqueCommands": 7,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 2,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 386,
+                "responseBytes": 35033,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 3.9875000000010914,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.9465999999993073,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.9477999999999156,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 4.979999999999563,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 6.742699999998877,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 3.782199999999648,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 6.361699999999473,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 4.776300000001356,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.254899999999907,
+              "ipc": {
+                "realIpc": 8,
+                "uniqueCommands": 7,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 2,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 386,
+                "responseBytes": 35033,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 4.034900000000562,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 4.0020000000004075,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.9750999999996566,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 4.319500000001426,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 8.139400000000023,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 3.7435999999997875,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 6.274199999999837,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 3.4526000000005297,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 24.13420000000042,
+              "ipc": {
+                "realIpc": 8,
+                "uniqueCommands": 7,
+                "preflights": 8,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 2,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 386,
+                "responseBytes": 35033,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 3.5952999999990425,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.876299999999901,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.8691000000017084,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 4.150400000000445,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 9.794099999999162,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 3.5920999999998457,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 7.629300000000512,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 3.00170000000071,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            },
+            {
+              "elapsedMs": 19.05240000000049,
+              "ipc": {
+                "realIpc": 8,
+                "uniqueCommands": 7,
+                "preflights": 0,
+                "probes": 0,
+                "pending": 0,
+                "byCommand": {
+                  "workflow_benchmark_list": 1,
+                  "preset_list": 2,
+                  "repair_jobs_status": 1,
+                  "workflow_workspace_query": 1,
+                  "model_list": 1,
+                  "project_workflow_config_get": 1,
+                  "runtime_profiles_list": 1
+                },
+                "repeatedSemanticCalls": 0,
+                "duplicateClassification": "CANDIDATE; requires action/retry/intent review",
+                "payloadBytes": 386,
+                "responseBytes": 35033,
+                "calls": [
+                  {
+                    "command": "workflow_benchmark_list",
+                    "elapsedMs": 3.521600000000035,
+                    "payloadBytes": 50,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.2757000000001426,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "preset_list",
+                    "elapsedMs": 3.3628000000007887,
+                    "payloadBytes": 144,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "repair_jobs_status",
+                    "elapsedMs": 3.5119999999988067,
+                    "payloadBytes": 2,
+                    "responseBytes": 3464,
+                    "failed": false
+                  },
+                  {
+                    "command": "workflow_workspace_query",
+                    "elapsedMs": 6.354000000001179,
+                    "payloadBytes": 15,
+                    "responseBytes": 29926,
+                    "failed": false
+                  },
+                  {
+                    "command": "model_list",
+                    "elapsedMs": 3.616700000000492,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  },
+                  {
+                    "command": "project_workflow_config_get",
+                    "elapsedMs": 6.087700000000041,
+                    "payloadBytes": 27,
+                    "responseBytes": 933,
+                    "failed": false
+                  },
+                  {
+                    "command": "runtime_profiles_list",
+                    "elapsedMs": 2.8672999999998865,
+                    "payloadBytes": 2,
+                    "responseBytes": 142,
+                    "failed": false
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "limitations": [
+        "Encoded transport bytes are not decoded DTO size",
+        "Repeated semantic calls require intent/retry review",
+        "No global heap-leak absence claim"
+      ]
     }
   },
-  "optimizations": [],
+  "optimizations": [
+    {
+      "id": "benchmark-preset-identity",
+      "path": "src/features/experiments/WorkflowBenchmarkPanel.tsx",
+      "status": "MEASURED_VERIFIED",
+      "rootCause": "Mount candidate-reset creates an equivalent array; preset effect depends on array/labels/order instead of exact reference set",
+      "change": "Stable exact-reference set dependency, component-local scope and existing cancellation retained",
+      "baseline": {
+        "samples": 5,
+        "realIpc": 10,
+        "presetReads": 4,
+        "repeatedSemanticCalls": 2,
+        "medianMs": 23.069900000000416
+      },
+      "after": {
+        "samples": 5,
+        "realIpc": 8,
+        "presetReads": 2,
+        "repeatedSemanticCalls": 0,
+        "medianMs": 23.020700000000943
+      },
+      "delta": {
+        "presetReads": -2,
+        "realIpc": -2
+      },
+      "timingClaim": "COUNT_IMPROVEMENT_ONLY; wall-clock acceleration not claimed",
+      "regressionTest": "WorkflowBenchmarkPerformance two cases: initial/label/project/remount counts, changed exact versions with identical names",
+      "sourceFreeze": {
+        "beforeHash": "7afb0c6bdacc04d55520eadfb450dcaafa35a6f938721b82f487551f244ead1e",
+        "afterHash": "9ceead51f7d8a31f92edd7d12e33675e45d02f72e73c78112bc57b561048a6f1"
+      }
+    }
+  ],
   "limitations": [
     "Static counts are NOT measured query/render counts",
     "OS cold cache cannot be controlled safely",
@@ -2210,6 +3816,22 @@
     "schemaChange": false,
     "ipcBreakingChange": false,
     "routeChange": false,
+    "nextPhaseStarted": false
+  },
+  "validation": {
+    "localFocusedCases": 8,
+    "frontendPassed": 7,
+    "rustPassed": 1,
+    "localFullSuite": "NOT_RUN",
+    "tsc": "PASS",
+    "frontendBuild": "PASS",
+    "cargoFmt": "PASS",
+    "cargoCheck": "PASS",
+    "architectureGuards": "PASS",
+    "performanceGuardCases": "PASS (2 Benchmark cases + 1 frozen-successor self-test)",
+    "ownedAppClosed": true,
+    "ownedServerClosed": true,
+    "remoteFullSuite": "PENDING exact checkpoint head; Phase12 remains incomplete",
     "nextPhaseStarted": false
   }
 }
