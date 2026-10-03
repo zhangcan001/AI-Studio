@@ -92,3 +92,70 @@ This checkpoint completes **one** optimization, not the required three. Eight
 navigation scenarios are not eight fully covered required path domains. Remaining
 baseline/profiling/large-data, two additional measured optimizations and complete
 correctness Native acceptance must finish before Phase12 can pass.
+
+## Continuation: actual processes and deeper profiling (still PARTIAL)
+
+The continuation retains all three existing commits and makes **no production
+behavior change**. The earlier pending statements above describe that historical
+checkpoint, not the new measurement inventory. The machine, debug executable
+SHA256 and production bundle SHA256 are recorded in the JSON alongside every
+group. Startup and resume use the original small isolated fixture. Deep profiling
+uses `phase12-large-v1`: 55 tasks, 108 media records and 51 prompt entries, with
+existing profiles/reference sets. These two datasets are deliberately separate
+and are not a before/after performance comparison.
+
+`native-process-performance.mjs` spawns the actual owned executable, observes its
+new WebView, verifies an actual native window handle and closes only that spawned
+PID gracefully after checking its executable path. It never uses reload for
+startup/resume. Both process-cold and warm groups have one warmup and five samples.
+The OS cache is **not** controlled. Primary timing is `visible`, measured before
+the external PowerShell window-handle verification; `elapsedMs` includes that
+verification overhead and must not be marketed as pure startup latency. Database
+and recovery log timestamps are stage measurements, not universal backend-ready
+proof. Startup IPC counts are attachment-onward only, not fabricated full counts.
+
+Deep resume is prepared through real UI navigation/selection, followed by actual
+process exit and launch. Create+shot, Runs+RunRef and Library+ResourceRef each have
+one warmup/five samples, with the exact persisted locator and actual child detail
+verified after restart. No route JSON injection/reload substitutes for this proof.
+
+`phase12-expand-fixture.py` is an explicitly owned-fixture-only seed script. It
+refuses to write while an AI Studio process runs, preserves original user-independent
+fixture records, uses deterministic synthetic identifiers and validates foreign
+keys. It shifts **all** task lifecycle timestamps together: changing only
+`created_at` correctly fails existing domain integrity checks. Those rejected seed
+attempts were harness errors, not performance samples or production regressions.
+
+`native-deep-performance.mjs` measures true Project List→Open, Create load/shot
+selection, large Runs list/detail/results, Library list/media/prompt detail, and
+prompt-save mutation. Its acceptance-only new-document script observes production
+React root commits and live EventTarget/timer/blob ownership. Enable CDP Page before
+injection and wait for the new document marker; otherwise old DOM can satisfy a
+reload wait and produce a false measurement. This profiler is never bundled into
+the app. Root commits are equivalent bounded work evidence, **not actualDuration
+or precise per-component execution counts**. Production minified names are not
+used as stable owner identifiers.
+
+Twenty Runs enter/leave cycles return connected listeners 148→148, global
+listeners 3→3, active intervals 0→0, timeouts 0→0 and object URLs 0→0. Mounted Runs
+owns one 5000ms interval, cleared on leaving. Weak registration records distinguish
+detached DOM from connected/global owners without retaining DOM solely for counting.
+Detached registrations fluctuate with uncontrolled GC and are not a leak metric.
+Private `runInvalidation` subscriptions are still **NOT_MEASURED**; resource
+acceptance therefore remains partial, not a blanket leak-free claim.
+
+Prompt edit exposes a measured candidate: each write is followed by **two** copies
+of list/get/relations/versions (9 IPC total; 4 repeated identical reads). The
+existing explicit refresh and 150ms same-owner invalidation refresh explain it.
+The measurement waits on the observed 150ms timer and IPC completion rather than
+ending at the first save acknowledgement. It records five identical work-count
+samples. No optimization2/3 is selected or applied yet: complete safe Create submit,
+Workflow deep read/OCC mutation, actual SQL profiling and subscription measurements
+before ranking and changing a seam.
+
+Local cumulative test budget remains **8/10**; this continuation ran no new core
+cases. Acceptance samples are the separately requested Native measurements. Case9
+and case10 remain reserved for the selected backend and frontend optimizations.
+Architecture guard and JavaScript syntax checks passed. Full local final gates,
+final Native correctness and final-head CI remain pending; checkpoint CI success
+does not close Phase12 or authorize Phase13.
