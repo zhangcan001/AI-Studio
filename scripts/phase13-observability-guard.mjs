@@ -171,7 +171,7 @@ export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
   const workflowBefore = git(root, 'show', `${PHASE13_BASELINE}:${workflowPath}`);
   if (!workflowReview || workflowReview.path !== workflowPath ||
       workflowReview.beforeHash !== sourceDigest(workflowBefore) ||
-      workflowReview.afterHash !== sourceDigest(readFileSync(join(root, workflowPath), 'utf8'))) fail('phase13-validation-workflow-drift');
+      workflowReview.afterHash !== sourceDigest(frozenRead(workflowPath))) fail('phase13-validation-workflow-drift');
 
   if (review?.privacy?.databaseExport !== false || review?.privacy?.promptExport !== false || review?.privacy?.absolutePathExport !== false || review?.privacy?.assetBytesExport !== false || review?.privacy?.workflowSourceExport !== false || review?.privacy?.recipeSourceExport !== false || review?.privacy?.remoteUpload !== false) fail('phase13-privacy-invariants-missing');
   const migrations = readdirSync(join(root, 'src-tauri/migrations'));

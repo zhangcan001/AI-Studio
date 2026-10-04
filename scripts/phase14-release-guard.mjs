@@ -9,6 +9,7 @@ export const RELEASE_PARENT = '52ba662d3e4f0a5e14fe30028be6fcc5778ac1eb';
 const rustPath = 'src-tauri/src/application/project_backup_service.rs';
 const guardPath = 'scripts/phase13-observability-guard.mjs';
 const ownPath = 'scripts/phase14-release-guard.mjs';
+const workflowPath = '.github/workflows/ci.yml';
 const normalize = s => s.replaceAll('\r\n', '\n');
 const hash = s => createHash('sha256').update(normalize(s)).digest('hex');
 const live = (root, path) => readFileSync(join(root, path), 'utf8');
@@ -27,12 +28,17 @@ export function releaseParentReader(root, reviewOverride) {
   const violations = [];
   const fail = s => violations.push(`phase14-${s}`);
   if (proof.phase !== 14 || proof.schemaVersion !== 1 || proof.parentHead !== RELEASE_PARENT ||
-      proof.reason !== 'restore-report-empty-list-serialization') fail('invalid-release-proof');
-  if (JSON.stringify(Object.keys(proof.paths ?? {}).sort()) !== JSON.stringify([rustPath, guardPath, ownPath].sort())) fail('reviewed-path-set');
-  for (const path of [rustPath, guardPath]) {
+      proof.reason !== 'release-compatibility-and-validation-resource-boundary') fail('invalid-release-proof');
+  if (JSON.stringify(Object.keys(proof.paths ?? {}).sort()) !== JSON.stringify([rustPath, guardPath, ownPath, workflowPath].sort())) fail('reviewed-path-set');
+  for (const path of [rustPath, guardPath, workflowPath]) {
     const p = proof.paths?.[path];
     if (p?.beforeHash !== hash(parent(root, path)) || p?.afterHash !== hash(live(root, path))) fail(`reviewed-path-drift:${path}`);
   }
+  // Only constrain frontend worker contention; preserve every test, timeout,
+  // Rust command/thread setting and all other workflow bytes.
+  const oldWorkflow = normalize(parent(root, workflowPath));
+  if (normalize(live(root, workflowPath)) !== oldWorkflow.replace(
+      'run: pnpm test\n', 'run: pnpm test --maxWorkers=1\n')) fail('workflow-resource-scope');
   if (proof.paths?.[ownPath]?.beforeHash !== null || proof.paths?.[ownPath]?.afterHash !== hash(live(root, ownPath))) fail('new-guard-drift');
   const basePaths = execFileSync('git', ['ls-tree', '-r', '--name-only', RELEASE_PARENT, 'src-tauri/src'],
     { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(p => p.endsWith('.rs')).sort();
@@ -61,7 +67,7 @@ export function releaseParentReader(root, reviewOverride) {
     if (proof.invariants?.[flag] !== false) fail(`authority:${flag}`);
   }
   return { violations, backendAggregateSha256: violations.length ? undefined : proof.backend.afterAggregateHash, read: path => {
-    if (violations.length || ![rustPath, guardPath].includes(path)) return live(root, path);
+    if (violations.length || ![rustPath, guardPath, workflowPath].includes(path)) return live(root, path);
     return path === rustPath ? blobs.get(path) : parent(root, path);
   } };
 }

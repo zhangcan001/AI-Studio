@@ -2,7 +2,7 @@
   "phase": 14,
   "schemaVersion": 1,
   "parentHead": "52ba662d3e4f0a5e14fe30028be6fcc5778ac1eb",
-  "reason": "restore-report-empty-list-serialization",
+  "reason": "release-compatibility-and-validation-resource-boundary",
   "paths": {
     "src-tauri/src/application/project_backup_service.rs": {
       "beforeHash": "3b06b3b1cbebbd363372e417154fed9f9617cfb9bce32985571ce8ef5ca66014",
@@ -10,11 +10,15 @@
     },
     "scripts/phase13-observability-guard.mjs": {
       "beforeHash": "dada65b16f617daa70d7e37475f87f27c0050744eb36f6d686df5a0e4533ad78",
-      "afterHash": "61797d6d6047b8480b08621025137d36ea942fe8a7b8a37e715938680b53a44c"
+      "afterHash": "a894348abd7cc3c8adcf8e7e4af8a17afef0735ea75dacd12bdc2dcac74de454"
+    },
+    ".github/workflows/ci.yml": {
+      "beforeHash": "696a4b0e524c6029adc6df49e9e6b4a245fb869a374e3c1e5791bc55dfa9da22",
+      "afterHash": "51327d0efcb0ef2601c261a6b82caf676e9614b21ebb6ef8ba0a37ede9b4b154"
     },
     "scripts/phase14-release-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "eb45576d5802e141673e0aaf1f7a00d94bba5bb70f33d97e673fa75291a8733f"
+      "afterHash": "3015d68fe4bd37577e5be67ebe0a16fb7f8e81986c95635f4ad71ad2b6770581"
     }
   },
   "backend": {

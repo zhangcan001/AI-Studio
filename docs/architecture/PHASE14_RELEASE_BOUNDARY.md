@@ -57,3 +57,16 @@ Installers, diagnostics, archives, databases, user media and generated caches
 remain outside commits. No tag or GitHub Release is created. Production Queue
 Start, Task validation/state, project isolation, binding OCC, workflow exact
 identity, backup v20 and migration maximum42 remain unchanged.
+
+Release validation infrastructure follow-up: two hosted runs completed the
+static architecture scan with PASS output but exceeded the unchanged15-second
+ordinary-frontend import deadline. Identical single-worker local full suite
+completed that scan in5.3seconds. The scoped fix only adds `--maxWorkers=1` to
+Frontend tests; all1017 cases, deadlines, assertions, Rust commands/threads,
+job timeouts/cache and independent architecture step remain unchanged.
+
+The release proof includes exact before/after workflow hashes and independently
+requires its complete bytes to equal the immutable parent's one-line worker
+replacement. Historical workflow review reads that parent only after validation.
+A workflow-drift negative probe was added; no historical manifest was changed.
+This is validation contention control, not a product-performance threshold.
