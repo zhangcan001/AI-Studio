@@ -28,6 +28,8 @@ import { DiagnosticsExecutionPanel, type DiagnosticsExecutionProps } from "./Dia
 
 interface Props extends DiagnosticsExecutionProps {
   onOpenWorkflowDiagnostics?: () => void;
+  onOpenProjectGenerators?: (projectId: string) => void;
+  onOpenToolHub?: () => void;
   showWorkflowRepairStatus?: boolean;
   comfy?: ComfyStatus;
   connectionLoading: boolean;
@@ -50,6 +52,8 @@ export function SettingsWorkspace({
   onOpenRun,
   onOpenAudit,
   onOpenWorkflowDiagnostics,
+  onOpenProjectGenerators,
+  onOpenToolHub,
 }: Props) {
   const [summary, setSummary] = useState<DiagnosticsSummary>();
   const [loading, setLoading] = useState(true);
@@ -323,30 +327,14 @@ export function SettingsWorkspace({
       {error !== undefined && <UiErrorNotice error={error} />}
       {notice && <p className="settings-notice" role="status">{notice}</p>}
 
-      <div className="settings-grid">
-        <section className="settings-card" aria-labelledby="settings-app-info">
-          <h3 id="settings-app-info">应用信息</h3>
-          <dl className="settings-list">
-            <div><dt>应用版本</dt><dd>{summary?.appVersion ?? "未知"}</dd></div>
-            <div><dt>运行平台</dt><dd>{summary ? `${summary.platform} · ${summary.architecture}` : "未知"}</dd></div>
-            <div><dt>运行模式</dt><dd>{summary?.runMode ?? "未知"}</dd></div>
-          </dl>
-        </section>
-
-        <section className="settings-card" aria-labelledby="settings-runtime-info">
-          <h3 id="settings-runtime-info">运行状态</h3>
-          <dl className="settings-list">
-            <div><dt>本地数据库</dt><dd>{summary ? (summary.databaseHealthy ? "正常" : "暂不可用") : "未知"}</dd></div>
-            <div><dt>工作流包</dt><dd>{summary?.validWorkflowPackages != null && summary.workflowPackages != null ? `${summary.validWorkflowPackages} 个可用 / ${summary.workflowPackages} 个总计` : "未知"}</dd></div>
-            <div><dt>活动任务</dt><dd>{summary?.activeTaskCount ?? "未知"}</dd></div>
-            <div><dt>生产队列</dt><dd>{summary?.productionBusy == null ? "未知" : summary.productionBusy ? "运行中" : "空闲"}</dd></div>
-            <div><dt>日志</dt><dd>{summary ? (summary.loggingAvailable ? `可用，保留 ${summary.logRetentionDays} 天` : "不可用") : "未知"}</dd></div>
-          </dl>
-        </section>
-      </div>
-
-      <DiagnosticsExecutionPanel key={`${projectId ?? "none"}:${initialTaskId ?? ""}`} projectId={projectId} initialTaskId={initialTaskId} onOpenRun={onOpenRun} onOpenAudit={onOpenAudit} />
-      <button type="button" onClick={onOpenWorkflowDiagnostics} disabled={!onOpenWorkflowDiagnostics}>工作流包诊断（高级 Lab）</button>
+      <section className="settings-card" aria-labelledby="settings-setup-title">
+        <h3 id="settings-setup-title">运行环境准备</h3>
+        <ol><li><a href="#comfy-endpoint">配置并应用 ComfyUI 地址</a></li><li><a href="#settings-preflight-title">执行运行预检</a></li><li>为当前项目确认生成器</li></ol>
+        <p>ComfyUI 地址是全局运行环境；项目生成器决定当前项目使用哪个已有生成器，保存地址不会自动绑定生成器。</p>
+        {projectId && onOpenProjectGenerators
+          ? <button type="button" onClick={() => onOpenProjectGenerators(projectId)}>检查当前项目生成器</button>
+          : <p>选择项目后，可在项目设置中确认图片/视频生成器。</p>}
+      </section>
 
       <section className="settings-card settings-comfy-card" aria-labelledby="settings-comfy-title">
         <div className="settings-card-heading">
@@ -384,6 +372,8 @@ export function SettingsWorkspace({
               {endpointApplying ? "正在保存……" : "保存并应用"}
             </button>
           </div>
+          <p>测试连接仅测试当前输入的地址，不会保存或应用这个地址。</p>
+          {settings && endpointDraft.trim() !== settings.endpoint && <p>当前输入只用于测试；点击“保存并应用”后才会成为 AI Studio 使用的运行环境。</p>}
           {settings?.warning && <p className="settings-warning" role="status">{settings.warning}</p>}
           {endpointTest && (
             <p className="settings-notice" role="status">
@@ -391,11 +381,58 @@ export function SettingsWorkspace({
             </p>
           )}
         </div>
+      </section>
+
+      <section className="settings-card" aria-labelledby="settings-preflight-title">
+        <div className="settings-card-heading">
+          <div>
+            <h3 id="settings-preflight-title">运行预检</h3>
+            <p>只读检查当前已应用环境的连接、GPU、节点和生产工作流；不会切换环境、启动生成或修改工作流与模型。预检不保证真实生成成功，还需校验项目生成器与本次输入。</p>
+          </div>
+          <button type="button" className="primary-action" onClick={() => void runPreflight()} disabled={preflightLoading}>
+            {preflightLoading ? "正在预检……" : "立即预检"}
+          </button>
+        </div>
+        {!preflight && !preflightLoading && <p>尚未运行预检。</p>}
+        {preflight && <PreflightReportView report={preflight} />}
+      </section>
+
+      <div className="settings-grid">
+        <section className="settings-card" aria-labelledby="settings-app-info">
+          <h3 id="settings-app-info">应用信息</h3>
+          <dl className="settings-list">
+            <div><dt>应用版本</dt><dd>{summary?.appVersion ?? "未知"}</dd></div>
+            <div><dt>运行平台</dt><dd>{summary ? `${summary.platform} · ${summary.architecture}` : "未知"}</dd></div>
+            <div><dt>运行模式</dt><dd>{summary?.runMode ?? "未知"}</dd></div>
+          </dl>
+        </section>
+
+        <section className="settings-card" aria-labelledby="settings-runtime-info">
+          <h3 id="settings-runtime-info">运行状态</h3>
+          <dl className="settings-list">
+            <div><dt>本地数据库</dt><dd>{summary ? (summary.databaseHealthy ? "正常" : "暂不可用") : "未知"}</dd></div>
+            <div><dt>工作流包</dt><dd>{summary?.validWorkflowPackages != null && summary.workflowPackages != null ? `${summary.validWorkflowPackages} 个可用 / ${summary.workflowPackages} 个总计` : "未知"}</dd></div>
+            <div><dt>活动任务</dt><dd>{summary?.activeTaskCount ?? "未知"}</dd></div>
+            <div><dt>生产队列</dt><dd>{summary?.productionBusy == null ? "未知" : summary.productionBusy ? "运行中" : "空闲"}</dd></div>
+            <div><dt>日志</dt><dd>{summary ? (summary.loggingAvailable ? `可用，保留 ${summary.logRetentionDays} 天` : "不可用") : "未知"}</dd></div>
+          </dl>
+        </section>
+      </div>
+
+      <DiagnosticsExecutionPanel key={`${projectId ?? "none"}:${initialTaskId ?? ""}`} projectId={projectId} initialTaskId={initialTaskId} onOpenRun={onOpenRun} onOpenAudit={onOpenAudit} />
+      <button type="button" onClick={onOpenWorkflowDiagnostics} disabled={!onOpenWorkflowDiagnostics}>工作流包诊断（高级 Lab）</button>
+
+      <section className="settings-card" aria-label="本地工具登记说明">
+        <p>本地工具中心显示已登记的工具、实例、版本和最近健康记录；不会自动发现、安装、启动或连接工具。</p>
+        {onOpenToolHub && <button type="button" onClick={onOpenToolHub}>查看本地工具登记（高级）</button>}
+      </section>
+
+      <section className="settings-card" aria-label="运行环境高级操作">
         <section className="settings-endpoint-form" aria-labelledby="settings-environment-profiles-title">
           <div className="settings-card-heading">
             <div>
               <h4 id="settings-environment-profiles-title">已保存环境</h4>
-              <p>保存多个 ComfyUI 地址；测试只读，应用会继续经过安全切换与忙碌检查。</p>
+              <p>测试已保存环境只读取连接情况，不会切换当前运行环境；只有点击“应用”才会经过安全切换与忙碌检查。</p>
             </div>
             {environmentProfiles.length >= 20 && <span className="settings-dirty-pill">最多 20 个</span>}
           </div>
@@ -461,20 +498,6 @@ export function SettingsWorkspace({
           <div><dt>GPU</dt><dd>{summary?.gpuName ?? "--"}</dd></div>
           <div><dt>VRAM</dt><dd>{formatVram(summary?.vramFree, summary?.vramTotal)}</dd></div>
         </dl>
-      </section>
-
-      <section className="settings-card" aria-labelledby="settings-preflight-title">
-        <div className="settings-card-heading">
-          <div>
-            <h3 id="settings-preflight-title">运行预检</h3>
-            <p>只读检查当前 ComfyUI、GPU、节点和生产工作流可用性，不会切换环境或启动生成。</p>
-          </div>
-          <button type="button" className="primary-action" onClick={() => void runPreflight()} disabled={preflightLoading}>
-            {preflightLoading ? "正在预检……" : "立即预检"}
-          </button>
-        </div>
-        {!preflight && !preflightLoading && <p>尚未运行预检。</p>}
-        {preflight && <PreflightReportView report={preflight} />}
       </section>
 
       {showWorkflowRepairStatus && <RepairJobsStatusSection />}
@@ -556,15 +579,15 @@ function preflightStatusClass(status: ComfyPreflightReport["status"]): string {
 }
 
 function preflightStatusLabel(status: ComfyPreflightReport["status"]): string {
-  if (status === "READY") return "就绪 · 运行环境就绪";
+  if (status === "READY") return "通过 · 当前预检通过";
   if (status === "WARNING") return "警告 · 存在警告";
-  return "已阻断 · 当前环境无法生产";
+  return "已阻断 · 预检发现阻断问题";
 }
 
 function preflightStatusDescription(status: ComfyPreflightReport["status"]): string {
-  if (status === "READY") return "运行环境就绪";
-  if (status === "WARNING") return "运行环境可用，但存在警告";
-  return "当前环境无法生产";
+  if (status === "READY") return "当前已知依赖可用";
+  if (status === "WARNING") return "预检有警告，请检查已知依赖";
+  return "请先处理预检发现的阻断问题";
 }
 
 function comfyStatusLabel(status: DiagnosticsSummary["comfyStatus"]): string {

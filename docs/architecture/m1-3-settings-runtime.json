@@ -1,0 +1,90 @@
+{
+  "checkpoint": "M1_3_SETTINGS_RUNTIME_SETUP_AND_TOOL_HUB_EXPLANATION",
+  "schemaVersion": 1,
+  "parentHead": "1a66234867692f8b0ec9d6cbb587f9d5f71ddef7",
+  "paths": {
+    "scripts/m1-overview-readiness-boundary-guard.mjs": {
+      "beforeHash": "52f143de7dcca959c090f60835de38a934266243b7814e4a4bfa61785571343b",
+      "afterHash": "dcea47547a1c87b59653e611989a898d36155da902fc45e979a44fe0ea721ff5"
+    },
+    "scripts/m1-settings-runtime-boundary-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "f0e708f3860a7cbd3b31cf9144417ecca6342697fc392a1818dda1957811c054"
+    },
+    "src/app/App.tsx": {
+      "beforeHash": "8ae4947da96699c361bdcc6b0f9ca29eecc7562bdef74c78bb4be25345bcecd3",
+      "afterHash": "2ad3b60dad614131da77aa28054b9450c7bce52d4f4632c1d98bf250055e5e22"
+    },
+    "src/app/M1SettingsNavigation.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "9df9b463bc0c37a1352d92cda9ca802358a64f33422c0ec6dcf3011aa208b6a4"
+    },
+    "src/app/M1SettingsRuntimeBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "1d8058b5c47638b507796ca1c8e1f27ea428c2c358b909648d138758f5e84534"
+    },
+    "src/features/settings/SettingsWorkspace.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "35c7ee021dbb3549441bec669cde5f700545920c78618c10abdf4ba3b012d6ff"
+    },
+    "src/features/settings/SettingsWorkspace.tsx": {
+      "beforeHash": "1804fd496034a5bd5a62384e39bb2e6dc0a61c13bcfc45b8361e1c0d4cac6ef7",
+      "afterHash": "40fd866a987adc5a6379ef78a0db6e82c5990c958f14200d74b8daecf8125e63"
+    },
+    "src/features/tools/LocalToolHub.test.tsx": {
+      "beforeHash": "900547619226cbc223d0517219a96bab86333c5b5ce3c012a78ce0286ed3fbd9",
+      "afterHash": "205b8c04c71274d0d9571f92b7d8ceacd2bb9c0357b57e9d3de9e2c39a52f435"
+    },
+    "src/features/tools/LocalToolHub.tsx": {
+      "beforeHash": "bad0c7944e3d08f4b8089b06f9f49ed8c26f57729ea14c24de87a78f050d3949",
+      "afterHash": "f703832bd41b20b0a340e5a1b927cc950954ca17ace0f286e21b18d651bcb90d"
+    }
+  },
+  "backend": {
+    "beforeFiles": 344,
+    "afterFiles": 344,
+    "beforeAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7",
+    "afterAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7",
+    "untouchedAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7"
+  },
+  "frontend": {
+    "beforeFiles": 475,
+    "afterFiles": 478,
+    "beforeAggregateHash": "6ad86911e5808f9fe77fb42985fbf27b1da278cc97e92fd3622f5c101f3e1a19",
+    "afterAggregateHash": "9a3868406ab2dd3a8adbda8b8759cd117550985a2dad894a86e9a334d17f7c44",
+    "untouchedAggregateHash": "9a9d76eef6232d08150b7d50c93b1240caa3f5b01a1bec547e83701e44c9a4c0"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612",
+    "afterAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612",
+    "untouchedAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612"
+  },
+  "scripts": {
+    "beforeFiles": 17,
+    "afterFiles": 18,
+    "beforeAggregateHash": "e7b704aa3f624e487a221947037fafcec7422f84a1bbbc8f8e9aa54d6c46fdba",
+    "afterAggregateHash": "3db904b2a7c20470e9cb806c906c322ef47a33eccb82b20052068eac881584a8",
+    "untouchedAggregateHash": "7041dab2af940d43758b66845f15d69e35abfad58156b71dedcf22a2e00ad27a"
+  },
+  "invariants": {
+    "queueAuthorityChanged": false,
+    "taskStateMachineChanged": false,
+    "workflowEngineChanged": false,
+    "bindingOccChanged": false,
+    "draftAuthorityChanged": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "remoteTelemetry": false,
+    "projectCommandCenterAuthorityChanged": false,
+    "newReadinessAuthority": false,
+    "newPollingOwner": false,
+    "comfySettingsAuthorityChanged": false,
+    "comfyRuntimeAuthorityChanged": false,
+    "toolHubAuthorityChanged": false,
+    "automaticToolDiscovery": false,
+    "automaticToolHealthPolling": false,
+    "processLaunchAdded": false
+  }
+}

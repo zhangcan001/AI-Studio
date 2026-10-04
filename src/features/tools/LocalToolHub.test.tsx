@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ToolCapabilityView,
@@ -136,5 +136,33 @@ describe("LocalToolHub", () => {
     expect((await screen.findAllByText("加载失败")).length).toBeGreaterThan(0);
     expect(screen.getByText("工具详情加载失败：操作失败，请查看技术详情。")).toBeTruthy();
     expect(screen.queryByText("未知")).toBeNull();
+  });
+
+  it("explains connected Comfy is not registration, and refresh rereads only registered metadata", async () => {
+    mocks.listTools.mockResolvedValue([]); render(<LocalToolHub />);
+    await screen.findByText("暂无本地工具登记。");
+    expect(screen.getByText(/ComfyUI 已连接，并不意味着已有 ComfyUI 登记记录/)).toBeTruthy();
+    expect(screen.getByText(/这不代表 ComfyUI 未连接/)).toBeTruthy();
+    expect(screen.getByText(/刷新仅重新读取已登记元数据/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(mocks.listTools).toHaveBeenCalledTimes(2));
+    expect(mocks.listToolInstances).not.toHaveBeenCalled(); expect(mocks.listToolVersions).not.toHaveBeenCalled(); expect(mocks.listToolCapabilities).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "ComfyUI" })).toBeNull();
+  });
+
+  it("labels health as last observation and refresh does not discover or probe", async () => {
+    render(<LocalToolHub />); await screen.findByText("image_generation");
+    expect(screen.getByText(/健康状态来自最近一次显式记录，不代表此刻实时状态/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(mocks.listToolCapabilities).toHaveBeenCalledTimes(2));
+    for (const list of [mocks.listToolInstances, mocks.listToolVersions, mocks.listToolCapabilities]) expect(list).toHaveBeenLastCalledWith(tool.id);
+  });
+
+  it("retains partial detail failure and retry without discarding other tools", async () => {
+    const other = { ...tool, id: "other", name: "Other" }; mocks.listTools.mockResolvedValue([tool, other]);
+    mocks.listToolInstances.mockRejectedValueOnce(new Error("owned fixture failure")); render(<LocalToolHub />);
+    await screen.findByText(/工具详情加载失败/); expect(screen.getByRole("button", { name: "Other" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试" })); await screen.findByText("image_generation");
+    expect(mocks.listTools).toHaveBeenCalledTimes(1); expect(mocks.listToolInstances).toHaveBeenLastCalledWith(tool.id);
   });
 });

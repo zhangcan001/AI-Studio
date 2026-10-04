@@ -821,6 +821,8 @@ function App() {
             onOpenRun={(projectId, taskId) => void navigate({ kind: "runs", projectId, run: { source: "task", id: taskId } })}
             onOpenAudit={(projectId, taskId) => void navigate({ kind: "project-settings", projectId, section: "advanced-tasks", auditTaskId: taskId })}
             onOpenWorkflowDiagnostics={() => void navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: route })}
+            onOpenProjectGenerators={(projectId) => void navigate({ kind: "project-settings", projectId, section: "generators" })}
+            onOpenToolHub={() => void navigate({ kind: "system-settings", section: "advanced-tools", returnTo: route })}
             comfy={comfy}
             connectionLoading={connectionLoading}
             capabilityLoading={capabilityLoading}

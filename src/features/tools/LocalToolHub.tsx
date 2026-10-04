@@ -179,6 +179,9 @@ export function LocalToolHub() {
         </div>
       </div>
 
+      <p className="local-tool-hub-note">ComfyUI 的实际连接由“系统设置 → ComfyUI 运行环境”管理。这里仅显示已登记的工具元数据；ComfyUI 已连接，并不意味着已有 ComfyUI 登记记录。</p>
+      <p className="local-tool-hub-note">健康状态来自最近一次显式记录，不代表此刻实时状态。刷新仅重新读取已登记元数据，不会扫描电脑、探测端点、安装或启动工具。</p>
+
       {error && <p className="error-message" role="alert">本地工具列表加载失败：{error}</p>}
 
       <div className="local-tool-hub-layout">
@@ -188,7 +191,7 @@ export function LocalToolHub() {
             <span className="status-pill">{tools.length} 个</span>
           </div>
           {loading && !tools.length && <p className="disabled-note" role="status">正在加载本地工具…</p>}
-          {!loading && !error && !tools.length && <p className="empty-state">暂无本地工具登记。</p>}
+          {!loading && !error && !tools.length && <div className="empty-state"><p>暂无本地工具登记。</p><p>这不代表 ComfyUI 未连接；实际运行连接请在系统设置中查看。</p></div>}
           {tools.length > 0 && (
             <div className="local-tool-hub-table-wrap">
               <table className="local-tool-hub-table">
