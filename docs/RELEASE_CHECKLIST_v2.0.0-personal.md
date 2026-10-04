@@ -93,12 +93,12 @@ complete Source-only CI; the chat closeout records that SHA/run/conclusion.
 
 ## Final-source local checks — PASS
 
-- Frontend188 files /1016 passed, sequential maxWorkers1.
+- Frontend188 files /1017 passed, sequential maxWorkers1.
 - Rust47 target summaries /1696 passed /3 pre-existing ignored, all-targets,
   single build job and test-threads1. No new ignored/removed tests.
 - TypeScript, frontend build, cargo fmt/check all-targets, architecture guards,
   Phase12 performance and Phase13 observability successors passed.
-- Resource inspection before builds/tests; no concurrent build/test runners.
+- Resource inspection before builds/tests, conservative single-worker/single-job execution. One short architecture check inadvertently overlapped a still-active frontend runner; it completed, then later compilation/test gates were sequential. No user workloads were terminated.
 - Two real blockers have regression tests. Historical manifests were not
   blindly repinned: scoped Phase14 source proof validates reviewed live bytes,
   exact paths and untouched/full aggregates against immutable Phase13 parent.
@@ -121,3 +121,16 @@ Installers, diagnostic ZIPs, DB/media/archives and acceptance logs are local,
 not committed. Installed-source SHA/fingerprints are in RC_BASELINE. The final
 closeout is documentation-only; it must prove no runtime/config diff from that
 installer source. Ordinary master push only; no force, tag, Release or next phase.
+
+## CI contention closeout
+
+Run37173899342 attempts1–2 are FAILED, not retrospectively PASS: the ordinary
+frontend test importing the complete static architecture guard exceeded its
+existing15-second deadline while logging guard PASS;1015 other cases passed.
+Rust47 summaries/1696 tests passed with3 existing ignored.
+
+The release-only infrastructure fix serializes frontend workers. It preserves
+the full suite, explicit15-second deadline, every assertion, Rust threads and
+job timeouts; adds one negative workflow-proof case. Local exact command
+`pnpm test --maxWorkers=1`:188 files/1017 PASS. Final source is rebuilt and
+installed reaccepted; a new final-head CI, not that failed run, is authority.

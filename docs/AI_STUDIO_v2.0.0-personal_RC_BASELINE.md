@@ -3,25 +3,25 @@
 ## Source and CI authority
 
 - Parent Phase13: `52ba662d3e4f0a5e14fe30028be6fcc5778ac1eb`; parent CI37165597077 success.
-- Installer source: `03ee97e17f5061f87b45573b9220cc7f1a81a939`.
+- Installer source: `58c897d8b6eae286848e196b047364d9ca125ad6`.
 - Final documentation closeout is this document’s containing commit. No runtime, transport, migration, bundle/config or historical-manifest bytes change after installer source; audit with `git diff <installer-source> <final-doc-head> -- src src-tauri scripts .github`.
 - Exact-final-HEAD Source-only CI is pending at documentation commit creation. The final chat report records the actual final SHA, run and completed conclusion; parent/local success is not substituted for it.
 
 ## Windows artifacts
 
-Built by standard `pnpm tauri build` with one Cargo build job; optimized compilation9m46s, both bundles completed. Product version2.0.0-personal; MSI numeric metadata2.0.0.
+Built by standard `pnpm tauri build` with one Cargo build job; optimized compilation9m31s, both bundles completed. Product version2.0.0-personal; MSI numeric metadata2.0.0.
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| AI Studio_2.0.0-personal_x64_en-US.msi | 20422656 | `7DF6068933913D76DDA1C2C067258866F1802DC40AF8C7BC538E85DDF64BF8DD` |
-| AI Studio_2.0.0-personal_x64-setup.exe | 13005085 | `4F9835CA70E92739DE2EF6391C03B511C78D34894DCBAC16CA0F889A5C905A4D` |
+| AI Studio_2.0.0-personal_x64_en-US.msi | 20422656 | `3A595A7F0E887F0D34A3846EEA2B0897B481DFA7C776040806BA5FE5723C5C74` |
+| AI Studio_2.0.0-personal_x64-setup.exe | 13016082 | `A5BE8E30CB0B33C955BB964F9F89D5D7FBE18C760E8CF94F25EAFCC3145603A1` |
 
 NSIS was installed, run, uninstalled and reinstalled in isolated TEMP directories. MSI installation NOT VERIFIED; MSI build and numeric-version regression passed. No executable/MSI/media/DB/archive/diagnostic bundle is committed. Unsigned local candidate, not a signed published release.
 
 ## Frozen data and local gates
 
 - Migration maximum42;71 named business tables; no043; backup20, reader accepts1–20.
-- Frontend188 files/1016 PASS; Rust47 targets/1696 PASS/3 existing ignored.
+- Frontend188 files/1017 PASS; Rust47 targets/1696 PASS/3 existing ignored.
 - TypeScript/build/fmt/check/architecture/performance/observability PASS.
 - Queue Start only execution authority, unchanged Task state/binding OCC/workflow engine; no remote telemetry.
 - Fresh installed data root and reconstructed39→42 upgrade copied fixture passed. Exact identities/media/business facts preserved; see checklist for counts and bounded coverage.
@@ -44,4 +44,8 @@ Known Issues records existing P2 follow-ups, dormant generic audio labels, exter
 
 ## Local evidence (not checked in)
 
-Owned TEMP evidence: phase14-artifacts-final.json; phase14-migration-final.json; phase14-upgrade-before.json/result.json; phase14-backup-data-final.json/extra-facts.json; phase14-diagnostics-privacy-evidence.json; phase14-safe-exit-fixture.json; phase14-before-uninstall-verified.json/after-uninstall-verified.json/after-reinstall-launch.json; final local test/build logs. These are local acceptance artifacts, not runtime dependencies.
+Owned TEMP evidence: phase14-artifacts-authoritative.json; phase14-migration-final.json; phase14-upgrade-before.json/result.json; phase14-backup-data-final.json/extra-facts.json; phase14-diagnostics-privacy-authoritative.json; phase14-safe-exit-fixture.json; phase14-authoritative-before-uninstall.json/authoritative-after-uninstall.json/authoritative-after-reinstall-launch.json; final local test/build logs. These are local acceptance artifacts, not runtime dependencies.
+
+## Final validation-only source checkpoint
+
+Hosted run37173899342 attempts1–2 failed the unchanged15-second whole-architecture import test, despite successful static guard output; Rust completed1696 tests. This failed run is not authority. The release-only CI follow-up constrains frontend workers to1, not assertions/deadlines/test scope. The workflow is exact-reviewed against the parent one-line replacement and a new negative drift probe passes. Current full local suite is1017. Both bundles were rebuilt from the CI-fix source above. That installed NSIS reaccepted fresh project/pages and single instance, v20 isolated restore108media/exact binding pairs, positive-control diagnostics privacy, and a new witnessed uninstall/reinstall/reopen cycle. Final docs alone follow this installer-source checkpoint; no runtime or validation bytes change afterward.
