@@ -15,6 +15,18 @@ Reviewed initial paths:
 - docs/architecture/PHASE14_RELEASE_BOUNDARY.md
 - scripts/testing/release-isolation-fixture.py
 
+Installer-only blocker repair:
+
+- src-tauri/tauri.conf.json: `bundle.windows.wix.version=2.0.0` maps the
+  unchanged product version `2.0.0-personal` onto MSI's numeric version
+  contract. Bundle targets and application identifier remain unchanged.
+- scripts/testing/release-config.test.ts: regression verifies product version
+  alignment, the supported numeric WiX override and retained bundle identity.
+
+Original `pnpm tauri build` compiled the executable but failed MSI bundling on
+the nonnumeric prerelease label. The focused regression reproduced the missing
+override before the fix. Both installers must be rebuilt after this fix.
+
 Final evidence may add the release checklist and RC baseline document. Any
 runtime/installer configuration fix requires separately recorded root cause,
 regression coverage, necessary Native reacceptance and final-source rebuild.
