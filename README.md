@@ -4,7 +4,27 @@ AI Studio is a Windows desktop foundation for a local AI image/video production 
 
 Released: `v2.0.0-personal` (AI Studio v2 Personal Edition stable baseline; see `docs/RELEASE_NOTES_v2.0.0-personal.md`).
 Previous stable maintenance baseline: `v1.3.1` (see `docs/RELEASE_NOTES_v1.3.1.md`).
-Development: v2.0.0 Personal Edition baseline frozen; next development phase not started.
+Development: Architecture Reset V3 release-candidate acceptance for
+`2.0.0-personal` is in progress. This does not create a new tag or GitHub Release.
+
+## Current workspace
+
+Select a project, then use **Overview**, **Create**, **Runs**, and **Library**.
+Create unifies image/video inputs and readiness; Runs presents execution and
+results; Library presents project-owned media and explicit relations. Technical
+workflow/version/recipe details remain in **Advanced Workflow Lab**. **System
+Settings** exposes read-only diagnostics and a local, privacy-filtered diagnostic
+export. Queue Start remains the only production execution gate.
+
+Project archives currently export **Backup v20**. The reader accepts v1–v20;
+older formats cannot contain later fields, and missing dependencies/warnings
+remain visible. See the release notes and candidate checklist for actual
+compatibility and installed-app evidence, not a blanket data-loss guarantee.
+
+## Historical implementation records
+
+The milestone descriptions below are historical evidence, not current
+navigation labels or a new live-generation claim.
 The historical 0.3.0 product defined Krea2 as independent batch image generation
 and MiniMax H3 as independent asset + prompt batch video generation. There is
 no automatic Krea2→H3 pipeline; live validation is `DEFERRED BY PRODUCT OWNER`.

@@ -1,83 +1,73 @@
-# AI Studio v2.0.0 Personal Edition
+# AI Studio 2.0.0 Personal Edition — release candidate
 
-AI Studio v2.0.0 Personal Edition is the stable baseline for a local-first AI
-creation workspace. It helps one person keep the production path, creative
-assets, prompt/model context, local tools, provenance, and project archives in
-one durable desktop workspace.
+AI Studio is a local-first Windows desktop workspace for project-owned image
+and video production. This document describes the Architecture Reset candidate;
+it does not announce a new tag or GitHub Release.
 
-## Core capabilities
+## Current product
 
-### Production Core
+- **Project-first workspace:** Overview, Create, Runs and Library share the
+  selected project context.
+- **Unified Create:** shot selection, image/video stage, prompt, generator,
+  parameters and readiness in one product entry. Creating work does not bypass
+  the existing Production Queue; Queue Start is the only execution gate.
+- **Unified Runs:** execution history, results, visible failure state and
+  capability-governed retry/edit-input actions reuse existing task/queue facts.
+- **Unified Library:** project-owned media previews, prompt details, explicit
+  relations and reuse in Create; referenced deletion is guarded.
+- **Advanced Workflow Lab:** exact workflow version + recipe identities,
+  version history and technical diagnostics remain in the advanced workspace.
+- **System diagnostics:** read-only health, bounded task timelines and grouped
+  failures. Missing telemetry is unknown/null, not a zero-duration success.
+  Diagnostic ZIP export is local and excludes prompts, credentials, source
+  workflow/recipe contents, database files, media bytes and absolute paths.
 
-- Project, Shot, Task, Generation, Queue, and Review continuity;
-- Queue Start remains the only production execution gate; and
-- Comfy execution admission covers the actual generation lifecycle rather than
-  only the IPC submission call.
+## Performance and ownership
 
-### Asset Library
+Measured Runs/Library/Workflow paths reduce duplicate parent reads, redundant
+refreshes and repeated preset work. This is not a claim that every workflow or
+project is faster. SQLite and filesystem-backed media remain local; existing
+repositories own persistence and typed Tauri transport owns frontend access.
+There is no new Task, Queue, metrics database, remote telemetry or cloud sync.
 
-- project-scoped Asset and immutable AssetVersion history;
-- explicit AssetRelation and GenerationAssetVersion lineage;
-- image, video, and audio media metadata and previews; and
-- filesystem media with SQLite metadata, checksums, and safe deletion guards.
+## Project archives and compatibility
 
-### Prompt Studio
+- Current export format is **Backup v20**.
+- The reader explicitly accepts **v1–v20**; compatibility depends on valid
+  archived contents. Older formats may omit later v2 data and surface warnings.
+- Export, inspect and restore use explicit stored identities and project-owned
+  ID remapping, not filenames, paths, timestamps or prompt-text inference.
+- Current v20 roundtrip tests cover shot selection/prompts, binding identities,
+  asset versions/relations, generation lineage and artifact reviews. v18/v19
+  compatibility regressions also pass in the full Rust suite.
+- Required media is validated before restore commits. Restore creates a new
+  project; it must not overwrite the source project.
+- Current database migration maximum is **42** (71 named business tables).
+  Database upgrades must be tested on copies; never on a unique original.
+- Existing compatibility recipe repairs retain historical versions and expose
+  their status. They are not guessed provenance repair or autonomous tool use.
 
-- reusable Prompt and PromptVersion records;
-- canonical Model and ModelVersion registry; and
-- explicit prompt/model context in supported generation provenance.
+## Installation and acceptance
 
-### Local Tool Hub
+The candidate uses version `2.0.0-personal` consistently across frontend, Rust
+and Tauri. NSIS is the primary Windows installer; MSI availability and actual
+installation results must be reported separately. No models are bundled;
+ComfyUI and runtime packages remain external prerequisites.
 
-- Tool, ToolInstance, ToolVersion, and Capability inventory;
-- read-only health state; and
-- no automatic installation, process start, process stop, or execution.
+The release checklist and RC baseline record fresh install, upgrade, backup,
+uninstall/reinstall, installed-app privacy, installer hashes and exact-source
+CI evidence. Checks still marked NOT VERIFIED are not release claims. An
+unsigned local installer may require a Windows trust prompt; it is not evidence
+of signed publication or an automatic update channel.
 
-### Project Archive
+## Known issues and non-goals
 
-- Backup v19 logical project package;
-- export, inspect, and restore with explicit project-owned ID remapping;
-- AssetVersion, tool usage, and generation-to-asset lineage preservation; and
-- visible UNKNOWN warnings for missing canonical models/tools without guessed
-  relations.
+See `AI_STUDIO_V2_KNOWN_ISSUES.md` for P2 UI polish, explicit Tool Hub discovery,
+Prompt statistics, search, unusually large-library tuning and media maintenance.
+Release readiness requires no unresolved P0/P1 blockers; see the candidate
+checklist for that decision, rather than inferring it from historical evidence.
 
-## Architecture and data ownership
-
-AI Studio remains local-first: SQLite owns structured metadata and the
-filesystem owns media. Rust repositories and application services own
-persistence; the React frontend uses typed Tauri transport. Existing Project,
-Shot, Task, Queue, Review, Asset, Prompt, Generation, and Comfy authorities are
-retained rather than duplicated.
-
-Historical relationships are trustworthy by construction. Restore and lineage
-operations use explicit IDs and stored output keys only; filenames, paths,
-timestamps, and prompt text are never used to infer a relationship.
-
-## Migration and archive compatibility
-
-- Existing v1.3.1 databases continue through the additive migration path.
-- Fresh databases apply the complete migration chain.
-- Backup v19 is the stable archive baseline.
-- Historical v18 packages remain inspectable/restorable where their contents
-  permit; absent v2 data is reported visibly rather than hidden.
-- Required media is checked before a restore is committed, preventing partial
-  restores that point at missing files.
-
-## Known issues
-
-Non-blocking follow-ups are recorded in
-`docs/AI_STUDIO_V2_KNOWN_ISSUES.md`: UI polish, explicit Tool Hub discovery,
-Prompt statistics, search enhancement, large-library tuning, and local media
-maintenance. `P0=NONE` and `P1=NONE`.
-
-## Verification
-
-The release gate runs the frontend test/type/build checks, Rust format/check/test
-checks, and Source-only CI against the exact final release commit. The final
-commit SHA and CI run are recorded in the DEV-131-0 completion result.
-
-## Non-goals
-
-This release does not add SaaS, cloud sync, multi-user permissions, an AI
-Agent, auto-decision logic, a new Queue/Task/Generation system, or a replacement
-workflow engine.
+This candidate does not add audio-input production, standalone audio generation,
+new workflow modes, SaaS, cloud sync, multi-user permissions, an AI Agent or a
+replacement workflow engine. No expensive new H3 video benchmark is required
+by the installer gate; any skipped GPU smoke is explicitly reported.

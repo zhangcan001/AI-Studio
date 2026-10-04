@@ -37,10 +37,22 @@ queue-before-task/Comfy, Shot-linkage, and retry-lineage behavior tests in
 P0=NONE
 P1=NONE
 UNKNOWN≠FAILURE_WHEN_VISIBLE
-NO_AUTO_REPAIR=YES
+NO_GUESSED_RELATION_REPAIR=YES
 ```
 
 Known issues must remain visible in future release notes when they affect a
 user decision. They must not be silently converted into new product scope or
 used to weaken the Queue, Task, provenance, project-isolation, or archive
 boundaries.
+
+Recipe compatibility repair jobs are a separate, existing startup/import
+mechanism: they retain historical recipe versions, publish repaired versions,
+and may retarget affected bindings/publication through the existing lifecycle
+contract. Their status is visible in System Settings. The no-guessing policy
+does not mean these repair jobs are disabled. Tool Hub does not implicitly
+install or start external tools.
+
+The Architecture Reset release candidate is not a new tag or GitHub Release.
+Its installer, upgrade and privacy acceptance must be tracked separately in
+the candidate checklist; historical P0/P1 closure is not proof those checks
+have already been completed for a new bundle.
