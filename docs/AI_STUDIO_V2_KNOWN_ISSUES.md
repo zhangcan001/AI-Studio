@@ -56,3 +56,26 @@ The Architecture Reset release candidate is not a new tag or GitHub Release.
 Its installer, upgrade and privacy acceptance must be tracked separately in
 the candidate checklist; historical P0/P1 closure is not proof those checks
 have already been completed for a new bundle.
+
+## Candidate setup boundaries
+
+The five seeded image/H3 workflow definitions still require an explicit runtime
+capability/node refresh, compatible ComfyUI nodes and external model weights
+before becoming production-ready. Fresh package presence is not readiness.
+Unavailable runtime/package reads remain visibly UNKNOWN rather than healthy.
+
+Generic advanced panels may retain unavailable audio-related mode labels, and
+the Library can view imported/historical audio. These do not promise audio-input
+production, standalone audio generation or image-plus-audio generation in the
+shipped image/H3 scope. Removing dormant generic labels is a P2 presentation
+follow-up, not a new release feature.
+
+The Windows candidate is unsigned. NSIS installation/uninstallation/reinstallation
+is the validated path. MSI generation and numeric metadata are validated, but
+MSI installation is NOT VERIFIED in this gate; do not describe it as tested.
+
+Two candidate blockers were repaired: nonnumeric personal prerelease metadata
+prevented MSI bundling; omitted empty restore-report arrays crashed the typed
+UI after successful archive restoration. Both have red/green regressions; the
+final-source NSIS app reaccepted restoration without a white screen. Final
+publication still requires the candidate's exact-HEAD CI authority.

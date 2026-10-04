@@ -52,7 +52,7 @@ There is no new Task, Queue, metrics database, remote telemetry or cloud sync.
 The candidate uses version `2.0.0-personal` consistently across frontend, Rust
 and Tauri. NSIS is the primary Windows installer; MSI availability and actual
 installation results must be reported separately. No models are bundled;
-ComfyUI and runtime packages remain external prerequisites.
+ComfyUI, model weights and required custom nodes remain external prerequisites. First launch seeds five built-in image/H3 workflow definitions into the data-root workflow library when their package directories are absent; user-imported packages are also data-backed. A copied package directory alone does not establish generator readiness.
 
 The release checklist and RC baseline record fresh install, upgrade, backup,
 uninstall/reinstall, installed-app privacy, installer hashes and exact-source
@@ -71,3 +71,11 @@ This candidate does not add audio-input production, standalone audio generation,
 new workflow modes, SaaS, cloud sync, multi-user permissions, an AI Agent or a
 replacement workflow engine. No expensive new H3 video benchmark is required
 by the installer gate; any skipped GPU smoke is explicitly reported.
+
+Candidate setup: the seeded definitions need runtime/node capability refresh
+and compatible external models before production readiness. Generic advanced
+surfaces can show unavailable audio mode labels; this is not shipped standalone
+audio or image-plus-audio generation. The Library retains historical/imported
+audio viewing. NSIS is the validated install/reinstall path; MSI was generated
+successfully but its installation is NOT VERIFIED. See Known Issues for these
+visible setup and validation boundaries.

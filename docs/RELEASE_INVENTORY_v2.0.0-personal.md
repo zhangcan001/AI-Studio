@@ -22,9 +22,7 @@ recorded in the candidate checklist.
 
 - Windows bundling is active with `targets: all` (NSIS and MSI expected).
 - Standard build: `pnpm tauri build`; frontend prebuild: `pnpm build`.
-- Runtime workflow packages are external, under the configured data root's
-  `workflow_library`; no models are bundled. Installed package directories are
-  not proof of active/published catalog availability.
+- Runtime workflow packages reside under the configured data root's `workflow_library`. Installed Native evidence subsequently confirmed five built-in image/H3 definitions are seeded when their directories are absent; models, ComfyUI and custom nodes are not bundled. Package directories alone are not proof of active/published catalog availability.
 - Existing per-user installer registration points to a previous isolated
   temporary acceptance installation. Preserve it until safe installation
   isolation is established; do not uninstall an unknown user installation.
