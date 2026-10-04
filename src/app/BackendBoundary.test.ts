@@ -8,6 +8,8 @@ import { createHash } from "node:crypto";
 import { backendPerformanceBoundary, backendBoundary, productionRust, sqlFootprint, rustFiles } from "../../scripts/backend-boundary-guard.mjs";
 // @ts-expect-error Build-time successor validator, never production browser code.
 import { phase13Boundary } from "../../scripts/phase13-observability-guard.mjs";
+// @ts-expect-error Build-time current successor, not application code.
+import { m1ParentReader } from "../../scripts/m1-readiness-boundary-guard.mjs";
 const read=(p:string):string=>readFileSync(p,"utf8");
 const manifest=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json"));
 const phase13=JSON.parse(read("docs/architecture/phase13-observability.json"));
@@ -48,7 +50,8 @@ it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=
  // Phase10 advances only explicitly scoped frontend seam pins; backend/IPC remain exact.
  const phase9=JSON.parse(read("docs/architecture/phase9-style-cleanup.json"));
  const phase10=JSON.parse(read("docs/architecture/phase10-frontend-architecture.json"));
- for(const [path,digest] of Object.entries(manifest.compatibilityFiles))expect(createHash("sha256").update(read(path).replace(/\r\n/g,"\n")).digest("hex"),path).toBe(phase13.frontend.afterHashes[path]??(path==='src/app/App.css'?phase9.styleSnapshots[path]:phase10.frontendSuccessor[path]??digest));
+ const current=m1ParentReader('.');expect(current.violations).toEqual([]);
+ for(const [path,digest] of Object.entries(manifest.compatibilityFiles))expect(createHash("sha256").update(read(path).replace(/\r\n/g,"\n")).digest("hex"),path).toBe(current.afterHashes[path]??phase13.frontend.afterHashes[path]??(path==='src/app/App.css'?phase9.styleSnapshots[path]:phase10.frontendSuccessor[path]??digest));
  expect(read('src-tauri/src/application/project_backup_service.rs')).toContain('const BACKUP_VERSION: u32 = 20;');
 });
 });

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { m1ParentReader } from './m1-readiness-boundary-guard.mjs';
 
 export const RELEASE_PARENT = '52ba662d3e4f0a5e14fe30028be6fcc5778ac1eb';
 const rustPath = 'src-tauri/src/application/project_backup_service.rs';
@@ -22,10 +23,12 @@ const files = (root, dir) => readdirSync(join(root, dir), { withFileTypes: true 
 const aggregate = (paths, read) => hash(paths.map(p => `${p}\n${normalize(read(p))}`).join('\n'));
 
 export function releaseParentReader(root, reviewOverride) {
+  const checkpoint = m1ParentReader(root);
+  const live = (_root, path) => checkpoint.read(path);
   const proofPath = join(root, 'docs/architecture/phase14-release.json');
   if (!existsSync(proofPath) && !reviewOverride) return { violations: [], read: path => live(root, path) };
   const proof = reviewOverride ?? JSON.parse(readFileSync(proofPath, 'utf8'));
-  const violations = [];
+  const violations = [...checkpoint.violations];
   const fail = s => violations.push(`phase14-${s}`);
   if (proof.phase !== 14 || proof.schemaVersion !== 1 || proof.parentHead !== RELEASE_PARENT ||
       proof.reason !== 'release-compatibility-and-validation-resource-boundary') fail('invalid-release-proof');
@@ -66,7 +69,7 @@ export function releaseParentReader(root, reviewOverride) {
     'workflowEngineChanged', 'schemaChanged', 'backupFormatChanged', 'remoteTelemetry']) {
     if (proof.invariants?.[flag] !== false) fail(`authority:${flag}`);
   }
-  return { violations, backendAggregateSha256: violations.length ? undefined : proof.backend.afterAggregateHash, read: path => {
+  return { violations, addedPaths: checkpoint.addedPaths, backendAggregateSha256: violations.length ? undefined : checkpoint.backendAggregateSha256 ?? proof.backend.afterAggregateHash, read: path => {
     if (violations.length || ![rustPath, guardPath, workflowPath].includes(path)) return live(root, path);
     return path === rustPath ? blobs.get(path) : parent(root, path);
   } };

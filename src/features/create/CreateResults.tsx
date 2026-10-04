@@ -4,6 +4,7 @@ import { normalizeProductError } from "../../product/errors";
 import type { CreationAsset } from "../../product/types";
 import type { CreateController } from "./CreateController";
 import { candidateForStage, runLabels, type CreateRoute } from "./createModel";
+import { focusCreateInput, resolveCreateReadinessAction, type CreateReadinessAction } from "./createReadinessAction";
 export function RunStatusCard({ controller: c }: { controller: CreateController }) {
   const edit = () => document.querySelector<HTMLTextAreaElement>(".create-page textarea")?.focus();
   return <section aria-label="本次运行" aria-live="polite"><h2>本次运行</h2>
@@ -36,9 +37,23 @@ export function CandidatePanel({ controller: c, route }: { controller: CreateCon
 }
 export function GenerateBar({ controller: c }: { controller: CreateController }) {
   const issues = c.readiness?.issues ?? [];
-  const focus = (field?: string) => { if (field) document.getElementById(`create-field-${field}`)?.focus(); };
+  function act(action: CreateReadinessAction) {
+    switch (action.kind) {
+      case "focus-field": focusCreateInput(action.field); break;
+      case "focus-inputs": focusCreateInput(); break;
+      case "select-generator": focusCreateInput("selectionRef"); break;
+      case "open-runtime-settings": c.openRuntimeSettings(); break;
+      case "recheck": void c.recheckReadiness(); break;
+      case "open-projects": c.openProjects(); break;
+      case "none": break;
+    }
+  }
   return <footer className="create-generate-bar"><div aria-live="polite">{c.readiness?.ready ? "可以生成" : c.readiness ? "请检查输入或运行环境" : "正在检查准备状态"}
-    {issues.map((issue, index) => <p key={index}>{normalizeProductError(issue).message}<button type="button" onClick={() => focus(issue.details.field)}>{issue.details.action === "TRY_LATER" ? "查看并修改" : "修改输入"}</button></p>)}
+    {issues.map((issue, index) => {
+      const error = normalizeProductError(issue);
+      const action = resolveCreateReadinessAction(error.details);
+      return <p key={index}>{error.message}{action.kind === "none" ? <small>{action.explanation}</small> : <button type="button" disabled={c.busy} onClick={() => act(action)}>{action.label}</button>}</p>;
+    })}
     {c.error && <p role="alert">{c.error}</p>}</div>
     <button className="primary" type="button" disabled={c.busy || !c.generator?.availability} onClick={() => void c.generate()}>{c.busy ? "正在提交…" : "生成"}</button></footer>;
 }

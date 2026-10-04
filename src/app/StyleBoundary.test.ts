@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs';
 import { styleBoundary, styleInventory, specificity, debtViolations, expandedCss, canonical, read, hash } from '../../scripts/style-boundary-guard.mjs';
 // @ts-expect-error Build-time exact successor validator, not browser code.
 import { phase13Boundary } from '../../scripts/phase13-observability-guard.mjs';
+// @ts-expect-error Build-time current successor, not application code.
+import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
 const m=JSON.parse(readFileSync('docs/architecture/phase9-style-cleanup.json','utf8'));
 it('phase9_target1 accounts for all styles and classifies inline candidates',()=>{
  expect(m.BLOCKED_UNKNOWN).toBe(0);expect(m.rows.length).toBe(m.before.selectors);
@@ -49,6 +51,7 @@ it('phase9_target8 pins style successor while preserving all historical non-CSS 
  const phase13=JSON.parse(read('docs/architecture/phase13-observability.json'));
  const checked=phase13Boundary('.',phase13,JSON.parse(read('docs/architecture/phase12-performance.json')),phase8.backendSourceSnapshot);
  expect(checked.violations).toEqual([]);
- for(const [path,digest] of Object.entries(phase8.compatibilityFiles))if(!path.endsWith('.css'))expect(hash(read(path)),path).toBe(phase13.frontend.afterHashes[path]??phase10.frontendSuccessor[path]??digest);
+ const current=m1ParentReader('.');expect(current.violations).toEqual([]);
+ for(const [path,digest] of Object.entries(phase8.compatibilityFiles))if(!path.endsWith('.css'))expect(hash(read(path)),path).toBe(current.afterHashes[path]??phase13.frontend.afterHashes[path]??phase10.frontendSuccessor[path]??digest);
  expect(m.after.inline).toBe(m.before.inline);expect(m.proofs.containment.selectors).toBeGreaterThan(0);
 });

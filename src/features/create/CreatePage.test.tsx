@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { StrictMode, useState } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error Node helpers execute only in Vitest; application excludes Node types.
 import { readFileSync, readdirSync } from "node:fs";
@@ -10,6 +10,7 @@ import type { CreationContext, GeneratorOption, ProductRun, CreationAsset } from
 import type { AppRoute } from "../../app/routes/types";
 import { normalCreate, mediaValue, modeLabel } from "./createModel";
 import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
+import { resolveCreateReadinessAction } from "./createReadinessAction";
 const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), bindingSet: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, project: { generatorBindingSet: api.bindingSet } } }));
 const prompt = { type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" } as const;
@@ -38,6 +39,101 @@ beforeEach(() => {
   api.referencesSet.mockResolvedValue(undefined); api.selectResult.mockImplementation(async (_p: string, _s: string, _stage: string, id: string) => { candidates = candidates.map(item => ({ ...item, selected: item.id === id })); });
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   URL.createObjectURL = vi.fn(() => "blob:fixture"); URL.revokeObjectURL = vi.fn();
+});
+describe("M1-1 readiness actions", () => {
+  const blocked = (action: string, field?: string) => ({ ready: false, issues: [{ code: "RUNTIME_BLOCKED", message: "private backend detail", details: { action, field, retryable: false, technicalDetails: "private path" } }], fieldErrors: [], actions: [action] });
+  async function show(action: string, field?: string) {
+    api.readinessGet.mockResolvedValue(blocked(action, field));
+    render(<Host />); await loaded();
+  }
+  it("focuses the generator without changing selection", async () => {
+    await show("SELECT_GENERATOR");
+    fireEvent.click(await screen.findByRole("button", { name: "重新选择生成器" }));
+    expect(document.activeElement).toBe(screen.getByLabelText("选择生成器"));
+    expect((screen.getByLabelText("选择生成器") as HTMLSelectElement).value).toBe("image-opaque");
+    expect(api.generate).not.toHaveBeenCalled(); expect(navigations).not.toHaveBeenCalled();
+  });
+  it.each([undefined, "future_field"])("falls back to the actual input region for field %s", async field => {
+    await show("EDIT_INPUT", field);
+    fireEvent.click(await screen.findByRole("button", { name: field ? "修改此输入" : "检查输入" }));
+    expect(document.activeElement).toBe(screen.getByRole("main", { name: "创作输入" }));
+    expect(api.generate).not.toHaveBeenCalled();
+    expect(screen.queryByText("private backend detail")).toBeNull(); expect(screen.queryByText("private path")).toBeNull();
+  });
+  it("rechecks with a read-only key without navigation or generation", async () => {
+    await show("TRY_LATER");
+    const button = await screen.findByRole("button", { name: "重新检查" });
+    const before = api.readinessGet.mock.calls.length;
+    api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
+    fireEvent.click(button);
+    await screen.findByText("可以生成");
+    expect(api.readinessGet.mock.calls.length).toBe(before + 1);
+    expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ submissionIdempotencyKey: "readiness-only", projectId: "project" }));
+    expect(api.generate).not.toHaveBeenCalled(); expect(api.retry).not.toHaveBeenCalled(); expect(navigations).not.toHaveBeenCalled();
+  });
+  it("does not guess unknown actions or binding/run destinations", async () => {
+    await show("FUTURE_ACTION");
+    expect(await screen.findByText("无法自动定位，请根据提示检查当前输入或运行环境。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "检查运行环境" })).toBeNull();
+    expect(api.generate).not.toHaveBeenCalled(); expect(api.retry).not.toHaveBeenCalled(); expect(navigations).not.toHaveBeenCalled();
+    expect(resolveCreateReadinessAction({ action: "OPEN_RUN", retryable: false }).kind).toBe("none");
+    expect(resolveCreateReadinessAction({ action: "REVIEW_CURRENT_BINDING", retryable: false }).kind).toBe("none");
+  });
+  it("uses the existing project-list destination", async () => {
+    await show("OPEN_PROJECTS");
+    fireEvent.click(await screen.findByRole("button", { name: "返回项目列表" }));
+    expect(navigations).toHaveBeenLastCalledWith({ kind: "project-list" }); expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("preserves draft, exact generator, RunRef and accepted state across Settings return", async () => {
+    const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
+    const navigate = vi.fn();
+    api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "FAILED_TO_START", startIssue: null });
+    const view = render(<CreatePage route={route} navigate={navigate} />); await loaded();
+    fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "fl-opaque" } });
+    fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "Settings return draft" } });
+    fireEvent.change(screen.getByLabelText("首帧"), { target: { value: "img1" } });
+    fireEvent.change(screen.getByLabelText("尾帧"), { target: { value: "img2" } });
+    fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "1280" } });
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    await screen.findByText("已加入队列，启动失败");
+    // Preserve accepted independently of dirty; editing removes accepted by existing contract.
+    useStudioStore.getState().setValue("width", { type: "integer", value: 1280 });
+    api.readinessGet.mockResolvedValue(blocked("OPEN_RUNTIME_SETTINGS"));
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    fireEvent.click(await screen.findByRole("button", { name: "检查运行环境" }));
+    expect(navigate).toHaveBeenLastCalledWith({ kind: "system-settings", section: "general", returnTo: route });
+    const draft = useStudioStore.getState().values;
+    view.unmount();
+    expect(useStudioStore.getState().draftDirty).toBe(true);
+    expect(useStudioStore.getState().creationLabReturn?.accepted?.startOutcome).toBe("FAILED_TO_START");
+    render(<CreatePage route={route} navigate={navigate} />); await loaded();
+    expect(useStudioStore.getState().values).toEqual(draft);
+    expect(useStudioStore.getState().draftDirty).toBe(true);
+    expect((screen.getByLabelText("选择生成器") as HTMLSelectElement).value).toBe("fl-opaque");
+    expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("Settings return draft");
+    await screen.findByText("已加入队列，启动失败");
+    fireEvent.click(screen.getByRole("button", { name: "查看运行详情" }));
+    expect(navigate).toHaveBeenLastCalledWith({ kind: "runs", projectId: "project", run: { source: "queue-batch", id: "run" } });
+    expect(api.generate).toHaveBeenCalledTimes(1);
+  });
+  it.each(["resolve", "reject"])("ignores a manual recheck %s after switching project", async outcome => {
+    let resolve!: (value: unknown) => void; let reject!: (error: unknown) => void;
+    const a = { kind: "create", projectId: "project", shotId: "shot1", stage: "image" } as const;
+    api.readinessGet.mockResolvedValue(blocked("TRY_LATER"));
+    const view = render(<CreatePage route={a} navigate={navigations} />); await loaded();
+    const button = await screen.findByRole("button", { name: "重新检查" });
+    api.readinessGet.mockImplementationOnce(() => new Promise((yes, no) => { resolve = yes; reject = no; }));
+    fireEvent.click(button);
+    api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
+    view.rerender(<CreatePage route={{ ...a, projectId: "other" }} navigate={navigations} />);
+    await loaded(); await screen.findByText("可以生成");
+    fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "B draft" } });
+    await act(async () => { if (outcome === "resolve") resolve(blocked("OPEN_RUNTIME_SETTINGS")); else reject({ code: "ASSET_UNAVAILABLE" }); });
+    expect(screen.queryByRole("button", { name: "检查运行环境" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "B draft" });
+    expect(api.generate).not.toHaveBeenCalled();
+  });
 });
 afterEach(cleanup);
 const loaded = () => screen.findByLabelText("选择生成器");
@@ -110,7 +206,7 @@ describe("Target14 run", () => {
   it("field errors focus input, and retry only uses ProductRun actions/snapshot locator", async () => {
     api.readinessGet.mockResolvedValue({ ready: false, issues: [{ code: "INPUT_OUT_OF_RANGE", message: "secret", details: { field: "width", action: "EDIT_INPUT", retryable: false } }], fieldErrors: [], actions: ["EDIT_INPUT"] });
     render(<Host />); await loaded(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
-    fireEvent.click(await screen.findByRole("button", { name: "修改输入" })); expect(document.activeElement).toBe(screen.getByLabelText("宽度")); expect(api.generate).not.toHaveBeenCalled(); expect(screen.queryByText("secret")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "修改此输入" })); expect(document.activeElement).toBe(screen.getByLabelText("宽度")); expect(api.generate).not.toHaveBeenCalled(); expect(screen.queryByText("secret")).toBeNull();
   });
   it("shows retry only when allowed, preserving the old run locator", async () => {
     api.runGet.mockResolvedValue(run("FAILED", ["RETRY"])); render(<Host />); await loaded(); fireEvent.click(screen.getByRole("button", { name: "生成" }));

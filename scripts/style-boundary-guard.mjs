@@ -9,6 +9,7 @@ export const postcss = createRequire(require.resolve('vite'))('postcss');
 export const read = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 export const hash = s => createHash('sha256').update(s).digest('hex');
 import { phase13Boundary } from './phase13-observability-guard.mjs';
+import { m1ParentReader } from './m1-readiness-boundary-guard.mjs';
 export function files(root) {
   return readdirSync(root, { withFileTypes:true }).flatMap(e => e.isDirectory() ? files(`${root}/${e.name}`) : [`${root}/${e.name}`]).sort();
 }
@@ -120,6 +121,9 @@ export function styleBoundary(root,manifest) {
     violations.push(...phase13Result.violations);
     Object.assign(productionSnapshot,phase13.frontend.afterHashes);
   }
+  const checkpoint=m1ParentReader(root);
+  violations.push(...checkpoint.violations);
+  if(!checkpoint.violations.length)for(const [path,digest] of Object.entries(checkpoint.afterHashes))if(/^src\/.+\.tsx?$/.test(path))productionSnapshot[path]=digest;
   for(const [path,digest] of Object.entries(productionSnapshot))if(hash(read(`${root}/${path}`))!==digest)violations.push(`behavior:${path}`);
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')))if(!(path in productionSnapshot))violations.push(`new-production-source:${path}`);
   for(const [path,digest] of Object.entries(manifest.styleSnapshots))if(hash(read(`${root}/${path}`))!==digest)violations.push(`unreviewed-style:${path}`);

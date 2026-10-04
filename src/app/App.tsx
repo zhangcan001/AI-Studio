@@ -62,7 +62,7 @@ import { useDraftConfirmation } from "./routes/useDraftConfirmation";
 import { fromLegacyLocation, toLegacyLocation, type LegacyLocation } from "./routes/legacyAdapter";
 import { readRouteResume, resolveResume, validateResumeChildren } from "./routes/resumeAdapter";
 import { productClient } from "../product/client";
-import { routeProjectId } from "./routes/types";
+import { routeProjectId, type AppRoute } from "./routes/types";
 import { labCreationSelection } from "../services/workflowLabClient";
 import "./App.css";
 import "../styles/studioTokens.css";
@@ -146,6 +146,15 @@ function keepsNativeContextMenu(target: EventTarget | null): boolean {
 // Stable use-case ports are composition dependencies, not a new IPC/client layer.
 const taskRecoveryServices = { listRecentTasks, reconcileActiveTasks };
 const shotConsistencyServices = { getConsistencyScopeBinding, getShotConsistencyBinding, getShotContextDraft, listConsistencyProfiles, listCostumeVariants, listReferenceSets, replaceConsistencyScopeBinding, replaceShotConsistencyBinding };
+
+export function preservesCreateDraftForSettings(current: AppRoute, next: AppRoute, savedScope?: string) {
+  return current.kind === "create" && next.kind === "system-settings"
+    && (next.section === "advanced-workflows" || next.section === "general")
+    && next.returnTo?.kind === "create"
+    && next.returnTo.projectId === current.projectId && next.returnTo.shotId === current.shotId
+    && next.returnTo.stage === current.stage && next.returnTo.surface === current.surface
+    && savedScope === `${current.projectId}:${current.shotId ?? ""}:${current.stage}`;
+}
 
 function App() {
   const { confirm: confirmDraftDiscard, dialog: draftConfirmation } = useDraftConfirmation();
@@ -312,8 +321,8 @@ function App() {
   }
   async function navigate(next: import("./routes/types").AppRoute) {
     const nextLegacy = toLegacyLocation(next);
-    const preserveLabDraft = next.kind === "system-settings" && next.section === "advanced-workflows" && next.returnTo?.kind === "create" && next.returnTo.projectId === activeProjectId;
-    if (!preserveLabDraft && shotDraftDirty && (nextLegacy.workspace !== "shots" || nextLegacy.projectId !== activeProjectId || nextLegacy.shotId !== resumeShotId || nextLegacy.section !== activeStudioSection)) {
+    const preserveCreateDraft = preservesCreateDraftForSettings(route, next, useStudioStore.getState().creationLabReturn?.scope);
+    if (!preserveCreateDraft && shotDraftDirty && (nextLegacy.workspace !== "shots" || nextLegacy.projectId !== activeProjectId || nextLegacy.shotId !== resumeShotId || nextLegacy.section !== activeStudioSection)) {
       if (!await confirmDraftDiscard("镜头有未保存的修改。离开会放弃这些修改，是否继续？")) return false;
     }
     if (!await allowProjectSwitch(routeProjectId(next))) return false;

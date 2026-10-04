@@ -250,6 +250,41 @@ async fn product_creation_submission_deduplicates_and_preserves_runref_after_sta
     assert_eq!(count(&pool, "batches").await, 1);
     assert_eq!(count(&pool, "items").await, 1);
     assert_eq!(count(&pool, "tasks").await, 0); // Accepted is not succeeded.
+                                                // Owned fixture: represent an existing running batch without starting execution.
+    sqlx::query("UPDATE production_batches SET status = 'RUNNING' WHERE id = ?")
+        .bind(&first.run_ref.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let busy = facade
+        .readiness_get(
+            &services.queue,
+            request(
+                &shot.id,
+                BTreeMap::from([
+                    (
+                        "prompt".into(),
+                        GenerationInputValue::Text("recheck".into()),
+                    ),
+                    (
+                        "reference_video".into(),
+                        GenerationInputValue::VideoAsset(asset.clone()),
+                    ),
+                ]),
+                "readiness-only",
+            ),
+        )
+        .await;
+    assert!(!busy.ready);
+    assert_eq!(busy.issues[0].code, "RUNTIME_BLOCKED");
+    assert_eq!(busy.issues[0].details.action, Some("TRY_LATER"));
+    assert_eq!(count(&pool, "batches").await, 1);
+    assert_eq!(count(&pool, "tasks").await, 0);
+    sqlx::query("UPDATE production_batches SET status = 'READY' WHERE id = ?")
+        .bind(&first.run_ref.id)
+        .execute(&pool)
+        .await
+        .unwrap();
     services
         .queue
         .start_for_test(PROJECT_ID, &first.run_ref.id)

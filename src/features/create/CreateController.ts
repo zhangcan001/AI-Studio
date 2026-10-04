@@ -24,11 +24,14 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   const snapshots = useRef(new Map<string, StageView>());
   const live = useRef({ selection, runRef, accepted }); live.current = { selection, runRef, accepted };
   const epoch = useRef(0);
+  const readinessEpoch = useRef(0);
+  const mounted = useRef(false);
   const attempt = useRef<string | null>(null);
   const actionLock = useRef(false);
   const owner = `${route.projectId}:${route.shotId ?? ""}`;
   const previousOwner = useRef(owner);
   const key = scopeKey(route);
+  const currentDraft = useRef({ key, selection, values }); currentDraft.current = { key, selection, values };
   const generator = generators.find(item => item.selectionRef === selection);
   useEffect(() => {
     if (previousOwner.current !== owner) { snapshots.current.clear(); previousOwner.current = owner; }
@@ -62,17 +65,29 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     };
   }, [key]); // Canonical route is the only Shot/stage owner.
   useEffect(() => { onDirtyChange?.(dirty || [...snapshots.current.entries()].some(([scope, item]) => scope !== key && item.dirty)); }, [dirty, key, loading, onDirtyChange]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => () => { onDirtyChange?.(false); const store = useStudioStore.getState(); if (!store.creationLabReturn) store.loadCreationDraft({}); }, [onDirtyChange]);
   function submission() {
     return { projectId: route.projectId, shotId: route.shotId ?? "", stage: route.stage, selectionRef: selection, values: useStudioStore.getState().values, submissionIdempotencyKey: attempt.current ?? "readiness-only" };
   }
   useEffect(() => {
+    ++readinessEpoch.current;
     setReadiness(undefined);
     if (loading || !route.shotId || !generator?.availability) return;
-    let cancelled = false;
-    const timer = setTimeout(() => { productClient.creation.readinessGet(submission()).then(value => { if (!cancelled) setReadiness(value); }).catch(error => { if (!cancelled) setError(normalizeProductError(error).message); }); }, 600);
-    return () => { cancelled = true; clearTimeout(timer); };
+    const timer = setTimeout(() => { void recheckReadiness(); }, 600);
+    return () => { ++readinessEpoch.current; clearTimeout(timer); };
   }, [values, selection, loading, key]);
+  async function recheckReadiness() {
+    if (loading || !route.shotId || !generator?.availability || actionLock.current) return;
+    const token = epoch.current;
+    const requestEpoch = ++readinessEpoch.current;
+    const draft = currentDraft.current;
+    const isCurrent = () => mounted.current && token === epoch.current && requestEpoch === readinessEpoch.current && draft.key === currentDraft.current.key && draft.selection === currentDraft.current.selection && draft.values === currentDraft.current.values;
+    try {
+      const next = await productClient.creation.readinessGet({ ...submission(), submissionIdempotencyKey: "readiness-only" });
+      if (isCurrent()) { setReadiness(next); setError(undefined); }
+    } catch (error) { if (isCurrent()) setError(normalizeProductError(error).message); }
+  }
   async function refreshContext(token = epoch.current) {
     const next = await productClient.creation.get(route.projectId, route.shotId ?? null, route.stage);
     if (token === epoch.current) setContext(next);
@@ -143,6 +158,7 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   }
   function generate() { return mutate(async () => {
     const token = epoch.current;
+    ++readinessEpoch.current; // An earlier read-only check cannot replace submit-time readiness.
     attempt.current ??= crypto.randomUUID();
     const request = submission();
     const ready = await productClient.creation.readinessGet(request);
@@ -158,7 +174,12 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); setRun(next); setRunRef(next.ref); setAccepted(null); });
   return { libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, accepted, run, runRef, error, loading, busy,
-    setValue, removeValue, chooseGenerator, generate, createShot, selectResult, setReferences, retry,
+    setValue, removeValue, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
+    openRuntimeSettings: () => {
+      useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });
+      return navigate({ kind: "system-settings", section: "general", returnTo: route });
+    },
+    openProjects: () => navigate({ kind: "project-list" }),
     refresh: () => mutate(() => refreshContext()),
     selectShot: (shotId: string) => navigate({ ...route, shotId }),
     selectStage: (stage: "image" | "video") => navigate({ ...route, stage }),

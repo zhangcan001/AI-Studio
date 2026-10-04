@@ -1,0 +1,109 @@
+{
+  "checkpoint": "M1_1_CREATE_READINESS_ACTION_ROUTING",
+  "schemaVersion": 1,
+  "parentHead": "3feefee642eb88c496bf9bcb603e95c4bb1eb03d",
+  "paths": {
+    "scripts/phase13-observability-guard.mjs": {
+      "beforeHash": "a894348abd7cc3c8adcf8e7e4af8a17afef0735ea75dacd12bdc2dcac74de454",
+      "afterHash": "cb812bdd6602c99c9515936da634276f483bdfa4d42bbd69e34301875d763d4d"
+    },
+    "scripts/phase14-release-guard.mjs": {
+      "beforeHash": "3015d68fe4bd37577e5be67ebe0a16fb7f8e81986c95635f4ad71ad2b6770581",
+      "afterHash": "24e524949206c89c95448d94f0d2043ac9e502b6317292cec8aa85247ee6fb25"
+    },
+    "scripts/style-boundary-guard.mjs": {
+      "beforeHash": "1ca3aa70a638e79d347a3a2e85e0de85101d7b2bcf7bc576ec376b405993334f",
+      "afterHash": "3add087f5073abba766c0e2262afa04b3907c58aa56be3cfeef944a3dd9d9b5c"
+    },
+    "src-tauri/src/application/product/creation_facade/submission.rs": {
+      "beforeHash": "2c15596784227ff2618d734231b8ebe7c30aadb181d2fb25c5fb6e11ccf8b3e8",
+      "afterHash": "11cf307c9f4839af893f0c4fd7b798e5fd907bec3d15d1c1d3988ecf3d092aa6"
+    },
+    "src-tauri/tests/support/creation_submission_contract.rs": {
+      "beforeHash": "3c76e714b57e4be3c7fedadff9475bd1ac13fa1f20abfa38a821bb732a201a04",
+      "afterHash": "ee32c6fb76b4717352ac1cdc5c1d21045a1c9f41252fe0eb16d20506440ea6c5"
+    },
+    "src/app/App.tsx": {
+      "beforeHash": "e7942da5df4a75fd22d1371e7cd34df0600ca4d1fcd5b28afeaf5858f4e76e1d",
+      "afterHash": "8ae4947da96699c361bdcc6b0f9ca29eecc7562bdef74c78bb4be25345bcecd3"
+    },
+    "src/app/BackendBoundary.test.ts": {
+      "beforeHash": "22c9973b7474f07dceb4b7e7bd9308eda231b90f625d270e8fccbc581ce2265f",
+      "afterHash": "bd1a8b64cc0dcce61cbc3667ceac25e3d68f98a165bac6ce320e12c38c9ec9fa"
+    },
+    "src/app/StyleBoundary.test.ts": {
+      "beforeHash": "97601b9bf3ea60fb1712a7d1ca72990141babcf02662f54c3aecaa5b0c8811a2",
+      "afterHash": "e6eaa2cd4bf70aa82edd68c574918a5bfc9515e4c7248af907ec6811d7de109c"
+    },
+    "src/features/create/CreateController.ts": {
+      "beforeHash": "a87d748867a4edc8bb5762341efed65f78187ed11f8da55c072acba69ba45f79",
+      "afterHash": "cdbadf77569714edcb52e702573e9de9d576bf6086749eb8bfd14ff991d170cf"
+    },
+    "src/features/create/CreateInputs.tsx": {
+      "beforeHash": "5b5f30641fde43e75b50800b1b6cd59b7ba60f400ed2eacffc73657f6c713e81",
+      "afterHash": "c4ee03e8913bb56b44a90af8484ec602ab1e70f006ce3425560bce4a561da436"
+    },
+    "src/features/create/CreatePage.test.tsx": {
+      "beforeHash": "8d4152ee0ca90c707bf10560ccb2371b12ec1e7a1821cf7ef01390a9d194cbaa",
+      "afterHash": "de1233732aff30944c3077033280f07115251e33aa3464ad24fc93c076729492"
+    },
+    "src/features/create/CreatePage.tsx": {
+      "beforeHash": "965f33425146ee8879c9b40a29a9bd7b668c85ff4b54567a0b08bebb878c834c",
+      "afterHash": "798d9d663098a7f456dc3bc0f43e75b82d08dcbf45bd35492314e0d6bef10023"
+    },
+    "src/features/create/CreateResults.tsx": {
+      "beforeHash": "5379e29dacd26549e2ca52012f5c10251ece38147908259284c7cda2aeab9922",
+      "afterHash": "c9cb8fe5c088d07f3ff37544a69fe677254e1dd2d38c6bb88fb70d229fed3a6a"
+    },
+    "scripts/m1-readiness-boundary-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "c365fa435efa9ac31742d5b3c722af464eabf507052340e4cb3ff2d0f6440feb"
+    },
+    "src/app/M1ReadinessBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "7d3f1cc170fc5e074b875779fe13f7fb099d797e5a2a5d04a7796c5201d1673d"
+    },
+    "src/features/create/createReadinessAction.ts": {
+      "beforeHash": null,
+      "afterHash": "4717e84981cab5467db2be2ecd8feebbee0a7b9527d4332b111877ea4ddeb63b"
+    }
+  },
+  "backend": {
+    "beforeFiles": 344,
+    "afterFiles": 344,
+    "beforeAggregateHash": "aef31ea8ac325f7677ee37d28bb1eca666716bf76a891de4d2f05669e6be8078",
+    "afterAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7",
+    "untouchedAggregateHash": "bdf22a86e7fd7e423de681df3932aab98e6e9cc270eb22d87dea3f001cbffc1e"
+  },
+  "frontend": {
+    "beforeFiles": 470,
+    "afterFiles": 472,
+    "beforeAggregateHash": "41498b891db3f4b57cec36a1c18f0ef9d5a8b5bb648401149230a6d86a151f68",
+    "afterAggregateHash": "1fbf74dbedfc3f8cf53fa6853f931ae68b5644b18e0010265d3643f55ce12750",
+    "untouchedAggregateHash": "4d72402b6f4723fecf62d174871fb0a42006b9b5514fdf506fe62a0506db7cca"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612",
+    "afterAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612",
+    "untouchedAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612"
+  },
+  "scripts": {
+    "beforeFiles": 15,
+    "afterFiles": 16,
+    "beforeAggregateHash": "cd851e28d95fd137c6f75a22bfe160a76493e582462c210a0a753f0ee154d952",
+    "afterAggregateHash": "169c59bd728c5d468210947da59ffd4b06f23c42f4aaa3be2149db63678472a1",
+    "untouchedAggregateHash": "26545ece448307050d91bd4c5b17d3982e6ae8c7673947d14e013e70d86422a5"
+  },
+  "invariants": {
+    "queueAuthorityChanged": false,
+    "taskStateMachineChanged": false,
+    "workflowEngineChanged": false,
+    "bindingOccChanged": false,
+    "draftAuthorityChanged": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "remoteTelemetry": false
+  }
+}

@@ -5,7 +5,7 @@ import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, generatorLabel, mediaKind, mediaValue } from "./createModel";
 function textValue(value?: import("../../types/generation").DraftValue) { return value?.type === "string" ? value.value : ""; }
 export function GeneratorPanel({ controller: c }: { controller: CreateController }) {
-  return <section><h2>生成器</h2><label>选择生成器<select aria-label="选择生成器" value={c.selection} disabled={c.busy} onChange={e => c.chooseGenerator(e.target.value)}>
+  return <section><h2>生成器</h2><label>选择生成器<select id="create-field-selectionRef" aria-label="选择生成器" value={c.selection} disabled={c.busy} onChange={e => c.chooseGenerator(e.target.value)}>
     <option value="">请选择</option>{c.generators.map((item, index) => <option key={item.selectionRef} value={item.selectionRef} disabled={!item.availability}>{generatorLabel(item, index)}{!item.availability ? "（不可用）" : ""}</option>)}
   </select></label>{c.generator?.availabilityReason && <p>{c.generator.availabilityReason}</p>}</section>;
 }

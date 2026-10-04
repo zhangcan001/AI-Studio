@@ -261,7 +261,7 @@ fn generation_error(error: GenerationServiceError) -> ProductError {
     };
     let mut result = ProductError::new(code, "请检查输入或运行环境后重试。", Some("EDIT_INPUT"));
     if code == "RUNTIME_BLOCKED" {
-        result.details.action = Some("TRY_LATER");
+        result.details.action = Some("OPEN_RUNTIME_SETTINGS");
     }
     if code == "GENERATOR_UNAVAILABLE" {
         result.details.action = Some("SELECT_GENERATOR");
@@ -269,4 +269,42 @@ fn generation_error(error: GenerationServiceError) -> ProductError {
     result.details.field = field;
     result.details.technical_details = Some(error.to_string());
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{application::ports::ComfyAdapterError, compiler::CompileError};
+
+    #[test]
+    fn product_creation_submission_typed_runtime_and_field_actions() {
+        for error in [
+            GenerationServiceError::Comfy(ComfyAdapterError::Offline("private endpoint".into())),
+            GenerationServiceError::ExecutionFailed {
+                code: "RUNTIME_CHECK_FAILED".into(),
+                message: "private backend detail".into(),
+                details: None,
+            },
+        ] {
+            let issue = generation_error(error);
+            assert_eq!(issue.code, "RUNTIME_BLOCKED");
+            assert_eq!(issue.details.action, Some("OPEN_RUNTIME_SETTINGS"));
+            assert!(issue.details.field.is_none());
+            assert_eq!(
+                serde_json::to_value(issue).unwrap()["details"]["action"],
+                "OPEN_RUNTIME_SETTINGS"
+            );
+        }
+        let issue = generation_error(GenerationServiceError::Compile(
+            CompileError::InputOutOfRange {
+                input: "width".into(),
+                value: 9999,
+                min: Some(64),
+                max: Some(1920),
+            },
+        ));
+        assert_eq!(issue.code, "INPUT_OUT_OF_RANGE");
+        assert_eq!(issue.details.action, Some("EDIT_INPUT"));
+        assert_eq!(issue.details.field.as_deref(), Some("width"));
+    }
 }

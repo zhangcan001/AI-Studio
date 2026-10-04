@@ -136,7 +136,7 @@ export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
 
   const baseTs = git(root, 'ls-tree', '-r', '--name-only', PHASE13_BASELINE, 'src').trim().split('\n').filter(path => /\.tsx?$/.test(path)).sort();
   primeCommitBlobs(root, PHASE13_BASELINE, baseTs);
-  const liveTs = sourceFiles(root, 'src', /\.tsx?$/);
+  const liveTs = sourceFiles(root, 'src', /\.tsx?$/).filter(path => !release.addedPaths?.includes(path));
   const frontendReview = review?.frontend;
   if (JSON.stringify([...(frontendReview?.existingPaths || [])].sort()) !== JSON.stringify([...EXPECTED_TS_EXISTING].sort()) ||
       JSON.stringify([...(frontendReview?.addedPaths || [])].sort()) !== JSON.stringify([...EXPECTED_TS_ADDED].sort())) fail('phase13-frontend-scope-mismatch');
