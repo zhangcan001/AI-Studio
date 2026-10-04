@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { releaseParentReader } from './phase14-release-guard.mjs';
 
 export const PHASE13_BASELINE = '2795ffddf964e88f3c99af2ed3f284120da4b368';
 const EXPECTED_RUST_EXISTING = [
@@ -84,6 +85,9 @@ function aggregate(paths, read) {
 
 export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
   const violations = [];
+  const release = releaseParentReader(root);
+  violations.push(...release.violations);
+  const frozenRead = path => release.read(path);
   const fail = message => violations.push(message);
   if (review?.phase !== 13 || review?.baselineHead !== PHASE13_BASELINE || review?.schemaVersion !== 1) fail('invalid-phase13-review-header');
   if (review?.migration?.maxVersion !== 42 || review.migration.tableCount !== 71 || review.migration.migration043 !== false || review.migration.backupVersion !== 20) fail('phase13-schema-boundary-changed');
@@ -120,15 +124,15 @@ export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
   if (backendReview?.beforeFiles !== baseRust.length || backendReview?.afterFiles !== liveRust.length || backendReview?.beforeAggregateSha256 !== phase12Base) fail('phase13-backend-parent-or-file-count-changed');
   if (JSON.stringify(liveRust) !== JSON.stringify(expectedLiveRust)) fail('phase13-backend-file-set-changed');
   for (const path of backendExisting) {
-    if (!backendBaseSet.has(path) || sourceDigest(baseRead(path)) !== backendReview.beforeHashes?.[path] || sourceDigest(readFileSync(join(root, path), 'utf8')) !== backendReview.afterHashes?.[path]) fail(`phase13-backend-path-drift:${path}`);
+    if (!backendBaseSet.has(path) || sourceDigest(baseRead(path)) !== backendReview.beforeHashes?.[path] || sourceDigest(frozenRead(path)) !== backendReview.afterHashes?.[path]) fail(`phase13-backend-path-drift:${path}`);
   }
   for (const path of backendAdded) {
-    if (backendBaseSet.has(path) || !existsSync(join(root, path)) || backendReview.beforeHashes?.[path] !== null || sourceDigest(readFileSync(join(root, path), 'utf8')) !== backendReview.afterHashes?.[path]) fail(`phase13-backend-addition-drift:${path}`);
+    if (backendBaseSet.has(path) || !existsSync(join(root, path)) || backendReview.beforeHashes?.[path] !== null || sourceDigest(frozenRead(path)) !== backendReview.afterHashes?.[path]) fail(`phase13-backend-addition-drift:${path}`);
   }
-  const untouchedBackend = aggregate(baseRust.filter(path => !backendAllowed.has(path)), path => readFileSync(join(root, path), 'utf8'));
+  const untouchedBackend = aggregate(baseRust.filter(path => !backendAllowed.has(path)), path => frozenRead(path));
   if (backendReview.untouchedAggregateSha256 !== aggregate(baseRust.filter(path => !backendAllowed.has(path)), baseRead)) fail('phase13-untouched-backend-parent-proof-changed');
   if (untouchedBackend !== backendReview.untouchedAggregateSha256) fail('phase13-untouched-backend-changed');
-  if (aggregate(liveRust, path => readFileSync(join(root, path), 'utf8')) !== backendReview.aggregateSha256) fail('phase13-backend-aggregate-changed');
+  if (aggregate(liveRust, path => frozenRead(path)) !== backendReview.aggregateSha256) fail('phase13-backend-aggregate-changed');
 
   const baseTs = git(root, 'ls-tree', '-r', '--name-only', PHASE13_BASELINE, 'src').trim().split('\n').filter(path => /\.tsx?$/.test(path)).sort();
   primeCommitBlobs(root, PHASE13_BASELINE, baseTs);
@@ -141,23 +145,23 @@ export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
   const frontendAllowed = new Set([...frontendExisting, ...frontendAdded]);
   if (JSON.stringify(liveTs) !== JSON.stringify([...baseTs, ...frontendAdded].sort())) fail('phase13-frontend-file-set-changed');
   for (const path of frontendExisting) {
-    if (!baseTs.includes(path) || sourceDigest(baseRead(path)) !== frontendReview.beforeHashes?.[path] || sourceDigest(readFileSync(join(root, path), 'utf8')) !== frontendReview.afterHashes?.[path]) fail(`phase13-frontend-path-drift:${path}`);
+    if (!baseTs.includes(path) || sourceDigest(baseRead(path)) !== frontendReview.beforeHashes?.[path] || sourceDigest(frozenRead(path)) !== frontendReview.afterHashes?.[path]) fail(`phase13-frontend-path-drift:${path}`);
   }
   for (const path of frontendAdded) {
-    if (baseTs.includes(path) || frontendReview.beforeHashes?.[path] !== null || !existsSync(join(root, path)) || sourceDigest(readFileSync(join(root, path), 'utf8')) !== frontendReview.afterHashes?.[path]) fail(`phase13-frontend-addition-drift:${path}`);
+    if (baseTs.includes(path) || frontendReview.beforeHashes?.[path] !== null || !existsSync(join(root, path)) || sourceDigest(frozenRead(path)) !== frontendReview.afterHashes?.[path]) fail(`phase13-frontend-addition-drift:${path}`);
   }
   if (frontendReview?.beforeFiles !== baseTs.length || frontendReview?.afterFiles !== liveTs.length || frontendReview?.beforeAggregateSha256 !== aggregate(baseTs, baseRead)) fail('phase13-frontend-parent-or-file-count-changed');
-  const untouchedFrontend = aggregate(baseTs.filter(path => !frontendAllowed.has(path)), path => readFileSync(join(root, path), 'utf8'));
+  const untouchedFrontend = aggregate(baseTs.filter(path => !frontendAllowed.has(path)), path => frozenRead(path));
   if (frontendReview.untouchedAggregateSha256 !== aggregate(baseTs.filter(path => !frontendAllowed.has(path)), baseRead)) fail('phase13-untouched-frontend-parent-proof-changed');
   if (untouchedFrontend !== frontendReview.untouchedAggregateSha256) fail('phase13-untouched-frontend-changed');
-  if (aggregate(liveTs, path => readFileSync(join(root, path), 'utf8')) !== frontendReview.aggregateSha256) fail('phase13-frontend-aggregate-changed');
+  if (aggregate(liveTs, path => frozenRead(path)) !== frontendReview.aggregateSha256) fail('phase13-frontend-aggregate-changed');
 
   const guardReview = review?.guardScripts || {};
   if (JSON.stringify(Object.keys(guardReview).sort()) !== JSON.stringify([...EXPECTED_GUARD_SCRIPTS].sort())) fail('phase13-guard-script-scope-mismatch');
   for (const path of EXPECTED_GUARD_SCRIPTS) {
     const proof = guardReview[path];
     const baselinePath = git(root, 'ls-tree', '-r', '--name-only', PHASE13_BASELINE, path).trim();
-    if (!proof || proof.afterHash !== sourceDigest(readFileSync(join(root, path), 'utf8'))) fail(`phase13-guard-script-drift:${path}`);
+    if (!proof || proof.afterHash !== sourceDigest(frozenRead(path))) fail(`phase13-guard-script-drift:${path}`);
     if (baselinePath === path && proof.beforeHash !== sourceDigest(git(root, 'show', `${PHASE13_BASELINE}:${path}`))) fail(`phase13-guard-script-before-hash-invalid:${path}`);
     if (!baselinePath && proof.beforeHash !== null) fail(`phase13-new-guard-parent-hash-invalid:${path}`);
     if (baselinePath && proof.beforeHash === null) fail(`phase13-guard-script-parent-missing:${path}`);
@@ -174,9 +178,9 @@ export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
   if (migrations.some(name => /^043/.test(name)) || !migrations.some(name => /^042/.test(name))) fail('phase13-migration-boundary-changed');
   const baselineMigrations = git(root, 'ls-tree', '-r', '--name-only', PHASE13_BASELINE, 'src-tauri/migrations').trim().split('\n').filter(path => path.endsWith('.sql')).sort();
   const liveMigrations = sourceFiles(root, 'src-tauri/migrations', /\.sql$/);
-  if (JSON.stringify(baselineMigrations) !== JSON.stringify(liveMigrations) || aggregate(liveMigrations, path => readFileSync(join(root, path), 'utf8')) !== aggregate(baselineMigrations, baseRead)) fail('phase13-historical-migrations-changed');
+  if (JSON.stringify(baselineMigrations) !== JSON.stringify(liveMigrations) || aggregate(liveMigrations, path => frozenRead(path)) !== aggregate(baselineMigrations, baseRead)) fail('phase13-historical-migrations-changed');
   for (const key of ['newObservabilityAuthority', 'newTelemetryRepository', 'newMetricsDatabase', 'newExecutionAuthority', 'phase12ProfilerPromoted']) if (review?.authority?.[key] !== false) fail(`phase13-authority-invariant:${key}`);
   if (!readFileSync(join(root, 'src-tauri/src/application/project_backup_service.rs'), 'utf8').includes('const BACKUP_VERSION: u32 = 20;')) fail('phase13-backup-version-changed');
   if (review?.commands?.countAdded !== 3 || !Array.isArray(review.commands.addedNames) || review.commands.addedNames.length !== 3) fail('phase13-typed-command-review-missing');
-  return { violations, backendFiles: liveRust.length, frontendFiles: liveTs.length, backendAggregateSha256: backendReview?.aggregateSha256, frontendAggregateSha256: frontendReview?.aggregateSha256 };
+  return { violations, backendFiles: liveRust.length, frontendFiles: liveTs.length, backendAggregateSha256: release.backendAggregateSha256 ?? backendReview?.aggregateSha256, frontendAggregateSha256: frontendReview?.aggregateSha256 };
 }

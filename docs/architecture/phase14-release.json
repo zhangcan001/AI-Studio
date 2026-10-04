@@ -1,0 +1,35 @@
+{
+  "phase": 14,
+  "schemaVersion": 1,
+  "parentHead": "52ba662d3e4f0a5e14fe30028be6fcc5778ac1eb",
+  "reason": "restore-report-empty-list-serialization",
+  "paths": {
+    "src-tauri/src/application/project_backup_service.rs": {
+      "beforeHash": "3b06b3b1cbebbd363372e417154fed9f9617cfb9bce32985571ce8ef5ca66014",
+      "afterHash": "7571517e4b767a60a95b0f60b2476c0e4074a174b85c37bbd4b1d86933344e43"
+    },
+    "scripts/phase13-observability-guard.mjs": {
+      "beforeHash": "dada65b16f617daa70d7e37475f87f27c0050744eb36f6d686df5a0e4533ad78",
+      "afterHash": "61797d6d6047b8480b08621025137d36ea942fe8a7b8a37e715938680b53a44c"
+    },
+    "scripts/phase14-release-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "eb45576d5802e141673e0aaf1f7a00d94bba5bb70f33d97e673fa75291a8733f"
+    }
+  },
+  "backend": {
+    "files": 344,
+    "beforeAggregateHash": "18330afb2d764581707bfc1835cf1bd72f25ee01be50bfa74a183f7190d9f2af",
+    "afterAggregateHash": "aef31ea8ac325f7677ee37d28bb1eca666716bf76a891de4d2f05669e6be8078",
+    "untouchedAggregateHash": "5092a6bc1ec59274c1f2dfea1bd25ce3e810e02ad4bd9854c8ac3465c2666cf0"
+  },
+  "invariants": {
+    "queueAuthorityChanged": false,
+    "taskStateMachineChanged": false,
+    "bindingAuthorityChanged": false,
+    "workflowEngineChanged": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "remoteTelemetry": false
+  }
+}

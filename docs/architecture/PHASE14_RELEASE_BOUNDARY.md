@@ -27,6 +27,22 @@ Original `pnpm tauri build` compiled the executable but failed MSI bundling on
 the nonnumeric prerelease label. The focused regression reproduced the missing
 override before the fix. Both installers must be rebuilt after this fix.
 
+Installed Native backup restore exposed a second blocker: the backend restored
+the new project successfully, then the UI crashed because empty restore-report
+issue arrays were omitted by Rust serialization but required by typed UI.
+The minimal repair always serializes the seven existing issue lists (empty or
+nonempty). It changes no archive/persistence/relationship or execution semantics.
+
+The exact additional scope is project_backup_service.rs (DTO serialization and
+its red/green regression), phase14-release-guard.mjs, its negative probes, and
+the Phase13 guard integration. `phase14-release.json` pins the immutable Phase13
+parent, exact reviewed paths, before/after hashes, whole Rust file set/count and
+both baseline/live untouched aggregates. Historical Phase7–13 manifests remain
+byte-identical. Only after real live bytes pass this release proof may the
+historical guard read the immutable parent for the two reviewed existing paths.
+Invalid proof falls back to real bytes and cannot conceal drift. Frontend,
+privacy, migrations and all other historical checks continue reading live files.
+
 Final evidence may add the release checklist and RC baseline document. Any
 runtime/installer configuration fix requires separately recorded root cause,
 regression coverage, necessary Native reacceptance and final-source rebuild.

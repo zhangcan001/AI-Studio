@@ -140,21 +140,21 @@ pub struct RestoredProjectView {
     pub assets: usize,
     pub versions: usize,
     pub generations: usize,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub warnings: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub missing_tools: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub missing_models: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub missing_files: Vec<String>,
     pub restored_generation_tool_usages: usize,
     pub restored_generation_asset_versions: usize,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub unresolved_model_version_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub unresolved_tool_instance_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub unresolved_tool_version_ids: Vec<String>,
 }
 
@@ -5012,6 +5012,52 @@ pub(crate) use crate::infrastructure::database::{
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn phase14_restore_report_serializes_empty_issue_lists_for_typed_ui() {
+        let report = super::RestoredProjectView {
+            id: "prj_release_restore".to_owned(),
+            name: "Release restore".to_owned(),
+            description: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            status: "COMPLETE".to_owned(),
+            backup_version: 20,
+            assets: 0,
+            versions: 0,
+            generations: 0,
+            warnings: Vec::new(),
+            missing_tools: Vec::new(),
+            missing_models: Vec::new(),
+            missing_files: Vec::new(),
+            restored_generation_tool_usages: 0,
+            restored_generation_asset_versions: 0,
+            unresolved_model_version_ids: Vec::new(),
+            unresolved_tool_instance_ids: Vec::new(),
+            unresolved_tool_version_ids: Vec::new(),
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        for field in [
+            "warnings",
+            "missingTools",
+            "missingModels",
+            "missingFiles",
+            "unresolvedModelVersionIds",
+            "unresolvedToolInstanceIds",
+            "unresolvedToolVersionIds",
+        ] {
+            assert_eq!(value.get(field), Some(&serde_json::json!([])), "{field}");
+        }
+        let mut warned = report;
+        warned.warnings.push("dependency unavailable".to_owned());
+        warned.missing_tools.push("tool_release".to_owned());
+        let value = serde_json::to_value(warned).unwrap();
+        assert_eq!(
+            value["warnings"],
+            serde_json::json!(["dependency unavailable"])
+        );
+        assert_eq!(value["missingTools"], serde_json::json!(["tool_release"]));
+    }
+
     use super::{
         assemble_reference_anchor_backups, collect_exact_asset_id_references, hash_bytes,
         inspect_archive, remap_reference_anchor_assets, remap_snapshot_asset_references,
