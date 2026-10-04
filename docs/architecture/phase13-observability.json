@@ -76,7 +76,10 @@
       "src/features/tasks/TaskHistory.tsx",
       "src/services/tauriClient.ts",
       "src/types/diagnostics.ts",
-      "src/features/workflow-lab/WorkflowLabPage.tsx"
+      "src/features/workflow-lab/WorkflowLabPage.tsx",
+      "src/app/StyleBoundary.test.ts",
+      "src/features/settings/RepairJobsStatusSection.test.tsx",
+      "src/features/workflow-lab/WorkflowLabBoundary.test.tsx"
     ],
     "addedPaths": [
       "src/features/settings/DiagnosticsExecutionPanel.test.tsx",
@@ -99,12 +102,15 @@
       "src/features/settings/DiagnosticsExecutionPanel.test.tsx": null,
       "src/features/settings/DiagnosticsExecutionPanel.tsx": null,
       "src/services/diagnosticsClient.ts": null,
-      "src/features/workflow-lab/WorkflowLabPage.tsx": "81c62f874d447f1f1537dd88e043894d6842f4c5793549f43cf3fe669a74ee54"
+      "src/features/workflow-lab/WorkflowLabPage.tsx": "81c62f874d447f1f1537dd88e043894d6842f4c5793549f43cf3fe669a74ee54",
+      "src/app/StyleBoundary.test.ts": "95e1db03aaff4bf7077d2dc60bc0e96b25323fc54814e3b0b0de120e878a332d",
+      "src/features/settings/RepairJobsStatusSection.test.tsx": "6284d5f4cdc3149e41450fe7d4333eaf0eeb79b3f64cbfafbd66b5728436ba86",
+      "src/features/workflow-lab/WorkflowLabBoundary.test.tsx": "9ab82f2a0a5113096762f0f3b88ed62075e370ddbd17e2b1ff3d4f0c73eccce9"
     },
     "afterHashes": {
       "src/app/App.tsx": "e7942da5df4a75fd22d1371e7cd34df0600ca4d1fcd5b28afeaf5858f4e76e1d",
       "src/app/BackendBoundary.test.ts": "22c9973b7474f07dceb4b7e7bd9308eda231b90f625d270e8fccbc581ce2265f",
-      "src/app/Phase7Retirement.test.tsx": "4306fbf8d8fd33de3342d2626183379c78266063e5e759aeea0ee29763599db7",
+      "src/app/Phase7Retirement.test.tsx": "18da2957ede0a57f745961140e04a8005b5b81211eb101f58d195d8fc711cd9f",
       "src/app/routes/resumeAdapter.ts": "628f70e33253768179bc234d98c8f1410500b9056736a7480db888b3d867ebd4",
       "src/app/routes/types.ts": "32a4ca96bc41f153976f2d41d2b6d140d1b05c4a5015423ccb508796e85585ae",
       "src/features/production/ProductionAuditCenter.tsx": "f5240a284ef4f0bd500d40dc2e9149e5359ac235cd0162c1eed8402c1d02d90d",
@@ -117,15 +123,21 @@
       "src/features/settings/DiagnosticsExecutionPanel.test.tsx": "8eecc67285723c02593aaffb3500ca230018f64a89ed640e547658a5bb9425b6",
       "src/features/settings/DiagnosticsExecutionPanel.tsx": "a0bc73f72dc3a39356ded9bae24bd290d68f6093401bc9abc743f8a7290772b4",
       "src/services/diagnosticsClient.ts": "3d48c549f3869d43c3c8ee303aa2c5d98b5676ec124bc130ec9bb932168266bc",
-      "src/features/workflow-lab/WorkflowLabPage.tsx": "8e6045c20825b70bbc9a7f624fb73a9f91ca627f1faa29c64c5d92ce709b0e5e"
+      "src/features/workflow-lab/WorkflowLabPage.tsx": "8e6045c20825b70bbc9a7f624fb73a9f91ca627f1faa29c64c5d92ce709b0e5e",
+      "src/app/StyleBoundary.test.ts": "97601b9bf3ea60fb1712a7d1ca72990141babcf02662f54c3aecaa5b0c8811a2",
+      "src/features/settings/RepairJobsStatusSection.test.tsx": "6b6ef5effae4e85880b8e833ea2c6d07e313663b574132d4f7710761f44fd186",
+      "src/features/workflow-lab/WorkflowLabBoundary.test.tsx": "e6c6e1c93f272cfde08def20521018def03fc1658d8fcba6b598c5ee6d7d0a8e"
     },
-    "untouchedAggregateSha256": "f34d963f0e473ff29f1436e95e31df2556005cebabc3c8b8aadbcd6097a4a6fd",
-    "aggregateSha256": "545b72ce12f42fb6495046e5cea15f45f17f2255356c8b68480082577da0691d",
+    "untouchedAggregateSha256": "3d7bad371ed65cc2e169a1b3502abba5f0c5d59c81c46a4086a675e28bcbee93",
+    "aggregateSha256": "41498b891db3f4b57cec36a1c18f0ef9d5a8b5bb648401149230a6d86a151f68",
     "beforeFiles": 467,
     "afterFiles": 470,
     "beforeAggregateSha256": "8a21b88fb7623bec5253f9b45ac9dff7ba092284fe34f769779ba7d5642062b9",
     "reviewReasons": {
-      "src/features/workflow-lab/WorkflowLabPage.tsx": "Open existing Lab diagnostics pane for the System diagnostics deep link; no new inspector or authority."
+      "src/features/workflow-lab/WorkflowLabPage.tsx": "Open existing Lab diagnostics pane for the System diagnostics deep link; no new inspector or authority.",
+      "src/app/StyleBoundary.test.ts": "Validate exact Phase13 successor before using authorized hashes; preserve historical manifests/ownership assertions. Bound cold historical Git IO timeout only, not product performance thresholds.",
+      "src/features/settings/RepairJobsStatusSection.test.tsx": "Mock the actual typed read-only Diagnostics seam after Phase13 transport ownership changed, not unrelated legacy exports.",
+      "src/features/workflow-lab/WorkflowLabBoundary.test.tsx": "Preserve normal-page Advanced transport ban and hidden legacy binding controls while validating the explicitly authorized read-only repair status in System Diagnostics."
     }
   },
   "guardScripts": {
@@ -143,7 +155,7 @@
     },
     "scripts/phase13-observability-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "22e2818869f9682f309fb5fe983075219ffa4ec298d3ebeee02f7311f8136fb0"
+      "afterHash": "dada65b16f617daa70d7e37475f87f27c0050744eb36f6d686df5a0e4533ad78"
     }
   },
   "commands": {

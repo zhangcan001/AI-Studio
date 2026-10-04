@@ -23,8 +23,8 @@ const jobs: RepairJobStatusView[] = [
   },
 ];
 
-vi.mock("../../services/tauriClient", () => ({
-  repairJobsStatus: vi.fn(async () => jobs),
+vi.mock("../../services/diagnosticsClient", () => ({
+  diagnosticsClient: { repairJobs: vi.fn(async () => jobs) },
 }));
 
 import { RepairJobsStatusList, RepairJobsStatusSection } from "./RepairJobsStatusSection";

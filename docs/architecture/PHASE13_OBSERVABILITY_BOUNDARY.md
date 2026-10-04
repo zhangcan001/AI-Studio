@@ -34,7 +34,7 @@ Testing policy: NO_HARD_LIMIT; risk-driven coverage, no numeric execution ceilin
 | TypeScript, frontend build, Rust format, cargo check all-targets -j1 | PASS |
 | Tauri development compile and real isolated Native IPC | PASS |
 
-Full local suites: NOT RUN (focused checks plus the mandatory final remote full suite). Final GitHub CI: PENDING, not substituted with any earlier run.
+Full local frontend suite: PASS (186 files, 1,008 tests, one worker). Full local Rust suite: NOT RUN; focused Rust/SQL and all-target check passed, and final remote full Rust suite remains mandatory. Final GitHub CI: PENDING, not substituted with any earlier run.
 
 ## Native acceptance
 
@@ -62,3 +62,11 @@ No Queue/Task state machine/Run/GenerationSnapshot/Binding/OCC/Workflow/Repair/A
 
 Before push: diff/scope review and fetch/divergence check. Normal master push only; no force/history rewrite.
 After push: the exact HEAD full Frontend/Rust/architecture/performance/successor CI must succeed before Phase13 is final PASS. Next phase has not started.
+
+## CI feedback correction
+
+The initial Phase13 CI frontend gate failed on older test integrations: a historical non-CSS guard did not follow the validated Phase13 successor, the repair-status test mocked the old transport instead of the actual Diagnostics seam, an old assertion still suppressed the newly authorized read-only repair panel, and two cold structural Git/source checks exceeded Vitest's default five-second timeout under CI contention.
+
+The follow-up changes only test adapters, exact reviewed test paths/hashes, guard scope metadata and this ledger. Historical manifests and all assertions remain; normal pages' Advanced transport ban now also covers diagnosticsClient. Two structural IO test deadlines are explicitly bounded at 30 seconds; product performance thresholds, CI job timeouts, thread counts, production code and test inclusion are unchanged.
+
+Focused CI-failure regression targets: PASS (31 tests). Full local frontend: PASS (1,008 tests). Static/architecture/successor gates are rerun for this correction. Real Native/privacy acceptance remains applicable because production source did not change. A new final HEAD must run the full authoritative CI; the failed earlier run is not relabeled PASS.

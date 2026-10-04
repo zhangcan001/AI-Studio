@@ -21,6 +21,9 @@ const EXPECTED_TS_EXISTING = [
   'src/features/settings/RepairJobsStatusSection.tsx', 'src/features/settings/SettingsWorkspace.tsx',
   'src/features/tasks/TaskHistory.tsx', 'src/services/tauriClient.ts', 'src/types/diagnostics.ts',
   'src/features/workflow-lab/WorkflowLabPage.tsx',
+  'src/app/StyleBoundary.test.ts',
+  'src/features/settings/RepairJobsStatusSection.test.tsx',
+  'src/features/workflow-lab/WorkflowLabBoundary.test.tsx',
 ];
 const EXPECTED_TS_ADDED = [
   'src/features/settings/DiagnosticsExecutionPanel.test.tsx',

@@ -103,4 +103,4 @@ it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()
  const reviewed=backendPerformanceBoundary('.',phase8.backendSourceSnapshot,JSON.parse(read('docs/architecture/phase12-performance.json')),phase13BoundaryReview);expect(reviewed.violations).toEqual([]);
  for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,files:reviewed.files ?? phase8.backendSourceSnapshot.files,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
 
-});
+},30000); // Exact historical source traversal, not a runtime performance threshold.

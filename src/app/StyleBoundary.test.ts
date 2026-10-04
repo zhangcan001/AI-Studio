@@ -4,6 +4,8 @@ import { it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 // @ts-expect-error Existing build-time guard module, not browser code.
 import { styleBoundary, styleInventory, specificity, debtViolations, expandedCss, canonical, read, hash } from '../../scripts/style-boundary-guard.mjs';
+// @ts-expect-error Build-time exact successor validator, not browser code.
+import { phase13Boundary } from '../../scripts/phase13-observability-guard.mjs';
 const m=JSON.parse(readFileSync('docs/architecture/phase9-style-cleanup.json','utf8'));
 it('phase9_target1 accounts for all styles and classifies inline candidates',()=>{
  expect(m.BLOCKED_UNKNOWN).toBe(0);expect(m.rows.length).toBe(m.before.selectors);
@@ -21,7 +23,7 @@ it('phase9_target3 guards ownership and preserves every production frontend sour
  expect(styleBoundary('.',wrongOwner).violations.some((v:string)=>v.startsWith('ownership:'))).toBe(true);
  expect(m.ownedFiles['src/styles/modelVersionSelector.css']).toEqual(['.model-version-selector']);
  const shared=m.rows.find((r:{selector_or_scope:string})=>r.selector_or_scope==='.model-version-selector');expect(shared.callers).toContain('src/features/assets/AssetVideoBatchWorkspace.tsx');expect(shared.callers).toContain('src/features/workflow-lab/WorkflowLabSurface.tsx');
-});
+},30000); // Historical Git/source IO under CI contention, not a runtime performance threshold.
 it('phase9_target4 preserves exact cascade ordering through eager imports',()=>{
  expect(canonical(expandedCss('src/app/App.css'))).toBe(m.proofs.extraction.canonicalBefore);
  expect(m.proofs.extraction.parts).toHaveLength(5);expect(read('src/app/App.tsx')).toContain('import "./App.css";');
@@ -44,6 +46,9 @@ it('phase9_target7 lowers specificity and merges only the redundant media rule',
 it('phase9_target8 pins style successor while preserving all historical non-CSS freezes',()=>{
  const phase8=JSON.parse(read('docs/architecture/phase8-backend-decomposition.json'));
  const phase10=JSON.parse(read('docs/architecture/phase10-frontend-architecture.json'));
- for(const [path,digest] of Object.entries(phase8.compatibilityFiles))if(!path.endsWith('.css'))expect(hash(read(path)),path).toBe(phase10.frontendSuccessor[path]??digest);
+ const phase13=JSON.parse(read('docs/architecture/phase13-observability.json'));
+ const checked=phase13Boundary('.',phase13,JSON.parse(read('docs/architecture/phase12-performance.json')),phase8.backendSourceSnapshot);
+ expect(checked.violations).toEqual([]);
+ for(const [path,digest] of Object.entries(phase8.compatibilityFiles))if(!path.endsWith('.css'))expect(hash(read(path)),path).toBe(phase13.frontend.afterHashes[path]??phase10.frontendSuccessor[path]??digest);
  expect(m.after.inline).toBe(m.before.inline);expect(m.proofs.containment.selectors).toBeGreaterThan(0);
 });

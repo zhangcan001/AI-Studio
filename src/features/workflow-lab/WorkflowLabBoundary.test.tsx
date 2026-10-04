@@ -24,13 +24,14 @@ it("phase6_target13 Benchmark remains reachable as Advanced validation without i
   expect(screen.getByText("EXACT_DIAGNOSTIC")).toBeTruthy();
   expect(api.create).not.toHaveBeenCalled(); expect(api.queue).not.toHaveBeenCalled();
 });
-it("phase6_target14 normal surfaces have no technical Lab transport dependency and normal settings suppress legacy binding controls", () => {
+it("phase6_target14 normal surfaces exclude Advanced transports; settings hide legacy bindings and expose read-only diagnostics repairs", () => {
   for (const file of ["src/features/create/CreatePage.tsx", "src/features/create/CreateController.ts", "src/features/runs/RunsPage.tsx", "src/features/library/LibraryPage.tsx", "src/features/generators/GeneratorSettingsPage.tsx", "src/app/v3/ProjectOverviewPage.tsx"]) {
-    expect(read(file)).not.toMatch(/from ["'][^"']*(?:workflowClient|workflowLabClient|tauriClient|WorkflowWorkspace)["']/);
+    expect(read(file)).not.toMatch(/from ["'][^"']*(?:workflowClient|workflowLabClient|diagnosticsClient|tauriClient|WorkflowWorkspace)["']/);
   }
   const host = read("src/app/App.tsx");
   expect(host).toContain('showWorkflowSettings={false}');
-  expect(host).toContain('showWorkflowRepairStatus={false}');
+  expect(host).toContain('showWorkflowRepairStatus={true}');
+  expect(read("src/features/settings/RepairJobsStatusSection.tsx")).toContain("diagnosticsClient.repairJobs()");
   expect(read("src/features/generators/GeneratorSettingsPage.tsx")).not.toMatch(/\.workflowVersionId|\.recipeId|\.targetNode/);
 });
 it("phase6_target15 Advanced seam whitelists existing clients only and exact selection transport is canonical without new authority", () => {
