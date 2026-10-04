@@ -153,7 +153,7 @@ pub use task_history_repository::{
     TaskHistoryFilter, TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository,
     TaskHistoryTimeFilter, TaskHistoryWorkflowOption,
 };
-pub use task_repository::TaskRepository;
+pub use task_repository::{TaskDiagnosticFacts, TaskRepository};
 pub use task_update_sink::{
     NoopTaskUpdateSink, TaskUpdatePayload, TaskUpdateSink, TASK_UPDATED_EVENT,
 };

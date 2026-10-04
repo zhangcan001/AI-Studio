@@ -29,7 +29,7 @@ export function parseRoute(value: unknown, depth = 0): AppRoute | undefined {
   switch (v.kind) {
     case "project": return v.page === "overview" ? { kind: "project", projectId, page: "overview" } : undefined;
     case "create": return (v.stage === "image" || v.stage === "video") && (v.shotId === undefined || text(v.shotId)) && (v.surface === undefined || v.surface === "batch") ? { kind: "create", projectId, stage: v.stage, shotId: v.shotId as string | undefined, surface: v.surface as "batch" | undefined } : undefined;
-    case "project-settings": return text(v.section) ? { kind: "project-settings", projectId, section: v.section } : undefined;
+    case "project-settings": return text(v.section) ? { kind: "project-settings", projectId, section: v.section, ...(v.section === "advanced-tasks" && text(v.auditTaskId) ? { auditTaskId: v.auditTaskId } : {}) } : undefined;
     case "runs": {
       const r = v.run as Record<string, unknown> | undefined;
       if (r !== undefined && (!r || !["production-run", "queue-batch", "task"].includes(String(r.source)) || !text(r.id))) return undefined;

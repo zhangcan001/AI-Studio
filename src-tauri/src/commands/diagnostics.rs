@@ -9,6 +9,35 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn diagnostics_execution_health(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<crate::application::diagnostics_service::execution::ExecutionHealth, AppError> {
+    state.system.diagnostics.execution_health(&project_id).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn diagnostics_recent_failures(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Vec<crate::application::diagnostics_service::execution::RecentFailure>, AppError> {
+    state.system.diagnostics.recent_failures(&project_id).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn diagnostics_task_timeline(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> Result<crate::application::diagnostics_service::execution::TaskTimeline, AppError> {
+    state
+        .system
+        .diagnostics
+        .task_timeline(&project_id, &task_id)
+        .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn runtime_activity_status(
     state: State<'_, AppState>,
 ) -> Result<RuntimeActivityStatusView, AppError> {

@@ -2,7 +2,7 @@ use super::{
     format_datetime, i64_to_u64, insert_event, map_domain_error, map_sqlx_error, parse_datetime,
     parse_json, parse_optional_datetime, serialize_json,
 };
-use crate::application::ports::{RepositoryError, TaskRepository};
+use crate::application::ports::{RepositoryError, TaskDiagnosticFacts, TaskRepository};
 use crate::domain::{
     NewTaskEvent, RuntimeProvenance, StoredTaskEvent, Task, TaskError, TaskEventType, TaskId,
     TaskProgress, TaskStatus, TaskTelemetry,
@@ -23,6 +23,35 @@ impl SqliteTaskRepository {
 
 #[async_trait]
 impl TaskRepository for SqliteTaskRepository {
+    async fn list_recent_diagnostic_facts(
+        &self,
+        project_id: &str,
+        limit: u32,
+    ) -> Result<Vec<TaskDiagnosticFacts>, RepositoryError> {
+        let rows = sqlx::query_as::<_, DiagnosticTaskRow>(&format!("{DIAGNOSTIC_TASK_SELECT} WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT ?"))
+            .bind(project_id).bind(i64::from(limit.clamp(1, 50)))
+            .fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(DiagnosticTaskRow::into_facts)
+            .collect()
+    }
+
+    async fn find_diagnostic_facts(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+    ) -> Result<Option<TaskDiagnosticFacts>, RepositoryError> {
+        sqlx::query_as::<_, DiagnosticTaskRow>(&format!(
+            "{DIAGNOSTIC_TASK_SELECT} WHERE project_id = ? AND id = ?"
+        ))
+        .bind(project_id)
+        .bind(task_id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?
+        .map(DiagnosticTaskRow::into_facts)
+        .transpose()
+    }
     async fn create(
         &self,
         task: &Task,
@@ -454,6 +483,79 @@ impl TaskRepository for SqliteTaskRepository {
         .map_err(map_sqlx_error)?;
 
         rows.into_iter().map(EventRow::try_into_domain).collect()
+    }
+}
+
+// Facts intentionally omit all prompt/source/path/raw-error columns. This does
+// not affect the validated TaskRow mapper used by execution, recovery or writes.
+const DIAGNOSTIC_TASK_SELECT: &str = "SELECT id, project_id, status, error_code,
+    generation_execution_id, compiled_workflow_sha256, runtime_profile, concurrency_class,
+    prepare_started_at, prepared_at, submitted_at, execution_started_at,
+    execution_finished_at, collection_finished_at, created_at, queued_at, started_at, finished_at FROM tasks";
+
+#[derive(sqlx::FromRow)]
+struct DiagnosticTaskRow {
+    id: String,
+    project_id: String,
+    status: String,
+    error_code: Option<String>,
+    generation_execution_id: Option<String>,
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    concurrency_class: Option<String>,
+    prepare_started_at: Option<String>,
+    prepared_at: Option<String>,
+    submitted_at: Option<String>,
+    execution_started_at: Option<String>,
+    execution_finished_at: Option<String>,
+    collection_finished_at: Option<String>,
+    created_at: String,
+    queued_at: Option<String>,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+}
+
+impl DiagnosticTaskRow {
+    fn into_facts(self) -> Result<TaskDiagnosticFacts, RepositoryError> {
+        Ok(TaskDiagnosticFacts {
+            id: TaskId::parse(&self.id)
+                .map_err(|error| map_domain_error("diagnostic task id", error))?,
+            project_id: self.project_id,
+            status: TaskStatus::try_from_db(&self.status)
+                .map_err(|error| map_domain_error("diagnostic status", error))?,
+            error_code: self.error_code,
+            telemetry: TaskTelemetry {
+                generation_execution_id: self.generation_execution_id,
+                compiled_workflow_sha256: self.compiled_workflow_sha256,
+                runtime_profile: self.runtime_profile,
+                concurrency_class: self.concurrency_class,
+                prepare_started_at: parse_optional_datetime(
+                    "prepare_started_at",
+                    self.prepare_started_at.as_deref(),
+                )?,
+                prepared_at: parse_optional_datetime("prepared_at", self.prepared_at.as_deref())?,
+                submitted_at: parse_optional_datetime(
+                    "submitted_at",
+                    self.submitted_at.as_deref(),
+                )?,
+                execution_started_at: parse_optional_datetime(
+                    "execution_started_at",
+                    self.execution_started_at.as_deref(),
+                )?,
+                execution_finished_at: parse_optional_datetime(
+                    "execution_finished_at",
+                    self.execution_finished_at.as_deref(),
+                )?,
+                collection_finished_at: parse_optional_datetime(
+                    "collection_finished_at",
+                    self.collection_finished_at.as_deref(),
+                )?,
+            },
+            created_at: parse_datetime("created_at", &self.created_at)?,
+            queued_at: parse_optional_datetime("queued_at", self.queued_at.as_deref())?,
+            started_at: parse_optional_datetime("started_at", self.started_at.as_deref())?,
+            finished_at: parse_optional_datetime("finished_at", self.finished_at.as_deref())?,
+        })
     }
 }
 
@@ -973,6 +1075,65 @@ mod tests {
             "recipe-1",
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
         )
+    }
+
+    #[tokio::test]
+    async fn phase13_diagnostic_facts_read_undated_and_invalid_without_weakening_task_authority() {
+        use crate::application::diagnostics_service::execution::{
+            recent_failures, TaskTimeline, TelemetryCompleteness,
+        };
+        let (_directory, pool, repository) = setup().await;
+        let task = new_task();
+        repository
+            .create(&task, &task.created_event())
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tasks SET status='FAILED', error_code='COMFY_OFFLINE', error_message='prompt=PRIVATE_NATIVE', finished_at=NULL WHERE id=?")
+            .bind(task.id.as_str()).execute(&pool).await.unwrap();
+        assert!(repository.find_by_id(&task.id).await.is_err());
+        let facts = repository
+            .find_diagnostic_facts("project-1", &task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(facts.finished_at.is_none());
+        assert!(recent_failures("project-1", &[facts.clone()])[0]
+            .latest_at
+            .is_none());
+        assert!(repository
+            .find_diagnostic_facts("other-project", &task.id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(repository
+            .list_recent_diagnostic_facts("other-project", 50)
+            .await
+            .unwrap()
+            .is_empty());
+        let invalid_at = super::format_datetime(task.created_at - Duration::seconds(1));
+        sqlx::query("UPDATE tasks SET prepare_started_at=? WHERE id=?")
+            .bind(&invalid_at)
+            .bind(task.id.as_str())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let facts = repository
+            .list_recent_diagnostic_facts("project-1", 500)
+            .await
+            .unwrap();
+        assert_eq!(facts.len(), 1);
+        let view = TaskTimeline::from_facts(&facts[0]);
+        assert_eq!(view.completeness, TelemetryCompleteness::Invalid);
+        assert!(view.finished_at.is_none());
+        assert!(view.durations.prepare_ms.is_none());
+        assert!(repository.find_by_id(&task.id).await.is_err());
+        let stored: (String, Option<String>, String) =
+            sqlx::query_as("SELECT status,finished_at,prepare_started_at FROM tasks WHERE id=?")
+                .bind(task.id.as_str())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, ("FAILED".to_owned(), None, invalid_at));
     }
 
     #[tokio::test]

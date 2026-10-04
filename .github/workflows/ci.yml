@@ -54,6 +54,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Exact successor proofs read immutable Phase8/12/13 baseline commits.
+          fetch-depth: 0
 
       - name: Set up pnpm 10
         uses: pnpm/action-setup@v4
@@ -71,6 +74,9 @@ jobs:
 
       - name: Frontend tests
         run: pnpm test
+
+      - name: Architecture guards
+        run: pnpm test:architecture
 
       - name: TypeScript check
         run: pnpm exec tsc --noEmit

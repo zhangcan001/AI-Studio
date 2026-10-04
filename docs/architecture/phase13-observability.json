@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "phase": 13,
+  "status": "LOCAL_GATES_VERIFIED_PENDING_FINAL_CI",
+  "baselineHead": "2795ffddf964e88f3c99af2ed3f284120da4b368",
+  "phase8": {
+    "sourceFiles": 343,
+    "sourceAggregateSha256": "70a28807fb358ef046e0f11b16ebebc94e61d011122eab41a837c992027e96b9"
+  },
+  "phase12": {
+    "sourceFiles": 343,
+    "beforeAggregateSha256": "70a28807fb358ef046e0f11b16ebebc94e61d011122eab41a837c992027e96b9",
+    "afterAggregateSha256": "22bf6637d39d861004a2853bd6d11f97a5158dc02ccbd88e25a72fb72823b222",
+    "untouchedAggregateSha256": "6cf526258b9d41088f736eb95cae48dbe4388b7ffeba5853c98312ac685987f3",
+    "reviewedPaths": [
+      "src-tauri/src/application/product/run_facade.rs",
+      "src-tauri/src/application/product/run_facade/workspace.rs"
+    ],
+    "preserved": true
+  },
+  "backend": {
+    "existingPaths": [
+      "src-tauri/src/application/diagnostics_service.rs",
+      "src-tauri/src/commands/diagnostics.rs",
+      "src-tauri/src/infrastructure/logging.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/application/ports/task_repository.rs",
+      "src-tauri/src/application/ports/mod.rs",
+      "src-tauri/src/infrastructure/database/repositories/task.rs"
+    ],
+    "addedPaths": [
+      "src-tauri/src/application/diagnostics_service/execution.rs"
+    ],
+    "beforeHashes": {
+      "src-tauri/src/application/diagnostics_service.rs": "bdbedb09126d93eaf2903ff631e9917f46b043dc2baae77848cf8ee4e7760ea1",
+      "src-tauri/src/commands/diagnostics.rs": "cebf995ffa95413046a948cd6bf92994bb41c055430b4313efcf92e036c231fd",
+      "src-tauri/src/infrastructure/logging.rs": "8a8a0bcf7d5d6a6baef295b96b1e102149e16586b00049bb637dffc4e0141ea7",
+      "src-tauri/src/lib.rs": "0e2dafd7a62acdd6882ce7d1e945f2db8c17ad1ecf9ebf2dcf2ad40e909fc2ec",
+      "src-tauri/src/application/diagnostics_service/execution.rs": null,
+      "src-tauri/src/application/ports/task_repository.rs": "6a84fbb0807a83010d9f88b65595fe632c50c84caf214a5fa1a6b2d137d6baf3",
+      "src-tauri/src/application/ports/mod.rs": "2439798777a700a30bc2c2c10f664fcac2d0c64bc2f08ff0eb692599ed926073",
+      "src-tauri/src/infrastructure/database/repositories/task.rs": "c2fc543506cc7efdc9aff69c13667cfe4da42bd91c62f30a4e92f46287d930be"
+    },
+    "afterHashes": {
+      "src-tauri/src/application/diagnostics_service.rs": "cfa3eac4fa48d75b4dc7b71992db0ffb2a07b16861c39b62e7123c4321b3a361",
+      "src-tauri/src/commands/diagnostics.rs": "b8d8e8b28cf8d28a536bde456f5d049798e422f5f20fa711ef788879ccd4a2fa",
+      "src-tauri/src/infrastructure/logging.rs": "48be760dc6fff3ce5d6792fe84126faefb79dfeefbdff987351a72e22c8d34dc",
+      "src-tauri/src/lib.rs": "3e8acf447ec558b79747b567561ba5935377f063b255a5cef3d0c8dc3daf637f",
+      "src-tauri/src/application/diagnostics_service/execution.rs": "1f3966df16a1f9e97b2484eadf1b3d5b8866a97a55e9f7a5d3dea61805bf9b4c",
+      "src-tauri/src/application/ports/task_repository.rs": "94a1ff76d051b1267026d2eda4f85bc3e871e7a96ba8a9becb1d6ce9422ccede",
+      "src-tauri/src/application/ports/mod.rs": "3b98d2f4459b4c187259dc43e9b3ac04dd8ec3695b3884211242b12da478d756",
+      "src-tauri/src/infrastructure/database/repositories/task.rs": "651c62c813476b017503cfdd934673d0654397f406d567c66000f8dd72756fac"
+    },
+    "untouchedAggregateSha256": "381607e2a8fd16bc968168fae912e842a4cc937d7087cfd3f8b911c217aaee42",
+    "aggregateSha256": "18330afb2d764581707bfc1835cf1bd72f25ee01be50bfa74a183f7190d9f2af",
+    "beforeFiles": 343,
+    "afterFiles": 344,
+    "beforeAggregateSha256": "22bf6637d39d861004a2853bd6d11f97a5158dc02ccbd88e25a72fb72823b222",
+    "reviewReasons": {
+      "src-tauri/src/application/ports/task_repository.rs": "Exact read-only facts path on existing TaskRepository: explain undated/invalid persisted telemetry without weakening executable Task validation or introducing a repository/authority.",
+      "src-tauri/src/application/ports/mod.rs": "Exact read-only facts path on existing TaskRepository: explain undated/invalid persisted telemetry without weakening executable Task validation or introducing a repository/authority.",
+      "src-tauri/src/infrastructure/database/repositories/task.rs": "Exact read-only facts path on existing TaskRepository: explain undated/invalid persisted telemetry without weakening executable Task validation or introducing a repository/authority."
+    }
+  },
+  "frontend": {
+    "existingPaths": [
+      "src/app/App.tsx",
+      "src/app/BackendBoundary.test.ts",
+      "src/app/Phase7Retirement.test.tsx",
+      "src/app/routes/resumeAdapter.ts",
+      "src/app/routes/types.ts",
+      "src/features/production/ProductionAuditCenter.tsx",
+      "src/features/runs/RunDetail.tsx",
+      "src/features/settings/RepairJobsStatusSection.tsx",
+      "src/features/settings/SettingsWorkspace.tsx",
+      "src/features/tasks/TaskHistory.tsx",
+      "src/services/tauriClient.ts",
+      "src/types/diagnostics.ts",
+      "src/features/workflow-lab/WorkflowLabPage.tsx"
+    ],
+    "addedPaths": [
+      "src/features/settings/DiagnosticsExecutionPanel.test.tsx",
+      "src/features/settings/DiagnosticsExecutionPanel.tsx",
+      "src/services/diagnosticsClient.ts"
+    ],
+    "beforeHashes": {
+      "src/app/App.tsx": "ccb1f09504ff835cbe0a7234224770fe7976515759ca31abcb0afacbdd078e21",
+      "src/app/BackendBoundary.test.ts": "5b7fa37911a425e799038e0a063bacd82650b1592314bdf2ea703f47b39b8890",
+      "src/app/Phase7Retirement.test.tsx": "e646ede00e7ced06c9335ffb49b64a0f20b35415ed61e2bff2e152016eb18781",
+      "src/app/routes/resumeAdapter.ts": "8896f755d42ce11f375ce1f9e75e44b29261b685f76c137465e8808512e75bc1",
+      "src/app/routes/types.ts": "4821221b4aab8b011de2f670ea8a66753a5805ba69d3320c78e481978d2363ad",
+      "src/features/production/ProductionAuditCenter.tsx": "5dfaed9521859e69fb01d193ed46bf2b833e82c888dfacb00bbfbba2cf2f37a1",
+      "src/features/runs/RunDetail.tsx": "2405f7d8e7bcf9ba3f11046ec4bb5db0dc11865ee3c7a5a7fcd0856a614d291d",
+      "src/features/settings/RepairJobsStatusSection.tsx": "e97395acd95cbecc56aa7457bc5a377ca897c5efcf6394aed460094626f322ca",
+      "src/features/settings/SettingsWorkspace.tsx": "a95437a0237f73665d47c61403a6cb2b639e1d02c3c44799b4898af3edc67562",
+      "src/features/tasks/TaskHistory.tsx": "e8286193021d3b380144d99af0599770b5da293813e2f104b29235243c7a8418",
+      "src/services/tauriClient.ts": "892f32430bc9380e2d2047f4b722ebd8422b4a039ed0cc97bee55663a5d512f2",
+      "src/types/diagnostics.ts": "05a7daeb167b58a83dab5a3fce75e4caa0c09eba837b4605e1f579750ae8fcdc",
+      "src/features/settings/DiagnosticsExecutionPanel.test.tsx": null,
+      "src/features/settings/DiagnosticsExecutionPanel.tsx": null,
+      "src/services/diagnosticsClient.ts": null,
+      "src/features/workflow-lab/WorkflowLabPage.tsx": "81c62f874d447f1f1537dd88e043894d6842f4c5793549f43cf3fe669a74ee54"
+    },
+    "afterHashes": {
+      "src/app/App.tsx": "e7942da5df4a75fd22d1371e7cd34df0600ca4d1fcd5b28afeaf5858f4e76e1d",
+      "src/app/BackendBoundary.test.ts": "22c9973b7474f07dceb4b7e7bd9308eda231b90f625d270e8fccbc581ce2265f",
+      "src/app/Phase7Retirement.test.tsx": "4306fbf8d8fd33de3342d2626183379c78266063e5e759aeea0ee29763599db7",
+      "src/app/routes/resumeAdapter.ts": "628f70e33253768179bc234d98c8f1410500b9056736a7480db888b3d867ebd4",
+      "src/app/routes/types.ts": "32a4ca96bc41f153976f2d41d2b6d140d1b05c4a5015423ccb508796e85585ae",
+      "src/features/production/ProductionAuditCenter.tsx": "f5240a284ef4f0bd500d40dc2e9149e5359ac235cd0162c1eed8402c1d02d90d",
+      "src/features/runs/RunDetail.tsx": "ecc14ee82f787082acdcd3c2e580d344afbcc4cda359ff8de5c057d54faf0217",
+      "src/features/settings/RepairJobsStatusSection.tsx": "7612657ccbad0e6a0012858785fc855128f78a49a5c65da0b0a0a8c95bd038d1",
+      "src/features/settings/SettingsWorkspace.tsx": "1804fd496034a5bd5a62384e39bb2e6dc0a61c13bcfc45b8361e1c0d4cac6ef7",
+      "src/features/tasks/TaskHistory.tsx": "af022b7c0a7d132947cac0855d7b623c8f897a14319cc4acbfcf4c09133eb781",
+      "src/services/tauriClient.ts": "36558cba32d44bc7dfc112abb5b69ab193a0e1cf939efaa474c2a9912c414c77",
+      "src/types/diagnostics.ts": "040c377261ba43941cd283797e93bbd1bb5524857014381b4737f4fecd4c5b98",
+      "src/features/settings/DiagnosticsExecutionPanel.test.tsx": "8eecc67285723c02593aaffb3500ca230018f64a89ed640e547658a5bb9425b6",
+      "src/features/settings/DiagnosticsExecutionPanel.tsx": "a0bc73f72dc3a39356ded9bae24bd290d68f6093401bc9abc743f8a7290772b4",
+      "src/services/diagnosticsClient.ts": "3d48c549f3869d43c3c8ee303aa2c5d98b5676ec124bc130ec9bb932168266bc",
+      "src/features/workflow-lab/WorkflowLabPage.tsx": "8e6045c20825b70bbc9a7f624fb73a9f91ca627f1faa29c64c5d92ce709b0e5e"
+    },
+    "untouchedAggregateSha256": "f34d963f0e473ff29f1436e95e31df2556005cebabc3c8b8aadbcd6097a4a6fd",
+    "aggregateSha256": "545b72ce12f42fb6495046e5cea15f45f17f2255356c8b68480082577da0691d",
+    "beforeFiles": 467,
+    "afterFiles": 470,
+    "beforeAggregateSha256": "8a21b88fb7623bec5253f9b45ac9dff7ba092284fe34f769779ba7d5642062b9",
+    "reviewReasons": {
+      "src/features/workflow-lab/WorkflowLabPage.tsx": "Open existing Lab diagnostics pane for the System diagnostics deep link; no new inspector or authority."
+    }
+  },
+  "guardScripts": {
+    "scripts/backend-boundary-guard.mjs": {
+      "beforeHash": "84670198f5e8f2269605f517b3118a70087796691fbceb1741b37dc12f40fa89",
+      "afterHash": "f3d53b28f86988f5975616baca8e603202bdd4abd4b3815172c499f707daa884"
+    },
+    "scripts/dev088-architecture-guard.mjs": {
+      "beforeHash": "34b6ec4836d394cabe6c332078e3f3de21c8dbcdb044615fa70cc86b24d8a379",
+      "afterHash": "3bf8b6ef75b68db5ef2985f3949dfd2ab2744fffa9116d639c8230d01b3962b6"
+    },
+    "scripts/style-boundary-guard.mjs": {
+      "beforeHash": "13b1f42be353f9f24e17a4a16e0bacb47a3cfd47133fec94abcba738ed9328bc",
+      "afterHash": "1ca3aa70a638e79d347a3a2e85e0de85101d7b2bcf7bc576ec376b405993334f"
+    },
+    "scripts/phase13-observability-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "22e2818869f9682f309fb5fe983075219ffa4ec298d3ebeee02f7311f8136fb0"
+    }
+  },
+  "commands": {
+    "countAdded": 3,
+    "addedNames": [
+      "diagnostics_execution_health",
+      "diagnostics_recent_failures",
+      "diagnostics_task_timeline"
+    ],
+    "addedSignatures": [
+      {
+        "name": "diagnostics_execution_health",
+        "signature": "#[tauri::command(rename_all = \"camelCase\")] pub async fn diagnostics_execution_health( state: State<'_, AppState>, project_id: String, ) -> Result<crate::application::diagnostics_service::execution::ExecutionHealth, AppError>"
+      },
+      {
+        "name": "diagnostics_recent_failures",
+        "signature": "#[tauri::command(rename_all = \"camelCase\")] pub async fn diagnostics_recent_failures( state: State<'_, AppState>, project_id: String, ) -> Result<Vec<crate::application::diagnostics_service::execution::RecentFailure>, AppError>"
+      },
+      {
+        "name": "diagnostics_task_timeline",
+        "signature": "#[tauri::command(rename_all = \"camelCase\")] pub async fn diagnostics_task_timeline( state: State<'_, AppState>, project_id: String, task_id: String, ) -> Result<crate::application::diagnostics_service::execution::TaskTimeline, AppError>"
+      }
+    ]
+  },
+  "migration": {
+    "maxVersion": 42,
+    "tableCount": 71,
+    "migration043": false,
+    "backupVersion": 20
+  },
+  "privacy": {
+    "databaseExport": false,
+    "promptExport": false,
+    "absolutePathExport": false,
+    "assetBytesExport": false,
+    "workflowSourceExport": false,
+    "recipeSourceExport": false,
+    "remoteUpload": false
+  },
+  "authority": {
+    "newObservabilityAuthority": false,
+    "newTelemetryRepository": false,
+    "newMetricsDatabase": false,
+    "newExecutionAuthority": false,
+    "phase12ProfilerPromoted": false
+  },
+  "validationWorkflow": {
+    "path": ".github/workflows/ci.yml",
+    "beforeHash": "e99f20343a557bf7f459eeadc599bf1d259fa857abba70b4789b2656527c36fe",
+    "afterHash": "696a4b0e524c6029adc6df49e9e6b4a245fb869a374e3c1e5791bc55dfa9da22"
+  }
+}

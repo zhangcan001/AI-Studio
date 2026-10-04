@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 export const postcss = createRequire(require.resolve('vite'))('postcss');
 export const read = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 export const hash = s => createHash('sha256').update(s).digest('hex');
+import { phase13Boundary } from './phase13-observability-guard.mjs';
 export function files(root) {
   return readdirSync(root, { withFileTypes:true }).flatMap(e => e.isDirectory() ? files(`${root}/${e.name}`) : [`${root}/${e.name}`]).sort();
 }
@@ -111,6 +112,14 @@ export function styleBoundary(root,manifest) {
   const reviewed=performanceSuccessor(priorSnapshot,performanceReview);
   violations.push(...reviewed.violations);
   const productionSnapshot=reviewed.snapshot;
+  const phase13Path=`${root}/docs/architecture/phase13-observability.json`;
+  if(existsSync(phase13Path)) {
+    const phase13=JSON.parse(read(phase13Path));
+    const phase8=JSON.parse(read(`${root}/docs/architecture/phase8-backend-decomposition.json`));
+    const phase13Result=phase13Boundary(root,phase13,performanceReview,phase8.backendSourceSnapshot);
+    violations.push(...phase13Result.violations);
+    Object.assign(productionSnapshot,phase13.frontend.afterHashes);
+  }
   for(const [path,digest] of Object.entries(productionSnapshot))if(hash(read(`${root}/${path}`))!==digest)violations.push(`behavior:${path}`);
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')))if(!(path in productionSnapshot))violations.push(`new-production-source:${path}`);
   for(const [path,digest] of Object.entries(manifest.styleSnapshots))if(hash(read(`${root}/${path}`))!==digest)violations.push(`unreviewed-style:${path}`);

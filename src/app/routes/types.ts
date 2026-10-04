@@ -20,7 +20,7 @@ export type AppRoute =
   | { kind: "create"; projectId: string; shotId?: string; stage: "image" | "video"; surface?: "batch" }
   | { kind: "runs"; projectId: string; run?: RunRef; filter?: string; context?: LegacyRunContext }
   | { kind: "library"; projectId: string; resource?: ResourceRef; filter?: string }
-  | { kind: "project-settings"; projectId: string; section: string }
+  | { kind: "project-settings"; projectId: string; section: string; auditTaskId?: string }
   | { kind: "system-settings"; section: string; returnTo?: AppRoute };
 
 export function routeProjectId(route: AppRoute): string | undefined {

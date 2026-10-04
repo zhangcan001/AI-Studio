@@ -4,6 +4,9 @@ import type { CapabilitySummary, ComfyMemoryReleaseResult, ComfyStatus } from ".
 import type {
   DiagnosticsExport,
   DiagnosticsSummary,
+  DiagnosticExecutionHealth,
+  DiagnosticRecentFailure,
+  DiagnosticTaskTimeline,
   RuntimeActivityStatus,
 } from "../types/diagnostics";
 import type {
@@ -493,6 +496,18 @@ export function getRuntimeActivityStatus(): Promise<RuntimeActivityStatus> {
 
 export function getDiagnosticsSummary(): Promise<DiagnosticsSummary> {
   return invoke<DiagnosticsSummary>("diagnostics_summary");
+}
+
+export function getDiagnosticsExecutionHealth(projectId: string): Promise<DiagnosticExecutionHealth> {
+  return invoke<DiagnosticExecutionHealth>("diagnostics_execution_health", { projectId });
+}
+
+export function getDiagnosticsRecentFailures(projectId: string): Promise<DiagnosticRecentFailure[]> {
+  return invoke<DiagnosticRecentFailure[]>("diagnostics_recent_failures", { projectId });
+}
+
+export function getDiagnosticsTaskTimeline(projectId: string, taskId: string): Promise<DiagnosticTaskTimeline> {
+  return invoke<DiagnosticTaskTimeline>("diagnostics_task_timeline", { projectId, taskId });
 }
 
 export function exportDiagnostics(): Promise<DiagnosticsExport | null> {

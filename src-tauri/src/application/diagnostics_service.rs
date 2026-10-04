@@ -19,6 +19,18 @@ use tokio::task;
 use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
 const MAX_DIAGNOSTICS_BUNDLE_BYTES: usize = 25 * 1024 * 1024;
+const DIAGNOSTIC_PACKAGE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+// Diagnostics must not await every live package/runtime probe while offline.
+// Cancellation drops only this read future; execution/readiness authority stays unchanged.
+async fn bounded_diagnostic_read<T, E>(
+    budget: std::time::Duration,
+    read: impl std::future::Future<Output = Result<T, E>>,
+) -> Option<T> {
+    tokio::time::timeout(budget, read).await.ok()?.ok()
+}
+
+pub mod execution;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -40,11 +52,11 @@ pub struct DiagnosticsSummaryView {
     pub gpu_name: Option<String>,
     pub vram_total: Option<u64>,
     pub vram_free: Option<u64>,
-    pub workflow_packages: usize,
-    pub valid_workflow_packages: usize,
-    pub invalid_workflow_packages: usize,
-    pub active_task_count: usize,
-    pub production_busy: bool,
+    pub workflow_packages: Option<usize>,
+    pub valid_workflow_packages: Option<usize>,
+    pub invalid_workflow_packages: Option<usize>,
+    pub active_task_count: Option<usize>,
+    pub production_busy: Option<bool>,
     pub logging_available: bool,
     pub log_retention_days: u32,
 }
@@ -66,6 +78,53 @@ pub struct DiagnosticsService {
 }
 
 impl DiagnosticsService {
+    /// Explicit project scope: never label a bounded project window as global history.
+    pub async fn execution_health(
+        &self,
+        project_id: &str,
+    ) -> Result<execution::ExecutionHealth, AppError> {
+        let tasks = self.recent_diagnostic_tasks(project_id).await?;
+        Ok(execution::ExecutionHealth::from_recent(project_id, &tasks))
+    }
+
+    pub async fn recent_failures(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<execution::RecentFailure>, AppError> {
+        let tasks = self.recent_diagnostic_tasks(project_id).await?;
+        Ok(execution::recent_failures(project_id, &tasks))
+    }
+
+    async fn recent_diagnostic_tasks(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<crate::application::ports::TaskDiagnosticFacts>, AppError> {
+        if project_id.trim().is_empty() {
+            return Err(AppError::invalid_input("诊断需要明确的项目范围"));
+        }
+        self.task_repository
+            .list_recent_diagnostic_facts(project_id, execution::RECENT_TASK_LIMIT)
+            .await
+            .map_err(|_| AppError::database("无法读取最近任务诊断"))
+    }
+
+    pub async fn task_timeline(
+        &self,
+        project_id: &str,
+        task_id: &str,
+    ) -> Result<execution::TaskTimeline, AppError> {
+        let id = crate::domain::TaskId::parse(task_id)
+            .map_err(|_| AppError::invalid_input("任务标识无效"))?;
+        let task = self
+            .task_repository
+            .find_diagnostic_facts(project_id, &id)
+            .await
+            .map_err(|_| AppError::database("无法读取任务诊断"))?
+            .filter(|task| task.project_id == project_id)
+            .ok_or_else(|| AppError::invalid_input("当前项目中找不到该任务"))?;
+        Ok(execution::TaskTimeline::from_facts(&task))
+    }
+
     pub fn new(
         database_health_probe: Arc<dyn DatabaseHealthProbe>,
         task_repository: Arc<dyn TaskRepository>,
@@ -90,30 +149,32 @@ impl DiagnosticsService {
         let database_healthy = self.database_health_probe.is_healthy().await;
 
         let active_task_count = match self.task_repository.list_active().await {
-            Ok(tasks) => tasks.len(),
+            Ok(tasks) => Some(tasks.len()),
             Err(error) => {
                 tracing::warn!(
                     error_type = std::any::type_name_of_val(&error),
                     "diagnostics could not read active tasks"
                 );
-                0
+                None
             }
         };
 
         let production_busy = match self.production_queue_service.admission_status().await {
-            Ok(status) => status.busy,
+            Ok(status) => Some(status.busy),
             Err(error) => {
                 tracing::warn!(
                     error_type = std::any::type_name_of_val(&error),
                     "diagnostics could not read production admission"
                 );
-                false
+                None
             }
         };
 
+        let mut comfy_read_unknown = false;
         let comfy = match self.comfy_service.get_status().await {
             Ok(status) => status,
             Err(error) => {
+                comfy_read_unknown = true;
                 tracing::warn!(
                     error_code = error.code(),
                     "diagnostics could not read ComfyUI status"
@@ -129,28 +190,30 @@ impl DiagnosticsService {
             }
         };
 
-        let (workflow_packages, valid_workflow_packages, invalid_workflow_packages) = match self
-            .workflow_lifecycle_service
-            .list_workspace_diagnostics()
+        let (workflow_packages, valid_workflow_packages, invalid_workflow_packages) =
+            match bounded_diagnostic_read(
+                DIAGNOSTIC_PACKAGE_READ_TIMEOUT,
+                self.workflow_lifecycle_service.list_workspace_diagnostics(),
+            )
             .await
-        {
-            Ok(workspace) => {
-                let total = workspace.items.len();
-                let valid = workspace
-                    .items
-                    .iter()
-                    .filter(|item| item.package_status == "VALID")
-                    .count();
-                (total, valid, total.saturating_sub(valid))
-            }
-            Err(error) => {
-                tracing::warn!(
-                    error_code = error.code(),
-                    "diagnostics could not read workflow package status"
-                );
-                (0, 0, 0)
-            }
-        };
+            {
+                Some(workspace) => {
+                    let total = workspace.items.len();
+                    let valid = workspace
+                        .items
+                        .iter()
+                        .filter(|item| item.package_status == "VALID")
+                        .count();
+                    (Some(total), Some(valid), Some(total.saturating_sub(valid)))
+                }
+                None => {
+                    tracing::warn!(
+                        error_code = "DIAGNOSTIC_PACKAGE_READ_UNAVAILABLE",
+                        "diagnostics could not read workflow package status"
+                    );
+                    (None, None, None)
+                }
+            };
 
         let (gpu_name, vram_total, vram_free) = summarize_devices(&comfy);
 
@@ -164,7 +227,7 @@ impl DiagnosticsService {
                 "正式版".to_owned()
             },
             database_healthy,
-            comfy_status: comfy_status_name(comfy.status),
+            comfy_status: diagnostic_comfy_status(comfy.status, comfy_read_unknown),
             comfy_version: comfy.comfyui_version,
             gpu_name,
             vram_total,
@@ -259,6 +322,14 @@ fn sum_device_value(
     found.then_some(total)
 }
 
+fn diagnostic_comfy_status(status: ComfyConnectionStatus, read_unknown: bool) -> String {
+    if read_unknown {
+        "UNKNOWN".to_owned()
+    } else {
+        comfy_status_name(status)
+    }
+}
+
 fn comfy_status_name(status: ComfyConnectionStatus) -> String {
     match status {
         ComfyConnectionStatus::Connected => "CONNECTED".to_owned(),
@@ -278,7 +349,26 @@ fn build_diagnostics_bundle(
     summary: &DiagnosticsSummaryView,
     logs_dir: &Path,
 ) -> Result<Vec<u8>, String> {
-    let diagnostics = serde_json::to_vec_pretty(summary).map_err(|_| "summary serialization")?;
+    // Runtime-supplied device/version text is not trusted merely because the
+    // field lives in a typed summary. The bundle's path/secret policy applies
+    // to every string, not only the separate log entries.
+    let mut safe_summary = summary.clone();
+    for value in [
+        &mut safe_summary.app_version,
+        &mut safe_summary.platform,
+        &mut safe_summary.architecture,
+        &mut safe_summary.run_mode,
+        &mut safe_summary.comfy_status,
+    ] {
+        *value = safe_export_text(value).unwrap_or_else(|| "UNAVAILABLE".to_owned());
+    }
+    safe_summary.comfy_version = safe_summary
+        .comfy_version
+        .as_deref()
+        .and_then(safe_export_text);
+    safe_summary.gpu_name = safe_summary.gpu_name.as_deref().and_then(safe_export_text);
+    let diagnostics =
+        serde_json::to_vec_pretty(&safe_summary).map_err(|_| "summary serialization")?;
     let recent_logs = read_recent_logs(logs_dir, DIAGNOSTIC_LOG_FILE_LIMIT, DIAGNOSTIC_LOG_BYTES);
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
@@ -310,8 +400,51 @@ fn build_diagnostics_bundle(
         .map_err(|_| "bundle finish")?)
 }
 
+fn safe_export_text(value: &str) -> Option<String> {
+    if value.len() > 256 || value.contains(['\r', '\n']) {
+        return None;
+    }
+    let mut expected = value.as_bytes().to_vec();
+    expected.push(b'\n');
+    (crate::infrastructure::logging::sanitize_log_content(value.as_bytes()) == expected)
+        .then(|| value.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn phase13_package_probe_deadline_and_error_are_unknown_not_zero() {
+        use super::*;
+        let budget = std::time::Duration::from_millis(1);
+        assert_eq!(
+            bounded_diagnostic_read(budget, async { Ok::<_, ()>(7) }).await,
+            Some(7)
+        );
+        assert_eq!(
+            bounded_diagnostic_read(budget, async { Err::<usize, _>(()) }).await,
+            None
+        );
+        assert_eq!(
+            bounded_diagnostic_read(budget, std::future::pending::<Result<usize, ()>>()).await,
+            None
+        );
+    }
+    #[test]
+    fn phase13_failed_comfy_probe_is_unknown_not_offline() {
+        use super::*;
+        assert_eq!(
+            diagnostic_comfy_status(ComfyConnectionStatus::Offline, true),
+            "UNKNOWN"
+        );
+        assert_eq!(
+            diagnostic_comfy_status(ComfyConnectionStatus::Offline, false),
+            "OFFLINE"
+        );
+        assert_eq!(
+            diagnostic_comfy_status(ComfyConnectionStatus::Connected, false),
+            "CONNECTED"
+        );
+    }
     use super::{build_diagnostics_bundle, DiagnosticsSummaryView};
     use crate::infrastructure::logging::sanitize_log_content;
     use chrono::{Duration, Utc};
@@ -331,14 +464,54 @@ mod tests {
             gpu_name: None,
             vram_total: None,
             vram_free: None,
-            workflow_packages: 0,
-            valid_workflow_packages: 0,
-            invalid_workflow_packages: 0,
-            active_task_count: 0,
-            production_busy: false,
+            workflow_packages: Some(0),
+            valid_workflow_packages: Some(0),
+            invalid_workflow_packages: Some(0),
+            active_task_count: Some(0),
+            production_busy: Some(false),
             logging_available: true,
             log_retention_days: 7,
         }
+    }
+
+    #[test]
+    fn phase13_case6_bundle_privacy_entries_and_runtime_text() {
+        let directory = tempdir().unwrap();
+        fs::write(directory.path().join("app.db"), b"PRIVATE_DATABASE").unwrap();
+        fs::write(directory.path().join("image.png"), b"PRIVATE_ASSET").unwrap();
+        fs::write(directory.path().join("workflow.json"), b"PRIVATE_WORKFLOW").unwrap();
+        fs::write(directory.path().join("recipe.yaml"), b"PRIVATE_RECIPE").unwrap();
+        fs::write(directory.path().join(format!("ai-studio.{}", Utc::now().date_naive())),
+            b"prompt=PRIVATE_PROMPT\nsnapshot_json=PRIVATE_SNAPSHOT\nAuthorization: Bearer PRIVATE_TOKEN\nsource=/home/private/project\nerror_code=COMFY_OFFLINE\n").unwrap();
+        let mut summary = sample_summary();
+        summary.gpu_name = Some(r"C:\Users\private\GPU".to_owned());
+        summary.comfy_version = Some("https://private:password@example.com".to_owned());
+        summary.active_task_count = None;
+        summary.production_busy = None;
+        let bytes = build_diagnostics_bundle(&summary, directory.path()).unwrap();
+        assert!(bytes.len() <= super::MAX_DIAGNOSTICS_BUNDLE_BYTES);
+        let mut archive = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut all = String::new();
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).unwrap();
+            assert!(
+                entry.name() == "diagnostics.json"
+                    || entry.name() == "README.txt"
+                    || entry.name().starts_with("logs/ai-studio.")
+            );
+            entry.read_to_string(&mut all).unwrap();
+        }
+        assert!(!all.contains("PRIVATE_"));
+        assert!(!all.contains(r"C:\Users"));
+        assert!(!all.contains("/home/private"));
+        assert!(!all.contains("example.com"));
+        assert!(all.contains("COMFY_OFFLINE"));
+        assert!(all.contains("\"activeTaskCount\": null"));
+        assert!(all.contains("\"productionBusy\": null"));
+        assert_eq!(
+            fs::read(directory.path().join("app.db")).unwrap(),
+            b"PRIVATE_DATABASE"
+        );
     }
 
     #[test]

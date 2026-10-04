@@ -21,6 +21,7 @@ import { normalLibrary } from "../features/library/libraryModel";
 import { WORKSPACES } from "../types/workspaceResume";
 const read=(p:string)=>readFileSync(p,"utf8");
 const matrix=JSON.parse(read("docs/architecture/phase7-retirement-matrix.json")) as {rows:{entry:string;file:string;decision:string;replacement:string;compatibility:string;status:string}[];frozenSources:Record<string,{files:number;sha256:string}>};
+const phase13BoundaryReview=JSON.parse(read("docs/architecture/phase13-observability.json"));
 const app=()=>read("src/app/App.tsx");
 const project="phase7-project";
 const create:AppRoute={kind:"create",projectId:project,shotId:"shot-exact",stage:"video"};
@@ -99,7 +100,7 @@ it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()
  // Migrations and all other historical boundaries remain pinned.
  const phase8=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json")) as {backendSourceSnapshot:{files:number;sha256:string}};
  const phase9=JSON.parse(read("docs/architecture/phase9-style-cleanup.json"));
- const reviewed=backendPerformanceBoundary('.',phase8.backendSourceSnapshot,JSON.parse(read('docs/architecture/phase12-performance.json')));expect(reviewed.violations).toEqual([]);
- for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
+ const reviewed=backendPerformanceBoundary('.',phase8.backendSourceSnapshot,JSON.parse(read('docs/architecture/phase12-performance.json')),phase13BoundaryReview);expect(reviewed.violations).toEqual([]);
+ for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,files:reviewed.files ?? phase8.backendSourceSnapshot.files,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
 
 });

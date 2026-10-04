@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { repairJobsStatus } from "../../services/tauriClient";
+import { diagnosticsClient } from "../../services/diagnosticsClient";
 import type { RepairJobStatus, RepairJobStatusView } from "../../types/repairJobs";
 import { formatDateTime } from "../../i18n/statusLabels";
 import { formatUiError } from "../../i18n/errorMessages";
@@ -61,7 +61,7 @@ export function RepairJobsStatusSection() {
   const [error, setError] = useState<unknown>();
   useEffect(() => {
     let cancelled = false;
-    repairJobsStatus()
+    diagnosticsClient.repairJobs()
       .then((next) => { if (!cancelled) setJobs(next); })
       .catch((nextError: unknown) => { if (!cancelled) setError(nextError); })
       .finally(() => { if (!cancelled) setLoading(false); });

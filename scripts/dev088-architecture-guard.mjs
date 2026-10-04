@@ -175,7 +175,10 @@ function productBoundaryViolations(path, source) {
     const directLegacy = /(?:^|\/)tauriClient(?:\.ts)?$/.test(specifier);
     const oldTransport = directLegacy || /(?:^|\/)services\/(?:ipc|workflowClient)(?:\.ts)?$/.test(specifier) || specifier === "@tauri-apps/api/core";
     if ((product && !transport && oldTransport) || (newPage && oldTransport)) violations.push(`${path}: forbidden product/transport import ${specifier}`);
-    if (directLegacy && !transport && !legacyTransportAllowlist.has(path)) violations.push(`${path}: new legacy importer`);
+    // Phase13's exact Advanced read seam is hash/scope-checked by styleBoundary
+    // above; this does not authorize any normal Product or new-page importer.
+    const advancedDiagnosticsSeam = path === "src/services/diagnosticsClient.ts";
+    if (directLegacy && !transport && !advancedDiagnosticsSeam && !legacyTransportAllowlist.has(path)) violations.push(`${path}: new legacy importer`);
   }
   return violations;
 }
@@ -803,6 +806,8 @@ console.log(`ASSET_VIDEO_LIBRARY_CONTROLLER=PASS`);
 console.log(`ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER=PASS`);
 
 const performanceReview=JSON.parse(readFileSync(`${root}/docs/architecture/phase12-performance.json`,'utf8'));
-const backendPerformance=backendPerformanceBoundary(root,backendManifest.backendSourceSnapshot,performanceReview);
+const phase13Review=JSON.parse(readFileSync(`${root}/docs/architecture/phase13-observability.json`,'utf8'));
+const backendPerformance=backendPerformanceBoundary(root,backendManifest.backendSourceSnapshot,performanceReview,phase13Review);
 if(backendPerformance.violations.length)throw Error(backendPerformance.violations.join('\n'));
 console.log('BACKEND_PERFORMANCE_SUCCESSOR=PASS');
+console.log('PHASE13_OBSERVABILITY_SUCCESSOR=PASS');

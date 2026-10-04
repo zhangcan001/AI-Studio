@@ -17,11 +17,12 @@ interface Props {
   productionBusy: boolean;
   focusTaskId?: string;
   initialFilter?: TaskHistoryFilter;
+  initialAuditTaskId?: string;
   onLoadInputs: (draft: ReusableGenerationDraft) => void;
   onOpenShot?: (shotId: string) => void;
 }
 
-export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTaskId, initialFilter, onLoadInputs, onOpenShot }: Props) {
+export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTaskId, initialFilter, initialAuditTaskId, onLoadInputs, onOpenShot }: Props) {
   const [view, setView] = useState<"tasks" | "audit">("tasks");
   const [filter, setFilter] = useState<TaskHistoryFilter>(initialFilter ?? "ALL");
   const [keywordInput, setKeywordInput] = useState("");
@@ -160,6 +161,8 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
     if (focusTaskId) setView("tasks");
   }, [focusTaskId]);
 
+  useEffect(() => { if (initialAuditTaskId) setView("audit"); }, [initialAuditTaskId, projectId]);
+
   const previewAsset = detail?.outputAssets.find((asset) => asset.id === previewAssetId);
 
   return (
@@ -171,6 +174,7 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
       {view === "audit" ? (
         <ProductionAuditCenter
           projectId={projectId}
+          focusTaskId={initialAuditTaskId}
           onOpenTask={(taskId) => {
             setView("tasks");
             void selectTask(taskId);

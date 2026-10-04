@@ -1,6 +1,7 @@
 use chrono::{Duration, NaiveDate, Utc};
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
 };
@@ -110,9 +111,31 @@ pub fn read_recent_logs(
     let mut selected = Vec::new();
     let mut total_bytes = 0usize;
     for entry in entries.into_iter().take(max_files) {
-        let Ok(content) = fs::read(&entry.path) else {
+        if total_bytes >= max_bytes {
+            break;
+        }
+        let Ok(file) = fs::File::open(&entry.path) else {
             continue;
         };
+        // Bound input before allocating; a single log may be much larger than
+        // the export allowance. Drop a truncated line rather than exporting a
+        // prefix whose sensitive marker may have been cut off.
+        let mut content = Vec::new();
+        if file
+            .take(max_bytes as u64 + 1)
+            .read_to_end(&mut content)
+            .is_err()
+        {
+            continue;
+        }
+        if content.len() > max_bytes {
+            let end = content[..max_bytes]
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map(|index| index + 1)
+                .unwrap_or(0);
+            content.truncate(end);
+        }
         let sanitized = sanitize_log_content(&content);
         if sanitized.is_empty() || total_bytes >= max_bytes {
             continue;
@@ -154,15 +177,71 @@ fn contains_sensitive_data(line: &str) -> bool {
         "prompt:",
         "storage_path",
         "workflow_json",
+        "workflow_source",
         "recipe_yaml",
+        "recipe_source",
         "snapshot_json",
         "database_path",
         "path=",
         "appdata\\",
+        "values_json",
+        "authorization",
+        "bearer",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "api_key",
+        "apikey",
+        "api-key",
+        "credential",
+        "private_key",
+        "privatekey",
+        "access_key",
+        "accesskey",
+        "refresh_key",
+        "cookie",
+        "-----begin",
+        "sk-",
+        "ghp_",
+        "github_pat_",
+        "eyj",
     ]
     .iter()
     .any(|marker| lower.contains(marker))
         || contains_windows_absolute_path(line)
+        // JSON escape sequences are common in structured log fields.
+        // Escaped keys can hide the sensitive marker itself (e.g. \u0070rompt).
+        // Export does not need escaped Unicode/solidus payloads; omit their lines.
+        || lower.contains("\\u") || lower.contains("\\/")
+        || contains_unix_absolute_path(line)
+        || contains_credential_url(line)
+}
+
+fn contains_unix_absolute_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.iter().enumerate().any(|(index, byte)| {
+        *byte == b'/'
+            && (index == 0
+                || matches!(
+                    bytes[index - 1],
+                    b' ' | b'\t' | b'"' | b'\'' | b'=' | b':' | b'(' | b'['
+                ))
+            && bytes
+                .get(index + 1)
+                .is_some_and(|next| *next != b'/' && !next.is_ascii_whitespace())
+    })
+}
+
+fn contains_credential_url(value: &str) -> bool {
+    value.split_whitespace().any(|word| {
+        word.split_once("://").is_some_and(|(_, suffix)| {
+            suffix
+                .split(['/', '?', '#'])
+                .next()
+                .is_some_and(|authority| authority.contains('@'))
+        })
+    })
 }
 
 fn contains_windows_absolute_path(value: &str) -> bool {
@@ -197,6 +276,9 @@ fn read_owned_log_entries(logs_dir: &Path) -> Option<Vec<OwnedLogEntry>> {
         entries
             .filter_map(Result::ok)
             .filter_map(|entry| {
+                if entry.file_type().ok()?.is_symlink() {
+                    return None;
+                }
                 let path = entry.path();
                 if !path.is_file() {
                     return None;
@@ -234,6 +316,54 @@ mod tests {
     use chrono::{Duration, Utc};
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn phase13_case7_sanitizer_drops_sensitive_lines_and_keeps_safe_codes() {
+        use super::sanitize_log_content;
+        let sensitive = [
+            "prompt=private",
+            "negative_prompt: private",
+            "password=hunter2",
+            "token=abc",
+            "Authorization: Bearer abc",
+            "apiKey=abc",
+            "api-key=abc",
+            r#"{"path":"C:\\Users\\alice\\asset.png"}"#,
+            r#"{"token":"abc"}"#,
+            r#"{"snapshot_json":{"x":1}}"#,
+            r"\\server\share\asset.png",
+            "/home/alice/project/image.png",
+            "source=/Users/alice/private",
+            "GET https://alice:abc@example.com/a",
+            r#"{"path":"C:\u005cUsers\u005calice"}"#,
+            "cookie=session-value",
+            "credential=abc",
+            "ghp_fake",
+            "sk-fake",
+            r#"{"\u0070rompt":"private"}"#,
+            r#"{"\u0074oken":"private"}"#,
+            r#"{"location":"\/home\/alice\/private"}"#,
+            "workflow_source={nodes:private}",
+            "recipe_source=private",
+        ];
+        for line in sensitive {
+            assert!(
+                sanitize_log_content(line.as_bytes()).is_empty(),
+                "sensitive case was retained"
+            );
+        }
+        let safe = b"error_code=COMFY_OFFLINE task_id=tsk_opaque\nphase=PREPARE duration_ms=12\n";
+        assert_eq!(sanitize_log_content(safe), safe);
+        let dir = tempdir().unwrap();
+        let name = format!("ai-studio.{}", Utc::now().date_naive());
+        fs::write(
+            dir.path().join(name),
+            b"safe=kept\nthis-is-a-truncated-line-token=secret",
+        )
+        .unwrap();
+        let logs = read_recent_logs(dir.path(), 7, 12);
+        assert_eq!(logs[0].1, b"safe=kept\n");
+    }
 
     fn dated_name(offset_days: i64) -> String {
         format!(

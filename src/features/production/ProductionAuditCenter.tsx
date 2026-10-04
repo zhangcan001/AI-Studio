@@ -23,11 +23,13 @@ import "./ProductionAuditCenter.css";
 
 interface Props {
   projectId: string;
+  focusTaskId?: string;
   onOpenTask?: (taskId: string) => void;
   onOpenShot?: (shotId: string) => void;
 }
 
 export interface ProductionAuditCenterViewProps {
+  initialTaskRoot?: string;
   summary?: ProductionAuditSummary;
   activity?: ProductionAuditActivity[];
   integrity?: ProductionAuditIntegrity;
@@ -60,7 +62,7 @@ const rootTypes: Array<{ value: ProductionAuditRootType; label: string }> = [
   { value: "TASK", label: "任务" },
 ];
 
-export function ProductionAuditCenter({ projectId, onOpenTask, onOpenShot }: Props) {
+export function ProductionAuditCenter({ projectId, focusTaskId, onOpenTask, onOpenShot }: Props) {
   const [summary, setSummary] = useState<ProductionAuditSummary>();
   const [activity, setActivity] = useState<ProductionAuditActivity[]>([]);
   const [integrity, setIntegrity] = useState<ProductionAuditIntegrity>();
@@ -109,6 +111,15 @@ export function ProductionAuditCenter({ projectId, onOpenTask, onOpenShot }: Pro
     }
   }
 
+  useEffect(() => {
+    if (!focusTaskId) return;
+    let current = true;
+    void getProductionAuditLineage({ projectId, rootType: "TASK", rootId: focusTaskId })
+      .then(result => { if (current) setLineage(result); })
+      .catch(error => { if (current) setError(toUserMessage(error)); });
+    return () => { current = false; };
+  }, [projectId, focusTaskId]);
+
   async function loadSnapshotDetail(node: ProductionAuditLineageNode) {
     if (snapshotDetails[node.id] || !node.itemId) return;
     setSnapshotLoadingId(node.id);
@@ -140,6 +151,7 @@ export function ProductionAuditCenter({ projectId, onOpenTask, onOpenShot }: Pro
 
   return (
     <ProductionAuditCenterView
+      initialTaskRoot={focusTaskId}
       summary={summary}
       activity={activity}
       integrity={integrity}
@@ -159,6 +171,7 @@ export function ProductionAuditCenter({ projectId, onOpenTask, onOpenShot }: Pro
 }
 
 export function ProductionAuditCenterView({
+  initialTaskRoot,
   summary,
   activity = [],
   integrity,
@@ -178,6 +191,7 @@ export function ProductionAuditCenterView({
   const [keyword, setKeyword] = useState("");
   const [rootType, setRootType] = useState<ProductionAuditRootType>("RUN");
   const [rootId, setRootId] = useState("");
+  useEffect(() => { if (initialTaskRoot) { setRootType("TASK"); setRootId(initialTaskRoot); } }, [initialTaskRoot]);
   const [copiedContextHash, setCopiedContextHash] = useState<string>();
   const visibleActivity = useMemo(
     () => filterActivities(activity, filter, keyword),

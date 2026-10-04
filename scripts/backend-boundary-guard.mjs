@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { phase13Boundary } from './phase13-observability-guard.mjs';
 // Lightweight lexical masking keeps offsets, including nested Rust comments and raw strings.
 export function maskRust(source, maskStrings = true) {
  const out=source.split(''); const blank=(a,b)=>{for(let k=a;k<b;k++)if(out[k]!=='\n'&&out[k]!=='\r')out[k]=' ';};
@@ -46,7 +47,11 @@ export function backendBoundary(root,manifest){const violations=[];let checked=0
 // A measured Phase12 successor, not a new historical baseline. Every untouched
 // Rust file and the complete new aggregate remain pinned; only these two existing
 // read-projection paths may advance. No new source, IPC, DB or authority exemption.
-export function backendPerformanceBoundary(root, snapshot, review) {
+export function backendPerformanceBoundary(root, snapshot, review, phase13Review) {
+ if (phase13Review) {
+  const gate=phase13Boundary(root,phase13Review,review,snapshot);
+  return {sha256:gate.backendAggregateSha256,files:gate.backendFiles,violations:gate.violations};
+ }
  const seam=review?.backendOptimization2,proof=seam?.sourceFreeze;
  if(!proof)return {sha256:snapshot.sha256,violations:[]};
  const allowed=['src-tauri/src/application/product/run_facade.rs','src-tauri/src/application/product/run_facade/workspace.rs'];

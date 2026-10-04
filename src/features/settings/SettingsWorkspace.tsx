@@ -1,17 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyComfyEnvironmentProfile,
   deleteComfyEnvironmentProfile,
-  exportDiagnostics,
   freeComfyMemory,
   getComfyPreflight,
   getComfySettings,
-  getDiagnosticsSummary,
   listComfyEnvironmentProfiles,
   saveComfyEndpoint,
   saveComfyEnvironmentProfile,
   testComfyConnection,
 } from "../../services/tauriClient";
+import { diagnosticsClient } from "../../services/diagnosticsClient";
 import type { DiagnosticsSummary } from "../../types/diagnostics";
 import type { ComfyStatus } from "../../types/comfy";
 import type {
@@ -25,8 +24,10 @@ import { formatFileSize, formatDateTime } from "../../i18n/statusLabels";
 import { formatUiError } from "../../i18n/errorMessages";
 import { ComfyStatus as ComfyStatusCard } from "../comfy/ComfyStatus";
 import { RepairJobsStatusSection } from "./RepairJobsStatusSection";
+import { DiagnosticsExecutionPanel, type DiagnosticsExecutionProps } from "./DiagnosticsExecutionPanel";
 
-interface Props {
+interface Props extends DiagnosticsExecutionProps {
+  onOpenWorkflowDiagnostics?: () => void;
   showWorkflowRepairStatus?: boolean;
   comfy?: ComfyStatus;
   connectionLoading: boolean;
@@ -44,6 +45,11 @@ export function SettingsWorkspace({
   onRefreshCapabilities,
   onEndpointApplied,
   showWorkflowRepairStatus = true,
+  projectId,
+  initialTaskId,
+  onOpenRun,
+  onOpenAudit,
+  onOpenWorkflowDiagnostics,
 }: Props) {
   const [summary, setSummary] = useState<DiagnosticsSummary>();
   const [loading, setLoading] = useState(true);
@@ -69,20 +75,25 @@ export function SettingsWorkspace({
   const [preflight, setPreflight] = useState<ComfyPreflightReport>();
   const [preflightLoading, setPreflightLoading] = useState(false);
 
+  const summaryRequest = useRef(0);
   const refresh = useCallback(async () => {
+    const request = ++summaryRequest.current;
+    setSummary(undefined);
     setLoading(true);
     setError(undefined);
     try {
-      setSummary(await getDiagnosticsSummary());
+      const next = await diagnosticsClient.summary();
+      if (request === summaryRequest.current) setSummary(next);
     } catch (nextError) {
-      setError(nextError);
+      if (request === summaryRequest.current) setError(nextError);
     } finally {
-      setLoading(false);
+      if (request === summaryRequest.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void refresh();
+    return () => { summaryRequest.current++; };
   }, [refresh]);
 
   useEffect(() => {
@@ -267,7 +278,7 @@ export function SettingsWorkspace({
     setError(undefined);
     setNotice(undefined);
     try {
-      const exported = await exportDiagnostics();
+      const exported = await diagnosticsClient.exportBundle();
       if (exported) setNotice(`诊断包已保存：${exported.fileName}`);
     } catch (exportError) {
       setError(exportError);
@@ -316,23 +327,26 @@ export function SettingsWorkspace({
         <section className="settings-card" aria-labelledby="settings-app-info">
           <h3 id="settings-app-info">应用信息</h3>
           <dl className="settings-list">
-            <div><dt>应用版本</dt><dd>{summary?.appVersion ?? "--"}</dd></div>
-            <div><dt>运行平台</dt><dd>{summary ? `${summary.platform} · ${summary.architecture}` : "--"}</dd></div>
-            <div><dt>运行模式</dt><dd>{summary?.runMode ?? "--"}</dd></div>
+            <div><dt>应用版本</dt><dd>{summary?.appVersion ?? "未知"}</dd></div>
+            <div><dt>运行平台</dt><dd>{summary ? `${summary.platform} · ${summary.architecture}` : "未知"}</dd></div>
+            <div><dt>运行模式</dt><dd>{summary?.runMode ?? "未知"}</dd></div>
           </dl>
         </section>
 
         <section className="settings-card" aria-labelledby="settings-runtime-info">
           <h3 id="settings-runtime-info">运行状态</h3>
           <dl className="settings-list">
-            <div><dt>本地数据库</dt><dd>{summary ? (summary.databaseHealthy ? "正常" : "暂不可用") : "--"}</dd></div>
-            <div><dt>工作流包</dt><dd>{summary ? `${summary.validWorkflowPackages} 个可用 / ${summary.workflowPackages} 个总计` : "--"}</dd></div>
-            <div><dt>活动任务</dt><dd>{summary?.activeTaskCount ?? "--"}</dd></div>
-            <div><dt>生产队列</dt><dd>{summary ? (summary.productionBusy ? "运行中" : "空闲") : "--"}</dd></div>
-            <div><dt>日志</dt><dd>{summary ? (summary.loggingAvailable ? `可用，保留 ${summary.logRetentionDays} 天` : "不可用") : "--"}</dd></div>
+            <div><dt>本地数据库</dt><dd>{summary ? (summary.databaseHealthy ? "正常" : "暂不可用") : "未知"}</dd></div>
+            <div><dt>工作流包</dt><dd>{summary?.validWorkflowPackages != null && summary.workflowPackages != null ? `${summary.validWorkflowPackages} 个可用 / ${summary.workflowPackages} 个总计` : "未知"}</dd></div>
+            <div><dt>活动任务</dt><dd>{summary?.activeTaskCount ?? "未知"}</dd></div>
+            <div><dt>生产队列</dt><dd>{summary?.productionBusy == null ? "未知" : summary.productionBusy ? "运行中" : "空闲"}</dd></div>
+            <div><dt>日志</dt><dd>{summary ? (summary.loggingAvailable ? `可用，保留 ${summary.logRetentionDays} 天` : "不可用") : "未知"}</dd></div>
           </dl>
         </section>
       </div>
+
+      <DiagnosticsExecutionPanel key={`${projectId ?? "none"}:${initialTaskId ?? ""}`} projectId={projectId} initialTaskId={initialTaskId} onOpenRun={onOpenRun} onOpenAudit={onOpenAudit} />
+      <button type="button" onClick={onOpenWorkflowDiagnostics} disabled={!onOpenWorkflowDiagnostics}>工作流包诊断（高级 Lab）</button>
 
       <section className="settings-card settings-comfy-card" aria-labelledby="settings-comfy-title">
         <div className="settings-card-heading">
@@ -554,6 +568,7 @@ function preflightStatusDescription(status: ComfyPreflightReport["status"]): str
 }
 
 function comfyStatusLabel(status: DiagnosticsSummary["comfyStatus"]): string {
+  if (status === "UNKNOWN") return "未知";
   if (status === "CONNECTED") return "已连接";
   if (status === "INCOMPATIBLE") return "版本不兼容";
   return "离线";

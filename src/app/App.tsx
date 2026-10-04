@@ -763,6 +763,7 @@ function App() {
             comfyConnected={isConnected}
             productionBusy={productionAdmission.busy}
             focusTaskId={focusedTaskId}
+            initialAuditTaskId={route.auditTaskId}
             initialFilter={focusedCollectionFilter?.kind === "tasks" ? focusedCollectionFilter.status : undefined}
             onLoadInputs={loadHistoricalInputs}
             onOpenShot={(shotId) => openShot(shotId)}
@@ -783,6 +784,7 @@ function App() {
         )}
         {(route.kind === "system-settings" || route.kind === "project-settings") && route.section === "advanced-workflows" && (
           <WorkflowLabPage
+            initialDiagnosticsOpen={route.kind === "system-settings" && route.returnTo?.kind === "system-settings" && route.returnTo.section !== "advanced-tools"}
             projectId={activeProject?.id}
             catalog={catalog}
             comfyConnected={isConnected}
@@ -804,7 +806,12 @@ function App() {
         )}
         {route.kind === "system-settings" && !["advanced-tools", "advanced-workflows"].includes(route.section) && (
           <SettingsWorkspace
-            showWorkflowRepairStatus={false}
+            showWorkflowRepairStatus={true}
+            projectId={activeProject?.id}
+            initialTaskId={route.returnTo?.kind === "runs" && route.returnTo.run?.source === "task" ? route.returnTo.run.id : undefined}
+            onOpenRun={(projectId, taskId) => void navigate({ kind: "runs", projectId, run: { source: "task", id: taskId } })}
+            onOpenAudit={(projectId, taskId) => void navigate({ kind: "project-settings", projectId, section: "advanced-tasks", auditTaskId: taskId })}
+            onOpenWorkflowDiagnostics={() => void navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: route })}
             comfy={comfy}
             connectionLoading={connectionLoading}
             capabilityLoading={capabilityLoading}

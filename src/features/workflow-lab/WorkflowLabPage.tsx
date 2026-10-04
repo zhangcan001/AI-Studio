@@ -8,7 +8,7 @@ import { toUserMessage } from "../../i18n/errorMessages";
 import { WorkflowLabSurface } from "./WorkflowLabSurface";
 
 /** Advanced view over existing Onboarding/Registry/Queue authorities, not a store. */
-export function WorkflowLabPage({ returnTo, navigate, ...props }: WorkflowWorkspaceProps & { returnTo?: AppRoute; navigate: (route: AppRoute) => unknown }) {
+export function WorkflowLabPage({ returnTo, navigate, initialDiagnosticsOpen, ...props }: WorkflowWorkspaceProps & { returnTo?: AppRoute; navigate: (route: AppRoute) => unknown; initialDiagnosticsOpen?: boolean }) {
   const [actionError, setActionError] = useState<string>();
   const controller = useWorkflowLabController({ ...props, onOpenStudio: async (workflowId, recipeId) => {
     setActionError(undefined);
@@ -24,6 +24,6 @@ export function WorkflowLabPage({ returnTo, navigate, ...props }: WorkflowWorksp
     {actionError && <p role="alert">{actionError}</p>}
     <WorkflowLabSurface controller={controller} />
     <details><summary>高级验证 · Benchmark</summary>{props.projectId ? <LabBenchmarkPane projectId={props.projectId} catalog={props.catalog} onOpenTask={props.onOpenTask} /> : <p>选择项目后才能运行高级验证。</p>}</details>
-    <details><summary>诊断与修复状态</summary><LabDiagnosticsPane items={controller.items} /></details>
+    <details open={initialDiagnosticsOpen}><summary>诊断与修复状态</summary><LabDiagnosticsPane items={controller.items} /></details>
   </section>;
 }
