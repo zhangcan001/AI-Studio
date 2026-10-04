@@ -4,6 +4,7 @@ import { normalizeProductError } from "../../product/errors";
 import type { ProjectOverview } from "../../product/types";
 import type { AppRoute } from "../routes/types";
 import { projectDisplayName } from "../../i18n/statusLabels";
+import { runtimeReadinessPresentation } from "./projectOverviewReadiness";
 
 /** Translate the backend's chosen action, never recompute project priorities. */
 export function overviewAction(projectId: string, action: ProjectOverview["nextAction"]): { label: string; route: AppRoute } {
@@ -36,12 +37,18 @@ export function ProjectOverviewPage({ projectId, navigate }: { projectId: string
   if (state.error) return <p role="alert">{state.error}</p>;
   const data = state.data!;
   const action = overviewAction(projectId, data.nextAction);
+  const readiness = runtimeReadinessPresentation(data.runtimeReadiness);
   return <section className="v3-overview" aria-label="项目概览">
     <header><h1>{projectDisplayName(data.project.id, data.project.name)}</h1>{data.project.description && <p>{data.project.description}</p>}</header>
     <section className="v3-next-action"><h2>下一步</h2><button type="button" className="primary-button" onClick={() => navigate(action.route)}>{action.label}</button></section>
     <div className="v3-overview-grid">
       <section><h2>当前进度</h2><p>镜头 {data.progress.total} · 已完成 {data.progress.completed} · 失败 {data.progress.failed}</p></section>
-      <section><h2>阻断与提醒</h2>{data.blockingIssues.length ? <ul>{data.blockingIssues.map((issue, i) => <li key={i}>{issue.title}</li>)}</ul> : <p>暂无项目阻断</p>}<p>运行环境：{data.runtimeReadiness.status === "READY" ? "就绪" : data.runtimeReadiness.status === "BLOCKED" ? "需要处理" : "待检查"}</p></section>
+      <section><h2>阻断与提醒</h2>{data.blockingIssues.length ? <ul>{data.blockingIssues.map((issue, i) => <li key={i}>{issue.title}</li>)}</ul> : <p>暂无项目阻断</p>}</section>
+      <section aria-label="运行准备"><h2>运行准备</h2>
+        <p>连接：{readiness.connectionLabel}</p><p>运行预检：{readiness.preflightLabel}</p>
+        <p>生产工作流：{readiness.workflowsLabel}</p><p>运行资源：{readiness.resourcesLabel}</p>
+        {readiness.needsAttention && <button type="button" onClick={() => navigate({ kind: "system-settings", section: "general", returnTo: { kind: "project", projectId, page: "overview" } })}>检查运行环境</button>}
+      </section>
       <section><h2>当前运行</h2><p>运行中队列 {data.activeRuns.runningBatches} · 暂停队列 {data.activeRuns.pausedBatches} · 活动任务 {data.activeRuns.activeTasks}</p><button type="button" onClick={() => navigate({ kind: "runs", projectId })}>查看运行</button></section>
       <section><h2>项目结果</h2><p>图片 {data.recentResults.images} · 视频 {data.recentResults.videos}</p><button type="button" onClick={() => navigate({ kind: "library", projectId })}>查看素材</button></section>
     </div>

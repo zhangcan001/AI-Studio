@@ -1,0 +1,72 @@
+{
+  "checkpoint": "M1_2_OVERVIEW_RUNTIME_READINESS",
+  "schemaVersion": 1,
+  "parentHead": "a51e1f697ab4dc5997e36ff080fddb48d9ebfe2b",
+  "paths": {
+    "scripts/m1-overview-readiness-boundary-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "52f143de7dcca959c090f60835de38a934266243b7814e4a4bfa61785571343b"
+    },
+    "scripts/m1-readiness-boundary-guard.mjs": {
+      "beforeHash": "c365fa435efa9ac31742d5b3c722af464eabf507052340e4cb3ff2d0f6440feb",
+      "afterHash": "28194362a8fb4b2bb2724a781b13dea35aef68248b1ab4b631338395ca54af22"
+    },
+    "src/app/M1OverviewReadinessBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "6df43fb70cfc27c51beaf5d6b29de9ab7c035f9053b840f201d7140d9afdc613"
+    },
+    "src/app/v3/ProjectOverviewPage.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "937292fea75b5d5b2d2741f7585921b5c069cc2deb37c08a90a01acb0ac2ac82"
+    },
+    "src/app/v3/ProjectOverviewPage.tsx": {
+      "beforeHash": "db19dff56112a53fd06a13eef2a93207f33aec48b270a9803d8514123fe781fb",
+      "afterHash": "6dd95bc81de98ec4e82e1862c9ddc1697918c4de17dfcc19f09608954cb2c84d"
+    },
+    "src/app/v3/projectOverviewReadiness.ts": {
+      "beforeHash": null,
+      "afterHash": "7d63fb134bee1f62dee3c455be0bbd39ef493dcc1a0f4c91845e5942b90919ea"
+    }
+  },
+  "backend": {
+    "beforeFiles": 344,
+    "afterFiles": 344,
+    "beforeAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7",
+    "afterAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7",
+    "untouchedAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7"
+  },
+  "frontend": {
+    "beforeFiles": 472,
+    "afterFiles": 475,
+    "beforeAggregateHash": "1fbf74dbedfc3f8cf53fa6853f931ae68b5644b18e0010265d3643f55ce12750",
+    "afterAggregateHash": "6ad86911e5808f9fe77fb42985fbf27b1da278cc97e92fd3622f5c101f3e1a19",
+    "untouchedAggregateHash": "76e30d03fce88e46a18d76707d06a14b608d02b877f11b77bc074363b8b954dd"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612",
+    "afterAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612",
+    "untouchedAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612"
+  },
+  "scripts": {
+    "beforeFiles": 16,
+    "afterFiles": 17,
+    "beforeAggregateHash": "169c59bd728c5d468210947da59ffd4b06f23c42f4aaa3be2149db63678472a1",
+    "afterAggregateHash": "e7b704aa3f624e487a221947037fafcec7422f84a1bbbc8f8e9aa54d6c46fdba",
+    "untouchedAggregateHash": "3f348c8f7293de83fbf8cb2edf25735ea686bbef425719bbc057618159f1fe0b"
+  },
+  "invariants": {
+    "queueAuthorityChanged": false,
+    "taskStateMachineChanged": false,
+    "workflowEngineChanged": false,
+    "bindingOccChanged": false,
+    "draftAuthorityChanged": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "remoteTelemetry": false,
+    "projectCommandCenterAuthorityChanged": false,
+    "newReadinessAuthority": false,
+    "newPollingOwner": false
+  }
+}
