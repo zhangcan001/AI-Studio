@@ -1,0 +1,74 @@
+{
+  "checkpoint": "M2_1_RUN_RECOVERY_SEMANTICS",
+  "schemaVersion": 1,
+  "parentHead": "b6d60ad1cf6906531fb81123fba8e8eea2835976",
+  "paths": {
+    "scripts/m1-settings-runtime-boundary-guard.mjs": {
+      "beforeHash": "f0e708f3860a7cbd3b31cf9144417ecca6342697fc392a1818dda1957811c054",
+      "afterHash": "9f4aec4ce43d8daa10b9580429005f33e1293043ce364b525a75697ef2ee5fd2"
+    },
+    "scripts/m2-run-recovery-boundary-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "7e901e993a02c6cd29d2115b0bd62b0b003d4476fb1c1475b3c182a607eba9c8"
+    },
+    "src/app/M2RunRecoveryBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "bfa337f3224d9e993a52c132ca49c84132d7f693e5cb8757bbcf2ee7f0fddac8"
+    },
+    "src/features/runs/RunDetail.tsx": {
+      "beforeHash": "ecc14ee82f787082acdcd3c2e580d344afbcc4cda359ff8de5c057d54faf0217",
+      "afterHash": "60a435d65b8b00f73f4c99315bf80428ceee373a9e6cadcedd17ac66bdc9507c"
+    },
+    "src/features/runs/RunsPage.test.tsx": {
+      "beforeHash": "2e9a8d02fc6ff989a83d3afe46888750b4e28fc5b1f1aad6d53c45d1ea70013d",
+      "afterHash": "5ebd59070015600bafea627f0b0d7ba123999574b0b453f2bdef80012fb152c1"
+    },
+    "src/features/runs/runRecoveryPresentation.ts": {
+      "beforeHash": null,
+      "afterHash": "df493ffa38e48edb10583fd020593f971165e7cce65e4c0da3a23c499548e09b"
+    }
+  },
+  "backend": {
+    "beforeFiles": 344,
+    "afterFiles": 344,
+    "beforeAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7",
+    "afterAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7",
+    "untouchedAggregateHash": "b0e52cab24e6407d691ffd1e5d82d58aa5539457dba4499ed2e5f88be9211ae7"
+  },
+  "frontend": {
+    "beforeFiles": 478,
+    "afterFiles": 480,
+    "beforeAggregateHash": "9a3868406ab2dd3a8adbda8b8759cd117550985a2dad894a86e9a334d17f7c44",
+    "afterAggregateHash": "4bda7b39096674f1e70d5ab42caceaf2b489fcd896992c68d501e7228f99445b",
+    "untouchedAggregateHash": "ccdd394f895c44adbc7edeb9e92154afb1a7491e26c47532111e1f985615b4fb"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612",
+    "afterAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612",
+    "untouchedAggregateHash": "73b5b5e5d49d44192ee3feede939805bf7672161e98ce21ffa4a227199e47612"
+  },
+  "scripts": {
+    "beforeFiles": 18,
+    "afterFiles": 19,
+    "beforeAggregateHash": "3db904b2a7c20470e9cb806c906c322ef47a33eccb82b20052068eac881584a8",
+    "afterAggregateHash": "f682a0e619cce51ad139edce1405b295e4712a02e5b2f6b54b495b95e3543ea7",
+    "untouchedAggregateHash": "f04b1f4c9421bb6729a824530dbda808f8a5ddadad6b18127bde41fc1107ff2c"
+  },
+  "invariants": {
+    "queueAuthorityChanged": false,
+    "taskStateMachineChanged": false,
+    "workflowEngineChanged": false,
+    "bindingOccChanged": false,
+    "draftAuthorityChanged": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "remoteTelemetry": false,
+    "runRetryAuthorityChanged": false,
+    "reviewAuthorityChanged": false,
+    "shotSelectionAuthorityChanged": false,
+    "newRecoveryStore": false,
+    "newPollingOwner": false
+  }
+}
