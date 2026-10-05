@@ -6,6 +6,15 @@ const { invokeCommand } = vi.hoisted(() => ({ invokeCommand: vi.fn() }));
 vi.mock("../services/ipc", () => ({ invokeCommand }));
 
 describe("product facade client", () => {
+  it("M3-1 read-only typed tag adapter and combined filters reach Product transport",async()=>{
+    const tags=[{id:"tag-a",projectId:"project-a",name:"Tag A",createdAt:"date",updatedAt:"date"}];
+    invokeCommand.mockResolvedValueOnce(tags);
+    expect(await productClient.library.tagsList("project-a")).toEqual(tags);
+    expect(invokeCommand).toHaveBeenLastCalledWith("product_library_tags_list",{projectId:"project-a"});
+    const query={category:"images",keyword:"later",favoriteOnly:true,tagId:"tag-a",cursor:null,limit:30} as const;
+    invokeCommand.mockResolvedValueOnce({items:[]});await productClient.library.list("project-a",query);
+    expect(invokeCommand).toHaveBeenLastCalledWith("product_library_list",{projectId:"project-a",query});
+  });
   it("phase5 target8 transports typed library details and preserves missing-resource errors", async () => {
     const query = { category: "prompts", keyword: "中文", cursor: null, limit: 20 } as const;
     const page = { items: [], nextCursor: null, coverage: "keyset-page", coverageMessage: "数据库分页" };

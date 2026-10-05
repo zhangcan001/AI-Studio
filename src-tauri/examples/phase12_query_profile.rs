@@ -221,6 +221,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .list(
                             "prj_default",
                             LibraryQuery {
+                                favorite_only: None,
+                                tag_id: None,
                                 category: LibraryCategory::Prompts,
                                 keyword: None,
                                 cursor: None,

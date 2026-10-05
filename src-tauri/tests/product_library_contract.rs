@@ -1,4 +1,8 @@
 //! Phase 5 targets 1, 2 and 8: real project-scoped authorities and typed reads.
+#[path = "support/library_findability_contract.rs"]
+mod library_findability_contract;
+#[path = "support/library_scale_baseline.rs"]
+mod library_scale_baseline;
 #[path = "support/project_database.rs"]
 mod project_database;
 use ai_studio_lib::application::{
@@ -158,6 +162,8 @@ impl Fixture {
 fn query(category: LibraryCategory) -> LibraryQuery {
     LibraryQuery {
         category,
+        favorite_only: None,
+        tag_id: None,
         keyword: None,
         cursor: None,
         limit: Some(2),

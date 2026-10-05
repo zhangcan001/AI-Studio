@@ -3,26 +3,44 @@ import type { AppRoute } from "../../app/routes/types";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import { invalidateRuns, subscribeRunInvalidation } from "../../product/runInvalidation";
-import type { LibraryDeletionInspection, LibraryDetail, LibraryEditRequest, LibraryList, LibraryRelation, LibraryVersions, ResourceRef } from "../../product/libraryTypes";
+import type { LibraryDeletionInspection, LibraryDetail, LibraryEditRequest, LibraryList, LibraryRelation, LibraryVersions, LibraryTag, ResourceRef } from "../../product/libraryTypes";
 import { useStudioStore } from "../../stores/studioStore";
 import { categoryFor, resourceKey, type LibraryRoute } from "./libraryModel";
 export interface LibraryProps { route: LibraryRoute; navigate: (route: AppRoute) => unknown }
 interface Projection {scope:string;list:LibraryList;detail?:LibraryDetail;relations:LibraryRelation[];versions?:LibraryVersions}
 export function useLibraryController({route,navigate}:LibraryProps) {
-  const [search,setSearch]=useState("");const [projection,setProjection]=useState<Projection>();
+  const [queryState,setQueryState]=useState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:""});
+  const [tagProjection,setTagProjection]=useState<{projectId:string;items:LibraryTag[]}>();
+  const mediaCategory=["media","images","videos","audio"].includes(categoryFor(route));
+  const ownedQuery=queryState.projectId===route.projectId ? queryState : {projectId:route.projectId,search:"",favoriteOnly:false,tagId:""};
+  const search=ownedQuery.search, favoriteOnly=mediaCategory&&ownedQuery.favoriteOnly, tagId=mediaCategory ? ownedQuery.tagId.trim() : "";
+  const setSearch=(search:string)=>setQueryState(state=>({...state,projectId:route.projectId,search}));
+  const setFavoriteOnly=(favoriteOnly:boolean)=>setQueryState(state=>({...state,projectId:route.projectId,favoriteOnly}));
+  const setTagId=(tagId:string)=>setQueryState(state=>({...state,projectId:route.projectId,tagId}));
+  const [projection,setProjection]=useState<Projection>();
   const [queryError,setQueryError]=useState<string>();const [actionError,setActionError]=useState<string>();const [notice,setNotice]=useState<string>();
   const [inspection,setInspection]=useState<LibraryDeletionInspection>();const [busy,setBusy]=useState(false);const [loading,setLoading]=useState(true);
   const inspectionOpen=useRef(false);const epoch=useRef(0);const actionLock=useRef(false);const pageCount=useRef(1);
   const selfEditInvalidation=useRef(false);
-  const category=categoryFor(route);const scope=`${route.projectId}:${category}:${search.trim()}:${resourceKey(route.resource)}`;
+  const category=categoryFor(route);const scope=JSON.stringify([route.projectId,category,search.trim(),favoriteOnly,tagId,resourceKey(route.resource)]);
   const liveScope=useRef(scope);liveScope.current=scope;
   const previousProject=useRef(route.projectId);
   const refresh=useCallback(async()=>{
     const token=++epoch.current;
     try {
+      if(mediaCategory) {
+        const tags=await productClient.library.tagsList(route.projectId);
+        if(token!==epoch.current)return;
+        const ownedTags=tags.filter(tag=>tag.projectId===route.projectId);
+        setTagProjection({projectId:route.projectId,items:ownedTags});
+        if(tagId&&!ownedTags.some(tag=>tag.id===tagId)) {
+          pageCount.current=1;setProjection(undefined);
+          setQueryState(state=>({...state,tagId:""}));return;
+        }
+      }
       let list:LibraryList|undefined;const items:LibraryList["items"]=[];let cursor:LibraryList["nextCursor"]=null;
       for(let index=0;index<pageCount.current;index++) {
-        const page=await productClient.library.list(route.projectId,{category,keyword:search.trim()||null,cursor,limit:30});
+        const page=await productClient.library.list(route.projectId,{category,keyword:search.trim()||null,favoriteOnly,tagId:tagId||null,cursor,limit:30});
         if(token!==epoch.current)return;
         items.push(...page.items);list=page;cursor=page.nextCursor;if(!cursor)break;
       }
@@ -44,7 +62,8 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   },[scope]);
   useEffect(()=>{
     inspectionOpen.current=false;setProjection(undefined);setInspection(undefined);setQueryError(undefined);setActionError(undefined);setLoading(true);
-    if(previousProject.current!==route.projectId){previousProject.current=route.projectId;setSearch("");setNotice(undefined);}
+    if(previousProject.current!==route.projectId){previousProject.current=route.projectId;setQueryState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:""});setTagProjection(undefined);setNotice(undefined);
+      if(route.resource)navigate({...route,resource:undefined});}
     pageCount.current=1;void refresh();
     let event:ReturnType<typeof setTimeout>|undefined;
     const unsubscribe=subscribeRunInvalidation(project=>{if(project!==route.projectId)return;if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}clearTimeout(event);event=setTimeout(()=>void refresh(),150);});
@@ -72,7 +91,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     useStudioStore.getState().setPendingLibraryIntent(intent);
     navigate(returnRoute ?? {kind:"create",projectId:route.projectId,stage:stage!});
   });
-  return {returnRoute,category,search,setSearch,list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
+  return {returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
     loadMore:()=>{if(current?.list.nextCursor){pageCount.current++;void refresh();}},
     open:(resource:ResourceRef)=>{setNotice(undefined);navigate({...route,resource});},
     closeInspection:()=>{inspectionOpen.current=false;setInspection(undefined);},

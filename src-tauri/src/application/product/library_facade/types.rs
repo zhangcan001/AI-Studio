@@ -45,6 +45,10 @@ pub struct LibraryCursor {
     pub project_id: String,
     pub category: LibraryCategory,
     pub keyword: Option<String>,
+    #[serde(default)]
+    pub favorite_only: bool,
+    #[serde(default)]
+    pub tag_id: Option<String>,
     pub position: PageCursor,
 }
 
@@ -53,6 +57,8 @@ pub struct LibraryCursor {
 pub struct LibraryQuery {
     pub category: LibraryCategory,
     pub keyword: Option<String>,
+    pub favorite_only: Option<bool>,
+    pub tag_id: Option<String>,
     pub cursor: Option<LibraryCursor>,
     pub limit: Option<u32>,
 }

@@ -10,6 +10,8 @@ import { backendPerformanceBoundary, backendBoundary, productionRust, sqlFootpri
 import { phase13Boundary } from "../../scripts/phase13-observability-guard.mjs";
 // @ts-expect-error Build-time current successor, not application code.
 import { m1ParentReader } from "../../scripts/m1-readiness-boundary-guard.mjs";
+// @ts-expect-error Build-time reviewed additive tag command, not browser production code.
+import { m3LibraryParentReader } from "../../scripts/m3-library-findability-boundary-guard.mjs";
 const read=(p:string):string=>readFileSync(p,"utf8");
 const manifest=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json"));
 const phase13=JSON.parse(read("docs/architecture/phase13-observability.json"));
@@ -41,7 +43,8 @@ it("target1 prevents production SQL growth while recognizing only real test scop
 });
 it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=>{
  const commands=rustFiles("src-tauri/src/commands").flatMap((p:string)=>[...read(p).matchAll(/#\[tauri::command[^\]]*\]\s*pub\s+async\s+fn\s+(\w+)[\s\S]*?(?=\{)/g)].map(x=>({name:x[1],signature:x[0].replace(/\s+/g," ").trim()}))).sort((a:{name:string},b:{name:string})=>a.name.localeCompare(b.name));
- expect(commands).toEqual([...manifest.ipcContracts,...phase13.commands.addedSignatures].sort((a:{name:string},b:{name:string})=>a.name.localeCompare(b.name)));
+ const successor=m3LibraryParentReader(".");expect(successor.violations).toEqual([]);
+ expect(commands).toEqual([...manifest.ipcContracts,...phase13.commands.addedSignatures,...successor.addedCommandSignatures].sort((a:{name:string},b:{name:string})=>a.name.localeCompare(b.name)));
  const backend=rustFiles("src-tauri/src").map((p:string)=>p.replace(/\\/g,"/")).sort();
  const reviewed=backendPerformanceBoundary(".",manifest.backendSourceSnapshot,phase12,phase13);
  expect(reviewed.violations).toEqual([]);

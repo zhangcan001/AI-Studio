@@ -1135,6 +1135,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::product::product_generators_list,
             commands::product::product_generator_binding_set,
             commands::product::product_run_list,
+            commands::product::product_library_tags_list,
             commands::product::product_library_list,
             commands::product::product_library_get,
             commands::product::product_library_image_get,

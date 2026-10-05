@@ -6,6 +6,7 @@ export const productMediaUrl = buildAssetMediaUrl;
 import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest, RunList, RunListFilter } from "./types";
 
 interface ProductCommands {
+  product_library_tags_list: { args: { projectId: string }; result: import("./libraryTypes").LibraryTag[] };
   product_library_image_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: number[] };
   product_library_relations_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryRelation[] };
   product_library_versions_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryVersions };

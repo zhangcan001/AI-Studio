@@ -21,11 +21,29 @@ impl LibraryServices<'_> {
         if keyword.as_ref().is_some_and(|v| v.chars().count() > 200) {
             return Err(invalid_query());
         }
+        let favorite_only = query.favorite_only.unwrap_or(false);
+        let tag_id = query
+            .tag_id
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
+        if (favorite_only || tag_id.is_some())
+            && !matches!(
+                query.category,
+                LibraryCategory::Media
+                    | LibraryCategory::Images
+                    | LibraryCategory::Videos
+                    | LibraryCategory::Audio
+            )
+        {
+            return Err(invalid_query());
+        }
         let cursor = match query.cursor {
             Some(cursor)
                 if cursor.project_id == project_id
                     && cursor.category == query.category
-                    && cursor.keyword == keyword =>
+                    && cursor.keyword == keyword
+                    && cursor.favorite_only == favorite_only
+                    && cursor.tag_id == tag_id =>
             {
                 Some(cursor.position)
             }
@@ -51,6 +69,8 @@ impl LibraryServices<'_> {
                         project_id,
                         LibraryCategory::Media,
                         keyword.clone(),
+                        false,
+                        None,
                         None,
                         12,
                     )
@@ -90,7 +110,15 @@ impl LibraryServices<'_> {
             ),
             _ => {
                 let (items, next) = self
-                    .media(project_id, category, keyword.clone(), cursor, limit)
+                    .media(
+                        project_id,
+                        category,
+                        keyword.clone(),
+                        favorite_only,
+                        tag_id.clone(),
+                        cursor,
+                        limit,
+                    )
                     .await?;
                 (items, next, LibraryCoverage::KeysetPage)
             }
@@ -101,6 +129,8 @@ impl LibraryServices<'_> {
                 project_id: project_id.into(),
                 category,
                 keyword,
+                favorite_only,
+                tag_id,
                 position,
             }),
             coverage,
@@ -119,6 +149,8 @@ impl LibraryServices<'_> {
         project: &str,
         category: LibraryCategory,
         keyword: Option<String>,
+        favorite_only: bool,
+        tag_id: Option<String>,
         cursor: Option<crate::application::pagination::PageCursor>,
         limit: u32,
     ) -> Result<
@@ -141,8 +173,8 @@ impl LibraryServices<'_> {
                     _ => AssetMediaTypeFilter::All,
                 },
                 source_kind: AssetSourceFilter::All,
-                favorite_only: false,
-                tag_id: None,
+                favorite_only,
+                tag_id,
                 created_order: AssetCreatedOrder::Newest,
                 cursor,
                 limit,

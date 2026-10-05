@@ -1,0 +1,381 @@
+{
+  "sameHarnessAsParent": true,
+  "regressionBudgetCommit": "d47216d67ecb2cb948cebd2a0ae113e52d07f135",
+  "budgetAdjusted": false,
+  "violations": [],
+  "backend": {
+    "actualNativeIPC": "NOT_AVAILABLE",
+    "coldDefinition": "fresh pool; OS cache not evicted",
+    "datasets": [
+      {
+        "mediaCount": 1000,
+        "promptCount": 1000,
+        "promptPagination": [
+          {
+            "approxResponseBytes": 6216,
+            "durationMs": 1.9697999999999998,
+            "items": 30,
+            "pages": 1
+          },
+          {
+            "approxResponseBytes": 31080,
+            "durationMs": 9.367500000000001,
+            "items": 150,
+            "pages": 5
+          },
+          {
+            "approxResponseBytes": 124320,
+            "durationMs": 31.0785,
+            "items": 600,
+            "pages": 20
+          }
+        ],
+        "queries": {
+          "cold": {
+            "approxResponseBytes": 12212,
+            "p50Ms": 3.4259999999999997,
+            "p95Ms": 4.0771,
+            "repetitions": 21
+          },
+          "combined": {
+            "approxResponseBytes": 5501,
+            "p50Ms": 1.0463,
+            "p95Ms": 1.199,
+            "repetitions": 21
+          },
+          "favorite": {
+            "approxResponseBytes": 12208,
+            "p50Ms": 1.1319,
+            "p95Ms": 1.2389000000000001,
+            "repetitions": 21
+          },
+          "keyword": {
+            "approxResponseBytes": 12244,
+            "p50Ms": 1.4385,
+            "p95Ms": 1.6315,
+            "repetitions": 21
+          },
+          "promptKeyword": {
+            "approxResponseBytes": 6745,
+            "p50Ms": 0.6558,
+            "p95Ms": 0.9944999999999999,
+            "repetitions": 21
+          },
+          "tag": {
+            "approxResponseBytes": 12631,
+            "p50Ms": 1.0937,
+            "p95Ms": 1.2526,
+            "repetitions": 21
+          },
+          "warm": {
+            "approxResponseBytes": 12212,
+            "p50Ms": 1.0988,
+            "p95Ms": 1.3848,
+            "repetitions": 21
+          }
+        },
+        "queryPlans": [
+          [
+            "SEARCH assets USING INDEX idx_assets_project_created (project_id=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH f USING INDEX sqlite_autoindex_asset_favorites_1 (asset_id=?)",
+            "CORRELATED SCALAR SUBQUERY 2",
+            "SEARCH l USING INDEX sqlite_autoindex_asset_tag_links_1 (asset_id=? AND tag_id=?)"
+          ],
+          [
+            "SEARCH e USING INDEX idx_prompt_entries_project_updated (project_id=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH v USING COVERING INDEX idx_prompt_versions_prompt_version (prompt_id=?)",
+            "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+          ]
+        ]
+      },
+      {
+        "mediaCount": 10000,
+        "promptCount": 10000,
+        "promptPagination": [
+          {
+            "approxResponseBytes": 6216,
+            "durationMs": 13.436,
+            "items": 30,
+            "pages": 1
+          },
+          {
+            "approxResponseBytes": 31080,
+            "durationMs": 69.0269,
+            "items": 150,
+            "pages": 5
+          },
+          {
+            "approxResponseBytes": 124320,
+            "durationMs": 268.2926,
+            "items": 600,
+            "pages": 20
+          }
+        ],
+        "queries": {
+          "cold": {
+            "approxResponseBytes": 12228,
+            "p50Ms": 6.3838,
+            "p95Ms": 6.8837,
+            "repetitions": 21
+          },
+          "combined": {
+            "approxResponseBytes": 5501,
+            "p50Ms": 5.0328,
+            "p95Ms": 5.3921,
+            "repetitions": 21
+          },
+          "favorite": {
+            "approxResponseBytes": 12240,
+            "p50Ms": 2.5573,
+            "p95Ms": 2.9449,
+            "repetitions": 21
+          },
+          "keyword": {
+            "approxResponseBytes": 12228,
+            "p50Ms": 6.0291,
+            "p95Ms": 6.894,
+            "repetitions": 21
+          },
+          "promptKeyword": {
+            "approxResponseBytes": 6745,
+            "p50Ms": 2.0875,
+            "p95Ms": 4.647799999999999,
+            "repetitions": 21
+          },
+          "tag": {
+            "approxResponseBytes": 12647,
+            "p50Ms": 2.476,
+            "p95Ms": 2.6147,
+            "repetitions": 21
+          },
+          "warm": {
+            "approxResponseBytes": 12228,
+            "p50Ms": 2.4705,
+            "p95Ms": 3.7932,
+            "repetitions": 21
+          }
+        },
+        "queryPlans": [
+          [
+            "SEARCH assets USING INDEX idx_assets_project_created (project_id=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH f USING INDEX sqlite_autoindex_asset_favorites_1 (asset_id=?)",
+            "CORRELATED SCALAR SUBQUERY 2",
+            "SEARCH l USING INDEX sqlite_autoindex_asset_tag_links_1 (asset_id=? AND tag_id=?)"
+          ],
+          [
+            "SEARCH e USING INDEX idx_prompt_entries_project_updated (project_id=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH v USING COVERING INDEX idx_prompt_versions_prompt_version (prompt_id=?)",
+            "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+          ]
+        ]
+      }
+    ],
+    "environment": "Windows single runner; no GPU generation",
+    "layer": "existing AssetLibraryService + SQLite repository (filters not yet exposed by parent Product facade)",
+    "warmup": "one warmup before each warm query shape; 21 measured repetitions"
+  },
+  "frontend": {
+    "layer": "React/jsdom with typed API fixtures; no real IPC, browser paint or WebView RSS",
+    "observations": [
+      {
+        "dataset": 1000,
+        "category": "images",
+        "pages": 1,
+        "repetitions": 7,
+        "p50Ms": 5.72420000000011,
+        "p95Ms": 29.350400000000036,
+        "productListCalls": 1,
+        "approxFixtureResponseBytes": 4962,
+        "domItems": 30,
+        "loadedItems": 30,
+        "nodeProcessRss": 202096640,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 1000,
+        "category": "images",
+        "pages": 5,
+        "repetitions": 7,
+        "p50Ms": 23.02930000000015,
+        "p95Ms": 60.33899999999994,
+        "productListCalls": 15,
+        "approxFixtureResponseBytes": 74773,
+        "domItems": 150,
+        "loadedItems": 150,
+        "nodeProcessRss": 261849088,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 1000,
+        "category": "images",
+        "pages": 20,
+        "repetitions": 7,
+        "p50Ms": 192.1260000000002,
+        "p95Ms": 296.46799999999985,
+        "productListCalls": 210,
+        "approxFixtureResponseBytes": 1054813,
+        "domItems": 600,
+        "loadedItems": 600,
+        "nodeProcessRss": 382287872,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 1000,
+        "category": "prompts",
+        "pages": 1,
+        "repetitions": 7,
+        "p50Ms": 1.6232999999997446,
+        "p95Ms": 2.1224999999999454,
+        "productListCalls": 1,
+        "approxFixtureResponseBytes": 5023,
+        "domItems": 30,
+        "loadedItems": 30,
+        "nodeProcessRss": 382287872,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 1000,
+        "category": "prompts",
+        "pages": 5,
+        "repetitions": 7,
+        "p50Ms": 11.16989999999987,
+        "p95Ms": 14.649900000000343,
+        "productListCalls": 15,
+        "approxFixtureResponseBytes": 75688,
+        "domItems": 150,
+        "loadedItems": 150,
+        "nodeProcessRss": 381808640,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 1000,
+        "category": "prompts",
+        "pages": 20,
+        "repetitions": 7,
+        "p50Ms": 124.67460000000028,
+        "p95Ms": 215.7727,
+        "productListCalls": 210,
+        "approxFixtureResponseBytes": 1067623,
+        "domItems": 600,
+        "loadedItems": 600,
+        "nodeProcessRss": 471752704,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 10000,
+        "category": "images",
+        "pages": 1,
+        "repetitions": 7,
+        "p50Ms": 1.7084999999997308,
+        "p95Ms": 4.558500000000095,
+        "productListCalls": 1,
+        "approxFixtureResponseBytes": 4962,
+        "domItems": 30,
+        "loadedItems": 30,
+        "nodeProcessRss": 479031296,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 10000,
+        "category": "images",
+        "pages": 5,
+        "repetitions": 7,
+        "p50Ms": 17.95119999999997,
+        "p95Ms": 58.89350000000013,
+        "productListCalls": 15,
+        "approxFixtureResponseBytes": 74773,
+        "domItems": 150,
+        "loadedItems": 150,
+        "nodeProcessRss": 500396032,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 10000,
+        "category": "images",
+        "pages": 20,
+        "repetitions": 7,
+        "p50Ms": 187.97590000000037,
+        "p95Ms": 315.84619999999995,
+        "productListCalls": 210,
+        "approxFixtureResponseBytes": 1054813,
+        "domItems": 600,
+        "loadedItems": 600,
+        "nodeProcessRss": 575213568,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 10000,
+        "category": "prompts",
+        "pages": 1,
+        "repetitions": 7,
+        "p50Ms": 1.4695999999994456,
+        "p95Ms": 1.788499999999658,
+        "productListCalls": 1,
+        "approxFixtureResponseBytes": 5023,
+        "domItems": 30,
+        "loadedItems": 30,
+        "nodeProcessRss": 575213568,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 10000,
+        "category": "prompts",
+        "pages": 5,
+        "repetitions": 7,
+        "p50Ms": 10.880799999999908,
+        "p95Ms": 14.079099999999926,
+        "productListCalls": 15,
+        "approxFixtureResponseBytes": 75688,
+        "domItems": 150,
+        "loadedItems": 150,
+        "nodeProcessRss": 575164416,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "dataset": 10000,
+        "category": "prompts",
+        "pages": 20,
+        "repetitions": 7,
+        "p50Ms": 119.96059999999943,
+        "p95Ms": 250.63030000000072,
+        "productListCalls": 210,
+        "approxFixtureResponseBytes": 1067623,
+        "domItems": 600,
+        "loadedItems": 600,
+        "nodeProcessRss": 576626688,
+        "rendererMemory": "NOT_AVAILABLE",
+        "firstVisibleResult": "included in 1-page React/jsdom settle time; not Native paint"
+      },
+      {
+        "category": "images",
+        "scenario": "rapid-input-project-switch",
+        "productListCalls": 7,
+        "durationMs": 12.871500000000196
+      },
+      {
+        "category": "prompts",
+        "scenario": "rapid-input-project-switch",
+        "productListCalls": 7,
+        "durationMs": 3.9309999999995853
+      }
+    ]
+  },
+  "additionalTagRequests": "source-derived: one read-only tag list per media refresh/load-more; no extra poll owner",
+  "actualNativeIPC": "NOT_AVAILABLE",
+  "productSla": false
+}

@@ -115,6 +115,20 @@ pub async fn product_library_resource_edit(
         .await
 }
 
+/// Read-only adapter to the existing Advanced Asset organization authority.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_tags_list(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Vec<crate::application::ports::AssetTag>, ProductError> {
+    state
+        .organization
+        .organization
+        .list_tags(&project_id)
+        .await
+        .map_err(ProductError::internal)
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub async fn product_library_list(
     state: State<'_, AppState>,
