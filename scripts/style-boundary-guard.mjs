@@ -126,7 +126,11 @@ export function styleBoundary(root,manifest) {
   if(!checkpoint.violations.length)for(const [path,digest] of Object.entries(checkpoint.afterHashes))if(/^src\/.+\.tsx?$/.test(path))productionSnapshot[path]=digest;
   for(const [path,digest] of Object.entries(productionSnapshot))if(hash(read(`${root}/${path}`))!==digest)violations.push(`behavior:${path}`);
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')))if(!(path in productionSnapshot))violations.push(`new-production-source:${path}`);
-  for(const [path,digest] of Object.entries(manifest.styleSnapshots))if(hash(read(`${root}/${path}`))!==digest)violations.push(`unreviewed-style:${path}`);
+  // Only a validated successor may advance this existing stylesheet; historical
+  // manifests and every other CSS boundary stay frozen. No new styles exemption.
+  const currentStyles={...manifest.styleSnapshots};
+  if(!checkpoint.violations.length && checkpoint.afterHashes['src/features/library/LibraryPage.css'])currentStyles['src/features/library/LibraryPage.css']=checkpoint.afterHashes['src/features/library/LibraryPage.css'];
+  for(const [path,digest] of Object.entries(currentStyles))if(hash(read(`${root}/${path}`))!==digest)violations.push(`unreviewed-style:${path}`);
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.(css|scss)$/.test(p)))if(!(path in manifest.styleSnapshots))violations.push(`unreviewed-style:${path}`);
   return {violations,inventory:inv};
 }

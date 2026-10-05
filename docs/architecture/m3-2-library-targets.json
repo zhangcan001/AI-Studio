@@ -1,0 +1,22 @@
+{
+  "checkpoint": "M3_2_BOUNDED_VISUAL_LIBRARY_AND_RUNS_HISTORY",
+  "parentHead": "8842a2750e4402ca8e45a6e4efc4571c3e34a425",
+  "recordedBeforeProductImplementation": true,
+  "measurementLayer": "controlled React/controller/jsdom; not Native IPC or paint SLA",
+  "targets": {
+    "pageSize": 30,
+    "page20CumulativeListCallsMax": 20,
+    "pageDomCardsMax": 30,
+    "offscreenThumbnailRequests": 0,
+    "visibleThumbnailRequestsMax": "visible eligible cards",
+    "maxConcurrentThumbnailRequests": 4,
+    "fullMediaBytesForList": 0,
+    "pageNavigationListCalls": 1,
+    "currentPageRefreshListCalls": 1
+  },
+  "frozenBaseline": "m3-1-library-scale-baseline.json",
+  "raiseTargetsAfterFailure": false,
+  "nativeIpcTiming": "NOT_AVAILABLE",
+  "rendererMemory": "NOT_AVAILABLE",
+  "webviewPaint": "NOT_AVAILABLE"
+}

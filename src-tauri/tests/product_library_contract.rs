@@ -3,6 +3,8 @@
 mod library_findability_contract;
 #[path = "support/library_scale_baseline.rs"]
 mod library_scale_baseline;
+#[path = "support/library_thumbnail_contract.rs"]
+mod library_thumbnail_contract;
 #[path = "support/project_database.rs"]
 mod project_database;
 use ai_studio_lib::application::{

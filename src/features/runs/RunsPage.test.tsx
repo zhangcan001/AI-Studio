@@ -210,3 +210,9 @@ it("m2_background refresh rereads recovery facts without choosing a recovery or 
   expect(useStudioStore.getState().values).toEqual(before); expect(useStudioStore.getState().pendingRunIntent).toBeUndefined();
   expect(navigate).not.toHaveBeenCalled(); expect(api.retry).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled(); expect(api.start).not.toHaveBeenCalled();
 });
+
+it("ordinary Runs exposes recent coverage and project-scoped existing complete task history",async()=>{
+ const navigate=vi.fn();render(<RunsPage route={{kind:"runs",projectId:"project-a"}} navigate={navigate}/>);
+ expect(screen.getByRole("heading",{name:"近期运行"})).toBeTruthy();expect(screen.getByText(/当前覆盖最近 50 个任务/)).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"查看完整任务历史"}));expect(navigate).toHaveBeenCalledWith({kind:"project-settings",projectId:"project-a",section:"advanced-tasks"});
+});

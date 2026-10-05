@@ -5,6 +5,7 @@ export const productClient = {
   library: {
     tagsList: (projectId: string) => productRequest("product_library_tags_list", { projectId }),
     imageGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_image_get", { projectId, resource }),
+    thumbnailGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_thumbnail_get", { projectId, resource }),
     relationsGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_relations_get", { projectId, resource }),
     versionsGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_versions_get", { projectId, resource }),
     useInCreation: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_use_in_creation", { projectId, resource }),

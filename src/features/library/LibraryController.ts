@@ -20,54 +20,67 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   const [projection,setProjection]=useState<Projection>();
   const [queryError,setQueryError]=useState<string>();const [actionError,setActionError]=useState<string>();const [notice,setNotice]=useState<string>();
   const [inspection,setInspection]=useState<LibraryDeletionInspection>();const [busy,setBusy]=useState(false);const [loading,setLoading]=useState(true);
-  const inspectionOpen=useRef(false);const epoch=useRef(0);const actionLock=useRef(false);const pageCount=useRef(1);
+  const inspectionOpen=useRef(false);const epoch=useRef(0);const actionLock=useRef(false);
+  const [pageIndex,setPageIndex]=useState(0);
+  const pages=useRef<{owner:string;index:number;starts:LibraryList["nextCursor"][]}>({owner:"",index:0,starts:[null]});
+  const tagsOwner=useRef<string|undefined>(undefined);
+  const navigating=useRef(false);
   const selfEditInvalidation=useRef(false);
-  const category=categoryFor(route);const scope=JSON.stringify([route.projectId,category,search.trim(),favoriteOnly,tagId,resourceKey(route.resource)]);
+  const category=categoryFor(route);const queryScope=JSON.stringify([route.projectId,category,search.trim(),favoriteOnly,tagId]);
+  const scope=JSON.stringify([queryScope,resourceKey(route.resource)]);
   const liveScope=useRef(scope);liveScope.current=scope;
   const previousProject=useRef(route.projectId);
-  const refresh=useCallback(async()=>{
+  const refresh=useCallback(async(options?:{tags?:boolean;page?:number;cursor?:LibraryList["nextCursor"]})=>{
     const token=++epoch.current;
+    navigating.current=options?.page!==undefined;
+    const target=options?.page??pages.current.index;
+    const cursor=options?.cursor!==undefined?options.cursor:pages.current.starts[target]??null;
+    const owns=()=>token===epoch.current&&liveScope.current===scope;
+    setLoading(true);
     try {
-      if(mediaCategory) {
+      if(mediaCategory&&(options?.tags!==false||tagsOwner.current!==route.projectId)) {
         const tags=await productClient.library.tagsList(route.projectId);
-        if(token!==epoch.current)return;
+        if(!owns())return;
         const ownedTags=tags.filter(tag=>tag.projectId===route.projectId);
+        tagsOwner.current=route.projectId;
         setTagProjection({projectId:route.projectId,items:ownedTags});
         if(tagId&&!ownedTags.some(tag=>tag.id===tagId)) {
-          pageCount.current=1;setProjection(undefined);
+          setProjection(undefined);
           setQueryState(state=>({...state,tagId:""}));return;
         }
       }
-      let list:LibraryList|undefined;const items:LibraryList["items"]=[];let cursor:LibraryList["nextCursor"]=null;
-      for(let index=0;index<pageCount.current;index++) {
-        const page=await productClient.library.list(route.projectId,{category,keyword:search.trim()||null,favoriteOnly,tagId:tagId||null,cursor,limit:30});
-        if(token!==epoch.current)return;
-        items.push(...page.items);list=page;cursor=page.nextCursor;if(!cursor)break;
-      }
-      if(!list)return;list={...list,items};
+      const list=await productClient.library.list(route.projectId,{category,keyword:search.trim()||null,favoriteOnly,tagId:tagId||null,cursor,limit:30});
+      if(!owns())return;
       let detail:LibraryDetail|undefined;let relations:LibraryRelation[]=[];let versions:LibraryVersions|undefined;
       if(route.resource) {
         try {
           [detail,relations,versions]=await Promise.all([productClient.library.get(route.projectId,route.resource),productClient.library.relationsGet(route.projectId,route.resource),productClient.library.versionsGet(route.projectId,route.resource)]);
         }catch(error) {
-          if(token!==epoch.current)return;const e=normalizeProductError(error);
+          if(!owns())return;const e=normalizeProductError(error);
           if(e.code!=="LIBRARY_RESOURCE_NOT_FOUND"&&e.code!=="PROJECT_SCOPE_VIOLATION")throw e;
           setNotice("资源不存在或不可访问，已返回资源列表。");navigate({...route,resource:undefined});
         }
       }
-      if(route.resource&&inspectionOpen.current){const nextInspection=await productClient.library.deletionInspect(route.projectId,route.resource);if(token===epoch.current&&inspectionOpen.current)setInspection(nextInspection);}
-      if(token===epoch.current){setProjection({scope,list,detail,relations,versions});setQueryError(undefined);}
-    }catch(error){if(token===epoch.current)setQueryError(normalizeProductError(error).message);}
-    finally{if(token===epoch.current)setLoading(false);}
+      if(route.resource&&inspectionOpen.current){const nextInspection=await productClient.library.deletionInspect(route.projectId,route.resource);if(owns()&&inspectionOpen.current)setInspection(nextInspection);}
+      if(owns()){
+        // Commit cursor history only for the latest successful request. Old pages
+        // are not cached and are never replayed on refresh or navigation.
+        const starts=pages.current.starts.slice(0,target+1);starts[target]=cursor;
+        pages.current={owner:queryScope,index:target,starts};setPageIndex(target);
+        setProjection({scope,list,detail,relations,versions});setQueryError(undefined);
+      }
+    }catch(error){if(owns())setQueryError(normalizeProductError(error).message);}
+    finally{if(owns()){navigating.current=false;setLoading(false);}}
   },[scope]);
   useEffect(()=>{
     inspectionOpen.current=false;setProjection(undefined);setInspection(undefined);setQueryError(undefined);setActionError(undefined);setLoading(true);
     if(previousProject.current!==route.projectId){previousProject.current=route.projectId;setQueryState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:""});setTagProjection(undefined);setNotice(undefined);
       if(route.resource)navigate({...route,resource:undefined});}
-    pageCount.current=1;void refresh();
+    if(pages.current.owner!==queryScope){pages.current={owner:queryScope,index:0,starts:[null]};setPageIndex(0);}
+    void refresh({tags:false});
     let event:ReturnType<typeof setTimeout>|undefined;
     const unsubscribe=subscribeRunInvalidation(project=>{if(project!==route.projectId)return;if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}clearTimeout(event);event=setTimeout(()=>void refresh(),150);});
-    const timer=setInterval(()=>void refresh(),5000);
+    const timer=setInterval(()=>{if(!navigating.current)void refresh({tags:false});},5000);
     return()=>{++epoch.current;unsubscribe();clearTimeout(event);clearInterval(timer);};
   },[refresh]);
   const current=projection?.scope===scope?projection:undefined;
@@ -92,7 +105,9 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     navigate(returnRoute ?? {kind:"create",projectId:route.projectId,stage:stage!});
   });
   return {returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
-    loadMore:()=>{if(current?.list.nextCursor){pageCount.current++;void refresh();}},
+    pageIndex,canPrevious:pageIndex>0,
+    nextPage:()=>{if(current?.list.nextCursor)void refresh({tags:false,page:pages.current.index+1,cursor:current.list.nextCursor});},
+    previousPage:()=>{if(pages.current.index>0)void refresh({tags:false,page:pages.current.index-1});},
     open:(resource:ResourceRef)=>{setNotice(undefined);navigate({...route,resource});},
     closeInspection:()=>{inspectionOpen.current=false;setInspection(undefined);},
   };

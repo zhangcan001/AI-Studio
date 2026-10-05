@@ -24,7 +24,7 @@ it("combined server query resets pages and uses only current cursor; deleted tag
  const cursor={projectId:"a",category:"images",keyword:null,favoriteOnly:false,tagId:null,position:{id:"first",createdAt:"date"}};
  api.list.mockImplementation(async(_p,q)=>page(q.cursor?"second":"first",q.cursor?null:cursor));
  const view=render(<LibraryPage route={{kind:"library",projectId:"a",filter:"images"}} navigate={vi.fn()}/>);await screen.findByText("first");
- fireEvent.click(screen.getByRole("button",{name:"加载更多"}));await screen.findByText("second");
+ fireEvent.click(screen.getByRole("button",{name:"下一页"}));await screen.findByText("second");
  fireEvent.click(screen.getByRole("checkbox",{name:"仅收藏"}));await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({favoriteOnly:true,cursor:null})));expect(screen.queryByText("second")).toBeNull();
  fireEvent.change(screen.getByLabelText("标签"),{target:{value:"tag-a"}});await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({tagId:"tag-a",favoriteOnly:true,cursor:null})));
  fireEvent.change(screen.getByLabelText("搜索资源名称"),{target:{value:" unique "}});await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({category:"images",keyword:"unique",tagId:"tag-a",favoriteOnly:true,cursor:null,limit:30})));
@@ -46,13 +46,13 @@ it("pending old keyword/filter responses cannot overwrite current query or proje
 it("invalid query displays understandable error and explicit refresh recovers without retry loops",async()=>{
  api.list.mockRejectedValueOnce({code:"LIBRARY_QUERY_INVALID"});render(<LibraryPage route={{kind:"library",projectId:"a",filter:"images"}} navigate={vi.fn()}/>);await screen.findByRole("alert");expect(api.list).toHaveBeenCalledTimes(1);fireEvent.click(screen.getByRole("button",{name:"刷新"}));await screen.findByText("first");expect(screen.queryByRole("alert")).toBeNull();
 });
-it("loadMore carries the active normalized favorite/tag/keyword cursor rather than a previous query cursor",async()=>{
+it("nextPage carries the active normalized favorite/tag/keyword cursor rather than a previous query cursor",async()=>{
  api.list.mockImplementation(async(project,q)=>page(q.cursor?"next":"first",q.cursor?null:{projectId:project,category:q.category,keyword:q.keyword,favoriteOnly:q.favoriteOnly,tagId:q.tagId,position:{id:q.keyword||"default",createdAt:"date"}}));
  const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"a",filter:"images"},navigate:vi.fn()}));await drain();
  act(()=>view.result.current.setSearch(" new "));await drain();act(()=>view.result.current.setFavoriteOnly(true));await drain();act(()=>view.result.current.setTagId("tag-b"));await drain();
  const cursor=view.result.current.list!.nextCursor;
  expect(cursor).toMatchObject({projectId:"a",category:"images",keyword:"new",favoriteOnly:true,tagId:"tag-b"});
- act(()=>view.result.current.loadMore());await drain();expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({keyword:"new",favoriteOnly:true,tagId:"tag-b",cursor}));expect(view.result.current.list?.items.map(x=>x.title)).toEqual(["first","next"]);
+ act(()=>view.result.current.nextPage());await drain();expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({keyword:"new",favoriteOnly:true,tagId:"tag-b",cursor}));expect(view.result.current.list?.items.map(x=>x.title)).toEqual(["next"]);
 });
 it("pending old favorite and project tag requests cannot publish after ownership changes",async()=>{
  let resolveFavorite:(p:ReturnType<typeof page>)=>void=()=>{};let resolveTags:(t:typeof tags)=>void=()=>{};

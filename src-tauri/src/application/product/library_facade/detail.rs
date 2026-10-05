@@ -6,11 +6,45 @@ use crate::application::{
 use crate::domain::consistency::ProfileType;
 
 impl LibraryServices<'_> {
+    /// Read only the existing managed thumbnail. Never fall back to full media.
+    pub async fn thumbnail_get(
+        &self,
+        project_id: &str,
+        resource: &ResourceRef,
+    ) -> Result<Vec<u8>, ProductError> {
+        tracing::debug!(
+            event = "library_thumbnail_read_requested",
+            "Product managed thumbnail read"
+        );
+        let ResourceRef::Asset { id } = resource else {
+            return Err(invalid_query());
+        };
+        self.asset_detail
+            .read_thumbnail(project_id, id)
+            .await
+            .map(|value| value.bytes)
+            .map_err(|error| match error {
+                AssetQueryError::NotFound(_) => missing(),
+                AssetQueryError::NotImage(_) => {
+                    ProductError::new("ASSET_TYPE_MISMATCH", "该资源不支持缩略图。", None)
+                }
+                AssetQueryError::ThumbnailNotAvailable(_) => {
+                    ProductError::new("ASSET_THUMBNAIL_UNAVAILABLE", "缩略图不可用。", None)
+                }
+                // Read failures may contain local storage paths. The Product
+                // thumbnail contract exposes neither paths nor technical detail.
+                _ => ProductError::new("ASSET_THUMBNAIL_UNAVAILABLE", "缩略图不可用。", None),
+            })
+    }
     pub async fn image_get(
         &self,
         project_id: &str,
         resource: &ResourceRef,
     ) -> Result<Vec<u8>, ProductError> {
+        tracing::debug!(
+            event = "library_image_read_requested",
+            "Product full image preview read"
+        );
         let LibraryDetail::Asset { asset } = self.get(project_id, resource).await? else {
             return Err(invalid_query());
         };

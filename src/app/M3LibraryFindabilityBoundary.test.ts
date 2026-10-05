@@ -9,7 +9,7 @@ import {m1ParentReader} from '../../scripts/m1-readiness-boundary-guard.mjs';
 it('M3-1 validates parent/live paths and immutable baseline before historical projection, fails closed',()=>{
  const proof=JSON.parse(readFileSync('docs/architecture/m3-1-library-findability.json','utf8'));
  expect(m3LibraryParentReader('.').violations).toEqual([]);expect(m1ParentReader('.').violations).toEqual([]);
- expect(m1ParentReader('.').backendAggregateSha256).toBe(proof.backend.afterAggregateHash);
+ expect(m1ParentReader('.').backendAggregateSha256).toBe(m3LibraryParentReader('.').backendAggregateSha256);
  for(const mutate of [
   (p:typeof proof)=>{p.parentHead='0'.repeat(40);},
   (p:typeof proof)=>{p.paths['src/product/libraryTypes.ts'].afterHash='0'.repeat(64);},

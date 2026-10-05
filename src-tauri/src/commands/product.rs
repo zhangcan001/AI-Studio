@@ -45,6 +45,15 @@ fn library_operations(state: &AppState) -> LibraryOperations<'_> {
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_thumbnail_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+) -> Result<Vec<u8>, ProductError> {
+    library(&state).thumbnail_get(&project_id, &resource).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn product_library_image_get(
     state: State<'_, AppState>,
     project_id: String,

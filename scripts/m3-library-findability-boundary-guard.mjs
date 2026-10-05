@@ -1,3 +1,4 @@
+import {m3VisualParentReader} from './m3-bounded-visual-library-boundary-guard.mjs';
 // M3-1 successor validates live bytes before historical guards read their parent.
 // Historical manifests remain immutable; no authority or transport exemption.
 import { createHash } from 'node:crypto';
@@ -38,10 +39,12 @@ function parentBlobs(root, paths) {
 export function m3LibraryParentReader(root, override) {
   // Memoize reads only within this synchronous validation; no live cache survives
   // a call or replaces a fresh fail-closed read. Parent blobs alone persist.
+  const successor = m3VisualParentReader(root);
+  const projectedFiles = (root,folder,pattern) => files(root,folder,pattern).filter(p=>!successor.addedPaths.includes(p));
   const live = new Map();
-  const disk = (_root,p) => { if (!live.has(p)) live.set(p,text(readFileSync(join(root,p),'utf8'))); return live.get(p); };
+  const disk = (_root,p) => { if (!live.has(p)) live.set(p,successor.read(p)); return live.get(p); };
   const review = override ?? JSON.parse(disk(root, 'docs/architecture/m3-1-library-findability.json'));
-  const violations = [], fail = s => violations.push(`m3-1-${s}`);
+  const violations = [...successor.violations], fail = s => violations.push(`m3-1-${s}`);
   if (review.checkpoint !== 'M3_1_LIBRARY_FINDABILITY' || review.parentHead !== M3_LIBRARY_PARENT || review.schemaVersion !== 1) fail('invalid-header');
   if (JSON.stringify(Object.keys(review.paths ?? {}).sort()) !== JSON.stringify([...existing, ...added].sort())) fail('path-set');
   const listed = execFileSync('git', ['ls-tree', '-r', '--name-only', M3_LIBRARY_PARENT, 'src', 'src-tauri/src', 'scripts', 'src-tauri/tests/product_library_contract.rs', 'src-tauri/examples/phase12_query_profile.rs'],
@@ -50,7 +53,7 @@ export function m3LibraryParentReader(root, override) {
   for (const p of existing) if (review.paths?.[p]?.beforeHash !== hash(before(p)) || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`path-drift:${p}`);
   for (const p of added) if (blobs.has(p) || review.paths?.[p]?.beforeHash !== null || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`addition-drift:${p}`);
   for (const [name, folder, pattern] of [['backend', 'src-tauri/src', /\.rs$/], ['frontend', 'src', /\.tsx?$/], ['styles', 'src', /\.css$/], ['scripts', 'scripts', /\.mjs$/]]) {
-    const base = listed.filter(p => p.startsWith(`${folder}/`) && pattern.test(p)), current = files(root, folder, pattern);
+    const base = listed.filter(p => p.startsWith(`${folder}/`) && pattern.test(p)), current = projectedFiles(root, folder, pattern);
     const expected = [...base, ...added.filter(p => p.startsWith(`${folder}/`) && pattern.test(p))].sort();
     const unchanged = base.filter(p => !existing.includes(p));
     const proof = review[name];
@@ -70,7 +73,7 @@ export function m3LibraryParentReader(root, override) {
   const baselinePath='docs/architecture/m3-1-library-scale-baseline.json';
   const frozenBaseline=text(execFileSync('git',['show','d47216d67ecb2cb948cebd2a0ae113e52d07f135:'+baselinePath],{cwd:root,encoding:'utf8'}));
   if (disk(root,baselinePath)!==frozenBaseline) fail('baseline-budget-drift');
-  return { addedCommandSignatures: violations.length ? [] : [ADDED_COMMAND], violations, addedPaths: added, afterHashes: Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),
-    backendAggregateSha256: violations.length ? undefined : review.backend.afterAggregateHash,
-    read: p => violations.length || !existing.includes(p) ? text(readFileSync(join(root,p),'utf8')) : before(p) };
+  return { addedCommandSignatures: violations.length ? [] : [ADDED_COMMAND,...successor.addedCommandSignatures], violations, addedPaths: [...added,...successor.addedPaths], afterHashes: {...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),...successor.afterHashes},
+    backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,
+    read: p => violations.length || !existing.includes(p) ? successor.read(p) : before(p) };
 }

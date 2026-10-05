@@ -27,7 +27,7 @@ it("phase5_target12 canonical details search actual paging missing resource and 
  const navigate=vi.fn();const cursor={projectId:"project-a",category:"prompts",keyword:null,position:{createdAt:"2026-10-02",id:"prompt-a"}};
  api.list.mockImplementation((_project,query)=>Promise.resolve(query.cursor ? {...page,items:[]} : {...page,nextCursor:cursor}));
  const view=render(<LibraryPage route={route} navigate={navigate}/>);await screen.findAllByText("原始正文",{selector:"p.library-prompt-text"});
- fireEvent.click(screen.getByRole("button",{name:"加载更多"}));await waitFor(()=>expect(api.list).toHaveBeenCalledWith("project-a",expect.objectContaining({cursor})));
+ fireEvent.click(screen.getByRole("button",{name:"下一页"}));await waitFor(()=>expect(api.list).toHaveBeenCalledWith("project-a",expect.objectContaining({cursor})));
  fireEvent.change(screen.getByLabelText("搜索资源名称"),{target:{value:"中文"}});await waitFor(()=>expect(api.list).toHaveBeenCalledWith("project-a",expect.objectContaining({keyword:"中文",cursor:null})));
  api.get.mockRejectedValue({code:"LIBRARY_RESOURCE_NOT_FOUND"});view.rerender(<LibraryPage route={{...route,resource:{kind:"profile",id:"missing"}}} navigate={navigate}/>);await waitFor(()=>expect(navigate).toHaveBeenCalledWith(expect.objectContaining({resource:undefined})));
  api.list.mockResolvedValue({...page,items:[]});view.rerender(<LibraryPage route={{kind:"library",projectId:"project-b"}} navigate={navigate}/>);expect(screen.queryByText("原始正文")).toBeNull();await screen.findByText("当前分类 / 搜索没有资源。");

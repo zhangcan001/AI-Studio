@@ -12,6 +12,7 @@ const messages = {
   ASSET_PROJECT_MISMATCH: "输入素材不属于当前项目。",
   ASSET_TYPE_MISMATCH: "输入素材类型不匹配。",
   ASSET_UNAVAILABLE: "输入素材不存在或无法读取，请重新选择。",
+  ASSET_THUMBNAIL_UNAVAILABLE: "缩略图不可用；仍可打开资源详情。",
   RUNTIME_BLOCKED: "运行环境暂时不可用，请检查连接或稍后重试。",
   PROJECT_NOT_FOUND: "项目不存在，请返回项目列表。",
   PROJECT_SCOPE_VIOLATION: "无法访问其他项目的数据。",

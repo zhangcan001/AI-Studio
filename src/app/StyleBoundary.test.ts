@@ -8,11 +8,16 @@ import { styleBoundary, styleInventory, specificity, debtViolations, expandedCss
 import { phase13Boundary } from '../../scripts/phase13-observability-guard.mjs';
 // @ts-expect-error Build-time current successor, not application code.
 import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
+// @ts-expect-error Validated M3-2 stylesheet successor; historical manifest stays immutable.
+import { m3VisualParentReader } from '../../scripts/m3-bounded-visual-library-boundary-guard.mjs';
 const m=JSON.parse(readFileSync('docs/architecture/phase9-style-cleanup.json','utf8'));
 it('phase9_target1 accounts for all styles and classifies inline candidates',()=>{
  expect(m.BLOCKED_UNKNOWN).toBe(0);expect(m.rows.length).toBe(m.before.selectors);
  for(const r of m.rows){expect(['KEEP','DELETE_DEAD','MERGE_DUPLICATE','MOVE_TO_SHARED','MOVE_TO_FEATURE','MOVE_TO_PAGE','TOKENIZE','REDUCE_SPECIFICITY','KEEP_GLOBAL','KEEP_COMPAT','DEFER']).toContain(r.decision);expect(r.owner).toBeTruthy();expect(r.risk).toBeTruthy();}
- const now=styleInventory('.');expect(now.metrics).toEqual(m.after);expect(now.inline.every((r:{decision:string})=>['KEEP','DEFER'].includes(r.decision))).toBe(true);
+ // Exact reviewed delta: one CSS line / three scoped thumbnail-pagination
+ // selectors. All other inventory counts and debt budgets remain frozen.
+ expect(m3VisualParentReader('.').violations).toEqual([]);
+ const now=styleInventory('.');expect(now.metrics).toEqual({...m.after,lines:m.after.lines+1,selectors:m.after.selectors+3});expect(now.inline.every((r:{decision:string})=>['KEEP','DEFER'].includes(r.decision))).toBe(true);
 },15000); // Full source/inline inventory; bounded static guard, not a browser test.
 it('phase9_target2 prevents new important IDs deep and global selectors',()=>{
  expect(debtViolations({'new':{important:1,id:1,deep:1,global:1}},{})).toHaveLength(4);
