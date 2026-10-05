@@ -1,0 +1,168 @@
+{
+  "checkpoint": "M4_1_READONLY_MEDIA_INTEGRITY",
+  "schemaVersion": 1,
+  "parentHead": "7926f74ea3a77771d489fc834c93ed876d64163c",
+  "paths": {
+    "scripts/m3-bounded-visual-library-boundary-guard.mjs": {
+      "beforeHash": "b06b3c11db3a0ccbb7cc6b035b0e645e1b9ea6b97f0a49920f52b945358ba73a",
+      "afterHash": "b14a7e1fa83f6bfde5d1c4d1c1bfb0e59e3615b9b333b7ce2361bd03f584a104"
+    },
+    "scripts/m4-readonly-media-integrity-boundary-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "acb3b16e5153fe5a1efd6a8ee588374864f2ac075bc977b2a65df470fd2d87bf"
+    },
+    "scripts/phase13-observability-guard.mjs": {
+      "beforeHash": "cb812bdd6602c99c9515936da634276f483bdfa4d42bbd69e34301875d763d4d",
+      "afterHash": "b01925ba945368eed6698e7b0d8db433f93b475246c74ddbca836aa7164203de"
+    },
+    "scripts/phase14-release-guard.mjs": {
+      "beforeHash": "24e524949206c89c95448d94f0d2043ac9e502b6317292cec8aa85247ee6fb25",
+      "afterHash": "3c6a7ea9b33e930fba7468e5d3051affa4eb0d2728e4e4a092561aa22ecc55a6"
+    },
+    "src-tauri/src/application/asset_query_service.rs": {
+      "beforeHash": "8f9ff2f23c1201726bc47799f59d4952205f353b38d559e4970958a6ba7aad2a",
+      "afterHash": "94f73f4647051482dcfb72ab6f69efbe26b3a175276ac13f265b2ce829881e15"
+    },
+    "src-tauri/src/application/asset_query_service/media_integrity.rs": {
+      "beforeHash": null,
+      "afterHash": "114991956dd0ae4bf429999608affadb012dfc0d5acfc0f07a0b39a678c9335b"
+    },
+    "src-tauri/src/application/media_probe.rs": {
+      "beforeHash": "0e874f311d9d538af3be7ecda827895081af4f8f607d3884b6d890255fc6f4fa",
+      "afterHash": "14f2288cea7dca92d06226bd6eca7b5f0f3df41eb062ba1c8abc329fb722df2a"
+    },
+    "src-tauri/src/application/ports/asset_store.rs": {
+      "beforeHash": "878399c25bab098dba42c554c0c310607891cb79b6806a15b38849b2544f0261",
+      "afterHash": "087e71e24215de79dc05e5ffb0e66443b8f61d6c83a1f345dc52e74c96e3d514"
+    },
+    "src-tauri/src/application/ports/mod.rs": {
+      "beforeHash": "3b98d2f4459b4c187259dc43e9b3ac04dd8ec3695b3884211242b12da478d756",
+      "afterHash": "247ccdca0abe39848cb4e30700fc72332394543beaadb952d85e08d0337aa2aa"
+    },
+    "src-tauri/src/application/product/library_facade/detail.rs": {
+      "beforeHash": "89f2996b10cc52d561180ed585ca0424ce8653ac85873b1e2f022ab9087239b7",
+      "afterHash": "026c865074c67a075028771ad5832d1d46aade1612aecc6d3643527c8e964e26"
+    },
+    "src-tauri/src/commands/product.rs": {
+      "beforeHash": "d314ad9b8e89fb797430a28d65f9ed877d76b58481f8e295b1b821889916a546",
+      "afterHash": "0c3383328badd437a6fe98c54c1c9c4150e4ba75a11ed8952983ba1a44f53f10"
+    },
+    "src-tauri/src/infrastructure/filesystem/asset_store.rs": {
+      "beforeHash": "0979d20a275a4dd22a6c9bd3699ff3bf2ecf0fd2ef25a5bc3738dd150e279581",
+      "afterHash": "7a10fbd4cecb724287a80385c228db91a451011cdd32665a48ec920bc3cc1458"
+    },
+    "src-tauri/src/lib.rs": {
+      "beforeHash": "6cccf73884bd5e346bd032fae2ee9f7767cb3418f4ed1ba5506945c5e6f4be26",
+      "afterHash": "668dd943fab938e20d7e04339ff6329b3e382d40a7b9840e4bda39b057484622"
+    },
+    "src-tauri/tests/product_library_contract.rs": {
+      "beforeHash": "ffeac22595fc10c9a7fab5013f0d267743dfde307991b8e70e224ea580bf6525",
+      "afterHash": "7a584e869a82304244120a5151206ed82ff6c491e2e37e02f0dbea8c56835582"
+    },
+    "src-tauri/tests/support/media_integrity_contract.rs": {
+      "beforeHash": null,
+      "afterHash": "d11ed9c7c48fd7d3e078509bbf63b3168a2d33eb9540c8efc189196e5314df83"
+    },
+    "src/app/BackendBoundary.test.ts": {
+      "beforeHash": "3345e9141434fef886f7bc73105d6477ade165a42875552a064639a3ccee4cdd",
+      "afterHash": "a2e208bab93777e0747ad3334d675af503c31ac73cc1a72b944ea417598aba3d"
+    },
+    "src/app/M3BoundedVisualLibraryBoundary.test.ts": {
+      "beforeHash": "6606e5d301aa9c99a2c2f059d67c52c2310a6d7b9a2f49482c3991508ff3ff13",
+      "afterHash": "e840e03a0cdd95d51203d99db5468f214fe487d1b5b25b679ad377bea49e8b4b"
+    },
+    "src/app/M4ReadonlyMediaIntegrityBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "0a0e11ee4cd5fafcbd2daf12503cd752b917a32d458898d37a97022f949cbea9"
+    },
+    "src/features/library/LibraryController.ts": {
+      "beforeHash": "a3047f165f7e80088984976558105651be58dc6216dfa42944f4b4aabc412e43",
+      "afterHash": "1e32c9e90e9a7233ee0bce0390c02a8dc4111296491ed186f5be6c26be6397e5"
+    },
+    "src/features/library/LibraryDetail.tsx": {
+      "beforeHash": "fbbf4f94205fd4e48b81410fb4b69d89571fa2428b035a44f9033376f9513cbf",
+      "afterHash": "2167119431035c47e71cf35b4708f5986b392c1dba2c777f748f0a7e15d1d731"
+    },
+    "src/features/library/LibraryPage.tsx": {
+      "beforeHash": "d05c36f9169e84a27be944b891068717d3c773e9ab7d854ceddeaddf8b9e72dd",
+      "afterHash": "d982e15ce284198b51334977db3bf2a28b6799925705f80586d40b42446d4117"
+    },
+    "src/features/library/MediaIntegrity.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "b035faf0507c017713a78cc2d52b3ce0878f4c33303922e1567efa49ff5b38c9"
+    },
+    "src/features/library/MediaIntegrityPanel.tsx": {
+      "beforeHash": null,
+      "afterHash": "84124646e4d9d9e41a29c1ccc2e72be2f5aba17ba0e18947518c5db0ad35be5d"
+    },
+    "src/features/library/useLibraryMediaInspection.ts": {
+      "beforeHash": null,
+      "afterHash": "eac4f9b50999660ab1888382edb92d3b76878a419b0d824b79b16c90ac0b6a08"
+    },
+    "src/product/client.test.ts": {
+      "beforeHash": "260be3f8d8326ce5de9bec70a5cafc60ca70ab7b8e33dafe087de5cb0390eaeb",
+      "afterHash": "2940e3844ee702d86371713aa4f36b1d9411a40269955560c7f929d61bbebf96"
+    },
+    "src/product/client.ts": {
+      "beforeHash": "4e53a861666cba9d4023287aa634474e6ac2b8d854e93e72c323e0567026d3d3",
+      "afterHash": "2a475720daa66e757f557d0bf83f12750d952b3d4b0e6bc83d29adaa755c323c"
+    },
+    "src/product/errors.ts": {
+      "beforeHash": "4d1da64cf4f0edc4a63c73aa223e05c6bcbbbf936dd1b54aa3575deb0b7d6eda",
+      "afterHash": "986942986b2b0a6099e05b02d10308a2db1fdfe503288955910614bcb4211675"
+    },
+    "src/product/libraryTypes.ts": {
+      "beforeHash": "398ef2d8475eeb1b3b5097f000d9af8acc998c06035f965e412fcbb67fe0a0f3",
+      "afterHash": "6b6a973a54c118138629ed0982c039a6d27b1f8df0f5912819f365a2405c139b"
+    },
+    "src/product/transport.ts": {
+      "beforeHash": "e456620cddfe9724565f0307181d50c1a6f112070d164ea45d0db512a62e4314",
+      "afterHash": "e1f4cd05afec1bf4471087ba337cb8bdea57a07f336825186f71370121c8c270"
+    }
+  },
+  "backend": {
+    "beforeFiles": 344,
+    "afterFiles": 345,
+    "beforeAggregateHash": "6a5cc5e3c3475e60fd6b43660406abc69fda86a05ab4e6d6e481931fa97c6cba",
+    "afterAggregateHash": "52ba360e0bf813b5ebf1dbff0d9f65093de3087fc3e4fff3b50b617f2d5357fb",
+    "untouchedAggregateHash": "176072b6a3cbcec76128effe485f750ee4e082dce6780d1920cdb15c70565e59"
+  },
+  "frontend": {
+    "beforeFiles": 489,
+    "afterFiles": 493,
+    "beforeAggregateHash": "c1edf163b790847e4a41fbd0c96500b977e42a6839f5cc9dcfd5709f1f00c1b7",
+    "afterAggregateHash": "93ef549d1b719cdb08d5f19065346aa9f4fd845bab4930c1faa836ceb1a706cd",
+    "untouchedAggregateHash": "2fd2975ace7a6ff86475938adfd4f98c405c0a5d59c96c03f4c48287cdbc415d"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "afterAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "untouchedAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa"
+  },
+  "scripts": {
+    "beforeFiles": 22,
+    "afterFiles": 23,
+    "beforeAggregateHash": "8fe7c950453a423179ea05ed3a08264a22a376dcc0b4ad67a95cea3093002684",
+    "afterAggregateHash": "234b61c2cd6160803ea962d968bcbc5c9a87cce3673792c7ebe0ebbc994d0cdc",
+    "untouchedAggregateHash": "b47a8cd477b63d5f4493c0b14c0ac84a1137bf269ad39ddba8d84e76cec3c944"
+  },
+  "invariants": {
+    "assetRepositoryAuthorityChanged": false,
+    "assetStoreAuthorityChanged": false,
+    "mediaRepairAuthorityAdded": false,
+    "mediaRelinkAdded": false,
+    "maintenancePersistenceAdded": false,
+    "newMaintenanceStore": false,
+    "newPollingOwner": false,
+    "newBackgroundScanner": false,
+    "queueAuthorityChanged": false,
+    "taskStateMachineChanged": false,
+    "workflowEngineChanged": false,
+    "bindingOccChanged": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "remoteTelemetry": false
+  }
+}

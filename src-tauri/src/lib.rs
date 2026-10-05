@@ -1140,6 +1140,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::product::product_library_get,
             commands::product::product_library_image_get,
             commands::product::product_library_thumbnail_get,
+            commands::product::product_library_media_verify,
             commands::product::product_library_relations_get,
             commands::product::product_library_versions_get,
             commands::product::product_library_use_in_creation,

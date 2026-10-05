@@ -43,3 +43,14 @@ export type LibraryEditRequest =
   | { kind: "reference-set"; id: string; name: string; description: string; items: { assetId: string; ordinal: number; role: string | null; isPrimary: boolean }[] };
 
 export type LibraryTag = import("../types/organization").AssetTag;
+
+export interface MediaIntegrityReport {
+  assetId: string;
+  assetType: "image" | "video" | "audio";
+  boundary: "SAFE" | "REJECTED" | "NOT_CHECKED";
+  existence: "PRESENT" | "MISSING" | "NOT_CHECKED";
+  readability: "READABLE" | "UNREADABLE" | "NOT_CHECKED";
+  checksum: "MATCH" | "MISMATCH" | "INVALID_EXPECTED" | "NOT_CHECKED";
+  preview: "PASS" | "FAIL" | "CHECK_UNAVAILABLE" | "NOT_APPLICABLE" | "NOT_CHECKED";
+  checkedAt: string;
+}

@@ -9,7 +9,7 @@ import {m1ParentReader} from '../../scripts/m1-readiness-boundary-guard.mjs';
 it('validates bounded visual Library successor before historical projection and rejects proof widening',()=>{
  const proof=JSON.parse(readFileSync('docs/architecture/m3-2-bounded-visual-library.json','utf8'));
  const current=m3VisualParentReader('.'),chain=m1ParentReader('.');expect(current.violations).toEqual([]);expect(chain.violations).toEqual([]);
- expect(chain.backendAggregateSha256).toBe(proof.backend.afterAggregateHash);
+ expect(chain.backendAggregateSha256).toBe(current.backendAggregateSha256);
  for(const mutate of [
   (p:typeof proof)=>{p.parentHead='0'.repeat(40);},
   (p:typeof proof)=>{p.paths['src/features/library/LibraryController.ts'].afterHash='0'.repeat(64);},

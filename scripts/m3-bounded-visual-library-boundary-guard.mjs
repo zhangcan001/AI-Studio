@@ -1,3 +1,4 @@
+import {m4MediaParentReader} from './m4-readonly-media-integrity-boundary-guard.mjs';
 // M3-2 successor validates live bytes before historical guards read their parent.
 // Historical manifests remain immutable; no authority or transport exemption.
 import { createHash } from 'node:crypto';
@@ -53,15 +54,17 @@ export function visualCandidateViolations(baseline,candidate) {
 export function m3VisualParentReader(root, override) {
   // Memoize reads only within this synchronous validation; no live cache survives
   // a call or replaces a fresh fail-closed read. Parent blobs alone persist.
+  const successor=m4MediaParentReader(root);
+  const projectedFiles=(root,folder,pattern)=>files(root,folder,pattern).filter(p=>!successor.addedPaths.includes(p));
   const live = new Map();
-  const disk = (_root,p) => { if (!live.has(p)) live.set(p,text(readFileSync(join(root,p),'utf8'))); return live.get(p); };
+  const disk = (_root,p) => { if (!live.has(p)) live.set(p,successor.read(p)); return live.get(p); };
   const review = override ?? JSON.parse(disk(root, 'docs/architecture/m3-2-bounded-visual-library.json'));
-  const violations = [], fail = s => violations.push(`m3-2-${s}`);
+  const violations = [...successor.violations], fail = s => violations.push(`m3-2-${s}`);
   if (review.checkpoint !== 'M3_2_BOUNDED_VISUAL_LIBRARY' || review.parentHead !== M3_VISUAL_PARENT || review.schemaVersion !== 1) fail('invalid-header');
   if (JSON.stringify(Object.keys(review.paths ?? {}).sort()) !== JSON.stringify([...existing, ...added].sort())) fail('path-set');
   for (const flag of ["libraryAuthorityChanged", "assetBrowseAuthorityChanged", "promptLibraryAuthorityChanged", "thumbnailStorageAuthorityChanged", "thumbnailGenerationAuthorityAdded", "newCacheAuthority", "newStore", "newRouter", "newPollingOwner", "runsAuthorityChanged", "taskHistoryAuthorityChanged", "mixedRunsPaginationAdded", "queueAuthorityChanged", "taskStateMachineChanged", "workflowEngineChanged", "bindingOccChanged", "schemaChanged", "backupFormatChanged", "remoteTelemetry"]) if (review.invariants?.[flag] !== false) fail(`invariant:${flag}`);
   // Invalid proof shape/invariants fail closed without any historical projection.
-  if (violations.length) return { violations, addedPaths: added, addedCommandSignatures: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => disk(root,p) };
+  if (violations.length) return { violations, addedPaths: [...added,...successor.addedPaths], addedCommandSignatures: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => successor.read(p) };
   // Only immutable Git objects/file sets are reused. Every live byte and full
   // untouched aggregate is still read and validated anew on every invocation.
   if (!parentFileSets.has(root)) parentFileSets.set(root, execFileSync('git', ['ls-tree', '-r', '--name-only', M3_VISUAL_PARENT, 'src', 'src-tauri/src', 'scripts', 'src-tauri/tests/product_library_contract.rs', 'src-tauri/examples/phase12_query_profile.rs'],
@@ -71,7 +74,7 @@ export function m3VisualParentReader(root, override) {
   for (const p of existing) if (review.paths?.[p]?.beforeHash !== hash(before(p)) || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`path-drift:${p}`);
   for (const p of added) if (blobs.has(p) || review.paths?.[p]?.beforeHash !== null || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`addition-drift:${p}`);
   for (const [name, folder, pattern] of [['backend', 'src-tauri/src', /\.rs$/], ['frontend', 'src', /\.tsx?$/], ['styles', 'src', /\.css$/], ['scripts', 'scripts', /\.mjs$/]]) {
-    const base = listed.filter(p => p.startsWith(`${folder}/`) && pattern.test(p)), current = files(root, folder, pattern);
+    const base = listed.filter(p => p.startsWith(`${folder}/`) && pattern.test(p)), current = projectedFiles(root, folder, pattern);
     const expected = [...base, ...added.filter(p => p.startsWith(`${folder}/`) && pattern.test(p))].sort();
     const unchanged = base.filter(p => !existing.includes(p));
     const proof = review[name];
@@ -97,7 +100,7 @@ export function m3VisualParentReader(root, override) {
   if(!targets.recordedBeforeProductImplementation||targets.targets?.page20CumulativeListCallsMax!==20||targets.targets?.pageDomCardsMax!==30||targets.targets?.offscreenThumbnailRequests!==0||targets.targets?.fullMediaBytesForList!==0||targets.raiseTargetsAfterFailure!==false)fail('fixed-targets');
   for(const p of frozenArtifacts) if(disk(root,p)!==before(p))fail('immutable-artifact:'+p);
   violations.push(...visualCandidateViolations(JSON.parse(disk(root,'docs/architecture/m3-1-library-scale-baseline.json')),JSON.parse(disk(root,'docs/architecture/m3-2-library-scale-candidate.json'))));
-  return { addedCommandSignatures: violations.length ? [] : [ADDED_COMMAND], violations, addedPaths: added, afterHashes: Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),
-    backendAggregateSha256: violations.length ? undefined : review.backend.afterAggregateHash,
-    read: p => violations.length || !existing.includes(p) ? text(readFileSync(join(root,p),'utf8')) : before(p) };
+  return { addedCommandSignatures: violations.length ? [] : [ADDED_COMMAND,...successor.addedCommandSignatures], violations, addedPaths: [...added,...successor.addedPaths], afterHashes: {...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),...successor.afterHashes},
+    backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,
+    read: p => violations.length || !existing.includes(p) ? successor.read(p) : before(p) };
 }

@@ -53,65 +53,116 @@ impl std::fmt::Display for AssetStoreError {
 
 impl std::error::Error for AssetStoreError {}
 
-/// Resolve an asset path and enforce that the existing regular file remains
-/// inside the owning project's canonical storage root. This is shared by the
-/// application boundary and filesystem adapter so HEAD/GET/stream reads use
-/// the same policy.
-pub fn validate_asset_read_path(
+/// Internal typed inspection; paths never cross the Product DTO boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssetReadInspection {
+    Present { canonical_path: PathBuf },
+    Missing,
+    Unreadable,
+    UnsafePath,
+}
+
+/// Shared path policy for all reads and readonly integrity inspection. Resolve
+/// the nearest existing ancestor before classifying a missing managed file.
+fn resolve_asset_read_path(
     project_root: &Path,
     candidate: &Path,
-) -> Result<PathBuf, AssetStoreError> {
-    if project_root.as_os_str().is_empty() || candidate.as_os_str().is_empty() {
-        return Err(AssetStoreError::InvalidPath(
-            "project root and asset path are required".to_owned(),
-        ));
-    }
-    if candidate
-        .components()
-        .any(|component| matches!(component, std::path::Component::ParentDir))
+) -> Result<PathBuf, AssetReadInspection> {
+    use AssetReadInspection::*;
+    if project_root.as_os_str().is_empty()
+        || candidate.as_os_str().is_empty()
+        || candidate
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
     {
-        return Err(AssetStoreError::FilesystemBoundary(format!(
-            "path traversal is not allowed: {}",
-            candidate.display()
-        )));
+        return Err(UnsafePath);
     }
-
-    let root = fs::canonicalize(project_root).map_err(|error| {
-        AssetStoreError::FilesystemBoundary(format!(
-            "canonicalize project root {}: {error}",
-            project_root.display()
-        ))
-    })?;
+    if fs::symlink_metadata(project_root)
+        .map_err(|_| UnsafePath)?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(UnsafePath);
+    }
+    let root = fs::canonicalize(project_root).map_err(|_| UnsafePath)?;
     let lexical = if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
         root.join(candidate)
     };
-    let metadata = fs::symlink_metadata(&lexical).map_err(|error| {
-        AssetStoreError::Read(format!("inspect {}: {error}", lexical.display()))
-    })?;
+    let mut ancestor = lexical.as_path();
+    let mut missing = false;
+    let metadata = loop {
+        match fs::symlink_metadata(ancestor) {
+            Ok(m) => break m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                missing = true;
+                ancestor = ancestor.parent().ok_or(UnsafePath)?;
+            }
+            Err(_) => return Err(UnsafePath),
+        }
+    };
     if metadata.file_type().is_symlink() {
-        return Err(AssetStoreError::FilesystemBoundary(format!(
-            "symbolic links are not allowed: {}",
-            lexical.display()
-        )));
+        return Err(UnsafePath);
+    }
+    let canonical = fs::canonicalize(ancestor).map_err(|_| UnsafePath)?;
+    if !canonical.starts_with(&root) {
+        return Err(UnsafePath);
+    }
+    // Reject links in intermediate components too, including links resolving
+    // back inside the root. No alternative inspection-only path rules.
+    let mut parent = if canonical == root {
+        None
+    } else {
+        ancestor.parent()
+    };
+    while let Some(p) = parent {
+        let resolved = fs::canonicalize(p).map_err(|_| UnsafePath)?;
+        if fs::symlink_metadata(p)
+            .map_err(|_| UnsafePath)?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(UnsafePath);
+        }
+        if resolved == root {
+            break;
+        }
+        if !resolved.starts_with(&root) {
+            return Err(UnsafePath);
+        }
+        parent = p.parent();
+    }
+    if missing {
+        return Err(Missing);
     }
     if !metadata.is_file() {
-        return Err(AssetStoreError::FilesystemBoundary(format!(
-            "asset path is not a regular file: {}",
-            lexical.display()
-        )));
-    }
-    let canonical = fs::canonicalize(&lexical).map_err(|error| {
-        AssetStoreError::Read(format!("canonicalize {}: {error}", lexical.display()))
-    })?;
-    if !canonical.starts_with(&root) {
-        return Err(AssetStoreError::FilesystemBoundary(format!(
-            "asset path is outside project root: {}",
-            lexical.display()
-        )));
+        return Err(UnsafePath);
     }
     Ok(canonical)
+}
+
+pub fn validate_asset_read_path(
+    project_root: &Path,
+    candidate: &Path,
+) -> Result<PathBuf, AssetStoreError> {
+    resolve_asset_read_path(project_root, candidate).map_err(|outcome| match outcome {
+        AssetReadInspection::UnsafePath => {
+            AssetStoreError::FilesystemBoundary("unsafe managed asset path".into())
+        }
+        _ => AssetStoreError::Read("managed asset unavailable".into()),
+    })
+}
+
+pub fn inspect_asset_read_path(project_root: &Path, candidate: &Path) -> AssetReadInspection {
+    match resolve_asset_read_path(project_root, candidate) {
+        Ok(canonical_path) => match fs::File::open(&canonical_path) {
+            Ok(_) => AssetReadInspection::Present { canonical_path },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => AssetReadInspection::Missing,
+            Err(_) => AssetReadInspection::Unreadable,
+        },
+        Err(outcome) => outcome,
+    }
 }
 
 #[async_trait]
@@ -245,6 +296,11 @@ pub trait AssetStore: Send + Sync {
     /// filesystem operation, not just rely on callers to preflight the path.
     async fn read(&self, project_root: &Path, path: &Path) -> Result<Vec<u8>, AssetStoreError>;
 
+    /// Default is fail closed; adapters/fakes must explicitly support inspection.
+    async fn inspect_read(&self, _project_root: &Path, _path: &Path) -> AssetReadInspection {
+        AssetReadInspection::UnsafePath
+    }
+
     async fn open_read_stream(
         &self,
         _project_root: &Path,
@@ -265,5 +321,87 @@ pub trait AssetStore: Send + Sync {
         Err(AssetStoreError::Read(
             "bounded range reads are not available".to_owned(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+    #[test]
+    fn inspection_keeps_missing_inside_root_distinct_and_rejects_unsafe_missing_paths() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            inspect_asset_read_path(root.path(), Path::new("missing/file.png")),
+            AssetReadInspection::Missing
+        );
+        assert_eq!(
+            inspect_asset_read_path(root.path(), Path::new("../outside.png")),
+            AssetReadInspection::UnsafePath
+        );
+        let outside = tempfile::tempdir().unwrap();
+        assert_eq!(
+            inspect_asset_read_path(root.path(), &outside.path().join("missing.png")),
+            AssetReadInspection::UnsafePath
+        );
+        assert_eq!(
+            inspect_asset_read_path(root.path(), root.path()),
+            AssetReadInspection::UnsafePath
+        );
+        let file = root.path().join("managed.png");
+        fs::write(&file, b"managed").unwrap();
+        let AssetReadInspection::Present { canonical_path } =
+            inspect_asset_read_path(root.path(), &file)
+        else {
+            panic!("safe file")
+        };
+        assert_eq!(
+            canonical_path,
+            validate_asset_read_path(root.path(), &file).unwrap()
+        );
+    }
+    #[test]
+    fn inspection_rejects_symlinks_including_in_root_aliases_when_platform_permits() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("real.bin");
+        fs::write(&file, b"owned").unwrap();
+        let link = root.path().join("alias.bin");
+        #[cfg(unix)]
+        let result = std::os::unix::fs::symlink(&file, &link);
+        #[cfg(windows)]
+        let result = std::os::windows::fs::symlink_file(&file, &link);
+        if let Err(e) = result {
+            #[cfg(windows)]
+            {
+                assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+                eprintln!("SYMLINK_FIXTURE=NOT_AVAILABLE_WINDOWS_PERMISSION; production rejection unchanged");
+                return;
+            }
+            #[cfg(not(windows))]
+            panic!("owned symlink fixture failed: {e}");
+        }
+        assert_eq!(
+            inspect_asset_read_path(root.path(), &link),
+            AssetReadInspection::UnsafePath
+        );
+        assert!(matches!(
+            validate_asset_read_path(root.path(), &link),
+            Err(AssetStoreError::FilesystemBoundary(_))
+        ));
+        let real = root.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("file.bin"), b"owned").unwrap();
+        let dir_link = root.path().join("alias-dir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &dir_link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &dir_link).unwrap();
+        assert_eq!(
+            inspect_asset_read_path(root.path(), &dir_link.join("file.bin")),
+            AssetReadInspection::UnsafePath
+        );
+        assert_eq!(
+            inspect_asset_read_path(root.path(), &dir_link.join("missing.bin")),
+            AssetReadInspection::UnsafePath
+        );
     }
 }

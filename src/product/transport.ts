@@ -8,6 +8,7 @@ import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationC
 interface ProductCommands {
   product_library_tags_list: { args: { projectId: string }; result: import("./libraryTypes").LibraryTag[] };
   product_library_image_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: number[] };
+  product_library_media_verify: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").MediaIntegrityReport };
   product_library_thumbnail_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: number[] };
   product_library_relations_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryRelation[] };
   product_library_versions_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryVersions };

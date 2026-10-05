@@ -49,7 +49,7 @@ it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=
  const reviewed=backendPerformanceBoundary(".",manifest.backendSourceSnapshot,phase12,phase13);
  expect(reviewed.violations).toEqual([]);
  expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(reviewed.sha256);
-  expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend.filter((p:string)=>!phase13.backend.addedPaths.includes(p)));
+  expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend.filter((p:string)=>!phase13.backend.addedPaths.includes(p)&&!successor.addedPaths.includes(p)));
 });
 it("target2 preserves frozen Phase7 consumers through the validated successor",()=>{
  // Phase10 advances only explicitly scoped frontend seam pins; backend/IPC remain exact.

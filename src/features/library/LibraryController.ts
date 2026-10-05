@@ -1,3 +1,4 @@
+import { useLibraryMediaInspection } from "./useLibraryMediaInspection";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppRoute } from "../../app/routes/types";
 import { productClient } from "../../product/client";
@@ -17,6 +18,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   const setSearch=(search:string)=>setQueryState(state=>({...state,projectId:route.projectId,search}));
   const setFavoriteOnly=(favoriteOnly:boolean)=>setQueryState(state=>({...state,projectId:route.projectId,favoriteOnly}));
   const setTagId=(tagId:string)=>setQueryState(state=>({...state,projectId:route.projectId,tagId}));
+  const mediaInspection=useLibraryMediaInspection(route.projectId,route.resource);
   const [projection,setProjection]=useState<Projection>();
   const [queryError,setQueryError]=useState<string>();const [actionError,setActionError]=useState<string>();const [notice,setNotice]=useState<string>();
   const [inspection,setInspection]=useState<LibraryDeletionInspection>();const [busy,setBusy]=useState(false);const [loading,setLoading]=useState(true);
@@ -104,7 +106,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     useStudioStore.getState().setPendingLibraryIntent(intent);
     navigate(returnRoute ?? {kind:"create",projectId:route.projectId,stage:stage!});
   });
-  return {returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
+  return {mediaInspection,returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
     pageIndex,canPrevious:pageIndex>0,
     nextPage:()=>{if(current?.list.nextCursor)void refresh({tags:false,page:pages.current.index+1,cursor:current.list.nextCursor});},
     previousPage:()=>{if(pages.current.index>0)void refresh({tags:false,page:pages.current.index-1});},

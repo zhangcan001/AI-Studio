@@ -1,3 +1,4 @@
+mod media_integrity;
 use crate::application::ports::{
     AssetRepository, AssetStore, AssetStoreError, GenerationDefinitionRepository,
     OrganizationRepository, ProjectRepository, RepositoryError, TaskOutputAssetMapping,
@@ -6,10 +7,12 @@ use crate::application::ports::{
 use crate::compiler::RecipeParser;
 use crate::domain::{AssetId, AssetType, TaskId};
 use chrono::{DateTime, Utc};
+pub use media_integrity::*;
 use serde::Serialize;
 use std::{error::Error, fmt, sync::Arc};
 
 pub struct AssetQueryService {
+    media_probe: Arc<dyn crate::application::media_probe::MediaProbe>,
     asset_repository: Arc<dyn AssetRepository>,
     asset_store: Arc<dyn AssetStore>,
     project_repository: Arc<dyn ProjectRepository>,
@@ -25,6 +28,7 @@ impl AssetQueryService {
         project_repository: Arc<dyn ProjectRepository>,
     ) -> Self {
         Self {
+            media_probe: Arc::new(crate::application::media_probe::CommandMediaProbe::default()),
             asset_repository,
             asset_store,
             project_repository,
@@ -32,6 +36,14 @@ impl AssetQueryService {
             definition_repository: None,
             organization_repository: None,
         }
+    }
+
+    pub fn with_media_probe(
+        mut self,
+        probe: Arc<dyn crate::application::media_probe::MediaProbe>,
+    ) -> Self {
+        self.media_probe = probe;
+        self
     }
 
     pub fn with_organization_repository(

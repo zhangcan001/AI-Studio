@@ -45,7 +45,8 @@ export function releaseParentReader(root, reviewOverride) {
   if (proof.paths?.[ownPath]?.beforeHash !== null || proof.paths?.[ownPath]?.afterHash !== hash(live(root, ownPath))) fail('new-guard-drift');
   const basePaths = execFileSync('git', ['ls-tree', '-r', '--name-only', RELEASE_PARENT, 'src-tauri/src'],
     { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(p => p.endsWith('.rs')).sort();
-  const livePaths = files(root, 'src-tauri/src');
+  // Exclude only additions already validated by the complete successor chain.
+  const livePaths = files(root, 'src-tauri/src').filter(path => !checkpoint.addedPaths?.includes(path));
   if (JSON.stringify(basePaths) !== JSON.stringify(livePaths) || proof.backend.files !== livePaths.length) fail('backend-file-set');
   // Batch immutable reads; never cache working-tree data.
   const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: root,

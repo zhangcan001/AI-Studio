@@ -45,6 +45,15 @@ fn library_operations(state: &AppState) -> LibraryOperations<'_> {
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn product_library_media_verify(
+    state: State<'_, AppState>,
+    project_id: String,
+    resource: ResourceRef,
+) -> Result<crate::application::asset_query_service::MediaIntegrityReport, ProductError> {
+    library(&state).media_verify(&project_id, &resource).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn product_library_thumbnail_get(
     state: State<'_, AppState>,
     project_id: String,

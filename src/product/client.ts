@@ -3,6 +3,7 @@ import type { CreationSubmission, CreationShotUpdate, GeneratorBindingSetRequest
 
 export const productClient = {
   library: {
+    mediaVerify: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_media_verify", { projectId, resource }),
     tagsList: (projectId: string) => productRequest("product_library_tags_list", { projectId }),
     imageGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_image_get", { projectId, resource }),
     thumbnailGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_thumbnail_get", { projectId, resource }),

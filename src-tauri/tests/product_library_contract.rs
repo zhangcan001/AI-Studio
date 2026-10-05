@@ -5,6 +5,8 @@ mod library_findability_contract;
 mod library_scale_baseline;
 #[path = "support/library_thumbnail_contract.rs"]
 mod library_thumbnail_contract;
+#[path = "support/media_integrity_contract.rs"]
+mod media_integrity_contract;
 #[path = "support/project_database.rs"]
 mod project_database;
 use ai_studio_lib::application::{

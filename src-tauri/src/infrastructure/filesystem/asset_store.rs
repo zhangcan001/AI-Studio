@@ -1,6 +1,6 @@
 use crate::application::ports::{
-    validate_asset_read_path, AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession,
-    StagedAssetFile, StoredAssetFile,
+    inspect_asset_read_path, validate_asset_read_path, AssetReadInspection, AssetReadStream,
+    AssetStore, AssetStoreError, AssetWriteSession, StagedAssetFile, StoredAssetFile,
 };
 use crate::domain::{Asset, AssetId};
 use async_trait::async_trait;
@@ -246,6 +246,10 @@ impl AssetStore for FileSystemAssetStore {
         extension: &str,
     ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
         Self::begin_stream_write(project_root, asset_id, extension, "source", "audio").await
+    }
+
+    async fn inspect_read(&self, project_root: &Path, path: &Path) -> AssetReadInspection {
+        inspect_asset_read_path(project_root, path)
     }
 
     async fn open_read_stream(

@@ -6,6 +6,27 @@ use crate::application::{
 use crate::domain::consistency::ProfileType;
 
 impl LibraryServices<'_> {
+    pub async fn media_verify(
+        &self,
+        project_id: &str,
+        resource: &ResourceRef,
+    ) -> Result<crate::application::asset_query_service::MediaIntegrityReport, ProductError> {
+        let ResourceRef::Asset { id } = resource else {
+            return Err(invalid_query());
+        };
+        self.asset_detail
+            .verify_media(project_id, id)
+            .await
+            .map_err(|error| match error {
+                AssetQueryError::NotFound(_) => missing(),
+                _ => ProductError::new(
+                    "MEDIA_VERIFY_UNAVAILABLE",
+                    "当前无法完成媒体检查，请稍后重试。",
+                    None,
+                ),
+            })
+    }
+
     /// Read only the existing managed thumbnail. Never fall back to full media.
     pub async fn thumbnail_get(
         &self,

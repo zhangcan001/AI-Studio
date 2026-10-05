@@ -94,7 +94,7 @@ export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
 
   const baseRust = git(root, 'ls-tree', '-r', '--name-only', PHASE13_BASELINE, 'src-tauri/src').trim().split('\n').filter(path => path.endsWith('.rs')).sort();
   primeCommitBlobs(root, PHASE13_BASELINE, baseRust);
-  const liveRust = sourceFiles(root, 'src-tauri/src', /\.rs$/);
+  const liveRust = sourceFiles(root, 'src-tauri/src', /\.rs$/).filter(path => !release.addedPaths?.includes(path));
   const phase12Proof = phase12Review?.backendOptimization2?.sourceFreeze;
   const phase12Seam = phase12Review?.backendOptimization2;
   if (phase12Seam?.status !== 'MEASURED_VERIFIED' || !Number.isFinite(phase12Seam.baseline?.samples) || !Number.isFinite(phase12Seam.after?.samples) || phase12Seam.baseline.samples < 5 || phase12Seam.after.samples < 5) fail('phase12-measurement-proof-invalid');
