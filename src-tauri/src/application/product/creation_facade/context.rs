@@ -63,6 +63,8 @@ pub struct CreationContext {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreationPromptChoice {
+    pub prompt_id: String,
+    pub prompt_version_id: String,
     pub name: String,
     pub version: i64,
     pub text: String,
@@ -302,6 +304,8 @@ impl ProductCreationFacade {
                 .map_err(ProductError::internal)?;
             if let Some(version) = entry.versions.iter().max_by_key(|version| version.version) {
                 context.prompt_choices.push(CreationPromptChoice {
+                    prompt_id: entry.id.clone(),
+                    prompt_version_id: version.id.clone(),
                     name: entry.name,
                     version: version.version,
                     text: version.text.clone(),

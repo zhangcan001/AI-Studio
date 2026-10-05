@@ -136,6 +136,8 @@ pub async fn product_library_get(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreationSubmissionDto {
+    prompt_id: Option<String>,
+    prompt_version_id: Option<String>,
     project_id: String,
     shot_id: String,
     stage: String,
@@ -166,6 +168,8 @@ impl CreationSubmissionDto {
             })
             .collect::<Result<_, _>>()?;
         Ok(CreationSubmission {
+            prompt_id: self.prompt_id,
+            prompt_version_id: self.prompt_version_id,
             project_id: self.project_id,
             shot_id: self.shot_id,
             stage: self.stage,
@@ -182,7 +186,11 @@ pub async fn product_creation_readiness_get(
     request: CreationSubmissionDto,
 ) -> Result<CreationReadiness, ProductError> {
     Ok(creation(&state)
-        .readiness_get(&state.production.queue, request.into_application()?)
+        .readiness_get(
+            &state.production.queue,
+            &state.catalog.prompt_library,
+            request.into_application()?,
+        )
         .await)
 }
 
@@ -195,6 +203,7 @@ pub async fn product_creation_generate(
     creation(&state)
         .generate(
             &state.production.queue,
+            &state.catalog.prompt_library,
             request.into_application()?,
             move |project_id, batch_id| async move {
                 admission

@@ -63,8 +63,16 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     // suppress later external events or the polling fallback.
     selfEditInvalidation.current=true;try{invalidateRuns(route.projectId);}finally{selfEditInvalidation.current=false;}
     if(liveScope.current===scope){inspectionOpen.current=false;setInspection(undefined);await refresh();}});
-  const useInCreation=()=>mutate(async()=>{if(!route.resource)return;const intent=await productClient.library.useInCreation(route.projectId,route.resource);if(liveScope.current!==scope)return;useStudioStore.getState().setPendingLibraryIntent(intent);navigate({kind:"create",projectId:route.projectId,stage:intent.kind==="asset"?"video":"image"});});
-  return {category,search,setSearch,list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
+  const savedReturn=useStudioStore(state=>state.creationLabReturn);
+  const returnRoute=savedReturn?.route?.projectId===route.projectId && savedReturn.scope===`${savedReturn.route.projectId}:${savedReturn.route.shotId ?? ""}:${savedReturn.route.stage}` ? savedReturn.route : undefined;
+  const useInCreation=(stage?: "image" | "video")=>mutate(async()=>{
+    if(!route.resource || (!returnRoute && !stage))return;
+    const intent=await productClient.library.useInCreation(route.projectId,route.resource);
+    if(liveScope.current!==scope || intent.projectId!==route.projectId || (intent.kind==="asset" && intent.mediaKind==="audio"))return;
+    useStudioStore.getState().setPendingLibraryIntent(intent);
+    navigate(returnRoute ?? {kind:"create",projectId:route.projectId,stage:stage!});
+  });
+  return {returnRoute,category,search,setSearch,list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
     loadMore:()=>{if(current?.list.nextCursor){pageCount.current++;void refresh();}},
     open:(resource:ResourceRef)=>{setNotice(undefined);navigate({...route,resource});},
     closeInspection:()=>{inspectionOpen.current=false;setInspection(undefined);},

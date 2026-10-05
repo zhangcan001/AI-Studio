@@ -8,7 +8,9 @@ import type {
 } from "../types/generation";
 
 interface StudioState {
-  creationLabReturn?: { scope: string; selectionRef: string; runRef: import("../product/types").RunRef | null; accepted: import("../product/types").CreationAccepted | null };
+  creationLabReturn?: { scope: string; route?: Extract<import("../app/routes/types").AppRoute, {kind: "create"}>; selectionRef: string; runRef: import("../product/types").RunRef | null; accepted: import("../product/types").CreationAccepted | null };
+  creationPromptProvenance?: import("../product/types").CreationPromptProvenance;
+  applyCreationPrompt: (choice: import("../product/types").CreationPromptProvenance & {text: string}) => void;
   setCreationLabReturn: (intent: StudioState["creationLabReturn"]) => void;
   pendingLibraryIntent?: import("../product/libraryTypes").LibraryCreateIntent;
   setPendingLibraryIntent: (intent: StudioState["pendingLibraryIntent"]) => void;
@@ -24,7 +26,7 @@ interface StudioState {
   reuseProvenance?: StudioReuseProvenance;
   setSelectedWorkflow: (workflow?: RecipeViewModel) => void;
   loadDraft: (workflow: RecipeViewModel, values: GenerationValues, modelVersionId?: string, promptVersionId?: string) => void;
-  loadCreationDraft: (values: GenerationValues, dirty?: boolean) => void;
+  loadCreationDraft: (values: GenerationValues, dirty?: boolean, provenance?: import("../product/types").CreationPromptProvenance) => void;
   clearPromptVersion: () => void;
   setPendingAssetIntent: (intent: PendingStudioAssetIntent) => void;
   clearPendingAssetIntent: () => void;
@@ -37,6 +39,7 @@ interface StudioState {
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
+  applyCreationPrompt: ({promptId, promptVersionId, text}) => set(state => ({values: {...state.values, prompt: {type: "string", value: text}}, draftDirty: true, creationPromptProvenance: {promptId, promptVersionId}})),
   setCreationLabReturn: (creationLabReturn) => set({ creationLabReturn }),
   setPendingLibraryIntent: (pendingLibraryIntent) => set({ pendingLibraryIntent }),
   setPendingRunIntent: (pendingRunIntent) => set({ pendingRunIntent }),
@@ -55,19 +58,19 @@ export const useStudioStore = create<StudioState>((set) => ({
     }),
   loadDraft: (workflow, values, selectedModelVersionId, selectedPromptVersionId) =>
     set({ selectedWorkflow: workflow, selectedModelVersionId, selectedPromptVersionId, values, draftDirty: false, validationErrors: {} }),
-  loadCreationDraft: (values, draftDirty = false) => set({ selectedWorkflow: undefined,
+  loadCreationDraft: (values, draftDirty = false, creationPromptProvenance) => set({ selectedWorkflow: undefined, creationPromptProvenance,
     selectedModelVersionId: undefined, selectedPromptVersionId: undefined, values, draftDirty, validationErrors: {}, reuseProvenance: undefined }),
   clearPromptVersion: () => set({ selectedPromptVersionId: undefined }),
   setPendingAssetIntent: (pendingAssetIntent) => set({ pendingAssetIntent }),
   clearPendingAssetIntent: () => set({ pendingAssetIntent: undefined }),
   setReuseProvenance: (reuseProvenance) => set({ reuseProvenance }),
   setValue: (key, value) =>
-    set((state) => ({ values: { ...state.values, [key]: value }, draftDirty: true })),
+    set((state) => ({ values: { ...state.values, [key]: value }, draftDirty: true, ...(key === "prompt" ? {creationPromptProvenance: undefined} : {}) })),
   removeValue: (key) =>
     set((state) => {
       const values = { ...state.values };
       delete values[key];
-      return { values, draftDirty: true };
+      return { values, draftDirty: true, ...(key === "prompt" ? {creationPromptProvenance: undefined} : {}) };
     }),
   setValidationErrors: (validationErrors) => set({ validationErrors }),
   clearValidationErrors: () => set({ validationErrors: {} }),
@@ -82,6 +85,7 @@ export const useStudioStore = create<StudioState>((set) => ({
       pendingAssetIntent: undefined,
       pendingRunIntent: undefined,
       creationLabReturn: undefined,
+      creationPromptProvenance: undefined,
       pendingLibraryIntent: undefined,
       reuseProvenance: undefined,
     })),

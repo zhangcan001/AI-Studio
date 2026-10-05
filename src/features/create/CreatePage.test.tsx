@@ -11,8 +11,8 @@ import type { AppRoute } from "../../app/routes/types";
 import { normalCreate, mediaValue, modeLabel } from "./createModel";
 import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
 import { resolveCreateReadinessAction } from "./createReadinessAction";
-const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), bindingSet: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, project: { generatorBindingSet: api.bindingSet } } }));
+const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), libraryGet: vi.fn(), bindingSet: vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, library: {get: api.libraryGet}, project: { generatorBindingSet: api.bindingSet } } }));
 const prompt = { type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" } as const;
 const negative = { ...prompt, key: "negative_prompt", label: "Negative prompt", required: false };
 const params = [{ type: "integer", key: "width", label: "Width", required: true, default: 640, min: 64, max: 1920, step: 8 }, { type: "integer", key: "height", label: "Height", required: true, default: 480 }, { type: "integer", key: "duration_seconds", label: "Duration", required: true, default: 5, min: 1, max: 10 }, { type: "number", key: "cfg", label: "CFG", required: false, default: 1.5 }, { type: "seed", key: "seed", label: "Seed", defaultMode: "random" }] satisfies GeneratorOption["fields"];
@@ -21,7 +21,7 @@ const image = option("image-opaque", [prompt, negative, ...params.filter(f => f.
 const videos = [option("t2v-opaque", [prompt, ...params]), option("i2v-opaque", [prompt, ...params, { type: "image", key: "first_frame", label: "First frame", required: true }]), option("fl-opaque", [prompt, ...params, { type: "image", key: "first_frame", label: "First", required: true }, { type: "image", key: "last_frame", label: "Last", required: true }]), option("ref-opaque", [prompt, ...params, { type: "video", key: "reference_video", label: "Reference video", required: true }])];
 const inputs: CreationAsset[] = [{ id: "img1", name: "首帧素材", mediaKind: "image", selected: false }, { id: "img2", name: "尾帧素材", mediaKind: "image", selected: false }, { id: "vid1", name: "参考视频素材", mediaKind: "video", selected: false }];
 let candidates: CreationAsset[];
-function context(stage: "image" | "video", shotId: string | null = "shot1"): CreationContext { return { projectId: "project", projectName: "Project", stage, shots: [{ id: "shot1", name: "镜头一", ordinal: 0 }, { id: "shot2", name: "镜头二", ordinal: 1 }], selectedShot: shotId ? { summary: { id: shotId, name: "镜头", ordinal: 0 }, prompt: `${stage} prompt`, selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null } : null, candidates: [...candidates], mediaInputs: inputs, promptChoices: [{ name: "我的提示词", text: "chosen prompt", version: 2 }] }; }
+function context(stage: "image" | "video", shotId: string | null = "shot1"): CreationContext { return { projectId: "project", projectName: "Project", stage, shots: [{ id: "shot1", name: "镜头一", ordinal: 0 }, { id: "shot2", name: "镜头二", ordinal: 1 }], selectedShot: shotId ? { summary: { id: shotId, name: "镜头", ordinal: 0 }, prompt: `${stage} prompt`, selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null } : null, candidates: [...candidates], mediaInputs: inputs, promptChoices: [{ promptId: "prm-choice", promptVersionId: "prv-choice", name: "我的提示词", text: "chosen prompt", version: 2 }] }; }
 function run(status: ProductRun["status"] = "QUEUED", actions: string[] = []): ProductRun { return { ref: { source: "queue-batch", id: "run" }, projectId: "project", title: "run", status, phase: status, createdAt: "", updatedAt: "", progress: { total: 1, succeeded: status === "SUCCEEDED" ? 1 : 0, failed: status === "FAILED" ? 1 : 0, cancelled: 0 }, recoverability: { retryItemIds: ["old-item"], reviewRequired: 0 }, resultsSummary: [], errorSummary: null, preferredParent: null, availableActions: actions }; }
 const navigations = vi.fn(); const dirty = vi.fn();
 function Host({ initialStage = "image", initialShot = "shot1" }: { initialStage?: "image" | "video"; initialShot?: string }) {
@@ -250,4 +250,82 @@ it("phase6_target4 canonical Lab routes and legacy deep links preserve Create dr
   expect(toLegacyLocation({kind:"project-settings",projectId:"project",section:"generators"}).workspace).toBe("projects");
   expect(toLegacyLocation({kind:"project-settings",projectId:"project",section:"advanced-workflows"}).workspace).toBe("workflows");
   expect(fromLegacyLocation({projectId:"project",workspace:"workflows"})).toEqual({kind:"project-settings",projectId:"project",section:"advanced-workflows"});
+});
+
+
+describe("M2-2 precise library reuse", () => {
+  it("sets exact recent provenance, sends it to readiness/generate, clears it on any manual edit", async () => {
+    render(<Host />); await loaded();
+    fireEvent.click(screen.getByRole("button", {name:"选择提示词"}));
+    expect(screen.getByText("近期提示词")).toBeTruthy();
+    expect(screen.getByText(/最多20个近期提示词/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", {name:"我的提示词 · 版本 2"}));
+    expect(useStudioStore.getState().creationPromptProvenance).toEqual({promptId:"prm-choice",promptVersionId:"prv-choice"});
+    fireEvent.click(screen.getByRole("button", {name:"生成"}));
+    await waitFor(()=>expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({promptId:"prm-choice",promptVersionId:"prv-choice"})));
+    expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({promptId:"prm-choice",promptVersionId:"prv-choice"}));
+    fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"chosen prompt!"}});
+    expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
+    fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"chosen prompt"}});
+    fireEvent.click(screen.getByRole("button", {name:"生成"}));
+    await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+    expect(api.generate.mock.calls[1][0].promptVersionId).toBeUndefined();
+  });
+  it("captures exact video/shot draft to Library and preserves provenance on return and stage switch", async () => {
+    const route={kind:"create",projectId:"project",shotId:"shot2",stage:"video"} as const;
+    const navigate=vi.fn(); const view=render(<CreatePage route={route} navigate={navigate}/>); await loaded();
+    fireEvent.change(screen.getByLabelText("选择生成器"),{target:{value:"fl-opaque"}});
+    fireEvent.change(screen.getByLabelText("宽度"),{target:{value:"1280"}});
+    fireEvent.click(screen.getByRole("button",{name:"选择提示词"}));
+    fireEvent.click(screen.getByRole("button",{name:"我的提示词 · 版本 2"}));
+    fireEvent.click(screen.getByRole("button",{name:"在资源库查找更多图片"}));
+    expect(navigate).toHaveBeenLastCalledWith({kind:"library",projectId:"project",filter:"images"});
+    expect(useStudioStore.getState().creationLabReturn?.route).toEqual(route);
+    const draft=useStudioStore.getState().values; view.unmount();
+    render(<CreatePage route={route} navigate={navigate}/>); await loaded();
+    expect(useStudioStore.getState().values).toEqual(draft);
+    expect(useStudioStore.getState().creationPromptProvenance?.promptVersionId).toBe("prv-choice");
+    expect(useStudioStore.getState().draftDirty).toBe(true);
+    expect((screen.getByLabelText("选择生成器") as HTMLSelectElement).value).toBe("fl-opaque");
+    expect(screen.getByText(/近期100项素材/)).toBeTruthy();
+    expect(screen.queryByText(/视频\/音频输入/)).toBeNull();
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("does not inject a late non-recent asset into a different project", async () => {
+    let finish!: (detail: unknown)=>void;
+    api.libraryGet.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    useStudioStore.getState().setPendingLibraryIntent({kind:"asset",projectId:"project",assetId:"old101",mediaKind:"image"});
+    const route={kind:"create",projectId:"project",shotId:"shot1",stage:"video"} as const;
+    const view=render(<CreatePage route={route} navigate={navigations}/>); await loaded();
+    await waitFor(()=>expect(api.libraryGet).toHaveBeenCalled());
+    api.get.mockImplementation((_p,shot,stage)=>Promise.resolve({...context(stage,shot),projectId:"other"}));
+    view.rerender(<CreatePage route={{...route,projectId:"other"}} navigate={navigations}/>); await loaded();
+    fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"B draft"}});
+    await act(async()=>finish({kind:"asset",asset:{id:"old101",name:"old101",projectId:"project",assetType:"image"}}));
+    expect(useStudioStore.getState().values.prompt).toEqual({type:"string",value:"B draft"});
+    expect(useStudioStore.getState().pendingLibraryIntent).toBeUndefined();
+    expect(screen.queryByRole("option",{name:"old101"})).toBeNull();
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("keeps incompatible prompt intent visible without changing generator", async () => {
+    api.generatorsList.mockResolvedValue([option("no-prompt",params,"image")]);
+    useStudioStore.getState().setPendingLibraryIntent({kind:"prompt",projectId:"project",promptId:"p",promptVersionId:"v",text:"old21",modelVersionId:null});
+    render(<Host/>); await loaded();
+    expect(screen.getByText(/当前生成器没有可应用提示词的输入/)).toBeTruthy();
+    expect(useStudioStore.getState().pendingLibraryIntent?.kind).toBe("prompt");
+    expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+});
+
+it("M2-2 typed prompt provenance survives stage and Settings/Workflow return snapshots", async()=>{
+ render(<Host/>); await loaded();
+ fireEvent.click(screen.getByRole("button",{name:"选择提示词"}));fireEvent.click(screen.getByRole("button",{name:"我的提示词 · 版本 2"}));
+ fireEvent.click(screen.getByRole("button",{name:"视频"})); await loaded();
+ expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
+ fireEvent.click(screen.getByRole("button",{name:"图片"}));await loaded();
+ expect(useStudioStore.getState().creationPromptProvenance).toEqual({promptId:"prm-choice",promptVersionId:"prv-choice"});
+ fireEvent.click(screen.getByRole("button",{name:"工作流 / Benchmark"}));
+ expect(useStudioStore.getState().creationPromptProvenance?.promptVersionId).toBe("prv-choice");
+ expect(useStudioStore.getState().creationLabReturn?.scope).toBe("project:shot1:image");
 });

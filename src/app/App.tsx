@@ -148,6 +148,8 @@ const taskRecoveryServices = { listRecentTasks, reconcileActiveTasks };
 const shotConsistencyServices = { getConsistencyScopeBinding, getShotConsistencyBinding, getShotContextDraft, listConsistencyProfiles, listCostumeVariants, listReferenceSets, replaceConsistencyScopeBinding, replaceShotConsistencyBinding };
 
 export function preservesCreateDraftForSettings(current: AppRoute, next: AppRoute, savedScope?: string) {
+  if (current.kind === "create" && next.kind === "library") return next.projectId === current.projectId
+    && savedScope === `${current.projectId}:${current.shotId ?? ""}:${current.stage}`;
   return current.kind === "create" && next.kind === "system-settings"
     && (next.section === "advanced-workflows" || next.section === "general")
     && next.returnTo?.kind === "create"
@@ -591,7 +593,7 @@ function App() {
         route={route}
         navigate={navigate}
         back={async () => { if (!shotDraftDirty || await confirmDraftDiscard("镜头有未保存的修改。返回会放弃这些修改，是否继续？")) back(); }}
-        projectName={activeProject?.name}
+        projectName={activeProject ? projectDisplayName(activeProject.id, activeProject.name) : undefined}
         projectSelector={projectSelector}
       >
         <div className="app-main-content" id="app-main-content" tabIndex={-1}>

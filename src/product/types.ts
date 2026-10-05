@@ -72,10 +72,14 @@ export interface CreationContext {
   selectedShot: CreationShot | null;
   candidates: CreationAsset[];
   mediaInputs: CreationAsset[];
-  promptChoices: { name: string; version: number; text: string }[];
+  promptChoices: CreationPromptChoice[];
 }
+export interface CreationPromptChoice { promptId: string; promptVersionId: string; name: string; version: number; text: string }
+export interface CreationPromptProvenance { promptId: string; promptVersionId: string }
 export interface CreationShotUpdate { shotId: string; name: string }
 export interface CreationSubmission {
+  promptId?: string;
+  promptVersionId?: string;
   projectId: string;
   shotId: string;
   stage: "image" | "video";

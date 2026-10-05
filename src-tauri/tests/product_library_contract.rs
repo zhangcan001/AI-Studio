@@ -432,9 +432,23 @@ async fn phase5_target7_create_intents_do_not_create_tasks_or_queues() {
         .create("prj_default", "prompt", "提示词", &[], "draft")
         .await
         .unwrap();
+    let latest = f
+        .prompts
+        .add_version("prj_default", &p.id, "latest draft")
+        .await
+        .unwrap();
+    let intent = f
+        .operations()
+        .use_in_creation("prj_default", &ResourceRef::Prompt { id: p.id.clone() })
+        .await
+        .unwrap();
     assert!(
-        matches!(f.operations().use_in_creation("prj_default",&ResourceRef::Prompt {id:p.id}).await.unwrap(),LibraryCreateIntent::Prompt {text,..} if text=="draft")
+        matches!(&intent, LibraryCreateIntent::Prompt {project_id,prompt_id,prompt_version_id,text,..}
+        if project_id=="prj_default" && prompt_id==&p.id && prompt_version_id==&latest.id && text=="latest draft")
     );
+    let wire = serde_json::to_value(intent).unwrap();
+    assert_eq!(wire["promptId"], p.id);
+    assert_eq!(wire["promptVersionId"], latest.id);
     let profile = f.profile("道具").await;
     assert!(matches!(
         f.operations()

@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
-import type { CreationAccepted, CreationContext, CreationReadiness, GeneratorOption, ProductRun, RunRef } from "../../product/types";
+import type { CreationAccepted, CreationContext, CreationReadiness, GeneratorOption, ProductRun, RunRef, CreationPromptChoice, CreationPromptProvenance } from "../../product/types";
 import type { GenerationValues, DraftValue } from "../../types/generation";
 import type { AppRoute } from "../../app/routes/types";
 import { useStudioStore } from "../../stores/studioStore";
-import { draftFor, mediaKind, mediaValue, scopeKey, type CreateRoute } from "./createModel";
+import { assetIds, draftFor, mediaKind, mediaValue, scopeKey, type CreateRoute } from "./createModel";
 export interface CreateProps { route: CreateRoute; navigate: (route: AppRoute) => unknown; onDirtyChange?: (dirty: boolean) => void }
-interface StageView { selection: string; values: GenerationValues; dirty: boolean; runRef: RunRef | null; accepted: CreationAccepted | null }
+interface StageView { selection: string; values: GenerationValues; dirty: boolean; runRef: RunRef | null; accepted: CreationAccepted | null; provenance?: CreationPromptProvenance }
 export function useCreateController({ route, navigate, onDirtyChange }: CreateProps) {
   const values = useStudioStore(state => state.values);
   const dirty = useStudioStore(state => state.draftDirty);
+  const provenance = useStudioStore(state => state.creationPromptProvenance);
   const [context, setContext] = useState<CreationContext>();
   const [generators, setGenerators] = useState<GeneratorOption[]>([]);
   const [selection, setSelection] = useState("");
@@ -40,19 +41,19 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     setLoading(true); setContext(undefined); setReadiness(undefined); setRun(undefined); setError(undefined);
     attempt.current = null;
     const store = useStudioStore.getState();
-    const labReturn = store.creationLabReturn?.scope === key ? { ...store.creationLabReturn, values: store.values, dirty: store.draftDirty } : undefined;
+    const labReturn = store.creationLabReturn?.scope === key ? { ...store.creationLabReturn, values: store.values, dirty: store.draftDirty, provenance: store.creationPromptProvenance } : undefined;
     if (!labReturn) store.loadCreationDraft({});
     Promise.all([productClient.creation.get(route.projectId, route.shotId ?? null, route.stage), productClient.creation.generatorsList(route.projectId, route.stage, route.shotId ?? null)])
       .then(([next, options]) => {
         if (cancelled || token !== epoch.current) return;
-        const saved = labReturn ? { selection: labReturn.selectionRef, values: labReturn.values, dirty: labReturn.dirty, runRef: labReturn.runRef, accepted: labReturn.accepted } : snapshots.current.get(key);
+        const saved = labReturn ? { selection: labReturn.selectionRef, values: labReturn.values, dirty: labReturn.dirty, runRef: labReturn.runRef, accepted: labReturn.accepted, provenance: labReturn.provenance } : snapshots.current.get(key);
         const intent = useStudioStore.getState().pendingRunIntent;
         const reuse = intent?.projectId === route.projectId && intent.stage === route.stage ? intent : undefined;
         const selected = reuse ? options.find(item => item.selectionRef === reuse.selectionRef) : saved ? options.find(item => item.selectionRef === saved.selection) : options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
         if ((reuse || saved) && !selected) setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
         initialized = true; setContext(next); setGenerators(options); setSelection(selected?.selectionRef ?? "");
         const reused = reuse && selected?.selectionRef === reuse.selectionRef && next.selectedShot;
-        useStudioStore.getState().loadCreationDraft(reused ? draftFor(selected, next.selectedShot, reuse.values) : saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), reused ? true : saved?.dirty ?? false);
+        useStudioStore.getState().loadCreationDraft(reused ? draftFor(selected, next.selectedShot, reuse.values) : saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), reused ? true : saved?.dirty ?? false, reused ? undefined : saved?.provenance);
         if (reused) useStudioStore.getState().setPendingRunIntent(undefined);
         setRunRef(saved?.runRef ?? next.selectedShot?.recentRun ?? null); setAccepted(saved?.accepted ?? null);
         useStudioStore.getState().setCreationLabReturn(undefined);
@@ -61,14 +62,15 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     return () => {
       cancelled = true;
       const store = useStudioStore.getState();
-      if (initialized) snapshots.current.set(key, { ...live.current, values: store.values, dirty: store.draftDirty });
+      if (initialized) snapshots.current.set(key, { ...live.current, values: store.values, dirty: store.draftDirty, provenance: store.creationPromptProvenance });
     };
   }, [key]); // Canonical route is the only Shot/stage owner.
   useEffect(() => { onDirtyChange?.(dirty || [...snapshots.current.entries()].some(([scope, item]) => scope !== key && item.dirty)); }, [dirty, key, loading, onDirtyChange]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => () => { onDirtyChange?.(false); const store = useStudioStore.getState(); if (!store.creationLabReturn) store.loadCreationDraft({}); }, [onDirtyChange]);
   function submission() {
-    return { projectId: route.projectId, shotId: route.shotId ?? "", stage: route.stage, selectionRef: selection, values: useStudioStore.getState().values, submissionIdempotencyKey: attempt.current ?? "readiness-only" };
+    const store = useStudioStore.getState();
+    return { projectId: route.projectId, shotId: route.shotId ?? "", stage: route.stage, selectionRef: selection, values: store.values, ...store.creationPromptProvenance, submissionIdempotencyKey: attempt.current ?? "readiness-only" };
   }
   useEffect(() => {
     ++readinessEpoch.current;
@@ -76,7 +78,7 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     if (loading || !route.shotId || !generator?.availability) return;
     const timer = setTimeout(() => { void recheckReadiness(); }, 600);
     return () => { ++readinessEpoch.current; clearTimeout(timer); };
-  }, [values, selection, loading, key]);
+  }, [values, provenance, selection, loading, key]);
   async function recheckReadiness() {
     if (loading || !route.shotId || !generator?.availability || actionLock.current) return;
     const token = epoch.current;
@@ -123,17 +125,35 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     if (libraryIntent.projectId !== route.projectId) { useStudioStore.getState().setPendingLibraryIntent(undefined); return; }
     if (loading || !context) return;
     if (libraryIntent.kind === "prompt" && context.selectedShot && generator?.fields.some(field => field.key === "prompt" && field.type === "textarea")) {
-      setValue("prompt", {type:"string",value:libraryIntent.text});
+      applyPromptChoice(libraryIntent);
       useStudioStore.getState().setPendingLibraryIntent(undefined);
     }
     if (libraryIntent.kind !== "asset" || context.mediaInputs.some(a => a.id === libraryIntent.assetId)) return;
-    let alive=true;
+    let alive=true; const token=epoch.current; const project=route.projectId;
     void productClient.library.get(route.projectId,{kind:"asset",id:libraryIntent.assetId}).then(detail=>{
-      if(!alive || detail.kind!=="asset")return;
-      setContext(current=>current ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==detail.asset.id),{id:detail.asset.id,name:detail.asset.name,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
+      if(!alive || token!==epoch.current || detail.kind!=="asset" || detail.asset.assetType!==libraryIntent.mediaKind)return;
+      setContext(current=>current?.projectId===project ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==detail.asset.id),{id:detail.asset.id,name:detail.asset.name,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
     }).catch(error=>{if(alive)setError(normalizeProductError(error).message);});
     return()=>{alive=false;};
   },[libraryIntent,loading,context,generator,key]);
+  // A returned draft may still reference an older asset after its intent was consumed.
+  // Resolve only those explicit field identities, never widen the recent picker.
+  useEffect(() => {
+    if (loading || !context || !generator) return;
+    const missing=generator.fields.flatMap(field=>assetIds(values[field.key]).map(id=>({id,kind:mediaKind(field)})))
+      .filter(item=>item.kind && !context.mediaInputs.some(a=>a.id===item.id));
+    if (!missing.length) return;
+    let alive=true; const token=epoch.current; const project=route.projectId;
+    void Promise.all([...new Map(missing.map(item=>[item.id,item])).values()].map(async item=>{
+      const detail=await productClient.library.get(project,{kind:"asset",id:item.id});
+      return detail.kind==="asset" && detail.asset.assetType===item.kind ? {id:item.id,name:detail.asset.name,mediaKind:item.kind!,selected:false} : undefined;
+    })).then(items=>{
+      if (!alive || token!==epoch.current) return;
+      if (!items.some(Boolean)) {setError("草稿素材不存在或类型不兼容，请重新选择。");return;}
+      setContext(current=>current?.projectId===project ? {...current,mediaInputs:[...current.mediaInputs,...items.filter((a):a is NonNullable<typeof a>=>!!a && !current.mediaInputs.some(b=>b.id===a.id))]} : current);
+    }).catch(error=>{if(alive && token===epoch.current)setError(normalizeProductError(error).message);});
+    return()=>{alive=false;};
+  },[values,loading,context,generator,key]);
   const librarySlots = libraryIntent?.kind === "asset" ? generator?.fields.filter(field=>mediaKind(field)===libraryIntent.mediaKind) ?? [] : [];
   function applyLibraryAsset(fieldKey:string) {
     if(libraryIntent?.kind!=="asset" || libraryIntent.projectId!==route.projectId || !context?.selectedShot)return;
@@ -144,11 +164,19 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   }
   function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
   function removeValue(field: string) { attempt.current = null; useStudioStore.getState().removeValue(field); }
+  function applyPromptChoice(choice: CreationPromptChoice | (CreationPromptProvenance & {text:string})) {
+    if (!context?.selectedShot || !generator?.fields.some(field=>field.key==="prompt" && field.type==="textarea")) return;
+    attempt.current=null; setAccepted(null); useStudioStore.getState().applyCreationPrompt(choice);
+  }
+  function openLibrary(filter: "prompts" | "images" | "videos") {
+    useStudioStore.getState().setCreationLabReturn({scope:key, route, selectionRef:selection, runRef, accepted});
+    return navigate({kind:"library",projectId:route.projectId,filter});
+  }
   function chooseGenerator(ref: string) {
     const option = generators.find(item => item.selectionRef === ref); if (!option) return;
     useStudioStore.getState().setPendingRunIntent(undefined);
     attempt.current = null; setSelection(ref); setAccepted(null);
-    useStudioStore.getState().loadCreationDraft(draftFor(option, context?.selectedShot ?? null, values), true);
+    useStudioStore.getState().loadCreationDraft(draftFor(option, context?.selectedShot ?? null, values), true, option.fields.some(field=>field.key==="prompt" && field.type==="textarea") ? useStudioStore.getState().creationPromptProvenance : undefined);
   }
   async function mutate(action: () => Promise<void>) {
     if (actionLock.current) return;
@@ -167,14 +195,14 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     const ack = await productClient.creation.generate(request);
     if (token !== epoch.current) return;
     setAccepted(ack); setRunRef(ack.runRef); setRun(undefined);
-    useStudioStore.getState().loadCreationDraft(request.values, false);
+    useStudioStore.getState().loadCreationDraft(request.values, false, request.promptId && request.promptVersionId ? {promptId:request.promptId,promptVersionId:request.promptVersionId} : undefined);
   }); }
   const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); if (token === epoch.current) navigate({ ...route, shotId: shot.id }); });
   const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); setRun(next); setRunRef(next.ref); setAccepted(null); });
   return { libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, accepted, run, runRef, error, loading, busy,
-    setValue, removeValue, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
+    setValue, removeValue, applyPromptChoice, openLibrary, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
     openRuntimeSettings: () => {
       useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });
       return navigate({ kind: "system-settings", section: "general", returnTo: route });

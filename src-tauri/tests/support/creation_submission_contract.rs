@@ -1,6 +1,7 @@
 use super::creation_context_contract::creation_context_services;
 use super::*;
 use ai_studio_lib::application::product::error::ProductError;
+use ai_studio_lib::application::prompt_library_service::PromptLibraryService;
 use ai_studio_lib::domain::{Asset, AssetId, TaskId};
 
 fn request(
@@ -9,6 +10,8 @@ fn request(
     key: &str,
 ) -> CreationSubmission {
     CreationSubmission {
+        prompt_id: None,
+        prompt_version_id: None,
         project_id: PROJECT_ID.into(),
         shot_id: shot.into(),
         stage: "video".into(),
@@ -16,6 +19,13 @@ fn request(
         values,
         submission_idempotency_key: key.into(),
     }
+}
+
+fn prompt_service(pool: &SqlitePool) -> PromptLibraryService {
+    PromptLibraryService::new(
+        Arc::new(SqlitePromptLibraryRepository::new(pool.clone())),
+        Arc::new(SystemClock),
+    )
 }
 
 fn schema_comfy() -> Arc<ControlledComfy> {
@@ -87,6 +97,7 @@ async fn product_creation_submission_shared_validation_is_read_only_and_scoped()
     video_recipe(&pool).await;
     let services = build_services(&pool, schema_comfy(), &dir.path().join("packages"));
     let (facade, _) = creation_context_services(&pool);
+    let prompts = prompt_service(&pool);
     let shot = facade.create_shot(PROJECT_ID).await.unwrap();
     let asset = source_video(&pool, dir.path(), PROJECT_ID).await;
     let values = BTreeMap::from([
@@ -100,7 +111,11 @@ async fn product_creation_submission_shared_validation_is_read_only_and_scoped()
         ),
     ]);
     let readiness = facade
-        .readiness_get(&services.queue, request(&shot.id, values.clone(), "ready"))
+        .readiness_get(
+            &services.queue,
+            &prompts,
+            request(&shot.id, values.clone(), "ready"),
+        )
         .await;
     assert!(readiness.ready, "{:?}", readiness.issues);
     for table in ["tasks", "batches", "items"] {
@@ -127,7 +142,11 @@ async fn product_creation_submission_shared_validation_is_read_only_and_scoped()
         GenerationInputValue::ImageAsset(asset.clone()),
     );
     let bad = facade
-        .readiness_get(&services.queue, request(&shot.id, wrong.clone(), "bad"))
+        .readiness_get(
+            &services.queue,
+            &prompts,
+            request(&shot.id, wrong.clone(), "bad"),
+        )
         .await;
     assert!(!bad.ready);
     assert_eq!(
@@ -137,6 +156,7 @@ async fn product_creation_submission_shared_validation_is_read_only_and_scoped()
     let error = facade
         .generate(
             &services.queue,
+            &prompts,
             request(&shot.id, wrong, "bad"),
             |_, _| async { panic!("invalid input must not reach start") },
         )
@@ -170,7 +190,11 @@ async fn product_creation_submission_shared_validation_is_read_only_and_scoped()
     );
     assert_eq!(
         facade
-            .readiness_get(&services.queue, request(&shot.id, wrong_type, "type"))
+            .readiness_get(
+                &services.queue,
+                &prompts,
+                request(&shot.id, wrong_type, "type")
+            )
             .await
             .issues[0]
             .code,
@@ -191,6 +215,7 @@ async fn product_creation_submission_shared_validation_is_read_only_and_scoped()
         facade
             .readiness_get(
                 &services.queue,
+                &prompts,
                 request(&shot.id, foreign_values, "foreign")
             )
             .await
@@ -210,6 +235,7 @@ async fn product_creation_submission_deduplicates_and_preserves_runref_after_sta
     video_recipe(&pool).await;
     let services = build_services(&pool, schema_comfy(), &dir.path().join("packages"));
     let (facade, _) = creation_context_services(&pool);
+    let prompts = prompt_service(&pool);
     let shot = facade.create_shot(PROJECT_ID).await.unwrap();
     let asset = source_video(&pool, dir.path(), PROJECT_ID).await;
     let values = BTreeMap::from([
@@ -222,6 +248,20 @@ async fn product_creation_submission_deduplicates_and_preserves_runref_after_sta
             GenerationInputValue::VideoAsset(asset.clone()),
         ),
     ]);
+    let prompt = prompts
+        .create(PROJECT_ID, "prompt", "Owned provenance", &[], "v1")
+        .await
+        .unwrap();
+    let version = prompts
+        .add_version(PROJECT_ID, &prompt.id, "frozen prompt")
+        .await
+        .unwrap();
+    let with_provenance = |values, key| {
+        let mut r = request(&shot.id, values, key);
+        r.prompt_id = Some(prompt.id.clone());
+        r.prompt_version_id = Some(version.id.clone());
+        r
+    };
     let failed_start = |_, _| async {
         Err(ProductError::new(
             "RUNTIME_BLOCKED",
@@ -232,12 +272,14 @@ async fn product_creation_submission_deduplicates_and_preserves_runref_after_sta
     let (first, second) = tokio::join!(
         facade.generate(
             &services.queue,
-            request(&shot.id, values.clone(), "same-key"),
+            &prompts,
+            with_provenance(values.clone(), "same-key"),
             failed_start
         ),
         facade.generate(
             &services.queue,
-            request(&shot.id, values, "same-key"),
+            &prompts,
+            with_provenance(values, "same-key"),
             failed_start
         )
     );
@@ -259,6 +301,7 @@ async fn product_creation_submission_deduplicates_and_preserves_runref_after_sta
     let busy = facade
         .readiness_get(
             &services.queue,
+            &prompts,
             request(
                 &shot.id,
                 BTreeMap::from([
@@ -309,10 +352,151 @@ async fn product_creation_submission_deduplicates_and_preserves_runref_after_sta
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     let snapshot = snapshot.expect("existing queue creates immutable generation snapshot");
+    assert_eq!(
+        snapshot.prompt_version_id.as_deref(),
+        Some(version.id.as_str())
+    );
+    assert!(snapshot.model_version_id.is_none());
     assert_eq!(snapshot.user_inputs_json["prompt"], "frozen prompt");
     assert_eq!(
         snapshot.user_inputs_json["reference_video"]["assetId"],
         asset.as_str()
     );
     assert_eq!(count(&pool, "tasks").await, 1);
+}
+
+#[tokio::test]
+async fn product_creation_submission_prompt_provenance_rejects_foreign_wrong_modified_and_partial_without_writes(
+) {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("provenance.db")).await.unwrap();
+    seed_database(&pool, dir.path()).await;
+    video_recipe(&pool).await;
+    let services = build_services(&pool, schema_comfy(), &dir.path().join("packages"));
+    let (facade, _) = creation_context_services(&pool);
+    let prompts = prompt_service(&pool);
+    let shot = facade.create_shot(PROJECT_ID).await.unwrap();
+    let asset = source_video(&pool, dir.path(), PROJECT_ID).await;
+    let a = prompts
+        .create(PROJECT_ID, "prompt", "Owned A", &[], "fixture prompt")
+        .await
+        .unwrap();
+    let b = prompts
+        .create(PROJECT_ID, "prompt", "Owned B", &[], "fixture prompt")
+        .await
+        .unwrap();
+    let other = "prj_11111111-1111-4111-8111-111111111111";
+    SqliteProjectRepository::new(pool.clone())
+        .ensure_default_project(other, "Other", &dir.path().join("other"), Utc::now())
+        .await
+        .unwrap();
+    let foreign = prompts
+        .create(other, "prompt", "Foreign", &[], "fixture prompt")
+        .await
+        .unwrap();
+    let values = BTreeMap::from([
+        (
+            "prompt".into(),
+            GenerationInputValue::Text("fixture prompt".into()),
+        ),
+        (
+            "reference_video".into(),
+            GenerationInputValue::VideoAsset(asset),
+        ),
+    ]);
+    for (prompt_id, version_id, text) in [
+        (
+            Some(foreign.id.clone()),
+            Some(foreign.versions[0].id.clone()),
+            "fixture prompt",
+        ),
+        (
+            Some(a.id.clone()),
+            Some(b.versions[0].id.clone()),
+            "fixture prompt",
+        ),
+        (
+            Some(a.id.clone()),
+            Some(a.versions[0].id.clone()),
+            "changed prompt",
+        ),
+        (Some(a.id.clone()), None, "fixture prompt"),
+        (None, Some(a.versions[0].id.clone()), "fixture prompt"),
+    ] {
+        let build = || {
+            let mut r = request(&shot.id, values.clone(), "invalid-provenance");
+            r.prompt_id = prompt_id.clone();
+            r.prompt_version_id = version_id.clone();
+            r.values
+                .insert("prompt".into(), GenerationInputValue::Text(text.into()));
+            r
+        };
+        let ready = facade
+            .readiness_get(&services.queue, &prompts, build())
+            .await;
+        assert!(!ready.ready);
+        assert_eq!(ready.issues[0].code, "INVALID_INPUT");
+        assert_eq!(ready.issues[0].details.field.as_deref(), Some("prompt"));
+        let e = facade
+            .generate(&services.queue, &prompts, build(), |_, _| async {
+                panic!("invalid provenance must not start")
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, ready.issues[0].code);
+        for table in ["tasks", "batches", "items"] {
+            assert_eq!(count(&pool, table).await, 0);
+        }
+    }
+    assert!(
+        facade
+            .readiness_get(
+                &services.queue,
+                &prompts,
+                request(&shot.id, values, "manual")
+            )
+            .await
+            .ready
+    );
+}
+
+#[tokio::test]
+async fn product_creation_submission_recent_prompt_choices_keep_exact_identity_and_twenty_bound() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("recent.db")).await.unwrap();
+    seed_database(&pool, dir.path()).await;
+    let (facade, assets) = creation_context_services(&pool);
+    let prompts = prompt_service(&pool);
+    let old = prompts
+        .create(PROJECT_ID, "prompt", "Old21", &[], "old")
+        .await
+        .unwrap();
+    for n in 0..20 {
+        prompts
+            .create(PROJECT_ID, "prompt", &format!("Recent{n}"), &[], "new")
+            .await
+            .unwrap();
+    }
+    let mut context = facade
+        .get(&command_center(&pool), &assets, PROJECT_ID, None, "video")
+        .await
+        .unwrap();
+    facade
+        .project_prompt_choices(&mut context, &prompts)
+        .await
+        .unwrap();
+    assert_eq!(context.prompt_choices.len(), 20);
+    assert!(context
+        .prompt_choices
+        .iter()
+        .all(|choice| choice.prompt_id != old.id));
+    for choice in context.prompt_choices {
+        let entry = prompts.get(PROJECT_ID, &choice.prompt_id).await.unwrap();
+        let latest = entry.versions.iter().max_by_key(|v| v.version).unwrap();
+        assert_eq!(choice.prompt_version_id, latest.id);
+        assert_eq!(choice.text, latest.text);
+        let wire = serde_json::to_value(choice).unwrap();
+        assert!(wire["promptId"].is_string());
+        assert!(wire["promptVersionId"].is_string());
+    }
 }

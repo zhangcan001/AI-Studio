@@ -16,8 +16,10 @@ export function PromptPanel({ controller: c }: { controller: CreateController })
   const fields = c.generator?.fields.filter(field => field.type === "textarea" && ["prompt", "negative_prompt"].includes(field.key)) ?? [];
   return <section><h2>提示词</h2>{fields.map(field => <label key={field.key}>{fieldLabel(field)}<textarea id={`create-field-${field.key}`} aria-label={fieldLabel(field)} value={textValue(c.values[field.key])} onChange={e => c.setValue(field.key, { type: "string", value: e.target.value })} rows={field.key === "prompt" ? 5 : 2} /></label>)}
     {fields.some(field => field.key === "prompt") && <button type="button" onClick={() => setPicker(true)}>选择提示词</button>}
-    {picker && <dialog ref={dialog} className="create-picker" aria-label="选择提示词" onCancel={() => setPicker(false)}><h2>项目提示词</h2>
-      {c.context?.promptChoices.length ? c.context.promptChoices.map((choice, index) => <button key={index} type="button" onClick={() => { c.setValue("prompt", { type: "string", value: choice.text }); setPicker(false); }}>{choice.name} · 版本 {choice.version}</button>) : <p>此项目暂无提示词。</p>}
+    {fields.some(field=>field.key==="prompt") && <button type="button" onClick={()=>c.openLibrary("prompts")}>在资源库查找更多提示词</button>}
+    {picker && <dialog ref={dialog} className="create-picker" aria-label="选择提示词" onCancel={() => setPicker(false)}><h2>近期提示词</h2><p>此处显示当前项目最多20个近期提示词条目的最新版本。更早的提示词可在资源库中查找。</p>
+      {c.context?.promptChoices.length ? c.context.promptChoices.map(choice => <button key={choice.promptVersionId} type="button" onClick={() => { c.applyPromptChoice(choice); setPicker(false); }}>{choice.name} · 版本 {choice.version}</button>) : <p>此项目暂无近期提示词。</p>}
+      <button type="button" onClick={()=>{setPicker(false);c.openLibrary("prompts");}}>在资源库查找更多提示词</button>
       <button type="button" autoFocus onClick={() => setPicker(false)}>返回创作</button></dialog>}
   </section>;
 }
@@ -35,7 +37,8 @@ function MediaField({ field, controller: c }: { field: RecipeField; controller: 
   </label>;
 }
 export function MediaInputPanel({ controller: c }: { controller: CreateController }) {
-  return <section><h2>本次生成素材</h2>{c.generator?.fields.filter(field => mediaKind(field)).map(field => <MediaField key={field.key} field={field} controller={c} />)}<small>首帧、尾帧及视频/音频输入只属于本次草稿，不写入长期参考图。</small></section>;
+  const fields=c.generator?.fields.filter(field=>mediaKind(field)) ?? [];
+  return <section><h2>本次生成素材</h2>{fields.map(field => <MediaField key={field.key} field={field} controller={c} />)}{fields.length>0&&<p>下拉列表显示当前项目近期100项素材，并包含当前镜头明确关联的素材。更早的素材可从资源库查找。</p>}{fields.some(field=>mediaKind(field)==="image")&&<button type="button" onClick={()=>c.openLibrary("images")}>在资源库查找更多图片</button>}{fields.some(field=>mediaKind(field)==="video")&&<button type="button" onClick={()=>c.openLibrary("videos")}>在资源库查找更多视频</button>}<small>这些媒体输入只属于本次草稿，不会修改镜头长期参考图。</small></section>;
 }
 export function ReferencePanel({ context, save, busy }: { context: CreationContext; save: (ids: string[]) => unknown; busy: boolean }) {
   const current = context.selectedShot?.referenceAssetIds ?? [];

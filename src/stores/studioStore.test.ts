@@ -64,3 +64,17 @@ describe("studio media draft state", () => {
     expect(useStudioStore.getState().draftDirty).toBe(false);
   });
 });
+
+it("M2-2 snapshots typed provenance and never restores it from equal manual text",()=>{
+ const store=useStudioStore.getState(); store.resetDraft();
+ store.applyCreationPrompt({promptId:"p",promptVersionId:"v",text:"exact"});
+ const saved=useStudioStore.getState();
+ store.loadCreationDraft(saved.values,saved.draftDirty,saved.creationPromptProvenance);
+ expect(useStudioStore.getState().creationPromptProvenance).toEqual({promptId:"p",promptVersionId:"v"});
+ store.setValue("width",{type:"integer",value:1280});
+ expect(useStudioStore.getState().creationPromptProvenance?.promptVersionId).toBe("v");
+ store.setValue("prompt",{type:"string",value:"exact"});
+ expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
+ store.applyCreationPrompt({promptId:"p",promptVersionId:"v",text:"exact"}); store.removeValue("prompt");
+ expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined(); store.resetDraft();
+});

@@ -227,6 +227,7 @@ pub enum LibraryCreateIntent {
     },
     Prompt {
         project_id: String,
+        prompt_id: String,
         prompt_version_id: String,
         text: String,
         model_version_id: Option<String>,

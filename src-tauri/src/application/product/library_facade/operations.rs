@@ -69,6 +69,7 @@ impl LibraryOperations<'_> {
                     .ok_or_else(missing)?;
                 Ok(LibraryCreateIntent::Prompt {
                     project_id: project.into(),
+                    prompt_id: prompt.id,
                     prompt_version_id: v.id,
                     text: v.text,
                     model_version_id: v.model_version_id,

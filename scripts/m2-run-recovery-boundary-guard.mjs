@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { m2ReuseParentReader } from './m2-create-library-reuse-boundary-guard.mjs';
 
 export const M2_RECOVERY_PARENT = 'b6d60ad1cf6906531fb81123fba8e8eea2835976';
 const existing = ['src/features/runs/RunDetail.tsx', 'src/features/runs/RunsPage.test.tsx',
@@ -37,8 +38,11 @@ function parentBlobs(root, paths) {
 }
 
 export function m2RecoveryParentReader(root, override) {
+  const successor = m2ReuseParentReader(root);
+  const disk = (_root,p) => successor.read(p);
+  const projectedFiles = (root,folder,pattern) => files(root,folder,pattern).filter(p=>!successor.addedPaths.includes(p));
   const review = override ?? JSON.parse(disk(root, 'docs/architecture/m2-1-run-recovery.json'));
-  const violations = [], fail = s => violations.push(`m2-1-${s}`);
+  const violations = [...successor.violations], fail = s => violations.push(`m2-1-${s}`);
   if (review.checkpoint !== 'M2_1_RUN_RECOVERY_SEMANTICS' || review.parentHead !== M2_RECOVERY_PARENT || review.schemaVersion !== 1) fail('invalid-header');
   if (JSON.stringify(Object.keys(review.paths ?? {}).sort()) !== JSON.stringify([...existing, ...added].sort())) fail('path-set');
   const listed = execFileSync('git', ['ls-tree', '-r', '--name-only', M2_RECOVERY_PARENT, 'src', 'src-tauri/src', 'scripts', 'src-tauri/tests/support/creation_submission_contract.rs'],
@@ -47,7 +51,7 @@ export function m2RecoveryParentReader(root, override) {
   for (const p of existing) if (review.paths?.[p]?.beforeHash !== hash(before(p)) || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`path-drift:${p}`);
   for (const p of added) if (blobs.has(p) || review.paths?.[p]?.beforeHash !== null || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`addition-drift:${p}`);
   for (const [name, folder, pattern] of [['backend', 'src-tauri/src', /\.rs$/], ['frontend', 'src', /\.tsx?$/], ['styles', 'src', /\.css$/], ['scripts', 'scripts', /\.mjs$/]]) {
-    const base = listed.filter(p => p.startsWith(`${folder}/`) && pattern.test(p)), current = files(root, folder, pattern);
+    const base = listed.filter(p => p.startsWith(`${folder}/`) && pattern.test(p)), current = projectedFiles(root, folder, pattern);
     const expected = [...base, ...added.filter(p => p.startsWith(`${folder}/`) && pattern.test(p))].sort();
     const unchanged = base.filter(p => !existing.includes(p));
     const proof = review[name];
@@ -63,7 +67,7 @@ export function m2RecoveryParentReader(root, override) {
   const presentation = disk(root, 'src/features/runs/runRecoveryPresentation.ts');
   if (/errorSummary|errorMessage|\.phase|\b(?:navigate|retry|dispatch)\s*\(/.test(presentation) ||
       !presentation.includes('run.availableActions.includes("RETRY")') || !presentation.includes('run.recoverability.retryItemIds.length')) fail('recovery-capability-authority');
-  return { violations, addedPaths: added, afterHashes: Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),
+  return { violations, addedPaths: [...added,...successor.addedPaths], afterHashes: { ...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])), ...successor.afterHashes},
     backendAggregateSha256: violations.length ? undefined : review.backend.afterAggregateHash,
     read: p => violations.length || !existing.includes(p) ? disk(root, p) : before(p) };
 }

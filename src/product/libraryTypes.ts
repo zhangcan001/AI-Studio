@@ -35,7 +35,7 @@ export interface LibraryDeletionInspection { allowed: boolean; blockers: string[
 export type LibraryVersions = { kind: "asset"; versions: { id: string; versionNumber: number; createdAt: string }[] } | { kind: "prompt"; versions: PromptVersionView[] } | { kind: "unsupported"; reason: string };
 export type LibraryCreateIntent =
   | { kind: "asset"; projectId: string; assetId: string; mediaKind: "image" | "video" | "audio" }
-  | { kind: "prompt"; projectId: string; promptVersionId: string; text: string; modelVersionId: string | null }
+  | { kind: "prompt"; projectId: string; promptId: string; promptVersionId: string; text: string; modelVersionId: string | null }
   | { kind: "context"; projectId: string; resource: ResourceRef; message: string };
 export type LibraryEditRequest =
   | { kind: "prompt"; id: string; text: string; modelVersionId: string | null }

@@ -19,6 +19,8 @@ use serde::Serialize;
 use std::{collections::BTreeMap, future::Future};
 
 pub struct CreationSubmission {
+    pub prompt_id: Option<String>,
+    pub prompt_version_id: Option<String>,
     pub project_id: String,
     pub shot_id: String,
     pub stage: String,
@@ -50,6 +52,7 @@ impl ProductCreationFacade {
     async fn prepare_submission(
         &self,
         queue: &ProductionQueueService,
+        prompts: &crate::application::prompt_library_service::PromptLibraryService,
         request: CreationSubmission,
     ) -> Result<CreateDirectGenerationRequest, ProductError> {
         if request.submission_idempotency_key.trim().is_empty()
@@ -61,6 +64,28 @@ impl ProductCreationFacade {
                 Some("EDIT_INPUT"),
             ));
         }
+        let prompt_version_id = match (&request.prompt_id, &request.prompt_version_id) {
+            (None, None) => None,
+            (Some(prompt_id), Some(version_id)) => {
+                let entry = prompts
+                    .get(&request.project_id, prompt_id)
+                    .await
+                    .map_err(|_| prompt_provenance_error())?;
+                let version = entry
+                    .versions
+                    .iter()
+                    .find(|v| v.id == *version_id)
+                    .ok_or_else(prompt_provenance_error)?;
+                if entry.project_id != request.project_id
+                    || version.prompt_id != *prompt_id
+                    || !matches!(request.values.get("prompt"), Some(GenerationInputValue::Text(text)) if text == &version.text)
+                {
+                    return Err(prompt_provenance_error());
+                }
+                Some(version_id.clone())
+            }
+            _ => return Err(prompt_provenance_error()),
+        };
         let stage = match request.stage.as_str() {
             "image" => ShotStage::Image,
             "video" => ShotStage::Video,
@@ -129,7 +154,7 @@ impl ProductCreationFacade {
             item,
             shot_id: Some(prepared.shot_id),
             stage: Some(stage.as_str().to_owned()),
-            prompt_version_id: None,
+            prompt_version_id,
             model_version_id: None,
             tool_instance_id: None,
             tool_version_id: None,
@@ -143,9 +168,10 @@ impl ProductCreationFacade {
     pub async fn readiness_get(
         &self,
         queue: &ProductionQueueService,
+        prompts: &crate::application::prompt_library_service::PromptLibraryService,
         request: CreationSubmission,
     ) -> CreationReadiness {
-        let result = self.prepare_submission(queue, request).await;
+        let result = self.prepare_submission(queue, prompts, request).await;
         let error = match result {
             Err(error) => Some(error),
             Ok(_) => match queue.admission_status().await {
@@ -179,6 +205,7 @@ impl ProductCreationFacade {
     pub async fn generate<F, Fut>(
         &self,
         queue: &ProductionQueueService,
+        prompts: &crate::application::prompt_library_service::PromptLibraryService,
         request: CreationSubmission,
         start: F,
     ) -> Result<CreationAccepted, ProductError>
@@ -186,7 +213,7 @@ impl ProductCreationFacade {
         F: FnOnce(String, String) -> Fut,
         Fut: Future<Output = Result<(), ProductError>>,
     {
-        let prepared = self.prepare_submission(queue, request).await?;
+        let prepared = self.prepare_submission(queue, prompts, request).await?;
         let project_id = prepared.project_id.clone();
         let detail = queue
             .create_direct_generation(prepared)
@@ -219,6 +246,16 @@ impl ProductCreationFacade {
             start_issue,
         })
     }
+}
+
+fn prompt_provenance_error() -> ProductError {
+    let mut error = ProductError::new(
+        "INVALID_INPUT",
+        "提示词来源与当前正文不一致，请重新选择提示词或继续作为手工文本编辑。",
+        Some("EDIT_INPUT"),
+    );
+    error.details.field = Some("prompt".into());
+    error
 }
 
 fn generation_error(error: GenerationServiceError) -> ProductError {
