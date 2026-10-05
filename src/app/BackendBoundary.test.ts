@@ -48,6 +48,7 @@ it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=
  const backend=rustFiles("src-tauri/src").map((p:string)=>p.replace(/\\/g,"/")).sort();
  const reviewed=backendPerformanceBoundary(".",manifest.backendSourceSnapshot,phase12,phase13);
  expect(reviewed.violations).toEqual([]);
+ expect(reviewed.files).toBe(backend.length);
  expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(reviewed.sha256);
   expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend.filter((p:string)=>!phase13.backend.addedPaths.includes(p)&&!successor.addedPaths.includes(p)));
 });

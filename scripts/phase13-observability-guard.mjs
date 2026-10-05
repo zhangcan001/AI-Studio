@@ -182,5 +182,5 @@ export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
   for (const key of ['newObservabilityAuthority', 'newTelemetryRepository', 'newMetricsDatabase', 'newExecutionAuthority', 'phase12ProfilerPromoted']) if (review?.authority?.[key] !== false) fail(`phase13-authority-invariant:${key}`);
   if (!readFileSync(join(root, 'src-tauri/src/application/project_backup_service.rs'), 'utf8').includes('const BACKUP_VERSION: u32 = 20;')) fail('phase13-backup-version-changed');
   if (review?.commands?.countAdded !== 3 || !Array.isArray(review.commands.addedNames) || review.commands.addedNames.length !== 3) fail('phase13-typed-command-review-missing');
-  return { violations, backendFiles: liveRust.length, frontendFiles: liveTs.length, backendAggregateSha256: release.backendAggregateSha256 ?? backendReview?.aggregateSha256, frontendAggregateSha256: frontendReview?.aggregateSha256 };
+  return { violations, backendFiles: sourceFiles(root, 'src-tauri/src', /\.rs$/).length, frontendFiles: liveTs.length, backendAggregateSha256: release.backendAggregateSha256 ?? backendReview?.aggregateSha256, frontendAggregateSha256: frontendReview?.aggregateSha256 };
 }
