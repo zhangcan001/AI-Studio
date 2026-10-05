@@ -52,10 +52,14 @@ it('phase9_target7 lowers specificity and merges only the redundant media rule',
 });
 it('phase9_target8 pins style successor while preserving all historical non-CSS freezes',()=>{
  const phase8=JSON.parse(read('docs/architecture/phase8-backend-decomposition.json'));
- const phase10=JSON.parse(read('docs/architecture/phase10-frontend-architecture.json'));
  const phase13=JSON.parse(read('docs/architecture/phase13-observability.json'));
  const checked=phase13Boundary('.',phase13,JSON.parse(read('docs/architecture/phase12-performance.json')),phase8.backendSourceSnapshot);
  expect(checked.violations).toEqual([]);
+});
+it('phase9_target8 preserves every historical non-CSS consumer through the validated successor',()=>{
+ const phase8=JSON.parse(read('docs/architecture/phase8-backend-decomposition.json'));
+ const phase10=JSON.parse(read('docs/architecture/phase10-frontend-architecture.json'));
+ const phase13=JSON.parse(read('docs/architecture/phase13-observability.json'));
  const current=m1ParentReader('.');expect(current.violations).toEqual([]);
  for(const [path,digest] of Object.entries(phase8.compatibilityFiles))if(!path.endsWith('.css'))expect(hash(read(path)),path).toBe(current.afterHashes[path]??phase13.frontend.afterHashes[path]??phase10.frontendSuccessor[path]??digest);
  expect(m.after.inline).toBe(m.before.inline);expect(m.proofs.containment.selectors).toBeGreaterThan(0);

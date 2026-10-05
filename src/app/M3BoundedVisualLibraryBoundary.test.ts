@@ -8,8 +8,8 @@ import {m3VisualParentReader,visualCandidateViolations} from '../../scripts/m3-b
 import {m1ParentReader} from '../../scripts/m1-readiness-boundary-guard.mjs';
 it('validates bounded visual Library successor before historical projection and rejects proof widening',()=>{
  const proof=JSON.parse(readFileSync('docs/architecture/m3-2-bounded-visual-library.json','utf8'));
- const current=m3VisualParentReader('.');expect(current.violations).toEqual([]);expect(m1ParentReader('.').violations).toEqual([]);
- expect(m1ParentReader('.').backendAggregateSha256).toBe(proof.backend.afterAggregateHash);
+ const current=m3VisualParentReader('.'),chain=m1ParentReader('.');expect(current.violations).toEqual([]);expect(chain.violations).toEqual([]);
+ expect(chain.backendAggregateSha256).toBe(proof.backend.afterAggregateHash);
  for(const mutate of [
   (p:typeof proof)=>{p.parentHead='0'.repeat(40);},
   (p:typeof proof)=>{p.paths['src/features/library/LibraryController.ts'].afterHash='0'.repeat(64);},

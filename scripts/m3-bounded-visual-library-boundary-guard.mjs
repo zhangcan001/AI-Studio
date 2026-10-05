@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 export const M3_VISUAL_PARENT = '8842a2750e4402ca8e45a6e4efc4571c3e34a425';
 const ADDED_COMMAND = {"name": "product_library_thumbnail_get", "signature": "#[tauri::command(rename_all = \"camelCase\")] pub async fn product_library_thumbnail_get( state: State<'_, AppState>, project_id: String, resource: ResourceRef, ) -> Result<Vec<u8>, ProductError>"};
-const existing = ["src/app/StyleBoundary.test.ts", "scripts/style-boundary-guard.mjs", "src/product/errors.ts", "src/features/library/LibraryController.ts", "src/features/library/LibraryPage.tsx", "src/features/library/LibraryPage.css", "src/features/library/LibraryPage.test.tsx", "src/features/library/LibraryFindability.test.tsx", "src/features/library/LibraryScale.observed.test.tsx", "src/product/client.ts", "src/product/transport.ts", "src/product/client.test.ts", "src-tauri/src/application/product/library_facade/detail.rs", "src-tauri/src/commands/product.rs", "src-tauri/src/lib.rs", "src-tauri/tests/product_library_contract.rs", "src/features/runs/RunsPage.tsx", "src/features/runs/RunsPage.test.tsx", "scripts/m3-library-findability-boundary-guard.mjs", "src/app/M3LibraryFindabilityBoundary.test.ts"].sort();
+const existing = ["src/app/BackendBoundary.test.ts", "src/app/M2CreateLibraryReuseBoundary.test.ts", "src/app/StyleBoundary.test.ts", "scripts/style-boundary-guard.mjs", "src/product/errors.ts", "src/features/library/LibraryController.ts", "src/features/library/LibraryPage.tsx", "src/features/library/LibraryPage.css", "src/features/library/LibraryPage.test.tsx", "src/features/library/LibraryFindability.test.tsx", "src/features/library/LibraryScale.observed.test.tsx", "src/product/client.ts", "src/product/transport.ts", "src/product/client.test.ts", "src-tauri/src/application/product/library_facade/detail.rs", "src-tauri/src/commands/product.rs", "src-tauri/src/lib.rs", "src-tauri/tests/product_library_contract.rs", "src/features/runs/RunsPage.tsx", "src/features/runs/RunsPage.test.tsx", "scripts/m3-library-findability-boundary-guard.mjs", "src/app/M3LibraryFindabilityBoundary.test.ts"].sort();
 const added = ["docs/architecture/m3-2-library-scale-candidate.json", "src/features/library/LibraryThumbnail.tsx", "src/features/library/LibraryThumbnail.test.tsx", "src/features/library/LibraryPagination.test.tsx", "src-tauri/tests/support/library_thumbnail_contract.rs", "scripts/m3-bounded-visual-library-boundary-guard.mjs", "src/app/M3BoundedVisualLibraryBoundary.test.ts", "docs/architecture/m3-2-library-targets.json"].sort();
 const text = s => s.replaceAll('\r\n', '\n');
 const hash = s => createHash('sha256').update(text(s)).digest('hex');
@@ -18,6 +18,8 @@ const files = (root, folder, pattern) => readdirSync(join(root, folder), { withF
 }).sort();
 const aggregate = (paths, read) => hash(paths.map(p => `${p}\n${read(p)}`).join('\n'));
 const immutable = new Map();
+const parentFileSets = new Map();
+const frozenArtifacts = ['docs/architecture/m3-1-library-findability.json','docs/architecture/m3-1-library-scale-baseline.json','docs/architecture/m3-1-library-scale-candidate.json'];
 function parentBlobs(root, paths) {
   const cacheKey = JSON.stringify([root, paths]);
   if (immutable.has(cacheKey)) return immutable.get(cacheKey);
@@ -57,9 +59,15 @@ export function m3VisualParentReader(root, override) {
   const violations = [], fail = s => violations.push(`m3-2-${s}`);
   if (review.checkpoint !== 'M3_2_BOUNDED_VISUAL_LIBRARY' || review.parentHead !== M3_VISUAL_PARENT || review.schemaVersion !== 1) fail('invalid-header');
   if (JSON.stringify(Object.keys(review.paths ?? {}).sort()) !== JSON.stringify([...existing, ...added].sort())) fail('path-set');
-  const listed = execFileSync('git', ['ls-tree', '-r', '--name-only', M3_VISUAL_PARENT, 'src', 'src-tauri/src', 'scripts', 'src-tauri/tests/product_library_contract.rs', 'src-tauri/examples/phase12_query_profile.rs'],
-    { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(p => /\.(tsx?|rs|css|mjs)$/.test(p)).sort();
-  const blobs = parentBlobs(root, listed), before = p => blobs.get(p);
+  for (const flag of ["libraryAuthorityChanged", "assetBrowseAuthorityChanged", "promptLibraryAuthorityChanged", "thumbnailStorageAuthorityChanged", "thumbnailGenerationAuthorityAdded", "newCacheAuthority", "newStore", "newRouter", "newPollingOwner", "runsAuthorityChanged", "taskHistoryAuthorityChanged", "mixedRunsPaginationAdded", "queueAuthorityChanged", "taskStateMachineChanged", "workflowEngineChanged", "bindingOccChanged", "schemaChanged", "backupFormatChanged", "remoteTelemetry"]) if (review.invariants?.[flag] !== false) fail(`invariant:${flag}`);
+  // Invalid proof shape/invariants fail closed without any historical projection.
+  if (violations.length) return { violations, addedPaths: added, addedCommandSignatures: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => disk(root,p) };
+  // Only immutable Git objects/file sets are reused. Every live byte and full
+  // untouched aggregate is still read and validated anew on every invocation.
+  if (!parentFileSets.has(root)) parentFileSets.set(root, execFileSync('git', ['ls-tree', '-r', '--name-only', M3_VISUAL_PARENT, 'src', 'src-tauri/src', 'scripts', 'src-tauri/tests/product_library_contract.rs', 'src-tauri/examples/phase12_query_profile.rs'],
+    { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(p => /\.(tsx?|rs|css|mjs)$/.test(p)).sort());
+  const listed = parentFileSets.get(root);
+  const blobs = parentBlobs(root, [...listed,...frozenArtifacts]), before = p => blobs.get(p);
   for (const p of existing) if (review.paths?.[p]?.beforeHash !== hash(before(p)) || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`path-drift:${p}`);
   for (const p of added) if (blobs.has(p) || review.paths?.[p]?.beforeHash !== null || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`addition-drift:${p}`);
   for (const [name, folder, pattern] of [['backend', 'src-tauri/src', /\.rs$/], ['frontend', 'src', /\.tsx?$/], ['styles', 'src', /\.css$/], ['scripts', 'scripts', /\.mjs$/]]) {
@@ -71,7 +79,7 @@ export function m3VisualParentReader(root, override) {
     if (proof?.beforeAggregateHash !== aggregate(base, before) || proof?.afterAggregateHash !== aggregate(current, p => disk(root, p)) ||
       proof?.untouchedAggregateHash !== aggregate(unchanged, before) || proof?.untouchedAggregateHash !== aggregate(unchanged, p => disk(root, p))) fail(`${name}-aggregate`);
   }
-  for (const flag of ["libraryAuthorityChanged", "assetBrowseAuthorityChanged", "promptLibraryAuthorityChanged", "thumbnailStorageAuthorityChanged", "thumbnailGenerationAuthorityAdded", "newCacheAuthority", "newStore", "newRouter", "newPollingOwner", "runsAuthorityChanged", "taskHistoryAuthorityChanged", "mixedRunsPaginationAdded", "queueAuthorityChanged", "taskStateMachineChanged", "workflowEngineChanged", "bindingOccChanged", "schemaChanged", "backupFormatChanged", "remoteTelemetry"]) if (review.invariants?.[flag] !== false) fail(`invariant:${flag}`);
+
   const commands=disk(root,'src-tauri/src/commands/product.rs');
   const signature=[...commands.matchAll(/#\[tauri::command[^\]]*\]\s*pub\s+async\s+fn\s+(\w+)[\s\S]*?(?=\{)/g)].find(m=>m[1]===ADDED_COMMAND.name);
   if(!signature||signature[0].replace(/\s+/g,' ').trim()!==ADDED_COMMAND.signature||!commands.includes('.thumbnail_get(&project_id, &resource)'))fail('readonly-thumbnail-command');
@@ -87,10 +95,7 @@ export function m3VisualParentReader(root, override) {
   if(!runs.includes('查看完整任务历史')||!runs.includes('section: "advanced-tasks"')||/TaskHistory|taskHistoryPage/.test(runs))fail('existing-history-navigation');
   const targets=JSON.parse(disk(root,'docs/architecture/m3-2-library-targets.json'));
   if(!targets.recordedBeforeProductImplementation||targets.targets?.page20CumulativeListCallsMax!==20||targets.targets?.pageDomCardsMax!==30||targets.targets?.offscreenThumbnailRequests!==0||targets.targets?.fullMediaBytesForList!==0||targets.raiseTargetsAfterFailure!==false)fail('fixed-targets');
-  for(const p of ['docs/architecture/m3-1-library-findability.json','docs/architecture/m3-1-library-scale-baseline.json','docs/architecture/m3-1-library-scale-candidate.json']){
-    const frozen=text(execFileSync('git',['show',M3_VISUAL_PARENT+':'+p],{cwd:root,encoding:'utf8'}));
-    if(disk(root,p)!==frozen)fail('immutable-artifact:'+p);
-  }
+  for(const p of frozenArtifacts) if(disk(root,p)!==before(p))fail('immutable-artifact:'+p);
   violations.push(...visualCandidateViolations(JSON.parse(disk(root,'docs/architecture/m3-1-library-scale-baseline.json')),JSON.parse(disk(root,'docs/architecture/m3-2-library-scale-candidate.json'))));
   return { addedCommandSignatures: violations.length ? [] : [ADDED_COMMAND], violations, addedPaths: added, afterHashes: Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),
     backendAggregateSha256: violations.length ? undefined : review.backend.afterAggregateHash,

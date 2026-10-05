@@ -19,6 +19,8 @@ const files = (root, folder, pattern) => readdirSync(join(root, folder), { withF
 }).sort();
 const aggregate = (paths, read) => hash(paths.map(p => `${p}\n${read(p)}`).join('\n'));
 const immutable = new Map();
+const parentFileSets = new Map();
+const baselineBlobs = new Map();
 function parentBlobs(root, paths) {
   const cacheKey = JSON.stringify([root, paths]);
   if (immutable.has(cacheKey)) return immutable.get(cacheKey);
@@ -47,8 +49,12 @@ export function m3LibraryParentReader(root, override) {
   const violations = [...successor.violations], fail = s => violations.push(`m3-1-${s}`);
   if (review.checkpoint !== 'M3_1_LIBRARY_FINDABILITY' || review.parentHead !== M3_LIBRARY_PARENT || review.schemaVersion !== 1) fail('invalid-header');
   if (JSON.stringify(Object.keys(review.paths ?? {}).sort()) !== JSON.stringify([...existing, ...added].sort())) fail('path-set');
-  const listed = execFileSync('git', ['ls-tree', '-r', '--name-only', M3_LIBRARY_PARENT, 'src', 'src-tauri/src', 'scripts', 'src-tauri/tests/product_library_contract.rs', 'src-tauri/examples/phase12_query_profile.rs'],
-    { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(p => /\.(tsx?|rs|css|mjs)$/.test(p)).sort();
+  for (const flag of ['queueAuthorityChanged','taskStateMachineChanged','workflowEngineChanged','bindingOccChanged','draftAuthorityChanged','newReuseStore','libraryAuthorityChanged','assetBrowseAuthorityChanged','promptLibraryAuthorityChanged','newSearchAuthority','newCacheAuthority','newStore','newRouter','newPollingOwner','schemaChanged','backupFormatChanged','remoteTelemetry']) if (review.invariants?.[flag] !== false) fail(`invariant:${flag}`);
+  // Rejected historical proof never exposes its parent; live successor remains validated.
+  if (violations.length) return { violations, addedPaths: [...added,...successor.addedPaths], addedCommandSignatures: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => successor.read(p) };
+  if (!parentFileSets.has(root)) parentFileSets.set(root, execFileSync('git', ['ls-tree', '-r', '--name-only', M3_LIBRARY_PARENT, 'src', 'src-tauri/src', 'scripts', 'src-tauri/tests/product_library_contract.rs', 'src-tauri/examples/phase12_query_profile.rs'],
+    { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(p => /\.(tsx?|rs|css|mjs)$/.test(p)).sort());
+  const listed = parentFileSets.get(root);
   const blobs = parentBlobs(root, listed), before = p => blobs.get(p);
   for (const p of existing) if (review.paths?.[p]?.beforeHash !== hash(before(p)) || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`path-drift:${p}`);
   for (const p of added) if (blobs.has(p) || review.paths?.[p]?.beforeHash !== null || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`addition-drift:${p}`);
@@ -61,7 +67,7 @@ export function m3LibraryParentReader(root, override) {
     if (proof?.beforeAggregateHash !== aggregate(base, before) || proof?.afterAggregateHash !== aggregate(current, p => disk(root, p)) ||
       proof?.untouchedAggregateHash !== aggregate(unchanged, before) || proof?.untouchedAggregateHash !== aggregate(unchanged, p => disk(root, p))) fail(`${name}-aggregate`);
   }
-  for (const flag of ['queueAuthorityChanged','taskStateMachineChanged','workflowEngineChanged','bindingOccChanged','draftAuthorityChanged','newReuseStore','libraryAuthorityChanged','assetBrowseAuthorityChanged','promptLibraryAuthorityChanged','newSearchAuthority','newCacheAuthority','newStore','newRouter','newPollingOwner','schemaChanged','backupFormatChanged','remoteTelemetry']) if (review.invariants?.[flag] !== false) fail(`invariant:${flag}`);
+
   const commandSource=disk(root,'src-tauri/src/commands/product.rs');
   const signature=[...commandSource.matchAll(/#\[tauri::command[^\]]*\]\s*pub\s+async\s+fn\s+(\w+)[\s\S]*?(?=\{)/g)].find(m=>m[1]===ADDED_COMMAND.name);
   if (!signature || signature[0].replace(/\s+/g,' ').trim()!==ADDED_COMMAND.signature || !commandSource.includes('.list_tags(&project_id)')) fail('tag-readonly-command');
@@ -71,7 +77,8 @@ export function m3LibraryParentReader(root, override) {
   if (!controller.includes('productClient.library.tagsList') || !controller.includes('favoriteOnly,tagId:tagId||null,cursor,limit:30') || controller.includes('items.filter(')) fail('query-owner');
   for (const p of ['src/features/library/LibraryController.ts','src/features/library/LibraryPage.tsx']) if (/services\/(?:tauriClient|ipc)|@tauri-apps|\binvoke\s*\(|SELECT\s|createStore|setInterval/.test(disk(root,p).replace('setInterval(()=>void refresh(),5000)',''))) fail(`transport-owner:${p}`);
   const baselinePath='docs/architecture/m3-1-library-scale-baseline.json';
-  const frozenBaseline=text(execFileSync('git',['show','d47216d67ecb2cb948cebd2a0ae113e52d07f135:'+baselinePath],{cwd:root,encoding:'utf8'}));
+  if(!baselineBlobs.has(root))baselineBlobs.set(root,text(execFileSync('git',['show','d47216d67ecb2cb948cebd2a0ae113e52d07f135:'+baselinePath],{cwd:root,encoding:'utf8'})));
+  const frozenBaseline=baselineBlobs.get(root);
   if (disk(root,baselinePath)!==frozenBaseline) fail('baseline-budget-drift');
   return { addedCommandSignatures: violations.length ? [] : [ADDED_COMMAND,...successor.addedCommandSignatures], violations, addedPaths: [...added,...successor.addedPaths], afterHashes: {...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),...successor.afterHashes},
     backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,

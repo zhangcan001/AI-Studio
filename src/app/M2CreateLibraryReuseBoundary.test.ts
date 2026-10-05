@@ -8,8 +8,9 @@ import { m2ReuseParentReader } from '../../scripts/m2-create-library-reuse-bound
 import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
 it('validates exact M2-2 parent/live proof before immutable M2-1/M1 projection, failing closed',()=>{
  const proof=JSON.parse(readFileSync('docs/architecture/m2-2-create-library-reuse.json','utf8'));
- expect(m2ReuseParentReader('.').violations).toEqual([]); expect(m1ParentReader('.').violations).toEqual([]);
- expect(m1ParentReader('.').backendAggregateSha256).toBe(JSON.parse(readFileSync("docs/architecture/m3-1-library-findability.json","utf8")).backend.afterAggregateHash);
+ const successor=m2ReuseParentReader('.'),current=m1ParentReader('.');
+ expect(successor.violations).toEqual([]);expect(current.violations).toEqual([]);
+ expect(current.backendAggregateSha256).toBe(successor.backendAggregateSha256);
  for(const mutate of [
   (p:typeof proof)=>{p.parentHead='0'.repeat(40);},
   (p:typeof proof)=>{p.paths['src/product/types.ts'].afterHash='0'.repeat(64);},
