@@ -61,6 +61,6 @@ export function m1OverviewParentReader(root, override) {
   }
   for (const flag of ['queueAuthorityChanged', 'taskStateMachineChanged', 'workflowEngineChanged', 'bindingOccChanged', 'draftAuthorityChanged', 'schemaChanged', 'backupFormatChanged', 'remoteTelemetry', 'projectCommandCenterAuthorityChanged', 'newReadinessAuthority', 'newPollingOwner']) if (review.invariants?.[flag] !== false) fail(`invariant:${flag}`);
   return { violations, addedPaths: [...added, ...successor.addedPaths], afterHashes: { ...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])), ...successor.afterHashes },
-    backendAggregateSha256: violations.length ? undefined : review.backend.afterAggregateHash,
+    backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,
     read: p => violations.length || !existing.includes(p) ? disk(root, p) : before(p) };
 }

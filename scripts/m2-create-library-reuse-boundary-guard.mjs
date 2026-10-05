@@ -6,7 +6,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const M2_REUSE_PARENT = '974d59e513961155a1b551b4de3da5658e1359bb';
-const existing = ['scripts/m2-run-recovery-boundary-guard.mjs', 'src-tauri/src/application/product/creation_facade/context.rs', 'src-tauri/src/application/product/creation_facade/submission.rs', 'src-tauri/src/application/product/library_facade/operations.rs', 'src-tauri/src/application/product/library_facade/types.rs', 'src-tauri/src/commands/product.rs', 'src-tauri/tests/support/creation_submission_contract.rs', 'src-tauri/tests/product_library_contract.rs', 'src/app/App.tsx', 'src/features/create/CreateController.ts', 'src/features/create/CreateInputs.tsx', 'src/features/create/CreatePage.test.tsx', 'src/features/create/CreatePage.tsx', 'src/features/library/LibraryController.ts', 'src/features/library/LibraryDetail.tsx', 'src/features/library/LibraryPage.test.tsx', 'src/product/libraryTypes.ts', 'src/product/types.ts', 'src/stores/studioStore.test.ts', 'src/stores/studioStore.ts'].sort();
+const existing = ['src/product/client.test.ts', 'scripts/m1-settings-runtime-boundary-guard.mjs', 'scripts/m1-overview-readiness-boundary-guard.mjs', 'scripts/m1-readiness-boundary-guard.mjs', 'scripts/m2-run-recovery-boundary-guard.mjs', 'src-tauri/src/application/product/creation_facade/context.rs', 'src-tauri/src/application/product/creation_facade/submission.rs', 'src-tauri/src/application/product/library_facade/operations.rs', 'src-tauri/src/application/product/library_facade/types.rs', 'src-tauri/src/commands/product.rs', 'src-tauri/tests/support/creation_submission_contract.rs', 'src-tauri/tests/product_library_contract.rs', 'src/app/App.tsx', 'src/features/create/CreateController.ts', 'src/features/create/CreateInputs.tsx', 'src/features/create/CreatePage.test.tsx', 'src/features/create/CreatePage.tsx', 'src/features/library/LibraryController.ts', 'src/features/library/LibraryDetail.tsx', 'src/features/library/LibraryPage.test.tsx', 'src/product/libraryTypes.ts', 'src/product/types.ts', 'src/stores/studioStore.test.ts', 'src/stores/studioStore.ts'].sort();
 const added = ['scripts/m2-create-library-reuse-boundary-guard.mjs', 'src/app/M2CreateLibraryNavigation.test.tsx', 'src/app/M2CreateLibraryReuseBoundary.test.ts'].sort();
 const text = s => s.replaceAll('\r\n', '\n');
 const hash = s => createHash('sha256').update(text(s)).digest('hex');
@@ -35,6 +35,10 @@ function parentBlobs(root, paths) {
 }
 
 export function m2ReuseParentReader(root, override) {
+  // Memoize reads only within this synchronous validation; no live cache survives
+  // a call or replaces a fresh fail-closed read. Parent blobs alone persist.
+  const live = new Map();
+  const disk = (_root,p) => { if (!live.has(p)) live.set(p,text(readFileSync(join(root,p),'utf8'))); return live.get(p); };
   const review = override ?? JSON.parse(disk(root, 'docs/architecture/m2-2-create-library-reuse.json'));
   const violations = [], fail = s => violations.push(`m2-2-${s}`);
   if (review.checkpoint !== 'M2_2_CREATE_LIBRARY_PRECISE_REUSE' || review.parentHead !== M2_REUSE_PARENT || review.schemaVersion !== 1) fail('invalid-header');
@@ -64,5 +68,5 @@ export function m2ReuseParentReader(root, override) {
   for (const p of ['src/features/create/CreateController.ts','src/features/create/CreateInputs.tsx','src/features/library/LibraryController.ts','src/features/library/LibraryDetail.tsx']) if (/services\/(?:tauriClient|ipc)|@tauri-apps|\binvoke\s*\(/.test(disk(root,p))) fail(`transport-owner:${p}`);
   return { violations, addedPaths: added, afterHashes: Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),
     backendAggregateSha256: violations.length ? undefined : review.backend.afterAggregateHash,
-    read: p => violations.length || !existing.includes(p) ? disk(root, p) : before(p) };
+    read: p => violations.length || !existing.includes(p) ? text(readFileSync(join(root,p),'utf8')) : before(p) };
 }

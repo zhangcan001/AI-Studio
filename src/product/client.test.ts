@@ -31,7 +31,7 @@ describe("product facade client", () => {
     const script = new URL("../../scripts/dev088-architecture-guard.mjs", import.meta.url).href;
     const guard = await import(/* @vite-ignore */ script);
     expect(guard.productBoundaryVerified).toBe(true);
-  }, 15_000); // Whole-repo AST scan; CI measured ~5.6s, beyond Vitest's 5s default.
+  }, 30_000); // M2-2 full guard finished in 18.05s on CI (local ~10s); finite verification budget, not a product performance threshold.
   beforeEach(() => { invokeCommand.mockReset(); });
   it("routes the five original typed use cases through the single transport", async () => {
     invokeCommand.mockResolvedValue([]);

@@ -19,7 +19,7 @@
 
 No new query/store/router/polling/execution authority, migration, backup version, telemetry, release or product-version change. Migration max42 / formal table71 / backup20 / product2.0.0-personal.
 
-The new M2-2 review validates immutable parent blobs, exact legal changed/new paths, complete live aggregates and untouched aggregates before M2-1/M1 historical parent projection. Old manifests are unchanged. Historical guards intentionally inspect the validated historical projection; the M2-2 manifest separately pins the actual live Rust aggregate. Negative proofs fail closed.
+The new M2-2 review validates immutable parent blobs, exact legal changed/new paths, complete live aggregates and untouched aggregates before M2-1/M1 historical parent projection. Old manifests are unchanged. Historical source guards inspect the validated historical projection, while the final backend aggregate is propagated from the validated M2-2 live proof through each successor (not a historical projected aggregate). Negative proofs fail closed.
 
 ## Verification
 
@@ -33,3 +33,11 @@ Targeted frontend and controlled Rust submission/Library tests, TypeScript/build
 - Native: owned isolated DB/WebView, offline endpoint, 21 prompts / 101 images. UI recent picker contains20 Prompt buttons /100 image items and excludes Old Prompt21 / Old Asset101. Existing Library name search recovers both; return retains the same default project, Shot01, video stage, FL2V quality2.1.1 generator, width1280/height544/duration5. Image intent initially leaves both slots empty; explicit tail application changes only tail. Manual prompt append and another Library/back return preserve edited text and old tail selection. Shell/breadcrumb/Overview show 默认项目; ordinary My Film remains unchanged.
 - Before/after counts of tasks, production batches/items, Shot generation links, snapshots and persistent Shot references all remain0. Owned application closed. Native DB migration max42 and formal allowlisted table count71 verified; no043.
 - Remote CI result is reported with exact final commit in the final chat report; the prior M2-1 run is not reused as authority.
+
+### Integrated CI correctness repair
+
+The initial full CI found two live-backend hash comparisons still receiving a historical projected aggregate. Successor source validation itself passed, but the aggregate return value needed forwarding through M2-1/M1; four existing return statements now propagate the validated live value. A new boundary assertion compares the final reader's aggregate to the M2-2 live proof, preserving all historical manifests and byte validation.
+
+The existing all-architecture import test also completed after18.05s on CI but had a15s harness timeout inherited from a5.6s older guard. Local measured full command is10.45s before and10.22s after per-invocation read reuse (no material performance claim). Its finite verification budget is now30s; no assertions/suites are removed, test concurrency is unchanged, and no product/runtime timeout or CI workflow is changed. Parent blob cache remains immutable; working-tree reads are reused only within one synchronous validation and failure reads stay fresh. The failed initial run is not authoritative PASS.
+
+Business/runtime files did not change in this repair; the completed owned Native acceptance is reused without a rebuild.

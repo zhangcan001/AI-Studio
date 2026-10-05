@@ -68,6 +68,6 @@ export function m2RecoveryParentReader(root, override) {
   if (/errorSummary|errorMessage|\.phase|\b(?:navigate|retry|dispatch)\s*\(/.test(presentation) ||
       !presentation.includes('run.availableActions.includes("RETRY")') || !presentation.includes('run.recoverability.retryItemIds.length')) fail('recovery-capability-authority');
   return { violations, addedPaths: [...added,...successor.addedPaths], afterHashes: { ...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])), ...successor.afterHashes},
-    backendAggregateSha256: violations.length ? undefined : review.backend.afterAggregateHash,
+    backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,
     read: p => violations.length || !existing.includes(p) ? disk(root, p) : before(p) };
 }

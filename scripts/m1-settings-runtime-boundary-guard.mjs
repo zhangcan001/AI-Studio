@@ -67,6 +67,6 @@ export function m1SettingsParentReader(root, override) {
       /saveComfyEndpoint|applyComfyEnvironmentProfile|setInterval|setTimeout|\binvoke\s*\(|child_process|\b(?:generate|launch|spawn|exec|scan|probe)\s*\(/.test(tools)) fail('tool-viewer-authority');
   if (/\b(?:saveTool|registerTool|updateTool|createTool|setInterval)\w*\s*\(/.test(disk(root, 'src/features/settings/SettingsWorkspace.tsx'))) fail('settings-registry-authority');
   return { violations, addedPaths: [...added, ...successor.addedPaths], afterHashes: { ...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])), ...successor.afterHashes },
-    backendAggregateSha256: violations.length ? undefined : review.backend.afterAggregateHash,
+    backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,
     read: p => violations.length || !existing.includes(p) ? disk(root, p) : before(p) };
 }
