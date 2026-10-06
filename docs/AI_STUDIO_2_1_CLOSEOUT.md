@@ -17,7 +17,7 @@ tables71/no043; backup remains20. The closeout successor validates exact reviewe
 parent/live paths and complete untouched aggregates before projecting historical
 M4/M3/M2/M1 source. No historical manifest is repinned.
 
-## Acceptance status
+## Initial Closeout acceptance (historical)
 
 Local full frontend: 1145 passed, 1 existing opt-in benchmark skipped (206 files).
 TypeScript, frontend build, architecture gate, Rust format and all-targets check
@@ -121,3 +121,97 @@ commit changes evidence only: RUNTIME_CHANGED=NO, INSTALLER_CONFIG_CHANGED=NO.
 Final exact-head CI must be reported separately and may never clear this Native
 backup blocker merely by being green. RC READY=NO; publication gate READY=NO;
 2.1 RELEASED=NO; next checkpoint STARTED=NO.
+
+
+## RC Backup AssetVersion identity repair — 2026-10-06
+
+The original blocker and blocked installer evidence above remain historical
+facts; the old SHA `402FB863D16993E3E9780EBA855BE512C8C84B1AC4568E6CDAB512EAD697E5AB`
+is stale and ineligible for publication. The repair successor is rooted at
+`ed2f0c72e3f77c93b51f60e6af5475e51abb7e0b`; no Phase7–14, M1–M4 or initial
+Closeout manifest was changed.
+
+### Minimal repair and identity boundary
+
+Restore now allocates through `AssetVersionId::new()` only (`av_`). Public
+`AssetVersionId::parse()` still rejects `asv_`; crate-private `parse_persisted`
+accepts only nonempty canonical/legacy IDs at the two SQLite hydration seams,
+AssetVersionRow and GenerationAssetVersionRow. Existing legacy IDs and lineage
+references are preserved verbatim. No startup rewriting, legacy creation API,
+heuristic remapping, format bump or schema change: backup20, migration42,
+formal71 and no043. Version and lineage references share the explicit restore
+ID map. Queue/task/compiler/Comfy/binding OCC remain unchanged; GPU generation
+is SKIPPED_BY_POLICY, not claimed as exercised.
+
+### Behavioral and full local gates
+
+Domain, owned legacy repository/lineage, actual export→inspect→restore and
+Product Library detail/version-history regressions passed. All 60 existing
+backup tests (historical readers through v20) passed. Full local Rust:
+1684 passed, zero failed, four pre-existing ignored; fmt and all-target check
+passed. DEV051 now imports the compiled production asset repository rather than
+including its source across crates. Eight duplicated unit executions disappear;
+all original unit tests/assertions still execute in the library target. Three
+new Rust regressions were added; no test assertions were weakened or skipped.
+Full frontend: 1146 passed and one pre-existing opt-in benchmark skipped;
+TypeScript/build/architecture passed, including historical/M1–M4/Closeout/RC
+successors and Phase12/13 guards.
+
+The existing Phase14 negative tests exposed projected bytes on rejected proof;
+only that failure branch now returns actual live bytes. All original negative
+assertions remain unchanged. First repair CI `37405434822` timed out in frontend,
+not a PASS. Investigation found 38,809,497 unused non-Rust fixture bytes in each
+RC guard cold parent read. The guard now loads only relevant Rust test blobs,
+reuses only immutable Git-parent aggregates across calls, and caches live text
+only within one fresh validation. Complete path inventories, after aggregates,
+exact untouched-byte equality and every rejection check remain mandatory.
+Full frontend runtime decreased from394.64s to354.81s; all1146 tests still passed. Focused eight-guard-test runtime decreased from25.30s to21.40s on the same
+machine. CI timeout, commands, worker count and test semantics are unchanged.
+Final exact-head CI remains the independent authority; no earlier run clears
+this gate.
+
+### Rebuilt installed acceptance
+
+Clean synced installer source:
+`7739d314a19719e43e74fe6a2daec7d0b10097c6`.
+NSIS build passed (release compilation9m37s), filename
+`AI Studio_2.1.0-personal_x64-setup.exe`, size13,055,486 bytes, SHA256
+`857D7A04A1184C4F86D15FF1258B11CEEDADDDD664F97C8858AD044256B4CD32`.
+Signature remains NotSigned. Exact installed payload proof passed: the only
+permitted transformation is Tauri's single `TAURI_BUNDLE_TYPE_VAR_UNK`→`NSS`
+marker; no arbitrary byte exclusions.
+
+A fresh isolated installed app opened Project List, Overview, Create, Runs,
+Library, Project Settings, System Settings and Workflow Lab; a second launch
+exited0 with exactly one owned process. Titlebar safe exit passed. An owned
+historical r4 copy opened Generated Image1 through normal Product Library and
+advanced version history. Native showed v1 and original legacy lineage ID
+`asv_75e51bb7-bdf2-44c2-b9fa-7db999f824ef`; before/after core rows and all540
+source media hashes remained unchanged.
+
+Actual installed export produced221 files, then native inspection and restore
+created a new project. All two restored version IDs are canonical `av_`, with
+zero new `asv_`; one relation and one generation-version lineage survived.
+Restored Generated Image1 detail, v1 history and explicit lineage
+`av_c1d7fb15-f75f-4c68-a79e-8ef1acb06014` opened successfully. Seven source
+core table aggregates (including legacy versions and lineage) and original
+media hashes were preserved. Restored DB migration42/formal71/FK checks passed.
+
+Uninstall removed the owned candidate and preserved all1604 closed-app data
+files byte-for-byte. Reinstall reproduced the exact installed payload; restored
+and legacy projects reopened with their v1 histories and the same canonical /
+legacy lineage IDs. Core rows and all648 post-restore media hashes remained
+unchanged across reinstall. Candidate was safely exited and removed afterward;
+previous owned r4 registration and original executable hash were restored.
+No unique user data/app or ComfyUI was modified or stopped.
+
+Local evidence artifacts are owned-only and are not committed or uploaded.
+Post-installer changes are validation-script/architecture evidence and these
+documents only: RUNTIME_CHANGED_AFTER_BUILD=NO,
+INSTALLER_CONFIG_CHANGED_AFTER_BUILD=NO. The installed identity blocker is
+closed by actual typed/native reads, not merely raw SQLite counts.
+Final RC READY/P1=NONE requires final exact-HEAD Source-only CI completed
+success in addition to the passed local/installed gates described here.
+Publication is NOT authorized: public stable remainsr4, 2.1 RELEASED=NO,
+CREATE_TAG=NO, CREATE_GITHUB_RELEASE=NO, UPLOAD_RELEASE_ASSET=NO,
+NEXT_CHECKPOINT_STARTED=NO. Stop before Publication Gate.

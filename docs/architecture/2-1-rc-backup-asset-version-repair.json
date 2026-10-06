@@ -5,7 +5,7 @@
   "paths": {
     "scripts/2-1-rc-backup-asset-version-repair-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "1b7b7c86235208970530de3596d2054e6d6c212903b81b10c02a6a04b13f5d3c"
+      "afterHash": "9ccdaeda2dbcbd40e475b5c7b24e521d05da5f321095db1e013e9b5fc085f6fc"
     },
     "scripts/ai-studio-2-1-closeout-boundary-guard.mjs": {
       "beforeHash": "7f4feea5d2f4e3c5b32339b144d6274403839d7a02a316dde21dd0c8b6cf2c4a",
@@ -80,7 +80,7 @@
     "beforeFiles": 26,
     "afterFiles": 27,
     "beforeAggregateHash": "551ec6cf15f6d921f43c3c141dbf58e18ee055bc537ce211ac131d38ee672bb2",
-    "afterAggregateHash": "4c942449baf5f520f9b69f8ecfab4216f3e6265488220719a82c50e42f813a31",
+    "afterAggregateHash": "0938a5e1d5a6af9070170eea3e8bb1b5de4fd5bf5dab4af1fbd623b593c0f694",
     "untouchedAggregateHash": "738f4de2c8ff81dda3071007a1d9190ff57cac32a14d32ce211b9a2aeb741c97"
   },
   "invariants": {

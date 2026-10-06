@@ -53,3 +53,10 @@ replacement and automatic repair remain DEFERRED.
 - Candidate installation/backup/Native evidence and installer provenance are
   recorded in `AI_STUDIO_2_1_CLOSEOUT.md`; installation build alone is not
   installation acceptance. No installer upload, tag or Release is authorized here.
+
+
+## Backup compatibility
+
+Backup v20 restored asset-version identities remain readable, including
+legacy restored `asv_` identities. Existing history is retained without rewriting
+user data. This compatibility fix does not change the archive format.
