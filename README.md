@@ -2,10 +2,11 @@
 
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. It manages and executes AI production from structured production inputs; narrative, storyboard, and prompt authoring are supplied externally or entered as manual production input. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
-Stable release: `v2.0.0-personal-r4`.
-Current development candidate: `2.1.0-personal`.
-2.1 product work: **M1–M4 complete**. 2.1 publication: **NOT YET PUBLISHED**.
-See `docs/RELEASE_NOTES_v2.1.0-personal.md` and `docs/AI_STUDIO_2_1_CLOSEOUT.md` for the release-candidate scope and acceptance evidence.
+Stable release: [`v2.1.0-personal`](https://github.com/zhangcan001/AI-Studio/releases/tag/v2.1.0-personal).
+Current product: `2.1.0-personal` **released**.
+Previous validated 2.0 release: `v2.0.0-personal-r4`.
+2.1 product work: **M1–M4 complete**. 2.1 publication: **RELEASED**.
+See `docs/RELEASE_NOTES_v2.1.0-personal.md` and `docs/AI_STUDIO_2_1_CLOSEOUT.md` for the released scope and acceptance evidence.
 Previous stable maintenance baseline: `v1.3.1` (see `docs/RELEASE_NOTES_v1.3.1.md`).
 
 ## Current workspace

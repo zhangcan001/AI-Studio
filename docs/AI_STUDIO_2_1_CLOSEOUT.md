@@ -215,3 +215,35 @@ success in addition to the passed local/installed gates described here.
 Publication is NOT authorized: public stable remainsr4, 2.1 RELEASED=NO,
 CREATE_TAG=NO, CREATE_GITHUB_RELEASE=NO, UPLOAD_RELEASE_ASSET=NO,
 NEXT_CHECKPOINT_STARTED=NO. Stop before Publication Gate.
+
+## Final Publication — 2026-10-06
+
+This section supersedes the historical candidate/publication restrictions above;
+all historical blocker, failed-CI and ineligible-installer evidence is retained.
+
+- RC final branch CI: `37416738731` completed / success.
+- Tag: `v2.1.0-personal` (annotated, immutable).
+- Release tag head: `5af3f20273e722466c82b91ede4970cd83e0bcb8`.
+- Tag-triggered Source-only CI: `37434078940` completed / success;
+  frontend tests, architecture, TypeScript, build, Rust fmt/check/tests all PASS.
+- GitHub Release: [published](https://github.com/zhangcan001/AI-Studio/releases/tag/v2.1.0-personal),
+  title **AI Studio 2.1.0 Personal**, not draft, not prerelease, Latest.
+- Installer source head remains independently recorded:
+  `7739d314a19719e43e74fe6a2daec7d0b10097c6`.
+- Installer asset: `AI-Studio-2.1.0-personal-windows-x64-setup.exe`.
+- Installer asset size: `13055486` bytes.
+- Installer SHA256:
+  `857D7A04A1184C4F86D15FF1258B11CEEDADDDD664F97C8858AD044256B4CD32`.
+- GitHub asset digest and actual downloaded installer SHA256 match the accepted
+  installer exactly. Downloaded sidecar names the same installer and digest.
+- Only NSIS and its SHA256 sidecar are published; the old blocked installer
+  remains ineligible and was not uploaded. Published assets are immutable by policy.
+- No runtime, installer configuration or dependency changes exist between installer
+  source and release tag head. No rebuild or repeat installed acceptance was needed.
+- Publication-state documentation is a separate master commit; it does not move
+  the release tag or alter installer provenance.
+- Migration maximum42, formal tables71, no043, Backup v20 remain unchanged.
+- Previous validated stable release: `v2.0.0-personal-r4`.
+- P0=NONE; P1=NONE. Unsigned installer and deferred scope remain documented.
+- AI_STUDIO_2_1_RELEASED=YES; PUBLIC_STABLE_RELEASE=v2.1.0-personal.
+- NEXT_CHECKPOINT_STARTED=NO.

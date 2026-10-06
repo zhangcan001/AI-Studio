@@ -1,10 +1,11 @@
-# AI Studio 2.1.0 Personal Edition — Release Candidate
+# AI Studio 2.1.0 Personal Edition
 
-This document does not announce a Git tag or GitHub Release.
-
-Public stable release: **v2.0.0-personal-r4**. Development candidate:
-**2.1.0-personal**. M1–M4 product work is complete and frozen; publication is
-NOT YET PUBLISHED and requires a separate Publication Gate.
+Git tag: `v2.1.0-personal`.
+GitHub Release: [published](https://github.com/zhangcan001/AI-Studio/releases/tag/v2.1.0-personal).
+Public stable release: **v2.1.0-personal**. Previous validated release:
+**v2.0.0-personal-r4**. M1–M4 product work is complete and frozen.
+Release tag head: `5af3f20273e722466c82b91ede4970cd83e0bcb8`.
+Final branch CI: `37416738731` PASS; tag CI: `37434078940` completed / success.
 
 ## M1 — Readiness and setup
 
@@ -41,7 +42,7 @@ replacement and automatic repair remain DEFERRED.
 
 ## Compatibility and limitations
 
-- Internal candidate version is 2.1.0-personal; numeric WiX version is 2.1.0.
+- Product version is 2.1.0-personal; numeric WiX version is 2.1.0.
 - Database migration remains 42 (71 formal tables); no migration 043.
 - Backup export remains v20; historical reader compatibility is regression
   tested. Restore creates a new project; do not test on a unique user database.
@@ -50,9 +51,9 @@ replacement and automatic repair remain DEFERRED.
 - No automatic repair/relink, media replacement, general tool auto-discovery,
   automatic tool installation/start/stop, Prompt auto-scoring or usage statistics.
 - No mixed Runs full-history pagination, remote telemetry or cloud sync.
-- Candidate installation/backup/Native evidence and installer provenance are
+- Installed backup/Native acceptance and independent installer provenance are
   recorded in `AI_STUDIO_2_1_CLOSEOUT.md`; installation build alone is not
-  installation acceptance. No installer upload, tag or Release is authorized here.
+  installation acceptance. Published NSIS bytes match the accepted installer.
 
 
 ## Backup compatibility
