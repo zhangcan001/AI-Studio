@@ -1,0 +1,106 @@
+{
+  "checkpoint": "AI_STUDIO_2_1_PUBLICATION_SUCCESSOR",
+  "schemaVersion": 1,
+  "parentHead": "130cbbfaf67e1627fca7e447de322cf0f5f5ae85",
+  "releaseTag": "v2.1.0-personal",
+  "releaseTagHead": "5af3f20273e722466c82b91ede4970cd83e0bcb8",
+  "productVersion": "2.1.0-personal",
+  "installerSourceHead": "7739d314a19719e43e74fe6a2daec7d0b10097c6",
+  "installerSha256": "857D7A04A1184C4F86D15FF1258B11CEEDADDDD664F97C8858AD044256B4CD32",
+  "releaseEvidence": {
+    "releaseId": 404490006,
+    "tagCiRun": 37434078940,
+    "sourceCiRun": 37416738731,
+    "assetName": "AI-Studio-2.1.0-personal-windows-x64-setup.exe",
+    "assetSize": 13055486,
+    "downloadedEqualsAccepted": true
+  },
+  "paths": {
+    "README.md": {
+      "beforeHash": "c2223e3dde285c84774e7eabadc502a5cb387a5e9d5d4d77688b229b4baf9852",
+      "afterHash": "c2223e3dde285c84774e7eabadc502a5cb387a5e9d5d4d77688b229b4baf9852"
+    },
+    "docs/AI_STUDIO_2_1_CLOSEOUT.md": {
+      "beforeHash": "514c2bcd88194efd752162b48ccd1e134e17fc1b773065144b7832b80efbd465",
+      "afterHash": "514c2bcd88194efd752162b48ccd1e134e17fc1b773065144b7832b80efbd465"
+    },
+    "docs/RELEASE_NOTES_v2.1.0-personal.md": {
+      "beforeHash": "961cd683104a77e5c65aba5a90ac6892e52692456ddc558c720ce1b2fa6bbc70",
+      "afterHash": "961cd683104a77e5c65aba5a90ac6892e52692456ddc558c720ce1b2fa6bbc70"
+    },
+    "scripts/2-1-publication-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "3f97bc6c30a86f545b39d2e89ef93504ab2f61596014fc082344517b1e8d36ce"
+    },
+    "scripts/2-1-rc-backup-asset-version-repair-guard.mjs": {
+      "beforeHash": "44b810f2ee20cc956176fe8cebf8f94922a3505f27f3101473d18fa97d57c52d",
+      "afterHash": "4845c3bceaa488376f441c99dfbf187f0e443b729e71cccdc875d47905a04aaf"
+    },
+    "src/app/AIStudio21PublicationBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "00f1907323bcac6830fc30f7a7c42c1ddc7a98d04191e5cacc584eebf7604b9e"
+    }
+  },
+  "backend": {
+    "beforeFiles": 345,
+    "afterFiles": 345,
+    "beforeAggregateHash": "1c1a33faee8b7e0f4908dedb14672fb8d7743fc4d5f5aea6aabdfa4a304cdd02",
+    "afterAggregateHash": "1c1a33faee8b7e0f4908dedb14672fb8d7743fc4d5f5aea6aabdfa4a304cdd02",
+    "untouchedAggregateHash": "1c1a33faee8b7e0f4908dedb14672fb8d7743fc4d5f5aea6aabdfa4a304cdd02"
+  },
+  "tests": {
+    "beforeFiles": 55,
+    "afterFiles": 55,
+    "beforeAggregateHash": "6fce4c0e0d1b44744e03c1d7965ed454337e764032722c64e4196ff11c3c26b9",
+    "afterAggregateHash": "6fce4c0e0d1b44744e03c1d7965ed454337e764032722c64e4196ff11c3c26b9",
+    "untouchedAggregateHash": "6fce4c0e0d1b44744e03c1d7965ed454337e764032722c64e4196ff11c3c26b9"
+  },
+  "frontend": {
+    "beforeFiles": 495,
+    "afterFiles": 496,
+    "beforeAggregateHash": "89cb198c53eda72c8eb2ee1331dc75f43c38d994e5efd68129d24d018f660ef0",
+    "afterAggregateHash": "3623fb9d581e1c626c3103bcc556cdbac4646c5d3fadaf15a9e036a8018252d9",
+    "untouchedAggregateHash": "89cb198c53eda72c8eb2ee1331dc75f43c38d994e5efd68129d24d018f660ef0"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "afterAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "untouchedAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa"
+  },
+  "scripts": {
+    "beforeFiles": 27,
+    "afterFiles": 28,
+    "beforeAggregateHash": "f15656d8d8ae39e11854bceab954e16ec03902496128a6c5097d1cdb1d80747b",
+    "afterAggregateHash": "498d0ea5397efb6b2091c62213ad4273505b240e19ca31e832fd428b81595594",
+    "untouchedAggregateHash": "29f16c21dd12cc20a21108788ff2c8c7f5a88336bab44f6861abfd9e9d2672b9"
+  },
+  "migrations": {
+    "beforeFiles": 42,
+    "afterFiles": 42,
+    "beforeAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24",
+    "afterAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24",
+    "untouchedAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24"
+  },
+  "architecture": {
+    "beforeFiles": 25,
+    "afterFiles": 25,
+    "beforeAggregateHash": "46f2045173deb359c6add16edc5a3ed00fdd0a405a9cdd01579c6927617e9214",
+    "afterAggregateHash": "46f2045173deb359c6add16edc5a3ed00fdd0a405a9cdd01579c6927617e9214",
+    "untouchedAggregateHash": "46f2045173deb359c6add16edc5a3ed00fdd0a405a9cdd01579c6927617e9214"
+  },
+  "invariants": {
+    "businessRuntimeChanged": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "queueAuthorityChanged": false,
+    "taskStateMachineChanged": false,
+    "workflowEngineChanged": false,
+    "bindingOccChanged": false,
+    "installerChanged": false,
+    "releaseTagMoved": false,
+    "releaseAssetsReplaced": false,
+    "remoteTelemetry": false
+  }
+}

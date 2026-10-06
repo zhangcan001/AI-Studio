@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { publicationParentReader } from './2-1-publication-successor-guard.mjs';
 
 export const RC_REPAIR_PARENT = 'ed2f0c72e3f77c93b51f60e6af5475e51abb7e0b';
 const existing = [".github/workflows/ci.yml", "src-tauri/src/domain/asset.rs", "src-tauri/src/application/project_backup_service.rs", "src-tauri/src/infrastructure/database/repositories/asset.rs", "src-tauri/src/infrastructure/database/repositories/provenance_lineage.rs", "src-tauri/tests/product_library_contract.rs", "src-tauri/tests/dev051_consistency_assets.rs", "scripts/ai-studio-2-1-closeout-boundary-guard.mjs", "scripts/phase14-release-guard.mjs", "src/app/AIStudio21CloseoutBoundary.test.ts"].sort();
@@ -24,11 +25,10 @@ function parentBlobs(root) {
   if(offset!==bytes.length)throw Error('Closeout parent trailing bytes');immutable.set(root,blobs);return blobs;
 }
 export function rcRepairParentReader(root,override) {
-  // Fresh per validation, never a cross-call working-tree cache.
-  const live=new Map();
-  const disk=p=>{if(!live.has(p))live.set(p,normalize(readFileSync(join(root,p),'utf8')));return live.get(p);};
+  const publication=publicationParentReader(root);
+  const disk=p=>normalize(publication.read(p));
   const proof=override??JSON.parse(disk('docs/architecture/2-1-rc-backup-asset-version-repair.json'));
-  const violations=[],fail=s=>violations.push(`rc-repair-${s}`);
+  const violations=[...publication.violations],fail=s=>violations.push(`rc-repair-${s}`);
   if(proof.schemaVersion!==1||proof.checkpoint!=='AI_STUDIO_2_1_RC_BACKUP_ASSET_VERSION_IDENTITY_REPAIR'||proof.parentHead!==RC_REPAIR_PARENT)fail('header');
   if(JSON.stringify(Object.keys(proof.paths??{}).sort())!==JSON.stringify([...existing,...added].sort()))fail('scope');
   for(const flag of ['legacyAsvNewWrites','schemaChanged','backupFormatChanged','queueAuthorityChanged','taskStateMachineChanged','workflowCompilerChanged','comfySubmissionChanged','bindingOccChanged','remoteTelemetry'])if(proof.invariants?.[flag]!==false)fail(`invariant:${flag}`);
@@ -39,7 +39,7 @@ export function rcRepairParentReader(root,override) {
   for(const p of existing)if(proof.paths[p].beforeHash!==hash(before(p))||proof.paths[p].afterHash!==hash(disk(p)))fail(`path:${p}`);
   for(const p of added)if(blobs.has(p)||proof.paths[p].beforeHash!==null||proof.paths[p].afterHash!==hash(disk(p)))fail(`addition:${p}`);
   for(const [name,dir,pattern] of [['backend','src-tauri/src',/\.rs$/],['tests','src-tauri/tests',/\.rs$/],['frontend','src',/\.tsx?$/],['styles','src',/\.css$/],['scripts','scripts',/\.(?:mjs|ts)$/]]){
-    const base=[...blobs.keys()].filter(p=>p.startsWith(`${dir}/`)&&pattern.test(p)),current=files(root,dir,pattern),expected=[...base,...added.filter(p=>p.startsWith(`${dir}/`)&&pattern.test(p))].sort(),untouched=base.filter(p=>!existing.includes(p)),r=proof[name];
+    const base=[...blobs.keys()].filter(p=>p.startsWith(`${dir}/`)&&pattern.test(p)),current=files(root,dir,pattern).filter(p=>!publication.addedPaths.includes(p)),expected=[...base,...added.filter(p=>p.startsWith(`${dir}/`)&&pattern.test(p))].sort(),untouched=base.filter(p=>!existing.includes(p)),r=proof[name];
     if(JSON.stringify(current)!==JSON.stringify(expected)||r?.beforeFiles!==base.length||r?.afterFiles!==current.length)fail(`${name}-files`);
     // Only Git-parent facts persist. Exact untouched byte equality proves the
     // same untouched aggregate without repeatedly hashing identical parent text.
@@ -62,5 +62,5 @@ export function rcRepairParentReader(root,override) {
   if(!restore.includes('AssetVersionId::new().as_str().to_owned()')||restore.split('#[cfg(test)]')[0].includes('format!("asv_'))fail('restore-allocator');
   if(!restore.includes('const BACKUP_VERSION: u32 = 20;'))fail('backup-format');
   if(violations.length)return rejected();
-  return {violations,addedPaths:added,afterHashes:Object.fromEntries(existing.map(p=>[p,proof.paths[p].afterHash])),backendAggregateSha256:proof.backend.afterAggregateHash,read:p=>existing.includes(p)?before(p):disk(p)};
+  return {violations,addedPaths:[...added,...publication.addedPaths],afterHashes:Object.fromEntries(existing.map(p=>[p,proof.paths[p].afterHash])),backendAggregateSha256:proof.backend.afterAggregateHash,read:p=>existing.includes(p)?before(p):disk(p)};
 }
