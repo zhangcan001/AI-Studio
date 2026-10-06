@@ -155,10 +155,10 @@ mod infrastructure {
             }
 
             pub mod asset {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/infrastructure/database/repositories/asset.rs"
-                ));
+                // Exercise the compiled production repository, not a cross-crate
+                // source copy that cannot access persistence-only domain seams.
+                // Its unit tests remain in the library's full test target.
+                pub use ai_studio_lib::infrastructure::database::repositories::SqliteAssetRepository;
             }
             pub mod asset_deletion {
                 include!(concat!(

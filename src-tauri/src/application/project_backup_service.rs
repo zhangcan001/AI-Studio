@@ -5,6 +5,7 @@ use crate::application::ports::{
 use crate::domain::consistency::{
     BindingRole, InheritanceMode, ProfileRevisionStatus, ProfileType, ReferenceSetPurpose,
 };
+use crate::domain::AssetVersionId;
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -485,7 +486,10 @@ impl ProjectBackupService {
         }
         let mut asset_version_ids = HashMap::new();
         for version in &document.asset_versions {
-            asset_version_ids.insert(version.id.clone(), format!("asv_{}", Uuid::new_v4()));
+            asset_version_ids.insert(
+                version.id.clone(),
+                AssetVersionId::new().as_str().to_owned(),
+            );
         }
         let mut asset_relation_ids = HashMap::new();
         for relation in &document.asset_relations {
@@ -9731,6 +9735,71 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(foreign_lineage, 0);
+
+        use crate::application::ports::{AssetRepository, ProvenanceLineageRepository};
+        use crate::domain::{AssetId, AssetVersionId, TaskId};
+        use crate::infrastructure::database::repositories::{
+            SqliteAssetRepository, SqliteProvenanceLineageRepository,
+        };
+        let assets = SqliteAssetRepository::new(pool.clone());
+        let provenance = SqliteProvenanceLineageRepository::new(pool.clone());
+        let asset_id = AssetId::parse(&version_row.1).unwrap();
+        let versions = assets
+            .list_asset_versions(&restored.id, &asset_id)
+            .await
+            .unwrap();
+        assert_eq!(versions.len(), 1);
+        assert!(versions[0].id.as_str().starts_with("av_"));
+        assert_eq!(
+            AssetVersionId::parse(&version_row.0).unwrap(),
+            versions[0].id
+        );
+        let links = provenance
+            .list_asset_version_links(&restored.id, &TaskId::parse(&lineage.1).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].asset_version_id, versions[0].id);
+        let source = service.build_backup(&restored.id).await.unwrap().document;
+        let bytes = std::fs::read(&versions[0].location).unwrap();
+        let exported = directory.path().join("canonical-roundtrip.aiarchive");
+        service
+            .export(&restored.id, exported.clone())
+            .await
+            .unwrap();
+        let inspected = service.inspect(exported).await.unwrap();
+        let twice = service.restore(&inspected.inspection_id).await.unwrap();
+        let new_row: (String, String) =
+            sqlx::query_as("SELECT id, asset_id FROM asset_versions WHERE project_id = ?")
+                .bind(&twice.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let new_versions = assets
+            .list_asset_versions(&twice.id, &AssetId::parse(&new_row.1).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(new_versions.len(), 1);
+        assert!(new_versions[0].id.as_str().starts_with("av_"));
+        assert_ne!(new_versions[0].id, versions[0].id);
+        let new_task: String = sqlx::query_scalar("SELECT id FROM tasks WHERE project_id = ?")
+            .bind(&twice.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let new_links = provenance
+            .list_asset_version_links(&twice.id, &TaskId::parse(new_task).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(new_links.len(), 1);
+        assert_eq!(new_links[0].asset_version_id, new_versions[0].id);
+        assert_eq!(std::fs::read(&new_versions[0].location).unwrap(), bytes);
+        let unchanged = service.build_backup(&restored.id).await.unwrap().document;
+        assert_eq!(
+            serde_json::to_value(source).unwrap(),
+            serde_json::to_value(unchanged).unwrap()
+        );
+        assert_eq!(std::fs::read(&versions[0].location).unwrap(), bytes);
     }
 
     #[tokio::test]

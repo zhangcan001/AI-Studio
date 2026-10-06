@@ -71,7 +71,9 @@ export function releaseParentReader(root, reviewOverride) {
     if (proof.invariants?.[flag] !== false) fail(`authority:${flag}`);
   }
   return { violations, addedPaths: checkpoint.addedPaths, backendAggregateSha256: violations.length ? undefined : checkpoint.backendAggregateSha256 ?? proof.backend.afterAggregateHash, read: path => {
-    if (violations.length || ![rustPath, guardPath, workflowPath].includes(path)) return live(root, path);
+    // A rejected proof must never expose even a validated successor projection.
+    if (violations.length) return readFileSync(join(root, path), 'utf8');
+    if (![rustPath, guardPath, workflowPath].includes(path)) return live(root, path);
     return path === rustPath ? blobs.get(path) : parent(root, path);
   } };
 }

@@ -6,11 +6,13 @@ import {readFileSync} from 'node:fs';
 import {closeoutParentReader} from '../../scripts/ai-studio-2-1-closeout-boundary-guard.mjs';
 // @ts-expect-error Complete historical validation chain.
 import {m1ParentReader} from '../../scripts/m1-readiness-boundary-guard.mjs';
+// @ts-expect-error Node-only RC successor.
+import {rcRepairParentReader} from '../../scripts/2-1-rc-backup-asset-version-repair-guard.mjs';
 it('validates version-only 2.1 release candidate before immutable M4/M3/M2/M1 projection and rejects drift',()=>{
   const proof=JSON.parse(readFileSync('docs/architecture/ai-studio-2-1-closeout.json','utf8'));
   expect(closeoutParentReader('.').violations).toEqual([]);
   expect(m1ParentReader('.').violations).toEqual([]);
-  expect(m1ParentReader('.').backendAggregateSha256).toBe(proof.backend.afterAggregateHash);
+  expect(m1ParentReader('.').backendAggregateSha256).toBe(rcRepairParentReader('.').backendAggregateSha256);
   for(const mutate of [
     (p:typeof proof)=>{p.parentHead='0'.repeat(40);},
     (p:typeof proof)=>{p.paths['src-tauri/Cargo.toml'].afterHash='0'.repeat(64);},

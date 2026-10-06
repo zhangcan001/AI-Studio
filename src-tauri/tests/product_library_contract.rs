@@ -281,6 +281,93 @@ async fn phase5_target3_media_details_provenance_and_scope() {
 }
 
 #[tokio::test]
+async fn rc_backup_restored_library_detail_and_versions_remain_readable() {
+    use ai_studio_lib::application::project_backup_service::ProjectBackupService;
+    use sha2::{Digest, Sha256};
+    let f = Fixture::new().await;
+    f.asset("ast_rc_backup", "prj_default", "image").await;
+    let checksum = format!("{:x}", Sha256::digest(b"fixture"));
+    sqlx::query("UPDATE assets SET sha256=?,file_size=7 WHERE id='ast_rc_backup'")
+        .bind(&checksum)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let location: String =
+        sqlx::query_scalar("SELECT storage_path FROM assets WHERE id='ast_rc_backup'")
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    f.data
+        .create_version(
+            "prj_default",
+            "ast_rc_backup",
+            1,
+            serde_json::json!({}),
+            &location,
+            checksum,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+    // Model an old persisted restore without admitting legacy IDs through any write API.
+    sqlx::query(
+        "UPDATE asset_versions SET id='asv_rc_library_legacy' WHERE asset_id='ast_rc_backup'",
+    )
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let LibraryVersions::Asset { versions } = f
+        .operations()
+        .versions_get("prj_default", &asset_ref("ast_rc_backup"))
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(versions[0].id, "asv_rc_library_legacy");
+    let backup = ProjectBackupService::new(
+        Arc::new(SqliteProjectBackupRepository::new(f.pool.clone())),
+        f._dir.path().join("restored-projects"),
+        f._dir.path().join("backup-cache"),
+    );
+    let path = f._dir.path().join("library.aiarchive");
+    backup.export("prj_default", path.clone()).await.unwrap();
+    let preview = backup.inspect(path).await.unwrap();
+    let restored = backup.restore(&preview.inspection_id).await.unwrap();
+    let id: String = sqlx::query_scalar("SELECT id FROM assets WHERE project_id=?")
+        .bind(&restored.id)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        f.facade().get(&restored.id, &asset_ref(&id)).await.unwrap(),
+        LibraryDetail::Asset { .. }
+    ));
+    let LibraryVersions::Asset { versions } = f
+        .operations()
+        .versions_get(&restored.id, &asset_ref(&id))
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(versions.len(), 1);
+    assert!(versions[0].id.starts_with("av_"));
+    let old: String =
+        sqlx::query_scalar("SELECT id FROM asset_versions WHERE asset_id='ast_rc_backup'")
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert_eq!(old, "asv_rc_library_legacy");
+    assert_eq!(std::fs::read(location).unwrap(), b"fixture");
+    assert!(f
+        .operations()
+        .versions_get("prj_default", &asset_ref(&id))
+        .await
+        .is_err());
+}
+
+#[tokio::test]
 async fn phase5_target4_prompt_edit_and_immutable_versions() {
     let f = Fixture::new().await;
     let p = f

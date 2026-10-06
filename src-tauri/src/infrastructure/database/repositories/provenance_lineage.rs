@@ -243,7 +243,7 @@ impl GenerationAssetVersionRow {
                     format!("invalid value {}", self.ordinal),
                 )
             })?,
-            AssetVersionId::parse(self.asset_version_id).map_err(|error| {
+            AssetVersionId::parse_persisted(self.asset_version_id).map_err(|error| {
                 map_domain_error("generation_asset_versions asset_version_id", error)
             })?,
             GenerationAssetVersionRelationType::try_from_db(&self.relation_type).map_err(
@@ -460,6 +460,90 @@ mod tests {
             .insert_asset_version_link(&invalid)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn legacy_asset_version_and_lineage_hydrate_without_rewriting_stored_ids() {
+        let (_directory, pool, task, repository) = setup().await;
+        let assets = SqliteAssetRepository::new(pool.clone());
+        let asset = Asset::new_image(
+            AssetId::parse("ast_legacy").unwrap(),
+            "project-1",
+            "Legacy",
+            "legacy.png",
+            "C:/project/legacy.png",
+            "legacy-sha",
+            "image/png",
+            2,
+            2,
+            64,
+            task.id.clone(),
+            json!({"source": "test"}),
+            now(),
+        )
+        .unwrap();
+        let mapping = TaskOutputAssetMapping {
+            task_id: task.id.clone(),
+            output_id: "legacy_output".into(),
+            ordinal: 0,
+            asset_id: asset.id.clone(),
+            created_at: now(),
+        };
+        assets
+            .insert_generated_outputs(&[asset.clone()], &[mapping])
+            .await
+            .unwrap();
+        let canonical = assets
+            .current_asset_version("project-1", &asset.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(canonical.id.as_str().starts_with("av_"));
+        // Only an owned historical fixture writes legacy identity; no production API does.
+        sqlx::query("UPDATE asset_versions SET id = 'asv_legacy_test' WHERE id = ?")
+            .bind(canonical.id.as_str())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO generation_asset_versions (id,generation_id,output_id,ordinal,asset_version_id,relation_type,created_at) VALUES ('gav_legacy_test',?,'legacy_output',0,'asv_legacy_test','OUTPUT',?)")
+            .bind(task.id.as_str()).bind(now().to_rfc3339()).execute(&pool).await.unwrap();
+        let before: (String, String) = sqlx::query_as("SELECT av.id,gav.asset_version_id FROM asset_versions av JOIN generation_asset_versions gav ON gav.asset_version_id=av.id WHERE av.id='asv_legacy_test'")
+            .fetch_one(&pool).await.unwrap();
+        let versions = assets
+            .list_asset_versions("project-1", &asset.id)
+            .await
+            .unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].id.as_str(), "asv_legacy_test");
+        assert_eq!(
+            assets
+                .current_asset_version("project-1", &asset.id)
+                .await
+                .unwrap()
+                .unwrap(),
+            versions[0]
+        );
+        let links = repository
+            .list_asset_version_links("project-1", &task.id)
+            .await
+            .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].asset_version_id, versions[0].id);
+        assert!(assets
+            .list_asset_versions("project-2", &asset.id)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(repository
+            .list_asset_version_links("project-2", &task.id)
+            .await
+            .unwrap()
+            .is_empty());
+        let after: (String, String) = sqlx::query_as("SELECT av.id,gav.asset_version_id FROM asset_versions av JOIN generation_asset_versions gav ON gav.asset_version_id=av.id WHERE av.id='asv_legacy_test'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(before, after);
+        assert_eq!(before, ("asv_legacy_test".into(), "asv_legacy_test".into()));
+        assert!(AssetVersionId::parse(&before.0).is_err());
     }
 
     #[tokio::test]

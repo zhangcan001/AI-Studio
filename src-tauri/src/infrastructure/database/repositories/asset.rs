@@ -650,7 +650,7 @@ impl AssetVersionRow {
             RepositoryError::serialization("asset_versions metadata_snapshot", "missing value")
         })?;
         let version = AssetVersion::new(
-            AssetVersionId::parse(self.id)
+            AssetVersionId::parse_persisted(self.id)
                 .map_err(|error| map_domain_error("asset_versions id", error))?,
             self.project_id,
             AssetId::parse(self.asset_id)

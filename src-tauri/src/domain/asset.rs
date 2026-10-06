@@ -469,6 +469,17 @@ impl AssetVersionId {
         }
     }
 
+    /// Hydrate historical stored identities without legitimizing legacy IDs for inputs.
+    /// Never use this seam to allocate a new version or validate a command.
+    pub(crate) fn parse_persisted(value: impl Into<String>) -> Result<Self, AssetDomainError> {
+        let value = value.into();
+        if value.starts_with("asv_") && value.len() > "asv_".len() {
+            Ok(Self(value))
+        } else {
+            Self::parse(value)
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -676,3 +687,28 @@ impl fmt::Display for AssetDomainError {
 }
 
 impl Error for AssetDomainError {}
+
+#[cfg(test)]
+mod asset_version_identity_tests {
+    use super::AssetVersionId;
+
+    #[test]
+    fn public_identity_stays_canonical_and_persisted_legacy_is_read_only() {
+        assert!(AssetVersionId::new().as_str().starts_with("av_"));
+        assert_eq!(
+            AssetVersionId::parse("av_test").unwrap().as_str(),
+            "av_test"
+        );
+        assert!(AssetVersionId::parse("asv_test").is_err());
+        for value in ["av_test", "asv_test"] {
+            assert_eq!(
+                AssetVersionId::parse_persisted(value).unwrap().as_str(),
+                value
+            );
+        }
+        for value in ["", "av_", "asv_", "asv", "legacy_av_x", "foo_x"] {
+            assert!(AssetVersionId::parse(value).is_err(), "{value}");
+            assert!(AssetVersionId::parse_persisted(value).is_err(), "{value}");
+        }
+    }
+}

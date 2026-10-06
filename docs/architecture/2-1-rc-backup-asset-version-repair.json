@@ -1,0 +1,99 @@
+{
+  "checkpoint": "AI_STUDIO_2_1_RC_BACKUP_ASSET_VERSION_IDENTITY_REPAIR",
+  "schemaVersion": 1,
+  "parentHead": "ed2f0c72e3f77c93b51f60e6af5475e51abb7e0b",
+  "paths": {
+    "scripts/2-1-rc-backup-asset-version-repair-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "1b7b7c86235208970530de3596d2054e6d6c212903b81b10c02a6a04b13f5d3c"
+    },
+    "scripts/ai-studio-2-1-closeout-boundary-guard.mjs": {
+      "beforeHash": "7f4feea5d2f4e3c5b32339b144d6274403839d7a02a316dde21dd0c8b6cf2c4a",
+      "afterHash": "80c960ef0a7566238cdd010a1ff1aac7950f8636d80fed4c438936400fbf5544"
+    },
+    "scripts/phase14-release-guard.mjs": {
+      "beforeHash": "3c6a7ea9b33e930fba7468e5d3051affa4eb0d2728e4e4a092561aa22ecc55a6",
+      "afterHash": "8c23f5340b6d06621c0db1aea9b4d2f08dee079aecf9d3a7309c3d9d270d246a"
+    },
+    "src-tauri/src/application/project_backup_service.rs": {
+      "beforeHash": "7571517e4b767a60a95b0f60b2476c0e4074a174b85c37bbd4b1d86933344e43",
+      "afterHash": "0f61daf409fffe20a530deb9f7fcced4356a83b500ee22b8ef44cc503cccc5ce"
+    },
+    "src-tauri/src/domain/asset.rs": {
+      "beforeHash": "f0be54abd1247ca48673a00c4dbcd252e4285be92e9a600233fca0258815f1ac",
+      "afterHash": "3328d37d93646dd8c6015c35bb6fd28d8e59bcc5198a7ed8ad706e8c86ebc60b"
+    },
+    "src-tauri/src/infrastructure/database/repositories/asset.rs": {
+      "beforeHash": "62fb90e63b439f0d67c104f9bb3f2e6daa385a1964e91111367900dcdaa3ab06",
+      "afterHash": "1489cf9cf63cd6d7093c609d7970d8b08e86519e8988328e00f13627afa68aa4"
+    },
+    "src-tauri/src/infrastructure/database/repositories/provenance_lineage.rs": {
+      "beforeHash": "9ddd657474cfee762cf5533c5462237385dfe3350f41f6cc1eb957fb2d8e83d2",
+      "afterHash": "99859bc582717a6c6e93d00019de375911988064724644becb026e7c33988e16"
+    },
+    "src-tauri/tests/dev051_consistency_assets.rs": {
+      "beforeHash": "17e1f96a3445be462f9a88ac183f69e6ae934a1c50e78dd76c9cb57d2e8f2a55",
+      "afterHash": "fccf1a11770999dceb04cc23aab71d733e186fba074169cbd1b6774f5a291e74"
+    },
+    "src-tauri/tests/product_library_contract.rs": {
+      "beforeHash": "7a584e869a82304244120a5151206ed82ff6c491e2e37e02f0dbea8c56835582",
+      "afterHash": "431c7172fd31946cb1b388cd63069b51d94e7b869d0f240e757297cf150f2449"
+    },
+    "src/app/AIStudio21CloseoutBoundary.test.ts": {
+      "beforeHash": "56658c0ad19ab1100e2ef1af17e71acfe31a7221773e47766c275a9dca93ae43",
+      "afterHash": "e83ba235400dbcbc8beced7ad0f42f395f52df322d2c20bf31876a00918c5dfb"
+    },
+    "src/app/RCBackupAssetVersionRepairBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "1647f45d19bd2cc838bd5ae3059b9ad37ddfb8dc6e2733d852903b4c94d2f1b2"
+    }
+  },
+  "backend": {
+    "beforeFiles": 345,
+    "afterFiles": 345,
+    "beforeAggregateHash": "6eb2d6140414d096d80827496c29a34a0e30daa432e9593c2391b87af0845456",
+    "afterAggregateHash": "1c1a33faee8b7e0f4908dedb14672fb8d7743fc4d5f5aea6aabdfa4a304cdd02",
+    "untouchedAggregateHash": "491c15184be9e21a78402ef39797bff05b8f2b397bb850327d174651af9d7d45"
+  },
+  "tests": {
+    "beforeFiles": 55,
+    "afterFiles": 55,
+    "beforeAggregateHash": "20277edc63665e6cc666a7dbf749e97c17e741794881ae7eb24e80eea9065fec",
+    "afterAggregateHash": "6fce4c0e0d1b44744e03c1d7965ed454337e764032722c64e4196ff11c3c26b9",
+    "untouchedAggregateHash": "f7a275efbf2ec6999934c5d94c3018202f1a447f26270e099a89a2fc9196aa7a"
+  },
+  "frontend": {
+    "beforeFiles": 494,
+    "afterFiles": 495,
+    "beforeAggregateHash": "0122dc69e9a11c41f19f1af7f603aae517d004d310b7035cdcc09ef5ed7faead",
+    "afterAggregateHash": "89cb198c53eda72c8eb2ee1331dc75f43c38d994e5efd68129d24d018f660ef0",
+    "untouchedAggregateHash": "c219e66266c7ee0991ff69812d9d1fd3950f1d66f764aaea31d3e1b8e9167461"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "afterAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "untouchedAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa"
+  },
+  "scripts": {
+    "beforeFiles": 26,
+    "afterFiles": 27,
+    "beforeAggregateHash": "551ec6cf15f6d921f43c3c141dbf58e18ee055bc537ce211ac131d38ee672bb2",
+    "afterAggregateHash": "4c942449baf5f520f9b69f8ecfab4216f3e6265488220719a82c50e42f813a31",
+    "untouchedAggregateHash": "738f4de2c8ff81dda3071007a1d9190ff57cac32a14d32ce211b9a2aeb741c97"
+  },
+  "invariants": {
+    "legacyAsvNewWrites": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "queueAuthorityChanged": false,
+    "taskStateMachineChanged": false,
+    "workflowCompilerChanged": false,
+    "comfySubmissionChanged": false,
+    "bindingOccChanged": false,
+    "remoteTelemetry": false,
+    "assetVersionCanonicalPrefix": "av_",
+    "legacyAsvReadOnly": true
+  }
+}

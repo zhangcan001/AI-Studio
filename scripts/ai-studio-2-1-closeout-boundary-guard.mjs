@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { rcRepairParentReader } from './2-1-rc-backup-asset-version-repair-guard.mjs';
+
 export const CLOSEOUT_PARENT = '76a261607021d2ad10baef740d0afe9aebb6fc6f';
 const existing = ['package.json','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/tauri.conf.json','scripts/testing/release-config.test.ts','scripts/m4-readonly-media-integrity-boundary-guard.mjs','src-tauri/src/infrastructure/database/dev048_consistency_e2e.rs'].sort();
 const added = ['scripts/ai-studio-2-1-closeout-boundary-guard.mjs','src/app/AIStudio21CloseoutBoundary.test.ts'].sort();
@@ -23,9 +25,10 @@ function parentBlobs(root) {
   if(offset!==bytes.length)throw Error('Closeout parent trailing bytes');immutable.set(root,blobs);return blobs;
 }
 export function closeoutParentReader(root,override) {
-  const disk=p=>normalize(readFileSync(join(root,p),'utf8'));
+  const repair=rcRepairParentReader(root);
+  const disk=p=>normalize(repair.read(p));
   const proof=override??JSON.parse(disk('docs/architecture/ai-studio-2-1-closeout.json'));
-  const violations=[],fail=s=>violations.push(`closeout-${s}`);
+  const violations=[...repair.violations],fail=s=>violations.push(`closeout-${s}`);
   if(proof.schemaVersion!==1||proof.checkpoint!=='AI_STUDIO_2_1_CLOSEOUT'||proof.parentHead!==CLOSEOUT_PARENT)fail('header');
   if(JSON.stringify(Object.keys(proof.paths??{}).sort())!==JSON.stringify([...existing,...added].sort()))fail('scope');
   for(const flag of ['businessRuntimeChanged','schemaChanged','backupFormatChanged','queueAuthorityChanged','taskStateMachineChanged','workflowCompilerChanged','comfySubmissionChanged','bindingOccChanged','remoteTelemetry'])if(proof.invariants?.[flag]!==false)fail(`invariant:${flag}`);
@@ -35,7 +38,7 @@ export function closeoutParentReader(root,override) {
   for(const p of existing)if(proof.paths[p].beforeHash!==hash(before(p))||proof.paths[p].afterHash!==hash(disk(p)))fail(`path:${p}`);
   for(const p of added)if(blobs.has(p)||proof.paths[p].beforeHash!==null||proof.paths[p].afterHash!==hash(disk(p)))fail(`addition:${p}`);
   for(const [name,dir,pattern] of [['backend','src-tauri/src',/\.rs$/],['frontend','src',/\.tsx?$/],['styles','src',/\.css$/],['scripts','scripts',/\.(?:mjs|ts)$/]]){
-    const base=[...blobs.keys()].filter(p=>p.startsWith(`${dir}/`)&&pattern.test(p)),current=files(root,dir,pattern),expected=[...base,...added.filter(p=>p.startsWith(`${dir}/`)&&pattern.test(p))].sort(),untouched=base.filter(p=>!existing.includes(p)),r=proof[name];
+    const base=[...blobs.keys()].filter(p=>p.startsWith(`${dir}/`)&&pattern.test(p)),current=files(root,dir,pattern).filter(p=>!repair.addedPaths.includes(p)),expected=[...base,...added.filter(p=>p.startsWith(`${dir}/`)&&pattern.test(p))].sort(),untouched=base.filter(p=>!existing.includes(p)),r=proof[name];
     if(JSON.stringify(current)!==JSON.stringify(expected)||r?.beforeFiles!==base.length||r?.afterFiles!==current.length)fail(`${name}-files`);
     if(r?.beforeAggregateHash!==aggregate(base,before)||r?.afterAggregateHash!==aggregate(current,disk)||r?.untouchedAggregateHash!==aggregate(untouched,before)||r?.untouchedAggregateHash!==aggregate(untouched,disk))fail(`${name}-aggregate`);
   }
@@ -51,5 +54,5 @@ export function closeoutParentReader(root,override) {
   if(disk(rustReleaseTest)!==before(rustReleaseTest).replaceAll('2.0.0-personal','2.1.0-personal'))fail('rust-release-test-semantics');
   if(!disk('README.md').includes('NOT YET PUBLISHED')||!disk('README.md').includes('v2.0.0-personal-r4')||!disk('docs/AI_STUDIO_2_1_ROADMAP.md').includes('PRODUCT_WORK_COMPLETE=YES')||!disk('docs/RELEASE_NOTES_v2.1.0-personal.md').includes('This document does not announce a Git tag or GitHub Release.'))fail('publication-docs');
   if(violations.length)return rejected();
-  return {violations,addedPaths:added,afterHashes:Object.fromEntries(existing.map(p=>[p,proof.paths[p].afterHash])),backendAggregateSha256:proof.backend.afterAggregateHash,read:p=>existing.includes(p)?before(p):disk(p)};
+  return {violations,addedPaths:[...added,...repair.addedPaths],afterHashes:{...Object.fromEntries(existing.map(p=>[p,proof.paths[p].afterHash])),...repair.afterHashes},backendAggregateSha256:repair.backendAggregateSha256,read:p=>existing.includes(p)?before(p):disk(p)};
 }
