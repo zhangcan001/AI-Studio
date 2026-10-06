@@ -1,8 +1,23 @@
 # AI Studio 2.1 聚焦路线图
 
-日期：2026-10-04。状态：PROPOSED / NOT IMPLEMENTED。
-依据：[r4 产品审计](AI_STUDIO_POST_R4_PRODUCT_AUDIT.md)，源码基线 `8a503f6ab45bedb2b7f272d1f755abe915d7b70a`。
-稳定发布仍是 `v2.0.0-personal-r4`；本轮不 bump version、不创建 tag/release。
+更新：2026-10-06。状态：IMPLEMENTED / PRODUCT WORK COMPLETE。
+
+```text
+M1=PASS
+M2=PASS
+M3=PASS
+M4=PASS
+PRODUCT_WORK_COMPLETE=YES
+RELEASED=NO
+CURRENT_CANDIDATE=2.1.0-personal
+PUBLIC_STABLE_RELEASE=v2.0.0-personal-r4
+F12=CLOSED — LIVE README UPDATED
+```
+
+M1–M4 已冻结；后续发布需独立 Publication Gate。M3 仅交付 Library 分页和现有完整任务历史入口；混合 Runs 全历史分页不在本轮范围。M4 仅显式只读检查；relink/replacement/auto repair 继续延期。
+
+以下保留 2026-10-04 原始路线图的计划措辞与估算，不代表当前仍未实现。
+历史审计源码基线：`8a503f6ab45bedb2b7f272d1f755abe915d7b70a`。
 
 ## 1. Objective
 

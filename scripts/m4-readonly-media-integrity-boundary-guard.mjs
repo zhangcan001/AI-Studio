@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { closeoutParentReader } from './ai-studio-2-1-closeout-boundary-guard.mjs';
 
 export const M4_MEDIA_PARENT = '7926f74ea3a77771d489fc834c93ed876d64163c';
 const ADDED_COMMAND = {"name": "product_library_media_verify", "signature": "#[tauri::command(rename_all = \"camelCase\")] pub async fn product_library_media_verify( state: State<'_, AppState>, project_id: String, resource: ResourceRef, ) -> Result<crate::application::asset_query_service::MediaIntegrityReport, ProductError>"};
@@ -40,15 +41,16 @@ function parentBlobs(root, paths) {
 export function m4MediaParentReader(root, override) {
   // Memoize reads only within this synchronous validation; no live cache survives
   // a call or replaces a fresh fail-closed read. Parent blobs alone persist.
+  const closeout = closeoutParentReader(root);
   const live = new Map();
-  const disk = (_root,p) => { if (!live.has(p)) live.set(p,text(readFileSync(join(root,p),'utf8'))); return live.get(p); };
+  const disk = (_root,p) => { if (!live.has(p)) live.set(p,text(closeout.read(p))); return live.get(p); };
   const review = override ?? JSON.parse(disk(root, 'docs/architecture/m4-1-readonly-media-integrity.json'));
-  const violations = [], fail = s => violations.push(`m4-1-${s}`);
+  const violations = [...closeout.violations], fail = s => violations.push(`m4-1-${s}`);
   if (review.checkpoint !== 'M4_1_READONLY_MEDIA_INTEGRITY' || review.parentHead !== M4_MEDIA_PARENT || review.schemaVersion !== 1) fail('invalid-header');
   if (JSON.stringify(Object.keys(review.paths ?? {}).sort()) !== JSON.stringify([...existing, ...added].sort())) fail('path-set');
   for (const flag of ["assetRepositoryAuthorityChanged", "assetStoreAuthorityChanged", "mediaRepairAuthorityAdded", "mediaRelinkAdded", "maintenancePersistenceAdded", "newMaintenanceStore", "newPollingOwner", "newBackgroundScanner", "queueAuthorityChanged", "taskStateMachineChanged", "workflowEngineChanged", "bindingOccChanged", "schemaChanged", "backupFormatChanged", "remoteTelemetry"]) if (review.invariants?.[flag] !== false) fail(`invariant:${flag}`);
   // Invalid proof shape/invariants fail closed without any historical projection.
-  if (violations.length) return { violations, addedPaths: added, addedCommandSignatures: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => disk(root,p) };
+  if (violations.length) return { violations, addedPaths: [...added,...closeout.addedPaths], addedCommandSignatures: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => disk(root,p) };
   // Only immutable Git objects/file sets are reused. Every live byte and full
   // untouched aggregate is still read and validated anew on every invocation.
   if (!parentFileSets.has(root)) parentFileSets.set(root, execFileSync('git', ['ls-tree', '-r', '--name-only', M4_MEDIA_PARENT, 'src', 'src-tauri/src', 'scripts', 'src-tauri/tests/product_library_contract.rs', 'src-tauri/examples/phase12_query_profile.rs'],
@@ -58,7 +60,7 @@ export function m4MediaParentReader(root, override) {
   for (const p of existing) if (review.paths?.[p]?.beforeHash !== hash(before(p)) || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`path-drift:${p}`);
   for (const p of added) if (blobs.has(p) || review.paths?.[p]?.beforeHash !== null || review.paths?.[p]?.afterHash !== hash(disk(root, p))) fail(`addition-drift:${p}`);
   for (const [name, folder, pattern] of [['backend', 'src-tauri/src', /\.rs$/], ['frontend', 'src', /\.tsx?$/], ['styles', 'src', /\.css$/], ['scripts', 'scripts', /\.mjs$/]]) {
-    const base = listed.filter(p => p.startsWith(`${folder}/`) && pattern.test(p)), current = files(root, folder, pattern);
+    const base = listed.filter(p => p.startsWith(`${folder}/`) && pattern.test(p)), current = files(root, folder, pattern).filter(p=>!closeout.addedPaths.includes(p));
     const expected = [...base, ...added.filter(p => p.startsWith(`${folder}/`) && pattern.test(p))].sort();
     const unchanged = base.filter(p => !existing.includes(p));
     const proof = review[name];
@@ -87,8 +89,8 @@ export function m4MediaParentReader(root, override) {
   if(JSON.stringify(migrations)!==JSON.stringify(prior)||migrations.some(p=>/\/043/.test(p)))fail('migration-drift');
   const oldMigrations=parentBlobs(root,prior);
   if(aggregate(migrations,p=>disk(root,p))!==aggregate(prior,p=>oldMigrations.get(p)))fail('migration-bytes');
-  return { violations, addedCommandSignatures: violations.length?[]:[ADDED_COMMAND], addedPaths: added,
-    afterHashes: Object.fromEntries(Object.entries(review.paths??{}).map(([p,proof])=>[p,proof.afterHash])),
-    backendAggregateSha256: violations.length?undefined:review.backend.afterAggregateHash,
+  return { violations, addedCommandSignatures: violations.length?[]:[ADDED_COMMAND], addedPaths: [...added,...closeout.addedPaths],
+    afterHashes: {...Object.fromEntries(Object.entries(review.paths??{}).map(([p,proof])=>[p,proof.afterHash])),...closeout.afterHashes},
+    backendAggregateSha256: violations.length?undefined:closeout.backendAggregateSha256,
     read:p=>violations.length||!existing.includes(p)?disk(root,p):before(p) };
 }

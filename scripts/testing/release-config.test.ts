@@ -9,7 +9,7 @@ describe('personal release Windows bundle compatibility', () => {
     const cargo = readFileSync('src-tauri/Cargo.toml', 'utf8');
     expect(config.version).toBe(json('package.json').version);
     expect(cargo.match(/^version = "([^"]+)"/m)?.[1]).toBe(config.version);
-    expect(config.version).toBe('2.0.0-personal');
+    expect(config.version).toBe('2.1.0-personal');
   });
 
   it('supplies a numeric MSI version instead of deriving a nonnumeric prerelease', () => {
