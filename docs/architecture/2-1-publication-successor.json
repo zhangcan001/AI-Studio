@@ -30,7 +30,7 @@
     },
     "scripts/2-1-publication-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "3f97bc6c30a86f545b39d2e89ef93504ab2f61596014fc082344517b1e8d36ce"
+      "afterHash": "5919fc1f77e408105f5cf1ee8fd6380af55958b98a333f7cf77557ed5556623b"
     },
     "scripts/2-1-rc-backup-asset-version-repair-guard.mjs": {
       "beforeHash": "44b810f2ee20cc956176fe8cebf8f94922a3505f27f3101473d18fa97d57c52d",
@@ -38,7 +38,7 @@
     },
     "src/app/AIStudio21PublicationBoundary.test.ts": {
       "beforeHash": null,
-      "afterHash": "00f1907323bcac6830fc30f7a7c42c1ddc7a98d04191e5cacc584eebf7604b9e"
+      "afterHash": "7b812d2cbb89512cffb4718c237d30796c7bf458b4725c9e580f5cd3708e4088"
     }
   },
   "backend": {
@@ -59,7 +59,7 @@
     "beforeFiles": 495,
     "afterFiles": 496,
     "beforeAggregateHash": "89cb198c53eda72c8eb2ee1331dc75f43c38d994e5efd68129d24d018f660ef0",
-    "afterAggregateHash": "3623fb9d581e1c626c3103bcc556cdbac4646c5d3fadaf15a9e036a8018252d9",
+    "afterAggregateHash": "06c42db0caf30770c48df1443fdcb91c1261e4c45b2b0ff57735515d9909ff99",
     "untouchedAggregateHash": "89cb198c53eda72c8eb2ee1331dc75f43c38d994e5efd68129d24d018f660ef0"
   },
   "styles": {
@@ -73,7 +73,7 @@
     "beforeFiles": 27,
     "afterFiles": 28,
     "beforeAggregateHash": "f15656d8d8ae39e11854bceab954e16ec03902496128a6c5097d1cdb1d80747b",
-    "afterAggregateHash": "498d0ea5397efb6b2091c62213ad4273505b240e19ca31e832fd428b81595594",
+    "afterAggregateHash": "165fc96292843920f6f0904445c8a6477a47ad71022a9362a05be22b358efdbd",
     "untouchedAggregateHash": "29f16c21dd12cc20a21108788ff2c8c7f5a88336bab44f6861abfd9e9d2672b9"
   },
   "migrations": {

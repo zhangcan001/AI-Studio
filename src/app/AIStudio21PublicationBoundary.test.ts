@@ -89,6 +89,23 @@ it('fails closed on stale live docs and a missing tag in an owned fixture', () =
     // Cached immutable facts must not hide changed live evidence on later calls.
     writeFileSync(join(root, docs[0]), original);
     expect(publicationParentReader(root).violations).toEqual([]);
+    const guard = join(root, integration);
+    const guardBytes = readFileSync(guard, 'utf8');
+    writeFileSync(guard, guardBytes + '\n// owned invalid integration drift\n');
+    expect(publicationParentReader(root).violations).toContain(`publication-path:${integration}`);
+    writeFileSync(guard, guardBytes);
+    expect(publicationParentReader(root).violations).toEqual([]);
+    const config = join(root, 'src-tauri/tauri.conf.json');
+    const configBytes = readFileSync(config, 'utf8');
+    writeFileSync(config, configBytes + ' ');
+    expect(publicationParentReader(root).violations).toContain('publication-frozen-config:src-tauri/tauri.conf.json');
+    writeFileSync(config, configBytes);
+    const runtime = join(root, 'src-tauri/src/domain/asset.rs');
+    const runtimeBytes = readFileSync(runtime, 'utf8');
+    writeFileSync(runtime, runtimeBytes + '\n// owned invalid runtime drift\n');
+    expect(publicationParentReader(root).violations).toContain('publication-backend-untouched-bytes');
+    writeFileSync(runtime, runtimeBytes);
+    expect(publicationParentReader(root).violations).toEqual([]);
     writeFileSync(tagRef, '130cbbfaf67e1627fca7e447de322cf0f5f5ae85\n');
     const wrongTag = publicationParentReader(root);
     expect(wrongTag.violations).toContain('publication-tag-target');

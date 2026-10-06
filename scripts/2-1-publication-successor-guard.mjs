@@ -1,8 +1,8 @@
 // Validate published evidence before projecting immutable pre-publication history.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 export const PUBLICATION_PARENT = '130cbbfaf67e1627fca7e447de322cf0f5f5ae85';
 export const RELEASE_TAG_HEAD = '5af3f20273e722466c82b91ede4970cd83e0bcb8';
@@ -33,6 +33,26 @@ const files = (root, dir, pattern) => readdirSync(join(root, dir), {withFileType
   return e.isDirectory() ? files(root, p, pattern) : pattern.test(p) ? [p] : [];
 }).sort();
 const immutable = new Map();
+const reviewedAggregates = new Map();
+const peeledObjects = new Map();
+function liveTagTarget(root) {
+  const dotGit = resolve(root, '.git');
+  const gitDir = statSync(dotGit).isDirectory() ? dotGit :
+    resolve(root, readFileSync(dotGit, 'utf8').trim().replace(/^gitdir: /, ''));
+  const common = existsSync(join(gitDir, 'commondir')) ?
+    resolve(gitDir, readFileSync(join(gitDir, 'commondir'), 'utf8').trim()) : gitDir;
+  const ref = `refs/tags/${releaseTag}`, loose = join(common, ref);
+  let oid;
+  if (existsSync(loose)) oid = readFileSync(loose, 'utf8').trim();
+  else if (existsSync(join(common, 'packed-refs'))) oid = readFileSync(join(common, 'packed-refs'), 'utf8')
+    .split(/\r?\n/).find(line => line.endsWith(` ${ref}`))?.split(' ')[0];
+  if (!/^[a-f0-9]{40}$/.test(oid ?? '')) throw Error('Publication tag missing');
+  // Read the mutable ref every time. Only peeling the immutable object is reused.
+  const key = JSON.stringify([common, oid]);
+  if (!peeledObjects.has(key)) peeledObjects.set(key, execFileSync('git',
+    ['rev-list', '-n', '1', oid], {cwd: root, encoding: 'utf8', stdio: ['ignore','pipe','pipe']}).trim());
+  return peeledObjects.get(key);
+}
 function parentObjects(root) {
   if (immutable.has(root)) return immutable.get(root);
   const git = args => execFileSync('git', args, {cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024}).trim();
@@ -79,7 +99,7 @@ export function publicationParentReader(root, override) {
   try {
     proof = override ?? JSON.parse(disk(manifest));
     facts = parentObjects(root);
-    const tag = execFileSync('git', ['rev-list', '-n', '1', releaseTag], {cwd: root, encoding: 'utf8', stdio: ['ignore','pipe','pipe']}).trim();
+    const tag = liveTagTarget(root);
     if (tag !== RELEASE_TAG_HEAD) fail('tag-target');
   } catch { fail('missing-git-or-proof-evidence'); return rejected(); }
   if (proof.schemaVersion !== 1 || proof.checkpoint !== 'AI_STUDIO_2_1_PUBLICATION_SUCCESSOR' ||
@@ -103,9 +123,11 @@ export function publicationParentReader(root, override) {
   }
   for (const p of docs) if (disk(p) !== facts.read(p) || proof.paths[p].beforeHash !== proof.paths[p].afterHash) fail(`published-doc-drift:${p}`);
   for (const p of added) if (facts.all.includes(p) || proof.paths[p]?.beforeHash !== null || proof.paths[p]?.afterHash !== hash(disk(p))) fail(`addition:${p}`);
+  const inventories = new Map();
   for (const [name,dir,pattern] of groups) {
     const fixed = facts.fixed[name], r = proof[name];
-    const current = files(root, dir, pattern).filter(p => p !== manifest);
+    if (!inventories.has(dir)) inventories.set(dir, files(root, dir, /./));
+    const current = inventories.get(dir).filter(p => p !== manifest && pattern.test(p));
     const expected = [...fixed.base, ...added.filter(p => p.startsWith(`${dir}/`) && pattern.test(p))].sort();
     if (JSON.stringify(current) !== JSON.stringify(expected) || r?.beforeFiles !== fixed.base.length || r?.afterFiles !== current.length) fail(`${name}-files`);
     // Exact fresh byte equality proves unchanged groups without hashing identical
@@ -113,7 +135,20 @@ export function publicationParentReader(root, override) {
     const untouchedMatch = fixed.untouched.every(p => disk(p) === facts.read(p));
     const wholeGroupUnchanged = untouchedMatch && fixed.untouched.length === fixed.base.length &&
       JSON.stringify(current) === JSON.stringify(fixed.base);
-    const afterHash = wholeGroupUnchanged ? fixed.beforeHash : aggregate(current, disk);
+    const reviewed = [...existing, ...added].filter(p => current.includes(p));
+    const key = JSON.stringify([root, name, reviewed.map(p => [p, proof.paths[p].afterHash])]);
+    // Path hashes were checked above; fresh untouched byte equality is checked
+    // on every call. The expected aggregate is then content-addressed evidence,
+    // never a cached acceptance result or stale working-tree read.
+    const reviewedMatch = reviewed.every(p => hash(disk(p)) === proof.paths[p].afterHash);
+    let afterHash = fixed.beforeHash;
+    if (!wholeGroupUnchanged) {
+      if (!untouchedMatch || !reviewedMatch) afterHash = aggregate(current, disk);
+      else {
+        if (!reviewedAggregates.has(key)) reviewedAggregates.set(key, aggregate(current, disk));
+        afterHash = reviewedAggregates.get(key);
+      }
+    }
     if (r?.beforeAggregateHash !== fixed.beforeHash || r?.untouchedAggregateHash !== fixed.untouchedHash ||
       r?.afterAggregateHash !== afterHash) fail(`${name}-aggregate`);
     if (!untouchedMatch) fail(`${name}-untouched-bytes`);
