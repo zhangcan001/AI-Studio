@@ -14,8 +14,7 @@ const workflowPath = '.github/workflows/ci.yml';
 const normalize = s => s.replaceAll('\r\n', '\n');
 const hash = s => createHash('sha256').update(normalize(s)).digest('hex');
 const live = (root, path) => readFileSync(join(root, path), 'utf8');
-const parent = (root, path) => execFileSync('git', ['show', `${RELEASE_PARENT}:${path}`],
-  { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+
 const files = (root, dir) => readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
   const p = `${dir}/${e.name}`;
   return e.isDirectory() ? files(root, p) : p.endsWith('.rs') ? [p] : [];
@@ -33,6 +32,25 @@ export function releaseParentReader(root, reviewOverride) {
   if (proof.phase !== 14 || proof.schemaVersion !== 1 || proof.parentHead !== RELEASE_PARENT ||
       proof.reason !== 'release-compatibility-and-validation-resource-boundary') fail('invalid-release-proof');
   if (JSON.stringify(Object.keys(proof.paths ?? {}).sort()) !== JSON.stringify([rustPath, guardPath, ownPath, workflowPath].sort())) fail('reviewed-path-set');
+  const basePaths = execFileSync('git', ['ls-tree', '-r', '--name-only', RELEASE_PARENT, 'src-tauri/src'],
+    { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(p => p.endsWith('.rs')).sort();
+  // Batch immutable reads; never cache working-tree data.
+  const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: root,
+    input: [...basePaths, guardPath, workflowPath].map(p => `${RELEASE_PARENT}:${p}\n`).join(''), maxBuffer: 64 * 1024 * 1024 });
+  const blobs = new Map(); let offset = 0;
+  for (const path of [...basePaths, guardPath, workflowPath]) {
+    const end = bytes.indexOf(10, offset);
+    const m = /^[a-f0-9]+ blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
+    if (!m) throw Error('Release parent blob unavailable');
+    const length = Number(m[1]), start = end + 1;
+    blobs.set(path, bytes.subarray(start, start + length).toString('utf8'));
+    offset = start + length + 1;
+  }
+  if (offset !== bytes.length) fail('parent-blob-boundary');
+  const parent = (_root, path) => blobs.get(path);
+  // Exclude only additions already validated by the complete successor chain.
+  const livePaths = files(root, 'src-tauri/src').filter(path => !checkpoint.addedPaths?.includes(path));
+  if (JSON.stringify(basePaths) !== JSON.stringify(livePaths) || proof.backend.files !== livePaths.length) fail('backend-file-set');
   for (const path of [rustPath, guardPath, workflowPath]) {
     const p = proof.paths?.[path];
     if (p?.beforeHash !== hash(parent(root, path)) || p?.afterHash !== hash(live(root, path))) fail(`reviewed-path-drift:${path}`);
@@ -43,24 +61,6 @@ export function releaseParentReader(root, reviewOverride) {
   if (normalize(live(root, workflowPath)) !== oldWorkflow.replace(
       'run: pnpm test\n', 'run: pnpm test --maxWorkers=1\n')) fail('workflow-resource-scope');
   if (proof.paths?.[ownPath]?.beforeHash !== null || proof.paths?.[ownPath]?.afterHash !== hash(live(root, ownPath))) fail('new-guard-drift');
-  const basePaths = execFileSync('git', ['ls-tree', '-r', '--name-only', RELEASE_PARENT, 'src-tauri/src'],
-    { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).filter(p => p.endsWith('.rs')).sort();
-  // Exclude only additions already validated by the complete successor chain.
-  const livePaths = files(root, 'src-tauri/src').filter(path => !checkpoint.addedPaths?.includes(path));
-  if (JSON.stringify(basePaths) !== JSON.stringify(livePaths) || proof.backend.files !== livePaths.length) fail('backend-file-set');
-  // Batch immutable reads; never cache working-tree data.
-  const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: root,
-    input: basePaths.map(p => `${RELEASE_PARENT}:${p}\n`).join(''), maxBuffer: 64 * 1024 * 1024 });
-  const blobs = new Map(); let offset = 0;
-  for (const path of basePaths) {
-    const end = bytes.indexOf(10, offset);
-    const m = /^[a-f0-9]+ blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
-    if (!m) throw Error('Release parent blob unavailable');
-    const length = Number(m[1]), start = end + 1;
-    blobs.set(path, bytes.subarray(start, start + length).toString('utf8'));
-    offset = start + length + 1;
-  }
-  if (offset !== bytes.length) fail('parent-blob-boundary');
   const untouched = basePaths.filter(p => p !== rustPath);
   if (aggregate(basePaths, p => blobs.get(p)) !== proof.backend.beforeAggregateHash ||
       aggregate(livePaths, p => live(root, p)) !== proof.backend.afterAggregateHash ||

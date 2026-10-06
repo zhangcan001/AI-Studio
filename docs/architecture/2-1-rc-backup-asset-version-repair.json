@@ -17,7 +17,7 @@
     },
     "scripts/phase14-release-guard.mjs": {
       "beforeHash": "3c6a7ea9b33e930fba7468e5d3051affa4eb0d2728e4e4a092561aa22ecc55a6",
-      "afterHash": "8c23f5340b6d06621c0db1aea9b4d2f08dee079aecf9d3a7309c3d9d270d246a"
+      "afterHash": "eab520f7fa94b8ca4d375df965352e67f669ddfd7380d1482577ec90d5305e07"
     },
     "src-tauri/src/application/project_backup_service.rs": {
       "beforeHash": "7571517e4b767a60a95b0f60b2476c0e4074a174b85c37bbd4b1d86933344e43",
@@ -84,7 +84,7 @@
     "beforeFiles": 26,
     "afterFiles": 27,
     "beforeAggregateHash": "551ec6cf15f6d921f43c3c141dbf58e18ee055bc537ce211ac131d38ee672bb2",
-    "afterAggregateHash": "87ad29420364a0491482498da8ef1cd695c9ec39acba12e4959e08d0c0129ef7",
+    "afterAggregateHash": "f15656d8d8ae39e11854bceab954e16ec03902496128a6c5097d1cdb1d80747b",
     "untouchedAggregateHash": "738f4de2c8ff81dda3071007a1d9190ff57cac32a14d32ce211b9a2aeb741c97"
   },
   "invariants": {
