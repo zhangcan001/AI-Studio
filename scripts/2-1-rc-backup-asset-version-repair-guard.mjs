@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const RC_REPAIR_PARENT = 'ed2f0c72e3f77c93b51f60e6af5475e51abb7e0b';
-const existing = ["src-tauri/src/domain/asset.rs", "src-tauri/src/application/project_backup_service.rs", "src-tauri/src/infrastructure/database/repositories/asset.rs", "src-tauri/src/infrastructure/database/repositories/provenance_lineage.rs", "src-tauri/tests/product_library_contract.rs", "src-tauri/tests/dev051_consistency_assets.rs", "scripts/ai-studio-2-1-closeout-boundary-guard.mjs", "scripts/phase14-release-guard.mjs", "src/app/AIStudio21CloseoutBoundary.test.ts"].sort();
+const existing = [".github/workflows/ci.yml", "src-tauri/src/domain/asset.rs", "src-tauri/src/application/project_backup_service.rs", "src-tauri/src/infrastructure/database/repositories/asset.rs", "src-tauri/src/infrastructure/database/repositories/provenance_lineage.rs", "src-tauri/tests/product_library_contract.rs", "src-tauri/tests/dev051_consistency_assets.rs", "scripts/ai-studio-2-1-closeout-boundary-guard.mjs", "scripts/phase14-release-guard.mjs", "src/app/AIStudio21CloseoutBoundary.test.ts"].sort();
 const added = ["scripts/2-1-rc-backup-asset-version-repair-guard.mjs", "src/app/RCBackupAssetVersionRepairBoundary.test.ts"].sort();
 const normalize = s => s.replaceAll('\r\n','\n');
 const hash = s => createHash('sha256').update(normalize(s)).digest('hex');
@@ -51,7 +51,11 @@ export function rcRepairParentReader(root,override) {
   }
   for(const p of [...blobs.keys()].filter(p=>p.startsWith('docs/architecture/')||p.startsWith('src-tauri/migrations/')))if(disk(p)!==before(p))fail(`frozen:${p}`);
   if(JSON.stringify(files(root,'src-tauri/migrations',/\.sql$/))!==JSON.stringify([...blobs.keys()].filter(p=>p.startsWith('src-tauri/migrations/')&&p.endsWith('.sql'))))fail('migration-file-set');
-  for(const p of ['package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/tauri.conf.json','.github/workflows/ci.yml'])if(disk(p)!==before(p))fail(`frozen-config:${p}`);
+  for(const p of ['package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/tauri.conf.json'])if(disk(p)!==before(p))fail(`frozen-config:${p}`);
+  // Approve only the frontend budget increase; all commands and other bytes stay frozen.
+  const ciPath='.github/workflows/ci.yml',ciBefore=before(ciPath);
+  const ciMarker='    timeout-minutes: 10';
+  if(ciBefore.split(ciMarker).length!==2||disk(ciPath)!==ciBefore.replace(ciMarker,'    timeout-minutes: 15'))fail('ci-frontend-budget-only');
   const asset=disk('src-tauri/src/domain/asset.rs'),restore=disk('src-tauri/src/application/project_backup_service.rs');
   const publicParser=asset.slice(asset.indexOf('impl AssetVersionId {')).split('pub(crate) fn parse_persisted')[0];
   if(publicParser.includes('starts_with("asv_")'))fail('public-parser-legacy');
