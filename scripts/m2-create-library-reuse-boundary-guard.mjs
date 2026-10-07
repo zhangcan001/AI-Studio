@@ -36,6 +36,16 @@ function parentBlobs(root, paths) {
 }
 
 export function m2ReuseParentReader(root, override) {
+  // Invalid review metadata cannot authorize projection. Reject it before
+  // replaying the complete successor chain; live bytes remain unprojected.
+  // Do not cache acceptance or skip any byte checks for valid metadata.
+  if (override) {
+    const denied = [];
+    if (override.checkpoint !== 'M2_2_CREATE_LIBRARY_PRECISE_REUSE' || override.parentHead !== M2_REUSE_PARENT || override.schemaVersion !== 1) denied.push('m2-2-invalid-header');
+    if (JSON.stringify(Object.keys(override.paths ?? {}).sort()) !== JSON.stringify([...existing, ...added].sort())) denied.push('m2-2-path-set');
+    for (const flag of ['queueAuthorityChanged','taskStateMachineChanged','workflowEngineChanged','bindingOccChanged','reviewAuthorityChanged','shotSelectionAuthorityChanged','libraryAuthorityChanged','draftAuthorityChanged','promptLibraryAuthorityChanged','newSearchAuthority','newReuseStore','newRouter','newPollingOwner','schemaChanged','backupFormatChanged','remoteTelemetry']) if (override.invariants?.[flag] !== false) denied.push(`m2-2-invariant:${flag}`);
+    if (denied.length) return {violations: denied, addedPaths: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => text(readFileSync(join(root, p), 'utf8'))};
+  }
   // Memoize reads only within this synchronous validation; no live cache survives
   // a call or replaces a fresh fail-closed read. Parent blobs alone persist.
   const successor = m3LibraryParentReader(root);

@@ -43,3 +43,19 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
   expect(h3RepairParentReader(root).violations).toContain('h3-repair-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);
+
+// @ts-expect-error Node-only immutable boundary helper.
+import {m2ReuseParentReader} from '../../scripts/m2-create-library-reuse-boundary-guard.mjs';
+it('rejects impossible review metadata before historical replay and leaves live bytes unprojected',()=>{
+ const root=mkdtempSync(join(tmpdir(),'ai-studio-h3-invalid-review-'));
+ try {
+  const path='src/product/types.ts',value='live H3 resolution metadata';
+  mkdirSync(dirname(join(root,path)),{recursive:true});writeFileSync(join(root,path),value);
+  const proof=JSON.parse(readFileSync('docs/architecture/m2-2-create-library-reuse.json','utf8'));
+  proof.parentHead='0'.repeat(40);
+  const rejected=m2ReuseParentReader(root,proof);
+  expect(rejected.violations).toContain('m2-2-invalid-header');
+  expect(rejected.addedPaths).toEqual([]);expect(rejected.afterHashes).toEqual({});
+  expect(rejected.backendAggregateSha256).toBeUndefined();expect(rejected.read(path)).toBe(value);
+ } finally {rmSync(root,{recursive:true,force:true});}
+});

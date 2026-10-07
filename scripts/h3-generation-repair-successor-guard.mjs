@@ -15,7 +15,7 @@ const existing=[
  'src/features/create/createReadinessAction.ts','src/product/types.ts','src/product/client.test.ts',
  'scripts/2-1-publication-successor-guard.mjs',
  'scripts/2-1-rc-backup-asset-version-repair-guard.mjs',
- 'scripts/testing/release-boundary.test.ts',
+ 'scripts/m2-create-library-reuse-boundary-guard.mjs','scripts/testing/release-boundary.test.ts',
 ].sort();
 const added=['src-tauri/src/application/product/h3_resolution.rs',
  'scripts/h3-generation-repair-successor-guard.mjs','src/app/H3GenerationRepairBoundary.test.ts'].sort();

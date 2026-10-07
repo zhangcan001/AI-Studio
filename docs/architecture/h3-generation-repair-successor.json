@@ -26,7 +26,11 @@
     },
     "scripts/h3-generation-repair-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "e34b752432c4ede714c152ad16aeb68d119d1a42f559ab0d89d2cca4775f2fe4"
+      "afterHash": "62faf65946806cbbf9fd67984435e545a460545f8cc70079499a89e0635dd80a"
+    },
+    "scripts/m2-create-library-reuse-boundary-guard.mjs": {
+      "beforeHash": "22ef2fb217d74bfc5842891e55c5dce33c29d7155147455d0923d8ab5c768abe",
+      "afterHash": "9eb7c53d68b0bb0154ae506895695910e5e5e82f39e7e82cba2c7e5de6aa3bfb"
     },
     "scripts/testing/release-boundary.test.ts": {
       "beforeHash": "16871d0f579fe5a9c01aea7a83fa3657e009dc2435d123c68fc560d956ca6496",
@@ -54,7 +58,7 @@
     },
     "src/app/H3GenerationRepairBoundary.test.ts": {
       "beforeHash": null,
-      "afterHash": "bb83821f2b53a5c57245a74ef2d142018b903951513d34875edb90f246190948"
+      "afterHash": "7ee697ce89c40dffe66cdcc90850956567edd2b2d0031802f6f7fb4b44742d7f"
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "ab00673948be5b03adfd8df938ba2bd3dab8cf502f79280d77c28d156e13b255",
@@ -103,7 +107,7 @@
     "beforeFiles": 496,
     "afterFiles": 497,
     "beforeAggregateHash": "06c42db0caf30770c48df1443fdcb91c1261e4c45b2b0ff57735515d9909ff99",
-    "afterAggregateHash": "e1ca9acfebfb90cc2c52ff25f1459b104dbaa28260a310d62997d34ee7bf93b6",
+    "afterAggregateHash": "4096a4438c8dcf9734c98eb0a71e026a24c97e6b042f0eccdee7c67b1b8b2b60",
     "untouchedAggregateHash": "7bf489c36e1daea91f293994f07c4661ceb8b669ef0022e3c841e916dfb997be"
   },
   "styles": {
@@ -117,8 +121,8 @@
     "beforeFiles": 28,
     "afterFiles": 29,
     "beforeAggregateHash": "165fc96292843920f6f0904445c8a6477a47ad71022a9362a05be22b358efdbd",
-    "afterAggregateHash": "068483e22b9d5b4c72e6f1f81242bf9faeb9227db2befe775a1dd06bde28c8ec",
-    "untouchedAggregateHash": "a5c10cf77da4cab656ef52250c4036c83b478fdb1690c5a5175dd3cfca672e36"
+    "afterAggregateHash": "9959e325faf2883cbedd6cabff88f8756970047a8e4f29800719c9e052dee19a",
+    "untouchedAggregateHash": "1957e0744a39b60705317b602ebf002379b28a8373429ef581a954b9c17a0b43"
   },
   "migrations": {
     "beforeFiles": 42,
