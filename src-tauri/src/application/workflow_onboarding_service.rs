@@ -6340,7 +6340,8 @@ fn evaluate_capability_with_schema(
 }
 
 // Recognition retains all discovered roots for review. Execution, however,
-// belongs only to the validated outputs declared by this exact Recipe.
+// collects the outputs declared by this exact Recipe. ComfyUI also validates
+// executable output nodes in the submitted prompt, even when not collected.
 fn evaluate_runtime_recipe_capability(
     workflow: &WorkflowDocument,
     nodes: &[WorkflowNodeView],
@@ -6359,8 +6360,11 @@ fn evaluate_runtime_recipe_capability(
         .map(|root| (root.node_id.as_str(), root.output_type.as_str()))
         .collect::<BTreeSet<_>>();
     if let OutputRootResolution::Resolved { roots } = &mut analysis.output_root_resolution {
-        roots.retain(|root| declared.contains(&(root.node_id.as_str(), root.output_type.as_str())));
-        if declared.is_empty() || roots.len() != declared.len() {
+        let mapped = roots
+            .iter()
+            .filter(|root| declared.contains(&(root.node_id.as_str(), root.output_type.as_str())))
+            .count();
+        if declared.is_empty() || mapped != declared.len() {
             return unresolved_output_root_capability(
                 CapabilityState::UnknownOutputRoot,
                 "INVALID_OUTPUT_ROOT_MAPPING",
@@ -6368,6 +6372,14 @@ fn evaluate_runtime_recipe_capability(
                 Vec::new(),
             );
         }
+        roots.retain(|root| {
+            declared.contains(&(root.node_id.as_str(), root.output_type.as_str()))
+                || workflow
+                    .class_type(&root.node_id)
+                    .and_then(|class| schema.node(class))
+                    // Unknown schema cannot prove that a candidate is inert.
+                    .is_none_or(|node| node.output_node)
+        });
     }
     evaluate_capability_with_schema_and_analysis(
         workflow,
@@ -6404,20 +6416,36 @@ fn evaluate_capability_with_schema_and_output_roots(
 mod runtime_recipe_scope_tests {
     use super::*;
     fn capability(roots: Vec<OutputRootSelection>, break_video: bool) -> CapabilityCheckView {
-        let workflow = WorkflowDocument::parse(serde_json::json!({
+        capability_with_extra_saver(roots, break_video, None)
+    }
+    fn capability_with_extra_saver(
+        roots: Vec<OutputRootSelection>,
+        break_video: bool,
+        saver_schema: Option<bool>,
+    ) -> CapabilityCheckView {
+        let mut value = serde_json::json!({
             "1":{"class_type":"LoadImage","inputs":{"image":"fixture.png"}},
             "2":{"class_type":"VideoGenerator","inputs":if break_video { serde_json::json!({}) } else { serde_json::json!({"image":["1",0]}) }},
             "3":{"class_type":"SaveVideo","inputs":{"video":["2",0]}},
             "4":{"class_type":"ImageScaleToTotalPixels","inputs":{}},
             "5":{"class_type":"GetImageSize","inputs":{"image":["4",0]}}
-        })).unwrap();
-        let schema = RecognitionSchemaContext::parse(&serde_json::json!({
+        });
+        if saver_schema.is_some() {
+            value["6"] = serde_json::json!({"class_type":"SaveImage","inputs":{"images":["4",0]}});
+        }
+        let workflow = WorkflowDocument::parse(value).unwrap();
+        let mut schema_value = serde_json::json!({
             "LoadImage":{"output":["IMAGE"],"input":{"required":{"image":["STRING",{}]}}},
             "VideoGenerator":{"output":["VIDEO"],"input":{"required":{"image":["IMAGE",{}]}}},
             "SaveVideo":{"output":["VIDEO"],"output_node":true,"input":{"required":{"video":["VIDEO",{}]}}},
+            "SaveImage":{"output":[],"output_node":true,"input":{"required":{"images":["IMAGE",{}]}}},
             "ImageScaleToTotalPixels":{"output":["IMAGE"],"input":{"required":{"image":["IMAGE",{}]}}},
             "GetImageSize":{"output":["INT","INT","INT"],"input":{"required":{"image":["IMAGE",{}]}}}
-        }));
+        });
+        if saver_schema == Some(false) {
+            schema_value.as_object_mut().unwrap().remove("SaveImage");
+        }
+        let schema = RecognitionSchemaContext::parse(&schema_value);
         let nodes = inspect_workflow(&workflow).unwrap();
         evaluate_runtime_recipe_capability(&workflow, &nodes, &schema, &BTreeSet::new(), &roots)
     }
@@ -6433,6 +6461,25 @@ mod runtime_recipe_scope_tests {
         assert_eq!(cap.state, CapabilityState::Ready);
         assert!(cap.issues.is_empty());
         assert_eq!(cap.profile.unwrap().roots.len(), 1);
+    }
+    #[test]
+    fn uncollected_executable_saver_still_requires_valid_inputs() {
+        let cap = capability_with_extra_saver(vec![root("3", "video")], false, Some(true));
+        assert_ne!(cap.state, CapabilityState::Ready);
+        assert!(cap
+            .issues
+            .iter()
+            .any(|i| i.code == "INVALID_REQUIRED_INPUT" && i.node_id.as_deref() == Some("4")));
+    }
+    #[test]
+    fn unverified_uncollected_saver_is_not_assumed_inert() {
+        let cap = capability_with_extra_saver(vec![root("3", "video")], false, Some(false));
+        assert_ne!(cap.state, CapabilityState::Ready);
+        assert!(cap
+            .issues
+            .iter()
+            .any(|i| i.node_id.as_deref() == Some("6")
+                || i.class_type.as_deref() == Some("SaveImage")));
     }
     #[test]
     fn selected_invalid_branches_and_declared_multi_outputs_still_block() {

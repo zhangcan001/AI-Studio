@@ -53,7 +53,7 @@ export function h3RepairParentReader(root,override){
  if(JSON.stringify(Object.keys(proof.paths??{}).sort())!==JSON.stringify([...existing,...added].sort()))fail('scope');
  for(const flag of ['schemaChanged','backupFormatChanged','queueAuthorityChanged','bindingOccChanged',
   'recognitionSemanticsChanged','replayFixturesChanged','releaseAssetsReplaced','remoteTelemetry'])if(proof.invariants?.[flag]!==false)fail(`invariant:${flag}`);
- if(proof.invariants?.runtimeChanged!==true||proof.invariants?.recipeDeclaredOutputsOnly!==true||proof.invariants?.h3BaseNativeOnly!==true)fail('repair-contract');
+ if(proof.invariants?.runtimeChanged!==true||proof.invariants?.recipeAndExecutableOutputsChecked!==true||proof.invariants?.h3BaseNativeOnly!==true)fail('repair-contract');
  if(violations.length)return rejected();
  for(const p of existing)if(proof.paths[p]?.beforeHash!==h3Hash(facts.read(p))||proof.paths[p]?.afterHash!==h3Hash(disk(p)))fail(`path:${p}`);
  for(const p of added)if(facts.paths.includes(p)||proof.paths[p]?.beforeHash!==null||proof.paths[p]?.afterHash!==h3Hash(disk(p)))fail(`addition:${p}`);

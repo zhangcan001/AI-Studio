@@ -4,7 +4,7 @@
   "parentHead": "3a3e14a3bd1573a94dae4171848e910eab845f0c",
   "invariants": {
     "runtimeChanged": true,
-    "recipeDeclaredOutputsOnly": true,
+    "recipeAndExecutableOutputsChecked": true,
     "h3BaseNativeOnly": true,
     "schemaChanged": false,
     "backupFormatChanged": false,
@@ -26,7 +26,7 @@
     },
     "scripts/h3-generation-repair-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "45b3e7f1f51403004504ce02cde6b2ff7f50f98958d02028eaab06af28984857"
+      "afterHash": "e34b752432c4ede714c152ad16aeb68d119d1a42f559ab0d89d2cca4775f2fe4"
     },
     "scripts/testing/release-boundary.test.ts": {
       "beforeHash": "16871d0f579fe5a9c01aea7a83fa3657e009dc2435d123c68fc560d956ca6496",
@@ -50,7 +50,7 @@
     },
     "src-tauri/src/application/workflow_onboarding_service.rs": {
       "beforeHash": "a81fe029c4ff25eed0a94b9137d7b8a7836a3f33c09d13cae39bca0f00e392f3",
-      "afterHash": "e799450a1bf2a09de41ef648c810499461ec870372364da4f8cf76fe338641a5"
+      "afterHash": "8373fb44acafe880471b4bd490d4eab0949b08721af0fc55ceeeac8a142684d8"
     },
     "src/app/H3GenerationRepairBoundary.test.ts": {
       "beforeHash": null,
@@ -89,7 +89,7 @@
     "beforeFiles": 345,
     "afterFiles": 346,
     "beforeAggregateHash": "1c1a33faee8b7e0f4908dedb14672fb8d7743fc4d5f5aea6aabdfa4a304cdd02",
-    "afterAggregateHash": "311b3640be58339aa8d247210e01f6f5fdb5a8e871dc63391df5e77e65154106",
+    "afterAggregateHash": "1229b07194e65a975225fdfc6cd0cc4d16523b167d66f7fa14023aa18bcff66e",
     "untouchedAggregateHash": "f0e81080157348fa3a0ea0f4dc6e168a6dec1c79d716819a13710ac33f397fab"
   },
   "tests": {
@@ -117,7 +117,7 @@
     "beforeFiles": 28,
     "afterFiles": 29,
     "beforeAggregateHash": "165fc96292843920f6f0904445c8a6477a47ad71022a9362a05be22b358efdbd",
-    "afterAggregateHash": "4ff72ee5b553a278ebe03dad7164163e5c99d132b513cecc3925cbbe42aeca3f",
+    "afterAggregateHash": "068483e22b9d5b4c72e6f1f81242bf9faeb9227db2befe775a1dd06bde28c8ec",
     "untouchedAggregateHash": "a5c10cf77da4cab656ef52250c4036c83b478fdb1690c5a5175dd3cfca672e36"
   },
   "migrations": {
