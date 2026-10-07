@@ -3537,7 +3537,7 @@ impl WorkflowOnboardingService {
         let nodes = inspect_workflow(&workflow)?;
         let dynamic_binding_targets = dynamic_binding_targets(recipe);
         let output_roots = output_root_selections_from_recipe(recipe);
-        Ok(evaluate_capability_with_schema_and_output_roots(
+        Ok(evaluate_runtime_recipe_capability(
             &workflow,
             &nodes,
             schema,
@@ -6339,6 +6339,45 @@ fn evaluate_capability_with_schema(
     )
 }
 
+// Recognition retains all discovered roots for review. Execution, however,
+// belongs only to the validated outputs declared by this exact Recipe.
+fn evaluate_runtime_recipe_capability(
+    workflow: &WorkflowDocument,
+    nodes: &[WorkflowNodeView],
+    schema: &RecognitionSchemaContext,
+    dynamic_binding_targets: &BTreeSet<(String, String)>,
+    output_roots: &[OutputRootSelection],
+) -> CapabilityCheckView {
+    let mut analysis = WorkflowAnalysisService::analyze_workflow_with_schema_and_output_roots(
+        workflow,
+        &[],
+        Some(schema),
+        output_roots,
+    );
+    let declared = output_roots
+        .iter()
+        .map(|root| (root.node_id.as_str(), root.output_type.as_str()))
+        .collect::<BTreeSet<_>>();
+    if let OutputRootResolution::Resolved { roots } = &mut analysis.output_root_resolution {
+        roots.retain(|root| declared.contains(&(root.node_id.as_str(), root.output_type.as_str())));
+        if declared.is_empty() || roots.len() != declared.len() {
+            return unresolved_output_root_capability(
+                CapabilityState::UnknownOutputRoot,
+                "INVALID_OUTPUT_ROOT_MAPPING",
+                "配方输出映射未指向可验证的媒体输出节点。",
+                Vec::new(),
+            );
+        }
+    }
+    evaluate_capability_with_schema_and_analysis(
+        workflow,
+        nodes,
+        schema,
+        dynamic_binding_targets,
+        &analysis,
+    )
+}
+
 fn evaluate_capability_with_schema_and_output_roots(
     workflow: &WorkflowDocument,
     nodes: &[WorkflowNodeView],
@@ -6359,6 +6398,69 @@ fn evaluate_capability_with_schema_and_output_roots(
         dynamic_binding_targets,
         &analysis,
     )
+}
+
+#[cfg(test)]
+mod runtime_recipe_scope_tests {
+    use super::*;
+    fn capability(roots: Vec<OutputRootSelection>, break_video: bool) -> CapabilityCheckView {
+        let workflow = WorkflowDocument::parse(serde_json::json!({
+            "1":{"class_type":"LoadImage","inputs":{"image":"fixture.png"}},
+            "2":{"class_type":"VideoGenerator","inputs":if break_video { serde_json::json!({}) } else { serde_json::json!({"image":["1",0]}) }},
+            "3":{"class_type":"SaveVideo","inputs":{"video":["2",0]}},
+            "4":{"class_type":"ImageScaleToTotalPixels","inputs":{}},
+            "5":{"class_type":"GetImageSize","inputs":{"image":["4",0]}}
+        })).unwrap();
+        let schema = RecognitionSchemaContext::parse(&serde_json::json!({
+            "LoadImage":{"output":["IMAGE"],"input":{"required":{"image":["STRING",{}]}}},
+            "VideoGenerator":{"output":["VIDEO"],"input":{"required":{"image":["IMAGE",{}]}}},
+            "SaveVideo":{"output":["VIDEO"],"output_node":true,"input":{"required":{"video":["VIDEO",{}]}}},
+            "ImageScaleToTotalPixels":{"output":["IMAGE"],"input":{"required":{"image":["IMAGE",{}]}}},
+            "GetImageSize":{"output":["INT","INT","INT"],"input":{"required":{"image":["IMAGE",{}]}}}
+        }));
+        let nodes = inspect_workflow(&workflow).unwrap();
+        evaluate_runtime_recipe_capability(&workflow, &nodes, &schema, &BTreeSet::new(), &roots)
+    }
+    fn root(node: &str, kind: &str) -> OutputRootSelection {
+        OutputRootSelection {
+            node_id: node.into(),
+            output_type: kind.into(),
+        }
+    }
+    #[test]
+    fn unselected_invalid_image_branch_does_not_block_video_recipe() {
+        let cap = capability(vec![root("3", "video")], false);
+        assert_eq!(cap.state, CapabilityState::Ready);
+        assert!(cap.issues.is_empty());
+        assert_eq!(cap.profile.unwrap().roots.len(), 1);
+    }
+    #[test]
+    fn selected_invalid_branches_and_declared_multi_outputs_still_block() {
+        for roots in [
+            vec![root("5", "image")],
+            vec![root("3", "video"), root("5", "image")],
+        ] {
+            let cap = capability(roots, false);
+            assert_ne!(cap.state, CapabilityState::Ready);
+            assert!(cap
+                .issues
+                .iter()
+                .any(|i| i.code == "INVALID_REQUIRED_INPUT" && i.node_id.as_deref() == Some("4")));
+        }
+        let cap = capability(vec![root("3", "video")], true);
+        assert_ne!(cap.state, CapabilityState::Ready);
+        assert!(cap.issues.iter().any(|i| i.node_id.as_deref() == Some("2")));
+    }
+    #[test]
+    fn unknown_wrong_type_and_empty_recipe_roots_fail_closed() {
+        for roots in [
+            vec![root("missing", "video")],
+            vec![root("3", "image")],
+            Vec::new(),
+        ] {
+            assert_ne!(capability(roots, false).state, CapabilityState::Ready);
+        }
+    }
 }
 
 fn evaluate_capability_with_schema_and_analysis(

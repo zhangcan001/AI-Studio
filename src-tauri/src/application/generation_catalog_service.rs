@@ -11,6 +11,25 @@ pub struct GenerationCatalogService {
 }
 
 impl GenerationCatalogService {
+    pub async fn video_resolution_presets(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<
+        Vec<crate::application::product::h3_resolution::VideoResolutionPreset>,
+        GenerationCatalogError,
+    > {
+        let Some(definition) = self.repository.find(workflow_version_id, recipe_id).await? else {
+            return Ok(Vec::new());
+        };
+        let recipe = RecipeParser::parse(&definition.recipe_yaml)
+            .map_err(|error| GenerationCatalogError::InvalidRecipe(error.to_string()))?;
+        Ok(crate::application::product::h3_resolution::presets_for(
+            definition.workflow_json,
+            &recipe,
+        ))
+    }
+
     pub fn new(repository: Arc<dyn GenerationDefinitionRepository>) -> Self {
         Self { repository }
     }

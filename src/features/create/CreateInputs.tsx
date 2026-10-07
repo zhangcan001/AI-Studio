@@ -50,6 +50,9 @@ export function ReferencePanel({ context, save, busy }: { context: CreationConte
 }
 export function ParameterPanel({ controller: c }: { controller: CreateController }) {
   const fields = c.generator?.fields.filter(field => ["integer", "number", "seed"].includes(field.type)) ?? [];
+  const presets = c.generator?.resolutionPresets ?? [];
+  const width = c.values.width; const height = c.values.height;
+  const selectedPreset = presets.find(preset => width?.type === "integer" && height?.type === "integer" && preset.width === width.value && preset.height === height.value);
   const common = new Set(["duration_seconds", "width", "height"]);
   const render = (field: RecipeField) => {
     const value = c.values[field.key];
@@ -57,5 +60,5 @@ export function ParameterPanel({ controller: c }: { controller: CreateController
     if (field.type !== "integer" && field.type !== "number") return null;
     return <label key={field.key}>{fieldLabel(field)}<input id={`create-field-${field.key}`} aria-label={fieldLabel(field)} type="number" min={field.min} max={field.max} step={field.step ?? (field.type === "integer" ? 1 : "any")} value={value && (value.type === "integer" || value.type === "number") ? value.value : ""} onChange={e => { if (e.target.value === "") c.removeValue(field.key); else c.setValue(field.key, { type: field.type, value: Number(e.target.value) }); }} /></label>;
   };
-  return <section><h2>参数</h2><div className="create-parameters">{fields.filter(field => common.has(field.key)).map(render)}</div><details><summary>高级参数</summary><div className="create-parameters">{fields.filter(field => !common.has(field.key)).map(render)}</div></details></section>;
+  return <section><h2>参数</h2>{presets.length > 0 && <label>视频分辨率<select id="create-field-resolution" aria-label="视频分辨率" value={selectedPreset?.id ?? "existing"} disabled={c.busy} onChange={e => c.chooseResolution(e.target.value)}>{!selectedPreset && <option value="existing" disabled>保留当前尺寸；可选择内置规格</option>}{presets.map(preset => <option key={preset.id} value={preset.id}>{preset.label} · {preset.width} × {preset.height}</option>)}</select><small>基于 H3-Base 官方短边768及32像素网格的常用规格。2K需独立再生成流程，此处不提供。高分辨率需要更多显存。</small></label>}<div className="create-parameters">{fields.filter(field => common.has(field.key) && !(presets.length && ["width", "height"].includes(field.key))).map(render)}</div><details><summary>高级参数</summary><div className="create-parameters">{fields.filter(field => !common.has(field.key)).map(render)}</div></details></section>;
 }

@@ -18,7 +18,8 @@ export function resolveCreateReadinessAction(details: ProductErrorDetails): Crea
 }
 
 export function focusCreateInput(field?: string) {
-  const target = field ? document.getElementById(`create-field-${field}`) : null;
+  const target = field ? document.getElementById(`create-field-${field}`) ??
+    (["width", "height"].includes(field) ? document.getElementById("create-field-resolution") : null) : null;
   // Advanced parameters may be inside closed details; make the existing control reachable.
   for (let parent = target?.parentElement; parent; parent = parent.parentElement) {
     if (parent instanceof HTMLDetailsElement) parent.open = true;

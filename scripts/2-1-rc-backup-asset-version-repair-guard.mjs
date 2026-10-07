@@ -62,5 +62,5 @@ export function rcRepairParentReader(root,override) {
   if(!restore.includes('AssetVersionId::new().as_str().to_owned()')||restore.split('#[cfg(test)]')[0].includes('format!("asv_'))fail('restore-allocator');
   if(!restore.includes('const BACKUP_VERSION: u32 = 20;'))fail('backup-format');
   if(violations.length)return rejected();
-  return {violations,addedPaths:[...added,...publication.addedPaths],afterHashes:Object.fromEntries(existing.map(p=>[p,proof.paths[p].afterHash])),backendAggregateSha256:proof.backend.afterAggregateHash,read:p=>existing.includes(p)?before(p):disk(p)};
+  return {violations,addedPaths:[...added,...publication.addedPaths],afterHashes:{...Object.fromEntries(existing.map(p=>[p,proof.paths[p].afterHash])),...publication.afterHashes},backendAggregateSha256:publication.backendAggregateSha256??proof.backend.afterAggregateHash,read:p=>existing.includes(p)?before(p):disk(p)};
 }

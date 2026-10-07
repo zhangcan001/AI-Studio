@@ -114,7 +114,7 @@ describe("product facade client", () => {
     expect(error.details.technicalDetails).toBeDefined();
   });
   it("exposes product types without raw generator identity", () => {
-    expectTypeOf<keyof GeneratorOption>().exclude<"selectionRef" | "name" | "version" | "mode" | "mediaKind" | "availability" | "availabilityReason" | "recommended" | "fields">().toEqualTypeOf<never>();
+    expectTypeOf<keyof GeneratorOption>().exclude<"selectionRef" | "name" | "version" | "mode" | "mediaKind" | "availability" | "availabilityReason" | "recommended" | "fields" | "resolutionPresets">().toEqualTypeOf<never>();
     expectTypeOf(productClient.project.getOverview).returns.resolves.toEqualTypeOf<ProjectOverview>();
     expectTypeOf(productClient.run.get).returns.resolves.toEqualTypeOf<ProductRun>();
   });

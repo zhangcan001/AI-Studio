@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { h3RepairParentReader } from './h3-generation-repair-successor-guard.mjs';
 
 export const PUBLICATION_PARENT = '130cbbfaf67e1627fca7e447de322cf0f5f5ae85';
 export const RELEASE_TAG_HEAD = '5af3f20273e722466c82b91ede4970cd83e0bcb8';
@@ -87,13 +88,14 @@ function parentObjects(root) {
   immutable.set(root, result); return result;
 }
 export function publicationParentReader(root, override) {
+  const successor = h3RepairParentReader(root);
   // No cross-call live cache: edited docs, tag refs and source must fail immediately.
   const live = new Map();
   const disk = p => {
-    if (!live.has(p)) live.set(p, normalize(readFileSync(join(root, p), 'utf8')));
+    if (!live.has(p)) live.set(p, normalize(successor.read(p)));
     return live.get(p);
   };
-  const violations = [], fail = s => violations.push(`publication-${s}`);
+  const violations = [...successor.violations], fail = s => violations.push(`publication-${s}`);
   const rejected = () => ({violations, addedPaths: [], afterHashes: {}, read: disk});
   let proof, facts;
   try {
@@ -117,7 +119,9 @@ export function publicationParentReader(root, override) {
   for (const flag of ['businessRuntimeChanged','schemaChanged','backupFormatChanged','queueAuthorityChanged',
     'taskStateMachineChanged','workflowEngineChanged','bindingOccChanged','installerChanged',
     'releaseTagMoved','releaseAssetsReplaced','remoteTelemetry']) if (proof.invariants?.[flag] !== false) fail(`invariant:${flag}`);
-  if (violations.length) return rejected();
+  // Preserve this boundary's precise diagnostics when an outer successor fails.
+  // Neither boundary exposes a historical projection on any rejection.
+  if (violations.some(v => v.startsWith('publication-'))) return rejected();
   for (const p of existing) {
     if (proof.paths[p]?.beforeHash !== hash(facts.read(p)) || proof.paths[p]?.afterHash !== hash(disk(p))) fail(`path:${p}`);
   }
@@ -127,7 +131,7 @@ export function publicationParentReader(root, override) {
   for (const [name,dir,pattern] of groups) {
     const fixed = facts.fixed[name], r = proof[name];
     if (!inventories.has(dir)) inventories.set(dir, files(root, dir, /./));
-    const current = inventories.get(dir).filter(p => p !== manifest && pattern.test(p));
+    const current = inventories.get(dir).filter(p => p !== manifest && !successor.addedPaths.includes(p) && pattern.test(p));
     const expected = [...fixed.base, ...added.filter(p => p.startsWith(`${dir}/`) && pattern.test(p))].sort();
     if (JSON.stringify(current) !== JSON.stringify(expected) || r?.beforeFiles !== fixed.base.length || r?.afterFiles !== current.length) fail(`${name}-files`);
     // Exact fresh byte equality proves unchanged groups without hashing identical
@@ -170,6 +174,6 @@ export function publicationParentReader(root, override) {
     if (!closeout.includes(token)) fail('closeout-publication');
   }
   if (violations.length) return rejected();
-  return {violations, addedPaths: added, afterHashes: {[integration]: proof.paths[integration].afterHash},
+  return {violations, addedPaths: [...added, ...successor.addedPaths], backendAggregateSha256: successor.backendAggregateSha256, afterHashes: {[integration]: proof.paths[integration].afterHash, ...successor.afterHashes},
     read: p => docs.includes(p) ? facts.historical(p) : p === integration ? facts.read(p) : disk(p)};
 }

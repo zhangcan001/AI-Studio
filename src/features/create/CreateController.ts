@@ -164,6 +164,13 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   }
   function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
   function removeValue(field: string) { attempt.current = null; useStudioStore.getState().removeValue(field); }
+  function chooseResolution(id: string) {
+    const preset = generator?.resolutionPresets?.find(item => item.id === id);
+    if (!preset || busy) return;
+    attempt.current = null; setAccepted(null);
+    const store = useStudioStore.getState();
+    store.loadCreationDraft({ ...store.values, width: { type: "integer", value: preset.width }, height: { type: "integer", value: preset.height } }, true, store.creationPromptProvenance);
+  }
   function applyPromptChoice(choice: CreationPromptChoice | (CreationPromptProvenance & {text:string})) {
     if (!context?.selectedShot || !generator?.fields.some(field=>field.key==="prompt" && field.type==="textarea")) return;
     attempt.current=null; setAccepted(null); useStudioStore.getState().applyCreationPrompt(choice);
@@ -202,7 +209,7 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); setRun(next); setRunRef(next.ref); setAccepted(null); });
   return { libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, accepted, run, runRef, error, loading, busy,
-    setValue, removeValue, applyPromptChoice, openLibrary, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
+    setValue, removeValue, chooseResolution, applyPromptChoice, openLibrary, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
     openRuntimeSettings: () => {
       useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });
       return navigate({ kind: "system-settings", section: "general", returnTo: route });

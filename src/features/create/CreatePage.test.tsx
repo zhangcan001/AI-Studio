@@ -8,9 +8,9 @@ import { CreatePage } from "./CreatePage";
 import { useStudioStore } from "../../stores/studioStore";
 import type { CreationContext, GeneratorOption, ProductRun, CreationAsset } from "../../product/types";
 import type { AppRoute } from "../../app/routes/types";
-import { normalCreate, mediaValue, modeLabel } from "./createModel";
+import { normalCreate, mediaValue, modeLabel, draftFor } from "./createModel";
 import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
-import { resolveCreateReadinessAction } from "./createReadinessAction";
+import { resolveCreateReadinessAction, focusCreateInput } from "./createReadinessAction";
 const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), libraryGet: vi.fn(), bindingSet: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, library: {get: api.libraryGet}, project: { generatorBindingSet: api.bindingSet } } }));
 const prompt = { type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" } as const;
@@ -39,6 +39,34 @@ beforeEach(() => {
   api.referencesSet.mockResolvedValue(undefined); api.selectResult.mockImplementation(async (_p: string, _s: string, _stage: string, id: string) => { candidates = candidates.map(item => ({ ...item, selected: item.id === id })); });
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   URL.createObjectURL = vi.fn(() => "blob:fixture"); URL.revokeObjectURL = vi.fn();
+});
+describe("H3 native resolution presets", () => {
+  const native = [{ id: "landscape", label: "16:9 横屏", width: 1344, height: 768 }, { id: "portrait", label: "9:16 竖屏", width: 768, height: 1344 }];
+  it("uses backend evidence rather than a generator name and updates both dimensions atomically", async () => {
+    api.generatorsList.mockResolvedValue([{ ...videos[0], name: "Renamed generator", resolutionPresets: native }]);
+    render(<Host initialStage="video" />); await loaded();
+    expect(screen.queryByLabelText("宽度")).toBeNull();
+    expect(screen.queryByLabelText("高度")).toBeNull();
+    for (const field of ["width", "height"]) {
+      focusCreateInput(field);
+      expect(document.activeElement).toBe(screen.getByLabelText("视频分辨率"));
+    }
+    expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1344 });
+    fireEvent.change(screen.getByLabelText("视频分辨率"), { target: { value: "portrait" } });
+    expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 768 });
+    expect(useStudioStore.getState().values.height).toEqual({ type: "integer", value: 1344 });
+    expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "video prompt" });
+    expect(api.generate).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("option").some(o => o.textContent?.includes("2K"))).toBe(false);
+  });
+  it("does not silently rewrite reused dimensions or unrelated generator forms", async () => {
+    const prior = { width: { type: "integer", value: 360 }, height: { type: "integer", value: 640 } } as const;
+    const draft = draftFor({ ...videos[0], resolutionPresets: native }, null, prior);
+    expect(draft.width).toEqual(prior.width); expect(draft.height).toEqual(prior.height);
+    render(<Host initialStage="video" />); await loaded();
+    expect(screen.queryByLabelText("视频分辨率")).toBeNull();
+    expect(screen.getByLabelText("宽度")).toBeTruthy();
+  });
 });
 describe("M1-1 readiness actions", () => {
   const blocked = (action: string, field?: string) => ({ ready: false, issues: [{ code: "RUNTIME_BLOCKED", message: "private backend detail", details: { action, field, retryable: false, technicalDetails: "private path" } }], fieldErrors: [], actions: [action] });

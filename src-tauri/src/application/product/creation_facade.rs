@@ -31,6 +31,7 @@ pub struct GeneratorOption {
     pub availability_reason: Option<String>,
     pub recommended: bool,
     pub fields: Vec<crate::application::generation_catalog_service::FieldViewModel>,
+    pub resolution_presets: Vec<super::h3_resolution::VideoResolutionPreset>,
 }
 
 impl ProductCreationFacade {
@@ -137,6 +138,14 @@ impl ProductCreationFacade {
                 b.workflow_version_id != generator.workflow_version_id
                     || b.recipe_id != generator.recipe_id
             });
+            let resolution_presets = if media_kind == "video" {
+                self.catalog
+                    .video_resolution_presets(&generator.workflow_version_id, &generator.recipe_id)
+                    .await
+                    .map_err(ProductError::internal)?
+            } else {
+                Vec::new()
+            };
             options.push(GeneratorOption {
                 selection_ref: ExactGeneratorSelection {
                     workflow_version_id: generator.workflow_version_id,
@@ -152,6 +161,7 @@ impl ProductCreationFacade {
                     .then(|| "生成器当前不可用，请在高级工作流管理中检查。".to_owned()),
                 recommended,
                 fields: generator.fields,
+                resolution_presets,
             });
         }
         // Existing bindings may refer to disabled historical generators absent
@@ -181,6 +191,7 @@ impl ProductCreationFacade {
                 availability_reason: Some("生成器已停用或不可用，请重新选择。".to_owned()),
                 recommended: false,
                 fields: Vec::new(),
+                resolution_presets: Vec::new(),
             });
         }
         if let Some((version, recipe)) = shot_pair {
@@ -213,6 +224,7 @@ impl ProductCreationFacade {
                         ),
                         recommended: false,
                         fields: Vec::new(),
+                        resolution_presets: Vec::new(),
                     });
                 }
             }

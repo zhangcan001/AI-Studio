@@ -31,6 +31,13 @@ export function draftFor(generator: GeneratorOption, shot: CreationShot | null, 
     if (value && compatible(field, value)) values[field.key] = value;
   }
   if (generator.fields.some(field => field.key === "prompt" && field.type === "textarea") && !previous.prompt) values.prompt = { type: "string", value: shot?.prompt ?? "" };
+  const native = generator.resolutionPresets?.[0];
+  // Only a new draft gets a native default. Existing/reused snapshots remain
+  // untouched until the user explicitly chooses another resolution.
+  if (native && !previous.width && !previous.height && !(shot?.selectionRef === generator.selectionRef && (shot.values.width || shot.values.height))) {
+    values.width = { type: "integer", value: native.width };
+    values.height = { type: "integer", value: native.height };
+  }
   return values;
 }
 function compatible(field: RecipeField, value: DraftValue) {
