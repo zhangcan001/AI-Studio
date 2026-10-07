@@ -40,7 +40,8 @@ it('fresh bytes and path sets invalidate cached acceptance, including published 
   execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
   writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
   const proof=JSON.parse(readFileSync(manifest,'utf8'));
-  for(const p of new Set([...h3CloseoutParentFacts('.').paths,...Object.keys(proof.paths),manifest]) as Set<string>){
+  const queue=JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
+  for(const p of new Set([...h3CloseoutParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json']) as Set<string>){
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(h3CloseoutParentReader(root).violations).toEqual([]);
@@ -50,7 +51,7 @@ it('fresh bytes and path sets invalidate cached acceptance, including published 
    writeFileSync(path,original);expect(h3CloseoutParentReader(root).violations).toEqual([]);
   }
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
-  expect(h3CloseoutParentReader(root).violations).toContain('h3-closeout-backend-files');
+  expect(h3CloseoutParentReader(root).violations).toContain('queue-lifecycle-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);
 it('shares nested replay but never trusts mtime, unchanged length or stale mutable tag identity',()=>{

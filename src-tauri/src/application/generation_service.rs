@@ -17,7 +17,7 @@ use crate::application::provenance_lineage_service::{
     GenerationProvenanceContext, ProvenanceLineageError, ProvenanceLineageService,
 };
 use crate::application::scheduler::scheduler_decision;
-use crate::application::task_execution_registry::TaskExecutionRegistry;
+use crate::application::task_execution_registry::{TaskExecutionGuard, TaskExecutionRegistry};
 use crate::application::workflow_onboarding_service::{
     dynamic_binding_target_labels, CapabilityCheckView, CapabilityState, WorkflowOnboardingService,
 };
@@ -565,6 +565,10 @@ impl GenerationService {
         self
     }
 
+    pub fn has_live_execution(&self, task_id: &crate::domain::TaskId) -> bool {
+        self.execution_registry.contains(task_id)
+    }
+
     pub fn with_workflow_compatibility_service(
         mut self,
         service: Arc<WorkflowOnboardingService>,
@@ -609,8 +613,7 @@ impl GenerationService {
         if let Some(existing) = self.find_existing_idempotent_task(&request).await? {
             return Ok(existing);
         }
-        let (request, definition, task) = self.prepare_task(request).await?;
-        let (cancel_signal, _guard) = self.execution_registry.register(task.id.clone());
+        let (request, definition, task, cancel_signal, _guard) = self.prepare_task(request).await?;
         self.execute_prepared(request, definition, task, cancel_signal)
             .await
     }
@@ -636,7 +639,7 @@ impl GenerationService {
         if let Some(existing) = self.find_existing_idempotent_task(&request).await? {
             return Ok(existing);
         }
-        let (request, definition, task) = self.prepare_task(request).await?;
+        let (request, definition, task, cancel_signal, guard) = self.prepare_task(request).await?;
         if let Err(error) = hook(&task).await {
             let mut failed_task = task.clone();
             let failure = TaskError {
@@ -673,7 +676,6 @@ impl GenerationService {
                 error,
             });
         }
-        let (cancel_signal, guard) = self.execution_registry.register(task.id.clone());
         let service = Arc::clone(self);
         let background_task = task.clone();
         tokio::spawn(async move {
@@ -732,6 +734,8 @@ impl GenerationService {
             CreateGenerationRequest,
             crate::application::ports::GenerationDefinition,
             Task,
+            watch::Receiver<bool>,
+            TaskExecutionGuard,
         ),
         GenerationServiceError,
     > {
@@ -849,9 +853,12 @@ impl GenerationService {
             dynamic_binding_targets,
         });
         let created_event = task.created_event();
+        // Recovery can observe CREATED as soon as the insert commits, even
+        // while the repository call or the queue linkage hook is still pending.
+        let (cancel_signal, guard) = self.execution_registry.register(task.id.clone());
         self.task_repository.create(&task, &created_event).await?;
         self.task_update_sink.publish(&task);
-        Ok((request, definition, task))
+        Ok((request, definition, task, cancel_signal, guard))
     }
 
     async fn execute_prepared(

@@ -672,7 +672,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             ));
             let task_cancellation_service = Arc::new(TaskCancellationService::new(
                 task_repository.clone(),
-                execution_registry,
+                execution_registry.clone(),
                 clock.clone(),
                 task_update_sink.clone(),
             ));
@@ -685,7 +685,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_store.clone(),
                 clock.clone(),
                 task_update_sink,
-            ));
+            ).with_execution_registry(execution_registry));
             let production_queue_service = Arc::new(ProductionQueueService::new(
                 production_queue_repository.clone(),
                 task_repository.clone(),

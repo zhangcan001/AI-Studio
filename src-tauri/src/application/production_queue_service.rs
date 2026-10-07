@@ -1706,23 +1706,44 @@ impl ProductionQueueService {
         }
         let service = Arc::clone(self);
         tokio::spawn(async move {
-            if let Err(error) = service.run_loop(&project_id, &batch_id).await {
-                tracing::error!(batch_id = %batch_id.as_str(), error_type = std::any::type_name_of_val(&error), "production queue runner failed");
-                let _ = service
-                    .repository
-                    .set_batch_status(
-                        &project_id,
-                        &batch_id,
-                        ProductionBatchStatus::Paused,
-                        service.clock.now(),
-                    )
-                    .await;
+            loop {
+                let outcome = service.run_loop(&project_id, &batch_id).await;
+                // Start/resume commits and worker retirement share this short
+                // gate. Either the current worker observes a committed resume,
+                // or it unregisters before Start can decide to spawn a successor.
+                let _admission = Arc::clone(&service.admission_gate).lock_owned().await;
+                let retirement_error = match outcome {
+                    Err(error) => Some(error),
+                    Ok(()) => match service.repository.find_detail(&project_id, &batch_id).await {
+                        Ok(Some(latest))
+                            if latest.batch.status == ProductionBatchStatus::Running
+                                && latest.items.iter().any(|item| !item.status.is_terminal()) =>
+                        {
+                            continue;
+                        }
+                        Ok(_) => None,
+                        Err(error) => Some(ProductionQueueError::Repository(error)),
+                    },
+                };
+                if let Some(error) = retirement_error {
+                    tracing::error!(batch_id = %batch_id.as_str(), error_type = std::any::type_name_of_val(&error), "production queue runner failed");
+                    let _ = service
+                        .repository
+                        .set_batch_status(
+                            &project_id,
+                            &batch_id,
+                            ProductionBatchStatus::Paused,
+                            service.clock.now(),
+                        )
+                        .await;
+                }
+                service
+                    .running_batches
+                    .lock()
+                    .expect("production queue runner registry mutex poisoned")
+                    .remove(&key);
+                return;
             }
-            service
-                .running_batches
-                .lock()
-                .expect("production queue runner registry mutex poisoned")
-                .remove(&key);
         });
     }
 
@@ -1828,7 +1849,12 @@ impl ProductionQueueService {
                     .lock()
                     .expect("production recovery task registry mutex poisoned")
                     .contains(task_id.as_str());
-                if needs_recovery_observation {
+                // A same-process stream failure drops the generation guard.
+                // Observe its existing prompt just like a restarted execution;
+                // never dispatch another item until this one is terminal.
+                if needs_recovery_observation
+                    || !self.generation_service.has_live_execution(&task_id)
+                {
                     sleep(Duration::from_secs(2)).await;
                     if let Err(error) = self.task_recovery_service.reconcile_active().await {
                         tracing::warn!(

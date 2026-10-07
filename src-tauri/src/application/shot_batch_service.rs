@@ -1841,6 +1841,15 @@ outputs:
         );
 
         assert!(queue_repository
+            .set_batch_status(
+                &old_batch.batch.project_id,
+                &old_batch.batch.id,
+                crate::domain::ProductionBatchStatus::Running,
+                now
+            )
+            .await
+            .unwrap());
+        assert!(queue_repository
             .set_item_dispatching(&old_batch.items[1].id, now)
             .await
             .expect("source Shot02 item should enter dispatching"));

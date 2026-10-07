@@ -11,6 +11,9 @@ mod project_database;
 #[path = "support/product_facade_contract.rs"]
 mod product_facade_contract;
 
+#[path = "support/queue_lifecycle_regressions.rs"]
+mod queue_lifecycle_regressions;
+
 use ai_studio_lib::application::{
     asset_video_prompt_service::AssetVideoPromptService,
     generation_service::GenerationService,
@@ -125,6 +128,9 @@ enum ComfyBehavior {
 
 #[derive(Clone)]
 struct ControlledComfy {
+    hold_upload: bool,
+    upload_entered: Arc<tokio::sync::Notify>,
+    upload_release: Arc<tokio::sync::Notify>,
     object_info: Option<Value>,
     fail_second: bool,
     behavior: Arc<Mutex<ComfyBehavior>>,
@@ -136,6 +142,9 @@ struct ControlledComfy {
 impl ControlledComfy {
     fn new(behavior: ComfyBehavior) -> Self {
         Self {
+            hold_upload: false,
+            upload_entered: Arc::new(tokio::sync::Notify::new()),
+            upload_release: Arc::new(tokio::sync::Notify::new()),
             object_info: None,
             fail_second: false,
             behavior: Arc::new(Mutex::new(behavior)),
@@ -315,6 +324,10 @@ impl ComfyAdapter for ControlledComfy {
         &self,
         mut upload: ComfyInputUpload,
     ) -> Result<ai_studio_lib::application::ports::ComfyUploadedInput, ComfyAdapterError> {
+        if self.hold_upload {
+            self.upload_entered.notify_one();
+            self.upload_release.notified().await;
+        }
         let mut bytes = Vec::new();
         while let Some(chunk) = upload
             .stream
@@ -543,6 +556,8 @@ impl AssetStore for GuardedAssetStore {
 }
 
 struct Services {
+    recovery: Arc<TaskRecoveryService>,
+    generation: Arc<GenerationService>,
     package: ProductionPackageService,
     queue: Arc<ProductionQueueService>,
     asset_reads: Arc<Mutex<Vec<PathBuf>>>,
@@ -569,6 +584,14 @@ pub fn phase12_read_facade(
 }
 
 fn build_services(pool: &SqlitePool, comfy: Arc<ControlledComfy>, package_root: &Path) -> Services {
+    build_services_with_repository(pool, comfy, package_root, None)
+}
+fn build_services_with_repository(
+    pool: &SqlitePool,
+    comfy: Arc<ControlledComfy>,
+    package_root: &Path,
+    repository: Option<Arc<dyn ProductionQueueRepository>>,
+) -> Services {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let project_repository: Arc<dyn ProjectRepository> =
         Arc::new(SqliteProjectRepository::new(pool.clone()));
@@ -584,6 +607,8 @@ fn build_services(pool: &SqlitePool, comfy: Arc<ControlledComfy>, package_root: 
         Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone()));
     let creation_preflight = comfy.object_info.is_some();
     let comfy_adapter: Arc<dyn ComfyAdapter> = comfy;
+    let execution_registry =
+        ai_studio_lib::application::task_execution_registry::TaskExecutionRegistry::default();
 
     let generation_service = GenerationService::new(
         task_repository.clone(),
@@ -631,28 +656,33 @@ fn build_services(pool: &SqlitePool, comfy: Arc<ControlledComfy>, package_root: 
     } else {
         generation_service
     };
-    let generation_service = Arc::new(generation_service);
-    let task_recovery_service = Arc::new(TaskRecoveryService::new(
-        task_repository.clone(),
-        snapshot_repository,
-        asset_repository.clone(),
-        comfy_adapter,
-        project_repository.clone(),
-        asset_store.clone(),
-        clock.clone(),
-        Arc::new(NoopTaskUpdateSink),
-    ));
+    let generation_service =
+        Arc::new(generation_service.with_execution_registry(execution_registry.clone()));
+    let task_recovery_service = Arc::new(
+        TaskRecoveryService::new(
+            task_repository.clone(),
+            snapshot_repository,
+            asset_repository.clone(),
+            comfy_adapter,
+            project_repository.clone(),
+            asset_store.clone(),
+            clock.clone(),
+            Arc::new(NoopTaskUpdateSink),
+        )
+        .with_execution_registry(execution_registry),
+    );
 
     let queue_repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
-    let production_queue_repository: Arc<dyn ProductionQueueRepository> = queue_repository.clone();
+    let production_queue_repository: Arc<dyn ProductionQueueRepository> =
+        repository.unwrap_or_else(|| queue_repository.clone());
     let shot_batch_repository: Arc<dyn ShotBatchRepository> = queue_repository.clone();
     let queue = Arc::new(ProductionQueueService::new(
         production_queue_repository,
         task_repository,
         definition_repository,
-        generation_service,
+        generation_service.clone(),
         shot_batch_repository,
-        task_recovery_service,
+        task_recovery_service.clone(),
         clock.clone(),
     ));
 
@@ -694,6 +724,8 @@ fn build_services(pool: &SqlitePool, comfy: Arc<ControlledComfy>, package_root: 
         clock,
     );
     Services {
+        recovery: task_recovery_service,
+        generation: generation_service,
         package,
         queue,
         asset_reads,

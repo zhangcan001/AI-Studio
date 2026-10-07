@@ -303,7 +303,12 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         let result = sqlx::query(
             "UPDATE production_batch_items
              SET status = 'DISPATCHING', error_code = NULL, error_message = NULL, updated_at = ?
-             WHERE id = ? AND status = 'PENDING'",
+             WHERE id = ? AND status = 'PENDING'
+               AND EXISTS (
+                   SELECT 1 FROM production_batches b
+                   WHERE b.id = production_batch_items.batch_id
+                     AND b.status = 'RUNNING' AND b.archived_at IS NULL
+               )",
         )
         .bind(format_datetime(updated_at))
         .bind(item_id.as_str())
@@ -2983,6 +2988,10 @@ mod tests {
             .unwrap(),
             1
         );
+        assert!(repository
+            .set_batch_status("project-1", &batch_id, ProductionBatchStatus::Running, now)
+            .await
+            .unwrap());
         assert!(repository
             .set_item_dispatching(&item_id, now)
             .await

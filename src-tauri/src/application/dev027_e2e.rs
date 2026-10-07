@@ -200,6 +200,16 @@ outputs:
         recipe_id: &str,
     ) -> String {
         let now = Utc::now();
+        // Model the explicit Queue Start before claiming a pending item.
+        assert!(queue
+            .set_batch_status(
+                PROJECT_ID,
+                &item.batch_id,
+                ProductionBatchStatus::Running,
+                now
+            )
+            .await
+            .unwrap());
         assert!(queue
             .set_item_dispatching(&item.id, now)
             .await

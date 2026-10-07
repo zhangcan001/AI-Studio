@@ -5,6 +5,7 @@ use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError, ComfyHistory,
     GenerationSnapshotRepository, RepositoryError, TaskRepository, TaskUpdateSink,
 };
+use crate::application::task_execution_registry::TaskExecutionRegistry;
 use crate::compiler::RecipeParser;
 use crate::domain::{Task, TaskDomainError, TaskError, TaskEventType, TaskStatus};
 use serde::Serialize;
@@ -20,6 +21,7 @@ pub struct TaskRecoveryService {
     asset_import_service: Arc<AssetImportService>,
     clock: Arc<dyn Clock>,
     task_update_sink: Arc<dyn TaskUpdateSink>,
+    execution_registry: TaskExecutionRegistry,
     gate: Mutex<()>,
 }
 
@@ -49,8 +51,14 @@ impl TaskRecoveryService {
             comfy_adapter,
             clock,
             task_update_sink,
+            execution_registry: TaskExecutionRegistry::default(),
             gate: Mutex::new(()),
         }
+    }
+
+    pub fn with_execution_registry(mut self, registry: TaskExecutionRegistry) -> Self {
+        self.execution_registry = registry;
+        self
     }
 
     pub async fn reconcile_active(&self) -> Result<RecoveryReport, TaskRecoveryError> {
@@ -68,6 +76,19 @@ impl TaskRecoveryService {
         let mut local_tasks = Vec::new();
         let mut external_tasks = Vec::new();
         for task in tasks {
+            // Sync and startup recovery must not compete with a live uploader,
+            // submitter or collector. Ownership is registered before DB creation.
+            if self.execution_registry.contains(&task.id) {
+                report.deferred += 1;
+                continue;
+            }
+            // A worker may finish between list_active and the ownership check.
+            let Some(task) = self.task_repository.find_by_id(&task.id).await? else {
+                continue;
+            };
+            if task.status.is_terminal() {
+                continue;
+            }
             self.record_recovery_started(&task).await?;
             if task.prompt_id.is_some() {
                 external_tasks.push(task);

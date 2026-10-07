@@ -79,6 +79,8 @@ it('fails closed on stale live docs and a missing tag in an owned fixture', () =
       docs.includes(p) || ['package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
         'src-tauri/tauri.conf.json','src-tauri/build.rs','.github/workflows/ci.yml'].includes(p)),
       manifest, 'scripts/2-1-publication-successor-guard.mjs', 'src/app/AIStudio21PublicationBoundary.test.ts'];
+    const queue=JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
+    paths.push(...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json');
     for (const p of new Set(paths)) { mkdirSync(dirname(join(root,p)), {recursive:true}); copyFileSync(p,join(root,p)); }
     expect(publicationParentReader(root).violations).toEqual([]);
     const original = readFileSync(join(root, docs[0]), 'utf8');

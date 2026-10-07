@@ -1,4 +1,5 @@
 import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
+import { queueLifecycleParentReader } from './queue-lifecycle-repair-successor-guard.mjs';
 // Post-release runtime repair: validate current scope before replaying immutable history.
 import {createHash} from 'node:crypto';
 import {readFileSync,readdirSync} from 'node:fs';
@@ -33,8 +34,9 @@ export function h3CloseoutParentFacts(root){
  const result={paths,read:p=>blobs.get(p)};parents.set(root,result);return result;
 }
 function h3CloseoutParentReaderUncached(root,override){
- const live=new Map(),disk=p=>{if(!live.has(p))live.set(p,normalize(readFileSync(join(root,p),'utf8')));return live.get(p);};
- const violations=[],fail=s=>violations.push(`h3-closeout-${s}`),rejected=()=>({violations,addedPaths:[],afterHashes:{},read:disk});
+ const successor=queueLifecycleParentReader(root);
+ const live=new Map(),disk=p=>{if(!live.has(p))live.set(p,normalize(successor.read(p)));return live.get(p);};
+ const violations=[...successor.violations],fail=s=>violations.push(`h3-closeout-${s}`),rejected=()=>({violations,addedPaths:[],afterHashes:{},read:p=>normalize(readFileSync(join(root,p),'utf8'))});
  let proof,facts;
  try{proof=override??JSON.parse(disk(manifest));facts=h3CloseoutParentFacts(root);}catch{fail('missing-evidence');return rejected();}
  if(proof.schemaVersion!==1||proof.checkpoint!=='H3_RELEASE_CLOSEOUT_PHASE1'||proof.parentHead!==H3_CLOSEOUT_PARENT)fail('header');
@@ -47,7 +49,7 @@ function h3CloseoutParentReaderUncached(root,override){
  for(const p of added)if(facts.paths.includes(p)||proof.paths[p]?.beforeHash!==null||proof.paths[p]?.afterHash!==h3CloseoutHash(disk(p)))fail(`addition:${p}`);
  for(const [name,dir,pattern] of H3_CLOSEOUT_GROUPS){
   const base=facts.paths.filter(p=>p.startsWith(dir+'/')&&pattern.test(p)),untouched=base.filter(p=>!existing.includes(p));
-  const current=files(root,dir,pattern).filter(p=>p!==manifest),expected=[...base,...added.filter(p=>p.startsWith(dir+'/')&&pattern.test(p))].sort();
+  const current=files(root,dir,pattern).filter(p=>p!==manifest&&!successor.addedPaths.includes(p)),expected=[...base,...added.filter(p=>p.startsWith(dir+'/')&&pattern.test(p))].sort();
   const r=proof[name];
   if(JSON.stringify(current)!==JSON.stringify(expected)||r?.beforeFiles!==base.length||r?.afterFiles!==current.length)fail(`${name}-files`);
   if(untouched.some(p=>disk(p)!==facts.read(p)))fail(`${name}-untouched-bytes`);
@@ -62,7 +64,7 @@ function h3CloseoutParentReaderUncached(root,override){
  }
  for(const p of configs)if(disk(p)!==facts.read(p))fail(`frozen:${p}`);
  if(violations.length)return rejected();
- return {violations,addedPaths:[...added,manifest],backendAggregateSha256:proof.backend.afterAggregateHash,afterHashes:Object.fromEntries([...existing,...added].map(p=>[p,proof.paths[p].afterHash])),read:p=>existing.includes(p)?facts.read(p):disk(p)};
+ return {violations,addedPaths:[...added,manifest,...successor.addedPaths],backendAggregateSha256:successor.backendAggregateSha256,afterHashes:{...Object.fromEntries([...existing,...added].map(p=>[p,proof.paths[p].afterHash])),...successor.afterHashes},read:p=>existing.includes(p)?facts.read(p):disk(p)};
 }
 
 export function h3CloseoutParentReader(root, override) {

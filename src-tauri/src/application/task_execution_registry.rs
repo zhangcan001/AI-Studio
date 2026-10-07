@@ -30,8 +30,7 @@ impl TaskExecutionRegistry {
             .unwrap_or(false)
     }
 
-    #[cfg(test)]
-    pub(crate) fn contains(&self, task_id: &TaskId) -> bool {
+    pub fn contains(&self, task_id: &TaskId) -> bool {
         lock_entries(&self.entries).contains_key(task_id)
     }
 
