@@ -163,7 +163,7 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
     useStudioStore.getState().setPendingLibraryIntent(undefined);
   }
   function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
-  function removeValue(field: string) { attempt.current = null; useStudioStore.getState().removeValue(field); }
+  function removeValue(field: string) { attempt.current = null; setAccepted(null); useStudioStore.getState().removeValue(field); }
   function chooseResolution(id: string) {
     const preset = generator?.resolutionPresets?.find(item => item.id === id);
     if (!preset || busy) return;

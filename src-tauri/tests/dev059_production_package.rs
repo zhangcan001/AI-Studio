@@ -696,8 +696,8 @@ async fn write_dev081_text_package(root: &Path) {
         "name": "DEV-081 graph workflow package",
         "defaults": {
             "durationSeconds": 7,
-            "width": 1056,
-            "height": 608
+            "width": 1344,
+            "height": 768
         },
         "items": [{
             "id": "DEV081-TXT-001",
@@ -715,9 +715,13 @@ async fn write_dev081_text_package(root: &Path) {
 }
 
 async fn write_dev081_sanitized_package(root: &Path) {
+    // Keep the historical fixture immutable; adapt only this owned execution input.
+    let mut manifest: Value = serde_json::from_str(DEV081_PACKAGE_FIXTURE_JSON).unwrap();
+    manifest["defaults"]["width"] = json!(1344);
+    manifest["defaults"]["height"] = json!(768);
     tokio::fs::write(
         root.join("production-package.json"),
-        DEV081_PACKAGE_FIXTURE_JSON.as_bytes(),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
     )
     .await
     .expect("DEV-081 sanitized package fixture should write");
@@ -1706,8 +1710,8 @@ async fn dev081_8step_graph_workflow_reaches_fake_comfy_executor() {
     assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 1);
     let submitted = comfy.submitted_workflow();
     assert_eq!(submitted["59"]["inputs"]["text"], "DEV081 PACKAGE PROMPT");
-    assert_eq!(submitted["63"]["inputs"]["width"], 1056);
-    assert_eq!(submitted["63"]["inputs"]["height"], 608);
+    assert_eq!(submitted["63"]["inputs"]["width"], 1344);
+    assert_eq!(submitted["63"]["inputs"]["height"], 768);
     assert_eq!(submitted["49"]["inputs"]["value"], 7);
     let seed = submitted["2"]["inputs"]["noise_seed"]
         .as_u64()
@@ -1749,8 +1753,8 @@ async fn dev081_8step_graph_workflow_reaches_fake_comfy_executor() {
     println!("PUBLISHED_RECIPE_ID={}", published.recipe_id);
     println!("PRODUCTION_BATCH_ID={batch_id}");
     println!("EXEC_PROMPT=DEV081 PACKAGE PROMPT");
-    println!("EXEC_WIDTH=1056");
-    println!("EXEC_HEIGHT=608");
+    println!("EXEC_WIDTH=1344");
+    println!("EXEC_HEIGHT=768");
     println!("EXEC_DURATION=7");
     println!("EXEC_SEED={seed}");
     println!("EXEC_STEPS=8");
@@ -2037,8 +2041,8 @@ async fn dev081_real_uat_regenerates_recipe_then_creates_three_items_and_reaches
         item.status == ProductionPackageItemStatus::Ready
             && item.mode == "FL2VA_TEXT_TO_VIDEO"
             && item.duration_seconds == 5
-            && item.width == 960
-            && item.height == 544
+            && item.width == 1344
+            && item.height == 768
             && item.resolved_workflow_version_id.as_deref()
                 == Some(regenerated_workflow_version_id.as_str())
             && item.resolved_recipe_id.as_deref() == Some(regenerated_publish.recipe_id.as_str())
@@ -2105,8 +2109,8 @@ async fn dev081_real_uat_regenerates_recipe_then_creates_three_items_and_reaches
         "DEV081 test prompt 03",
     ]) {
         assert_eq!(workflow["59"]["inputs"]["text"], prompt);
-        assert_eq!(workflow["63"]["inputs"]["width"], 960);
-        assert_eq!(workflow["63"]["inputs"]["height"], 544);
+        assert_eq!(workflow["63"]["inputs"]["width"], 1344);
+        assert_eq!(workflow["63"]["inputs"]["height"], 768);
         assert_eq!(workflow["49"]["inputs"]["value"], 5);
         assert_eq!(workflow["50"]["inputs"]["steps"], 8);
         assert_eq!(workflow["50"]["inputs"]["denoise"], 1);
@@ -2126,8 +2130,8 @@ async fn dev081_real_uat_regenerates_recipe_then_creates_three_items_and_reaches
     println!("AUTO_START_ON_CREATE=NO");
     println!("DEV078_EXACT_ADMISSION=PASS");
     println!("FAKE_COMFY_SUBMIT_COUNT=3");
-    println!("EXEC_WIDTH=960");
-    println!("EXEC_HEIGHT=544");
+    println!("EXEC_WIDTH=1344");
+    println!("EXEC_HEIGHT=768");
     println!("EXEC_DURATION=5");
     println!("EXEC_STEPS=8");
     println!("EXEC_DENOISE=1");

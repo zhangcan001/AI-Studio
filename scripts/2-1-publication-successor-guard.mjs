@@ -1,6 +1,6 @@
+import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
 // Validate published evidence before projecting immutable pre-publication history.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { h3RepairParentReader } from './h3-generation-repair-successor-guard.mjs';
@@ -87,7 +87,7 @@ function parentObjects(root) {
     historical: p => blobs.get(`release:${p}`)};
   immutable.set(root, result); return result;
 }
-export function publicationParentReader(root, override) {
+function publicationParentReaderUncached(root, override) {
   const successor = h3RepairParentReader(root);
   // No cross-call live cache: edited docs, tag refs and source must fail immediately.
   const live = new Map();
@@ -176,4 +176,8 @@ export function publicationParentReader(root, override) {
   if (violations.length) return rejected();
   return {violations, addedPaths: [...added, ...successor.addedPaths], backendAggregateSha256: successor.backendAggregateSha256, afterHashes: {[integration]: proof.paths[integration].afterHash, ...successor.afterHashes},
     read: p => docs.includes(p) ? facts.historical(p) : p === integration ? facts.read(p) : disk(p)};
+}
+
+export function publicationParentReader(root, override) {
+  return cachedBoundary(root, "publicationParentReader", override, () => publicationParentReaderUncached(root, override), 'docs/architecture/2-1-publication-successor.json');
 }

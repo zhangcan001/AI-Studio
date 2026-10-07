@@ -1,6 +1,6 @@
+import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
 // P1 identity successor: validate live bytes before projecting immutable release history.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { publicationParentReader } from './2-1-publication-successor-guard.mjs';
@@ -24,7 +24,7 @@ function parentBlobs(root) {
   for(const p of paths){const end=bytes.indexOf(10,offset),m=/^[a-f0-9]+ blob (\d+)$/.exec(bytes.subarray(offset,end).toString());if(!m)throw Error('Closeout parent blob missing');const start=end+1,length=Number(m[1]);if(bytes[start+length]!==10)throw Error('Closeout parent blob boundary');blobs.set(p,normalize(bytes.subarray(start,start+length).toString('utf8')));offset=start+length+1;}
   if(offset!==bytes.length)throw Error('Closeout parent trailing bytes');immutable.set(root,blobs);return blobs;
 }
-export function rcRepairParentReader(root,override) {
+function rcRepairParentReaderUncached(root,override) {
   const publication=publicationParentReader(root);
   const disk=p=>normalize(publication.read(p));
   const proof=override??JSON.parse(disk('docs/architecture/2-1-rc-backup-asset-version-repair.json'));
@@ -63,4 +63,8 @@ export function rcRepairParentReader(root,override) {
   if(!restore.includes('const BACKUP_VERSION: u32 = 20;'))fail('backup-format');
   if(violations.length)return rejected();
   return {violations,addedPaths:[...added,...publication.addedPaths],afterHashes:{...Object.fromEntries(existing.map(p=>[p,proof.paths[p].afterHash])),...publication.afterHashes},backendAggregateSha256:publication.backendAggregateSha256??proof.backend.afterAggregateHash,read:p=>existing.includes(p)?before(p):disk(p)};
+}
+
+export function rcRepairParentReader(root, override) {
+  return cachedBoundary(root, "rcRepairParentReader", override, () => rcRepairParentReaderUncached(root, override), 'docs/architecture/2-1-rc-backup-asset-version-repair.json');
 }

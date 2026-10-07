@@ -102,6 +102,9 @@ pub enum GenerationInputPrepareError {
     DuplicateFirstLastAsset {
         asset_id: String,
     },
+    H3ReferenceDuration {
+        message: String,
+    },
     Repository(String),
     Upload {
         input_key: String,
@@ -120,6 +123,13 @@ impl GenerationInputPrepareError {
             Self::InvalidAssetMime { .. } => "INPUT_ASSET_MIME_INVALID",
             Self::ReferenceMappingIncomplete { .. } => "REFERENCE_MAPPING_INCOMPLETE",
             Self::DuplicateFirstLastAsset { .. } => "INPUT_ASSET_DUPLICATE",
+            Self::H3ReferenceDuration { message } => {
+                if message.starts_with("BLOCKED_BY_METADATA") {
+                    "BLOCKED_BY_METADATA"
+                } else {
+                    "INPUT_H3_REFERENCE_DURATION_INVALID"
+                }
+            }
             Self::Repository(_) => "INPUT_ASSET_REPOSITORY_ERROR",
             Self::Upload { error, .. } => comfy_error_code(error),
         }
@@ -173,6 +183,9 @@ impl fmt::Display for GenerationInputPrepareError {
                 "{}: first_frame and last_frame cannot use the same image asset {asset_id}",
                 self.code()
             ),
+            Self::H3ReferenceDuration { message } => {
+                write!(formatter, "{}: {message}", self.code())
+            }
             Self::Repository(message) => write!(formatter, "{}: {message}", self.code()),
             Self::Upload {
                 input_key,
@@ -253,6 +266,36 @@ impl GenerationInputPreparer {
                 (key.clone(), value)
             })
             .collect()
+    }
+
+    pub async fn validate_h3_reference_durations(
+        &self,
+        project_id: &str,
+        workflow: serde_json::Value,
+        recipe: &crate::domain::Recipe,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), GenerationInputPrepareError> {
+        use crate::application::product::h3_resolution::{
+            active_h3_kind, validate_reference_durations,
+        };
+        if active_h3_kind(workflow, recipe).as_deref() != Some("MiniMaxH3ReferenceToVideo") {
+            return Ok(());
+        }
+        for key in ["reference_videos", "reference_audios"] {
+            let (ids, expectation) = match values.get(key) {
+                Some(GenerationInputValue::VideoAssets(ids)) => (ids, MediaExpectation::Video),
+                Some(GenerationInputValue::AudioAssets(ids)) => (ids, MediaExpectation::Audio),
+                _ => continue,
+            };
+            let mut durations = Vec::with_capacity(ids.len());
+            for id in ids {
+                let asset = self.load_media_asset(project_id, id, expectation).await?;
+                durations.push(asset.duration_ms);
+            }
+            validate_reference_durations(key, &durations)
+                .map_err(|message| GenerationInputPrepareError::H3ReferenceDuration { message })?;
+        }
+        Ok(())
     }
 
     pub async fn validate_asset_references(
@@ -1279,6 +1322,99 @@ mod tests {
             Arc::new(TestProjectRepository),
             Arc::new(adapter),
         )
+    }
+
+    #[tokio::test]
+    async fn h3_reference_duration_admission_reads_real_project_scoped_assets_without_upload() {
+        let recipe = crate::compiler::RecipeParser::parse(include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_2_0/recipe.yaml"
+        ))
+        .unwrap();
+        let workflow: serde_json::Value = serde_json::from_str(include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_2_0/workflow_api.json"
+        ))
+        .unwrap();
+        for audio in [false, true] {
+            let key = if audio {
+                "reference_audios"
+            } else {
+                "reference_videos"
+            };
+            for (duration, ok) in [
+                (Some(1900), false),
+                (Some(2000), true),
+                (Some(15000), true),
+                (Some(15001), false),
+                (None, false),
+            ] {
+                let mut asset = if audio {
+                    audio_asset("ast_media", "project-1")
+                } else {
+                    video_asset("ast_media", "project-1")
+                };
+                asset.duration_ms = duration;
+                let id = asset.id.clone();
+                let adapter = RecordingAdapter::default();
+                let uploads = adapter.filenames.clone();
+                let preparer = preparer(vec![asset], adapter);
+                let value = if audio {
+                    GenerationInputValue::AudioAssets(vec![id])
+                } else {
+                    GenerationInputValue::VideoAssets(vec![id])
+                };
+                let values = [(key.into(), value)].into();
+                let result = preparer
+                    .validate_h3_reference_durations(
+                        "project-1",
+                        workflow.clone(),
+                        &recipe,
+                        &values,
+                    )
+                    .await;
+                assert_eq!(result.is_ok(), ok);
+                if duration.is_none() {
+                    assert_eq!(result.unwrap_err().code(), "BLOCKED_BY_METADATA");
+                }
+                assert!(preparer
+                    .validate_h3_reference_durations(
+                        "other-project",
+                        workflow.clone(),
+                        &recipe,
+                        &values
+                    )
+                    .await
+                    .is_err());
+                assert!(uploads.lock().unwrap().is_empty());
+            }
+            let mut first = if audio {
+                audio_asset("ast_first", "project-1")
+            } else {
+                video_asset("ast_first", "project-1")
+            };
+            let mut second = if audio {
+                audio_asset("ast_second", "project-1")
+            } else {
+                video_asset("ast_second", "project-1")
+            };
+            first.duration_ms = Some(8000);
+            second.duration_ms = Some(8000);
+            let ids = vec![first.id.clone(), second.id.clone()];
+            let value = if audio {
+                GenerationInputValue::AudioAssets(ids)
+            } else {
+                GenerationInputValue::VideoAssets(ids)
+            };
+            let preparer = preparer(vec![first, second], RecordingAdapter::default());
+            assert!(preparer
+                .validate_h3_reference_durations(
+                    "project-1",
+                    workflow.clone(),
+                    &recipe,
+                    &[(key.into(), value)].into()
+                )
+                .await
+                .is_err());
+        }
     }
 
     #[test]

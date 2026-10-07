@@ -357,3 +357,29 @@ it("M2-2 typed prompt provenance survives stage and Settings/Workflow return sna
  expect(useStudioStore.getState().creationPromptProvenance?.promptVersionId).toBe("prv-choice");
  expect(useStudioStore.getState().creationLabReturn?.scope).toBe("project:shot1:image");
 });
+
+it.each(["STARTED", "FAILED_TO_START", "ALREADY_ACCEPTED"] as const)("clearing a submission field invalidates %s acceptance and renews the attempt", async startOutcome => {
+  api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome, startIssue: null });
+  render(<Host />); await loaded();
+  fireEvent.click(screen.getByRole("button", { name: "生成" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(useStudioStore.getState().draftDirty).toBe(false));
+  expect(await screen.findByText(startOutcome === "FAILED_TO_START" ? "已加入队列，启动失败" : "请求已接受")).toBeTruthy();
+  const first = api.generate.mock.calls[0][0].submissionIdempotencyKey;
+  fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "" } });
+  await waitFor(() => expect(screen.queryByText(/已加入队列|请求已接受/)).toBeNull());
+  expect(useStudioStore.getState().values.width).toBeUndefined();
+  expect(screen.getByRole("button", { name: "查看运行详情" })).toBeTruthy();
+  // The historical RunRef remains available; it is not an accepted submission.
+  api.readinessGet.mockResolvedValue({ ready: false, issues: [], fieldErrors: [], actions: [] });
+  fireEvent.click(screen.getByRole("button", { name: "生成" }));
+  await waitFor(() => expect(api.readinessGet.mock.calls[api.readinessGet.mock.calls.length - 1]?.[0].submissionIdempotencyKey).not.toBe(first));
+  expect(api.generate).toHaveBeenCalledTimes(1);
+  const second = api.readinessGet.mock.calls[api.readinessGet.mock.calls.length - 1]?.[0].submissionIdempotencyKey;
+  act(() => useStudioStore.getState().setValue("width", {type:"integer",value:640}));
+  api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
+  fireEvent.click(screen.getByRole("button", { name: "生成" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2));
+  expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).toBe(second);
+  expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(first);
+});

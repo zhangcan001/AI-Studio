@@ -82,6 +82,18 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_1_0/workflow_api.json"
         ),
     },
+    BuiltinPackage {
+        directory: "minimax_h3_fl2va_t2v_quality_2_2_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/workflow_api.json"
+        ),
+    },
     #[cfg(test)]
     BuiltinPackage {
         directory: "minimax_h3_fl2va_i2v_quality_2_0_0",
@@ -105,6 +117,18 @@ const PACKAGES: &[BuiltinPackage] = &[
         ),
         workflow: include_str!(
             "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_1_0/workflow_api.json"
+        ),
+    },
+    BuiltinPackage {
+        directory: "minimax_h3_fl2va_i2v_quality_2_2_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/workflow_api.json"
         ),
     },
     #[cfg(test)]
@@ -132,6 +156,18 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_1_1/workflow_api.json"
         ),
     },
+    BuiltinPackage {
+        directory: "minimax_h3_fl2va_first_last_quality_2_2_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_2_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_2_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_2_0/workflow_api.json"
+        ),
+    },
     #[cfg(test)]
     BuiltinPackage {
         directory: "minimax_h3_reference_video_quality_2_0_0",
@@ -155,6 +191,18 @@ const PACKAGES: &[BuiltinPackage] = &[
         ),
         workflow: include_str!(
             "../../runtime_packages/minimax_h3_reference_video_quality_2_1_0/workflow_api.json"
+        ),
+    },
+    BuiltinPackage {
+        directory: "minimax_h3_reference_video_quality_2_2_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_2_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_2_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_2_0/workflow_api.json"
         ),
     },
     #[cfg(test)]
@@ -234,9 +282,41 @@ pub fn is_builtin_package_name(package_name: &str) -> bool {
 }
 
 fn active_package(package: &BuiltinPackage) -> bool {
-    package.directory.contains("_quality_2_1_0")
-        || package.directory == "minimax_h3_fl2va_first_last_quality_2_1_1"
-        || package.directory.starts_with("kera2_")
+    package.directory.contains("_quality_2_2_0") || package.directory.starts_with("kera2_")
+}
+
+/// The only automatic default advance is this explicitly approved immutable
+/// H3 Base upgrade. Generic imports and user-selected/promoted recipes keep
+/// their existing default; historical version/recipe identities are untouched.
+pub fn h3_base_supersession(
+    package: &crate::application::ports::WorkflowPackageRecord,
+) -> Option<(&'static str, String, String)> {
+    if package.source_kind != "PRODUCT" {
+        return None;
+    }
+    let new = PACKAGES
+        .iter()
+        .find(|p| p.directory == package.package_name && p.directory.contains("_quality_2_2_0"))?;
+    let manifest =
+        crate::application::workflow_manifest::WorkflowManifest::parse(new.manifest).ok()?;
+    let digest = |bytes: &str| format!("{:x}", Sha256::digest(bytes.as_bytes()));
+    if package.workflow_id != manifest.id
+        || package.workflow_version != manifest.workflow_version
+        || package.recipe_version != manifest.recipe_version
+        || package.workflow_sha256 != digest(new.workflow)
+        || package.recipe_sha256 != digest(new.recipe)
+    {
+        return None;
+    }
+    let old_name = match new.directory {
+        "minimax_h3_fl2va_t2v_quality_2_2_0" => "minimax_h3_fl2va_t2v_quality_2_1_0",
+        "minimax_h3_fl2va_i2v_quality_2_2_0" => "minimax_h3_fl2va_i2v_quality_2_1_0",
+        "minimax_h3_fl2va_first_last_quality_2_2_0" => "minimax_h3_fl2va_first_last_quality_2_1_1",
+        "minimax_h3_reference_video_quality_2_2_0" => "minimax_h3_reference_video_quality_2_1_0",
+        _ => return None,
+    };
+    let old = PACKAGES.iter().find(|p| p.directory == old_name)?;
+    Some((old.directory, digest(old.workflow), digest(old.recipe)))
 }
 
 pub fn ensure_installed(root: &Path) -> Result<(), String> {
@@ -373,13 +453,203 @@ fn unique_suffix() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        audit_installed, ensure_installed, is_builtin_package_name, repair_package, PACKAGES,
+        active_package, audit_installed, ensure_installed, is_builtin_package_name, repair_package,
+        PACKAGES,
     };
     use crate::application::workflow_manifest::WorkflowManifest;
     use crate::compiler::{BindingValidator, RecipeParser, RecipeValidator, WorkflowValidator};
     use crate::domain::WorkflowDocument;
     use tempfile::tempdir;
 
+    #[tokio::test]
+    async fn h3_default_upgrade_is_exact_preserves_history_and_respects_user_lifecycle() {
+        use crate::application::ports::{WorkflowLibraryRepository, WorkflowPackageRecord};
+        use crate::infrastructure::database::{initialize, SqliteWorkflowLibraryRepository};
+        let record = |package: &super::BuiltinPackage| {
+            let manifest = WorkflowManifest::parse(package.manifest).unwrap();
+            let recipe = RecipeParser::parse(package.recipe).unwrap();
+            let digest = |bytes: &str| {
+                format!(
+                    "{:x}",
+                    <sha2::Sha256 as sha2::Digest>::digest(bytes.as_bytes())
+                )
+            };
+            WorkflowPackageRecord {
+                workflow_id: manifest.id,
+                source_kind: "PRODUCT".into(),
+                package_name: package.directory.into(),
+                package_source_path: None,
+                name: manifest.name,
+                category: manifest.category,
+                mode: manifest.mode,
+                workflow_version: manifest.workflow_version,
+                workflow_json: serde_json::from_str(package.workflow).unwrap(),
+                workflow_sha256: digest(package.workflow),
+                source_workflow_json: None,
+                recognition_metadata_json: None,
+                recipe_version: manifest.recipe_version,
+                recipe_schema_version: recipe.schema_version,
+                recipe_yaml: package.recipe.into(),
+                recipe_sha256: digest(package.recipe),
+                created_at: chrono::Utc::now(),
+            }
+        };
+        for new in PACKAGES
+            .iter()
+            .filter(|p| p.directory.contains("_quality_2_2_0"))
+        {
+            let new_record = record(new);
+            let (old_name, _, _) = super::h3_base_supersession(&new_record).unwrap();
+            let old = PACKAGES.iter().find(|p| p.directory == old_name).unwrap();
+            let mut tampered = new_record.clone();
+            tampered.recipe_sha256 = "0".repeat(64);
+            assert!(super::h3_base_supersession(&tampered).is_none());
+            for lifecycle in ["active", "removed", "disabled", "archived", "promoted"] {
+                let directory = tempdir().unwrap();
+                let pool = initialize(&directory.path().join("owned.sqlite"))
+                    .await
+                    .unwrap();
+                let repository = SqliteWorkflowLibraryRepository::new(pool.clone());
+                repository.register_package(&record(old)).await.unwrap();
+                let old_id: String =
+                    sqlx::query_scalar("SELECT current_version_id FROM workflows WHERE id=?")
+                        .bind(&new_record.workflow_id)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                if lifecycle == "removed" {
+                    sqlx::query("UPDATE workflows SET library_state='REMOVED' WHERE id=?")
+                        .bind(&new_record.workflow_id)
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                }
+                if lifecycle == "disabled" || lifecycle == "archived" {
+                    sqlx::query("INSERT INTO workflow_runtime_states (workflow_version_id,enabled,archived,updated_at) VALUES (?,?,?,?)").bind(&old_id).bind(if lifecycle=="disabled" {0}else{1}).bind(if lifecycle=="archived" {1}else{0}).bind(chrono::Utc::now().to_rfc3339()).execute(&pool).await.unwrap();
+                }
+                if lifecycle == "promoted" {
+                    sqlx::query("INSERT INTO workflow_recipe_promotions (workflow_version_id,recipe_id,promoted_at) SELECT workflow_version_id,id,? FROM recipes WHERE workflow_version_id=?").bind(chrono::Utc::now().to_rfc3339()).bind(&old_id).execute(&pool).await.unwrap();
+                }
+                repository.register_package(&new_record).await.unwrap();
+                repository.register_package(&new_record).await.unwrap();
+                let current: String =
+                    sqlx::query_scalar("SELECT current_version_id FROM workflows WHERE id=?")
+                        .bind(&new_record.workflow_id)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(current != old_id, lifecycle == "active");
+                let historical: String = sqlx::query_scalar(
+                    "SELECT recipe_yaml FROM recipes WHERE workflow_version_id=?",
+                )
+                .bind(&old_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                assert_eq!(historical, old.recipe);
+                assert_eq!(
+                    sqlx::query_scalar::<_, i64>("SELECT count(*) FROM workflow_versions")
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap(),
+                    2
+                );
+                assert_eq!(
+                    sqlx::query_scalar::<_, i64>("SELECT count(*) FROM recipes")
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap(),
+                    2
+                );
+                pool.close().await;
+            }
+        }
+    }
+    #[test]
+    fn new_h3_identities_compile_four_to_fifteen_seconds_without_mutating_history() {
+        use crate::compiler::WorkflowCompiler;
+        use crate::domain::{CompileRequest, InputValue};
+        for package in PACKAGES
+            .iter()
+            .filter(|p| p.directory.contains("_quality_2_2_0"))
+        {
+            let recipe = RecipeParser::parse(package.recipe).unwrap();
+            let workflow =
+                WorkflowDocument::parse(serde_json::from_str(package.workflow).unwrap()).unwrap();
+            assert!(package.manifest.contains("workflow_version: 2.2.0"));
+            for duration in [3, 4, 15, 16] {
+                let mut values: std::collections::BTreeMap<String, InputValue> = [
+                    ("duration_seconds".into(), InputValue::Integer(duration)),
+                    ("prompt".into(), InputValue::String("test".into())),
+                ]
+                .into();
+                for field in ["first_frame", "last_frame"] {
+                    if recipe.inputs.contains_key(field) {
+                        values.insert(field.into(), InputValue::Image(format!("{field}.png")));
+                    }
+                }
+                let compiled = crate::application::product::h3_resolution::compile_checked(
+                    &WorkflowCompiler,
+                    &workflow,
+                    &recipe,
+                    &CompileRequest::new(values),
+                );
+                assert_eq!(
+                    compiled.is_ok(),
+                    (4..=15).contains(&duration),
+                    "{}: {} {:?}",
+                    package.directory,
+                    duration,
+                    compiled.as_ref().err()
+                );
+                if let Ok(compiled) = compiled {
+                    crate::application::product::h3_resolution::validate_resolved(
+                        compiled.workflow.clone(),
+                        &recipe,
+                        &compiled.resolved_inputs,
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        for old in PACKAGES.iter().filter(|p| {
+            p.directory.contains("_quality_2_1_0") || p.directory.ends_with("_quality_2_1_1")
+        }) {
+            assert!(old.recipe.contains("    min: 1\n"));
+            assert!(!active_package(old));
+            let recipe = RecipeParser::parse(old.recipe).unwrap();
+            let workflow =
+                WorkflowDocument::parse(serde_json::from_str(old.workflow).unwrap()).unwrap();
+            for duration in [3, 4, 15, 16] {
+                let mut request = CompileRequest::new(
+                    [
+                        ("duration_seconds".into(), InputValue::Integer(duration)),
+                        ("prompt".into(), InputValue::String("legacy draft".into())),
+                        ("width".into(), InputValue::Integer(1344)),
+                        ("height".into(), InputValue::Integer(768)),
+                    ]
+                    .into(),
+                );
+                for field in ["first_frame", "last_frame"] {
+                    if recipe.inputs.contains_key(field) {
+                        request
+                            .values
+                            .insert(field.into(), InputValue::Image(format!("{field}.png")));
+                    }
+                }
+                assert_eq!(
+                    crate::application::product::h3_resolution::compile_checked(
+                        &WorkflowCompiler,
+                        &workflow,
+                        &recipe,
+                        &request
+                    )
+                    .is_ok(),
+                    (4..=15).contains(&duration)
+                );
+            }
+        }
+    }
     #[test]
     fn quality_only_installation_trims_video_and_audio_to_requested_seconds() {
         let directory = tempdir().unwrap();
@@ -503,14 +773,14 @@ mod tests {
     fn installs_missing_product_packages_without_overwriting_existing_directory() {
         let directory = tempdir().expect("temp directory");
         ensure_installed(directory.path()).expect("builtin packages should install");
-        let fl2va = directory.path().join("minimax_h3_fl2va_i2v_quality_2_1_0");
+        let fl2va = directory.path().join("minimax_h3_fl2va_i2v_quality_2_2_0");
         let ref2va = directory
             .path()
-            .join("minimax_h3_reference_video_quality_2_1_0");
-        let quality_t2v = directory.path().join("minimax_h3_fl2va_t2v_quality_2_1_0");
+            .join("minimax_h3_reference_video_quality_2_2_0");
+        let quality_t2v = directory.path().join("minimax_h3_fl2va_t2v_quality_2_2_0");
         let quality_ref = directory
             .path()
-            .join("minimax_h3_reference_video_quality_2_1_0");
+            .join("minimax_h3_reference_video_quality_2_2_0");
         let kera2 = directory.path().join("kera2_t2i_local_v2_1_1_1_90894e9e");
         assert!(fl2va.join("manifest.yaml").is_file());
         assert!(ref2va.join("recipe.yaml").is_file());
@@ -529,7 +799,7 @@ mod tests {
     fn same_version_hash_mismatch_is_reported_without_overwrite_and_has_explicit_repair() {
         let directory = tempdir().expect("temp directory");
         ensure_installed(directory.path()).expect("builtin packages should install");
-        let package = directory.path().join("minimax_h3_fl2va_i2v_quality_2_1_0");
+        let package = directory.path().join("minimax_h3_fl2va_i2v_quality_2_2_0");
         std::fs::write(package.join("recipe.yaml"), "user change").expect("mutate package");
 
         let mismatches = audit_installed(directory.path());
@@ -543,7 +813,7 @@ mod tests {
             "user change"
         );
 
-        repair_package(directory.path(), "minimax_h3_fl2va_i2v_quality_2_1_0")
+        repair_package(directory.path(), "minimax_h3_fl2va_i2v_quality_2_2_0")
             .expect("explicit repair should work");
         assert!(audit_installed(directory.path()).is_empty());
         assert!(

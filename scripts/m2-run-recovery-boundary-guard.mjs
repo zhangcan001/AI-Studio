@@ -1,7 +1,7 @@
+import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
 // M2-1 successor validates live bytes before historical guards read their parent.
 // Historical manifests remain immutable; no authority or transport exemption.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { m2ReuseParentReader } from './m2-create-library-reuse-boundary-guard.mjs';
@@ -37,7 +37,7 @@ function parentBlobs(root, paths) {
   immutable.set(cacheKey, result); return result;
 }
 
-export function m2RecoveryParentReader(root, override) {
+function m2RecoveryParentReaderUncached(root, override) {
   const successor = m2ReuseParentReader(root);
   const disk = (_root,p) => successor.read(p);
   const projectedFiles = (root,folder,pattern) => files(root,folder,pattern).filter(p=>!successor.addedPaths.includes(p));
@@ -70,4 +70,8 @@ export function m2RecoveryParentReader(root, override) {
   return { violations, addedPaths: [...added,...successor.addedPaths], afterHashes: { ...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])), ...successor.afterHashes},
     backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,
     read: p => violations.length || !existing.includes(p) ? disk(root, p) : before(p) };
+}
+
+export function m2RecoveryParentReader(root, override) {
+  return cachedBoundary(root, "m2RecoveryParentReader", override, () => m2RecoveryParentReaderUncached(root, override), 'docs/architecture/m2-1-run-recovery.json');
 }

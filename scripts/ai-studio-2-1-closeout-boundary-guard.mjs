@@ -1,6 +1,6 @@
+import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
 // Release-only successor. No historical manifest, runtime authority or CI exemption.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -24,7 +24,7 @@ function parentBlobs(root) {
   for(const p of paths){const end=bytes.indexOf(10,offset),m=/^[a-f0-9]+ blob (\d+)$/.exec(bytes.subarray(offset,end).toString());if(!m)throw Error('Closeout parent blob missing');const start=end+1,length=Number(m[1]);if(bytes[start+length]!==10)throw Error('Closeout parent blob boundary');blobs.set(p,normalize(bytes.subarray(start,start+length).toString('utf8')));offset=start+length+1;}
   if(offset!==bytes.length)throw Error('Closeout parent trailing bytes');immutable.set(root,blobs);return blobs;
 }
-export function closeoutParentReader(root,override) {
+function closeoutParentReaderUncached(root,override) {
   const repair=rcRepairParentReader(root);
   const disk=p=>normalize(repair.read(p));
   const proof=override??JSON.parse(disk('docs/architecture/ai-studio-2-1-closeout.json'));
@@ -55,4 +55,8 @@ export function closeoutParentReader(root,override) {
   if(!disk('README.md').includes('NOT YET PUBLISHED')||!disk('README.md').includes('v2.0.0-personal-r4')||!disk('docs/AI_STUDIO_2_1_ROADMAP.md').includes('PRODUCT_WORK_COMPLETE=YES')||!disk('docs/RELEASE_NOTES_v2.1.0-personal.md').includes('This document does not announce a Git tag or GitHub Release.'))fail('publication-docs');
   if(violations.length)return rejected();
   return {violations,addedPaths:[...added,...repair.addedPaths],afterHashes:{...Object.fromEntries(existing.map(p=>[p,proof.paths[p].afterHash])),...repair.afterHashes},backendAggregateSha256:repair.backendAggregateSha256,read:p=>existing.includes(p)?before(p):disk(p)};
+}
+
+export function closeoutParentReader(root, override) {
+  return cachedBoundary(root, "closeoutParentReader", override, () => closeoutParentReaderUncached(root, override), 'docs/architecture/ai-studio-2-1-closeout.json');
 }

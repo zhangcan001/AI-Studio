@@ -1,7 +1,7 @@
+import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
 // M2-2 successor validates live bytes before historical guards read their parent.
 // Historical manifests remain immutable; no authority or transport exemption.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { m3LibraryParentReader } from './m3-library-findability-boundary-guard.mjs';
@@ -35,7 +35,7 @@ function parentBlobs(root, paths) {
   immutable.set(cacheKey, result); return result;
 }
 
-export function m2ReuseParentReader(root, override) {
+function m2ReuseParentReaderUncached(root, override) {
   // Invalid review metadata cannot authorize projection. Reject it before
   // replaying the complete successor chain; live bytes remain unprojected.
   // Do not cache acceptance or skip any byte checks for valid metadata.
@@ -82,4 +82,8 @@ export function m2ReuseParentReader(root, override) {
   return { violations, addedPaths: [...added,...successor.addedPaths], afterHashes: { ...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])), ...successor.afterHashes },
     backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,
     read: p => violations.length || !existing.includes(p) ? successor.read(p) : before(p) };
+}
+
+export function m2ReuseParentReader(root, override) {
+  return cachedBoundary(root, "m2ReuseParentReader", override, () => m2ReuseParentReaderUncached(root, override), 'docs/architecture/m2-2-create-library-reuse.json');
 }

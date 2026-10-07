@@ -1,7 +1,7 @@
+import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
 // Release-only successor: validate real live bytes before projecting the exact
 // parent for historical Phase13 checks. No historical manifest is rewritten.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { m1ParentReader } from './m1-readiness-boundary-guard.mjs';
@@ -21,7 +21,7 @@ const files = (root, dir) => readdirSync(join(root, dir), { withFileTypes: true 
 }).sort();
 const aggregate = (paths, read) => hash(paths.map(p => `${p}\n${normalize(read(p))}`).join('\n'));
 
-export function releaseParentReader(root, reviewOverride) {
+function releaseParentReaderUncached(root, reviewOverride) {
   const checkpoint = m1ParentReader(root);
   const live = (_root, path) => checkpoint.read(path);
   const proofPath = join(root, 'docs/architecture/phase14-release.json');
@@ -76,4 +76,8 @@ export function releaseParentReader(root, reviewOverride) {
     if (![rustPath, guardPath, workflowPath].includes(path)) return live(root, path);
     return path === rustPath ? blobs.get(path) : parent(root, path);
   } };
+}
+
+export function releaseParentReader(root, reviewOverride) {
+  return cachedBoundary(root, "releaseParentReader", reviewOverride, () => releaseParentReaderUncached(root, reviewOverride), 'docs/architecture/phase14-release.json');
 }

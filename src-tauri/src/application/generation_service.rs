@@ -280,6 +280,20 @@ impl Drop for GenerationExecutionLease {
 }
 
 impl GenerationService {
+    fn compile_product(
+        &self,
+        workflow: &crate::domain::WorkflowDocument,
+        recipe: &crate::domain::Recipe,
+        request: &CompileRequest,
+    ) -> Result<crate::compiler::CompileResult, CompileError> {
+        crate::application::product::h3_resolution::compile_checked(
+            &self.compiler,
+            workflow,
+            recipe,
+            request,
+        )
+    }
+
     /// Read-only execution admission for one saved WorkflowVersion/Recipe pair.
     /// No Task, queue item, upload, or remote prompt is created here.
     pub async fn preflight_saved_version(
@@ -410,8 +424,7 @@ impl GenerationService {
         for item_values in values {
             let result = async {
                 let compiled = self
-                    .compiler
-                    .compile(
+                    .compile_product(
                         &workflow,
                         &recipe,
                         &CompileRequest::new(GenerationInputPreparer::preflight_values(
@@ -474,6 +487,15 @@ impl GenerationService {
                         }),
                     });
                 }
+                self.generation_input_preparer
+                    .validate_h3_reference_durations(
+                        project_id,
+                        definition.workflow_json.clone(),
+                        &recipe,
+                        item_values,
+                    )
+                    .await
+                    .map_err(GenerationServiceError::InputPrepare)?;
                 self.generation_input_preparer
                     .validate_asset_references(project_id, item_values)
                     .await
@@ -943,15 +965,30 @@ impl GenerationService {
         }
         let preflight_request =
             CompileRequest::new(GenerationInputPreparer::preflight_values(&request.values));
-        if let Err(error) = self
-            .compiler
-            .compile(&workflow, &recipe, &preflight_request)
-        {
+        if let Err(error) = self.compile_product(&workflow, &recipe, &preflight_request) {
             return Err(self
                 .fail_and_preserve(
                     &mut task,
                     task_error_from_compile(&error),
                     GenerationServiceError::Compile(error),
+                )
+                .await);
+        }
+        if let Err(error) = self
+            .generation_input_preparer
+            .validate_h3_reference_durations(
+                &project_id,
+                definition.workflow_json.clone(),
+                &recipe,
+                &request.values,
+            )
+            .await
+        {
+            return Err(self
+                .fail_and_preserve(
+                    &mut task,
+                    task_error_from_input_prepare(&error),
+                    GenerationServiceError::InputPrepare(error),
                 )
                 .await);
         }
@@ -1029,7 +1066,7 @@ impl GenerationService {
             return Ok(task);
         }
         let compile_request = CompileRequest::new(prepared.compiler_values.clone());
-        let compile_result = match self.compiler.compile(&workflow, &recipe, &compile_request) {
+        let compile_result = match self.compile_product(&workflow, &recipe, &compile_request) {
             Ok(result) => result,
             Err(error) => {
                 return Err(self

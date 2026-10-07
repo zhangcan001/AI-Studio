@@ -170,16 +170,33 @@ async fn register_package(
         }
     };
 
+    let supersession = crate::application::builtin_runtime_packages::h3_base_supersession(package);
+    let (old_package, old_workflow_sha, old_recipe_sha) =
+        supersession.unwrap_or(("", String::new(), String::new()));
     sqlx::query(
         "UPDATE workflows SET current_version_id = ?, updated_at = ?
-         WHERE id = ? AND current_version_id IS NULL",
+         WHERE id = ? AND (current_version_id IS NULL OR (
+           source_kind = 'PRODUCT' AND library_state = 'ACTIVE'
+           AND EXISTS (SELECT 1 FROM workflow_runtime_artifacts a
+             WHERE a.workflow_version_id = workflows.current_version_id
+               AND a.package_name = ? AND a.source_kind = 'PRODUCT'
+               AND a.workflow_sha256 = ? AND a.recipe_sha256 = ?)
+           AND NOT EXISTS (SELECT 1 FROM workflow_runtime_states s
+             WHERE s.workflow_version_id = workflows.current_version_id
+               AND (s.enabled = 0 OR s.archived = 1))
+           AND NOT EXISTS (SELECT 1 FROM workflow_recipe_promotions p
+             WHERE p.workflow_version_id = workflows.current_version_id)))",
     )
     .bind(&workflow_version_id)
     .bind(format_datetime(package.created_at))
     .bind(&package.workflow_id)
+    .bind(old_package)
+    .bind(old_workflow_sha)
+    .bind(old_recipe_sha)
     .execute(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
+
     register_runtime_artifact(transaction, package, &workflow_version_id, &recipe_id).await?;
     Ok(registration)
 }

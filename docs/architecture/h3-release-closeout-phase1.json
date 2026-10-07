@@ -1,0 +1,236 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "H3_RELEASE_CLOSEOUT_PHASE1",
+  "parentHead": "5dcc9c63e3718818e976b039f77ca4f11a83527f",
+  "paths": {
+    "scripts/2-1-publication-successor-guard.mjs": {
+      "beforeHash": "3830202674d132855a98b53d96c968dffbf91059d40f135d2174b70b8d70a1b1",
+      "afterHash": "4407991b75f9eb4500ac9deb6c731f27a6d564f70d5a40a91c73974f496761ed"
+    },
+    "scripts/2-1-rc-backup-asset-version-repair-guard.mjs": {
+      "beforeHash": "c95827d8d7f76477138e2237ca3754d320a4bd53196ddb3699e0ef60f93523da",
+      "afterHash": "ba4ee636a765fe016f420cb7fadf0ab267745c44adad3827473e33e9d7cb17b5"
+    },
+    "scripts/ai-studio-2-1-closeout-boundary-guard.mjs": {
+      "beforeHash": "80c960ef0a7566238cdd010a1ff1aac7950f8636d80fed4c438936400fbf5544",
+      "afterHash": "4ea76d72e3018c652702481973fa3214da01b295cfb98552defb24bf125794a6"
+    },
+    "scripts/boundary-validation-cache.mjs": {
+      "beforeHash": null,
+      "afterHash": "cbb2233a9173b68ce112b20ce8bca6aad248bd0d2897a636a39b932e2f4e0298"
+    },
+    "scripts/h3-generation-repair-successor-guard.mjs": {
+      "beforeHash": "62faf65946806cbbf9fd67984435e545a460545f8cc70079499a89e0635dd80a",
+      "afterHash": "36e689a692c345727c8d9a60c7fe1cea7187c973b5d7338d7275f1a1900ba166"
+    },
+    "scripts/h3-release-closeout-phase1-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "05794315f260338df82dcc305d932e8c31292be81ac86abcf709ada2d02f0f26"
+    },
+    "scripts/m1-overview-readiness-boundary-guard.mjs": {
+      "beforeHash": "3f4ced9be0a06e9c4c94c8b6b8847e7121bc1dfc53358d5de1f77f92fab27001",
+      "afterHash": "60de284bf23b25bae4635af432cd830b437892ceedcc4ef3c9f4121461ef03a0"
+    },
+    "scripts/m1-readiness-boundary-guard.mjs": {
+      "beforeHash": "7f4b7c63fe53978269b3d3c629b3b711fc6fb88cfc2d33e9845ae4512202c593",
+      "afterHash": "400193070c2c828ddb7094cf2cc86e79234856e766609b1272896c7b51f95db8"
+    },
+    "scripts/m1-settings-runtime-boundary-guard.mjs": {
+      "beforeHash": "63210fa8ee74223c59d4dc017cd104b0a12c281d355e1a9d6a04cdcf0b076760",
+      "afterHash": "990caf6f4aa24457b5af18e02f5aa9d4850602644cdb1214052b35df427a9173"
+    },
+    "scripts/m2-create-library-reuse-boundary-guard.mjs": {
+      "beforeHash": "9eb7c53d68b0bb0154ae506895695910e5e5e82f39e7e82cba2c7e5de6aa3bfb",
+      "afterHash": "12afc734eb4177d3044b0a185f72c75e34581eb2ee8b3fa3677e883815295c40"
+    },
+    "scripts/m2-run-recovery-boundary-guard.mjs": {
+      "beforeHash": "0b65f64754829a58ab9846ec665157337cf57080ca7431a9d7bb3f5e303e5f03",
+      "afterHash": "90f142f2f3f52d6a150f63874f31f513ce30f4d0d8fe21738df1bcc5e5db0247"
+    },
+    "scripts/m3-bounded-visual-library-boundary-guard.mjs": {
+      "beforeHash": "b14a7e1fa83f6bfde5d1c4d1c1bfb0e59e3615b9b333b7ce2361bd03f584a104",
+      "afterHash": "ecd344edf2458f42f117e5e9e43a3c60525d65b67b2a1e7d266b54c145536741"
+    },
+    "scripts/m3-library-findability-boundary-guard.mjs": {
+      "beforeHash": "8ad5b683ef9453b27b27ecae9a09ef25c42c7340f52f660e1938d9fef89a3429",
+      "afterHash": "60da0494ded7c5c76a4b54f6759f462fdf79d0431bf82080c2f0fa361f6efa45"
+    },
+    "scripts/m4-readonly-media-integrity-boundary-guard.mjs": {
+      "beforeHash": "0f878b8b641db07a5a0f4fac092ccd278b5171d64e6fbb5ccb1b4e04255c876a",
+      "afterHash": "309d49815ea8dba5ab21d1c1a1c08d5725470753c32198250120add17ca54633"
+    },
+    "scripts/phase14-release-guard.mjs": {
+      "beforeHash": "eab520f7fa94b8ca4d375df965352e67f669ddfd7380d1482577ec90d5305e07",
+      "afterHash": "41b2df9e35a0d24076c585c663bf020f5bdc30a8f6a1257f63235667706097fa"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_first_last_quality_2_2_0/manifest.yaml": {
+      "beforeHash": null,
+      "afterHash": "b6ceed9d31c78a24607fbfa425ad6dd7261cbd012e5ccc88fe07250873b6ed69"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_first_last_quality_2_2_0/recipe.yaml": {
+      "beforeHash": null,
+      "afterHash": "e9e1fc23386f2e4d622ed3feb026ed154087b67b7ab9c043cb8a3f95166e1d56"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_first_last_quality_2_2_0/workflow_api.json": {
+      "beforeHash": null,
+      "afterHash": "41ec1a3778c12d5c4c4b6ab9e49e4d1ee615db85ee7ab187796d31436c3c5ce0"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/manifest.yaml": {
+      "beforeHash": null,
+      "afterHash": "ca23239ca0bf46b0aa106205039cae59cb837be7589a66f568ebb9c4027945b9"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml": {
+      "beforeHash": null,
+      "afterHash": "f05dab7718cff9e6a00a297690b03296185a0a4a26132213c30f6e24d8d1d261"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/workflow_api.json": {
+      "beforeHash": null,
+      "afterHash": "9333e732779f878dae3ae367a3f4703359c364a5d87084f5c5b33f0d2d586577"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/manifest.yaml": {
+      "beforeHash": null,
+      "afterHash": "f00c8d4ac66e295f58e0116cdecb4b2877470ab8b36fb38323e1aa8d8781caf6"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml": {
+      "beforeHash": null,
+      "afterHash": "dd4acb6f6540cc7cd0bf0ed1449732a0b3b10799ff27af11ace9871a4ac3b922"
+    },
+    "src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/workflow_api.json": {
+      "beforeHash": null,
+      "afterHash": "81ef2d95aa3e53b5103c0b088dde9ac5f3987be94e25cbfb8ec30af4fc0b355a"
+    },
+    "src-tauri/runtime_packages/minimax_h3_reference_video_quality_2_2_0/manifest.yaml": {
+      "beforeHash": null,
+      "afterHash": "7525776e6bf2af903cb9b59ab261c8c7dad3bb9f01f3bac6bda86c23ad5ac8f7"
+    },
+    "src-tauri/runtime_packages/minimax_h3_reference_video_quality_2_2_0/recipe.yaml": {
+      "beforeHash": null,
+      "afterHash": "3bd3a256939a97a66c115625fa4c7cc16c48e63d08a9f14d22567c7d2ab62de5"
+    },
+    "src-tauri/runtime_packages/minimax_h3_reference_video_quality_2_2_0/workflow_api.json": {
+      "beforeHash": null,
+      "afterHash": "8b41b048778c8ae0cc1d4f22736f1403732660be957443306d743237f336cdde"
+    },
+    "src-tauri/src/application/builtin_runtime_packages.rs": {
+      "beforeHash": "7f1f20c456e864083947f9a39a4c80c4709d1dc44c1a2d13af8947fc34a634be",
+      "afterHash": "ed6445ab85864ca79b0447cceb6da73485cf901760d7a9c2690e6554801042f9"
+    },
+    "src-tauri/src/application/generation_input_preparer.rs": {
+      "beforeHash": "5b60016351f1bd471ec62cc09468e7e71443eec2b6771c3204b10d0358556272",
+      "afterHash": "b1d8cbb0f13cc66f9397aa10f89e9e937a9bc1bdd64b781a91492b1c745e3789"
+    },
+    "src-tauri/src/application/generation_service.rs": {
+      "beforeHash": "767b47cf035066631251ed84e5350b28b8339b83bfc9bba53c04b5e9505cc8b2",
+      "afterHash": "693d695947bad22b4776608618fc01bfb1f8d8661f17a736e83b9320dc13a972"
+    },
+    "src-tauri/src/application/product/creation_facade/submission.rs": {
+      "beforeHash": "9a3c8d84229ea54f3ba68d68fa82a47133e42165b0e678e5e447bed655ca667e",
+      "afterHash": "0753c6e6a9db2301169ecaefb3f921317776ee2ff3849e16e384d779af85503d"
+    },
+    "src-tauri/src/application/product/h3_resolution.rs": {
+      "beforeHash": "77070bec0a0278bfe49d6ad051d2622ac28938fb932b38144725b8db171fe93e",
+      "afterHash": "61875e39849b32dae728398a66140ac18082343f078ef8ccbb2b8e1f2bb10152"
+    },
+    "src-tauri/src/infrastructure/database/repositories/workflow_library.rs": {
+      "beforeHash": "a2d976170e25f1fe18571b9eb043996b12a11057a6fcaf0df259835717baa9e7",
+      "afterHash": "f3f50e1abf5a9af00de7596cfba67cfe4f6518b0588d629f97ad4e75e87b1ec3"
+    },
+    "src-tauri/tests/dev059_production_package.rs": {
+      "beforeHash": "57277260d5f10b414ffefcc3385c0b742f806ef59a3ba786038a2aa247716c94",
+      "afterHash": "6102a5e8f81c540d0c6826f6482ce7a98a5b8895530ab726833a53af418c2e81"
+    },
+    "src-tauri/tests/dev082_unified_workflow_library.rs": {
+      "beforeHash": "3688fbe0a2aa829bef6d148d164ce8addfd9e3e6a98c2cb2cd25a54f148f862e",
+      "afterHash": "ba50c63026b58a90c5560bb9b27c7a4e5f2197129a5803e3b2538c60d1dabfb1"
+    },
+    "src/app/AIStudio21PublicationBoundary.test.ts": {
+      "beforeHash": "7b812d2cbb89512cffb4718c237d30796c7bf458b4725c9e580f5cd3708e4088",
+      "afterHash": "7924ddcaf77869edc1e70c8e3c89cb0cf6f838f9ea4f3fe392afb7d010524975"
+    },
+    "src/app/H3GenerationRepairBoundary.test.ts": {
+      "beforeHash": "7ee697ce89c40dffe66cdcc90850956567edd2b2d0031802f6f7fb4b44742d7f",
+      "afterHash": "f03a4435a1637d0b566d1e9f061f5b6e8dcc9f1d263cbe09ec31b35d0c5ed119"
+    },
+    "src/app/H3ReleaseCloseoutPhase1Boundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "0d17ad01625f0307385d91ec7dd6bef56fe3d76a9cde6ca1de1eb3f0a0c09356"
+    },
+    "src/features/create/CreateController.ts": {
+      "beforeHash": "c18b0e916b07e87618362e71a985fca887a72211dd0258dd28628007f8077ee5",
+      "afterHash": "49b0bd17d842b008fe15426a6af8e6e1a3431fcd95ce5b658704a63c93afce08"
+    },
+    "src/features/create/CreatePage.test.tsx": {
+      "beforeHash": "092a543e8214d4fef138f5af6d12f59389be675c3c39b0cc3ef62ab5085bb41c",
+      "afterHash": "69856b3d792ad6c9e7ddf6d6a0a0f84b5c3bcefc73d088a2ec1fe59735eb0d31"
+    }
+  },
+  "invariants": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "queueAuthorityChanged": false,
+    "bindingOccChanged": false,
+    "recognitionSemanticsChanged": false,
+    "replayFixturesChanged": false,
+    "releaseAssetsReplaced": false,
+    "remoteTelemetry": false,
+    "runtimeChanged": true,
+    "immutablePackagesPreserved": true,
+    "sharedProductAdmission": true
+  },
+  "backend": {
+    "beforeFiles": 346,
+    "afterFiles": 346,
+    "beforeAggregateHash": "1229b07194e65a975225fdfc6cd0cc4d16523b167d66f7fa14023aa18bcff66e",
+    "afterAggregateHash": "4a30304d3141fbd07db131c38d95b0676f4346b03ef83e4d7fa8ff8fe3c12532",
+    "untouchedAggregateHash": "bb2b74435a839a9f83a2c6b8dce43d44cf41daf01e2e6646b4fd71f3458b97d8"
+  },
+  "tests": {
+    "beforeFiles": 55,
+    "afterFiles": 55,
+    "beforeAggregateHash": "6fce4c0e0d1b44744e03c1d7965ed454337e764032722c64e4196ff11c3c26b9",
+    "afterAggregateHash": "883bb08ddc9fcbc1fafed39d25e0173fc4d06cf973617e68e7fd8f297aa5d541",
+    "untouchedAggregateHash": "3888bab451d0cf2e2bcbcf397461b540e362e04d5bea8bc87876bdcabbf750e3"
+  },
+  "frontend": {
+    "beforeFiles": 497,
+    "afterFiles": 498,
+    "beforeAggregateHash": "4096a4438c8dcf9734c98eb0a71e026a24c97e6b042f0eccdee7c67b1b8b2b60",
+    "afterAggregateHash": "3608a565e7b4425386f223499504d680ff00fc33bd141f667a2553793dd698b9",
+    "untouchedAggregateHash": "0575156c627365b2dde204fd3c0587abb1d294601d4663cf5d43650ebe41a582"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "afterAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "untouchedAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa"
+  },
+  "scripts": {
+    "beforeFiles": 29,
+    "afterFiles": 31,
+    "beforeAggregateHash": "9959e325faf2883cbedd6cabff88f8756970047a8e4f29800719c9e052dee19a",
+    "afterAggregateHash": "3ce5e3d0c8ed7bdbf509eaf9cdcb7bbcbc2f38bd1de270496fb59cce7b5b0d68",
+    "untouchedAggregateHash": "429987bfc34ca94fde40adaec8d89f53865bb71ef5c77d1e2ee1b4436790b302"
+  },
+  "migrations": {
+    "beforeFiles": 42,
+    "afterFiles": 42,
+    "beforeAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24",
+    "afterAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24",
+    "untouchedAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24"
+  },
+  "architecture": {
+    "beforeFiles": 27,
+    "afterFiles": 27,
+    "beforeAggregateHash": "bc0d10118356bfeb70cd11d5ae20c1fd23837a827c0a240dbe5782aa7029ea6f",
+    "afterAggregateHash": "bc0d10118356bfeb70cd11d5ae20c1fd23837a827c0a240dbe5782aa7029ea6f",
+    "untouchedAggregateHash": "bc0d10118356bfeb70cd11d5ae20c1fd23837a827c0a240dbe5782aa7029ea6f"
+  },
+  "packages": {
+    "beforeFiles": 39,
+    "afterFiles": 51,
+    "beforeAggregateHash": "31eefeac0ec9e46358db92b2df7b858061915c602dc54cef3bdf294f09327e64",
+    "afterAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "untouchedAggregateHash": "31eefeac0ec9e46358db92b2df7b858061915c602dc54cef3bdf294f09327e64"
+  }
+}

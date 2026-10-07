@@ -1,7 +1,7 @@
+import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
 // M3-2 successor validates live bytes before historical guards read their parent.
 // Historical manifests remain immutable; no authority or transport exemption.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { closeoutParentReader } from './ai-studio-2-1-closeout-boundary-guard.mjs';
@@ -38,7 +38,7 @@ function parentBlobs(root, paths) {
   immutable.set(cacheKey, result); return result;
 }
 
-export function m4MediaParentReader(root, override) {
+function m4MediaParentReaderUncached(root, override) {
   // Memoize reads only within this synchronous validation; no live cache survives
   // a call or replaces a fresh fail-closed read. Parent blobs alone persist.
   const closeout = closeoutParentReader(root);
@@ -93,4 +93,8 @@ export function m4MediaParentReader(root, override) {
     afterHashes: {...Object.fromEntries(Object.entries(review.paths??{}).map(([p,proof])=>[p,proof.afterHash])),...closeout.afterHashes},
     backendAggregateSha256: violations.length?undefined:closeout.backendAggregateSha256,
     read:p=>violations.length||!existing.includes(p)?disk(root,p):before(p) };
+}
+
+export function m4MediaParentReader(root, override) {
+  return cachedBoundary(root, "m4MediaParentReader", override, () => m4MediaParentReaderUncached(root, override), 'docs/architecture/m4-1-readonly-media-integrity.json');
 }

@@ -274,6 +274,9 @@ fn generation_error(error: GenerationServiceError) -> ProductError {
             | C::InputNumberStepMismatch { input, .. }
             | C::InputCountOutOfRange { input, .. }
             | C::SeedOutOfRange { input, .. } => ("INPUT_OUT_OF_RANGE", Some(input.clone())),
+            C::BindingInvalid { node, .. } if node == "H3-Base" => {
+                ("INPUT_OUT_OF_RANGE", Some("width".into()))
+            }
             _ => ("GENERATOR_UNAVAILABLE", None),
         },
         GenerationServiceError::InputPrepare(P::AssetProjectMismatch { .. }) => {
@@ -285,6 +288,14 @@ fn generation_error(error: GenerationServiceError) -> ProductError {
         GenerationServiceError::InputPrepare(P::AssetNotFound { .. } | P::AssetRead { .. }) => {
             ("ASSET_UNAVAILABLE", None)
         }
+        GenerationServiceError::InputPrepare(P::H3ReferenceDuration { message }) => (
+            if message.starts_with("BLOCKED_BY_METADATA") {
+                "BLOCKED_BY_METADATA"
+            } else {
+                "INPUT_OUT_OF_RANGE"
+            },
+            Some("references".into()),
+        ),
         GenerationServiceError::InputPrepare(_) => ("INVALID_INPUT", None),
         GenerationServiceError::ExecutionFailed { code, .. }
             if code == "WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION" =>
@@ -343,5 +354,34 @@ mod tests {
         assert_eq!(issue.code, "INPUT_OUT_OF_RANGE");
         assert_eq!(issue.details.action, Some("EDIT_INPUT"));
         assert_eq!(issue.details.field.as_deref(), Some("width"));
+    }
+    #[test]
+    fn h3_submission_errors_preserve_resolution_and_metadata_authority() {
+        let resolution = generation_error(GenerationServiceError::Compile(
+            CompileError::BindingInvalid {
+                source: "width/height".into(),
+                node: "H3-Base".into(),
+                input: "resolution".into(),
+                message: "unsupported canvas".into(),
+            },
+        ));
+        assert_eq!(resolution.code, "INPUT_OUT_OF_RANGE");
+        assert_eq!(resolution.details.field.as_deref(), Some("width"));
+        for (message, code) in [
+            (
+                "BLOCKED_BY_METADATA: reference_videos.duration_ms unavailable",
+                "BLOCKED_BY_METADATA",
+            ),
+            (
+                "reference_audios: combined reference duration exceeds 15 seconds",
+                "INPUT_OUT_OF_RANGE",
+            ),
+        ] {
+            let issue=generation_error(GenerationServiceError::InputPrepare(
+                crate::application::generation_input_preparer::GenerationInputPrepareError::H3ReferenceDuration {message:message.into()}));
+            assert_eq!(issue.code, code);
+            assert_eq!(issue.details.action, Some("EDIT_INPUT"));
+            assert!(issue.details.technical_details.unwrap().contains(message));
+        }
     }
 }

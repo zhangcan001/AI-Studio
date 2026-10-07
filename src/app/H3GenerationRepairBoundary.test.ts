@@ -31,7 +31,9 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
   execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
   writeFileSync(join(root,'.git/objects/info/alternates'),join(gitDir,'objects')+'\n');
   const proof=JSON.parse(readFileSync(manifest,'utf8'));
-  const paths=[...h3ParentFacts('.').paths,...Object.keys(proof.paths),manifest];
+  const closeout=JSON.parse(readFileSync('docs/architecture/h3-release-closeout-phase1.json','utf8'));
+  const packages=execFileSync('git',['ls-files','src-tauri/runtime_packages'],{encoding:'utf8'}).trim().split(/\r?\n/);
+  const paths=[...packages,...h3ParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(closeout.paths),'docs/architecture/h3-release-closeout-phase1.json'];
   for(const p of new Set(paths) as Set<string>){mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));}
   expect(h3RepairParentReader(root).violations).toEqual([]);
   for(const p of ['src/features/create/CreateInputs.tsx','src-tauri/src/domain/asset.rs','src-tauri/tauri.conf.json']){
@@ -40,7 +42,7 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
    writeFileSync(path,original);expect(h3RepairParentReader(root).violations).toEqual([]);
   }
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// extra source');
-  expect(h3RepairParentReader(root).violations).toContain('h3-repair-backend-files');
+  expect(h3RepairParentReader(root).violations).toContain('h3-closeout-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);
 

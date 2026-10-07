@@ -72,9 +72,10 @@ it('fails closed on stale live docs and a missing tag in an owned fixture', () =
     mkdirSync(dirname(tagRef), {recursive:true});
     writeFileSync(tagRef, '5af3f20273e722466c82b91ede4970cd83e0bcb8\n');
     const tracked = execFileSync('git', ['ls-files'], {encoding:'utf8'}).trim().split(/\r?\n/);
-    const paths = [...tracked.filter((p: string) =>
+    const closeout = JSON.parse(readFileSync('docs/architecture/h3-release-closeout-phase1.json','utf8'));
+    const paths = [...Object.keys(closeout.paths), 'docs/architecture/h3-release-closeout-phase1.json', ...tracked.filter((p: string) =>
       /^(src|src-tauri\/(src|tests)|scripts)\/.*\.(rs|tsx?|mjs|css)$/.test(p) ||
-      /^src-tauri\/migrations\/.*\.sql$/.test(p) || /^docs\/architecture\/.*\.json$/.test(p) ||
+      /^src-tauri\/runtime_packages\/.*\.(yaml|json)$/.test(p) || /^src-tauri\/migrations\/.*\.sql$/.test(p) || /^docs\/architecture\/.*\.json$/.test(p) ||
       docs.includes(p) || ['package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
         'src-tauri/tauri.conf.json','src-tauri/build.rs','.github/workflows/ci.yml'].includes(p)),
       manifest, 'scripts/2-1-publication-successor-guard.mjs', 'src/app/AIStudio21PublicationBoundary.test.ts'];

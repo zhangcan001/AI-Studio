@@ -514,7 +514,7 @@ mod lifecycle_e2e {
     };
     use tempfile::{tempdir, TempDir};
 
-    const PRODUCT_PACKAGE_NAME: &str = "minimax_h3_fl2va_t2v_quality_2_1_0";
+    const PRODUCT_PACKAGE_NAME: &str = "minimax_h3_fl2va_t2v_quality_2_2_0";
     const KERA2_PACKAGE_NAME: &str = "kera2_t2i_local_v2_1_1_1_90894e9e";
     const USER_RACE_PACKAGE_NAME: &str = "dev082_user_race";
     const USER_RACE_WORKFLOW_ID: &str = "wfl_dev082_user_race";
@@ -1305,10 +1305,10 @@ mod lifecycle_e2e {
         installed_identities.sort_unstable();
         let mut expected_identities = vec![
             (KERA2_WORKFLOW_ID, "1.1.1"),
-            ("wfl_minimax_h3_fl2va_t2v_quality", "2.1.0"),
-            ("wfl_minimax_h3_fl2va_i2v_quality", "2.1.0"),
-            ("wfl_minimax_h3_fl2va_first_last_quality", "2.1.1"),
-            ("wfl_minimax_h3_reference_video_quality", "2.1.0"),
+            ("wfl_minimax_h3_fl2va_t2v_quality", "2.2.0"),
+            ("wfl_minimax_h3_fl2va_i2v_quality", "2.2.0"),
+            ("wfl_minimax_h3_fl2va_first_last_quality", "2.2.0"),
+            ("wfl_minimax_h3_reference_video_quality", "2.2.0"),
         ];
         expected_identities.sort_unstable();
         assert_eq!(installed_identities, expected_identities);

@@ -1,8 +1,8 @@
+import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
 import {m4MediaParentReader} from './m4-readonly-media-integrity-boundary-guard.mjs';
 // M3-2 successor validates live bytes before historical guards read their parent.
 // Historical manifests remain immutable; no authority or transport exemption.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -51,7 +51,7 @@ export function visualCandidateViolations(baseline,candidate) {
   return violations;
 }
 
-export function m3VisualParentReader(root, override) {
+function m3VisualParentReaderUncached(root, override) {
   // Memoize reads only within this synchronous validation; no live cache survives
   // a call or replaces a fresh fail-closed read. Parent blobs alone persist.
   const successor=m4MediaParentReader(root);
@@ -103,4 +103,8 @@ export function m3VisualParentReader(root, override) {
   return { addedCommandSignatures: violations.length ? [] : [ADDED_COMMAND,...successor.addedCommandSignatures], violations, addedPaths: [...added,...successor.addedPaths], afterHashes: {...Object.fromEntries(Object.entries(review.paths ?? {}).map(([p, proof]) => [p, proof.afterHash])),...successor.afterHashes},
     backendAggregateSha256: violations.length ? undefined : successor.backendAggregateSha256 ?? review.backend.afterAggregateHash,
     read: p => violations.length || !existing.includes(p) ? successor.read(p) : before(p) };
+}
+
+export function m3VisualParentReader(root, override) {
+  return cachedBoundary(root, "m3VisualParentReader", override, () => m3VisualParentReaderUncached(root, override), 'docs/architecture/m3-2-bounded-visual-library.json');
 }
