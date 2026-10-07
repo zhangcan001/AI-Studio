@@ -48,7 +48,7 @@ export function GenerateBar({ controller: c }: { controller: CreateController })
       case "none": break;
     }
   }
-  return <footer className="create-generate-bar"><div aria-live="polite">{c.readiness?.ready ? "可以生成" : c.readiness ? "请检查输入或运行环境" : "正在检查准备状态"}
+  return <footer className="create-generate-bar"><div aria-live="polite">{c.readinessState === "RUNTIME_OFFLINE" ? "运行环境暂时不可用" : c.readinessState === "READY" ? "可以生成" : c.readinessState === "NOT_READY" ? "请检查输入或运行环境" : "正在检查准备状态"}
     {issues.map((issue, index) => {
       const error = normalizeProductError(issue);
       const action = resolveCreateReadinessAction(error.details);

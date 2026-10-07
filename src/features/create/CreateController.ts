@@ -5,17 +5,17 @@ import type { CreationAccepted, CreationContext, CreationReadiness, GeneratorOpt
 import type { GenerationValues, DraftValue } from "../../types/generation";
 import type { AppRoute } from "../../app/routes/types";
 import { useStudioStore } from "../../stores/studioStore";
+import type { ComfyStatus } from "../../types/comfy";
 import { assetIds, draftFor, mediaKind, mediaValue, scopeKey, type CreateRoute } from "./createModel";
-export interface CreateProps { route: CreateRoute; navigate: (route: AppRoute) => unknown; onDirtyChange?: (dirty: boolean) => void }
+export interface CreateProps { route: CreateRoute; runtime?: ComfyStatus; navigate: (route: AppRoute) => unknown; onDirtyChange?: (dirty: boolean) => void }
 interface StageView { selection: string; values: GenerationValues; dirty: boolean; runRef: RunRef | null; accepted: CreationAccepted | null; provenance?: CreationPromptProvenance }
-export function useCreateController({ route, navigate, onDirtyChange }: CreateProps) {
+export function useCreateController({ route, runtime, navigate, onDirtyChange }: CreateProps) {
   const values = useStudioStore(state => state.values);
   const dirty = useStudioStore(state => state.draftDirty);
   const provenance = useStudioStore(state => state.creationPromptProvenance);
   const [context, setContext] = useState<CreationContext>();
   const [generators, setGenerators] = useState<GeneratorOption[]>([]);
   const [selection, setSelection] = useState("");
-  const [readiness, setReadiness] = useState<CreationReadiness>();
   const [accepted, setAccepted] = useState<CreationAccepted | null>(null);
   const [runRef, setRunRef] = useState<RunRef | null>(null);
   const [run, setRun] = useState<ProductRun>();
@@ -32,13 +32,24 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   const owner = `${route.projectId}:${route.shotId ?? ""}`;
   const previousOwner = useRef(owner);
   const key = scopeKey(route);
-  const currentDraft = useRef({ key, selection, values }); currentDraft.current = { key, selection, values };
+  const runtimeStatus = runtime?.status, runtimeEndpoint = runtime?.endpoint, runtimeGeneration = runtime?.runtimeGeneration;
+  const currentDraft = useRef({ key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration });
+  currentDraft.current = { key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration };
+  const [readinessCheck, setReadinessCheck] = useState<{ result: CreationReadiness; draft: typeof currentDraft.current }>();
+  function matchesDraft(draft: typeof currentDraft.current) {
+    const current = currentDraft.current;
+    return draft.key === current.key && draft.selection === current.selection && draft.values === current.values && draft.provenance === current.provenance
+      && draft.runtimeStatus === current.runtimeStatus && draft.runtimeEndpoint === current.runtimeEndpoint && draft.runtimeGeneration === current.runtimeGeneration;
+  }
+  // Reject a stale positive on the render itself, before effect cleanup runs.
+  const readiness = readinessCheck && matchesDraft(readinessCheck.draft) && runtimeStatus === "CONNECTED" ? readinessCheck.result : undefined;
+  const readinessState = !runtime ? "CHECKING" : runtimeStatus !== "CONNECTED" ? "RUNTIME_OFFLINE" : readiness ? readiness.ready ? "READY" : "NOT_READY" : "CHECKING";
   const generator = generators.find(item => item.selectionRef === selection);
   useEffect(() => {
     if (previousOwner.current !== owner) { snapshots.current.clear(); previousOwner.current = owner; }
     const token = ++epoch.current;
     let cancelled = false; let initialized = false;
-    setLoading(true); setContext(undefined); setReadiness(undefined); setRun(undefined); setError(undefined);
+    setLoading(true); setContext(undefined); setReadinessCheck(undefined); setRun(undefined); setError(undefined);
     attempt.current = null;
     const store = useStudioStore.getState();
     const labReturn = store.creationLabReturn?.scope === key ? { ...store.creationLabReturn, values: store.values, dirty: store.draftDirty, provenance: store.creationPromptProvenance } : undefined;
@@ -74,20 +85,22 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   }
   useEffect(() => {
     ++readinessEpoch.current;
-    setReadiness(undefined);
-    if (loading || !route.shotId || !generator?.availability) return;
+    setReadinessCheck(undefined);
+  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration]);
+  useEffect(() => {
+    if (loading || busy || readiness || runtimeStatus !== "CONNECTED" || !route.shotId || !generator?.availability) return;
     const timer = setTimeout(() => { void recheckReadiness(); }, 600);
     return () => { ++readinessEpoch.current; clearTimeout(timer); };
-  }, [values, provenance, selection, loading, key]);
+  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, busy]);
   async function recheckReadiness() {
     if (loading || !route.shotId || !generator?.availability || actionLock.current) return;
     const token = epoch.current;
     const requestEpoch = ++readinessEpoch.current;
     const draft = currentDraft.current;
-    const isCurrent = () => mounted.current && token === epoch.current && requestEpoch === readinessEpoch.current && draft.key === currentDraft.current.key && draft.selection === currentDraft.current.selection && draft.values === currentDraft.current.values;
+    const isCurrent = () => mounted.current && token === epoch.current && requestEpoch === readinessEpoch.current && matchesDraft(draft);
     try {
       const next = await productClient.creation.readinessGet({ ...submission(), submissionIdempotencyKey: "readiness-only" });
-      if (isCurrent()) { setReadiness(next); setError(undefined); }
+      if (isCurrent()) { setReadinessCheck({ result: next, draft }); setError(undefined); }
     } catch (error) { if (isCurrent()) setError(normalizeProductError(error).message); }
   }
   async function refreshContext(token = epoch.current) {
@@ -193,12 +206,13 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   }
   function generate() { return mutate(async () => {
     const token = epoch.current;
+    const draft = currentDraft.current;
     ++readinessEpoch.current; // An earlier read-only check cannot replace submit-time readiness.
     attempt.current ??= crypto.randomUUID();
     const request = submission();
     const ready = await productClient.creation.readinessGet(request);
-    if (token !== epoch.current) return;
-    setReadiness(ready); if (!ready.ready) return;
+    if (!mounted.current || token !== epoch.current || !matchesDraft(draft)) return;
+    setReadinessCheck({ result: ready, draft }); if (!ready.ready || draft.runtimeStatus !== "CONNECTED") return;
     const ack = await productClient.creation.generate(request);
     if (token !== epoch.current) return;
     setAccepted(ack); setRunRef(ack.runRef); setRun(undefined);
@@ -208,7 +222,7 @@ export function useCreateController({ route, navigate, onDirtyChange }: CreatePr
   const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); setRun(next); setRunRef(next.ref); setAccepted(null); });
-  return { libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, accepted, run, runRef, error, loading, busy,
+  return { libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy,
     setValue, removeValue, chooseResolution, applyPromptChoice, openLibrary, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
     openRuntimeSettings: () => {
       useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });

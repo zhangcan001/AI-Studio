@@ -24,10 +24,11 @@ let candidates: CreationAsset[];
 function context(stage: "image" | "video", shotId: string | null = "shot1"): CreationContext { return { projectId: "project", projectName: "Project", stage, shots: [{ id: "shot1", name: "镜头一", ordinal: 0 }, { id: "shot2", name: "镜头二", ordinal: 1 }], selectedShot: shotId ? { summary: { id: shotId, name: "镜头", ordinal: 0 }, prompt: `${stage} prompt`, selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null } : null, candidates: [...candidates], mediaInputs: inputs, promptChoices: [{ promptId: "prm-choice", promptVersionId: "prv-choice", name: "我的提示词", text: "chosen prompt", version: 2 }] }; }
 function run(status: ProductRun["status"] = "QUEUED", actions: string[] = []): ProductRun { return { ref: { source: "queue-batch", id: "run" }, projectId: "project", title: "run", status, phase: status, createdAt: "", updatedAt: "", progress: { total: 1, succeeded: status === "SUCCEEDED" ? 1 : 0, failed: status === "FAILED" ? 1 : 0, cancelled: 0 }, recoverability: { retryItemIds: ["old-item"], reviewRequired: 0 }, resultsSummary: [], errorSummary: null, preferredParent: null, availableActions: actions }; }
 const navigations = vi.fn(); const dirty = vi.fn();
+const runtime = { status: "CONNECTED", endpoint: "http://fixture.invalid", devices: [], runtimeGeneration: 1 } as const;
 function Host({ initialStage = "image", initialShot = "shot1" }: { initialStage?: "image" | "video"; initialShot?: string }) {
   const [route, setRoute] = useState<AppRoute>({ kind: "create", projectId: "project", shotId: initialShot || undefined, stage: initialStage });
   if (route.kind !== "create") return <p>离开创作</p>;
-  return <CreatePage route={route} onDirtyChange={dirty} navigate={next => { navigations(next); setRoute(next); }} />;
+  return <CreatePage runtime={{ ...runtime, devices: [] }} route={route} onDirtyChange={dirty} navigate={next => { navigations(next); setRoute(next); }} />;
 }
 beforeEach(() => {
   vi.clearAllMocks(); useStudioStore.getState().resetDraft(); candidates = [];
@@ -116,7 +117,7 @@ describe("M1-1 readiness actions", () => {
     const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
     const navigate = vi.fn();
     api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "FAILED_TO_START", startIssue: null });
-    const view = render(<CreatePage route={route} navigate={navigate} />); await loaded();
+    const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
     fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "fl-opaque" } });
     fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "Settings return draft" } });
     fireEvent.change(screen.getByLabelText("首帧"), { target: { value: "img1" } });
@@ -134,7 +135,7 @@ describe("M1-1 readiness actions", () => {
     view.unmount();
     expect(useStudioStore.getState().draftDirty).toBe(true);
     expect(useStudioStore.getState().creationLabReturn?.accepted?.startOutcome).toBe("FAILED_TO_START");
-    render(<CreatePage route={route} navigate={navigate} />); await loaded();
+    render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
     expect(useStudioStore.getState().values).toEqual(draft);
     expect(useStudioStore.getState().draftDirty).toBe(true);
     expect((screen.getByLabelText("选择生成器") as HTMLSelectElement).value).toBe("fl-opaque");
@@ -148,12 +149,12 @@ describe("M1-1 readiness actions", () => {
     let resolve!: (value: unknown) => void; let reject!: (error: unknown) => void;
     const a = { kind: "create", projectId: "project", shotId: "shot1", stage: "image" } as const;
     api.readinessGet.mockResolvedValue(blocked("TRY_LATER"));
-    const view = render(<CreatePage route={a} navigate={navigations} />); await loaded();
+    const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={a} navigate={navigations} />); await loaded();
     const button = await screen.findByRole("button", { name: "重新检查" });
     api.readinessGet.mockImplementationOnce(() => new Promise((yes, no) => { resolve = yes; reject = no; }));
     fireEvent.click(button);
     api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
-    view.rerender(<CreatePage route={{ ...a, projectId: "other" }} navigate={navigations} />);
+    view.rerender(<CreatePage runtime={{ ...runtime, devices: [] }} route={{ ...a, projectId: "other" }} navigate={navigations} />);
     await loaded(); await screen.findByText("可以生成");
     fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "B draft" } });
     await act(async () => { if (outcome === "resolve") resolve(blocked("OPEN_RUNTIME_SETTINGS")); else reject({ code: "ASSET_UNAVAILABLE" }); });
@@ -255,8 +256,9 @@ describe("Target16 architecture", () => {
     expect(normalCreate({ kind: "create", projectId: "p", stage: "video" })).toBe(true);
     const app = readFileSync("src/app/App.tsx", "utf8"); // Phase10: retain the normal-route proof at its actual composition owner.
     const pages = readFileSync("src/app/NormalProductPages.tsx", "utf8");
-    expect(app).toContain("<NormalProductPages project={activeProject} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />");
+    expect(app).toContain("<NormalProductPages project={activeProject} runtime={comfy} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />");
     expect(pages).toContain('normalCreate(route) && route.kind === "create"');
+    expect(pages).toContain('runtime={runtime}');
     for (const path of readdirSync("src/features/create").filter((path: string) => /\.(tsx?|css)$/.test(path) && !path.includes("test"))) {
       const source = readFileSync(`src/features/create/${path}`, "utf8"); expect(source).not.toMatch(/tauriClient|@tauri-apps|services\/ipc|create\s*\(.*=>/); expect(source).not.toMatch(/<ShotWorkspace|<GenerationStudio|<DirectGenerationEntry/);
     }
@@ -266,13 +268,13 @@ describe("Target16 architecture", () => {
 it("phase6_target4 canonical Lab routes and legacy deep links preserve Create draft on return", async () => {
   const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "image" } as const;
   const navigate = vi.fn();
-  const view = render(<CreatePage route={route} navigate={navigate} />); await loaded();
+  const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
   fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "Lab return draft" } });
   fireEvent.click(screen.getByRole("button", { name: "工作流 / Benchmark" }));
   expect(navigate).toHaveBeenCalledWith({ kind: "system-settings", section: "advanced-workflows", returnTo: route });
   view.unmount();
   expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "Lab return draft" });
-  render(<CreatePage route={route} navigate={navigate} />); await loaded();
+  render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
   expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("Lab return draft");
   expect(api.generate).not.toHaveBeenCalled(); expect(api.bindingSet).not.toHaveBeenCalled();
   expect(toLegacyLocation({kind:"project-settings",projectId:"project",section:"generators"}).workspace).toBe("projects");
@@ -301,7 +303,7 @@ describe("M2-2 precise library reuse", () => {
   });
   it("captures exact video/shot draft to Library and preserves provenance on return and stage switch", async () => {
     const route={kind:"create",projectId:"project",shotId:"shot2",stage:"video"} as const;
-    const navigate=vi.fn(); const view=render(<CreatePage route={route} navigate={navigate}/>); await loaded();
+    const navigate=vi.fn(); const view=render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate}/>); await loaded();
     fireEvent.change(screen.getByLabelText("选择生成器"),{target:{value:"fl-opaque"}});
     fireEvent.change(screen.getByLabelText("宽度"),{target:{value:"1280"}});
     fireEvent.click(screen.getByRole("button",{name:"选择提示词"}));
@@ -310,7 +312,7 @@ describe("M2-2 precise library reuse", () => {
     expect(navigate).toHaveBeenLastCalledWith({kind:"library",projectId:"project",filter:"images"});
     expect(useStudioStore.getState().creationLabReturn?.route).toEqual(route);
     const draft=useStudioStore.getState().values; view.unmount();
-    render(<CreatePage route={route} navigate={navigate}/>); await loaded();
+    render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate}/>); await loaded();
     expect(useStudioStore.getState().values).toEqual(draft);
     expect(useStudioStore.getState().creationPromptProvenance?.promptVersionId).toBe("prv-choice");
     expect(useStudioStore.getState().draftDirty).toBe(true);
@@ -324,10 +326,10 @@ describe("M2-2 precise library reuse", () => {
     api.libraryGet.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
     useStudioStore.getState().setPendingLibraryIntent({kind:"asset",projectId:"project",assetId:"old101",mediaKind:"image"});
     const route={kind:"create",projectId:"project",shotId:"shot1",stage:"video"} as const;
-    const view=render(<CreatePage route={route} navigate={navigations}/>); await loaded();
+    const view=render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigations}/>); await loaded();
     await waitFor(()=>expect(api.libraryGet).toHaveBeenCalled());
     api.get.mockImplementation((_p,shot,stage)=>Promise.resolve({...context(stage,shot),projectId:"other"}));
-    view.rerender(<CreatePage route={{...route,projectId:"other"}} navigate={navigations}/>); await loaded();
+    view.rerender(<CreatePage runtime={{ ...runtime, devices: [] }} route={{...route,projectId:"other"}} navigate={navigations}/>); await loaded();
     fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"B draft"}});
     await act(async()=>finish({kind:"asset",asset:{id:"old101",name:"old101",projectId:"project",assetType:"image"}}));
     expect(useStudioStore.getState().values.prompt).toEqual({type:"string",value:"B draft"});

@@ -534,6 +534,7 @@ mod tests {
         ComfyStatusView {
             status: connection,
             endpoint: "http://127.0.0.1:8188".to_owned(),
+            runtime_generation: 0,
             comfyui_version: Some("0.33.0".to_owned()),
             system: Some(SystemSummary {
                 python_version: Some("3.12.10".to_owned()),

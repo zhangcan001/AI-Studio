@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "READINESS_LIFECYCLE_FIX",
+  "parentHead": "7c82c8bf07dda09d47480d95300b11c401fd9be5",
+  "invariants": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "queueAuthorityChanged": false,
+    "bindingOccChanged": false,
+    "recognitionSemanticsChanged": false,
+    "replayFixturesChanged": false,
+    "releaseAssetsReplaced": false,
+    "remoteTelemetry": false,
+    "runtimeChanged": true,
+    "immutablePackagesPreserved": true,
+    "sharedProductAdmission": true,
+    "readinessLifecycleFreshness": true,
+    "reusedBackendRuntimeGeneration": true,
+    "submitTimeAuthorityPreserved": true
+  },
+  "paths": {
+    "src-tauri/src/application/comfy_preflight_service.rs": {
+      "beforeHash": "3b9810532f6e9fc602173782148561b08802572418f162ac968df916f8b63d67",
+      "afterHash": "5dd2e40c4320198b1f22d778e1aa3a355ccf748f9076eff9045e7835cf2fdf7d"
+    },
+    "src-tauri/src/application/comfy_service.rs": {
+      "beforeHash": "25e4ec4fcdd1c271db29ae21ff128f683b0ec2205bf2ce1050f71cbbaf9d0eb6",
+      "afterHash": "b984453a3df798556af390f8b8d6163b9923f29424e3c5bde60ecb7bf76f14f5"
+    },
+    "src-tauri/src/application/diagnostics_service.rs": {
+      "beforeHash": "cfa3eac4fa48d75b4dc7b71992db0ffb2a07b16861c39b62e7123c4321b3a361",
+      "afterHash": "1bbd742b844b3243d4b2659d0bca854b9a8d962558b25490a5a9b9e9a1a87046"
+    },
+    "src/app/App.tsx": {
+      "beforeHash": "b31414742155880821651cd785fd9ef0ff09ec06338252e93977b9c8e270cd20",
+      "afterHash": "488d3e108cb72675f8680500b69a70f171360cc3fe6888cd1c9adfc518a3bc94"
+    },
+    "src/app/NormalProductPages.tsx": {
+      "beforeHash": "941418a8940aaaaa2f8c3540472eae87509df1390585d99e196466c312921668",
+      "afterHash": "82eadafcf9570b6d8250e035ff3bd59e417987c04d4809e715d94f4994dc0966"
+    },
+    "src/features/create/CreateController.ts": {
+      "beforeHash": "49b0bd17d842b008fe15426a6af8e6e1a3431fcd95ce5b658704a63c93afce08",
+      "afterHash": "7bfd2919893e236cef9157b89c5200d79c3901f554a66f1b5403a0d5b7af07e3"
+    },
+    "src/features/create/CreatePage.test.tsx": {
+      "beforeHash": "69856b3d792ad6c9e7ddf6d6a0a0f84b5c3bcefc73d088a2ec1fe59735eb0d31",
+      "afterHash": "ea0ba366f7e4a554f775dc99071d89c1d6258b35cf7cba2c79d4711c2724e9b2"
+    },
+    "src/features/create/CreateResults.tsx": {
+      "beforeHash": "c9cb8fe5c088d07f3ff37544a69fe677254e1dd2d38c6bb88fb70d229fed3a6a",
+      "afterHash": "9520d530546211a422d8ceeb0f68f2f972925f230d63f87a2fc6f1472183ada8"
+    },
+    "src/types/comfy.ts": {
+      "beforeHash": "f6ef51a33f2b5e9e1d10afbcbfccaaab2382c6ed29f9cd4ff3fa6f4eff4f1a59",
+      "afterHash": "fdeec5a3746e3a468488b8afe4bebd2333a19665107f60e3ccc8c0a31585aa1c"
+    },
+    "scripts/queue-lifecycle-repair-successor-guard.mjs": {
+      "beforeHash": "d32271b9b989c36b71463529e50998d10173cdcbbef1542d19294282270d8e37",
+      "afterHash": "f19cdde264009cd36a5b063219ebdaeff4255eb990b83f82e69c0ab8ccabbf56"
+    },
+    "src/app/QueueLifecycleRepairBoundary.test.ts": {
+      "beforeHash": "ae491530ff1661cb0f7724982c497814af49907e8e33a71b9105bbbd920c918f",
+      "afterHash": "631bb9cb5c0bb130fe8c9cc91ffcc4f63ddfb77b1e96754388817b9a693720d4"
+    },
+    "src/app/H3ReleaseCloseoutPhase1Boundary.test.ts": {
+      "beforeHash": "4e4b1424ee1b691533cd3fcb67f96e84b52b9a1d31cb05310f7f9f440f2d2afe",
+      "afterHash": "70684844c022e499ad4fd883ca44efce35de8b2fe05b930f824565d0a43ca8a6"
+    },
+    "src/app/H3GenerationRepairBoundary.test.ts": {
+      "beforeHash": "54585aa1b6eef437bc52cbebd0981da5eaabdab5da3dede6a60fe241124fc292",
+      "afterHash": "c8c628e8cac6e265b8c0469dd51d423bc5f103ded7c4dab79b4719a599b24384"
+    },
+    "src/app/AIStudio21PublicationBoundary.test.ts": {
+      "beforeHash": "a98324adc71723dcc504c1decc788e89813be666cbd1b042426f848ae25f51f7",
+      "afterHash": "152f8d55cb23c07812d96b2fb4ce9b828fe7d8288c764dc8d7a4604a194e7150"
+    },
+    "src/features/runs/RunsPage.test.tsx": {
+      "beforeHash": "9d68e1ea6b703343f8c7a60561730112164209f96bf3928305064a053d59e5e8",
+      "afterHash": "a7a76c2c981b7c058e58ab8cdab21a99074761a93a90a0376954aeda7a9d4205"
+    },
+    "src/features/library/LibraryPage.test.tsx": {
+      "beforeHash": "67abfdd77763921205cc1725baef139b1f5a0caa776e46deceda18f000b43b64",
+      "afterHash": "42cac1fd04b71eb6c421f9546c0f7902b3ed6a488443e47e12964cdc51820a7d"
+    },
+    "src/app/useRuntimeStatusMonitor.ts": {
+      "beforeHash": null,
+      "afterHash": "b5e0073c8f1a86764edd95c7b319ff03959dfd39bd61d5d3c0494e15e90deb28"
+    },
+    "src/app/useRuntimeStatusMonitor.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "7ab8fe1cb882f89a1a46ed2423739b7c6f24057fa9fdbcd7aae3721746182dc4"
+    },
+    "src/features/create/CreateReadinessLifecycle.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "7804ead3fbfee8c915b841b7211ce49f56ecd82a03eb71184af25a50344345ec"
+    },
+    "scripts/readiness-lifecycle-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "2d6fb95de4b628868538419518cc4a1b25da589d7b5edeee1f7f3b6983e39df5"
+    },
+    "src/app/ReadinessLifecycleBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "de899011251b57ee27c144a68ca35d236e02f4e1552412559f414a4778602d1e"
+    }
+  },
+  "backend": {
+    "beforeFiles": 346,
+    "afterFiles": 346,
+    "beforeAggregateHash": "c73c4deb4875f3c4dcd09001283dc314db0d07a8b73e8d7fd5db45bbbcb65ec5",
+    "untouchedAggregateHash": "9d5db00547cb64803cec366143fcfc28e6e9ab93cc5c36b6f274161c78f1f72f",
+    "afterAggregateHash": "14d578ff41d8c6d87f914b86db13e5eda2a25f4f2fdb88f8f449957346d128c1"
+  },
+  "tests": {
+    "beforeFiles": 56,
+    "afterFiles": 56,
+    "beforeAggregateHash": "e5a19d19452a0e9b74f0a02501d74737a602d37dfb569189d300eabb1fac5ddf",
+    "untouchedAggregateHash": "e5a19d19452a0e9b74f0a02501d74737a602d37dfb569189d300eabb1fac5ddf",
+    "afterAggregateHash": "e5a19d19452a0e9b74f0a02501d74737a602d37dfb569189d300eabb1fac5ddf"
+  },
+  "frontend": {
+    "beforeFiles": 499,
+    "afterFiles": 503,
+    "beforeAggregateHash": "cfd9ad7872027f3788234f13a7cd1fb5624f80954d58bae1d5d2245ff774ecb3",
+    "untouchedAggregateHash": "db3898c8c700185d2cf995279aa47a381314676fd61fa9fd18c128f022099f45",
+    "afterAggregateHash": "74748d07ef08cc59aa8131c2ff0f2d6b72e681a634aac543d85915ab64607141"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "untouchedAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "afterAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa"
+  },
+  "scripts": {
+    "beforeFiles": 32,
+    "afterFiles": 33,
+    "beforeAggregateHash": "61f5e195cdb9cfb8fd013e54e98459bd6b77bf025a6278b2b6a311c771713f01",
+    "untouchedAggregateHash": "ce4f8f0ed45a2514ec931a4323c29b79cf365c7d4c6667ca287c5dd86d62a2c9",
+    "afterAggregateHash": "e05f6b2f5c400014bbfdb04269b20da411ddc176422f0a6ebe9c1d3bb991e6b8"
+  },
+  "migrations": {
+    "beforeFiles": 42,
+    "afterFiles": 42,
+    "beforeAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24",
+    "untouchedAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24",
+    "afterAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24"
+  },
+  "architecture": {
+    "beforeFiles": 29,
+    "afterFiles": 29,
+    "beforeAggregateHash": "3b8fc2f8923de113f13bc9c5859d70a9a79916cae61677f185a4c651077cdf28",
+    "untouchedAggregateHash": "3b8fc2f8923de113f13bc9c5859d70a9a79916cae61677f185a4c651077cdf28",
+    "afterAggregateHash": "3b8fc2f8923de113f13bc9c5859d70a9a79916cae61677f185a4c651077cdf28"
+  },
+  "packages": {
+    "beforeFiles": 51,
+    "afterFiles": 51,
+    "beforeAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "untouchedAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "afterAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884"
+  }
+}

@@ -65,6 +65,7 @@ impl CapabilityCache {
 pub struct ComfyStatusView {
     pub status: ComfyConnectionStatus,
     pub endpoint: String,
+    pub runtime_generation: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comfyui_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -194,37 +195,51 @@ impl ComfyService {
     }
 
     pub async fn get_status(&self) -> Result<ComfyStatusView, AppError> {
-        let cached_capability = self.cached_capability().await;
-        let endpoint = self.endpoint();
-
-        match self.runtime.adapter().health_check().await {
-            Ok(health) => {
-                let status = self.connected_status(health.system, cached_capability, endpoint);
-                *self.status_cache.write().await = Some(status.clone());
-                Ok(status)
+        loop {
+            let generation = self.runtime_generation();
+            let cached_capability = self.cached_capability().await;
+            let endpoint = self.endpoint();
+            let health = self.runtime.adapter().health_check().await;
+            // A health response from a replaced/invalidated runtime cannot identify
+            // the current runtime. Re-observe through the same authoritative port.
+            if generation != self.runtime_generation() {
+                continue;
             }
-            Err(error) => {
-                // A failed health check is a runtime boundary: any schema
-                // cached before the disconnect must not be reused after a
-                // reconnect or ComfyUI restart.
-                self.runtime.invalidate_object_info();
-                tracing::warn!(
-                    endpoint = %endpoint,
-                    error_type = error.kind(),
-                    "ComfyUI health check failed"
-                );
+            return match health {
+                Ok(health) => {
+                    let status = self.connected_status(
+                        health.system,
+                        cached_capability,
+                        endpoint,
+                        generation,
+                    );
+                    *self.status_cache.write().await = Some(status.clone());
+                    Ok(status)
+                }
+                Err(error) => {
+                    // A failed health check is a runtime boundary: any schema
+                    // cached before the disconnect must not be reused after a
+                    // reconnect or ComfyUI restart.
+                    self.runtime.invalidate_object_info();
+                    tracing::warn!(
+                        endpoint = %endpoint,
+                        error_type = error.kind(),
+                        "ComfyUI health check failed"
+                    );
 
-                let status = ComfyStatusView {
-                    status: status_for_adapter_error(&error),
-                    endpoint,
-                    comfyui_version: None,
-                    system: None,
-                    devices: Vec::new(),
-                    capability: cached_capability,
-                };
-                *self.status_cache.write().await = Some(status.clone());
-                Ok(status)
-            }
+                    let status = ComfyStatusView {
+                        status: status_for_adapter_error(&error),
+                        endpoint,
+                        runtime_generation: self.runtime_generation(),
+                        comfyui_version: None,
+                        system: None,
+                        devices: Vec::new(),
+                        capability: cached_capability,
+                    };
+                    *self.status_cache.write().await = Some(status.clone());
+                    Ok(status)
+                }
+            };
         }
     }
 
@@ -303,10 +318,12 @@ impl ComfyService {
         stats: SystemStats,
         capability: Option<CapabilitySummary>,
         endpoint: String,
+        runtime_generation: u64,
     ) -> ComfyStatusView {
         ComfyStatusView {
             status: ComfyConnectionStatus::Connected,
             endpoint,
+            runtime_generation,
             comfyui_version: stats.comfyui_version,
             system: Some(SystemSummary {
                 python_version: stats.python_version,
@@ -373,11 +390,15 @@ mod tests {
     struct FakeAdapter {
         stats: Result<SystemStats, ComfyAdapterError>,
         object_info: Result<serde_json::Value, ComfyAdapterError>,
+        health_gate: Option<Arc<tokio::sync::Semaphore>>,
     }
 
     #[async_trait]
     impl ComfyAdapter for FakeAdapter {
         async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
+            if let Some(gate) = &self.health_gate {
+                gate.acquire().await.unwrap().forget();
+            }
             self.stats
                 .as_ref()
                 .map(|stats| ComfyHealth {
@@ -438,6 +459,7 @@ mod tests {
         let adapter = FakeAdapter {
             stats: Err(ComfyAdapterError::Offline("not used".to_owned())),
             object_info: Ok(object_info),
+            health_gate: None,
         };
         let service = ComfyService::new(Arc::new(adapter), &ComfyConnectionConfig::default());
         service
@@ -468,6 +490,7 @@ mod tests {
                 }],
             }),
             object_info: Ok(json!({"KSampler": {}, "CLIPTextEncode": {}, "SaveImage": {}})),
+            health_gate: None,
         };
         let service = ComfyService::new(Arc::new(adapter), &ComfyConnectionConfig::default());
 
@@ -484,6 +507,11 @@ mod tests {
             .get("rawObjectInfo")
             .is_none());
         assert!(matches!(status.status, ComfyConnectionStatus::Connected));
+        assert_eq!(status.runtime_generation, service.runtime_generation());
+        assert_eq!(
+            serde_json::to_value(&status).unwrap()["runtimeGeneration"],
+            service.runtime_generation()
+        );
     }
 
     #[tokio::test]
@@ -536,6 +564,7 @@ mod tests {
         let adapter = FakeAdapter {
             stats: Err(ComfyAdapterError::Offline("connection refused".to_owned())),
             object_info: Ok(json!({})),
+            health_gate: None,
         };
         let service = ComfyService::new(Arc::new(adapter), &ComfyConnectionConfig::default());
 
@@ -545,5 +574,48 @@ mod tests {
             .expect("offline is a normal status");
 
         assert!(matches!(status.status, ComfyConnectionStatus::Offline));
+        assert_eq!(status.runtime_generation, service.runtime_generation());
+        assert!(status.runtime_generation > 0);
+    }
+
+    #[tokio::test]
+    async fn health_completion_after_runtime_replacement_observes_the_new_generation() {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let adapter = FakeAdapter {
+            stats: Err(ComfyAdapterError::Offline("old endpoint".to_owned())),
+            object_info: Ok(json!({})),
+            health_gate: Some(gate.clone()),
+        };
+        let service = ComfyService::new(Arc::new(adapter), &ComfyConnectionConfig::default());
+        let read = service.get_status();
+        tokio::pin!(read);
+        assert!(futures_util::poll!(&mut read).is_pending());
+        let config = ComfyConnectionConfig::from_endpoint("http://127.0.0.1:8189").unwrap();
+        service.runtime.replace(
+            config,
+            Arc::new(FakeAdapter {
+                stats: Ok(SystemStats {
+                    comfyui_version: Some("new-runtime".to_owned()),
+                    python_version: None,
+                    os: None,
+                    ram_total: None,
+                    ram_free: None,
+                    devices: vec![],
+                }),
+                object_info: Ok(json!({})),
+                health_gate: None,
+            }),
+        );
+        let generation = service.runtime_generation();
+        gate.add_permits(1);
+        let status = read.await.unwrap();
+        assert_eq!(status.endpoint, "http://127.0.0.1:8189");
+        assert_eq!(status.runtime_generation, generation);
+        assert_eq!(
+            service.runtime_generation(),
+            generation,
+            "old offline response must not invalidate the replacement"
+        );
+        assert!(matches!(status.status, ComfyConnectionStatus::Connected));
     }
 }

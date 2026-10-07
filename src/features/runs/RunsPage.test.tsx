@@ -76,7 +76,7 @@ it("phase4_target_13 route filters missing locator transport failures and projec
 });
 it("phase4_target_14 Runs to Create consumes exact input intent without immediate generation", async () => {
   const navigation = vi.fn();
-  function Harness() { const [route, setRoute] = useState<AppRoute>({ kind: "runs", projectId: "project-a", run: ref }); const navigate = (next: AppRoute) => { navigation(next); setRoute(next); }; return route.kind === "create" ? <CreatePage route={route} navigate={navigate} /> : route.kind === "runs" ? <RunsPage route={route} navigate={navigate} /> : null; }
+  function Harness() { const [route, setRoute] = useState<AppRoute>({ kind: "runs", projectId: "project-a", run: ref }); const navigate = (next: AppRoute) => { navigation(next); setRoute(next); }; return route.kind === "create" ? <CreatePage runtime={{ status: "CONNECTED", endpoint: "http://fixture.invalid", devices: [], runtimeGeneration: 1 }} route={route} navigate={navigate} /> : route.kind === "runs" ? <RunsPage route={route} navigate={navigate} /> : null; }
   render(<Harness />); fireEvent.click(await screen.findByRole("button", { name: "编辑这些输入并创建新运行" }));
   await screen.findByRole("button", { name: "生成" }); expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "原始提示词" }); expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 5 }); expect(useStudioStore.getState().pendingRunIntent).toBeUndefined(); expect(api.generate).not.toHaveBeenCalled();
   const acceptedRef = { source: "queue-batch", id: "accepted-owned-run" } as const;
@@ -116,7 +116,7 @@ it("phase4_target_16 ordinary Runs entry converges with explicit legacy bridges 
   expect(normalRuns({ kind: "runs", projectId: "p" })).toBe(true);
   const app = readFileSync("src/app/App.tsx", "utf8"); // Phase10: retain the normal-route proof at its actual composition owner.
     const pages = readFileSync("src/app/NormalProductPages.tsx", "utf8");
-    expect(app).toContain("<NormalProductPages project={activeProject} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />");
+    expect(app).toContain("<NormalProductPages project={activeProject} runtime={comfy} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />");
     expect(pages).toContain("<RunsPage"); expect(app).toContain('route.section === "advanced-tasks"'); expect(app).toContain('["advanced-shots", "advanced-production", "advanced-review"].includes(route.section)'); expect(app).toContain("<TaskHistory"); expect(app).toContain("<ShotWorkspace");
 });
 

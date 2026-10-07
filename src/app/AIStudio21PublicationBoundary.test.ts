@@ -81,6 +81,8 @@ it('fails closed on stale live docs and a missing tag in an owned fixture', () =
       manifest, 'scripts/2-1-publication-successor-guard.mjs', 'src/app/AIStudio21PublicationBoundary.test.ts'];
     const queue=JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
     paths.push(...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json');
+  const readiness=JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
+  paths.push(...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json');
     for (const p of new Set(paths)) { mkdirSync(dirname(join(root,p)), {recursive:true}); copyFileSync(p,join(root,p)); }
     expect(publicationParentReader(root).violations).toEqual([]);
     const original = readFileSync(join(root, docs[0]), 'utf8');
@@ -95,18 +97,18 @@ it('fails closed on stale live docs and a missing tag in an owned fixture', () =
     const guard = join(root, integration);
     const guardBytes = readFileSync(guard, 'utf8');
     writeFileSync(guard, guardBytes + '\n// owned invalid integration drift\n');
-    expect(publicationParentReader(root).violations).toContain(`publication-path:${integration}`);
+    expect(publicationParentReader(root).violations).toContain('readiness-lifecycle-scripts-untouched-bytes');
     writeFileSync(guard, guardBytes);
     expect(publicationParentReader(root).violations).toEqual([]);
     const config = join(root, 'src-tauri/tauri.conf.json');
     const configBytes = readFileSync(config, 'utf8');
     writeFileSync(config, configBytes + ' ');
-    expect(publicationParentReader(root).violations).toContain('publication-frozen-config:src-tauri/tauri.conf.json');
+    expect(publicationParentReader(root).violations).toContain('readiness-lifecycle-frozen:src-tauri/tauri.conf.json');
     writeFileSync(config, configBytes);
     const runtime = join(root, 'src-tauri/src/domain/asset.rs');
     const runtimeBytes = readFileSync(runtime, 'utf8');
     writeFileSync(runtime, runtimeBytes + '\n// owned invalid runtime drift\n');
-    expect(publicationParentReader(root).violations).toContain('publication-backend-untouched-bytes');
+    expect(publicationParentReader(root).violations).toContain('readiness-lifecycle-backend-untouched-bytes');
     writeFileSync(runtime, runtimeBytes);
     expect(publicationParentReader(root).violations).toEqual([]);
     writeFileSync(tagRef, '130cbbfaf67e1627fca7e447de322cf0f5f5ae85\n');

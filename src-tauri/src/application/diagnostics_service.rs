@@ -182,6 +182,7 @@ impl DiagnosticsService {
                 ComfyStatusView {
                     status: ComfyConnectionStatus::Offline,
                     endpoint: self.comfy_service.endpoint().to_owned(),
+                    runtime_generation: self.comfy_service.runtime_generation(),
                     comfyui_version: None,
                     system: None,
                     devices: Vec::new(),

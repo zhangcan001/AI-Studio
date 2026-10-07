@@ -9,15 +9,14 @@ import {tmpdir} from 'node:os';
 // @ts-expect-error Node-only boundary fixture.
 import {join,dirname} from 'node:path';
 // @ts-expect-error Node-only successor.
-import {queueLifecycleParentReader,queueLifecycleParentFacts,QUEUE_LIFECYCLE_PARENT} from '../../scripts/queue-lifecycle-repair-successor-guard.mjs';
-const manifest='docs/architecture/queue-lifecycle-repair.json';
-const successorManifest='docs/architecture/readiness-lifecycle-fix.json';
+import {readinessLifecycleParentReader,readinessLifecycleParentFacts,READINESS_LIFECYCLE_PARENT} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
+const manifest='docs/architecture/readiness-lifecycle-fix.json';
 
-it('accepts only the reviewed lifecycle repair before replaying immutable source',()=>{
+it('accepts only the reviewed readiness lifecycle repair before replaying immutable source',()=>{
  const proof=JSON.parse(readFileSync(manifest,'utf8'));
- const accepted=queueLifecycleParentReader('.');expect(accepted.violations).toEqual([]);
- const path='src-tauri/src/application/production_queue_service.rs';
- expect(accepted.read(path)).toBe(execFileSync('git',['show',`${QUEUE_LIFECYCLE_PARENT}:${path}`],{encoding:'utf8'}).replaceAll('\r\n','\n'));
+ const accepted=readinessLifecycleParentReader('.');expect(accepted.violations).toEqual([]);
+ const path='src/features/create/CreateController.ts';
+ expect(accepted.read(path)).toBe(execFileSync('git',['show',`${READINESS_LIFECYCLE_PARENT}:${path}`],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  for(const mutate of [
   (p:typeof proof)=>{p.parentHead='0'.repeat(40);},
   (p:typeof proof)=>{p.paths[path].beforeHash='0'.repeat(64);},
@@ -29,31 +28,30 @@ it('accepts only the reviewed lifecycle repair before replaying immutable source
    (p:typeof proof)=>{p[group].afterAggregateHash='0'.repeat(64);},
    (p:typeof proof)=>{p[group].afterFiles++;}]),
  ]){
-  const invalid=structuredClone(proof);mutate(invalid);const denied=queueLifecycleParentReader('.',invalid);
+  const invalid=structuredClone(proof);mutate(invalid);const denied=readinessLifecycleParentReader('.',invalid);
   expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
   expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
  }
 },30000);
 
 it('denies drift in repaired sources, untouched files, historical proofs, packages and frozen configs',()=>{
- const root=mkdtempSync(join(tmpdir(),'ai-studio-queue-boundary-'));
+ const root=mkdtempSync(join(tmpdir(),'ai-studio-readiness-boundary-'));
  try {
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
   execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
   writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
   const proof=JSON.parse(readFileSync(manifest,'utf8'));
-  const successorProof=JSON.parse(readFileSync(successorManifest,'utf8'));
-  for(const p of new Set([...queueLifecycleParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(successorProof.paths),successorManifest]) as Set<string>){
+  for(const p of new Set([...readinessLifecycleParentFacts('.').paths,...Object.keys(proof.paths),manifest]) as Set<string>){
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
-  expect(queueLifecycleParentReader(root).violations).toEqual([]);
-  for(const p of ['src-tauri/src/application/production_queue_service.rs','src-tauri/src/domain/asset.rs',
+  expect(readinessLifecycleParentReader(root).violations).toEqual([]);
+  for(const p of ['src/features/create/CreateController.ts','src-tauri/src/domain/asset.rs',
    'docs/architecture/h3-release-closeout-phase1.json','src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
    const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-   const denied=queueLifecycleParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
-   writeFileSync(path,original);expect(queueLifecycleParentReader(root).violations).toEqual([]);
+   const denied=readinessLifecycleParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
+   writeFileSync(path,original);expect(readinessLifecycleParentReader(root).violations).toEqual([]);
   }
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
-  expect(queueLifecycleParentReader(root).violations).toContain('readiness-lifecycle-backend-files');
+  expect(readinessLifecycleParentReader(root).violations).toContain('readiness-lifecycle-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);

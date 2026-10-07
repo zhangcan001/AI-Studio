@@ -22,6 +22,8 @@ export interface CapabilitySummary {
 export interface ComfyStatus {
   status: ComfyConnectionStatus;
   endpoint: string;
+  /** Existing backend schema/runtime epoch; not a second frontend revision. */
+  runtimeGeneration?: number;
   comfyuiVersion?: string;
   system?: ComfySystemSummary;
   devices: ComfyDeviceInfo[];

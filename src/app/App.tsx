@@ -1,5 +1,7 @@
 import { useProjectTaskRecovery } from "../features/tasks/useProjectTaskRecovery";
 import { NormalProductPages } from "./NormalProductPages";
+import { useRuntimeStatusMonitor } from "./useRuntimeStatusMonitor";
+import type { ComfyStatus } from "../types/comfy";
 import { useShotConsistencyController } from "../features/shots/useShotConsistencyController";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -172,6 +174,15 @@ function App() {
   const [shotDraftDirty, setShotDraftDirty] = useState(false);
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
+  const applyRuntimeStatus = useCallback((status?: ComfyStatus) => {
+    setBootstrapState(current => {
+      if (!current) return current;
+      if (!status) return { ...current, comfy: { ...current.comfy, status: "OFFLINE" } };
+      if (status.runtimeGeneration !== undefined && current.comfy.runtimeGeneration !== undefined && status.runtimeGeneration < current.comfy.runtimeGeneration) return current;
+      return { ...current, comfy: status };
+    });
+  }, []);
+  useRuntimeStatusMonitor(Boolean(bootstrapState) && route.kind === "create", applyRuntimeStatus, getComfyStatus);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
@@ -376,7 +387,7 @@ function App() {
     setError(null);
     try {
       const comfy = await getComfyStatus();
-      setBootstrapState((current) => (current ? { ...current, comfy } : current));
+      applyRuntimeStatus(comfy);
     } catch (connectionError: unknown) {
       setError(toUserMessage(connectionError));
     } finally {
@@ -409,7 +420,7 @@ function App() {
   async function refreshRuntimeAfterEndpoint() {
     try {
       const [nextComfy, nextCatalog] = await Promise.all([getComfyStatus(), listGenerationCatalog()]);
-      setBootstrapState((current) => (current ? { ...current, comfy: nextComfy } : current));
+      applyRuntimeStatus(nextComfy);
       setCatalog(nextCatalog);
     } catch (refreshError: unknown) {
       setError(toUserMessage(refreshError));
@@ -644,7 +655,7 @@ function App() {
 
       {!activeProject && projectError && <p className="error-message global-error">项目加载失败：{projectError}</p>}
       <Suspense fallback={<p className="workspace-loading" role="status">正在加载工作区...</p>}>
-        <NormalProductPages project={activeProject} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />
+        <NormalProductPages project={activeProject} runtime={comfy} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />
         {activeProject && (route.kind === "project" || (route.kind === "project-settings" && route.section === "advanced-project")) && (
           <WorkspaceErrorBoundary
             resetKey={activeProject?.id ?? "no-project"}
