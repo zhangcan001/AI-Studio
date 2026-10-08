@@ -29,7 +29,7 @@
     },
     "scripts/minimax-video-phase3-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "db7443732343380f6da5599fc1b6345c559c3452fc8819639ff79898c681ebf8"
+      "afterHash": "02ae09a15121aff55ce93157755f4e2a370427689573596c6dbd79e3b254f3f1"
     },
     "src-tauri/src/application/ordered_reference_binding.rs": {
       "beforeHash": "f2edb7817a039f4755e4c3f2d3c657e4bdd10a8a89d4e3827fb652408582c0ae",
@@ -46,6 +46,10 @@
     "src-tauri/src/application/production_queue_service.rs": {
       "beforeHash": "624c158fbbae134737615e95737f595cae398094a164fb2193d94b699ba4b0af",
       "afterHash": "68991beec0ca02e961fc1724aac5344fa5e30097d0ff09cdf95f9ccf2574fe99"
+    },
+    "src-tauri/src/application/project_backup_service.rs": {
+      "beforeHash": "80cb100ad24d0df5ae06244fb73e500a82458f225ea486eaca10ec8ef455d3f7",
+      "afterHash": "4d30a34ce3611b2ad830d4e88b16b7ef8f49e2882a7df5f157ceb620d8413c9c"
     },
     "src-tauri/src/application/shot_batch_service.rs": {
       "beforeHash": "b8ed0e9699a0be0259818279622031d30cc020baed6a92ff356205770ce49525",
@@ -95,6 +99,10 @@
       "beforeHash": "ac2442827d7f2e5ff6a4ff73966f52039a39db5f0c8efd6c54c8b5c0b708a4fa",
       "afterHash": "4ab987a12ec38b4598571f776be8794ab4e3b9c35aabfb2c9a4d2fef8587455e"
     },
+    "src-tauri/tests/dev084_runtime_artifact.rs": {
+      "beforeHash": "1218a45fb9aa05bbceee67c7f13d3f39e6a7c887d7de7df7bb91af82d897c430",
+      "afterHash": "602ecc6c12cffeb590dd337284934c0ce2fe8d400fca35a696a0f348ffd51d0b"
+    },
     "src-tauri/tests/dev100_authoring_removal.rs": {
       "beforeHash": "c2b1e7f41c5c0580b89aba9f903f3644aba0693bd29f4e73e4c57a5b7f1f37bf",
       "afterHash": "caa058615d006ace7ce3b3cfc98aa7c44719c2617e509bfb4c66ceb09d97ed9b"
@@ -109,7 +117,7 @@
     },
     "src-tauri/tests/support/minimax_video_input_regressions.rs": {
       "beforeHash": "e5b75d4bef88f8c04cd43e5fbae8e37ae3dfa3aac724ca005f5adf88d1ee7aca",
-      "afterHash": "aeab154a3f7363b691ee338504dadaf04b280bbb5e48dfceadfe7c1508a7bdeb"
+      "afterHash": "db07c450a6a238244d5e15be7c4eab5bb82f0da257756ad24f71465d01937b59"
     },
     "src/app/BackendBoundary.test.ts": {
       "beforeHash": "e818c2d7dd76859c2d7d5f5a3c44887b876e594f7b2a8abff6359c97569ed72e",
@@ -140,15 +148,15 @@
     "beforeFiles": 355,
     "afterFiles": 355,
     "beforeAggregateHash": "fbdcf656ffc51606ef5c11dc8dfa514b09fbc7139b9b1ef99c63b8f564528995",
-    "untouchedAggregateHash": "5de8750f24fd9162912ab609f9ef69c26e0b3e99b686c4e8b3a569837e8c52f7",
-    "afterAggregateHash": "b212169374eee4d4ea53f6c07cd8bfed9dc0cf841eb3c146918a0712801f4402"
+    "untouchedAggregateHash": "aa45bbbc64ba9e0cdfa08ecc88999daa9363e4626cb76e1f2572d337c2efade0",
+    "afterAggregateHash": "932cc82896a01581d8b294150b6d4185b0cfeb516d0d4ee26d4b5956ec7984f4"
   },
   "tests": {
     "beforeFiles": 58,
     "afterFiles": 58,
     "beforeAggregateHash": "0af87ba9dfbfe0ba50e10cce8f137d6ab56cd7768178f950fac408109fdb9b7d",
-    "untouchedAggregateHash": "a339df0ef05fc56c9c26ef6021368933446265b6df3f643c71e7991005691720",
-    "afterAggregateHash": "5b988d89745ce06baeecc0b2392b76eae00de035a84f9da2058eb72c5bbff07d"
+    "untouchedAggregateHash": "5bf948ac20cd6038643315cfdbee9dc66768556ab0a9f22755a8efc51c32b4ce",
+    "afterAggregateHash": "e7ac810a91474b745dea331818fa28a12938988d59ebb04cb3780b104b926a6d"
   },
   "frontend": {
     "beforeFiles": 510,
@@ -169,7 +177,7 @@
     "afterFiles": 35,
     "beforeAggregateHash": "9e15aa7c5eb9ade00bd1364e02ecd6b23de75a67587fcdef29521d00e08ae205",
     "untouchedAggregateHash": "11f60c8d097f953ebb466c5b9094a43889a4f6895f9b5465420354e86f7e65ca",
-    "afterAggregateHash": "46fbb4ddd1a0a178ce4a42ef92c310add82f324ed94152999848d21133777ae6"
+    "afterAggregateHash": "9129bc5d512b782cec526836edbc57793b95502c49fa5eae024dc1c857694f55"
   },
   "migrations": {
     "beforeFiles": 43,
