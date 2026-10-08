@@ -1992,7 +1992,7 @@ async fn current_backup_roundtrip_preserves_consistency_and_preparation_snapshot
         .expect("real consistency project export should produce the current archive");
     assert!(exported.entries >= 6);
     let archive_manifest = read_zip_json(&archive_path, "manifest.json");
-    assert_eq!(archive_manifest["version"], 20);
+    assert_eq!(archive_manifest["version"], 21);
     let archive_document = read_zip_json(&archive_path, "project.json");
     for (field, expected) in [
         ("characterProfiles", 1),

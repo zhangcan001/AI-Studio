@@ -93,7 +93,7 @@
     },
     "src-tauri/tests/dev055_release_compatibility.rs": {
       "beforeHash": "ac2442827d7f2e5ff6a4ff73966f52039a39db5f0c8efd6c54c8b5c0b708a4fa",
-      "afterHash": "ec3ab682f9d6c151eb3e962f567a163769f6b31945ed4fb516b342c1f0b39963"
+      "afterHash": "4ab987a12ec38b4598571f776be8794ab4e3b9c35aabfb2c9a4d2fef8587455e"
     },
     "src-tauri/tests/dev100_authoring_removal.rs": {
       "beforeHash": "c2b1e7f41c5c0580b89aba9f903f3644aba0693bd29f4e73e4c57a5b7f1f37bf",
@@ -144,7 +144,7 @@
     "afterFiles": 58,
     "beforeAggregateHash": "0af87ba9dfbfe0ba50e10cce8f137d6ab56cd7768178f950fac408109fdb9b7d",
     "untouchedAggregateHash": "c71953a5a7007248ab8367855b1e13922ff9c1346cb4245ab23c50c34ad89912",
-    "afterAggregateHash": "0b41b1997be31e7f66fda73166807d152d5b4d7fdc9f23b9d6eee46030d13c1d"
+    "afterAggregateHash": "1f52fb332b9200a3b95aee55bdec7696f915393755462ad6b3697ea3185e2570"
   },
   "frontend": {
     "beforeFiles": 510,
