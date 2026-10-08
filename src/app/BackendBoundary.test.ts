@@ -14,6 +14,8 @@ import { m1ParentReader } from "../../scripts/m1-readiness-boundary-guard.mjs";
 import { m3LibraryParentReader } from "../../scripts/m3-library-findability-boundary-guard.mjs";
 // @ts-expect-error Node-only schema successor, never production browser code.
 import { minimaxVideoPhase2ParentReader } from "../../scripts/minimax-video-phase2-successor-guard.mjs";
+// @ts-expect-error Node-only schema successor, never production browser code.
+import { minimaxVideoPhase3ParentReader } from "../../scripts/minimax-video-phase3-successor-guard.mjs";
 const read=(p:string):string=>readFileSync(p,"utf8");
 const manifest=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json"));
 const phase13=JSON.parse(read("docs/architecture/phase13-observability.json"));
@@ -54,7 +56,9 @@ it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=
  const reviewed=backendPerformanceBoundary(".",manifest.backendSourceSnapshot,phase12,phase13);
  expect(reviewed.violations).toEqual([]);
  expect(reviewed.files).toBe(backend.length);
- expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(reviewed.sha256);
+ // Phase 3 projects the Phase 2 checkpoint. Later Rust edits stay outside that frozen aggregate.
+ const phase3=minimaxVideoPhase3ParentReader('.');expect(phase3.violations).toEqual([]);
+ expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+phase3.read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(reviewed.sha256);
   expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend.filter((p:string)=>!phase13.backend.addedPaths.includes(p)&&!successor.addedPaths.includes(p)));
 });
 it("target2 preserves frozen Phase7 consumers through the validated successor",()=>{

@@ -91,6 +91,12 @@ mod application {
             pub message: String,
         }
     }
+
+    pub mod product {
+        pub mod h3_resolution {
+            pub use ai_studio_lib::application::product::h3_resolution::validate_reference_durations;
+        }
+    }
 }
 
 #[path = "../src/application/shot_readiness_evaluator.rs"]

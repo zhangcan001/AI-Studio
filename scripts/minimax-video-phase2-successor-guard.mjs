@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { READINESS_LIFECYCLE_GROUPS, readinessLifecycleParentFacts, readinessLifecycleHash, readinessLifecycleAggregate, MINIMAX_VIDEO_PHASE1_MANIFEST } from './readiness-lifecycle-successor-guard.mjs';
-import { minimaxVideoPhase3ParentReader, minimaxVideoPhase3FixtureFiles } from './minimax-video-phase3-successor-guard.mjs';
+import { minimaxVideoPhase3ParentReader, minimaxVideoPhase3FixtureFiles, MINIMAX_VIDEO_PHASE3_EXISTING, MINIMAX_VIDEO_PHASE3_PARENT } from './minimax-video-phase3-successor-guard.mjs';
 
 // One reviewed stage, directly based on the final Phase1 commit. Never repin an old proof.
 export const MINIMAX_VIDEO_PHASE2_PARENT = '8a0d037443dcc66f804379357da13c5e6bc92f74';
@@ -136,9 +136,20 @@ const files = (root, dir, pattern) => readdirSync(join(root,dir),{withFileTypes:
 function validate(root, override) {
   const successor = minimaxVideoPhase3ParentReader(root);
   const violations = [...successor.violations], fail = s => violations.push(`minimax-video-phase2-${s}`);
-  const live = new Map(), disk = p => { if (!live.has(p)) live.set(p, normalize(successor.read(p))); return live.get(p); };
+  const rawDisk = p => normalize(readFileSync(join(root, p), 'utf8'));
+  // Files owned by Phase 3 stay on that checkpoint's parent bytes even when a
+  // later probe is rejected. Everything else stays live so a deleted or drifted
+  // file still produces this checkpoint's evidence name.
+  let phase3Facts;
+  const live = new Map(), disk = p => {
+    if (live.has(p)) return live.get(p);
+    const value = MINIMAX_VIDEO_PHASE3_EXISTING.includes(p)
+      ? (phase3Facts ??= readinessLifecycleParentFacts(root, MINIMAX_VIDEO_PHASE3_PARENT)).read(p)
+      : (successor.violations.length ? rawDisk(p) : normalize(successor.read(p)));
+    live.set(p, value);
+    return value;
+  };
   const rejected = () => ({ violations, addedPaths: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => normalize(readFileSync(join(root,p),'utf8')) });
-  if (successor.violations.length) return rejected();
   let proof, facts;
   try { proof = override ?? JSON.parse(disk(MINIMAX_VIDEO_PHASE2_MANIFEST)); facts = readinessLifecycleParentFacts(root, MINIMAX_VIDEO_PHASE2_PARENT); }
   catch { fail('missing-evidence'); return rejected(); }
@@ -154,7 +165,6 @@ function validate(root, override) {
   const runtimeProfile = process.env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE ?? 'git';
   if (!Object.hasOwn(MINIMAX_VIDEO_PHASE2_RUNTIME_BYTES,runtimeProfile)
     || JSON.stringify(proof.runtimeByteBaselines) !== JSON.stringify(MINIMAX_VIDEO_PHASE2_RUNTIME_BYTES)) fail('runtime-byte-baseline');
-  if (violations.length) return rejected();
   try {
     if (proof.phase1ProofHash !== readinessLifecycleHash(facts.read(MINIMAX_VIDEO_PHASE1_MANIFEST))
       || disk(MINIMAX_VIDEO_PHASE1_MANIFEST) !== facts.read(MINIMAX_VIDEO_PHASE1_MANIFEST)) fail('historical-proof');
@@ -184,7 +194,8 @@ function validate(root, override) {
   } catch { fail('missing-evidence'); return rejected(); }
   if (violations.length) return rejected();
   return { violations, addedPaths: [...MINIMAX_VIDEO_PHASE2_ADDED,MINIMAX_VIDEO_PHASE2_MANIFEST,...successor.addedPaths],
-    afterHashes: Object.fromEntries(scope.map(p => [p,proof.paths[p].afterHash])), backendAggregateSha256: proof.backend.afterAggregateHash,
+    afterHashes: { ...Object.fromEntries(scope.map(p => [p,proof.paths[p].afterHash])), ...successor.afterHashes },
+    backendAggregateSha256: proof.backend.afterAggregateHash,
     // Only after validating live bytes do historical readers receive Phase1-final bytes.
     read: p => MINIMAX_VIDEO_PHASE2_EXISTING.includes(p) ? facts.read(p) : disk(p) };
 }
