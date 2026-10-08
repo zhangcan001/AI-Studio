@@ -29,7 +29,7 @@
     },
     "scripts/minimax-video-phase3-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "657782d0074c3a312b0eb65c486a37c051bd74d01544b56f1ecab02f3d16b40f"
+      "afterHash": "01127b9e1aab667439bc8aa44d329827645c952170a73959093c1b92e7ffcb1e"
     },
     "src-tauri/src/application/ordered_reference_binding.rs": {
       "beforeHash": "f2edb7817a039f4755e4c3f2d3c657e4bdd10a8a89d4e3827fb652408582c0ae",
@@ -83,6 +83,10 @@
       "beforeHash": "230f365c94aac6e60fa3f3268c6291b1532d441fda6083c35f287c8775efd9c8",
       "afterHash": "345b8cf53ede8ba082905005fc127850ef482675b07ab40c117a1e8801bc6807"
     },
+    "src-tauri/tests/dev052_production_preparation.rs": {
+      "beforeHash": "ed51bf044561abe93930833c99e88b32a9f8ddf9d68bcf68f39dc275c4e78798",
+      "afterHash": "7757a5ff489fdb9f2123d2b3afbb8c39c8f41933f94240bdd656b54dd3883d0a"
+    },
     "src-tauri/tests/dev055_release_compatibility.rs": {
       "beforeHash": "ac2442827d7f2e5ff6a4ff73966f52039a39db5f0c8efd6c54c8b5c0b708a4fa",
       "afterHash": "ec3ab682f9d6c151eb3e962f567a163769f6b31945ed4fb516b342c1f0b39963"
@@ -135,8 +139,8 @@
     "beforeFiles": 58,
     "afterFiles": 58,
     "beforeAggregateHash": "0af87ba9dfbfe0ba50e10cce8f137d6ab56cd7768178f950fac408109fdb9b7d",
-    "untouchedAggregateHash": "757de24609db9b7f412565b433b628210ef1554019e1a95b5b7fe5c97e5e6e93",
-    "afterAggregateHash": "660ed43e08a36691acfe6888c6da094e133ec4b980f2317b84c077e2d271a375"
+    "untouchedAggregateHash": "d65fa34a908dbd4e5f790fbe2bf754ea4fbf5c54e2862394e4359b15e9f02284",
+    "afterAggregateHash": "e3e8812cf41ad3d25d4220aa26dc1337fad7cc9a5c0114055be74f3b825a4005"
   },
   "frontend": {
     "beforeFiles": 510,
@@ -157,7 +161,7 @@
     "afterFiles": 35,
     "beforeAggregateHash": "9e15aa7c5eb9ade00bd1364e02ecd6b23de75a67587fcdef29521d00e08ae205",
     "untouchedAggregateHash": "11f60c8d097f953ebb466c5b9094a43889a4f6895f9b5465420354e86f7e65ca",
-    "afterAggregateHash": "f06c72a67e88cb678c582c5cc2e9e7665448caad7bc8c59c400327aee4a898cd"
+    "afterAggregateHash": "72718ffb317f7f42a8866bccb44c95b9e79c8e53b47b538e17465856f722cc25"
   },
   "migrations": {
     "beforeFiles": 43,
