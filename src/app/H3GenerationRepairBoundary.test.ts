@@ -37,7 +37,7 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
   const queue=JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
   paths.push(...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json');
   const readiness=JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
-  paths.push(...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json');
+  paths.push(...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json');
   for(const p of new Set(paths) as Set<string>){mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));}
   expect(h3RepairParentReader(root).violations).toEqual([]);
   for(const p of ['src/features/create/CreateInputs.tsx','src-tauri/src/domain/asset.rs','src-tauri/tauri.conf.json']){
@@ -46,7 +46,7 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
    writeFileSync(path,original);expect(h3RepairParentReader(root).violations).toEqual([]);
   }
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// extra source');
-  expect(h3RepairParentReader(root).violations).toContain('readiness-lifecycle-backend-files');
+  expect(h3RepairParentReader(root).violations).toContain('post-run-readiness-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);
 

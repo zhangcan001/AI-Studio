@@ -43,7 +43,7 @@ it('denies drift in repaired sources, untouched files, historical proofs, packag
   writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
   const proof=JSON.parse(readFileSync(manifest,'utf8'));
   const successorProof=JSON.parse(readFileSync(successorManifest,'utf8'));
-  for(const p of new Set([...queueLifecycleParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(successorProof.paths),successorManifest]) as Set<string>){
+  for(const p of new Set([...queueLifecycleParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(successorProof.paths),successorManifest,'docs/architecture/readiness-post-run-fix.json']) as Set<string>){
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(queueLifecycleParentReader(root).violations).toEqual([]);
@@ -54,6 +54,6 @@ it('denies drift in repaired sources, untouched files, historical proofs, packag
    writeFileSync(path,original);expect(queueLifecycleParentReader(root).violations).toEqual([]);
   }
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
-  expect(queueLifecycleParentReader(root).violations).toContain('readiness-lifecycle-backend-files');
+  expect(queueLifecycleParentReader(root).violations).toContain('post-run-readiness-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);

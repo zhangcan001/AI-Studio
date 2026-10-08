@@ -33,16 +33,20 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const previousOwner = useRef(owner);
   const key = scopeKey(route);
   const runtimeStatus = runtime?.status, runtimeEndpoint = runtime?.endpoint, runtimeGeneration = runtime?.runtimeGeneration;
-  const currentDraft = useRef({ key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration });
-  currentDraft.current = { key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration };
+  const runStatus = run?.status;
+  const currentDraft = useRef({ key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus });
+  currentDraft.current = { key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus };
   const [readinessCheck, setReadinessCheck] = useState<{ result: CreationReadiness; draft: typeof currentDraft.current }>();
   function matchesDraft(draft: typeof currentDraft.current) {
     const current = currentDraft.current;
     return draft.key === current.key && draft.selection === current.selection && draft.values === current.values && draft.provenance === current.provenance
       && draft.runtimeStatus === current.runtimeStatus && draft.runtimeEndpoint === current.runtimeEndpoint && draft.runtimeGeneration === current.runtimeGeneration;
   }
-  // Reject a stale positive on the render itself, before effect cleanup runs.
-  const readiness = readinessCheck && matchesDraft(readinessCheck.draft) && runtimeStatus === "CONNECTED" ? readinessCheck.result : undefined;
+  function matchesReadiness(draft: typeof currentDraft.current) {
+    return matchesDraft(draft) && draft.runRef === currentDraft.current.runRef && draft.runStatus === currentDraft.current.runStatus;
+  }
+  // Both positive and transient negative prechecks belong to the observed run lifecycle.
+  const readiness = readinessCheck && matchesReadiness(readinessCheck.draft) && runtimeStatus === "CONNECTED" ? readinessCheck.result : undefined;
   const readinessState = !runtime ? "CHECKING" : runtimeStatus !== "CONNECTED" ? "RUNTIME_OFFLINE" : readiness ? readiness.ready ? "READY" : "NOT_READY" : "CHECKING";
   const generator = generators.find(item => item.selectionRef === selection);
   useEffect(() => {
@@ -86,18 +90,18 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   useEffect(() => {
     ++readinessEpoch.current;
     setReadinessCheck(undefined);
-  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration]);
+  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus]);
   useEffect(() => {
     if (loading || busy || readiness || runtimeStatus !== "CONNECTED" || !route.shotId || !generator?.availability) return;
     const timer = setTimeout(() => { void recheckReadiness(); }, 600);
     return () => { ++readinessEpoch.current; clearTimeout(timer); };
-  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, busy]);
+  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, busy]);
   async function recheckReadiness() {
     if (loading || !route.shotId || !generator?.availability || actionLock.current) return;
     const token = epoch.current;
     const requestEpoch = ++readinessEpoch.current;
     const draft = currentDraft.current;
-    const isCurrent = () => mounted.current && token === epoch.current && requestEpoch === readinessEpoch.current && matchesDraft(draft);
+    const isCurrent = () => mounted.current && token === epoch.current && requestEpoch === readinessEpoch.current && matchesReadiness(draft);
     try {
       const next = await productClient.creation.readinessGet({ ...submission(), submissionIdempotencyKey: "readiness-only" });
       if (isCurrent()) { setReadinessCheck({ result: next, draft }); setError(undefined); }

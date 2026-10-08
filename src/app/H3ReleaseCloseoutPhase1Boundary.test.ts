@@ -42,7 +42,7 @@ it('fresh bytes and path sets invalidate cached acceptance, including published 
   const proof=JSON.parse(readFileSync(manifest,'utf8'));
   const queue=JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
   const readiness=JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
-  for(const p of new Set([...h3CloseoutParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json',...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json']) as Set<string>){
+  for(const p of new Set([...h3CloseoutParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json',...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json']) as Set<string>){
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(h3CloseoutParentReader(root).violations).toEqual([]);
@@ -52,7 +52,7 @@ it('fresh bytes and path sets invalidate cached acceptance, including published 
    writeFileSync(path,original);expect(h3CloseoutParentReader(root).violations).toEqual([]);
   }
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
-  expect(h3CloseoutParentReader(root).violations).toContain('readiness-lifecycle-backend-files');
+  expect(h3CloseoutParentReader(root).violations).toContain('post-run-readiness-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);
 it('shares nested replay but never trusts mtime, unchanged length or stale mutable tag identity',()=>{

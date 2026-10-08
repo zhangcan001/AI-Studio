@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CreatePage } from "./CreatePage";
 import { useStudioStore } from "../../stores/studioStore";
-import type { CreationContext, CreationReadiness, GeneratorOption } from "../../product/types";
+import type { CreationContext, CreationReadiness, GeneratorOption, ProductRun } from "../../product/types";
 import type { ComfyStatus } from "../../types/comfy";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn() }));
@@ -19,6 +19,9 @@ const page = (runtime: ComfyStatus & { runtimeGeneration: number }) => <CreatePa
 function deferred() { let resolve!: (result: CreationReadiness) => void; const promise = new Promise<CreationReadiness>(yes => { resolve = yes; }); return { promise, resolve }; }
 async function settle() { await act(async () => { await vi.advanceTimersByTimeAsync(600); }); }
 async function start() { const view = render(page(online)); await act(async () => {}); await settle(); return view; }
+function observedRun(status: ProductRun["status"] = "QUEUED") { return { ref: { source: "queue-batch", id: "run" }, status, progress: { total: 1, succeeded: status === "SUCCEEDED" ? 1 : 0 }, availableActions: [] }; }
+function withActiveRun() { api.get.mockResolvedValue({ ...context, selectedShot: { ...context.selectedShot!, recentRun: { source: "queue-batch", id: "run" } } }); }
+async function finishRun(status: ProductRun["status"] = "SUCCEEDED") { api.runGet.mockResolvedValue(observedRun(status)); await act(async () => { await vi.advanceTimersByTimeAsync(1500); }); await settle(); }
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks(); useStudioStore.getState().resetDraft();
@@ -29,6 +32,68 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("Create runtime readiness lifecycle", () => {
+  it.each(["SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED"] as const)("automatically replaces a transient negative after the current run becomes %s without draft edits", async status => {
+    withActiveRun();
+    api.readinessGet.mockResolvedValue(blocked);
+    await start();
+    expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();
+    const values = useStudioStore.getState().values;
+    const calls = api.readinessGet.mock.calls.length;
+    api.readinessGet.mockResolvedValue(ready);
+    await finishRun(status);
+    expect(api.readinessGet).toHaveBeenCalledTimes(calls + 1);
+    expect(screen.getByText("可以生成")).toBeTruthy();
+    expect(useStudioStore.getState().values).toBe(values);
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("ignores a pending negative from the active run after terminal readiness is READY", async () => {
+    withActiveRun(); const old = deferred(); api.readinessGet.mockReturnValueOnce(old.promise);
+    await start(); const calls = api.readinessGet.mock.calls.length;
+    await finishRun(); expect(api.readinessGet).toHaveBeenCalledTimes(calls + 1);
+    expect(screen.getByText("可以生成")).toBeTruthy();
+    await act(async () => { old.resolve(blocked); });
+    expect(screen.getByText("可以生成")).toBeTruthy(); expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("checks the latest draft if it changes during post-run readiness", async () => {
+    withActiveRun(); api.readinessGet.mockResolvedValue(blocked); await start();
+    const old = deferred(), current = deferred(); api.readinessGet.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    await finishRun(); fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "new prompt" } }); await settle();
+    await act(async () => { old.resolve(ready); }); expect(screen.queryByText("可以生成")).toBeNull();
+    expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ values: expect.objectContaining({ prompt: { type: "string", value: "new prompt" } }) }));
+    await act(async () => { current.resolve(blocked); }); expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("does not restore READY if the runtime disconnects during post-run readiness", async () => {
+    withActiveRun(); api.readinessGet.mockResolvedValue(blocked); const view = await start();
+    const pending = deferred(); api.readinessGet.mockReturnValueOnce(pending.promise); await finishRun();
+    view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
+    await act(async () => { pending.resolve(ready); }); expect(screen.queryByText("可以生成")).toBeNull();
+    const calls = api.readinessGet.mock.calls.length; await settle(); expect(api.readinessGet).toHaveBeenCalledTimes(calls);
+    api.readinessGet.mockResolvedValue(ready); view.rerender(page({ ...online, runtimeGeneration: 2 })); await settle();
+    expect(screen.getByText("可以生成")).toBeTruthy(); expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("does not rerun readiness for progress updates with unchanged run identity and status", async () => {
+    withActiveRun(); api.runGet.mockResolvedValue(observedRun("RUNNING")); api.readinessGet.mockResolvedValue(blocked); await start();
+    const calls = api.readinessGet.mock.calls.length;
+    api.runGet.mockImplementation(async () => ({ ...observedRun("RUNNING"), phase: "sampling", updatedAt: "later", progress: { total: 5, succeeded: 2 } }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(api.readinessGet).toHaveBeenCalledTimes(calls); expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("keeps a fresh backend negative after completion without forcing READY or polling readiness", async () => {
+    withActiveRun(); api.readinessGet.mockResolvedValue(blocked); await start(); const calls = api.readinessGet.mock.calls.length;
+    await finishRun(); expect(api.readinessGet).toHaveBeenCalledTimes(calls + 1);
+    expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(api.readinessGet).toHaveBeenCalledTimes(calls + 1); expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("refreshes the precheck across a newly accepted run without automatically generating again", async () => {
+    await start(); fireEvent.click(screen.getByRole("button", { name: "生成" })); await act(async () => {});
+    api.readinessGet.mockResolvedValue(blocked); await settle(); expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();
+    const values = useStudioStore.getState().values; api.readinessGet.mockResolvedValue(ready); await finishRun();
+    expect(screen.getByText("可以生成")).toBeTruthy(); expect(useStudioStore.getState().values).toBe(values);
+    expect(api.generate).toHaveBeenCalledTimes(1);
+    expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ submissionIdempotencyKey: "readiness-only" }));
+  });
   it("invalidates cached READY immediately when authoritative health becomes offline", async () => {
     const view = await start(); expect(screen.getByText("可以生成")).toBeTruthy();
     view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
