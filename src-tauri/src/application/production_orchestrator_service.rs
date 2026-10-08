@@ -1609,7 +1609,7 @@ fn ref2va_image_bounds(
         ));
     }
     if is_ref2va {
-        Ok(Some(((*min_items).max(2), *max_items)))
+        Ok(Some((*min_items, *max_items)))
     } else {
         Ok(None)
     }

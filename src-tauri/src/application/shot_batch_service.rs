@@ -1044,7 +1044,14 @@ impl ShotBatchService {
                 Ok(workflow) => {
                     let request =
                         CompileRequest::new(GenerationInputPreparer::preflight_values(&values));
-                    if let Err(error) = WorkflowCompiler.compile(&workflow, &recipe, &request) {
+                    // Same product gate as validate_new_items: missing I2V first_frame,
+                    // REF2VA audio-only, and the 9/3/3/12 caps fail closed here.
+                    if let Err(error) = crate::application::product::h3_resolution::compile_checked(
+                        &WorkflowCompiler,
+                        &workflow,
+                        &recipe,
+                        &request,
+                    ) {
                         reasons.push(format!("输入检查失败：{error}"));
                     }
                 }

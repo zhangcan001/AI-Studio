@@ -193,11 +193,14 @@ async fn scene_preparation_supports_all_four_modes_without_image_result_selectio
         assert_eq!(count(&f.pool, "shot_generation_links").await, 0); // Binding is not production.
         configure(&f, index).await;
         let shots = shot_service(&f, inputs.clone());
+        // Prompt belongs to the Shot (`prompt_text`), not the scalar bag.
+        let mut scalars = values();
+        scalars.remove("prompt");
         let request = ShotGenerationRequest {
             project_id: PROJECT_ID.into(),
             shot_id: "shot_phase2".into(),
             stage: ShotStage::Video,
-            values: values(),
+            values: scalars,
             retry_task_id: None,
             submission_idempotency_key: None,
         };
@@ -220,6 +223,11 @@ async fn scene_preparation_supports_all_four_modes_without_image_result_selectio
             .await
             .unwrap();
         for prepared in [&advanced, &normal] {
+            assert_eq!(
+                prepared.values.get("prompt"),
+                Some(&GenerationInputValue::Text("move".into())),
+                "mode {index} must submit the Shot prompt"
+            );
             f.services
                 .generation
                 .validate_new_product_inputs(
@@ -578,16 +586,21 @@ async fn mixed_reference_contract_accepts_video_only_and_rejects_audio_only_befo
         batch.items[0].values_json["reference_audios"]["assetIds"],
         json!([refs[1].id.as_str()])
     );
-    service
+    let before = count(&f.pool, "production_batches").await;
+    let audio_only = service
         .save(
             &ref_scope,
             Some(&mixed.token),
             &[input("reference_audios", 0, &refs[1].id)],
         )
-        .await
-        .unwrap();
-    let before = count(&f.pool, "production_batches").await;
-    assert!(batches.create(request()).await.is_err());
+        .await;
+    assert!(
+        matches!(
+            audio_only,
+            Err(ai_studio_lib::application::shot_video_input_service::ShotVideoInputError::Combination)
+        ),
+        "audio-only REF2VA is rejected when the binding is saved, before any batch write"
+    );
     assert_eq!(count(&f.pool, "production_batches").await, before);
     assert_eq!(count(&f.pool, "tasks").await, 1); // Only the explicitly seeded historical task.
 }

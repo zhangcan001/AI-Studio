@@ -11,6 +11,8 @@ import { createHash } from "node:crypto";
 import { backendPerformanceBoundary } from "../../scripts/backend-boundary-guard.mjs";
 // @ts-expect-error Node-only successor projection, never browser production.
 import { minimaxVideoPhase2ParentReader } from "../../scripts/minimax-video-phase2-successor-guard.mjs";
+// @ts-expect-error Node-only schema successor, never production browser code.
+import { minimaxVideoPhase3ParentReader } from "../../scripts/minimax-video-phase3-successor-guard.mjs";
 import ts from "typescript";
 import { ShellHost } from "./ShellHost";
 import { fromLegacyLocation } from "./routes/legacyAdapter";
@@ -97,6 +99,7 @@ it("phase7_target15 keyboard skip focus and active navigation survive single she
 });
 it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()=>{
  const successor=minimaxVideoPhase2ParentReader('.');expect(successor.violations).toEqual([]);
+ const phase3=minimaxVideoPhase3ParentReader('.');expect(phase3.violations).toEqual([]);
  expect(readdirSync("src-tauri/migrations").filter((f:string)=>!successor.addedPaths.includes(`src-tauri/migrations/${f}`)).some((f:string)=>f.startsWith("043"))).toBe(false);expect(successor.read("src-tauri/src/application/project_backup_service.rs")).toContain("const BACKUP_VERSION: u32 = 20;");
  function allFiles(dir:string):string[]{return readdirSync(dir,{withFileTypes:true}).flatMap((e:{name:string;isDirectory:()=>boolean})=>e.isDirectory()?allFiles(`${dir}/${e.name}`):[`${dir}/${e.name}`]).sort();}
  // Explicit authorized successors: Phase8 backend structure and Phase9 style entry.
@@ -105,6 +108,6 @@ it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()
  const phase8=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json")) as {backendSourceSnapshot:{files:number;sha256:string}};
  const phase9=JSON.parse(read("docs/architecture/phase9-style-cleanup.json"));
  const reviewed=backendPerformanceBoundary('.',phase8.backendSourceSnapshot,JSON.parse(read('docs/architecture/phase12-performance.json')),phase13BoundaryReview);expect(reviewed.violations).toEqual([]);
- for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,files:reviewed.files ?? phase8.backendSourceSnapshot.files,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root).filter(f=>root!=='src-tauri/migrations'||!successor.addedPaths.includes(f));expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+(root==='src-tauri/migrations'?successor.read(f):read(f)).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
+ for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,files:reviewed.files ?? phase8.backendSourceSnapshot.files,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root).filter(f=>root!=='src-tauri/migrations'||!successor.addedPaths.includes(f));expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+(root==='src-tauri/migrations'?successor.read(f):root==='src-tauri/src'?phase3.read(f):read(f)).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
 
 },30000); // Exact historical source traversal, not a runtime performance threshold.

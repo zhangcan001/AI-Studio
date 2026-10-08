@@ -646,13 +646,24 @@ fn ref2va_requires_ordered_reference_images_from_the_resolved_pack() {
     let binding = read_repo("src-tauri/src/application/ordered_reference_binding.rs");
     let batch = read_repo("src-tauri/src/application/shot_batch_service.rs");
     let domain = read_repo("src-tauri/src/domain/production_preparation.rs");
+    let queue = read_repo("src-tauri/src/application/production_queue_service.rs");
+    // Authorized H3 packages keep the recipe minimum, including 0. A hidden
+    // floor of 2 is not part of the product contract.
     assert_contains_all(
         &binding,
         &[
             "REF2VA",
             "reference_images",
-            "let min_items = (*min_items).max(2)",
+            "Ok(Some((*min_items, *max_items)))",
             "validate_ordered_reference_ids",
+        ],
+    );
+    assert_contains_none(&binding, &["(*min_items).max(2)"]);
+    assert_contains_all(
+        &queue,
+        &[
+            "reference_manifest_for_values(&workflow_id, &recipe, values)",
+            ".workflow_id",
         ],
     );
     assert_contains_all(

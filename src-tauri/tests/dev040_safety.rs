@@ -275,16 +275,30 @@ fn dev040_architecture_reuses_shot_batch_and_has_no_second_runtime_path() {
     assert!(!lib.contains("SceneExecutor"));
 
     let backup = read_repo("src-tauri/src/application/project_backup_service.rs");
-    assert!(backup.contains("const BACKUP_VERSION: u32 = 20"));
+    assert!(backup.contains("const BACKUP_VERSION: u32 = 21"));
     let migrations = fs::read_dir(repo_root().join("src-tauri/migrations"))
         .expect("migration directory should be readable")
         .flatten()
         .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
         .filter(|name| name.ends_with(".sql"))
         .collect::<Vec<_>>();
+    assert_eq!(
+        migrations
+            .iter()
+            .filter(|name| name.starts_with("043_"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        migrations
+            .iter()
+            .filter(|name| name.starts_with("044_"))
+            .count(),
+        0
+    );
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 42)
+            .is_some_and(|version| version <= 43)
     }));
 }

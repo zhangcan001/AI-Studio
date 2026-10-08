@@ -1,4 +1,5 @@
 use ai_studio_lib::application::{
+    generation_input_preparer::GenerationInputValue,
     generation_service::{
         CreateGenerationRequest, GenerationService, GenerationServiceError,
         WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION,
@@ -23,6 +24,7 @@ use ai_studio_lib::application::{
     workflow_registry_service::WorkflowRegistryService,
     workflow_workspace_query_service::WorkflowWorkspaceQueryService,
 };
+use ai_studio_lib::domain::SeedValue;
 use ai_studio_lib::infrastructure::database::{
     initialize, SqliteAssetRepository, SqliteGenerationDefinitionRepository,
     SqliteGenerationSnapshotRepository, SqliteProjectRepository,
@@ -758,7 +760,20 @@ fn generation_request(workflow_version_id: String, recipe_id: String) -> CreateG
         prompt_version_id: None,
         tool_instance_id: None,
         tool_version_id: None,
-        values: BTreeMap::new(),
+        // Direct generation is not a Shot, so the prompt lives in the request.
+        values: BTreeMap::from([
+            (
+                "prompt".into(),
+                GenerationInputValue::Text("An owned exact-recipe prompt".into()),
+            ),
+            ("duration_seconds".into(), GenerationInputValue::Integer(5)),
+            ("width".into(), GenerationInputValue::Integer(1344)),
+            ("height".into(), GenerationInputValue::Integer(768)),
+            (
+                "seed".into(),
+                GenerationInputValue::Seed(SeedValue::Fixed(42)),
+            ),
+        ]),
         reference_manifest: None,
         submission_idempotency_key: None,
         submission_attempt: None,
