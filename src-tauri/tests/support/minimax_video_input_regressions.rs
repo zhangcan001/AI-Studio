@@ -578,16 +578,21 @@ async fn mixed_reference_contract_accepts_video_only_and_rejects_audio_only_befo
         batch.items[0].values_json["reference_audios"]["assetIds"],
         json!([refs[1].id.as_str()])
     );
-    service
+    let before = count(&f.pool, "production_batches").await;
+    let audio_only = service
         .save(
             &ref_scope,
             Some(&mixed.token),
             &[input("reference_audios", 0, &refs[1].id)],
         )
-        .await
-        .unwrap();
-    let before = count(&f.pool, "production_batches").await;
-    assert!(batches.create(request()).await.is_err());
+        .await;
+    assert!(
+        matches!(
+            audio_only,
+            Err(ai_studio_lib::application::shot_video_input_service::ShotVideoInputError::Combination)
+        ),
+        "audio-only REF2VA is rejected when the binding is saved, before any batch write"
+    );
     assert_eq!(count(&f.pool, "production_batches").await, before);
     assert_eq!(count(&f.pool, "tasks").await, 1); // Only the explicitly seeded historical task.
 }

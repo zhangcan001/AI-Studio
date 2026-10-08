@@ -25,6 +25,7 @@ export const MINIMAX_VIDEO_PHASE3_EXISTING = [
   'src-tauri/tests/dev052_production_preparation.rs',
   'src-tauri/tests/dev052_runtime_integration.rs',
   'src-tauri/tests/dev055_release_compatibility.rs',
+  'src-tauri/tests/support/minimax_video_input_regressions.rs',
   'src-tauri/tests/product_library_contract.rs',
   'src-tauri/tests/project_database_fixture.rs',
   'src-tauri/tests/dev100_authoring_removal.rs',
