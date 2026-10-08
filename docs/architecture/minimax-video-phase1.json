@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "MINIMAX_VIDEO_PHASE_1",
+  "parentHead": "0522b7444e7388a0ab8ad4b4d011e99ead47d9d8",
+  "invariants": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "queueAuthorityChanged": false,
+    "storeAuthorityChanged": false,
+    "uiV2Changed": false,
+    "historicalDataRewritten": false,
+    "immutablePackagesPreserved": true,
+    "sharedProductAdmission": true,
+    "registryLiveBytesPreserved": true,
+    "bindingOccPreserved": true,
+    "onlyFourBase220Packages": true,
+    "i2vFirstFrameRequired": true
+  },
+  "paths": {
+    "scripts/readiness-lifecycle-successor-guard.mjs": {
+      "beforeHash": "602191ff8110d25ab6c545996ffdb11d3a625edf1515686c4186fbe5907196b8",
+      "afterHash": "c45a7683e2451b5cd1382c27e7eaa9821036772a277447477904a0f03af49431"
+    },
+    "src-tauri/src/application/binding_lifecycle_race_tests.rs": {
+      "beforeHash": "6ce524d460bea2991f3fa9894f87c1f8b58aa02f5b5ec020b5d149e3b0c3fe43",
+      "afterHash": "e2e87b2d5d9ac4eb5cda90c33932ff606bfb401f8875a9d159ef1a42805b341e"
+    },
+    "src-tauri/src/application/builtin_runtime_packages.rs": {
+      "beforeHash": "ed6445ab85864ca79b0447cceb6da73485cf901760d7a9c2690e6554801042f9",
+      "afterHash": "48097c5a63f2cb928b03af0cdefce3cb89177c244aae876af4ea7737dbc11046"
+    },
+    "src-tauri/src/application/dev031_e2e.rs": {
+      "beforeHash": "88aef3e22642bfc1aaa775c7b28d8cc92b989e0a6c0d35fb6c49e17563b6dc23",
+      "afterHash": "71501908ad953394ed7e053adbc7742a759b77060cf338e773bade573310ee84"
+    },
+    "src-tauri/src/application/generation_catalog_service.rs": {
+      "beforeHash": "b89a8e55e84d4a363679390901a13af9d56ca61f1fd4dc1a45e60fe6d27e5775",
+      "afterHash": "0940d258fb499717409b99b6a7a745987544ae18134a9009fc485275f03775c3"
+    },
+    "src-tauri/src/application/generation_service.rs": {
+      "beforeHash": "6337c5dcd12dbc8a4678f14c99b99d7b4f683dc768809c469921ba6c6e2eb808",
+      "afterHash": "aba3b0521aed1d797b7683a832e709107db7983c897245eec6e84ab8f054e513"
+    },
+    "src-tauri/src/application/h3_local_import_service.rs": {
+      "beforeHash": "11100f510f8860195ddcb68115e4769f1545db90c7c11620859bd75b3e8e57ab",
+      "afterHash": "4dd547feb7456a1a8da9c65d308e6f53ef7ea43eb83d1a86c45ee8892aaa11cb"
+    },
+    "src-tauri/src/application/minimax_video_product_policy.rs": {
+      "beforeHash": null,
+      "afterHash": "b4ce6a495d756d2a7a24e4383f84d4916ffbd1878e0fd4bec58dbf37e79082d4"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "c224eb679e217eb2c80d554669a3cb04f26722755b3145528a7e9ffac147d875",
+      "afterHash": "bbc7a2cf48e9d1d6bf2caac385122d541e755eaebbf475ef7882153ed8300b64"
+    },
+    "src-tauri/src/application/product/h3_resolution.rs": {
+      "beforeHash": "61875e39849b32dae728398a66140ac18082343f078ef8ccbb2b8e1f2bb10152",
+      "afterHash": "9fcc98de21aa409c5c3866607458990d67d334cc0a17d8191943bae9b3e4afdb"
+    },
+    "src-tauri/src/application/product_runtime_scope.rs": {
+      "beforeHash": "e13917f0f197a0087a66c3dd1be503ce162fffedc132058f3e320dbf28fd039e",
+      "afterHash": "ae9737f83fbb49d77c0462a215d76a72b4b736084165331c3d2df1cb0fac44ae"
+    },
+    "src-tauri/src/application/production_orchestrator_service.rs": {
+      "beforeHash": "9ed1caba72ebcfb4e11eaa90541d468606f3380ad5f6e074db1c9909f735e154",
+      "afterHash": "403c723e75b39b64b558e3687dc2181049d4889e4d08c76a573ae41694b49147"
+    },
+    "src-tauri/src/application/production_preparation_service.rs": {
+      "beforeHash": "04a358ced659163750d4798d841abb31383ed691ea51e84b012c8936b242532a",
+      "afterHash": "2074332cd2b270f107f948c5c202211cfda3f314fbaa6e6dd7c1f9c316f89a47"
+    },
+    "src-tauri/src/application/production_queue_service.rs": {
+      "beforeHash": "c4a1427ffa5f42662fd1051c1b70cbb314d4c03cee0ad7f205f9222f943eb3c7",
+      "afterHash": "02767b663a0752e01c30c998a3366e704826651399087d6eb6dde7c37ca87456"
+    },
+    "src-tauri/src/application/project_workflow_binding_service.rs": {
+      "beforeHash": "177d8cbeead0b6a756dffdc81b66bd50578f1b92e52caf886d026d0c55cf6217",
+      "afterHash": "43a4c42e7ab61b28303f744020c94ae64025548b827b3eff186af5eaae2cc62f"
+    },
+    "src-tauri/src/application/shot_batch_service.rs": {
+      "beforeHash": "8d269419536038f9602d40ba7e8f6c973c435c5d6e407d50bed9e6d590bf8503",
+      "afterHash": "29a660de01e433ae7bed2679d0167535f0e29bb1a204e9ed7d305f8645a36844"
+    },
+    "src-tauri/src/application/workflow_benchmark_service.rs": {
+      "beforeHash": "d8e9be793fa81f84b2c8b280d5c5f30d267546c3f63add87b385a03451aef164",
+      "afterHash": "cbe31ba86eece4f98244fb3dfca8a9fa3472ff504305b64ba360d1110c57971c"
+    },
+    "src-tauri/src/application/workflow_registry_service.rs": {
+      "beforeHash": "2d2360cecc6900e4ac6a4de58aedc2b904259180c2ea915c9a1372c6c4e04e3a",
+      "afterHash": "44deac989cce2eae98b98ab9e04c69925aa0cfcb93a5d1b2c43af206b1aedd0a"
+    },
+    "src-tauri/src/lib.rs": {
+      "beforeHash": "03d22638caaa608267389d14b4c01f122fe7748b43a78a8ac8ec0d265253cf86",
+      "afterHash": "120e74e4751caaa909570d9827b082ca4c99ff0dc5a19cef0dde751bfd00ca61"
+    },
+    "src-tauri/tests/dev054_narrative_integration.rs": {
+      "beforeHash": "2e587759c67e7ed92f7975e57710a0af84ad84ee43e2de67457ecb7dd5011704",
+      "afterHash": "2dff972618656012ef968037d270740b0738b5cede7c856a9cabff022071816a"
+    },
+    "src-tauri/tests/dev061b_queue_recovery.rs": {
+      "beforeHash": "7ecd29f070004215ef008058b4e2f9c26426aec0adf976c304ab79eb5e0c80c4",
+      "afterHash": "80fe4829a35b1ecd25943d8300e9fee4fc0ab5979471a24b95811ade0e67c23b"
+    },
+    "src-tauri/tests/dev082_unified_workflow_library.rs": {
+      "beforeHash": "ba50c63026b58a90c5560bb9b27c7a4e5f2197129a5803e3b2538c60d1dabfb1",
+      "afterHash": "93dc12c6e528a70a8b4d3ee0a99b40814315061528305ecd726457257b73cda1"
+    },
+    "src-tauri/tests/dev084_runtime_artifact.rs": {
+      "beforeHash": "469fbea8b10013bb999c9f9eff22fc13a892f90d9979bd9b6cc5c80e3602d8c8",
+      "afterHash": "1218a45fb9aa05bbceee67c7f13d3f39e6a7c887d7de7df7bb91af82d897c430"
+    },
+    "src-tauri/tests/support/minimax_video_policy_regressions.rs": {
+      "beforeHash": null,
+      "afterHash": "77a67ae64990ef06aa1b181a1cd43edef3f9d494774e3f94ad9cf639c417e1ce"
+    },
+    "src/app/AIStudio21PublicationBoundary.test.ts": {
+      "beforeHash": "701c5c5888c187ca6542910862662cc9d0c49a939f2953886ff471478f4f69b1",
+      "afterHash": "eadd91ab5e8fd9851970df2273eb0985fda0c391ed58328a185000e19a99ae24"
+    },
+    "src/app/H3GenerationRepairBoundary.test.ts": {
+      "beforeHash": "a0320826e968cd82d2533e4141cc7ad60add2373e17b4ea28e290ccd8fec456a",
+      "afterHash": "269661c2971a978807dcf593074ba80d8242ea19fc90649b787391cd3d3f692f"
+    },
+    "src/app/H3ReleaseCloseoutPhase1Boundary.test.ts": {
+      "beforeHash": "7b171057d263c4c99585675abe23a0ecb04a5b94eb84eb3f2e954f04f473b0cf",
+      "afterHash": "82e3fd214f34906349c8e57b520a37d1e73ed75615ff7051e2a3d26d9b32bfcb"
+    },
+    "src/app/MiniMaxVideoPhase1Boundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "1a686f9c58670170f4802277d358da3f4942fe8a2f153ac6f3d9a9aac58883bd"
+    },
+    "src/app/QueueLifecycleRepairBoundary.test.ts": {
+      "beforeHash": "68e2c48c4ecd5cafc01afbf9146e1fdd0eb3bd10707cab9741dc4be2a4c7d243",
+      "afterHash": "17ae30063523caf07d1af0c092e4d36252f20abd4277520e5a478f30cad80b62"
+    },
+    "src/app/ReadinessLifecycleBoundary.test.ts": {
+      "beforeHash": "39b11639bf9ed3778d6f5fe402432b4cb83e50e2965304d07d839bd6f06e9460",
+      "afterHash": "cf99cbc409635cc184903e739375a0d829a6fbb0ee3b929443d031235b8c7eec"
+    }
+  },
+  "backend": {
+    "beforeFiles": 346,
+    "afterFiles": 347,
+    "beforeAggregateHash": "14d578ff41d8c6d87f914b86db13e5eda2a25f4f2fdb88f8f449957346d128c1",
+    "untouchedAggregateHash": "e87814dd8f06d0ebe302ce89492de46b271b550d7957a05569c8eaec65e352fe",
+    "afterAggregateHash": "cf11eaecb9f4bdccab0d632e4991da0892510830f7a85c400aa98d20dc992ec6"
+  },
+  "tests": {
+    "beforeFiles": 56,
+    "afterFiles": 57,
+    "beforeAggregateHash": "e5a19d19452a0e9b74f0a02501d74737a602d37dfb569189d300eabb1fac5ddf",
+    "untouchedAggregateHash": "0e32ebb17fffcb0c0b3844b2beea271be713b0fd7f1878254f10bc09060358c3",
+    "afterAggregateHash": "91f1a9ed0e0e27e43c21a14ede7dbd12e8eea40a2ee5a38cab83d00603b4f22e"
+  },
+  "frontend": {
+    "beforeFiles": 503,
+    "afterFiles": 504,
+    "beforeAggregateHash": "827cfbeab517f71ad288e98f60eaaf83f8cfcea570e1fb5d45533c425476789e",
+    "untouchedAggregateHash": "a523c10940fbad4291fd6eda6ee8041ee8adb2a4714eb0ad3c841219fff63345",
+    "afterAggregateHash": "2540b64536a019fefc243384588d82634c2498752dbb2931d589a44875bcbb9c"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "untouchedAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa",
+    "afterAggregateHash": "779a6eb60067981813b6806d7d4d3cfb13502abde6f38b0fe015851cf969acfa"
+  },
+  "scripts": {
+    "beforeFiles": 33,
+    "afterFiles": 33,
+    "beforeAggregateHash": "729b87f12699f21d1ede561dc52337135a5051c05db4e69eb561c4b86215f8fa",
+    "untouchedAggregateHash": "2bf8d942b3c6889f9068f4f81ce0c15475371092a86a2adc9ea2dfe95e8f7a75",
+    "afterAggregateHash": "d523f1c478171f0ceff6d29300bc6661f20ea1b076996d843eab9d79603240d0"
+  },
+  "migrations": {
+    "beforeFiles": 42,
+    "afterFiles": 42,
+    "beforeAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24",
+    "untouchedAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24",
+    "afterAggregateHash": "58535c8faf26171206b355f026807b82a4612aab4f7ac3ba96ab20235d814b24"
+  },
+  "architecture": {
+    "beforeFiles": 31,
+    "afterFiles": 31,
+    "beforeAggregateHash": "c30b29001d360863ef92f596e02b4c3e00477bdb29b3bf6c50747154321bdff8",
+    "untouchedAggregateHash": "c30b29001d360863ef92f596e02b4c3e00477bdb29b3bf6c50747154321bdff8",
+    "afterAggregateHash": "c30b29001d360863ef92f596e02b4c3e00477bdb29b3bf6c50747154321bdff8"
+  },
+  "packages": {
+    "beforeFiles": 51,
+    "afterFiles": 51,
+    "beforeAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "untouchedAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "afterAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884"
+  }
+}

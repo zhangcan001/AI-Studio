@@ -713,6 +713,10 @@ impl WorkflowBenchmarkService {
         let repeat_count = u32::try_from(row.repeat_count).unwrap_or(3).clamp(1, 10);
         let mut items = Vec::with_capacity(candidate_rows.len() * repeat_count as usize);
         for candidate in candidate_rows {
+            self.production_queue_service
+                .ensure_new_generation_allowed(&candidate.workflow_version_id, &candidate.recipe_id)
+                .await
+                .map_err(|e| WorkflowBenchmarkError::Queue(e.to_string()))?;
             let available_definition = available.iter().find(|definition| {
                 definition.workflow_version_id == candidate.workflow_version_id
                     && definition.recipe_id == candidate.recipe_id
@@ -820,6 +824,10 @@ impl WorkflowBenchmarkService {
         let available = self.definition_repository.list_available().await?;
         let mut drafts = Vec::with_capacity(request.candidates.len());
         for (index, candidate) in request.candidates.iter().enumerate() {
+            self.production_queue_service
+                .ensure_new_generation_allowed(&candidate.workflow_version_id, &candidate.recipe_id)
+                .await
+                .map_err(|e| WorkflowBenchmarkError::Queue(e.to_string()))?;
             let definition = available
                 .iter()
                 .find(|definition| {

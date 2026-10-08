@@ -282,7 +282,20 @@ pub fn is_builtin_package_name(package_name: &str) -> bool {
 }
 
 fn active_package(package: &BuiltinPackage) -> bool {
-    package.directory.contains("_quality_2_2_0") || package.directory.starts_with("kera2_")
+    crate::application::minimax_video_product_policy::AUTHORIZED_PACKAGES
+        .contains(&package.directory)
+}
+
+/// Immutable bytes used by the product policy; never inferred from a user name.
+pub(crate) fn embedded_package(
+    name: &str,
+) -> Option<crate::application::ports::WorkflowPackageBytes> {
+    let package = PACKAGES.iter().find(|package| package.directory == name)?;
+    Some(crate::application::ports::WorkflowPackageBytes::new(
+        package.manifest.as_bytes().to_vec(),
+        package.recipe.as_bytes().to_vec(),
+        package.workflow.as_bytes().to_vec(),
+    ))
 }
 
 /// The only automatic default advance is this explicitly approved immutable
@@ -655,7 +668,14 @@ mod tests {
         let directory = tempdir().unwrap();
         ensure_installed(directory.path()).unwrap();
         let installed = std::fs::read_dir(directory.path()).unwrap().count();
-        assert_eq!(installed, 5, "four quality modes and Krea2 only");
+        assert_eq!(
+            installed, 4,
+            "only four authorized video modes install by default"
+        );
+        assert!(!directory
+            .path()
+            .join("kera2_t2i_local_v2_1_1_1_90894e9e")
+            .exists());
         for package in PACKAGES
             .iter()
             .filter(|p| p.directory.contains("_quality_2_1_0"))
@@ -786,6 +806,20 @@ mod tests {
         assert!(ref2va.join("recipe.yaml").is_file());
         assert!(quality_t2v.join("workflow_api.json").is_file());
         assert!(quality_ref.join("recipe.yaml").is_file());
+        assert!(
+            !kera2.exists(),
+            "new installs must not activate retired image generation"
+        );
+        // Existing packages remain intact on upgrades; they are not new defaults.
+        std::fs::create_dir_all(&kera2).unwrap();
+        let historical = super::embedded_package("kera2_t2i_local_v2_1_1_1_90894e9e").unwrap();
+        for (name, bytes) in [
+            ("manifest.yaml", &historical.manifest_yaml),
+            ("recipe.yaml", &historical.recipe_yaml),
+            ("workflow_api.json", &historical.workflow_api_json),
+        ] {
+            std::fs::write(kera2.join(name), bytes).unwrap();
+        }
         assert!(kera2.join("manifest.yaml").is_file());
         assert!(kera2.join("recipe.yaml").is_file());
         assert!(kera2.join("workflow_api.json").is_file());
@@ -793,6 +827,18 @@ mod tests {
         std::fs::write(&sentinel, "keep").expect("sentinel");
         ensure_installed(directory.path()).expect("second install should be a no-op");
         assert_eq!(std::fs::read_to_string(sentinel).unwrap(), "keep");
+        assert_eq!(
+            std::fs::read(kera2.join("manifest.yaml")).unwrap(),
+            historical.manifest_yaml
+        );
+        assert_eq!(
+            std::fs::read(kera2.join("recipe.yaml")).unwrap(),
+            historical.recipe_yaml
+        );
+        assert_eq!(
+            std::fs::read(kera2.join("workflow_api.json")).unwrap(),
+            historical.workflow_api_json
+        );
     }
 
     #[test]

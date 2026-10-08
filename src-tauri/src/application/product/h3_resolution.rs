@@ -108,9 +108,25 @@ pub fn compile_checked(
     recipe: &Recipe,
     request: &crate::domain::CompileRequest,
 ) -> Result<crate::compiler::CompileResult, crate::compiler::CompileError> {
+    validate_product_request(recipe, request)?;
     let compiled = compiler.compile(workflow, recipe, request)?;
     validate_resolved(compiled.workflow.clone(), recipe, &compiled.resolved_inputs)?;
     Ok(compiled)
+}
+
+/// A stricter product requirement over the unchanged, accepted I2V recipe.
+pub fn validate_product_request(
+    recipe: &Recipe,
+    request: &crate::domain::CompileRequest,
+) -> Result<(), crate::compiler::CompileError> {
+    if recipe.id == "rcp_minimax_h3_fl2va_i2v_quality_2_2_0"
+        && !matches!(request.values.get("first_frame"), Some(crate::domain::InputValue::Image(path)) if !path.trim().is_empty())
+    {
+        return Err(crate::compiler::CompileError::InputRequired {
+            input: "first_frame".into(),
+        });
+    }
+    Ok(())
 }
 
 /// Product admission uses compiler-resolved values, including recipe defaults.

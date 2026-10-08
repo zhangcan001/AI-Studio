@@ -14,6 +14,9 @@ mod product_facade_contract;
 #[path = "support/queue_lifecycle_regressions.rs"]
 mod queue_lifecycle_regressions;
 
+#[path = "support/minimax_video_policy_regressions.rs"]
+mod minimax_video_policy_regressions;
+
 use ai_studio_lib::application::{
     asset_video_prompt_service::AssetVideoPromptService,
     generation_service::GenerationService,
@@ -592,6 +595,18 @@ fn build_services_with_repository(
     package_root: &Path,
     repository: Option<Arc<dyn ProductionQueueRepository>>,
 ) -> Services {
+    build_services_with_admission(pool, comfy, package_root, repository, None)
+}
+
+fn build_services_with_admission(
+    pool: &SqlitePool,
+    comfy: Arc<ControlledComfy>,
+    package_root: &Path,
+    repository: Option<Arc<dyn ProductionQueueRepository>>,
+    admission: Option<
+        Arc<dyn ai_studio_lib::application::generation_service::NewGenerationAdmission>,
+    >,
+) -> Services {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let project_repository: Arc<dyn ProjectRepository> =
         Arc::new(SqliteProjectRepository::new(pool.clone()));
@@ -656,6 +671,10 @@ fn build_services_with_repository(
     } else {
         generation_service
     };
+    let generation_service = match &admission {
+        Some(admission) => generation_service.with_new_generation_admission(admission.clone()),
+        None => generation_service,
+    };
     let generation_service =
         Arc::new(generation_service.with_execution_registry(execution_registry.clone()));
     let task_recovery_service = Arc::new(
@@ -676,7 +695,7 @@ fn build_services_with_repository(
     let production_queue_repository: Arc<dyn ProductionQueueRepository> =
         repository.unwrap_or_else(|| queue_repository.clone());
     let shot_batch_repository: Arc<dyn ShotBatchRepository> = queue_repository.clone();
-    let queue = Arc::new(ProductionQueueService::new(
+    let queue = ProductionQueueService::new(
         production_queue_repository,
         task_repository,
         definition_repository,
@@ -684,7 +703,11 @@ fn build_services_with_repository(
         shot_batch_repository,
         task_recovery_service.clone(),
         clock.clone(),
-    ));
+    );
+    let queue = Arc::new(match admission {
+        Some(admission) => queue.with_new_generation_admission(admission),
+        None => queue,
+    });
 
     let asset_video_prompt_repository: Arc<dyn AssetVideoPromptRepository> =
         Arc::new(SqliteAssetVideoPromptRepository::new(pool.clone()));

@@ -244,6 +244,9 @@ impl ProductionOrchestratorService {
         request: ProductionRunCreateRequest,
     ) -> Result<ProductionRunView, ProductionOrchestratorError> {
         validate_project_id(&request.project_id)?;
+        self.production_queue_service
+            .ensure_image_stage_generation_allowed()
+            .map_err(|e| ProductionOrchestratorError::Queue(e.to_string()))?;
         let name = validate_name(&request.name)?;
         if request.image_count == 0 || request.image_count > MAX_RUN_IMAGE_COUNT {
             return Err(ProductionOrchestratorError::InvalidInput(
@@ -476,6 +479,9 @@ impl ProductionOrchestratorService {
         project_id: &str,
         run_id: &str,
     ) -> Result<ProductionRunView, ProductionOrchestratorError> {
+        self.production_queue_service
+            .ensure_image_stage_generation_allowed()
+            .map_err(|e| ProductionOrchestratorError::Queue(e.to_string()))?;
         let _trigger_gate = self.stage_trigger_gate.lock().await;
         validate_project_id(project_id)?;
         let run = self.load_run(project_id, run_id).await?;
@@ -1093,6 +1099,10 @@ impl ProductionOrchestratorService {
         workflow_version_id: &str,
         recipe_id: &str,
     ) -> Result<(), ProductionOrchestratorError> {
+        self.production_queue_service
+            .ensure_new_generation_allowed(workflow_version_id, recipe_id)
+            .await
+            .map_err(|e| ProductionOrchestratorError::Queue(e.to_string()))?;
         if self
             .definition_repository
             .find(workflow_version_id, recipe_id)

@@ -1811,9 +1811,9 @@ async fn assert_direct_generation_is_blocked(harness: &RegistryPurgeHarness) {
 #[tokio::test]
 async fn dev084_removed_workflow_cannot_create_direct_generation() {
     let harness = registry_purge_harness(
-        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
-        "dev084_user_removed_generation",
-        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+        "minimax_h3_fl2va_t2v_quality_2_2_0",
+        "minimax_h3_fl2va_t2v_quality_2_2_0",
+        "wfl_minimax_h3_fl2va_t2v_quality",
     )
     .await;
     harness
@@ -1827,9 +1827,9 @@ async fn dev084_removed_workflow_cannot_create_direct_generation() {
 #[tokio::test]
 async fn dev084_disabled_workflow_cannot_create_direct_generation() {
     let harness = registry_purge_harness(
-        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
-        "dev084_user_disabled_generation",
-        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+        "minimax_h3_fl2va_t2v_quality_2_2_0",
+        "minimax_h3_fl2va_t2v_quality_2_2_0",
+        "wfl_minimax_h3_fl2va_t2v_quality",
     )
     .await;
     let (workflow_version_id, _) = exact_generation_identity(&harness).await;
@@ -1843,9 +1843,9 @@ async fn dev084_disabled_workflow_cannot_create_direct_generation() {
 #[tokio::test]
 async fn dev084_archived_version_cannot_create_direct_generation() {
     let harness = registry_purge_harness(
-        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
-        "dev084_user_archived_generation",
-        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+        "minimax_h3_fl2va_t2v_quality_2_2_0",
+        "minimax_h3_fl2va_t2v_quality_2_2_0",
+        "wfl_minimax_h3_fl2va_t2v_quality",
     )
     .await;
     let (workflow_version_id, _) = exact_generation_identity(&harness).await;
@@ -1860,8 +1860,8 @@ async fn dev084_archived_version_cannot_create_direct_generation() {
 #[tokio::test]
 async fn dev084_active_exact_recipe_can_create_generation() {
     let harness = registry_purge_harness(
-        "minimax_h3_fl2va_t2v_quality_2_1_0",
-        "dev084_user_active_generation",
+        "minimax_h3_fl2va_t2v_quality_2_2_0",
+        "minimax_h3_fl2va_t2v_quality_2_2_0",
         "wfl_minimax_h3_fl2va_t2v_quality",
     )
     .await;

@@ -103,8 +103,9 @@ impl NewGenerationAdmission for WorkflowRegistryService {
         workflow_version_id: &str,
         recipe_id: &str,
     ) -> Result<bool, RepositoryError> {
-        self.is_available(workflow_version_id, recipe_id)
+        self.inspect_new_generation_availability(workflow_version_id, recipe_id)
             .await
+            .map(|inspection| inspection.available)
             .map_err(|error| RepositoryError::database(error.to_string()))
     }
 }
@@ -783,7 +784,7 @@ impl GenerationService {
                 return Err(GenerationServiceError::ExecutionFailed {
                     code: WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION.to_owned(),
                     message: format!(
-                        "workflow version {} and recipe {} are unavailable for a new generation",
+                        "workflow version {} and recipe {} require an active, verified MiniMax H3 Base 2.2.0 product package for new generation",
                         request.workflow_version_id, request.recipe_id
                     ),
                     details: None,
@@ -808,6 +809,13 @@ impl GenerationService {
                 details: None,
             });
         }
+        let product_recipe = RecipeParser::parse(&definition.recipe_yaml)
+            .map_err(|error| GenerationServiceError::Compile(CompileError::from(error)))?;
+        crate::application::product::h3_resolution::validate_product_request(
+            &product_recipe,
+            &CompileRequest::new(GenerationInputPreparer::preflight_values(&request.values)),
+        )
+        .map_err(GenerationServiceError::Compile)?;
         let created_at = self.clock.now();
         let mut task = Task::new(
             request.project_id.clone(),

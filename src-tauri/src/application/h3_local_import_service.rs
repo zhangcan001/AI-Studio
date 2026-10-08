@@ -929,6 +929,10 @@ impl H3LocalImportService {
             validate_pair_media(pair, generation_mode)?;
         }
 
+        self.production_queue_service
+            .ensure_new_generation_allowed(&request.workflow_version_id, &request.recipe_id)
+            .await
+            .map_err(|e| H3LocalImportError::Queue(e.to_string()))?;
         let seed = request.seed.clone().unwrap_or(SeedValue::Random);
         let mut items = Vec::with_capacity(inspection.ready_count);
         let mut imported_asset_count = 0usize;
@@ -1238,7 +1242,11 @@ impl H3LocalImportService {
             .filter(|item| item.status == "READY")
         {
             let mode = H3CommitGenerationMode::parse(Some(&segment.generation_mode))?;
-            project_recipe_ids(&request, mode)?;
+            let (version, recipe) = project_recipe_ids(&request, mode)?;
+            self.production_queue_service
+                .ensure_new_generation_allowed(&version, &recipe)
+                .await
+                .map_err(|e| H3LocalImportError::Queue(e.to_string()))?;
         }
 
         let seed = request.seed.clone().unwrap_or(SeedValue::Random);

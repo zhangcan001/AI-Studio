@@ -141,6 +141,8 @@ pub struct ShotBatchService {
     project_repository: Arc<dyn ProjectRepository>,
     clock: Arc<dyn Clock>,
     stage_prompt_repository: Option<Arc<dyn ShotBulkRepository>>,
+    new_generation_admission:
+        Option<Arc<dyn crate::application::generation_service::NewGenerationAdmission>>,
 }
 
 impl ShotBatchService {
@@ -163,12 +165,69 @@ impl ShotBatchService {
             project_repository,
             clock,
             stage_prompt_repository: None,
+            new_generation_admission: None,
         }
     }
 
     pub fn with_stage_prompt_repository(mut self, repository: Arc<dyn ShotBulkRepository>) -> Self {
         self.stage_prompt_repository = Some(repository);
         self
+    }
+
+    pub fn with_new_generation_admission(
+        mut self,
+        admission: Arc<dyn crate::application::generation_service::NewGenerationAdmission>,
+    ) -> Self {
+        self.new_generation_admission = Some(admission);
+        self
+    }
+
+    pub async fn ensure_new_generation_allowed(
+        &self,
+        version: &str,
+        recipe: &str,
+    ) -> Result<(), ShotBatchServiceError> {
+        if let Some(admission) = &self.new_generation_admission {
+            if !admission
+                .is_available_for_new_generation(version, recipe)
+                .await?
+            {
+                return Err(ShotBatchServiceError::InvalidInput(format!(
+                    "{}: {version}/{recipe}",
+                    crate::application::minimax_video_product_policy::REQUIRED
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    async fn validate_new_items(
+        &self,
+        items: &[ProductionBatchItem],
+    ) -> Result<(), ShotBatchServiceError> {
+        for item in items {
+            self.ensure_new_generation_allowed(&item.workflow_version_id, &item.recipe_id)
+                .await?;
+            let definition = self
+                .definition_repository
+                .find(&item.workflow_version_id, &item.recipe_id)
+                .await?
+                .ok_or_else(|| {
+                    ShotBatchServiceError::InvalidInput("generation definition missing".into())
+                })?;
+            let recipe = RecipeParser::parse(&definition.recipe_yaml)
+                .map_err(|e| ShotBatchServiceError::InvalidInput(e.to_string()))?;
+            let values = crate::application::production_queue_service::generation_values_from_json(
+                &item.values_json,
+            )
+            .map_err(ShotBatchServiceError::InvalidInput)?;
+            crate::application::product::h3_resolution::validate_product_request(
+                &recipe,
+                &CompileRequest::new(GenerationInputPreparer::preflight_values(&values)),
+            )
+            .map_err(|e| ShotBatchServiceError::InvalidInput(e.to_string()))?;
+        }
+        Ok(())
     }
 
     pub async fn plan(
@@ -248,6 +307,7 @@ impl ShotBatchService {
         bindings: &[ShotBatchBinding],
         snapshots: &[PreparationSnapshotRecord],
     ) -> Result<(), ShotBatchServiceError> {
+        self.validate_new_items(items).await?;
         self.shot_batch_repository
             .insert_prepared_batch_with_bindings(batch, items, bindings, snapshots)
             .await
@@ -459,6 +519,7 @@ impl ShotBatchService {
                 production_batch_item_id: item_id.as_str().to_owned(),
             });
         }
+        self.validate_new_items(&items).await?;
         self.shot_batch_repository
             .insert_batch_with_bindings(&batch, &items, &bindings)
             .await?;
@@ -668,6 +729,12 @@ impl ShotBatchService {
                 recipe: None,
             });
         };
+        if let Err(error) = self
+            .ensure_new_generation_allowed(&config.workflow_version_id, &config.recipe_id)
+            .await
+        {
+            reasons.push(error.to_string());
+        }
         let recipe = match RecipeParser::parse(&definition.recipe_yaml) {
             Ok(recipe) => recipe,
             Err(error) => {

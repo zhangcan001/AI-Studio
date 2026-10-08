@@ -11,6 +11,7 @@ pub const MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID: &str = "wfl_minimax_h3_referenc
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductionRuntimeKind {
+    /// Historical capability classification only, never new-generation authorization.
     Kera2Image,
     MiniMaxH3Video,
 }

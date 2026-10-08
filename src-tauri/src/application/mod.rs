@@ -33,6 +33,7 @@ pub mod h3_local_import_service;
 pub(crate) mod image_inspection;
 pub mod media_probe;
 pub mod media_protocol;
+pub mod minimax_video_product_policy;
 pub mod model_service;
 pub(crate) mod ordered_reference_binding;
 pub mod organization_service;

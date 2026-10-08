@@ -40,6 +40,29 @@ mod tests {
             .await
             .unwrap();
         test_support::seed_task_dependencies(&pool).await;
+        // This fixture now reaches the real recipe/input check before a retry
+        // write. Task-only dependency stubs are deliberately not valid recipes.
+        sqlx::query("UPDATE recipes SET recipe_yaml=? WHERE id='recipe-1'")
+            .bind(
+                r#"schema_version: 1
+id: recipe-1
+name: DEV031 frozen queue fixture
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt: {type: textarea, label: Prompt, required: true}
+  seed: {type: seed, label: Seed, default: random, min: 0, max: 4294967295}
+  reference_images: {type: images, label: References, required: false}
+bindings:
+  - source: prompt
+    target: {node: "6", input: text}
+outputs:
+  - {id: generated_video, type: video, node: "11", required: true}
+"#,
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
 
         let repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
         let batch_id = ProductionBatchId::new();
@@ -130,6 +153,22 @@ mod tests {
         assert_eq!((first.created_count, first.already_prepared_count), (3, 0));
         assert_eq!(first.detail.items.len(), 9);
         assert_eq!(first.detail.batch.status, ProductionBatchStatus::Paused);
+        for (source_id, retry_id) in selected.iter().zip(&first.created_item_ids) {
+            let source = items
+                .iter()
+                .find(|item| item.id.as_str() == source_id)
+                .unwrap();
+            let retry = first
+                .detail
+                .items
+                .iter()
+                .find(|item| item.id.as_str() == retry_id)
+                .unwrap();
+            assert_eq!(
+                retry.values_json, source.values_json,
+                "frozen seed/reference order must not be rewritten"
+            );
+        }
 
         let repeated = queue
             .partial_resume("project-1", batch_id.as_str(), &selected)
@@ -344,7 +383,7 @@ mod tests {
             values_json: json!({
                 "prompt": {"type": "string", "value": "frozen"},
                 "seed": {"type": "seed_fixed", "value": "42"},
-                "reference_images": {"type": "image_assets", "assetIds": ["B", "A", "C"]}
+                "reference_images": {"type": "image_assets", "assetIds": ["ast_B", "ast_A", "ast_C"]}
             }),
             status,
             task_id: None,

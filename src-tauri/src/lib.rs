@@ -600,7 +600,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 .with_execution_registry(execution_registry.clone()),
             );
             let generation_catalog_service =
-                Arc::new(GenerationCatalogService::new(definition_repository.clone()));
+                Arc::new(GenerationCatalogService::new(definition_repository.clone())
+                    .with_new_generation_admission(workflow_registry_service.clone()));
             let task_query_service = Arc::new(TaskQueryService::new(
                 Arc::new(SqliteTaskRepository::new(database_pool.clone())),
                 asset_repository.clone(),
@@ -855,7 +856,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_repository.clone(),
                 clock.clone(),
             )
-            .with_stage_prompt_repository(shot_bulk_repository));
+            .with_stage_prompt_repository(shot_bulk_repository)
+            .with_new_generation_admission(workflow_registry_service.clone()));
             let production_preparation_service = Arc::new(ProductionPreparationService::new(
                 shot_batch_service.clone(),
                 shot_batch_repository.clone(),

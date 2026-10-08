@@ -1266,12 +1266,50 @@ mod lifecycle_e2e {
     }
 
     #[tokio::test]
-    async fn fresh_install_registers_supported_kera2_runtime_package_and_image_preflight() {
+    async fn fresh_install_is_video_only_and_historical_kera2_retains_read_and_preflight() {
         let environment = TestEnvironment::new().await;
         let kera2_package = environment.library_root.join(KERA2_PACKAGE_NAME);
         assert!(
+            !kera2_package.exists(),
+            "fresh installs must not activate Krea2"
+        );
+        let fresh = environment.services(CapabilityFixture::Ready, None);
+        let fresh_sync = fresh.library_service.sync().await.unwrap();
+        assert_eq!(fresh_sync.packages_found, 4);
+        assert_eq!(fresh_sync.invalid, 0);
+        let mut installed = fresh
+            .runtime_repository
+            .list_versions()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|v| v.package_name.unwrap())
+            .collect::<Vec<_>>();
+        let mut approved =
+            ai_studio_lib::application::minimax_video_product_policy::AUTHORIZED_PACKAGES
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+        installed.sort();
+        approved.sort();
+        assert_eq!(installed, approved);
+        drop(fresh);
+        // Explicitly seed an owned historical package, as on an existing installation.
+        // Preserve the original history/preflight/restart checks, not new activation.
+        fs::create_dir_all(&kera2_package).unwrap();
+        for file in ["manifest.yaml", "recipe.yaml", "workflow_api.json"] {
+            fs::copy(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("runtime_packages")
+                    .join(KERA2_PACKAGE_NAME)
+                    .join(file),
+                kera2_package.join(file),
+            )
+            .unwrap();
+        }
+        assert!(
             kera2_package.join("manifest.yaml").is_file(),
-            "fresh install should seed the Kera2 runtime package"
+            "owned historical Krea2 package must remain readable"
         );
         assert!(kera2_package.join("recipe.yaml").is_file());
         assert!(kera2_package.join("workflow_api.json").is_file());
@@ -1283,8 +1321,7 @@ mod lifecycle_e2e {
             .sync()
             .await
             .expect("fresh runtime package discovery should sync");
-        // Fresh production installs seed Kera2 and four quality H3 runtimes,
-        // not retired previews or historical cfg(test)-only packages.
+        // Existing installations retain historical Krea2 and four active videos.
         assert_eq!(first_sync.packages_found, 5);
         assert_eq!(first_sync.invalid, 0, "{:?}", first_sync.errors);
 
@@ -1341,30 +1378,78 @@ mod lifecycle_e2e {
 
         let project_id = "dev082-kera2-fresh-project";
         ensure_project(&services, project_id).await;
-        services
-            .binding_service
-            .replace(
+        let registry = Arc::new(ai_studio_lib::application::workflow_registry_service::WorkflowRegistryService::new(
+            services.runtime_repository.clone(), services.state_repository.clone(), services.binding_repository.clone(), Arc::new(FixedClock))
+            .with_registry_repository(Arc::new(ai_studio_lib::infrastructure::database::SqliteWorkflowRegistryRepository::new(environment.pool.clone())))
+            .with_runtime_artifact_repository(Arc::new(ai_studio_lib::infrastructure::database::SqliteWorkflowRuntimeArtifactRepository::new(environment.pool.clone())))
+            .with_package_store(services.package_store.clone()));
+        let catalog =
+            ai_studio_lib::application::generation_catalog_service::GenerationCatalogService::new(
+                services.generation_repository.clone(),
+            )
+            .with_new_generation_admission(registry.clone())
+            .list()
+            .await
+            .unwrap();
+        assert_eq!(catalog.len(), 4);
+        assert!(!catalog.iter().any(|v| v.workflow_id == KERA2_WORKFLOW_ID));
+        let binding_service = ProjectWorkflowBindingService::new(
+            services.binding_repository.clone(),
+            services.project_repository.clone(),
+            services.runtime_repository.clone(),
+            services.state_repository.clone(),
+            Arc::new(FixedClock),
+        )
+        .with_registry(registry);
+        let denied = binding_service
+            .upsert(
                 project_id,
-                ProjectWorkflowConfigUpdateRequest {
-                    bindings: vec![ProjectWorkflowBindingInput {
+                ai_studio_lib::application::project_workflow_binding_service::ProjectWorkflowBindingUpsertRequest {
                         stage: "IMAGE".to_owned(),
                         mode: "DEFAULT".to_owned(),
                         workflow_version_id: kera2.workflow_version_id.clone(),
                         recipe_id: kera2.recipes[0].recipe_id.clone(),
-                    }],
+                        expected_binding_instance_id: None,
+                        expected_revision: None,
                 },
             )
             .await
-            .expect("fresh project should bind the supported Kera2 image runtime");
-        let project_config = services
-            .binding_service
+            .expect_err("new projects cannot bind retired Krea2 as executable generation");
+        assert!(denied
+            .to_string()
+            .contains("MINIMAX_VIDEO_PRODUCT_REQUIRED"));
+        assert!(binding_service
+            .get(project_id)
+            .await
+            .unwrap()
+            .image_default
+            .is_none());
+        services
+            .binding_repository
+            .insert_slot(&ProjectWorkflowBindingRecord {
+                project_id: project_id.into(),
+                stage: "IMAGE".into(),
+                mode: "DEFAULT".into(),
+                workflow_version_id: kera2.workflow_version_id.clone(),
+                recipe_id: kera2.recipes[0].recipe_id.clone(),
+                binding_instance_id: "bnd_owned_historical".into(),
+                revision: 1,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+        let project_config = binding_service
             .get(project_id)
             .await
             .expect("fresh project image binding should resolve");
         let image_binding = project_config
             .image_default
             .expect("fresh project should have a default image runtime");
-        assert!(image_binding.available);
+        assert!(
+            !image_binding.available,
+            "historical binding is readable, not executable"
+        );
         assert_eq!(image_binding.workflow_version_id, kera2.workflow_version_id);
         assert_eq!(image_binding.recipe_id, kera2.recipes[0].recipe_id);
 

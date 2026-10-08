@@ -1,13 +1,20 @@
 //! Deterministic service/repository races: no sleeps or live ComfyUI calls.
 #[cfg(test)]
 use super::*;
+use crate::application::{
+    builtin_runtime_packages,
+    ports::{WorkflowLibraryRepository, WorkflowPackageRecord},
+    workflow_manifest::WorkflowManifest,
+};
 use crate::infrastructure::database::{
     initialize, repositories::test_support, SqliteProjectRepository,
-    SqliteProjectWorkflowBindingRepository, SqliteWorkflowRegistryRepository,
-    SqliteWorkflowRuntimeArtifactRepository, SqliteWorkflowRuntimeRepository,
-    SqliteWorkflowRuntimeStateRepository,
+    SqliteProjectWorkflowBindingRepository, SqliteWorkflowLibraryRepository,
+    SqliteWorkflowRegistryRepository, SqliteWorkflowRuntimeArtifactRepository,
+    SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
 };
+use crate::infrastructure::filesystem::FileSystemWorkflowPackageStore;
 use async_trait::async_trait;
+use sha2::{Digest, Sha256};
 use std::{
     future::Future,
     sync::atomic::{AtomicBool, Ordering},
@@ -107,22 +114,61 @@ struct RaceFixture {
     bindings: Arc<PausingBindings>,
     registry: Arc<WorkflowRegistryService>,
     service: Arc<ProjectWorkflowBindingService>,
+    workflow_id: String,
+    version_id: String,
+    recipe_id: String,
 }
 
 async fn fixture() -> RaceFixture {
     let dir = tempfile::tempdir().unwrap();
     let pool = initialize(&dir.path().join("race.db")).await.unwrap();
     test_support::seed_task_dependencies(&pool).await;
-    sqlx::query("INSERT INTO workflow_runtime_artifacts
-        (id, workflow_version_id, recipe_id, package_name, source_kind, workflow_sha256, recipe_sha256, created_at)
-        VALUES ('race-artifact', 'workflow-version-1', 'recipe-1', 'race-package', 'USER', 'sha', 'sha', '2026-01-01T00:00:00Z')")
-        .execute(&pool).await.unwrap();
+    // The race must reach the same production admission gate as a real binding.
+    // A generic image fixture is no longer a new executable product generator.
+    let package = "minimax_h3_fl2va_t2v_quality_2_2_0";
+    let root = dir.path().join("library");
+    builtin_runtime_packages::ensure_installed(&root).unwrap();
+    let bytes = builtin_runtime_packages::embedded_package(package).unwrap();
+    let manifest =
+        WorkflowManifest::parse(std::str::from_utf8(&bytes.manifest_yaml).unwrap()).unwrap();
+    let workflow_id = manifest.id.clone();
+    SqliteWorkflowLibraryRepository::new(pool.clone())
+        .register_package(&WorkflowPackageRecord {
+            workflow_id: manifest.id,
+            source_kind: "PRODUCT".into(),
+            package_name: package.into(),
+            package_source_path: None,
+            name: manifest.name,
+            category: manifest.category,
+            mode: manifest.mode,
+            workflow_version: manifest.workflow_version,
+            workflow_json: serde_json::from_slice(&bytes.workflow_api_json).unwrap(),
+            workflow_sha256: format!("{:x}", Sha256::digest(&bytes.workflow_api_json)),
+            source_workflow_json: None,
+            recognition_metadata_json: None,
+            recipe_version: manifest.recipe_version,
+            recipe_schema_version: 1,
+            recipe_sha256: format!("{:x}", Sha256::digest(&bytes.recipe_yaml)),
+            recipe_yaml: String::from_utf8(bytes.recipe_yaml).unwrap(),
+            created_at: Utc::now(),
+        })
+        .await
+        .unwrap();
     let bindings = Arc::new(PausingBindings {
         inner: SqliteProjectWorkflowBindingRepository::new(pool.clone()),
         write: Pause::default(),
         list: Pause::default(),
     });
     let runtime = Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
+    let version = runtime
+        .list_versions()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|v| v.workflow_id == workflow_id)
+        .unwrap();
+    let version_id = version.workflow_version_id;
+    let recipe_id = version.recipes[0].recipe_id.clone();
     let states = Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
     let clock = Arc::new(crate::infrastructure::time::SystemClock);
     let registry = Arc::new(
@@ -135,13 +181,17 @@ async fn fixture() -> RaceFixture {
         .with_registry_repository(Arc::new(SqliteWorkflowRegistryRepository::new(
             pool.clone(),
         )))
-        .with_runtime_artifact_repository(Arc::new(
-            SqliteWorkflowRuntimeArtifactRepository::new(pool.clone()),
-        )),
+        .with_runtime_artifact_repository(Arc::new(SqliteWorkflowRuntimeArtifactRepository::new(
+            pool.clone(),
+        )))
+        .with_package_store(Arc::new(FileSystemWorkflowPackageStore::new(
+            root,
+            dir.path().join("staging"),
+        ))),
     );
     assert!(
         registry
-            .inspect_availability("workflow-version-1", "recipe-1")
+            .inspect_new_generation_availability(&version_id, &recipe_id)
             .await
             .unwrap()
             .available
@@ -162,15 +212,18 @@ async fn fixture() -> RaceFixture {
         bindings,
         registry,
         service,
+        workflow_id,
+        version_id,
+        recipe_id,
     }
 }
 
-fn create_request() -> ProjectWorkflowBindingUpsertRequest {
+fn create_request(f: &RaceFixture) -> ProjectWorkflowBindingUpsertRequest {
     ProjectWorkflowBindingUpsertRequest {
-        stage: "IMAGE".into(),
+        stage: "VIDEO".into(),
         mode: "DEFAULT".into(),
-        workflow_version_id: "workflow-version-1".into(),
-        recipe_id: "recipe-1".into(),
+        workflow_version_id: f.version_id.clone(),
+        recipe_id: f.recipe_id.clone(),
         expected_binding_instance_id: None,
         expected_revision: None,
     }
@@ -178,12 +231,11 @@ fn create_request() -> ProjectWorkflowBindingUpsertRequest {
 
 async fn assert_removed_without_binding(f: &RaceFixture) {
     assert_eq!(
-        sqlx::query_scalar::<_, String>(
-            "SELECT library_state FROM workflows WHERE id='workflow-1'"
-        )
-        .fetch_one(&f.pool)
-        .await
-        .unwrap(),
+        sqlx::query_scalar::<_, String>("SELECT library_state FROM workflows WHERE id=?")
+            .bind(&f.workflow_id)
+            .fetch_one(&f.pool)
+            .await
+            .unwrap(),
         "REMOVED"
     );
     assert!(f
@@ -196,14 +248,14 @@ async fn assert_removed_without_binding(f: &RaceFixture) {
 
 async fn write_first(update: bool) {
     let f = fixture().await;
-    let mut request = create_request();
+    let mut request = create_request(&f);
     if update {
         let current = f
             .service
             .upsert("project-1", request.clone())
             .await
             .unwrap()
-            .image_default
+            .video_default
             .unwrap();
         request.expected_binding_instance_id = Some(current.binding_instance_id);
         request.expected_revision = Some(current.revision);
@@ -216,7 +268,7 @@ async fn write_first(update: bool) {
         f.registry.lifecycle_gate().try_lock().is_err(),
         "upsert must still own the shared lifecycle gate after availability"
     );
-    let remove = f.registry.remove_workflow("workflow-1");
+    let remove = f.registry.remove_workflow(&f.workflow_id);
     tokio::pin!(remove);
     std::future::poll_fn(|cx| {
         assert!(
@@ -252,16 +304,17 @@ async fn lifecycle_race_remove_first_rejects_create_and_update() {
         let f = fixture().await;
         let current = f
             .service
-            .upsert("project-1", create_request())
+            .upsert("project-1", create_request(&f))
             .await
             .unwrap()
-            .image_default
+            .video_default
             .unwrap();
         f.bindings.list.armed.store(true, Ordering::SeqCst);
         let registry = f.registry.clone();
-        let remove = tokio::spawn(async move { registry.remove_workflow("workflow-1").await });
+        let workflow_id = f.workflow_id.clone();
+        let remove = tokio::spawn(async move { registry.remove_workflow(&workflow_id).await });
         f.bindings.list.entered.notified().await; // registry holds its gate before transaction commit.
-        let upsert = f.service.upsert("project-1", create_request());
+        let upsert = f.service.upsert("project-1", create_request(&f));
         tokio::pin!(upsert);
         std::future::poll_fn(|cx| {
             assert!(matches!(upsert.as_mut().poll(cx), Poll::Pending));
@@ -275,7 +328,7 @@ async fn lifecycle_race_remove_first_rejects_create_and_update() {
             .unwrap_err()
             .to_string()
             .contains("WORKFLOW_REMOVED"));
-        let mut update = create_request();
+        let mut update = create_request(&f);
         update.expected_binding_instance_id = Some(current.binding_instance_id.clone());
         update.expected_revision = Some(current.revision);
         assert!(f
@@ -290,7 +343,7 @@ async fn lifecycle_race_remove_first_rejects_create_and_update() {
                 .remove(
                     "project-1",
                     ProjectWorkflowBindingRemoveRequest {
-                        stage: "IMAGE".into(),
+                        stage: "VIDEO".into(),
                         mode: "DEFAULT".into(),
                         expected_binding_instance_id: Some(current.binding_instance_id),
                         expected_revision: Some(current.revision),

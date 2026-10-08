@@ -422,7 +422,25 @@ impl ProductionPreparationService {
                 .clone()
                 .zip(context.workflow.recipe_id.clone());
             let definition = workflow_key.as_ref().and_then(|key| definitions.get(key));
-            let (readiness, values) = if workflow_key.is_some() && definition.is_none() {
+            let product_denial = if let Some((version, recipe)) = &workflow_key {
+                self.shot_batch_service
+                    .ensure_new_generation_allowed(version, recipe)
+                    .await
+                    .err()
+            } else {
+                None
+            };
+            let (readiness, values) = if let Some(error) = product_denial {
+                (
+                    readiness_with_blocker(
+                        readiness,
+                        &context,
+                        crate::application::minimax_video_product_policy::REQUIRED,
+                        error.to_string(),
+                    ),
+                    None,
+                )
+            } else if workflow_key.is_some() && definition.is_none() {
                 (
                     readiness_with_blocker(
                         readiness,
@@ -558,7 +576,12 @@ fn prepare_generation_values(
         }
     };
     let request = CompileRequest::new(GenerationInputPreparer::preflight_values(&values));
-    if let Err(error) = WorkflowCompiler.compile(&workflow, &recipe, &request) {
+    if let Err(error) = crate::application::product::h3_resolution::compile_checked(
+        &WorkflowCompiler,
+        &workflow,
+        &recipe,
+        &request,
+    ) {
         return (
             readiness_with_blocker(
                 readiness,

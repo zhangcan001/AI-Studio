@@ -19,6 +19,28 @@ export const READINESS_LIFECYCLE_GROUPS=[['backend','src-tauri/src',/\.rs$/],['t
 const configs=['package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
  'src-tauri/tauri.conf.json','src-tauri/build.rs','.github/workflows/ci.yml','README.md',
  'docs/AI_STUDIO_2_1_CLOSEOUT.md','docs/RELEASE_NOTES_v2.1.0-personal.md'];
+export const MINIMAX_VIDEO_PHASE1_PARENT='0522b7444e7388a0ab8ad4b4d011e99ead47d9d8';
+export const MINIMAX_VIDEO_PHASE1_MANIFEST='docs/architecture/minimax-video-phase1.json';
+export const MINIMAX_VIDEO_PHASE1_EXISTING=[
+ 'src-tauri/src/application/builtin_runtime_packages.rs','src-tauri/src/application/generation_catalog_service.rs',
+ 'src-tauri/src/application/binding_lifecycle_race_tests.rs','src-tauri/src/application/dev031_e2e.rs',
+ 'src-tauri/src/application/generation_service.rs','src-tauri/src/application/h3_local_import_service.rs',
+ 'src-tauri/src/application/mod.rs','src-tauri/src/application/product/h3_resolution.rs',
+ 'src-tauri/src/application/product_runtime_scope.rs','src-tauri/src/application/production_orchestrator_service.rs',
+ 'src-tauri/src/application/production_preparation_service.rs','src-tauri/src/application/production_queue_service.rs',
+ 'src-tauri/src/application/project_workflow_binding_service.rs','src-tauri/src/application/shot_batch_service.rs',
+ 'src-tauri/src/application/workflow_benchmark_service.rs','src-tauri/src/application/workflow_registry_service.rs',
+ 'src-tauri/src/lib.rs','src-tauri/tests/dev061b_queue_recovery.rs',
+ 'src-tauri/tests/dev082_unified_workflow_library.rs',
+ 'src-tauri/tests/dev054_narrative_integration.rs',
+ 'src-tauri/tests/dev084_runtime_artifact.rs',
+ 'scripts/readiness-lifecycle-successor-guard.mjs','src/app/ReadinessLifecycleBoundary.test.ts',
+ 'src/app/QueueLifecycleRepairBoundary.test.ts','src/app/H3ReleaseCloseoutPhase1Boundary.test.ts',
+ 'src/app/H3GenerationRepairBoundary.test.ts','src/app/AIStudio21PublicationBoundary.test.ts',
+];
+export const MINIMAX_VIDEO_PHASE1_ADDED=['src-tauri/src/application/minimax_video_product_policy.rs',
+ 'src-tauri/tests/support/minimax_video_policy_regressions.rs','src/app/MiniMaxVideoPhase1Boundary.test.ts'];
+export const MINIMAX_VIDEO_PHASE1_FILES=[...MINIMAX_VIDEO_PHASE1_EXISTING,...MINIMAX_VIDEO_PHASE1_ADDED,MINIMAX_VIDEO_PHASE1_MANIFEST];
 const normalize=s=>s.replaceAll('\r\n','\n');
 export const readinessLifecycleHash=s=>createHash('sha256').update(normalize(s)).digest('hex');
 export const readinessLifecycleAggregate=(paths,read)=>readinessLifecycleHash(paths.map(p=>`${p}\n${read(p)}`).join('\n'));
@@ -39,8 +61,9 @@ export function readinessLifecycleParentFacts(root,parent=READINESS_LIFECYCLE_PA
  const result={paths,read:p=>blobs.get(p)};parents.set(key,result);return result;
 }
 function postRunReadinessParentReaderUncached(root,override){
- const live=new Map(),disk=p=>{if(!live.has(p))live.set(p,normalize(readFileSync(join(root,p),'utf8')));return live.get(p);};
- const violations=[],fail=s=>violations.push(`post-run-readiness-${s}`),rejected=()=>({violations,addedPaths:[],afterHashes:{},read:disk});
+ const successor=minimaxVideoPhase1ParentReader(root);
+ const live=new Map(),disk=p=>{if(!live.has(p))live.set(p,normalize(successor.read(p)));return live.get(p);};
+ const violations=[...successor.violations],fail=s=>violations.push(`post-run-readiness-${s}`),rejected=()=>({violations,addedPaths:[],afterHashes:{},read:p=>normalize(readFileSync(join(root,p),'utf8'))});
  let proof,facts;
  try{proof=override??JSON.parse(disk(postRunManifest));facts=readinessLifecycleParentFacts(root,POST_RUN_READINESS_PARENT);}catch{fail('missing-evidence');return rejected();}
  if(proof.schemaVersion!==1||proof.checkpoint!=='READINESS_POST_RUN_FIX'||proof.parentHead!==POST_RUN_READINESS_PARENT)fail('header');
@@ -52,7 +75,7 @@ function postRunReadinessParentReaderUncached(root,override){
  for(const p of postRunPaths)if(proof.paths[p]?.beforeHash!==readinessLifecycleHash(facts.read(p))||proof.paths[p]?.afterHash!==readinessLifecycleHash(disk(p)))fail(`path:${p}`);
  for(const [name,dir,pattern] of READINESS_LIFECYCLE_GROUPS){
   const base=facts.paths.filter(p=>p.startsWith(dir+'/')&&pattern.test(p)),untouched=base.filter(p=>!postRunPaths.includes(p));
-  const current=files(root,dir,pattern).filter(p=>p!==postRunManifest),r=proof[name];
+  const current=files(root,dir,pattern).filter(p=>p!==postRunManifest&&!successor.addedPaths.includes(p)),r=proof[name];
   if(JSON.stringify(current)!==JSON.stringify(base)||r?.beforeFiles!==base.length||r?.afterFiles!==current.length)fail(`${name}-files`);
   if(untouched.some(p=>disk(p)!==facts.read(p)))fail(`${name}-untouched-bytes`);
   if(violations.length)continue;
@@ -60,8 +83,45 @@ function postRunReadinessParentReaderUncached(root,override){
  }
  for(const p of configs)if(disk(p)!==facts.read(p))fail(`frozen:${p}`);
  if(violations.length)return rejected();
- return {violations,addedPaths:[postRunManifest],backendAggregateSha256:proof.backend.afterAggregateHash,
-  afterHashes:Object.fromEntries(postRunPaths.map(p=>[p,proof.paths[p].afterHash])),read:p=>postRunPaths.includes(p)?facts.read(p):disk(p)};
+ return {violations,addedPaths:[postRunManifest,...successor.addedPaths],backendAggregateSha256:successor.backendAggregateSha256,
+  afterHashes:{...Object.fromEntries(postRunPaths.map(p=>[p,proof.paths[p].afterHash])),...successor.afterHashes},read:p=>postRunPaths.includes(p)?facts.read(p):disk(p)};
+}
+
+function minimaxVideoPhase1ParentReaderUncached(root,override){
+ const live=new Map(),disk=p=>{if(!live.has(p))live.set(p,normalize(readFileSync(join(root,p),'utf8')));return live.get(p);};
+ const violations=[],fail=s=>violations.push(`minimax-video-phase1-${s}`);
+ const rejected=()=>({violations,addedPaths:[],afterHashes:{},backendAggregateSha256:undefined,read:p=>normalize(readFileSync(join(root,p),'utf8'))});
+ let proof,facts;
+ try{proof=override??JSON.parse(disk(MINIMAX_VIDEO_PHASE1_MANIFEST));facts=readinessLifecycleParentFacts(root,MINIMAX_VIDEO_PHASE1_PARENT);}catch{fail('missing-evidence');return rejected();}
+ if(proof.schemaVersion!==1||proof.checkpoint!=='MINIMAX_VIDEO_PHASE_1'||proof.parentHead!==MINIMAX_VIDEO_PHASE1_PARENT)fail('header');
+ const scope=[...MINIMAX_VIDEO_PHASE1_EXISTING,...MINIMAX_VIDEO_PHASE1_ADDED].sort();
+ if(JSON.stringify(Object.keys(proof.paths??{}).sort())!==JSON.stringify(scope))fail('scope');
+ const invariants={schemaChanged:false,backupFormatChanged:false,queueAuthorityChanged:false,storeAuthorityChanged:false,
+  uiV2Changed:false,historicalDataRewritten:false,immutablePackagesPreserved:true,sharedProductAdmission:true,
+  registryLiveBytesPreserved:true,bindingOccPreserved:true,onlyFourBase220Packages:true,i2vFirstFrameRequired:true};
+ if(Object.keys(proof.invariants??{}).length!==Object.keys(invariants).length||Object.entries(invariants).some(([k,v])=>proof.invariants?.[k]!==v))fail('contract');
+ if(violations.length)return rejected();
+ try{
+ for(const p of MINIMAX_VIDEO_PHASE1_EXISTING)if(proof.paths[p]?.beforeHash!==readinessLifecycleHash(facts.read(p))||proof.paths[p]?.afterHash!==readinessLifecycleHash(disk(p)))fail(`path:${p}`);
+ for(const p of MINIMAX_VIDEO_PHASE1_ADDED)if(facts.paths.includes(p)||proof.paths[p]?.beforeHash!==null||proof.paths[p]?.afterHash!==readinessLifecycleHash(disk(p)))fail(`addition:${p}`);
+ for(const [name,dir,pattern] of READINESS_LIFECYCLE_GROUPS){
+  const base=facts.paths.filter(p=>p.startsWith(dir+'/')&&pattern.test(p));
+  const untouched=base.filter(p=>!MINIMAX_VIDEO_PHASE1_EXISTING.includes(p));
+  const current=files(root,dir,pattern).filter(p=>p!==MINIMAX_VIDEO_PHASE1_MANIFEST);
+  const expected=[...base,...MINIMAX_VIDEO_PHASE1_ADDED.filter(p=>p.startsWith(dir+'/')&&pattern.test(p))].sort(),r=proof[name];
+  if(JSON.stringify(current)!==JSON.stringify(expected)||r?.beforeFiles!==base.length||r?.afterFiles!==current.length)fail(`${name}-files`);
+  if(untouched.some(p=>disk(p)!==facts.read(p)))fail(`${name}-untouched-bytes`);
+  if(violations.length)continue;
+  if(r?.beforeAggregateHash!==readinessLifecycleAggregate(base,facts.read)||r?.untouchedAggregateHash!==readinessLifecycleAggregate(untouched,facts.read)||r?.afterAggregateHash!==readinessLifecycleAggregate(current,disk))fail(`${name}-aggregate`);
+ }
+ for(const p of configs)if(disk(p)!==facts.read(p))fail(`frozen:${p}`);
+ }catch{fail('missing-evidence');return rejected();}
+ if(violations.length)return rejected();
+ return {violations,addedPaths:[...MINIMAX_VIDEO_PHASE1_ADDED,MINIMAX_VIDEO_PHASE1_MANIFEST],backendAggregateSha256:proof.backend.afterAggregateHash,
+  afterHashes:Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),read:p=>MINIMAX_VIDEO_PHASE1_EXISTING.includes(p)?facts.read(p):disk(p)};
+}
+export function minimaxVideoPhase1ParentReader(root,override){
+ return cachedBoundary(root,'minimaxVideoPhase1ParentReader',override,()=>minimaxVideoPhase1ParentReaderUncached(root,override),MINIMAX_VIDEO_PHASE1_MANIFEST);
 }
 export function postRunReadinessParentReader(root,override){
  return cachedBoundary(root,'postRunReadinessParentReader',override,()=>postRunReadinessParentReaderUncached(root,override),postRunManifest);

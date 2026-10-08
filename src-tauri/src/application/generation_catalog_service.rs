@@ -8,6 +8,7 @@ use std::{error::Error, fmt, sync::Arc};
 
 pub struct GenerationCatalogService {
     repository: Arc<dyn GenerationDefinitionRepository>,
+    admission: Option<Arc<dyn crate::application::generation_service::NewGenerationAdmission>>,
 }
 
 impl GenerationCatalogService {
@@ -31,12 +32,38 @@ impl GenerationCatalogService {
     }
 
     pub fn new(repository: Arc<dyn GenerationDefinitionRepository>) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            admission: None,
+        }
+    }
+
+    pub fn with_new_generation_admission(
+        mut self,
+        admission: Arc<dyn crate::application::generation_service::NewGenerationAdmission>,
+    ) -> Self {
+        self.admission = Some(admission);
+        self
     }
 
     pub async fn list(&self) -> Result<Vec<RecipeViewModel>, GenerationCatalogError> {
         let definitions = self.repository.list_available().await?;
-        definitions
+        let mut authorized = Vec::new();
+        for definition in definitions {
+            if let Some(admission) = &self.admission {
+                if !admission
+                    .is_available_for_new_generation(
+                        &definition.workflow_version_id,
+                        &definition.recipe_id,
+                    )
+                    .await?
+                {
+                    continue;
+                }
+            }
+            authorized.push(definition);
+        }
+        authorized
             .into_iter()
             .filter(|definition| {
                 !crate::application::product_runtime_scope::is_retired_h3_workflow(

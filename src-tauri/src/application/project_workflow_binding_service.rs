@@ -424,7 +424,7 @@ impl ProjectWorkflowBindingService {
     ) -> Result<BindingAvailabilityInspection, ProjectWorkflowBindingServiceError> {
         if let Some(registry) = &self.registry {
             let inspection = registry
-                .inspect_availability(workflow_version_id, recipe_id)
+                .inspect_new_generation_availability(workflow_version_id, recipe_id)
                 .await
                 .map_err(|error| ProjectWorkflowBindingServiceError::Registry(error.to_string()))?;
             return Ok(BindingAvailabilityInspection {

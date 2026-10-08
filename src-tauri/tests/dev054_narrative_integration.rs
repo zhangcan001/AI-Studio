@@ -128,10 +128,11 @@ async fn database() -> (TempDir, SqlitePool) {
     sqlx::query(
         "INSERT INTO recipes
          (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
-         VALUES (?, ?, '1', 1, 'inputs: {}', 'recipe-sha-dev054', ?)",
+         VALUES (?, ?, '1', 1, ?, 'recipe-sha-dev054', ?)",
     )
     .bind(RECIPE_ID)
     .bind(WORKFLOW_VERSION_ID)
+    .bind(format!("schema_version: 1\nid: {RECIPE_ID}\nname: DEV054 narrative fixture\nworkflow:\n  file: workflow_api.json\ninputs: {{}}\nbindings: []\noutputs: []\n"))
     .bind(fixture_time(0).to_rfc3339())
     .execute(&pool)
     .await
@@ -842,7 +843,7 @@ async fn narrative_context_is_hierarchical_and_snapshot_is_immutable() {
         ordinal: 0,
         workflow_version_id: WORKFLOW_VERSION_ID.to_owned(),
         recipe_id: RECIPE_ID.to_owned(),
-        values_json: json!({"prompt": image_context.prompt_context.rendered_text}),
+        values_json: json!({"prompt": {"type":"string", "value":image_context.prompt_context.rendered_text}}),
         status: ProductionBatchItemStatus::Pending,
         task_id: None,
         retry_of_item_id: None,
@@ -862,7 +863,7 @@ async fn narrative_context_is_hierarchical_and_snapshot_is_immutable() {
         snapshot: PreparationSnapshotV1::from_context(
             &image_context,
             &readiness,
-            json!({"prompt": image_context.prompt_context.rendered_text}),
+            json!({"prompt": {"type":"string", "value":image_context.prompt_context.rendered_text}}),
             ComfyCapabilityEvidence::default(),
             fixture_time(2),
         ),

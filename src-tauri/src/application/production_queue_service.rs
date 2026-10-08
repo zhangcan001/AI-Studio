@@ -1,5 +1,7 @@
 use crate::application::comfy_execution_failure::{execution_error_code, NODE_INCOMPATIBLE};
-use crate::application::generation_input_preparer::GenerationInputValue;
+use crate::application::generation_input_preparer::{
+    GenerationInputPreparer, GenerationInputValue,
+};
 use crate::application::generation_service::{
     CreateGenerationRequest, GenerationService, GenerationServiceError, NewGenerationAdmission,
     ReferenceManifest,
@@ -15,7 +17,7 @@ use crate::application::ports::{
 use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::compiler::{RecipeParser, RecipeValidator, SeedResolver};
 use crate::domain::{
-    AssetId, InputDefinition, OutputType, ProductionBatch, ProductionBatchDetail,
+    AssetId, CompileRequest, InputDefinition, OutputType, ProductionBatch, ProductionBatchDetail,
     ProductionBatchId, ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus,
     ProductionBatchStatus, ProductionPackageBatchBinding, ProductionPackageProvenance, Recipe,
     SeedValue, ShotStage, TaskId, TaskStatus,
@@ -317,6 +319,38 @@ impl ProductionQueueService {
         request: CreateProductionBatchRequest,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
         self.create_with_provenance(request, None).await
+    }
+
+    /// Shared Registry-backed product check for adapters and every write/dispatch.
+    /// Isolated fixtures may omit the existing admission seam; production cannot.
+    pub async fn ensure_new_generation_allowed(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<(), ProductionQueueError> {
+        if let Some(admission) = &self.new_generation_admission {
+            if !admission
+                .is_available_for_new_generation(workflow_version_id, recipe_id)
+                .await?
+            {
+                return Err(ProductionQueueError::InvalidInput(format!(
+                    "WORKFLOW_RECIPE_ARCHIVED: {}: only active verified MiniMax H3 Base 2.2.0 video packages may generate ({workflow_version_id}, {recipe_id})",
+                    crate::application::minimax_video_product_policy::REQUIRED,
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Legacy image-first orchestration is readable, never a new product run.
+    pub(crate) fn ensure_image_stage_generation_allowed(&self) -> Result<(), ProductionQueueError> {
+        if self.new_generation_admission.is_some() {
+            return Err(ProductionQueueError::InvalidInput(format!(
+                "{}: image generation and new image-first Production Runs are retired",
+                crate::application::minimax_video_product_policy::REQUIRED,
+            )));
+        }
+        Ok(())
     }
 
     pub async fn create_with_provenance(
@@ -745,18 +779,8 @@ impl ProductionQueueService {
         let mut recipes = HashMap::<(String, String), Recipe>::new();
         let mut items = Vec::with_capacity(request.items.len());
         for (index, item) in request.items.into_iter().enumerate() {
-            if let Some(admission) = &self.new_generation_admission {
-                let available = admission
-                    .is_available_for_new_generation(&item.workflow_version_id, &item.recipe_id)
-                    .await
-                    .map_err(ProductionQueueError::Repository)?;
-                if !available {
-                    return Err(ProductionQueueError::InvalidInput(format!(
-                        "WORKFLOW_RECIPE_ARCHIVED: generation Recipe is unavailable for workflow version {} and Recipe {}",
-                        item.workflow_version_id, item.recipe_id
-                    )));
-                }
-            }
+            self.ensure_new_generation_allowed(&item.workflow_version_id, &item.recipe_id)
+                .await?;
             let definition_key = (item.workflow_version_id.clone(), item.recipe_id.clone());
             let recipe = if let Some(recipe) = recipes.get(&definition_key) {
                 recipe.clone()
@@ -767,6 +791,11 @@ impl ProductionQueueService {
                 recipes.insert(definition_key, recipe.clone());
                 recipe
             };
+            crate::application::product::h3_resolution::validate_product_request(
+                &recipe,
+                &CompileRequest::new(GenerationInputPreparer::preflight_values(&item.values)),
+            )
+            .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
             let values = freeze_random_seed_values(item.values, &recipe)
                 .map_err(ProductionQueueError::InvalidInput)?;
             let values_json = if let Some(context) = direct_contexts
@@ -917,9 +946,16 @@ impl ProductionQueueService {
         recipe_id: &str,
         values_json: &Value,
     ) -> Result<BTreeMap<String, GenerationInputValue>, ProductionQueueError> {
+        self.ensure_new_generation_allowed(workflow_version_id, recipe_id)
+            .await?;
         let values =
             generation_values_from_json(values_json).map_err(ProductionQueueError::InvalidInput)?;
         let recipe = self.load_recipe(workflow_version_id, recipe_id).await?;
+        crate::application::product::h3_resolution::validate_product_request(
+            &recipe,
+            &CompileRequest::new(GenerationInputPreparer::preflight_values(&values)),
+        )
+        .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
         freeze_random_seed_values(values, &recipe).map_err(ProductionQueueError::InvalidInput)
     }
 
@@ -1079,6 +1115,18 @@ impl ProductionQueueService {
                 "completed production batches cannot be restarted".to_owned(),
             ));
         }
+        for item in detail
+            .items
+            .iter()
+            .filter(|item| item.status == ProductionBatchItemStatus::Pending)
+        {
+            self.prepare_queue_values(
+                &item.workflow_version_id,
+                &item.recipe_id,
+                &item.values_json,
+            )
+            .await?;
+        }
         let blocker = self.admission_status_excluding(Some(&batch_id)).await?;
         if blocker.busy {
             return Err(ProductionQueueError::Busy(blocker));
@@ -1093,11 +1141,22 @@ impl ProductionQueueService {
         self: &Arc<Self>,
         detail: &ProductionBatchDetail,
     ) -> Result<(), ProductionQueueError> {
+        // The inspected detail is not an authorization token. Re-read pending
+        // identities and live packages before the write, without re-locking.
+        let current = self
+            .inspect_start_admitted(&detail.batch.project_id, detail.batch.id.as_str())
+            .await
+            .map_err(|error| match error {
+                ProductionQueueError::NotFound(_) => ProductionQueueError::InvalidState(
+                    "production batch start commit did not update a batch".to_owned(),
+                ),
+                other => other,
+            })?;
         let updated = self
             .repository
             .set_batch_status(
-                &detail.batch.project_id,
-                &detail.batch.id,
+                &current.batch.project_id,
+                &current.batch.id,
                 ProductionBatchStatus::Running,
                 self.clock.now(),
             )
@@ -1107,7 +1166,7 @@ impl ProductionQueueService {
                 "production batch start commit did not update a batch".to_owned(),
             ));
         }
-        self.spawn_if_needed(detail.batch.project_id.clone(), detail.batch.id.clone());
+        self.spawn_if_needed(current.batch.project_id.clone(), current.batch.id.clone());
         Ok(())
     }
 
@@ -1396,6 +1455,12 @@ impl ProductionQueueService {
                 .get(selected_id.as_str())
                 .copied()
                 .ok_or_else(|| ProductionQueueError::NotFound(selected_id.clone()))?;
+            self.prepare_queue_values(
+                &source.workflow_version_id,
+                &source.recipe_id,
+                &source.values_json,
+            )
+            .await?;
             if let Some(existing) = find_retry_item(&detail.items, source.id.as_str()) {
                 existing_retry_item_ids.push(existing.id.as_str().to_owned());
                 continue;
@@ -1512,6 +1577,8 @@ impl ProductionQueueService {
             .iter()
             .find(|item| item.id.as_str() == item_id)
             .ok_or_else(|| ProductionQueueError::NotFound(item_id.to_owned()))?;
+        self.ensure_new_generation_allowed(&source.workflow_version_id, &source.recipe_id)
+            .await?;
         if find_retry_item(&detail.items, source.id.as_str()).is_some() {
             return Ok(detail);
         }
@@ -1896,6 +1963,11 @@ impl ProductionQueueService {
                 .iter()
                 .find(|item| item.status == ProductionBatchItemStatus::Pending)
             {
+                // Do not rewrite the historical pending item or create a Task.
+                // Existing runner retirement pauses the batch on a denial; any
+                // already-dispatched task was drained above without cancellation.
+                self.ensure_new_generation_allowed(&next.workflow_version_id, &next.recipe_id)
+                    .await?;
                 if !self
                     .repository
                     .set_item_dispatching(&next.id, self.clock.now())

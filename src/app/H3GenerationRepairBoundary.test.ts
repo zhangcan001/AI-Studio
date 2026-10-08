@@ -1,3 +1,5 @@
+// @ts-expect-error Node-only successor fixture.
+import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 // @vitest-environment node
 import {expect,it} from 'vitest';
 // @ts-expect-error Node-only boundary evidence.
@@ -38,7 +40,7 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
   paths.push(...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json');
   const readiness=JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
   paths.push(...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json');
-  for(const p of new Set(paths) as Set<string>){mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));}
+  for(const p of new Set([...paths,...MINIMAX_VIDEO_PHASE1_FILES]) as Set<string>){mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));}
   expect(h3RepairParentReader(root).violations).toEqual([]);
   for(const p of ['src/features/create/CreateInputs.tsx','src-tauri/src/domain/asset.rs','src-tauri/tauri.conf.json']){
    const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n// unauthorized drift\n');
@@ -46,7 +48,7 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
    writeFileSync(path,original);expect(h3RepairParentReader(root).violations).toEqual([]);
   }
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// extra source');
-  expect(h3RepairParentReader(root).violations).toContain('post-run-readiness-backend-files');
+  expect(h3RepairParentReader(root).violations).toContain('minimax-video-phase1-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);
 

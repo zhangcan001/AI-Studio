@@ -1399,6 +1399,65 @@ impl WorkflowRegistryService {
         })
     }
 
+    /// Product authorization is separate from generic availability/history.
+    /// Missing production dependencies fail closed; no parallel Registry exists.
+    pub async fn inspect_new_generation_availability(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<WorkflowAvailabilityInspection, WorkflowRegistryServiceError> {
+        let existing = self
+            .inspect_availability(workflow_version_id, recipe_id)
+            .await?;
+        if !existing.available {
+            return Ok(existing);
+        }
+        let denied = || WorkflowAvailabilityInspection {
+            available: false,
+            reasons: vec![crate::application::minimax_video_product_policy::REQUIRED.to_owned()],
+        };
+        let (Some(registry), Some(artifacts), Some(store)) = (
+            &self.registry_repository,
+            &self.runtime_artifact_repository,
+            &self.package_store,
+        ) else {
+            return Ok(denied());
+        };
+        let Some(version) = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+        else {
+            return Ok(denied());
+        };
+        let Some(recipe) = version.recipes.iter().find(|r| r.recipe_id == recipe_id) else {
+            return Ok(denied());
+        };
+        if !registry
+            .get(&version.workflow_id)
+            .await?
+            .is_some_and(|w| w.source_kind == "PRODUCT")
+        {
+            return Ok(denied());
+        }
+        let records = artifacts
+            .list_for_recipe(workflow_version_id, recipe_id)
+            .await?;
+        let [artifact] = records.as_slice() else {
+            return Ok(denied());
+        };
+        let Ok(package) = store.read_runtime(&artifact.package_name).await else {
+            return Ok(denied());
+        };
+        if crate::application::minimax_video_product_policy::authorizes(
+            &version, recipe, artifact, &package,
+        ) {
+            Ok(existing)
+        } else {
+            Ok(denied())
+        }
+    }
+
     pub async fn is_available(
         &self,
         workflow_version_id: &str,
