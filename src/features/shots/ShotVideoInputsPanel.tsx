@@ -30,6 +30,7 @@ export function ShotVideoInputsPanel({ scope, recipe, onSaved, onReadyChange }: 
   async function save() {
     if (!loaded || lock.current) return; lock.current=true;setBusy(true);setError(undefined);
     const own=owner, token=epoch.current;
+    const combination=combinationMessage(inputs); if(combination){setError(combination); lock.current=false; setBusy(false); return;}
     try { const current=await productClient.creation.inputsSave({selection,expected:set?.token??null,inputs}); if(live.current===own && token===epoch.current){setSet(current);onSaved?.();} }
     catch(e) {if(live.current===own && token===epoch.current)setError(normalizeProductError(e).message);}
     finally {if(live.current===own && token===epoch.current){lock.current=false;setBusy(false);}}
@@ -42,7 +43,11 @@ export function ShotVideoInputsPanel({ scope, recipe, onSaved, onReadyChange }: 
     }catch(e){if(live.current===own&&token===epoch.current)setError(normalizeProductError(e).message);}
     finally{if(live.current===own&&token===epoch.current){lock.current=false;setBusy(false);}}
   }
-  function replace(key: string, ids: string[]) {setInputs(old=>[...old.filter(i=>i.inputKey!==key),...ids.map((assetId,ordinal)=>({inputKey:key as VideoInputKey,assetId,ordinal}))]);}
+  const COMBINATION = "参考图最多 9 个、参考视频最多 3 个、参考音频最多 3 个，合计不超过 12 个，且不能只有音频。";
+  const slotMax: Record<string, number> = {reference_images:9, reference_videos:3, reference_audios:3};
+  function counts(items: VideoInputAsset[]) {return {images:items.filter(i=>i.inputKey==="reference_images").length,videos:items.filter(i=>i.inputKey==="reference_videos").length,audios:items.filter(i=>i.inputKey==="reference_audios").length};}
+  function combinationMessage(items: VideoInputAsset[]) {const {images,videos,audios}=counts(items); if(images>9||videos>3||audios>3||images+videos+audios>12||(audios>0&&images+videos===0)) return COMBINATION;}
+  function replace(key: string, ids: string[]) {const max=slotMax[key]; if(max!==undefined && ids.length>max){setError(COMBINATION); return;} const next=[...inputs.filter(i=>i.inputKey!==key),...ids.map((assetId,ordinal)=>({inputKey:key as VideoInputKey,assetId,ordinal}))]; if(counts(next).images+counts(next).videos+counts(next).audios>12){setError(COMBINATION); return;} setInputs(next);}
   return <section aria-label="正式视频输入"><h3>正式视频输入</h3><p>按当前 Recipe 独立保存。导入不代表图片生成完成；生成仅使用已保存输入。</p>
     <fieldset disabled={busy||!loaded}>{fields.map(field=>{const ids=inputs.filter(i=>i.inputKey===field.key).sort((a,b)=>a.ordinal-b.ordinal).map(i=>i.assetId),plural=["images","videos","audios"].includes(field.type),kind=field.type.startsWith("image")?"image":field.type.startsWith("video")?"video":"audio";
       return <label key={field.key}>{field.label}<select aria-label={field.label} value={plural?"":ids[0]??""} onChange={e=>replace(field.key,plural?[...ids,e.target.value].filter(Boolean):e.target.value?[e.target.value]:[])}><option value="">{plural?"添加素材":"未选择"}</option>{assets.filter(a=>a.mediaKind===kind&&(!plural||!ids.includes(a.id))).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>

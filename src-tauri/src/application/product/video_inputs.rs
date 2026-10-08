@@ -78,6 +78,11 @@ fn map_error(error: ShotVideoInputError) -> ProductError {
             "输入不可用或不属于当前 Recipe，请重新选择受管理素材。",
             Some("RESELECT_INPUT"),
         ),
+        ShotVideoInputError::Combination => ProductError::new(
+            "SHOT_VIDEO_INPUT_COMBINATION_INVALID",
+            "参考图最多 9 个、参考视频最多 3 个、参考音频最多 3 个，合计不超过 12 个，且不能只有音频。",
+            Some("ADJUST_INPUTS"),
+        ),
     }
 }
 pub async fn get(

@@ -984,7 +984,18 @@ impl ProductionQueueService {
         values: &BTreeMap<String, GenerationInputValue>,
     ) -> Result<Option<ReferenceManifest>, ProductionQueueError> {
         let recipe = self.load_recipe(workflow_version_id, recipe_id).await?;
-        reference_manifest_for_values(workflow_version_id, &recipe, values)
+        // Package bounds are keyed by workflow id (`wfl_*`), not the version id.
+        let workflow_id = self
+            .definition_repository
+            .find(workflow_version_id, recipe_id)
+            .await?
+            .ok_or_else(|| {
+                ProductionQueueError::InvalidInput(format!(
+                    "generation Recipe is unavailable for workflow version {workflow_version_id} and Recipe {recipe_id}"
+                ))
+            })?
+            .workflow_id;
+        reference_manifest_for_values(&workflow_id, &recipe, values)
     }
 
     pub async fn list(
@@ -3513,6 +3524,51 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["ast_second", "ast_first"]
         );
+    }
+
+    #[test]
+    fn h3_reference_manifest_allows_zero_or_one_image() {
+        let recipe = Recipe {
+            schema_version: 1,
+            id: "rcp_minimax_h3_reference".to_owned(),
+            name: "REF2VA".to_owned(),
+            workflow: WorkflowRef {
+                file: "workflow_api.json".to_owned(),
+            },
+            inputs: [(
+                "reference_images".to_owned(),
+                InputDefinition::Images {
+                    label: "References".to_owned(),
+                    required: false,
+                    min_items: 0,
+                    max_items: 9,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            bindings: Vec::new(),
+            outputs: Vec::new(),
+        };
+        for count in [0, 1] {
+            let values = [(
+                "reference_images".to_owned(),
+                GenerationInputValue::ImageAssets(
+                    (0..count)
+                        .map(|index| AssetId::parse(format!("ast_ref{index}")).unwrap())
+                        .collect(),
+                ),
+            )]
+            .into_iter()
+            .collect();
+            let manifest = reference_manifest_for_values(
+                "wfl_minimax_h3_reference_video_quality",
+                &recipe,
+                &values,
+            )
+            .expect("0 or 1 reference image must not be QUEUE_VALUES_INVALID")
+            .expect("image array should produce a manifest");
+            assert_eq!(manifest.asset_ids.len(), count);
+        }
     }
 
     #[test]

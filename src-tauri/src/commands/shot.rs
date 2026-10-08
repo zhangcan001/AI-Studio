@@ -88,6 +88,7 @@ fn map_video_input_error(
     match error {
         ShotVideoInputError::Conflict => AppError::shot_video_input_conflict(error.to_string()),
         ShotVideoInputError::Invalid(message) => AppError::invalid_input(message),
+        ShotVideoInputError::Combination => AppError::invalid_input(error.to_string()),
     }
 }
 

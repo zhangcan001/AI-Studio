@@ -14,12 +14,17 @@ use std::{collections::BTreeMap, fmt, sync::Arc};
 pub enum ShotVideoInputError {
     Invalid(String),
     Conflict,
+    Combination,
 }
 impl fmt::Display for ShotVideoInputError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Invalid(message) => write!(f, "{message}"),
             Self::Conflict => write!(f, "SHOT_VIDEO_INPUT_CONFLICT: 输入已修改，请刷新后重新保存"),
+            Self::Combination => write!(
+                f,
+                "SHOT_VIDEO_INPUT_COMBINATION_INVALID: 参考图最多 9 个、参考视频最多 3 个、参考音频最多 3 个，合计不超过 12 个，且不能只有音频"
+            ),
         }
     }
 }
@@ -148,6 +153,9 @@ impl ShotVideoInputService {
             return Err(invalid("正式输入需要视频 Recipe"));
         }
         let values = media_values(&recipe, inputs)?;
+        // Incomplete drafts (missing first_frame) may save. Combinations that
+        // cannot generate — over 9/3/3/12 or audio-only — may not.
+        reject_ungeneratable_combination(&values)?;
         self.preparer
             .validate_product_assets(
                 &scope.project_id,
@@ -358,4 +366,150 @@ pub(crate) fn merge_media_inputs(
         )
     });
     values.extend(media);
+}
+
+/// Save allows a partial draft. It rejects only combinations prepare would
+/// refuse even after the missing required slots were filled: per-slot caps,
+/// the combined cap of 12, and audio-only REF2VA.
+pub(crate) fn reject_ungeneratable_combination(
+    values: &BTreeMap<String, GenerationInputValue>,
+) -> Result<(), ShotVideoInputError> {
+    let count = |key: &str| match values.get(key) {
+        Some(
+            GenerationInputValue::ImageAssets(ids)
+            | GenerationInputValue::VideoAssets(ids)
+            | GenerationInputValue::AudioAssets(ids),
+        ) => ids.len(),
+        Some(
+            GenerationInputValue::ImageAsset(_)
+            | GenerationInputValue::VideoAsset(_)
+            | GenerationInputValue::AudioAsset(_),
+        ) => 1,
+        _ => 0,
+    };
+    let (images, videos, audios) = (
+        count("reference_images"),
+        count("reference_videos"),
+        count("reference_audios"),
+    );
+    if images > 9
+        || videos > 3
+        || audios > 3
+        || images + videos + audios > 12
+        || (audios > 0 && images + videos == 0)
+    {
+        return Err(ShotVideoInputError::Combination);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{media_values, reject_ungeneratable_combination};
+    use crate::application::generation_input_preparer::GenerationInputValue;
+    use crate::application::ports::ShotVideoInputAsset;
+    use crate::domain::{InputDefinition, Recipe};
+    use std::collections::BTreeMap;
+
+    fn recipe() -> Recipe {
+        Recipe {
+            schema_version: 1,
+            id: "rcp_ref".into(),
+            name: "REF".into(),
+            workflow: crate::domain::WorkflowRef {
+                file: "workflow_api.json".into(),
+            },
+            inputs: BTreeMap::from([
+                (
+                    "first_frame".into(),
+                    InputDefinition::Image {
+                        label: "First".into(),
+                        required: false,
+                    },
+                ),
+                (
+                    "reference_images".into(),
+                    InputDefinition::Images {
+                        label: "Images".into(),
+                        required: false,
+                        min_items: 0,
+                        max_items: 9,
+                    },
+                ),
+                (
+                    "reference_videos".into(),
+                    InputDefinition::Videos {
+                        label: "Videos".into(),
+                        required: false,
+                        min_items: 0,
+                        max_items: 3,
+                    },
+                ),
+                (
+                    "reference_audios".into(),
+                    InputDefinition::Audios {
+                        label: "Audios".into(),
+                        required: false,
+                        min_items: 0,
+                        max_items: 3,
+                    },
+                ),
+            ]),
+            bindings: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    fn asset(key: &str, ordinal: i64, id: &str) -> ShotVideoInputAsset {
+        ShotVideoInputAsset {
+            input_key: key.into(),
+            ordinal,
+            asset_id: id.into(),
+        }
+    }
+
+    #[test]
+    fn save_allows_incomplete_draft_but_rejects_ungeneratable_combinations() {
+        let recipe = recipe();
+        let empty = media_values(&recipe, &[]).unwrap();
+        assert!(reject_ungeneratable_combination(&empty).is_ok());
+        let one_image = media_values(&recipe, &[asset("reference_images", 0, "ast_one")]).unwrap();
+        assert!(reject_ungeneratable_combination(&one_image).is_ok());
+        let audio_only =
+            media_values(&recipe, &[asset("reference_audios", 0, "ast_audio")]).unwrap();
+        assert!(matches!(
+            reject_ungeneratable_combination(&audio_only),
+            Err(super::ShotVideoInputError::Combination)
+        ));
+        let mut too_many = Vec::new();
+        for ordinal in 0..9 {
+            too_many.push(asset(
+                "reference_images",
+                ordinal,
+                &format!("ast_img{ordinal}"),
+            ));
+        }
+        for ordinal in 0..3 {
+            too_many.push(asset(
+                "reference_videos",
+                ordinal,
+                &format!("ast_vid{ordinal}"),
+            ));
+        }
+        too_many.push(asset("reference_audios", 0, "ast_aud0"));
+        let values = media_values(&recipe, &too_many).unwrap();
+        assert!(matches!(
+            reject_ungeneratable_combination(&values),
+            Err(super::ShotVideoInputError::Combination)
+        ));
+        let mut images = Vec::new();
+        for ordinal in 0..10 {
+            images.push(asset(
+                "reference_images",
+                ordinal,
+                &format!("ast_over{ordinal}"),
+            ));
+        }
+        assert!(media_values(&recipe, &images).is_err());
+    }
 }

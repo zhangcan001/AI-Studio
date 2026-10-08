@@ -881,7 +881,26 @@ async fn remove_migration_036_schema(pool: &SqlitePool) {
     }
 }
 
+async fn remove_migration_043_schema(pool: &SqlitePool) {
+    for statement in [
+        "DROP TABLE IF EXISTS shot_video_input_assets",
+        "DROP TABLE IF EXISTS shot_video_input_sets",
+        "DROP TABLE IF EXISTS external_asset_imports",
+        "DROP INDEX IF EXISTS idx_shot_video_input_assets_asset",
+        "DROP INDEX IF EXISTS idx_shots_project_identity",
+        "DROP INDEX IF EXISTS idx_assets_project_identity",
+    ] {
+        sqlx::query(statement)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("043 object should be removable before replay ({statement}): {error}")
+            });
+    }
+}
+
 async fn remove_migration_035_schema(pool: &SqlitePool) {
+    remove_migration_043_schema(pool).await;
     for statement in [
         "ALTER TABLE project_workflow_bindings DROP COLUMN binding_instance_id",
         "ALTER TABLE project_workflow_bindings DROP COLUMN revision",
@@ -1279,8 +1298,9 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 42);
+    assert_eq!(max_migration(pool).await, 43);
     assert_eq!(migration_marker_count(pool, 42).await, 1);
+    assert_eq!(migration_marker_count(pool, 43).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1442,10 +1462,14 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_042() {
+async fn dev055_migration_matrix_reaches_043() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(42));
+    assert_eq!(versions.last().copied(), Some(43));
+    assert!(
+        versions.contains(&42),
+        "repository must still contain migration 042"
+    );
     assert!(
         versions.contains(&33),
         "repository must contain migration 033"

@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { READINESS_LIFECYCLE_GROUPS, readinessLifecycleParentFacts, readinessLifecycleHash, readinessLifecycleAggregate, MINIMAX_VIDEO_PHASE1_MANIFEST } from './readiness-lifecycle-successor-guard.mjs';
+import { minimaxVideoPhase3ParentReader, minimaxVideoPhase3FixtureFiles } from './minimax-video-phase3-successor-guard.mjs';
 
 // One reviewed stage, directly based on the final Phase1 commit. Never repin an old proof.
 export const MINIMAX_VIDEO_PHASE2_PARENT = '8a0d037443dcc66f804379357da13c5e6bc92f74';
@@ -106,7 +107,7 @@ export const MINIMAX_VIDEO_PHASE2_ADDED = [
 export const MINIMAX_VIDEO_PHASE2_FILES = [...MINIMAX_VIDEO_PHASE2_EXISTING, ...MINIMAX_VIDEO_PHASE2_ADDED, MINIMAX_VIDEO_PHASE2_MANIFEST];
 // Owned negative fixtures need the complete governed parent view, including
 // older domain design docs, not just files changed by this checkpoint.
-export const minimaxVideoPhase2FixtureFiles = root => [...readinessLifecycleParentFacts(root,MINIMAX_VIDEO_PHASE2_PARENT).paths,...MINIMAX_VIDEO_PHASE2_FILES];
+export const minimaxVideoPhase2FixtureFiles = root => [...readinessLifecycleParentFacts(root,MINIMAX_VIDEO_PHASE2_PARENT).paths,...MINIMAX_VIDEO_PHASE2_FILES,...minimaxVideoPhase3FixtureFiles(root)];
 export const minimaxVideoPhase2Groups = () => [...READINESS_LIFECYCLE_GROUPS, ['domainDocs', 'docs/architecture', /\.md$/]];
 export const MINIMAX_VIDEO_PHASE2_INVARIANTS = {
   schemaChanged: true, backupFormatChanged: true, queueAuthorityChanged: false,
@@ -133,9 +134,11 @@ const files = (root, dir, pattern) => readdirSync(join(root,dir),{withFileTypes:
 }).sort();
 
 function validate(root, override) {
-  const violations = [], fail = s => violations.push(`minimax-video-phase2-${s}`);
-  const live = new Map(), disk = p => { if (!live.has(p)) live.set(p, normalize(readFileSync(join(root,p),'utf8'))); return live.get(p); };
-  const rejected = () => ({ violations, addedPaths: [], afterHashes: {}, backendAggregateSha256: undefined, read: disk });
+  const successor = minimaxVideoPhase3ParentReader(root);
+  const violations = [...successor.violations], fail = s => violations.push(`minimax-video-phase2-${s}`);
+  const live = new Map(), disk = p => { if (!live.has(p)) live.set(p, normalize(successor.read(p))); return live.get(p); };
+  const rejected = () => ({ violations, addedPaths: [], afterHashes: {}, backendAggregateSha256: undefined, read: p => normalize(readFileSync(join(root,p),'utf8')) });
+  if (successor.violations.length) return rejected();
   let proof, facts;
   try { proof = override ?? JSON.parse(disk(MINIMAX_VIDEO_PHASE2_MANIFEST)); facts = readinessLifecycleParentFacts(root, MINIMAX_VIDEO_PHASE2_PARENT); }
   catch { fail('missing-evidence'); return rejected(); }
@@ -162,7 +165,7 @@ function validate(root, override) {
     for (const [name,dir,pattern] of minimaxVideoPhase2Groups()) {
       const base = facts.paths.filter(p => p.startsWith(dir+'/') && pattern.test(p));
       const untouched = base.filter(p => !MINIMAX_VIDEO_PHASE2_EXISTING.includes(p));
-      const current = files(root,dir,pattern).filter(p => p !== MINIMAX_VIDEO_PHASE2_MANIFEST);
+      const current = files(root,dir,pattern).filter(p => p !== MINIMAX_VIDEO_PHASE2_MANIFEST && !successor.addedPaths.includes(p));
       const expected = [...base,...MINIMAX_VIDEO_PHASE2_ADDED.filter(p => p.startsWith(dir+'/') && pattern.test(p))].sort(), r = proof[name];
       if (JSON.stringify(current) !== JSON.stringify(expected) || r?.beforeFiles !== base.length || r?.afterFiles !== current.length) fail(`${name}-files`);
       if (untouched.some(p => disk(p) !== facts.read(p))) fail(`${name}-untouched-bytes`);
@@ -180,7 +183,7 @@ function validate(root, override) {
     for (const p of configs) if (disk(p) !== facts.read(p)) fail(`frozen:${p}`);
   } catch { fail('missing-evidence'); return rejected(); }
   if (violations.length) return rejected();
-  return { violations, addedPaths: [...MINIMAX_VIDEO_PHASE2_ADDED,MINIMAX_VIDEO_PHASE2_MANIFEST],
+  return { violations, addedPaths: [...MINIMAX_VIDEO_PHASE2_ADDED,MINIMAX_VIDEO_PHASE2_MANIFEST,...successor.addedPaths],
     afterHashes: Object.fromEntries(scope.map(p => [p,proof.paths[p].afterHash])), backendAggregateSha256: proof.backend.afterAggregateHash,
     // Only after validating live bytes do historical readers receive Phase1-final bytes.
     read: p => MINIMAX_VIDEO_PHASE2_EXISTING.includes(p) ? facts.read(p) : disk(p) };

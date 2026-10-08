@@ -265,8 +265,6 @@ fn reference_gate(
     let mode = mode.unwrap_or_default();
     if context.stage == ShotStage::Video {
         if let Some(inputs) = stage_input.and_then(|input| input.video_inputs.as_ref()) {
-            // Shape/limits/durations are validated by the shared H3 compiler and
-            // preparer, not a second numerical reference contract in readiness.
             let keys: &[&str] = match mode {
                 "I2V" => &["first_frame"],
                 "FIRST_LAST" => &["first_frame", "last_frame"],
@@ -288,6 +286,65 @@ fn reference_gate(
                         )
                         .with_fix_action("绑定正式外部导入素材"),
                     );
+                }
+            }
+            if mode == "REF2VA" {
+                let count = |name: &str| {
+                    inputs
+                        .inputs
+                        .iter()
+                        .filter(|input| input.input_key == name)
+                        .count()
+                };
+                let (images, videos, audios) = (
+                    count("reference_images"),
+                    count("reference_videos"),
+                    count("reference_audios"),
+                );
+                if images > 9 || videos > 3 || audios > 3 || images + videos + audios > 12 {
+                    checks.push(check(
+                        key,
+                        ReadinessCheckState::Blocker,
+                        "SHOT_VIDEO_INPUT_COMBINATION_INVALID",
+                        "参考图最多 9 个、参考视频最多 3 个、参考音频最多 3 个，合计不超过 12 个。",
+                        "ResolvedVideoInputSet",
+                    ));
+                }
+                if audios > 0 && images + videos == 0 {
+                    checks.push(
+                        check(
+                            key,
+                            ReadinessCheckState::Blocker,
+                            "SHOT_VIDEO_INPUT_COMBINATION_INVALID",
+                            "全能参考不能只有音频，至少要有一张参考图或一段参考视频。",
+                            "ResolvedVideoInputSet",
+                        )
+                        .with_fix_action("补充参考图或参考视频"),
+                    );
+                }
+                for media_key in ["reference_videos", "reference_audios"] {
+                    let durations = inputs
+                        .inputs
+                        .iter()
+                        .filter(|input| input.input_key == media_key)
+                        .map(|input| input.duration_ms)
+                        .collect::<Vec<_>>();
+                    if let Err(message) =
+                        crate::application::product::h3_resolution::validate_reference_durations(
+                            media_key, &durations,
+                        )
+                    {
+                        checks.push(
+                            check(
+                                key,
+                                ReadinessCheckState::Blocker,
+                                "VIDEO_INPUT_DURATION_INVALID",
+                                message,
+                                "ResolvedVideoInputSet",
+                            )
+                            .with_fix_action("换一段 2–15 秒且元数据完整的参考媒体"),
+                        );
+                    }
                 }
             }
             return ReadinessGateResult::new(key, checks);
@@ -977,7 +1034,7 @@ mod tests {
             asset_id: format!("asset-{key}"),
             media_type: kind.into(),
             sha256: "a".repeat(64),
-            duration_ms: None,
+            duration_ms: Some(4_000),
         }
     }
 
@@ -1048,6 +1105,78 @@ mod tests {
             .iter()
             .all(|c| c.code != "REF2VA_REFERENCES_REQUIRED"
                 && c.code != "REQUIRED_REFERENCE_SET_EMPTY"));
+    }
+
+    #[test]
+    fn formal_i2v_without_first_frame_is_not_ready() {
+        use crate::domain::shot_context::ResolvedVideoInputSet;
+        let mut context = context(ShotStage::Video);
+        context.stage_input.video_inputs = Some(ResolvedVideoInputSet {
+            workflow_version_id: "version".into(),
+            recipe_id: "recipe".into(),
+            instance_id: None,
+            revision: None,
+            inputs: Vec::new(),
+        });
+        let gate = reference_gate(&context, Some("I2V"), Some(&context.stage_input));
+        assert_eq!(gate.state, ReadinessCheckState::Incomplete);
+        assert!(gate.checks.iter().any(|c| c.code == "VIDEO_INPUT_REQUIRED"));
+    }
+
+    #[test]
+    fn formal_ref2va_rejects_audio_only_over_total_and_bad_duration() {
+        use crate::domain::shot_context::ResolvedVideoInputSet;
+        let mut context = context(ShotStage::Video);
+        let mut audio = formal_slot("reference_audios", "audio");
+        audio.duration_ms = Some(4_000);
+        context.stage_input.video_inputs = Some(ResolvedVideoInputSet {
+            workflow_version_id: "version".into(),
+            recipe_id: "recipe".into(),
+            instance_id: None,
+            revision: None,
+            inputs: vec![audio],
+        });
+        let gate = reference_gate(&context, Some("REF2VA"), Some(&context.stage_input));
+        assert_eq!(gate.state, ReadinessCheckState::Blocker);
+        assert!(gate
+            .checks
+            .iter()
+            .any(|c| c.code == "SHOT_VIDEO_INPUT_COMBINATION_INVALID"));
+
+        let mut inputs = Vec::new();
+        for index in 0..10 {
+            let mut image = formal_slot("reference_images", "image");
+            image.ordinal = index;
+            image.asset_id = format!("asset-image-{index}");
+            inputs.push(image);
+        }
+        context.stage_input.video_inputs = Some(ResolvedVideoInputSet {
+            workflow_version_id: "version".into(),
+            recipe_id: "recipe".into(),
+            instance_id: None,
+            revision: None,
+            inputs,
+        });
+        let gate = reference_gate(&context, Some("REF2VA"), Some(&context.stage_input));
+        assert!(gate
+            .checks
+            .iter()
+            .any(|c| c.code == "SHOT_VIDEO_INPUT_COMBINATION_INVALID"));
+
+        let mut video = formal_slot("reference_videos", "video");
+        video.duration_ms = None;
+        context.stage_input.video_inputs = Some(ResolvedVideoInputSet {
+            workflow_version_id: "version".into(),
+            recipe_id: "recipe".into(),
+            instance_id: None,
+            revision: None,
+            inputs: vec![video],
+        });
+        let gate = reference_gate(&context, Some("REF2VA"), Some(&context.stage_input));
+        assert!(gate
+            .checks
+            .iter()
+            .any(|c| c.code == "VIDEO_INPUT_DURATION_INVALID"));
     }
 
     #[test]

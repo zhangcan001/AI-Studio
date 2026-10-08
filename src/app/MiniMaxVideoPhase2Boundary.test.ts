@@ -13,6 +13,8 @@ import { env } from 'node:process';
 // @ts-expect-error Node-only successor.
 import { minimaxVideoPhase2ParentReader, MINIMAX_VIDEO_PHASE2_PARENT, MINIMAX_VIDEO_PHASE2_MANIFEST, MINIMAX_VIDEO_PHASE2_FILES } from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @ts-expect-error Node-only successor.
+import { minimaxVideoPhase3FixtureFiles } from '../../scripts/minimax-video-phase3-successor-guard.mjs';
+// @ts-expect-error Node-only successor.
 import { readinessLifecycleParentFacts, readinessLifecycleParentReader, MINIMAX_VIDEO_PHASE1_MANIFEST } from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 
 it('validates schema/backup changes honestly and replays immutable Phase1 bytes through a legal successor', () => {
@@ -53,7 +55,7 @@ it('selects raw-byte baselines explicitly and never accepts the other representa
     const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
     execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
     const facts=readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE2_PARENT);
-    for (const p of new Set([...facts.paths,...MINIMAX_VIDEO_PHASE2_FILES]) as Set<string>) {
+    for (const p of new Set([...facts.paths,...MINIMAX_VIDEO_PHASE2_FILES,...minimaxVideoPhase3FixtureFiles('.')]) as Set<string>) {
       mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
       // Only an owned fixture is materialized from literal Git blobs. The real
       // workspace and immutable package files are never normalized or written.
@@ -78,7 +80,7 @@ it('rejects undeclared changes, illegal additions, missing evidence and literal 
   try {
     const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
     execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-    for (const p of new Set([...readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE2_PARENT).paths,...MINIMAX_VIDEO_PHASE2_FILES]) as Set<string>) {
+    for (const p of new Set([...readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE2_PARENT).paths,...MINIMAX_VIDEO_PHASE2_FILES,...minimaxVideoPhase3FixtureFiles('.')]) as Set<string>) {
       mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
     }
     expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
@@ -98,7 +100,7 @@ it('rejects undeclared changes, illegal additions, missing evidence and literal 
     }
     for (const p of [MINIMAX_VIDEO_PHASE2_MANIFEST,'src-tauri/src/application/shot_video_input_service.rs','src-tauri/src/domain/asset.rs']) {
       const path=join(root,p),original=readFileSync(path);rmSync(path);const rejected=minimaxVideoPhase2ParentReader(root);
-      expect(rejected.violations).toContain('minimax-video-phase2-missing-evidence');expect(rejected.backendAggregateSha256).toBeUndefined();writeFileSync(path,original);
+      expect(rejected.violations.some((v:string)=>v.includes('missing-evidence')||v.endsWith('-files'))).toBe(true);expect(rejected.addedPaths).toEqual([]);expect(rejected.backendAggregateSha256).toBeUndefined();writeFileSync(path,original);
     }
     expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
   } finally { rmSync(root,{recursive:true,force:true}); }

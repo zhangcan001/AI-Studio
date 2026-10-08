@@ -5,10 +5,9 @@ use crate::application::product_runtime_scope::{
 use crate::domain::{AssetId, InputDefinition, Recipe};
 use std::collections::HashSet;
 
-/// Returns the effective image bounds for the two supported H3 REF2VA
-/// runtimes.  The runtime package keeps `min_items: 0` because it also
-/// describes non-image reference modes; Shot production uses the stricter
-/// image-to-video contract of at least two images.
+/// Image bounds for the authorized H3 REF2VA packages. The product contract
+/// is `validate_resolved` (0–9 images, 0–3 videos, 0–3 audios, total ≤ 12,
+/// no audio-only), not a hidden minimum of two images.
 pub(crate) fn ref2va_image_bounds(
     workflow_id: &str,
     recipe: &Recipe,
@@ -35,14 +34,7 @@ pub(crate) fn ref2va_image_bounds(
         return Err("REF2VA Recipe 的 reference_images min_items 不能大于 max_items".to_owned());
     }
     if is_ref2va {
-        let min_items = (*min_items).max(2);
-        if min_items > *max_items {
-            return Err(format!(
-                "REF2VA Recipe 最多允许 {} 张参考图，但实际最少需要 {} 张",
-                max_items, min_items
-            ));
-        }
-        Ok(Some((min_items, *max_items)))
+        Ok(Some((*min_items, *max_items)))
     } else {
         Ok(None)
     }
@@ -117,12 +109,19 @@ mod tests {
     }
 
     #[test]
-    fn ref2va_runtime_overrides_optional_recipe_minimum() {
+    fn ref2va_keeps_recipe_minimum_including_zero() {
         assert_eq!(
             ref2va_image_bounds("wfl_minimax_h3_reference_video_quality", &recipe(0, 9))
                 .expect("valid bounds"),
-            Some((2, 9))
+            Some((0, 9))
         );
+        assert_eq!(
+            ref2va_image_bounds("wfl_minimax_h3_reference_video", &recipe(0, 9))
+                .expect("valid bounds"),
+            Some((0, 9))
+        );
+        assert!(validate_ordered_reference_ids(&[], Some((0, 9))).is_ok());
+        assert!(validate_ordered_reference_ids(&[asset_id("a")], Some((0, 9))).is_ok());
     }
 
     #[test]
