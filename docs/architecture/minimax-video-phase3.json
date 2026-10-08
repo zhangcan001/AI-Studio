@@ -29,7 +29,7 @@
     },
     "scripts/minimax-video-phase3-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "01127b9e1aab667439bc8aa44d329827645c952170a73959093c1b92e7ffcb1e"
+      "afterHash": "1b6bf01c29774f70e0de5de2cc73253739fe9c15d00f803be9feeeba59811f2c"
     },
     "src-tauri/src/application/ordered_reference_binding.rs": {
       "beforeHash": "f2edb7817a039f4755e4c3f2d3c657e4bdd10a8a89d4e3827fb652408582c0ae",
@@ -87,6 +87,10 @@
       "beforeHash": "ed51bf044561abe93930833c99e88b32a9f8ddf9d68bcf68f39dc275c4e78798",
       "afterHash": "7757a5ff489fdb9f2123d2b3afbb8c39c8f41933f94240bdd656b54dd3883d0a"
     },
+    "src-tauri/tests/dev052_runtime_integration.rs": {
+      "beforeHash": "00505b248b39cd06b0dd4d45e369ddef66f373b29d50e5a7ce092d569c8cfe59",
+      "afterHash": "959fabc5f61780bb38bbdc5b6409511bec3ee822a472379987c0fd162f316c4c"
+    },
     "src-tauri/tests/dev055_release_compatibility.rs": {
       "beforeHash": "ac2442827d7f2e5ff6a4ff73966f52039a39db5f0c8efd6c54c8b5c0b708a4fa",
       "afterHash": "ec3ab682f9d6c151eb3e962f567a163769f6b31945ed4fb516b342c1f0b39963"
@@ -139,8 +143,8 @@
     "beforeFiles": 58,
     "afterFiles": 58,
     "beforeAggregateHash": "0af87ba9dfbfe0ba50e10cce8f137d6ab56cd7768178f950fac408109fdb9b7d",
-    "untouchedAggregateHash": "d65fa34a908dbd4e5f790fbe2bf754ea4fbf5c54e2862394e4359b15e9f02284",
-    "afterAggregateHash": "e3e8812cf41ad3d25d4220aa26dc1337fad7cc9a5c0114055be74f3b825a4005"
+    "untouchedAggregateHash": "c71953a5a7007248ab8367855b1e13922ff9c1346cb4245ab23c50c34ad89912",
+    "afterAggregateHash": "0b41b1997be31e7f66fda73166807d152d5b4d7fdc9f23b9d6eee46030d13c1d"
   },
   "frontend": {
     "beforeFiles": 510,
@@ -161,7 +165,7 @@
     "afterFiles": 35,
     "beforeAggregateHash": "9e15aa7c5eb9ade00bd1364e02ecd6b23de75a67587fcdef29521d00e08ae205",
     "untouchedAggregateHash": "11f60c8d097f953ebb466c5b9094a43889a4f6895f9b5465420354e86f7e65ca",
-    "afterAggregateHash": "72718ffb317f7f42a8866bccb44c95b9e79c8e53b47b538e17465856f722cc25"
+    "afterAggregateHash": "898d7c8304ac087a2064fad864632ff7b617ba677f8581c50fb01dced0d7a6cc"
   },
   "migrations": {
     "beforeFiles": 43,
