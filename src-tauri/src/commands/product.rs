@@ -35,6 +35,95 @@ fn library(state: &AppState) -> LibraryServices<'_> {
     }
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_creation_inputs_get(
+    state: State<'_, AppState>,
+    selection: crate::application::product::video_inputs::VideoInputSelection,
+) -> Result<crate::application::product::video_inputs::VideoInputView, ProductError> {
+    crate::application::product::video_inputs::get(&state.shots.video_inputs, selection).await
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceInputImportView {
+    pub imported: Vec<crate::application::product::video_inputs::InputAsset>,
+    pub failed: Vec<super::asset::AssetImportFailureView>,
+    pub cancelled: bool,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_creation_assets_import(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+    folder: bool,
+) -> Result<SourceInputImportView, ProductError> {
+    let result = if folder {
+        super::asset::asset_pick_and_import_source_folder(app_handle, state, project_id).await
+    } else {
+        super::asset::asset_pick_and_import_source_assets(app_handle, state, project_id).await
+    }
+    .map_err(ProductError::internal)?;
+    Ok(project_source_import(result))
+}
+
+fn project_source_import(
+    result: super::asset::AssetSourceImportBatchView,
+) -> SourceInputImportView {
+    SourceInputImportView {
+        imported: result
+            .imported
+            .into_iter()
+            .map(|a| crate::application::product::video_inputs::InputAsset {
+                id: a.id,
+                name: a.name,
+                media_kind: a.asset_type,
+            })
+            .collect(),
+        // Per-file failures can contain local I/O paths. Product DTOs expose
+        // the selected basename and safe recovery guidance, never raw diagnostics.
+        failed: result
+            .failed
+            .into_iter()
+            .map(|f| super::asset::AssetImportFailureView {
+                display_name: f.display_name,
+                error: "无法导入该素材；请确认文件可读、格式和大小合法，视频/音频时长可解码。"
+                    .into(),
+            })
+            .collect(),
+        cancelled: result.cancelled,
+    }
+}
+
+#[cfg(test)]
+mod source_input_import_tests {
+    #[test]
+    fn product_partial_import_failures_do_not_expose_local_paths() {
+        let view =
+            super::project_source_import(crate::commands::asset::AssetSourceImportBatchView {
+                imported: Vec::new(),
+                failed: vec![crate::commands::asset::AssetImportFailureView {
+                    display_name: "picked.png".into(),
+                    error: "read C:/private/source/picked.png: diagnostic".into(),
+                }],
+                cancelled: false,
+            });
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(json.contains("picked.png"));
+        assert!(!json.contains("C:/private"));
+        assert!(!json.contains("diagnostic"));
+        assert_eq!(view.failed.len(), 1);
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_creation_inputs_save(
+    state: State<'_, AppState>,
+    request: crate::application::product::video_inputs::VideoInputSave,
+) -> Result<crate::application::product::video_inputs::VideoInputView, ProductError> {
+    crate::application::product::video_inputs::save(&state.shots.video_inputs, request).await
+}
+
 fn library_operations(state: &AppState) -> LibraryOperations<'_> {
     LibraryOperations {
         library: library(state),

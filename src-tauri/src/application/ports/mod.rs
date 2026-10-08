@@ -40,6 +40,7 @@ pub mod shot_batch_repository;
 pub mod shot_bulk_repository;
 pub mod shot_consistency_repository;
 pub mod shot_repository;
+pub mod shot_video_input_repository;
 pub mod task_history_repository;
 pub mod task_repository;
 pub mod task_update_sink;
@@ -64,7 +65,7 @@ pub use asset_browse_repository::{
     AssetMediaTypeFilter, AssetSourceFilter,
 };
 pub use asset_deletion_repository::{AssetDeletionReferences, AssetDeletionRepository};
-pub use asset_repository::{AssetRepository, TaskOutputAssetMapping};
+pub use asset_repository::{AssetRepository, ExternalAssetImportRecord, TaskOutputAssetMapping};
 pub use asset_store::{
     inspect_asset_read_path, validate_asset_read_path, AssetReadInspection, AssetReadStream,
     AssetStore, AssetStoreError, AssetWriteSession, StagedAssetFile, StoredAssetFile,
@@ -148,6 +149,10 @@ pub use shot_consistency_repository::ShotConsistencyRepository;
 pub use shot_repository::{
     ShotData, ShotGenerationLinkRecord, ShotRecord, ShotReferenceAssetRecord, ShotRepository,
     ShotStageConfigRecord,
+};
+pub use shot_video_input_repository::{
+    ShotVideoInputAsset, ShotVideoInputRepository, ShotVideoInputScope, ShotVideoInputSet,
+    ShotVideoInputToken,
 };
 pub use task_history_repository::{
     TaskHistoryFilter, TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository,

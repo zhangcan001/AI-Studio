@@ -48,6 +48,7 @@ pub enum AppErrorCode {
     ArtifactReviewConflict,
     ArtifactReviewInvalid,
     ProjectWorkflowBindingRevisionConflict,
+    ShotVideoInputConflict,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,6 +60,9 @@ pub struct AppError {
 }
 
 impl AppError {
+    pub fn shot_video_input_conflict(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ShotVideoInputConflict, message)
+    }
     pub fn initialization(message: impl Into<String>) -> Self {
         Self::new(AppErrorCode::InitializationError, message)
     }
@@ -317,6 +321,7 @@ impl AppError {
             AppErrorCode::ArtifactOpenFailed => "ARTIFACT_OPEN_FAILED",
             AppErrorCode::ArtifactReviewConflict => "ARTIFACT_REVIEW_CONFLICT",
             AppErrorCode::ArtifactReviewInvalid => "ARTIFACT_REVIEW_INVALID",
+            AppErrorCode::ShotVideoInputConflict => "SHOT_VIDEO_INPUT_CONFLICT",
             AppErrorCode::ProjectWorkflowBindingRevisionConflict => {
                 "PROJECT_WORKFLOW_BINDING_REVISION_CONFLICT"
             }

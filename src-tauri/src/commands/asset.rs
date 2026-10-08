@@ -471,6 +471,7 @@ pub async fn asset_pick_and_import_source_assets(
 
     let mut imported = Vec::new();
     let mut failed = Vec::new();
+    let mut paths = Vec::new();
     for file in files {
         let display_name = selected_file_display_name(&file);
         let path = match file.into_path() {
@@ -483,26 +484,63 @@ pub async fn asset_pick_and_import_source_assets(
                 continue;
             }
         };
-        let result = state
-            .assets
-            .source_import
-            .import_files(&project_id, std::slice::from_ref(&path))
-            .await;
-        imported.extend(result.imported.into_iter().map(AssetView::from));
-        failed.extend(
-            result
-                .failed
-                .into_iter()
-                .map(|failure| AssetImportFailureView {
-                    display_name: failure.display_name,
-                    error: failure.error,
-                }),
-        );
+        paths.push(path);
     }
+    let result = state
+        .assets
+        .source_import
+        .import_files(&project_id, &paths)
+        .await;
+    imported.extend(result.imported.into_iter().map(AssetView::from));
+    failed.extend(
+        result
+            .failed
+            .into_iter()
+            .map(|failure| AssetImportFailureView {
+                display_name: failure.display_name,
+                error: failure.error,
+            }),
+    );
 
     Ok(AssetSourceImportBatchView {
         imported,
         failed,
+        cancelled: false,
+    })
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_pick_and_import_source_folder(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<AssetSourceImportBatchView, AppError> {
+    super::validate_project_id(&project_id)?;
+    let Some(folder) = app_handle.dialog().file().blocking_pick_folder() else {
+        return Ok(AssetSourceImportBatchView {
+            imported: Vec::new(),
+            failed: Vec::new(),
+            cancelled: true,
+        });
+    };
+    let path = folder
+        .into_path()
+        .map_err(|_| AppError::invalid_input("目录不可访问"))?;
+    let result = state
+        .assets
+        .source_import
+        .import_directory(&project_id, &path)
+        .await;
+    Ok(AssetSourceImportBatchView {
+        imported: result.imported.into_iter().map(AssetView::from).collect(),
+        failed: result
+            .failed
+            .into_iter()
+            .map(|f| AssetImportFailureView {
+                display_name: f.display_name,
+                error: f.error,
+            })
+            .collect(),
         cancelled: false,
     })
 }

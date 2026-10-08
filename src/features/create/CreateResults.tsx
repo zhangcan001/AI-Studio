@@ -55,5 +55,5 @@ export function GenerateBar({ controller: c }: { controller: CreateController })
       return <p key={index}>{error.message}{action.kind === "none" ? <small>{action.explanation}</small> : <button type="button" disabled={c.busy} onClick={() => act(action)}>{action.label}</button>}</p>;
     })}
     {c.error && <p role="alert">{c.error}</p>}</div>
-    <button className="primary" type="button" disabled={c.busy || !c.generator?.availability} onClick={() => void c.generate()}>{c.busy ? "正在提交…" : "生成"}</button></footer>;
+    <button className="primary" type="button" disabled={c.busy || !c.generator?.availability || !c.videoInputs.ready} onClick={() => void c.generate()}>{c.busy ? "正在提交…" : "生成"}</button></footer>;
 }

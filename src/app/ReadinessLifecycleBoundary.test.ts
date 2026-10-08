@@ -1,5 +1,7 @@
 // @ts-expect-error Node-only successor fixture.
 import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
+// @ts-expect-error Node-only successor.
+import {minimaxVideoPhase2FixtureFiles,MINIMAX_VIDEO_PHASE2_MANIFEST} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @vitest-environment node
 import {expect,it} from 'vitest';
 // @ts-expect-error Node-only boundary fixture.
@@ -66,7 +68,7 @@ it('denies post-run drift including the previous readiness proof and runtime pac
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
   execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
   writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of [...MINIMAX_VIDEO_PHASE1_FILES,...readinessLifecycleParentFacts('.',POST_RUN_READINESS_PARENT).paths,postRunManifest]){
+  for(const p of [...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...readinessLifecycleParentFacts('.',POST_RUN_READINESS_PARENT).paths,postRunManifest]){
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(postRunReadinessParentReader(root).violations).toEqual([]);
@@ -86,7 +88,7 @@ it('denies post-run drift including the previous readiness proof and runtime pac
   expect(postRunReadinessParentReader(root).violations).toContain('post-run-readiness-missing-evidence');
   writeFileSync(path,original);expect(postRunReadinessParentReader(root).violations).toEqual([]);
   writeFileSync(join(root,'src/unreviewed.ts'),'// unreviewed');
-  expect(postRunReadinessParentReader(root).violations).toContain('minimax-video-phase1-frontend-files');
+  expect(postRunReadinessParentReader(root).violations).toContain('minimax-video-phase2-frontend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);
 
@@ -97,7 +99,7 @@ it('denies drift in repaired sources, untouched files, historical proofs, packag
   execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
   writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
   const proof=JSON.parse(readFileSync(manifest,'utf8'));
-  for(const p of new Set([...MINIMAX_VIDEO_PHASE1_FILES,...readinessLifecycleParentFacts('.').paths,...Object.keys(proof.paths),manifest,postRunManifest]) as Set<string>){
+  for(const p of new Set([...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...readinessLifecycleParentFacts('.').paths,...Object.keys(proof.paths),manifest,postRunManifest]) as Set<string>){
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(readinessLifecycleParentReader(root).violations).toEqual([]);
@@ -108,6 +110,6 @@ it('denies drift in repaired sources, untouched files, historical proofs, packag
    writeFileSync(path,original);expect(readinessLifecycleParentReader(root).violations).toEqual([]);
   }
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
-  expect(readinessLifecycleParentReader(root).violations).toContain('minimax-video-phase1-backend-files');
+  expect(readinessLifecycleParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
 },30000);

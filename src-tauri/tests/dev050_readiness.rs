@@ -393,6 +393,7 @@ fn video_i2v_requires_selected_image_and_ref2va_requires_two_references() {
         Some(ReadinessStageInput {
             selected_image_asset_id: Some("ast_keyframe".to_owned()),
             selected_image_sha256: Some("sha-keyframe".to_owned()),
+            video_inputs: None,
         }),
     );
     assert!(!valid

@@ -75,7 +75,22 @@ impl ShotService {
                 )
             })
             .collect();
-        if let [(key, input)] = image_fields.as_slice() {
+        if request.stage == ShotStage::Video && self.video_inputs.is_some() {
+            let scope = crate::application::ports::ShotVideoInputScope {
+                project_id: request.project_id.clone(),
+                shot_id: request.shot_id.clone(),
+                workflow_version_id: workflow_version_id.clone(),
+                recipe_id: recipe_id.clone(),
+            };
+            let media = self
+                .video_inputs
+                .as_ref()
+                .expect("checked above")
+                .values(&scope, &recipe)
+                .await
+                .map_err(|e| ShotServiceError::InvalidInput(e.to_string()))?;
+            crate::application::shot_video_input_service::merge_media_inputs(&mut values, media);
+        } else if let [(key, input)] = image_fields.as_slice() {
             if !values.contains_key(*key) {
                 let references =
                     ordered_reference_asset_ids(&data.reference_assets, request.stage)?;

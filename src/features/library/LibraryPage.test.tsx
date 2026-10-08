@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 // @ts-expect-error Node helpers are test-only.
 import { readFileSync, readdirSync } from "node:fs";
+// @ts-expect-error Node-only validated historical schema projection.
+import { minimaxVideoPhase2ParentReader } from "../../../scripts/minimax-video-phase2-successor-guard.mjs";
 import { LibraryPage } from "./LibraryPage";
 import { CreatePage } from "../create/CreatePage";
 import { normalLibrary, relationRoute, deletionMessage } from "./libraryModel";
@@ -56,7 +58,9 @@ it("phase5_target14 event refresh typed edits blocked delete warnings and action
 it("phase5_target15 Product boundary command parity and no competing Library authority",()=>{
  for(const file of readdirSync("src/features/library").filter((f:string)=>!f.includes(".test.")&&/\.tsx?$/.test(f))){expect(readFileSync(`src/features/library/${file}`,"utf8")).not.toMatch(/services\/(tauriClient|ipc)|@tauri-apps\/api|SELECT\s|INSERT\s|create\(.*zustand/);}
  for(const file of readdirSync("src-tauri/src/application/product/library_facade")){expect(readFileSync(`src-tauri/src/application/product/library_facade/${file}`,"utf8")).not.toMatch(/sqlx::query|SqlitePool|LibraryRepository/);}
- expect(readdirSync("src/stores")).not.toContain("libraryStore.ts");expect(readdirSync("src-tauri/migrations").some((f:string)=>f.startsWith("043"))).toBe(false);
+ expect(readdirSync("src/stores")).not.toContain("libraryStore.ts");
+ const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
+ expect(readdirSync("src-tauri/migrations").filter((f:string)=>!schema.addedPaths.includes(`src-tauri/migrations/${f}`)).some((f:string)=>f.startsWith("043"))).toBe(false);
 // Full DEV-088 execution is owned by product/client.test.ts.
 // These per-feature ownership assertions remain independent and unchanged.
 },15000);

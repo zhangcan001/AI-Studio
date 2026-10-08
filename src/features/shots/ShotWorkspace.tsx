@@ -330,6 +330,10 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [videoInputsReady, setVideoInputsReady] = useState<{owner: string; ready: boolean}>();
+  const onVideoInputsReadyChange = useCallback((owner: string, ready: boolean) => {
+    setVideoInputsReady(old => old?.owner === owner && old.ready === ready ? old : {owner,ready});
+  }, []);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [structureMenuOpen, setStructureMenuOpen] = useState(false);
   const [shotListControls, setShotListControls] = useState<ShotListControls>(() => shotListControlsForNavigation(initialCollectionFilter));
@@ -443,6 +447,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
             : undefined,
         referenceCount,
         videoInputMode: nextStage === "video" ? compatibility?.videoInputMode : undefined,
+        persistentInputs: nextStage === "video" && recipe?.persistentInputs,
       };
     };
 
@@ -901,11 +906,14 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
 
   async function generate() {
     if (!selectedShot || !currentDraft) return;
+    if (stage === "video" && currentRecipe?.persistentInputs && !videoInputReady) {
+      setError("请先加载并保存当前 Recipe 的视频输入。"); return;
+    }
     if (!projectWorkflowConfig || projectWorkflowConfigError || stageResolution.blocked || !currentRecipe || !currentCompatibility?.compatible) {
       setError(projectWorkflowConfigError ?? stageResolution.reason ?? "当前阶段工作流不可用于正式 Shot 生产。");
       return;
     }
-    if (stage === "video") {
+    if (stage === "video" && !currentRecipe.persistentInputs) {
       const inputError = videoInputMode === "SINGLE_IMAGE"
         ? selectedShot.selectedImageAssetId ? undefined : "请先选择关键帧图片。"
         : videoInputMode === "REFERENCE_IMAGES"
@@ -1075,8 +1083,9 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     name: entry.name,
     versionCount: entry.versions.length,
   }));
-  const videoInputReady = videoInputMode === "TEXT_ONLY"
-    ? true
+  const videoInputReady = currentRecipe?.persistentInputs
+    ? videoInputsReady?.owner === JSON.stringify({projectId,shotId:selectedShot?.id,workflowVersionId:currentRecipe.workflowVersionId,recipeId:currentRecipe.recipeId}) && videoInputsReady.ready
+    : videoInputMode === "TEXT_ONLY" ? true
     : videoInputMode === "SINGLE_IMAGE"
       ? Boolean(selectedShot?.selectedImageAssetId)
       : videoInputMode === "REFERENCE_IMAGES"
@@ -1442,6 +1451,9 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
               onInspectorTabChange={setInspectorTab}
               currentDraft={currentDraft}
               currentRecipe={currentRecipe}
+              videoInputShotId={selectedShot?.id}
+              onVideoInputsSaved={() => { void reload(); }}
+              onVideoInputsReadyChange={onVideoInputsReadyChange}
               stageRecipes={stageRecipes}
               onRecipeChange={changeStageRecipe}
               onScalarChange={changeScalar}

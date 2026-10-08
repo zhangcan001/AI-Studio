@@ -6,3 +6,4 @@ pub mod library_facade;
 pub mod project_facade;
 pub mod run_facade;
 pub mod selection_ref;
+pub mod video_inputs;

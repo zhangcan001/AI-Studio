@@ -70,7 +70,22 @@ impl GenerationCatalogService {
                     &definition.workflow_id,
                 )
             })
-            .map(RecipeViewModel::try_from_definition)
+            .map(|definition| {
+                let mut view = RecipeViewModel::try_from_definition(definition)?;
+                view.persistent_inputs = self.admission.is_some()
+                    && view.output_types.iter().any(|kind| kind == "video");
+                if view.persistent_inputs {
+                    view.selection_ref = Some(
+                        crate::application::product::selection_ref::ExactGeneratorSelection {
+                            workflow_version_id: view.workflow_version_id.clone(),
+                            recipe_id: view.recipe_id.clone(),
+                        }
+                        .encode()
+                        .map_err(|e| GenerationCatalogError::InvalidRecipe(e.message.to_owned()))?,
+                    );
+                }
+                Ok(view)
+            })
             .collect()
     }
 }
@@ -86,6 +101,9 @@ pub struct RecipeViewModel {
     pub category: String,
     pub mode: String,
     pub fields: Vec<FieldViewModel>,
+    pub persistent_inputs: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_ref: Option<String>,
     pub output_types: Vec<String>,
 }
 
@@ -333,6 +351,8 @@ impl RecipeViewModel {
             category: definition.category,
             mode: definition.mode,
             fields,
+            persistent_inputs: false,
+            selection_ref: None,
             output_types,
         })
     }

@@ -54,8 +54,10 @@ pub mod shot_context_resolver;
 pub mod shot_reference_pack_builder;
 
 mod application {
+    pub use ai_studio_lib::application::shot_video_input_service;
     pub mod ports {
         pub use crate::ports::*;
+        pub use ai_studio_lib::application::ports::ShotVideoInputScope;
     }
     pub use crate::prompt_context_builder;
     pub use crate::shot_reference_pack_builder;

@@ -84,7 +84,7 @@ function m4MediaParentReaderUncached(root, override) {
   if(/setInterval|setTimeout|Promise\.all|zustand|@tauri-apps|\binvoke\s*\(|node:fs|library\.(?:delete|resourceEdit|useInCreation)|localStorage/.test(scan))fail('scan-authority-or-write');
   for(const p of ['src/features/library/MediaIntegrityPanel.tsx','src/features/library/useLibraryMediaInspection.ts'])if(/@tauri-apps|\binvoke\s*\(|node:fs|storagePath|canonicalPath|thumbnailPath|absolutePath/.test(disk(root,p)))fail('frontend-path-or-raw-transport:'+p);
   for(const p of frozenArtifacts)if(disk(root,p)!==before(p))fail('immutable-artifact:'+p);
-  const migrations=files(root,'src-tauri/migrations',/\.sql$/);
+  const migrations=files(root,'src-tauri/migrations',/\.sql$/).filter(p=>!closeout.addedPaths.includes(p));
   const prior=execFileSync('git',['ls-tree','-r','--name-only',M4_MEDIA_PARENT,'src-tauri/migrations'],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(p=>p.endsWith('.sql')).sort();
   if(JSON.stringify(migrations)!==JSON.stringify(prior)||migrations.some(p=>/\/043/.test(p)))fail('migration-drift');
   const oldMigrations=parentBlobs(root,prior);

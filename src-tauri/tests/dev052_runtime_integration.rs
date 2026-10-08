@@ -2728,6 +2728,7 @@ async fn runtime_i2v_selected_identity_and_ref2va_order_are_frozen() {
         ResolvedStageInput {
             selected_image_asset_id: Some(SELECTED_ASSET_ID.to_owned()),
             selected_image_sha256: Some("sha-selected-v1".to_owned()),
+            video_inputs: None,
         }
     );
     let readiness = harness

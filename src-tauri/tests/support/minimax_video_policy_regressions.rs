@@ -33,6 +33,9 @@ use ai_studio_lib::infrastructure::{
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
+#[path = "minimax_video_input_regressions.rs"]
+mod phase2_inputs;
+
 struct Fixture {
     _owned: tempfile::TempDir,
     root: PathBuf,
@@ -215,6 +218,10 @@ async fn all_four_exact_products_admit_and_compile_without_changing_recipe_bytes
         .await
         .unwrap();
     assert!(image.source_task_id.is_none());
+    let last = source
+        .import_bytes(PROJECT_ID, "last.png", &png_bytes([100, 110, 120, 255]))
+        .await
+        .unwrap();
     for (name, (version, recipe_id)) in AUTHORIZED_PACKAGES.iter().zip(&f.pairs) {
         assert!(
             f.registry
@@ -235,7 +242,11 @@ async fn all_four_exact_products_admit_and_compile_without_changing_recipe_bytes
                 InputDefinition::Image { .. } => {
                     request.items[0].values.insert(
                         key.clone(),
-                        GenerationInputValue::ImageAsset(image.id.clone()),
+                        GenerationInputValue::ImageAsset(if key == "last_frame" {
+                            last.id.clone()
+                        } else {
+                            image.id.clone()
+                        }),
                     );
                 }
                 InputDefinition::Images { .. } => {

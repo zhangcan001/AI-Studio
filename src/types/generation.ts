@@ -74,6 +74,8 @@ export interface RecipeViewModel {
   mode: string;
   fields: RecipeField[];
   outputTypes?: Array<"image" | "video">;
+  persistentInputs?: boolean;
+  selectionRef?: string;
 }
 
 export type DraftValue =

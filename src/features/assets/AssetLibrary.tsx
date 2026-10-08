@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assetLibraryPage, bulkAddAssetTag, bulkRemoveAssetTag, bulkSetAssetFavorite, getAsset, importSourceAssets, listAssetTags, setAssetFavorite } from "../../services/tauriClient";
+import { assetLibraryPage, bulkAddAssetTag, bulkRemoveAssetTag, bulkSetAssetFavorite, getAsset, importSourceAssets, importSourceFolder, listAssetTags, setAssetFavorite } from "../../services/tauriClient";
 import type {
   AssetCategoryFilter,
   AssetCreatedOrder,
@@ -42,6 +42,7 @@ interface Props {
 }
 
 export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenVideoBatch, onOpenTask, onOpenShot }: Props) {
+  const importOwner = useRef(projectId); importOwner.current = projectId;
   const [category, setCategory] = useState<AssetCategoryFilter>("ALL");
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -158,14 +159,15 @@ export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenV
     setNotice(undefined);
   }
 
-  async function importLocalAssets() {
+  async function importLocalAssets(folder = false) {
     if (importBusy) return;
+    const owner = projectId;
     setImportBusy(true);
     setError(undefined);
     setImportError(undefined);
     try {
-      const result = await importSourceAssets(projectId);
-      if (result.cancelled) return;
+      const result = await (folder ? importSourceFolder(projectId) : importSourceAssets(projectId));
+      if (result.cancelled || owner !== importOwner.current) return;
 
       await requestPage(undefined, true);
       const filterHint = hasFilters ? " 当前筛选条件可能隐藏新素材。" : "";
@@ -178,7 +180,7 @@ export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenV
         setNotice(`已导入 ${result.imported.length} 个素材。${filterHint}`);
       }
     } catch (value: unknown) {
-      setImportError(toUserMessage(value));
+      if (owner === importOwner.current) setImportError(toUserMessage(value));
     } finally {
       setImportBusy(false);
     }
@@ -276,6 +278,7 @@ export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenV
           <button type="button" className="asset-import-button" onClick={() => void importLocalAssets()} disabled={importBusy || loading || bulkBusy} aria-busy={importBusy}>
             {importBusy ? "正在导入…" : "导入本地素材"}
           </button>
+          <button type="button" className="quiet-button" onClick={() => void importLocalAssets(true)} disabled={importBusy || loading || bulkBusy}>导入图片文件夹</button>
           <button type="button" className="quiet-button" onClick={() => setTagManagerOpen(true)}>管理标签</button>
           <button type="button" className={compareMode ? "filter-button filter-button-active" : "quiet-button"} onClick={() => setCompareMode((value) => !value)}>
             {compareMode ? "结束对比选择" : "选择进行对比"}

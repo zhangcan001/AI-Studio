@@ -796,6 +796,17 @@ impl ProductionQueueService {
                 &CompileRequest::new(GenerationInputPreparer::preflight_values(&item.values)),
             )
             .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
+            if self.new_generation_admission.is_some() {
+                self.generation_service
+                    .validate_new_product_inputs(
+                        &batch.project_id,
+                        &item.workflow_version_id,
+                        &item.recipe_id,
+                        &item.values,
+                    )
+                    .await
+                    .map_err(|e| ProductionQueueError::InvalidInput(e.to_string()))?;
+            }
             let values = freeze_random_seed_values(item.values, &recipe)
                 .map_err(ProductionQueueError::InvalidInput)?;
             let values_json = if let Some(context) = direct_contexts
@@ -942,6 +953,7 @@ impl ProductionQueueService {
 
     async fn prepare_queue_values(
         &self,
+        project_id: &str,
         workflow_version_id: &str,
         recipe_id: &str,
         values_json: &Value,
@@ -956,6 +968,12 @@ impl ProductionQueueService {
             &CompileRequest::new(GenerationInputPreparer::preflight_values(&values)),
         )
         .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
+        if self.new_generation_admission.is_some() {
+            self.generation_service
+                .validate_new_product_inputs(project_id, workflow_version_id, recipe_id, &values)
+                .await
+                .map_err(|e| ProductionQueueError::InvalidInput(e.to_string()))?;
+        }
         freeze_random_seed_values(values, &recipe).map_err(ProductionQueueError::InvalidInput)
     }
 
@@ -1121,6 +1139,7 @@ impl ProductionQueueService {
             .filter(|item| item.status == ProductionBatchItemStatus::Pending)
         {
             self.prepare_queue_values(
+                &detail.batch.project_id,
                 &item.workflow_version_id,
                 &item.recipe_id,
                 &item.values_json,
@@ -1258,7 +1277,7 @@ impl ProductionQueueService {
         recipe_id: &str,
         values_json: &Value,
     ) -> Result<BTreeMap<String, GenerationInputValue>, ProductionQueueError> {
-        self.prepare_queue_values(workflow_version_id, recipe_id, values_json)
+        self.prepare_queue_values("prj_seed_test", workflow_version_id, recipe_id, values_json)
             .await
     }
 
@@ -1456,6 +1475,7 @@ impl ProductionQueueService {
                 .copied()
                 .ok_or_else(|| ProductionQueueError::NotFound(selected_id.clone()))?;
             self.prepare_queue_values(
+                &detail.batch.project_id,
                 &source.workflow_version_id,
                 &source.recipe_id,
                 &source.values_json,
@@ -1601,6 +1621,7 @@ impl ProductionQueueService {
         let now = self.clock.now();
         let source_values = self
             .prepare_queue_values(
+                &detail.batch.project_id,
                 &source.workflow_version_id,
                 &source.recipe_id,
                 &source.values_json,
@@ -1978,6 +1999,7 @@ impl ProductionQueueService {
                 let prepared = match direct_generation_context_from_json(&next.values_json) {
                     Ok(direct_context) => match self
                         .prepare_queue_values(
+                            &detail.batch.project_id,
                             &next.workflow_version_id,
                             &next.recipe_id,
                             &next.values_json,

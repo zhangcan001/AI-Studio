@@ -15,6 +15,9 @@ use std::{
 };
 use tokio::io::AsyncReadExt;
 
+mod source_paths;
+use source_paths::{open_source_file, scan_images, MAX_SOURCE_FILES};
+
 pub const MAX_SOURCE_IMAGE_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_SOURCE_VIDEO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_SOURCE_AUDIO_BYTES: u64 = 512 * 1024 * 1024;
@@ -123,6 +126,7 @@ pub struct SourceAssetImportService {
     asset_store: Arc<dyn AssetStore>,
     asset_repository: Arc<dyn AssetRepository>,
     clock: Arc<dyn Clock>,
+    media_probe: Arc<dyn MediaProbe>,
 }
 
 impl SourceAssetImportService {
@@ -137,6 +141,7 @@ impl SourceAssetImportService {
             asset_store,
             asset_repository,
             clock,
+            media_probe: Arc::new(CommandMediaProbe::default()),
         }
     }
 
@@ -157,6 +162,27 @@ impl SourceAssetImportService {
         let inspected =
             inspect_bytes(bytes).map_err(|error| SourceAssetImportError::InvalidSourceImage {
                 message: error.to_string(),
+            })?;
+        let extension = Path::new(&original_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !(extension == inspected.extension
+            || (extension == "jpeg" && inspected.extension == "jpg"))
+        {
+            return Err(SourceAssetImportError::InvalidSourceImage {
+                message: "file extension does not match decoded image".into(),
+            });
+        }
+        image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|e| SourceAssetImportError::InvalidSourceImage {
+                message: e.to_string(),
+            })?
+            .decode()
+            .map_err(|e| SourceAssetImportError::InvalidSourceImage {
+                message: e.to_string(),
             })?;
         let project_root = self
             .project_repository
@@ -221,11 +247,7 @@ impl SourceAssetImportService {
         };
         asset.thumbnail_path = thumbnail_path;
 
-        if let Err(error) = self
-            .asset_repository
-            .insert_many(std::slice::from_ref(&asset))
-            .await
-        {
+        if let Err(error) = self.asset_repository.insert_external_source(&asset).await {
             self.compensate(&stored_paths).await;
             return Err(SourceAssetImportError::AssetPersistence {
                 message: error.to_string(),
@@ -247,11 +269,15 @@ impl SourceAssetImportService {
                 message: "selected file has no usable name".to_owned(),
             })
             .and_then(safe_file_name)?;
-        let file_size = tokio::fs::metadata(path)
-            .await
+        let mut file = open_source_file(path)
+            .map(tokio::fs::File::from_std)
             .map_err(|error| SourceAssetImportError::AssetPersistence {
                 message: format!("inspect selected image: {error}"),
-            })?
+            })?;
+        let file_size = file
+            .metadata()
+            .await
+            .map_err(|e| repository_error(RepositoryError::database(e.to_string())))?
             .len();
         if file_size > MAX_SOURCE_IMAGE_BYTES {
             return Err(SourceAssetImportError::SourceImageTooLarge {
@@ -259,11 +285,19 @@ impl SourceAssetImportService {
                 actual_bytes: file_size,
             });
         }
-        let bytes = tokio::fs::read(path).await.map_err(|error| {
-            SourceAssetImportError::AssetPersistence {
+        let mut bytes = Vec::new();
+        (&mut file)
+            .take(MAX_SOURCE_IMAGE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|error| SourceAssetImportError::AssetPersistence {
                 message: format!("read selected image: {error}"),
-            }
-        })?;
+            })?;
+        if bytes.len() as u64 != file_size {
+            return Err(SourceAssetImportError::InvalidSourceImage {
+                message: "source file changed while reading".into(),
+            });
+        }
         self.import_bytes(project_id, &original_name, &bytes).await
     }
 
@@ -273,12 +307,46 @@ impl SourceAssetImportService {
         paths: &[PathBuf],
     ) -> SourceAssetImportBatch {
         let mut result = SourceAssetImportBatch::default();
+        if paths.len() > MAX_SOURCE_FILES {
+            result.failed.push(SourceAssetImportFailure {
+                display_name: "所选文件".into(),
+                error: format!("一次最多导入 {MAX_SOURCE_FILES} 个文件。"),
+            });
+            return result;
+        }
         for path in paths {
             let display_name = source_display_name(path);
             match self.import_file(project_id, path).await {
                 Ok(asset) => result.imported.push(asset),
                 Err(error) => result.failed.push(SourceAssetImportFailure {
                     display_name,
+                    error: public_import_error(&error),
+                }),
+            }
+        }
+        result
+    }
+
+    /// Pure, bounded folder import. Never calls the H3 Local Import batch commit.
+    pub async fn import_directory(&self, project_id: &str, root: &Path) -> SourceAssetImportBatch {
+        let scanned = scan_images(root, MAX_SOURCE_FILES);
+        let mut result = SourceAssetImportBatch {
+            imported: Vec::new(),
+            failed: scanned.failed,
+        };
+        for path in scanned.files {
+            // Recheck scope and all components after scanning, before opening.
+            if source_paths::within_root(root, &path).is_err() {
+                result.failed.push(SourceAssetImportFailure {
+                    display_name: source_display_name(&path),
+                    error: "目录边界或文件已变化，请重新选择。".into(),
+                });
+                continue;
+            }
+            match self.import_image_file(project_id, &path).await {
+                Ok(asset) => result.imported.push(asset),
+                Err(error) => result.failed.push(SourceAssetImportFailure {
+                    display_name: source_display_name(&path),
                     error: public_import_error(&error),
                 }),
             }
@@ -344,8 +412,8 @@ impl SourceAssetImportService {
             SourceMediaKind::Video => MAX_SOURCE_VIDEO_BYTES,
             SourceMediaKind::Audio => MAX_SOURCE_AUDIO_BYTES,
         };
-        let file_size = tokio::fs::metadata(path)
-            .await
+        let file_size = open_source_file(path)
+            .and_then(|f| f.metadata())
             .map_err(|error| SourceAssetImportError::AssetPersistence {
                 message: format!("inspect {}: {error}", path.display()),
             })?
@@ -389,6 +457,15 @@ impl SourceAssetImportService {
                 return Err(error);
             }
         };
+        if streamed.file_size != file_size
+            || validate_source_signature(kind, &extension, &streamed.signature).is_err()
+        {
+            let _ = writer.abort().await;
+            return Err(invalid_source_error(
+                kind,
+                "source file changed while streaming",
+            ));
+        }
         let stored = match writer.commit().await {
             Ok(stored) => stored,
             Err(error) => {
@@ -398,10 +475,17 @@ impl SourceAssetImportService {
             }
         };
         let mut stored_paths = vec![stored.path.clone()];
-        let media_probe = CommandMediaProbe::default();
+        let media_probe = &self.media_probe;
         let (width, height, duration_ms, thumbnail_path) = match kind {
             SourceMediaKind::Video => {
                 let metadata = media_probe.probe_video(&stored.path).await;
+                if metadata.width.unwrap_or(0) == 0
+                    || metadata.height.unwrap_or(0) == 0
+                    || metadata.duration_ms.unwrap_or(0) == 0
+                {
+                    self.compensate(&stored_paths).await;
+                    return Err(invalid_source_error(kind, "video could not be decoded with dimensions and duration; ffprobe is required"));
+                }
                 let thumbnail_path = if let Some(poster) =
                     media_probe.generate_video_poster(&stored.path).await
                 {
@@ -431,6 +515,13 @@ impl SourceAssetImportService {
             }
             SourceMediaKind::Audio => {
                 let metadata = media_probe.probe_audio(&stored.path).await;
+                if metadata.duration_ms.unwrap_or(0) == 0 {
+                    self.compensate(&stored_paths).await;
+                    return Err(invalid_source_error(
+                        kind,
+                        "audio could not be decoded with duration; ffprobe is required",
+                    ));
+                }
                 (None, None, metadata.duration_ms, None)
             }
         };
@@ -479,11 +570,7 @@ impl SourceAssetImportService {
             }
         };
         asset.thumbnail_path = thumbnail_path;
-        if let Err(error) = self
-            .asset_repository
-            .insert_many(std::slice::from_ref(&asset))
-            .await
-        {
+        if let Err(error) = self.asset_repository.insert_external_source(&asset).await {
             self.compensate(&stored_paths).await;
             return Err(SourceAssetImportError::AssetPersistence {
                 message: error.to_string(),
@@ -567,6 +654,7 @@ fn safe_file_name_for_kind(
 struct StreamedSourceFile {
     sha256: String,
     file_size: u64,
+    signature: Vec<u8>,
 }
 
 async fn stream_source_file(
@@ -575,11 +663,11 @@ async fn stream_source_file(
     max_bytes: u64,
     kind: SourceMediaKind,
 ) -> Result<StreamedSourceFile, SourceAssetImportError> {
-    let file = tokio::fs::File::open(path).await.map_err(|error| {
-        SourceAssetImportError::AssetPersistence {
+    let file = open_source_file(path)
+        .map(tokio::fs::File::from_std)
+        .map_err(|error| SourceAssetImportError::AssetPersistence {
             message: format!("open {}: {error}", path.display()),
-        }
-    })?;
+        })?;
     let mut source = FileSourceReadStream { file };
     stream_source_chunks(&mut source, writer, max_bytes, kind).await
 }
@@ -625,6 +713,7 @@ async fn stream_source_chunks(
     Ok(StreamedSourceFile {
         sha256: format!("{:x}", hasher.finalize()),
         file_size,
+        signature,
     })
 }
 
@@ -671,7 +760,7 @@ fn validate_source_size(
 }
 
 async fn read_source_prefix(path: &Path) -> Result<Vec<u8>, std::io::Error> {
-    let mut file = tokio::fs::File::open(path).await?;
+    let mut file = tokio::fs::File::from_std(open_source_file(path)?);
     let mut prefix = vec![0; SOURCE_SIGNATURE_BYTES];
     let read = file.read(&mut prefix).await?;
     prefix.truncate(read);
@@ -859,6 +948,10 @@ mod tests {
 
     #[async_trait]
     impl AssetRepository for FakeAssetRepository {
+        async fn insert_external_source(&self, asset: &Asset) -> Result<(), RepositoryError> {
+            self.insert_many(std::slice::from_ref(asset)).await
+        }
+
         async fn insert_many(&self, assets: &[Asset]) -> Result<(), RepositoryError> {
             if self.fail {
                 return Err(RepositoryError::database(
@@ -925,14 +1018,111 @@ mod tests {
     }
 
     fn service(root: &Path, repository: FakeAssetRepository) -> SourceAssetImportService {
-        SourceAssetImportService::new(
+        let mut service = SourceAssetImportService::new(
             Arc::new(FakeProjectRepository {
                 root: root.to_path_buf(),
             }),
             Arc::new(FileSystemAssetStore::new()),
             Arc::new(repository),
             Arc::new(FixedClock),
-        )
+        );
+        // Explicit metadata fixture: tests here cover managed writes/compensation,
+        // not successful real ffprobe decoding of a header-only MP4 fixture.
+        service.media_probe = Arc::new(FixtureProbe);
+        service
+    }
+
+    struct FixtureProbe;
+    #[async_trait]
+    impl crate::application::media_probe::MediaProbe for FixtureProbe {
+        async fn probe_video(&self, _: &Path) -> crate::application::media_probe::VideoMetadata {
+            crate::application::media_probe::VideoMetadata {
+                width: Some(64),
+                height: Some(64),
+                duration_ms: Some(2000),
+            }
+        }
+        async fn generate_video_poster(&self, _: &Path) -> Option<Vec<u8>> {
+            None
+        }
+        async fn probe_audio(&self, _: &Path) -> crate::application::media_probe::AudioMetadata {
+            crate::application::media_probe::AudioMetadata {
+                duration_ms: Some(2000),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn pure_folder_import_preserves_partial_failures_and_creates_only_assets() {
+        let root = tempdir().unwrap();
+        let input = root.path().join("input");
+        std::fs::create_dir_all(input.join("nested")).unwrap();
+        std::fs::write(input.join("a.png"), png()).unwrap();
+        std::fs::write(input.join("nested/b.png"), png()).unwrap();
+        std::fs::write(input.join("nested/broken.png"), b"bad").unwrap();
+        std::fs::write(input.join("video.mp4"), mp4_prefix()).unwrap();
+        let repository = FakeAssetRepository::default();
+        let batch = service(root.path(), repository.clone())
+            .import_directory("project-1", &input)
+            .await;
+        assert_eq!(batch.imported.len(), 2);
+        assert_eq!(batch.failed.len(), 1);
+        assert!(batch
+            .imported
+            .iter()
+            .all(|a| a.source_task_id.is_none() && a.category == "source_image"));
+        assert_eq!(repository.assets.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn rejects_disguised_image_and_truncated_pixel_data_before_writes() {
+        let root = tempdir().unwrap();
+        let repository = FakeAssetRepository::default();
+        let importer = service(root.path(), repository.clone());
+        assert!(importer
+            .import_bytes("project-1", "wrong.jpg", &png())
+            .await
+            .is_err());
+        let mut truncated = png();
+        truncated.truncate(40);
+        assert!(importer
+            .import_bytes("project-1", "broken.png", &truncated)
+            .await
+            .is_err());
+        assert!(repository.assets.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_video_audio_metadata_and_compensates_managed_files() {
+        struct MissingProbe;
+        #[async_trait]
+        impl crate::application::media_probe::MediaProbe for MissingProbe {
+            async fn probe_video(
+                &self,
+                _: &Path,
+            ) -> crate::application::media_probe::VideoMetadata {
+                Default::default()
+            }
+            async fn generate_video_poster(&self, _: &Path) -> Option<Vec<u8>> {
+                None
+            }
+        }
+        let root = tempdir().unwrap();
+        let repository = FakeAssetRepository::default();
+        let mut importer = service(root.path(), repository.clone());
+        importer.media_probe = Arc::new(MissingProbe);
+        for (name, bytes) in [("missing.mp4", mp4_prefix()), ("missing.wav", wav_prefix())] {
+            let path = root.path().join(name);
+            std::fs::write(&path, bytes).unwrap();
+            assert!(importer.import_file("project-1", &path).await.is_err());
+        }
+        assert!(repository.assets.lock().unwrap().is_empty());
+        for path in ["assets/source/video", "assets/source/audio"] {
+            assert_eq!(
+                std::fs::read_dir(root.path().join(path)).unwrap().count(),
+                0
+            );
+        }
     }
 
     #[tokio::test]

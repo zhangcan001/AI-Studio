@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod video_inputs;
+
 pub struct SqliteProjectBackupRepository {
     pool: SqlitePool,
 }
@@ -178,6 +180,8 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
         let mut shot_stage_prompts = query_shot_stage_prompts(&mut transaction, project_id).await?;
         materialize_legacy_shot_stage_prompts(&shots, &mut shot_stage_prompts);
         let mut shot_reference_assets = query_shot_reference_assets(&mut transaction).await?;
+        let (shot_video_input_sets, external_asset_imports) =
+            video_inputs::export(&mut transaction, project_id).await?;
         let mut shot_generation_links = query_shot_generation_links(&mut transaction).await?;
         let asset_tags = sqlx::query_as::<_, BackupAssetTag>(
             "SELECT id, project_id, name, normalized_name, created_at, updated_at FROM asset_tags WHERE project_id = ? ORDER BY created_at, id",
@@ -330,6 +334,12 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
         }
         let project_workflow_bindings =
             query_project_workflow_bindings(&mut transaction, project_id).await?;
+        video_inputs::append_workflow_refs(
+            &mut transaction,
+            &shot_video_input_sets,
+            &mut workflow_refs,
+        )
+        .await?;
         let workflow_registry = query_workflow_registry_snapshot(
             &mut transaction,
             &workflow_refs,
@@ -455,6 +465,8 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             shot_stage_configs,
             shot_stage_prompts,
             shot_reference_assets,
+            shot_video_input_sets,
+            external_asset_imports,
             shot_generation_links,
             character_profiles,
             scene_profiles,
@@ -4586,6 +4598,15 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
     }
+    video_inputs::restore(
+        transaction,
+        project,
+        document,
+        shot_ids,
+        asset_ids,
+        &workflow_version_id_map,
+    )
+    .await?;
     for link in &document.shot_generation_links {
         let link_id = shot_generation_link_ids
             .get(&link.id)

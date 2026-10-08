@@ -23,7 +23,321 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 20;
+const BACKUP_VERSION: u32 = 21;
+
+#[cfg(test)]
+mod video_input_tests {
+    use super::*;
+    use crate::application::ports::{
+        AssetRepository, ShotVideoInputAsset, ShotVideoInputRepository, ShotVideoInputScope,
+    };
+    use crate::domain::{Asset, AssetId, AssetType};
+    use crate::infrastructure::database::repositories::{
+        SqliteAssetRepository, SqliteShotVideoInputRepository,
+    };
+    use serde_json::json;
+
+    async fn owned_fixture() -> (
+        tempfile::TempDir,
+        sqlx::SqlitePool,
+        ProjectBackupService,
+        ShotVideoInputScope,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let (pool, service, project, _archive) =
+            super::tests::seed_current_v20_legacy_shot_fixture(&dir).await;
+        let root = PathBuf::from(
+            sqlx::query_scalar::<_, String>("SELECT root_path FROM projects WHERE id = ?")
+                .bind(&project)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+        );
+        let assets = SqliteAssetRepository::new(pool.clone());
+        for (id, kind, mime) in [
+            ("ast_input_first", AssetType::Image, "image/png"),
+            ("ast_input_last", AssetType::Image, "image/png"),
+            ("ast_input_video", AssetType::Video, "video/mp4"),
+            ("ast_input_audio", AssetType::Audio, "audio/wav"),
+        ] {
+            // Owned serialization fixture: tests archive integrity/identity, not decoding
+            // or Native media generation. Import security has separate real-media tests.
+            let bytes = format!("owned archive content for {id}").into_bytes();
+            let path = root.join(id);
+            std::fs::write(&path, &bytes).unwrap();
+            let mut asset = Asset::new_source_image(
+                AssetId::parse(id).unwrap(),
+                &project,
+                id,
+                id,
+                path.display().to_string(),
+                format!("{:x}", Sha256::digest(&bytes)),
+                "image/png",
+                32,
+                32,
+                bytes.len() as u64,
+                json!({"fixture": "archive serialization"}),
+                Utc::now(),
+            )
+            .unwrap();
+            asset.asset_type = kind;
+            asset.category = format!("source_{}", kind.as_str());
+            asset.mime_type = mime.into();
+            if kind != AssetType::Image {
+                asset.duration_ms = Some(3000);
+            }
+            assets.insert_external_source(&asset).await.unwrap();
+        }
+        let scope = ShotVideoInputScope {
+            project_id: project,
+            shot_id: "sht_current_v20".into(),
+            workflow_version_id: "workflow-version-1".into(),
+            recipe_id: "recipe-1".into(),
+        };
+        let inputs = [
+            ("first_frame", 0, "ast_input_first"),
+            ("last_frame", 0, "ast_input_last"),
+            ("reference_images", 0, "ast_input_last"),
+            ("reference_images", 1, "ast_input_first"),
+            ("reference_videos", 0, "ast_input_video"),
+            ("reference_audios", 0, "ast_input_audio"),
+        ]
+        .map(|(key, ordinal, id)| ShotVideoInputAsset {
+            input_key: key.into(),
+            ordinal,
+            asset_id: id.into(),
+        });
+        SqliteShotVideoInputRepository::new(pool.clone())
+            .replace(&scope, None, &inputs, Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        (dir, pool, service, scope)
+    }
+
+    #[tokio::test]
+    async fn v21_video_inputs_and_receipts_roundtrip_rotate_tokens_and_preserve_slots() {
+        let (dir, pool, service, scope) = owned_fixture().await;
+        let saved = SqliteShotVideoInputRepository::new(pool.clone())
+            .find(&scope)
+            .await
+            .unwrap()
+            .unwrap();
+        let destination = dir.path().join("inputs.aistudio-backup");
+        service
+            .export(&scope.project_id, destination.clone())
+            .await
+            .unwrap();
+        let (manifest, document, _) = inspect_archive(&destination).unwrap();
+        assert_eq!(manifest.version, 21);
+        assert_eq!(document.shot_video_input_sets, [saved.clone()]);
+        assert_eq!(document.external_asset_imports.len(), 4);
+        let inspected = service.inspect(destination).await.unwrap();
+        let restored = service.restore(&inspected.inspection_id).await.unwrap();
+        let restored_scope = ShotVideoInputScope {
+            project_id: restored.id.clone(),
+            shot_id: sqlx::query_scalar("SELECT id FROM shots WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            ..scope.clone()
+        };
+        let actual = SqliteShotVideoInputRepository::new(pool.clone())
+            .find(&restored_scope)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(actual.updated_at, saved.updated_at);
+        assert_eq!(actual.token.revision, saved.token.revision);
+        assert_ne!(actual.token.instance_id, saved.token.instance_id);
+        assert_eq!(
+            actual
+                .inputs
+                .iter()
+                .map(|i| (&i.input_key, i.ordinal))
+                .collect::<Vec<_>>(),
+            saved
+                .inputs
+                .iter()
+                .map(|i| (&i.input_key, i.ordinal))
+                .collect::<Vec<_>>()
+        );
+        let assets = SqliteAssetRepository::new(pool.clone());
+        for (old, new) in saved.inputs.iter().zip(&actual.inputs) {
+            assert_ne!(old.asset_id, new.asset_id);
+            let old_receipt = assets
+                .find_external_import(&scope.project_id, &AssetId::parse(&old.asset_id).unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            let new_receipt = assets
+                .find_external_import(&restored.id, &AssetId::parse(&new.asset_id).unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(old_receipt.sha256, new_receipt.sha256);
+            assert_eq!(old_receipt.media_type, new_receipt.media_type);
+            assert_eq!(old_receipt.duration_ms, new_receipt.duration_ms);
+            assert_eq!(old_receipt.imported_at, new_receipt.imported_at);
+            let asset = assets
+                .find_by_id(&AssetId::parse(&new.asset_id).unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(PathBuf::from(&asset.storage_path).starts_with(&service.projects_dir));
+            assert_eq!(
+                format!(
+                    "{:x}",
+                    Sha256::digest(std::fs::read(&asset.storage_path).unwrap())
+                ),
+                new_receipt.sha256
+            );
+        }
+        assert!(SqliteShotVideoInputRepository::new(pool.clone())
+            .replace(&restored_scope, Some(&saved.token), &[], Utc::now())
+            .await
+            .unwrap()
+            .is_none());
+        let twice = dir.path().join("twice.aistudio-backup");
+        service.export(&restored.id, twice.clone()).await.unwrap();
+        let (_, doc, _) = inspect_archive(&twice).unwrap();
+        assert_eq!(doc.shot_video_input_sets, [actual]);
+        assert_eq!(doc.external_asset_imports.len(), 4);
+        assert_eq!(
+            SqliteShotVideoInputRepository::new(pool.clone())
+                .find(&scope)
+                .await
+                .unwrap()
+                .unwrap(),
+            saved
+        );
+    }
+
+    #[tokio::test]
+    async fn v21_rejects_forged_provenance_wrong_scope_order_and_missing_membership() {
+        let (_dir, _pool, service, scope) = owned_fixture().await;
+        let original = service
+            .build_backup(&scope.project_id)
+            .await
+            .unwrap()
+            .document;
+        assert!(video_inputs::validate(&original, 21).is_ok());
+        let mut bad = original.clone();
+        bad.external_asset_imports[0].sha256 = "b".repeat(64);
+        assert!(video_inputs::validate(&bad, 21).is_err());
+        bad = original.clone();
+        bad.external_asset_imports[0].project_id = "another-project".into();
+        assert!(video_inputs::validate(&bad, 21).is_err());
+        bad = original.clone();
+        bad.shot_video_input_sets[0].scope.project_id = "another-project".into();
+        assert!(video_inputs::validate(&bad, 21).is_err());
+        bad = original.clone();
+        bad.shot_video_input_sets[0].inputs[0].ordinal = 1;
+        assert!(video_inputs::validate(&bad, 21).is_err());
+        bad = original.clone();
+        bad.shot_video_input_sets[0].inputs[0].asset_id = "ast_missing".into();
+        assert!(video_inputs::validate(&bad, 21).is_err());
+        bad = original.clone();
+        bad.external_asset_imports.clear();
+        assert!(video_inputs::validate(&bad, 21).is_err());
+        assert!(video_inputs::validate(&original, 20).is_err());
+    }
+
+    #[tokio::test]
+    async fn v20_without_video_authority_is_readable_and_does_not_infer_legacy_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let (pool, service, project, _) =
+            super::tests::seed_current_v20_legacy_shot_fixture(&dir).await;
+        let doc = service.build_backup(&project).await.unwrap().document;
+        assert!(doc.shot_video_input_sets.is_empty());
+        assert!(doc.external_asset_imports.is_empty());
+        assert!(doc.shots[0].selected_image_asset_id.is_some());
+        assert!(video_inputs::validate(&doc, 20).is_ok());
+        let value = serde_json::to_value(&doc).unwrap();
+        let mut legacy = value.as_object().unwrap().clone();
+        legacy.remove("shotVideoInputSets");
+        legacy.remove("externalAssetImports");
+        let decoded: BackupDocument = serde_json::from_value(Value::Object(legacy)).unwrap();
+        assert!(decoded.shot_video_input_sets.is_empty());
+        assert!(decoded.external_asset_imports.is_empty());
+        assert_eq!(
+            decoded.shots[0].selected_image_asset_id,
+            doc.shots[0].selected_image_asset_id
+        );
+        // Produce a genuine v20-format archive in this owned fixture, omitting the
+        // new authority fields and updating its exact logical snapshot checksum.
+        let current = dir.path().join("current.zip");
+        service.export(&project, current.clone()).await.unwrap();
+        let mut source = ZipArchive::new(File::open(current).unwrap()).unwrap();
+        let mut entries = Vec::new();
+        for index in 0..source.len() {
+            let mut file = source.by_index(index).unwrap();
+            let name = file.name().to_owned();
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).unwrap();
+            entries.push((name, bytes));
+        }
+        let project_bytes = serde_json::to_vec(&Value::Object({
+            let mut value = serde_json::to_value(&decoded)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .clone();
+            value.remove("shotVideoInputSets");
+            value.remove("externalAssetImports");
+            value
+        }))
+        .unwrap();
+        let mut manifest: ProjectBackupManifest = serde_json::from_slice(&entries[0].1).unwrap();
+        manifest.version = 20;
+        manifest.logical_snapshot_checksum = Some(format!("{:x}", Sha256::digest(&project_bytes)));
+        let legacy = dir.path().join("legacy-v20.zip");
+        let mut writer = ZipWriter::new(File::create(&legacy).unwrap());
+        for (name, bytes) in entries {
+            writer.start_file(&name, FileOptions::default()).unwrap();
+            let bytes = match name.as_str() {
+                "manifest.json" => serde_json::to_vec(&manifest).unwrap(),
+                "project.json" => project_bytes.clone(),
+                _ => bytes,
+            };
+            writer.write_all(&bytes).unwrap();
+        }
+        writer.finish().unwrap();
+        let inspection = service.inspect(legacy).await.unwrap();
+        let restored = service.restore(&inspection.inspection_id).await.unwrap();
+        assert_eq!(restored.backup_version, 20);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_video_input_sets WHERE project_id = ?"
+            )
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM external_asset_imports WHERE project_id = ?"
+            )
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        assert!(sqlx::query_scalar::<_, Option<String>>(
+            "SELECT selected_image_asset_id FROM shots WHERE project_id = ?"
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .is_some());
+    }
+}
+mod video_inputs;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -1014,6 +1328,10 @@ pub struct BackupDocument {
     pub(crate) shot_stage_prompts: Vec<BackupShotStagePrompt>,
     #[serde(default)]
     pub(crate) shot_reference_assets: Vec<BackupShotReferenceAsset>,
+    #[serde(default)]
+    pub(crate) shot_video_input_sets: Vec<crate::application::ports::ShotVideoInputSet>,
+    #[serde(default)]
+    pub(crate) external_asset_imports: Vec<crate::application::ports::ExternalAssetImportRecord>,
     #[serde(default)]
     pub(crate) shot_generation_links: Vec<BackupShotGenerationLink>,
     #[serde(default)]
@@ -2537,6 +2855,7 @@ fn inspect_archive(
                 | 18
                 | 19
                 | 20
+                | 21
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -2691,6 +3010,7 @@ fn validate_document_entries(
     validate_benchmark_document(document)?;
     validate_production_orchestrator_document(document)?;
     validate_shot_document(document, version)?;
+    video_inputs::validate(document, version)?;
     validate_script_draft_document(document, version)?;
     Ok(())
 }
@@ -5109,7 +5429,7 @@ mod tests {
         )
     }
 
-    async fn seed_current_v20_legacy_shot_fixture(
+    pub(super) async fn seed_current_v20_legacy_shot_fixture(
         directory: &tempfile::TempDir,
     ) -> (sqlx::SqlitePool, ProjectBackupService, String, PathBuf) {
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
@@ -5587,6 +5907,8 @@ mod tests {
             shot_stage_configs: Vec::new(),
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
+            shot_video_input_sets: Vec::new(),
+            external_asset_imports: Vec::new(),
             shot_generation_links: Vec::new(),
             character_profiles: Vec::new(),
             scene_profiles: Vec::new(),
@@ -6709,7 +7031,7 @@ mod tests {
         assert!(exported.entries >= 6);
         let (manifest, document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 20);
+        assert_eq!(manifest.version, super::BACKUP_VERSION);
         assert_eq!(document.project_workflow_bindings.len(), 2);
         assert_eq!(document.project_workflow_bindings[0].stage, "IMAGE");
         assert_eq!(
@@ -7584,6 +7906,8 @@ mod tests {
             shot_stage_configs: Vec::new(),
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
+            shot_video_input_sets: Vec::new(),
+            external_asset_imports: Vec::new(),
             shot_generation_links: Vec::new(),
             character_profiles: Vec::new(),
             scene_profiles: Vec::new(),
@@ -7772,6 +8096,8 @@ mod tests {
             shot_stage_configs: Vec::new(),
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
+            shot_video_input_sets: Vec::new(),
+            external_asset_imports: Vec::new(),
             shot_generation_links: Vec::new(),
             character_profiles: Vec::new(),
             scene_profiles: Vec::new(),
@@ -7881,7 +8207,7 @@ mod tests {
         );
         assert!(restored_binding.5.starts_with("bnd_"));
         assert_ne!(restored_binding.5, "bnd_stale_binding");
-        assert_eq!(restored.backup_version, 20);
+        assert_eq!(restored.backup_version, super::BACKUP_VERSION);
     }
 
     #[tokio::test]
@@ -7925,7 +8251,7 @@ mod tests {
             .expect("current v20 restore");
 
         assert_eq!(restored.status, "COMPLETE");
-        assert_eq!(restored.backup_version, 20);
+        assert_eq!(restored.backup_version, super::BACKUP_VERSION);
         assert_eq!(restored.assets, 2);
         assert_eq!(restored.versions, 1);
         assert_eq!(restored.generations, 1);
@@ -8298,7 +8624,7 @@ mod tests {
             .await
             .expect("export v19");
         let (manifest, document, _) = inspect_archive(&archive).unwrap();
-        assert_eq!(manifest.version, 20);
+        assert_eq!(manifest.version, super::BACKUP_VERSION);
         assert_eq!(document.asset_versions.len(), 1);
         assert_eq!(document.asset_relations.len(), 1);
         assert_eq!(document.models.len(), 1);
@@ -8331,7 +8657,7 @@ mod tests {
         assert_eq!(preview.tools, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_eq!(restored.status, "COMPLETE");
-        assert_eq!(restored.backup_version, 20);
+        assert_eq!(restored.backup_version, super::BACKUP_VERSION);
         assert_eq!(restored.assets, 2);
         assert_eq!(restored.versions, 1);
         assert_eq!(restored.generations, 1);
@@ -8586,7 +8912,7 @@ mod tests {
         write_zip_to_path(&document, &files, &archive_path).unwrap();
 
         let (manifest, loaded, names) = inspect_archive(&archive_path).unwrap();
-        assert_eq!(manifest.version, 20);
+        assert_eq!(manifest.version, super::BACKUP_VERSION);
         assert!(manifest.logical_snapshot_checksum.is_some());
         assert_eq!(manifest.media_inventory.len(), 1);
         assert_eq!(manifest.media_inventory[0].sha256, sha);
@@ -10001,7 +10327,7 @@ mod tests {
         let archive_path = directory.path().join("multimedia-v20.aiarchive");
         write_zip_to_path(&document, &files, &archive_path).unwrap();
         let (manifest, loaded, _) = inspect_archive(&archive_path).unwrap();
-        assert_eq!(manifest.version, 20);
+        assert_eq!(manifest.version, super::BACKUP_VERSION);
         let inventory = manifest.inventory.expect("v20 inventory");
         assert_eq!(inventory.assets, 3);
         assert_eq!(inventory.asset_versions, 6);
@@ -10025,7 +10351,7 @@ mod tests {
         let restored = service.restore(&preview.inspection_id).await.unwrap();
 
         assert_eq!(restored.status, "COMPLETE");
-        assert_eq!(restored.backup_version, 20);
+        assert_eq!(restored.backup_version, super::BACKUP_VERSION);
         assert_eq!(restored.assets, 3);
         assert_eq!(restored.versions, 6);
         assert_eq!(restored.generations, 1);
@@ -10351,7 +10677,7 @@ mod tests {
         let restored = service.restore(&preview.inspection_id).await.unwrap();
 
         assert_eq!(restored.status, "COMPLETE");
-        assert_eq!(restored.backup_version, 20);
+        assert_eq!(restored.backup_version, super::BACKUP_VERSION);
         assert_eq!(restored.generations, 1);
         assert_eq!(restored.missing_models, vec!["mdv_unknown".to_owned()]);
         assert_eq!(restored.missing_tools, vec!["tins_unknown".to_owned()]);

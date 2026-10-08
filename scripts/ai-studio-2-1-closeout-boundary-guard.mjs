@@ -48,7 +48,7 @@ function closeoutParentReaderUncached(root,override) {
   if(disk('src-tauri/Cargo.lock')!==before('src-tauri/Cargo.lock').replace('name = "ai-studio"\nversion = "2.0.0-personal"','name = "ai-studio"\nversion = "2.1.0-personal"'))fail('lock-only');
   if(disk('src-tauri/tauri.conf.json')!==before('src-tauri/tauri.conf.json').replace('"version": "2.0.0-personal"','"version": "2.1.0-personal"').replace('"version": "2.0.0"','"version": "2.1.0"'))fail('bundle-only');
   for(const p of [...blobs.keys()].filter(p=>p.startsWith('docs/architecture/')||p.startsWith('src-tauri/migrations/')))if(disk(p)!==before(p))fail(`frozen:${p}`);
-  if(JSON.stringify(files(root,'src-tauri/migrations',/\.sql$/))!==JSON.stringify([...blobs.keys()].filter(p=>p.startsWith('src-tauri/migrations/')&&p.endsWith('.sql'))))fail('migration-file-set');
+  if(JSON.stringify(files(root,'src-tauri/migrations',/\.sql$/).filter(p=>!repair.addedPaths.includes(p)))!==JSON.stringify([...blobs.keys()].filter(p=>p.startsWith('src-tauri/migrations/')&&p.endsWith('.sql'))))fail('migration-file-set');
   if(disk('scripts/testing/release-config.test.ts')!==before('scripts/testing/release-config.test.ts').replace("'2.0.0-personal'","'2.1.0-personal'"))fail('release-test-semantics');
   const rustReleaseTest='src-tauri/src/infrastructure/database/dev048_consistency_e2e.rs';
   if(disk(rustReleaseTest)!==before(rustReleaseTest).replaceAll('2.0.0-personal','2.1.0-personal'))fail('rust-release-test-semantics');

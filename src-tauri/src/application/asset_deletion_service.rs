@@ -181,6 +181,12 @@ impl AssetDeletionService {
                     ),
                 );
             }
+            for shot_id in &reference.shot_video_input_ids {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!("该素材仍被镜头“{shot_id}”的正式视频输入使用，请先解除输入绑定。"),
+                );
+            }
             for shot_id in &reference.selected_image_by_shot_ids {
                 push_unique_reason(
                     &mut blocking_reasons,

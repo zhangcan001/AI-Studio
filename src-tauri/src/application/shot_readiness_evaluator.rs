@@ -230,7 +230,18 @@ fn reference_gate(
         .filter(|diagnostic| diagnostic_gate(diagnostic) == Some(key))
         .map(|diagnostic| diagnostic_check(key, diagnostic))
         .collect::<Vec<_>>();
-    for reference_set in &context.reference_pack.reference_sets {
+    // Formal media slots are the reference authority. Legacy required image
+    // sets remain historical context, not additional Ref2VA image quotas.
+    let formal_inputs = context.stage == ShotStage::Video
+        && stage_input
+            .and_then(|input| input.video_inputs.as_ref())
+            .is_some();
+    for reference_set in context
+        .reference_pack
+        .reference_sets
+        .iter()
+        .filter(|_| !formal_inputs)
+    {
         let count = context
             .reference_assets
             .iter()
@@ -252,6 +263,36 @@ fn reference_gate(
     }
 
     let mode = mode.unwrap_or_default();
+    if context.stage == ShotStage::Video {
+        if let Some(inputs) = stage_input.and_then(|input| input.video_inputs.as_ref()) {
+            // Shape/limits/durations are validated by the shared H3 compiler and
+            // preparer, not a second numerical reference contract in readiness.
+            let keys: &[&str] = match mode {
+                "I2V" => &["first_frame"],
+                "FIRST_LAST" => &["first_frame", "last_frame"],
+                _ => &[],
+            };
+            for key_name in keys {
+                if !inputs
+                    .inputs
+                    .iter()
+                    .any(|i| i.input_key == *key_name && !i.sha256.is_empty())
+                {
+                    checks.push(
+                        check(
+                            key,
+                            ReadinessCheckState::Incomplete,
+                            "VIDEO_INPUT_REQUIRED",
+                            format!("{key_name} 需要重新选择素材"),
+                            "ResolvedVideoInputSet",
+                        )
+                        .with_fix_action("绑定正式外部导入素材"),
+                    );
+                }
+            }
+            return ReadinessGateResult::new(key, checks);
+        }
+    }
     if context.stage == ShotStage::Video && mode == "I2V" {
         match stage_input.and_then(|input| input.selected_image_asset_id.as_deref()) {
             None => checks.push(
@@ -843,8 +884,11 @@ fn mode_is_compatible(
         .as_deref()
         .unwrap_or_default()
         .to_ascii_uppercase();
-    let declared_video =
-        category == "VIDEO" || matches!(mode.as_str(), "I2V" | "T2V" | "REF2VA" | "VIDEO");
+    let declared_video = category == "VIDEO"
+        || matches!(
+            mode.as_str(),
+            "I2V" | "FIRST_LAST" | "T2V" | "REF2VA" | "VIDEO"
+        );
     let declared_image = category == "IMAGE"
         || matches!(
             mode.as_str(),
@@ -862,7 +906,16 @@ fn mode_is_compatible(
 fn is_known_workflow_mode(mode: &str) -> bool {
     matches!(
         mode,
-        "I2V" | "T2V" | "REF2VA" | "VIDEO" | "T2I" | "I2I" | "TXT2IMG" | "IMG2IMG" | "IMAGE"
+        "I2V"
+            | "FIRST_LAST"
+            | "T2V"
+            | "REF2VA"
+            | "VIDEO"
+            | "T2I"
+            | "I2I"
+            | "TXT2IMG"
+            | "IMG2IMG"
+            | "IMAGE"
     )
 }
 
@@ -911,9 +964,90 @@ mod tests {
         context.stage_input = ResolvedStageInput {
             selected_image_asset_id: Some("asset-selected".to_owned()),
             selected_image_sha256: Some("sha256".to_owned()),
+            video_inputs: None,
         };
         let gate = reference_gate(&context, Some("I2V"), Some(&context.stage_input));
         assert_eq!(gate.state, ReadinessCheckState::Pass);
+    }
+
+    fn formal_slot(key: &str, kind: &str) -> crate::domain::shot_context::ResolvedVideoInputAsset {
+        crate::domain::shot_context::ResolvedVideoInputAsset {
+            input_key: key.into(),
+            ordinal: 0,
+            asset_id: format!("asset-{key}"),
+            media_type: kind.into(),
+            sha256: "a".repeat(64),
+            duration_ms: None,
+        }
+    }
+
+    #[test]
+    fn formal_first_last_requires_both_slots_without_selecting_an_image_result() {
+        use crate::domain::shot_context::ResolvedVideoInputSet;
+        let mut context = context(ShotStage::Video);
+        context.stage_input.video_inputs = Some(ResolvedVideoInputSet {
+            workflow_version_id: "version".into(),
+            recipe_id: "recipe".into(),
+            instance_id: Some("instance".into()),
+            revision: Some(1),
+            inputs: vec![formal_slot("first_frame", "image")],
+        });
+        assert_eq!(
+            reference_gate(&context, Some("FIRST_LAST"), Some(&context.stage_input)).state,
+            ReadinessCheckState::Incomplete
+        );
+        context
+            .stage_input
+            .video_inputs
+            .as_mut()
+            .unwrap()
+            .inputs
+            .push(formal_slot("last_frame", "image"));
+        assert_eq!(
+            reference_gate(&context, Some("FIRST_LAST"), Some(&context.stage_input)).state,
+            ReadinessCheckState::Pass
+        );
+        assert!(context.stage_input.selected_image_asset_id.is_none());
+    }
+
+    #[test]
+    fn formal_reference_video_does_not_require_legacy_image_sets_or_two_images() {
+        use crate::domain::{
+            consistency::{BindingRole, InheritanceMode},
+            shot_context::{ResolvedReferenceSet, ResolvedVideoInputSet, SourceTrace},
+        };
+        let mut context = context(ShotStage::Video);
+        context
+            .reference_pack
+            .reference_sets
+            .push(ResolvedReferenceSet {
+                reference_set_id: "legacy-image-set".into(),
+                role: BindingRole::ShotReference,
+                ordinal: 0,
+                required: true,
+                content_hash: "legacy".into(),
+                source: SourceTrace {
+                    scope: ContextSourceScope::Legacy,
+                    scope_id: "shot".into(),
+                    binding_id: None,
+                    entity_id: "legacy-image-set".into(),
+                    inheritance_mode: InheritanceMode::Explicit,
+                },
+            });
+        context.stage_input.video_inputs = Some(ResolvedVideoInputSet {
+            workflow_version_id: "version".into(),
+            recipe_id: "recipe".into(),
+            instance_id: Some("instance".into()),
+            revision: Some(1),
+            inputs: vec![formal_slot("reference_videos", "video")],
+        });
+        let gate = reference_gate(&context, Some("REF2VA"), Some(&context.stage_input));
+        assert_eq!(gate.state, ReadinessCheckState::Pass);
+        assert!(gate
+            .checks
+            .iter()
+            .all(|c| c.code != "REF2VA_REFERENCES_REQUIRED"
+                && c.code != "REQUIRED_REFERENCE_SET_EMPTY"));
     }
 
     #[test]

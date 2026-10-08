@@ -26,7 +26,7 @@ export function PromptPanel({ controller: c }: { controller: CreateController })
 function MediaField({ field, controller: c }: { field: RecipeField; controller: CreateController }) {
   const kind = mediaKind(field); const ids = assetIds(c.values[field.key]);
   const plural = ["images", "videos", "audios"].includes(field.type);
-  const choices = c.context?.mediaInputs.filter(asset => asset.mediaKind === kind) ?? [];
+  const choices = (c.videoInputs.enabled ? c.videoInputs.view?.assets : c.context?.mediaInputs)?.filter(asset => asset.mediaKind === kind) ?? [];
   const set = (next: string[]) => next.length ? c.setValue(field.key, mediaValue(field, next)) : c.removeValue(field.key);
   return <label>{fieldLabel(field)}{("required" in field && field.required) ? "（必需）" : "（可选）"}
     <select id={`create-field-${field.key}`} aria-label={fieldLabel(field)} value={plural ? "" : ids[0] ?? ""} onChange={e => set(plural ? [...ids, e.target.value].filter(Boolean) : e.target.value ? [e.target.value] : [])}>
@@ -38,6 +38,13 @@ function MediaField({ field, controller: c }: { field: RecipeField; controller: 
 }
 export function MediaInputPanel({ controller: c }: { controller: CreateController }) {
   const fields=c.generator?.fields.filter(field=>mediaKind(field)) ?? [];
+  if (c.videoInputs.enabled) return <section aria-label="镜头视频输入"><h2>镜头视频输入</h2><p>输入按当前生成器独立保存；导入不是生图结果，不会自动填充首尾帧。</p>
+    <fieldset disabled={c.busy || c.videoInputs.loading || c.videoInputs.busy || !c.videoInputs.view}>{fields.map(field => <MediaField key={field.key} field={field} controller={c} />)}
+      {!fields.length && <p>T2V 无需图片输入。</p>}
+      <button type="button" onClick={()=>void c.videoInputs.importAssets(false)}>导入图片、视频或音频</button><button type="button" onClick={()=>void c.videoInputs.importAssets(true)}>导入图片文件夹</button>
+      <button type="button" onClick={()=>void c.videoInputs.save()} disabled={!c.videoInputs.dirty}>保存视频输入</button>
+    </fieldset><button type="button" disabled={c.videoInputs.busy} onClick={()=>void c.videoInputs.refresh()}>刷新已保存输入</button>
+    {c.videoInputs.loading && <p>正在加载当前 Recipe 输入…</p>}{c.videoInputs.dirty && <p>输入尚未保存。</p>}{c.videoInputs.error && <p role="alert">{c.videoInputs.error}</p>}</section>;
   return <section><h2>本次生成素材</h2>{fields.map(field => <MediaField key={field.key} field={field} controller={c} />)}{fields.length>0&&<p>下拉列表显示当前项目近期100项素材，并包含当前镜头明确关联的素材。更早的素材可从资源库查找。</p>}{fields.some(field=>mediaKind(field)==="image")&&<button type="button" onClick={()=>c.openLibrary("images")}>在资源库查找更多图片</button>}{fields.some(field=>mediaKind(field)==="video")&&<button type="button" onClick={()=>c.openLibrary("videos")}>在资源库查找更多视频</button>}<small>这些媒体输入只属于本次草稿，不会修改镜头长期参考图。</small></section>;
 }
 export function ReferencePanel({ context, save, busy }: { context: CreationContext; save: (ids: string[]) => unknown; busy: boolean }) {

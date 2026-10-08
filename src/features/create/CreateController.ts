@@ -7,6 +7,7 @@ import type { AppRoute } from "../../app/routes/types";
 import { useStudioStore } from "../../stores/studioStore";
 import type { ComfyStatus } from "../../types/comfy";
 import { assetIds, draftFor, mediaKind, mediaValue, scopeKey, type CreateRoute } from "./createModel";
+import { usePersistentVideoInputs } from "./usePersistentVideoInputs";
 export interface CreateProps { route: CreateRoute; runtime?: ComfyStatus; navigate: (route: AppRoute) => unknown; onDirtyChange?: (dirty: boolean) => void }
 interface StageView { selection: string; values: GenerationValues; dirty: boolean; runRef: RunRef | null; accepted: CreationAccepted | null; provenance?: CreationPromptProvenance }
 export function useCreateController({ route, runtime, navigate, onDirtyChange }: CreateProps) {
@@ -49,6 +50,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const readiness = readinessCheck && matchesReadiness(readinessCheck.draft) && runtimeStatus === "CONNECTED" ? readinessCheck.result : undefined;
   const readinessState = !runtime ? "CHECKING" : runtimeStatus !== "CONNECTED" ? "RUNTIME_OFFLINE" : readiness ? readiness.ready ? "READY" : "NOT_READY" : "CHECKING";
   const generator = generators.find(item => item.selectionRef === selection);
+  const videoInputs = usePersistentVideoInputs(route, generator, loading);
   useEffect(() => {
     if (previousOwner.current !== owner) { snapshots.current.clear(); previousOwner.current = owner; }
     const token = ++epoch.current;
@@ -173,6 +175,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   },[values,loading,context,generator,key]);
   const librarySlots = libraryIntent?.kind === "asset" ? generator?.fields.filter(field=>mediaKind(field)===libraryIntent.mediaKind) ?? [] : [];
   function applyLibraryAsset(fieldKey:string) {
+    if (busy || (videoInputs.enabled && (videoInputs.loading || videoInputs.busy || !videoInputs.view))) return;
     if(libraryIntent?.kind!=="asset" || libraryIntent.projectId!==route.projectId || !context?.selectedShot)return;
     const field=librarySlots.find(f=>f.key===fieldKey);
     if(!field || !context.mediaInputs.some(a=>a.id===libraryIntent.assetId && a.mediaKind===libraryIntent.mediaKind))return;
@@ -209,6 +212,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     finally { actionLock.current = false; setBusy(false); }
   }
   function generate() { return mutate(async () => {
+    if (!videoInputs.ready) { setError("请先加载并保存当前 Recipe 的视频输入。"); return; }
     const token = epoch.current;
     const draft = currentDraft.current;
     ++readinessEpoch.current; // An earlier read-only check cannot replace submit-time readiness.
@@ -226,7 +230,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); setRun(next); setRunRef(next.ref); setAccepted(null); });
-  return { libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy,
+  return { videoInputs, libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy,
     setValue, removeValue, chooseResolution, applyPromptChoice, openLibrary, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
     openRuntimeSettings: () => {
       useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });

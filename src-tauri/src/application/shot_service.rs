@@ -137,6 +137,7 @@ pub struct PreparedShotGeneration {
 }
 
 pub struct ShotService {
+    video_inputs: Option<Arc<crate::application::shot_video_input_service::ShotVideoInputService>>,
     repository: Arc<dyn ShotRepository>,
     task_repository: Arc<dyn TaskRepository>,
     asset_repository: Arc<dyn AssetRepository>,
@@ -162,6 +163,7 @@ impl ShotService {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
+            video_inputs: None,
             repository,
             task_repository,
             asset_repository,
@@ -177,6 +179,14 @@ impl ShotService {
 
     pub fn with_stage_prompt_repository(mut self, repository: Arc<dyn ShotBulkRepository>) -> Self {
         self.stage_prompt_repository = Some(repository);
+        self
+    }
+
+    pub fn with_video_inputs(
+        mut self,
+        service: Arc<crate::application::shot_video_input_service::ShotVideoInputService>,
+    ) -> Self {
+        self.video_inputs = Some(service);
         self
     }
 
@@ -542,72 +552,106 @@ impl ShotService {
             }
         }
         if request.stage == ShotStage::Video {
-            let (selected, references) = if is_frozen_retry {
-                match &input_mode {
-                    ShotVideoInputMode::TextOnly => (None, Vec::new()),
-                    ShotVideoInputMode::SingleImage { key } => match values.get(key).cloned() {
-                        Some(GenerationInputValue::ImageAsset(id)) => (Some(id), Vec::new()),
-                        _ => {
+            if let Some(service) = &self.video_inputs {
+                if !is_frozen_retry {
+                    let scope = crate::application::ports::ShotVideoInputScope {
+                        project_id: request.project_id.clone(),
+                        shot_id: request.shot_id.clone(),
+                        workflow_version_id: definition.workflow_version_id.clone(),
+                        recipe_id: definition.recipe_id.clone(),
+                    };
+                    let media = service
+                        .values(&scope, &recipe)
+                        .await
+                        .map_err(|e| ShotServiceError::InvalidInput(e.to_string()))?;
+                    crate::application::shot_video_input_service::merge_media_inputs(
+                        &mut values,
+                        media,
+                    );
+                }
+            } else {
+                let (selected, references) = if is_frozen_retry {
+                    match &input_mode {
+                        ShotVideoInputMode::FirstLast | ShotVideoInputMode::ReferenceMedia => {
                             return Err(ShotServiceError::InvalidInput(
-                                "失败任务快照缺少有效的视频输入，无法安全重试".to_owned(),
+                                "正式视频输入不可用；需要重新选择素材".into(),
                             ));
                         }
-                    },
-                    ShotVideoInputMode::ReferenceImages { key, .. } => {
-                        match values.get(key).cloned() {
-                            Some(GenerationInputValue::ImageAssets(ids)) => (None, ids),
+                        ShotVideoInputMode::TextOnly => (None, Vec::new()),
+                        ShotVideoInputMode::SingleImage { key } => match values.get(key).cloned() {
+                            Some(GenerationInputValue::ImageAsset(id)) => (Some(id), Vec::new()),
                             _ => {
                                 return Err(ShotServiceError::InvalidInput(
                                     "失败任务快照缺少有效的视频输入，无法安全重试".to_owned(),
                                 ));
                             }
+                        },
+                        ShotVideoInputMode::ReferenceImages { key, .. } => {
+                            match values.get(key).cloned() {
+                                Some(GenerationInputValue::ImageAssets(ids)) => (None, ids),
+                                _ => {
+                                    return Err(ShotServiceError::InvalidInput(
+                                        "失败任务快照缺少有效的视频输入，无法安全重试".to_owned(),
+                                    ));
+                                }
+                            }
                         }
                     }
-                }
-            } else {
-                match &input_mode {
-                    ShotVideoInputMode::TextOnly => (None, Vec::new()),
-                    ShotVideoInputMode::SingleImage { .. } => {
-                        let selected =
-                            data.shot.selected_image_asset_id.as_ref().ok_or_else(|| {
-                                ShotServiceError::InvalidInput("请先选择关键帧图片".to_owned())
+                } else {
+                    match &input_mode {
+                        ShotVideoInputMode::FirstLast | ShotVideoInputMode::ReferenceMedia => {
+                            return Err(ShotServiceError::InvalidInput(
+                                "正式视频输入不可用；需要重新选择素材".into(),
+                            ));
+                        }
+                        ShotVideoInputMode::TextOnly => (None, Vec::new()),
+                        ShotVideoInputMode::SingleImage { .. } => {
+                            let selected =
+                                data.shot.selected_image_asset_id.as_ref().ok_or_else(|| {
+                                    ShotServiceError::InvalidInput("请先选择关键帧图片".to_owned())
+                                })?;
+                            let selected = AssetId::parse(selected.clone()).map_err(|error| {
+                                ShotServiceError::InvalidInput(format!(
+                                    "关键帧素材 ID 无效：{error}"
+                                ))
                             })?;
-                        let selected = AssetId::parse(selected.clone()).map_err(|error| {
-                            ShotServiceError::InvalidInput(format!("关键帧素材 ID 无效：{error}"))
-                        })?;
-                        self.validate_image_asset(&request.project_id, &selected, "关键帧")
-                            .await?;
-                        (Some(selected), Vec::new())
-                    }
-                    ShotVideoInputMode::ReferenceImages {
-                        min_items,
-                        max_items,
-                        ..
-                    } => {
-                        let references =
-                            ordered_reference_asset_ids(&data.reference_assets, request.stage)?;
-                        validate_ordered_reference_ids(&references, Some((*min_items, *max_items)))
-                            .map_err(ShotServiceError::InvalidInput)?;
-                        for asset_id in &references {
-                            self.validate_image_asset(&request.project_id, asset_id, "参考图")
+                            self.validate_image_asset(&request.project_id, &selected, "关键帧")
                                 .await?;
+                            (Some(selected), Vec::new())
                         }
-                        (None, references)
+                        ShotVideoInputMode::ReferenceImages {
+                            min_items,
+                            max_items,
+                            ..
+                        } => {
+                            let references =
+                                ordered_reference_asset_ids(&data.reference_assets, request.stage)?;
+                            validate_ordered_reference_ids(
+                                &references,
+                                Some((*min_items, *max_items)),
+                            )
+                            .map_err(ShotServiceError::InvalidInput)?;
+                            for asset_id in &references {
+                                self.validate_image_asset(&request.project_id, asset_id, "参考图")
+                                    .await?;
+                            }
+                            (None, references)
+                        }
                     }
-                }
-            };
-            if !matches!(&input_mode, ShotVideoInputMode::TextOnly) {
-                let bounds = match &input_mode {
-                    ShotVideoInputMode::ReferenceImages {
-                        min_items,
-                        max_items,
-                        ..
-                    } => Some((*min_items, *max_items)),
-                    _ => None,
                 };
-                let (key, image_value, _manifest) =
-                    build_video_input(&recipe, selected, references, bounds)?;
-                values.insert(key, image_value);
+                if !matches!(&input_mode, ShotVideoInputMode::TextOnly) {
+                    let bounds = match &input_mode {
+                        ShotVideoInputMode::ReferenceImages {
+                            min_items,
+                            max_items,
+                            ..
+                        } => Some((*min_items, *max_items)),
+                        _ => None,
+                    };
+                    let (key, image_value, _manifest) =
+                        build_video_input(&recipe, selected, references, bounds)?;
+                    values.insert(key, image_value);
+                }
             }
             self.ensure_no_active_video_tasks(&request.project_id)
                 .await?;
@@ -625,7 +669,9 @@ impl ShotService {
                 let (key, multiple) = match &input_mode {
                     ShotVideoInputMode::SingleImage { key } => (key, false),
                     ShotVideoInputMode::ReferenceImages { key, .. } => (key, true),
-                    ShotVideoInputMode::TextOnly => {
+                    ShotVideoInputMode::TextOnly
+                    | ShotVideoInputMode::FirstLast
+                    | ShotVideoInputMode::ReferenceMedia => {
                         return Err(ShotServiceError::InvalidInput(
                             "当前阶段 Recipe 没有可用的图片输入".to_owned(),
                         ));

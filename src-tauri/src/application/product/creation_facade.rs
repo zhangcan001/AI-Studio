@@ -31,6 +31,7 @@ pub struct GeneratorOption {
     pub availability_reason: Option<String>,
     pub recommended: bool,
     pub fields: Vec<crate::application::generation_catalog_service::FieldViewModel>,
+    pub persistent_inputs: bool,
     pub resolution_presets: Vec<super::h3_resolution::VideoResolutionPreset>,
 }
 
@@ -161,6 +162,7 @@ impl ProductCreationFacade {
                     .then(|| "生成器当前不可用，请在高级工作流管理中检查。".to_owned()),
                 recommended,
                 fields: generator.fields,
+                persistent_inputs: media_kind == "video" && available,
                 resolution_presets,
             });
         }
@@ -191,6 +193,7 @@ impl ProductCreationFacade {
                 availability_reason: Some("生成器已停用或不可用，请重新选择。".to_owned()),
                 recommended: false,
                 fields: Vec::new(),
+                persistent_inputs: false,
                 resolution_presets: Vec::new(),
             });
         }
@@ -224,6 +227,7 @@ impl ProductCreationFacade {
                         ),
                         recommended: false,
                         fields: Vec::new(),
+                        persistent_inputs: false,
                         resolution_presets: Vec::new(),
                     });
                 }

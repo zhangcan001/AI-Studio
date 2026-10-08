@@ -22,6 +22,9 @@ export const productClient = {
     generatorBindingSet: (projectId: string, request: GeneratorBindingSetRequest) => productRequest("product_generator_binding_set", { projectId, request }),
   },
   creation: {
+    inputsGet: (selection: import("../types/shotVideoInput").VideoInputSelection) => productRequest("product_creation_inputs_get", { selection }),
+    inputsSave: (request: import("../types/shotVideoInput").VideoInputSave) => productRequest("product_creation_inputs_save", { request }),
+    assetsImport: (projectId: string, folder = false) => productRequest("product_creation_assets_import", { projectId, folder }),
     mediaUrl: productMediaUrl,
     readinessGet: (request: CreationSubmission) => productRequest("product_creation_readiness_get", { request }),
     generate: (request: CreationSubmission) => productRequest("product_creation_generate", { request }),

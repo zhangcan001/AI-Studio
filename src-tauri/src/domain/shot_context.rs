@@ -276,6 +276,27 @@ pub struct ResolvedOutputSpec {
 pub struct ResolvedStageInput {
     pub selected_image_asset_id: Option<String>,
     pub selected_image_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_inputs: Option<ResolvedVideoInputSet>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ResolvedVideoInputSet {
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub instance_id: Option<String>,
+    pub revision: Option<i64>,
+    pub inputs: Vec<ResolvedVideoInputAsset>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ResolvedVideoInputAsset {
+    pub input_key: String,
+    pub ordinal: i64,
+    pub asset_id: String,
+    pub media_type: String,
+    pub sha256: String,
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

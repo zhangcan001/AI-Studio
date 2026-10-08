@@ -3,6 +3,7 @@ import { cachedBoundary, immutableGit as execFileSync } from './boundary-validat
 import {createHash} from 'node:crypto';
 import {readFileSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
+import {minimaxVideoPhase2ParentReader} from './minimax-video-phase2-successor-guard.mjs';
 export const READINESS_LIFECYCLE_PARENT='7c82c8bf07dda09d47480d95300b11c401fd9be5';
 export const POST_RUN_READINESS_PARENT='f869335c61d6aa1b5751b5f8b778694960b87970';
 const postRunManifest='docs/architecture/readiness-post-run-fix.json';
@@ -51,14 +52,14 @@ const parents=new Map(),aggregates=new Map();
 export function readinessLifecycleParentFacts(root,parent=READINESS_LIFECYCLE_PARENT){
  const key=JSON.stringify([root,parent]);if(parents.has(key))return parents.get(key);
  const paths=execFileSync('git',['ls-tree','-r','--name-only',parent],{cwd:root,encoding:'utf8'})
-  .trim().split(/\r?\n/).filter(p=>configs.includes(p)||READINESS_LIFECYCLE_GROUPS.some(([,d,r])=>p.startsWith(d+'/')&&r.test(p))).sort();
+  .trim().split(/\r?\n/).filter(p=>p==='CONTEXT.md'||/^docs\/architecture\/.*\.md$/.test(p)||configs.includes(p)||READINESS_LIFECYCLE_GROUPS.some(([,d,r])=>p.startsWith(d+'/')&&r.test(p))).sort();
  const bytes=execFileSync('git',['cat-file','--batch'],{cwd:root,input:paths.map(p=>`${parent}:${p}\n`).join(''),maxBuffer:64*1024*1024});
- const blobs=new Map();let offset=0;
+ const blobs=new Map(),rawBlobs=new Map();let offset=0;
  for(const p of paths){const end=bytes.indexOf(10,offset),m=/^[a-f0-9]+ blob (\d+)$/.exec(bytes.subarray(offset,end).toString());
   if(!m)throw Error('H3 parent blob missing');const start=end+1,length=Number(m[1]);
-  if(bytes[start+length]!==10)throw Error('H3 parent blob boundary');blobs.set(p,normalize(bytes.subarray(start,start+length).toString('utf8')));offset=start+length+1;}
+  if(bytes[start+length]!==10)throw Error('H3 parent blob boundary');rawBlobs.set(p,bytes.subarray(start,start+length));blobs.set(p,normalize(bytes.subarray(start,start+length).toString('utf8')));offset=start+length+1;}
  if(offset!==bytes.length)throw Error('H3 parent trailing bytes');
- const result={paths,read:p=>blobs.get(p)};parents.set(key,result);return result;
+ const result={paths,read:p=>blobs.get(p),raw:p=>rawBlobs.get(p)};parents.set(key,result);return result;
 }
 function postRunReadinessParentReaderUncached(root,override){
  const successor=minimaxVideoPhase1ParentReader(root);
@@ -88,8 +89,9 @@ function postRunReadinessParentReaderUncached(root,override){
 }
 
 function minimaxVideoPhase1ParentReaderUncached(root,override){
- const live=new Map(),disk=p=>{if(!live.has(p))live.set(p,normalize(readFileSync(join(root,p),'utf8')));return live.get(p);};
- const violations=[],fail=s=>violations.push(`minimax-video-phase1-${s}`);
+ const successor=minimaxVideoPhase2ParentReader(root);
+ const live=new Map(),disk=p=>{if(!live.has(p))live.set(p,normalize(successor.read(p)));return live.get(p);};
+ const violations=[...successor.violations],fail=s=>violations.push(`minimax-video-phase1-${s}`);
  const rejected=()=>({violations,addedPaths:[],afterHashes:{},backendAggregateSha256:undefined,read:p=>normalize(readFileSync(join(root,p),'utf8'))});
  let proof,facts;
  try{proof=override??JSON.parse(disk(MINIMAX_VIDEO_PHASE1_MANIFEST));facts=readinessLifecycleParentFacts(root,MINIMAX_VIDEO_PHASE1_PARENT);}catch{fail('missing-evidence');return rejected();}
@@ -107,7 +109,7 @@ function minimaxVideoPhase1ParentReaderUncached(root,override){
  for(const [name,dir,pattern] of READINESS_LIFECYCLE_GROUPS){
   const base=facts.paths.filter(p=>p.startsWith(dir+'/')&&pattern.test(p));
   const untouched=base.filter(p=>!MINIMAX_VIDEO_PHASE1_EXISTING.includes(p));
-  const current=files(root,dir,pattern).filter(p=>p!==MINIMAX_VIDEO_PHASE1_MANIFEST);
+  const current=files(root,dir,pattern).filter(p=>p!==MINIMAX_VIDEO_PHASE1_MANIFEST&&!successor.addedPaths.includes(p));
   const expected=[...base,...MINIMAX_VIDEO_PHASE1_ADDED.filter(p=>p.startsWith(dir+'/')&&pattern.test(p))].sort(),r=proof[name];
   if(JSON.stringify(current)!==JSON.stringify(expected)||r?.beforeFiles!==base.length||r?.afterFiles!==current.length)fail(`${name}-files`);
   if(untouched.some(p=>disk(p)!==facts.read(p)))fail(`${name}-untouched-bytes`);
@@ -117,8 +119,8 @@ function minimaxVideoPhase1ParentReaderUncached(root,override){
  for(const p of configs)if(disk(p)!==facts.read(p))fail(`frozen:${p}`);
  }catch{fail('missing-evidence');return rejected();}
  if(violations.length)return rejected();
- return {violations,addedPaths:[...MINIMAX_VIDEO_PHASE1_ADDED,MINIMAX_VIDEO_PHASE1_MANIFEST],backendAggregateSha256:proof.backend.afterAggregateHash,
-  afterHashes:Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),read:p=>MINIMAX_VIDEO_PHASE1_EXISTING.includes(p)?facts.read(p):disk(p)};
+ return {violations,addedPaths:[...MINIMAX_VIDEO_PHASE1_ADDED,MINIMAX_VIDEO_PHASE1_MANIFEST,...successor.addedPaths],backendAggregateSha256:successor.backendAggregateSha256,
+  afterHashes:{...Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),...successor.afterHashes},read:p=>MINIMAX_VIDEO_PHASE1_EXISTING.includes(p)?facts.read(p):disk(p)};
 }
 export function minimaxVideoPhase1ParentReader(root,override){
  return cachedBoundary(root,'minimaxVideoPhase1ParentReader',override,()=>minimaxVideoPhase1ParentReaderUncached(root,override),MINIMAX_VIDEO_PHASE1_MANIFEST);

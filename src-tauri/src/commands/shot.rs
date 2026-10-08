@@ -19,6 +19,79 @@ use std::collections::BTreeMap;
 use tauri::State;
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VideoInputsSaveRequest {
+    pub scope: crate::application::ports::ShotVideoInputScope,
+    pub expected: Option<crate::application::ports::ShotVideoInputToken>,
+    pub inputs: Vec<crate::application::ports::ShotVideoInputAsset>,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn shot_video_inputs_get(
+    state: State<'_, AppState>,
+    scope: crate::application::ports::ShotVideoInputScope,
+) -> Result<Option<crate::application::ports::ShotVideoInputSet>, AppError> {
+    validate_project_id(&scope.project_id)?;
+    state
+        .shots
+        .video_inputs
+        .get(&scope)
+        .await
+        .map_err(map_video_input_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn shot_video_inputs_save(
+    state: State<'_, AppState>,
+    request: VideoInputsSaveRequest,
+) -> Result<crate::application::ports::ShotVideoInputSet, AppError> {
+    validate_project_id(&request.scope.project_id)?;
+    state
+        .shots
+        .video_inputs
+        .save(&request.scope, request.expected.as_ref(), &request.inputs)
+        .await
+        .map_err(map_video_input_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn shot_video_inputs_assets(
+    state: State<'_, AppState>,
+    scope: crate::application::ports::ShotVideoInputScope,
+) -> Result<Vec<crate::application::product::video_inputs::InputAsset>, AppError> {
+    validate_project_id(&scope.project_id)?;
+    let set = state
+        .shots
+        .video_inputs
+        .get(&scope)
+        .await
+        .map_err(map_video_input_error)?;
+    let inputs = set
+        .as_ref()
+        .map(|s| s.inputs.as_slice())
+        .unwrap_or_default();
+    Ok(state
+        .shots
+        .video_inputs
+        .available_assets(&scope.project_id, inputs)
+        .await
+        .map_err(map_video_input_error)?
+        .into_iter()
+        .map(crate::application::product::video_inputs::InputAsset::from)
+        .collect())
+}
+
+fn map_video_input_error(
+    error: crate::application::shot_video_input_service::ShotVideoInputError,
+) -> AppError {
+    use crate::application::shot_video_input_service::ShotVideoInputError;
+    match error {
+        ShotVideoInputError::Conflict => AppError::shot_video_input_conflict(error.to_string()),
+        ShotVideoInputError::Invalid(message) => AppError::invalid_input(message),
+    }
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShotUpdateRequestDto {
     pub project_id: String,

@@ -1578,6 +1578,19 @@ export function importSourceAssets(projectId: string): Promise<AssetSourceImport
   return invoke<AssetSourceImportBatch>("asset_pick_and_import_source_assets", { projectId });
 }
 
+export function importSourceFolder(projectId: string): Promise<AssetSourceImportBatch> {
+  return invoke<AssetSourceImportBatch>("asset_pick_and_import_source_folder", { projectId });
+}
+export function getShotVideoInputs(scope: import("../types/shotVideoInput").ShotVideoInputScope): Promise<import("../types/shotVideoInput").ShotVideoInputSet | null> {
+  return invoke("shot_video_inputs_get", { scope });
+}
+export function listShotVideoInputAssets(scope: import("../types/shotVideoInput").ShotVideoInputScope): Promise<import("../types/shotVideoInput").InputAsset[]> {
+  return invoke("shot_video_inputs_assets", { scope });
+}
+export function saveShotVideoInputs(request: { scope: import("../types/shotVideoInput").ShotVideoInputScope; expected: import("../types/shotVideoInput").VideoInputToken | null; inputs: import("../types/shotVideoInput").VideoInputAsset[] }): Promise<import("../types/shotVideoInput").ShotVideoInputSet> {
+  return invoke("shot_video_inputs_save", { request });
+}
+
 export function pickAndImportVideo(projectId: string): Promise<AssetView | null> {
   return invoke<AssetView | null>("asset_pick_and_import_video", { projectId });
 }

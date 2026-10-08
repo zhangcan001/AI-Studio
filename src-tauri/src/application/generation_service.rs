@@ -295,6 +295,39 @@ impl GenerationService {
         )
     }
 
+    /// Local product input validation, before new persistence or dispatch.
+    /// Callers still use the existing Registry admission and execution queue.
+    pub async fn validate_new_product_inputs(
+        &self,
+        project_id: &str,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), GenerationServiceError> {
+        let definition = self
+            .definition_repository
+            .find(workflow_version_id, recipe_id)
+            .await?
+            .ok_or_else(|| GenerationServiceError::DefinitionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+                recipe_id: recipe_id.to_owned(),
+            })?;
+        let recipe = RecipeParser::parse(&definition.recipe_yaml)
+            .map_err(|e| GenerationServiceError::Compile(CompileError::from(e)))?;
+        let workflow = crate::domain::WorkflowDocument::parse(definition.workflow_json.clone())
+            .map_err(|e| GenerationServiceError::Compile(CompileError::from(e)))?;
+        self.compile_product(
+            &workflow,
+            &recipe,
+            &CompileRequest::new(GenerationInputPreparer::preflight_values(values)),
+        )
+        .map_err(GenerationServiceError::Compile)?;
+        self.generation_input_preparer
+            .validate_product_assets(project_id, definition.workflow_json, &recipe, values)
+            .await
+            .map_err(GenerationServiceError::InputPrepare)
+    }
+
     /// Read-only execution admission for one saved WorkflowVersion/Recipe pair.
     /// No Task, queue item, upload, or remote prompt is created here.
     pub async fn preflight_saved_version(
@@ -505,6 +538,12 @@ impl GenerationService {
                     .validate_local_asset_files(project_id, item_values)
                     .await
                     .map_err(GenerationServiceError::InputPrepare)?;
+                if self.new_generation_admission.is_some() {
+                    self.generation_input_preparer
+                        .validate_external_image_inputs(project_id, item_values)
+                        .await
+                        .map_err(GenerationServiceError::InputPrepare)?;
+                }
                 Ok(())
             }
             .await;
@@ -816,6 +855,15 @@ impl GenerationService {
             &CompileRequest::new(GenerationInputPreparer::preflight_values(&request.values)),
         )
         .map_err(GenerationServiceError::Compile)?;
+        if self.new_generation_admission.is_some() {
+            self.validate_new_product_inputs(
+                &request.project_id,
+                &request.workflow_version_id,
+                &request.recipe_id,
+                &request.values,
+            )
+            .await?;
+        }
         let created_at = self.clock.now();
         let mut task = Task::new(
             request.project_id.clone(),

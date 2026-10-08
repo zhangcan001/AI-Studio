@@ -12,7 +12,7 @@ export type ShotProductionStepId =
 
 export type ShotProductionStepStatus = "COMPLETE" | "ACTIVE" | "READY" | "BLOCKED" | "PENDING" | "FAILED";
 
-export type ShotProductionVideoInputMode = "TEXT_ONLY" | "SINGLE_IMAGE" | "REFERENCE_IMAGES" | "UNSUPPORTED";
+export type ShotProductionVideoInputMode = "TEXT_ONLY" | "SINGLE_IMAGE" | "FIRST_LAST" | "REFERENCE_MEDIA" | "REFERENCE_IMAGES" | "UNSUPPORTED";
 
 export interface ShotProductionStageContext {
   available?: boolean;
@@ -21,6 +21,7 @@ export interface ShotProductionStageContext {
   referenceMinimum?: number;
   referenceCount?: number;
   videoInputMode?: ShotProductionVideoInputMode;
+  persistentInputs?: boolean;
 }
 
 export interface ShotProductionContext {
@@ -94,6 +95,7 @@ function contextFor(context: ShotProductionContext | undefined, stage: ShotStage
     referenceMinimum: stageContext?.referenceMinimum,
     referenceCount: stageContext?.referenceCount,
     videoInputMode: stageContext?.videoInputMode,
+    persistentInputs: stageContext?.persistentInputs,
   };
 }
 
@@ -158,6 +160,7 @@ function referenceStatus(
 }
 
 function videoBlockedByInput(shot: ShotView, context: ShotProductionStageContext): string | undefined {
+  if (context.persistentInputs) return undefined; // Saved media is validated by preparation, not image-result selection.
   if (context.videoInputMode === "SINGLE_IMAGE" && !shot.selectedImageAssetId) return "请先选择关键帧图片";
   if (context.videoInputMode === "UNSUPPORTED") return "当前视频工作流输入不受支持";
   return undefined;
@@ -226,5 +229,8 @@ export function buildShotProductionReadModel(
     makeStep("complete", finalStatus === "COMPLETED" ? { status: "COMPLETE" } : { status: "PENDING", detail: "完成前仍有步骤需要处理" }),
   ];
 
-  return { steps, nextAction: nextActionFor(steps) };
+  // Historical image-stage truth remains visible, never marked successful by
+  // input adoption. Formal video preparation does not require a new image run.
+  return { steps, nextAction: nextActionFor(videoContext.persistentInputs
+    ? steps.filter(step=>step.id !== "image" && step.id !== "image-review") : steps) };
 }

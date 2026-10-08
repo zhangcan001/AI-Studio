@@ -3,7 +3,7 @@ import type { ProjectWorkflowBindingView } from "../../types/projectWorkflow";
 import type { ShotStage, ShotStageConfig } from "../../types/shot";
 import { findRecipe, recipeRef } from "./workflowCapabilities";
 
-export type ShotVideoInputMode = "TEXT_ONLY" | "SINGLE_IMAGE" | "REFERENCE_IMAGES" | "UNSUPPORTED";
+export type ShotVideoInputMode = "TEXT_ONLY" | "SINGLE_IMAGE" | "FIRST_LAST" | "REFERENCE_MEDIA" | "REFERENCE_IMAGES" | "UNSUPPORTED";
 
 export interface ShotStageRecipeCompatibility {
   compatible: boolean;
@@ -57,6 +57,12 @@ export function shotStageRecipeCompatibility(
     };
   }
 
+  const media = recipe.fields.filter(field => ["image", "images", "video", "videos", "audio", "audios"].includes(field.type));
+  const has = (key: string, type: RecipeField["type"]) => media.some(f => f.key === key && f.type === type);
+  if (stage === "video" && media.length === 2 && has("first_frame", "image") && has("last_frame", "image"))
+    return { compatible: true, stage, videoInputMode: "FIRST_LAST" };
+  if (stage === "video" && media.length === 3 && has("reference_images", "images") && has("reference_videos", "videos") && has("reference_audios", "audios"))
+    return { compatible: true, stage, videoInputMode: "REFERENCE_MEDIA" };
   const unsupported = requiredUnsupportedMedia(recipe);
   if (unsupported.length) {
     return {

@@ -51,6 +51,11 @@ describe("formal Shot workflow compatibility", () => {
     expect(shotStageRecipeCompatibility(firstLast, "video")).toMatchObject({ compatible: false, videoInputMode: "UNSUPPORTED" });
   });
 
+  it("supports explicit FIRST_LAST and mixed REF2VA without legacy image minimums", () => {
+    expect(shotStageRecipeCompatibility(recipe("fl",["video"],[{key:"first_frame",type:"image",label:"First",required:true},{key:"last_frame",type:"image",label:"Last",required:true}]),"video").videoInputMode).toBe("FIRST_LAST");
+    expect(shotStageRecipeCompatibility(recipe("ref",["video"],[{key:"reference_images",type:"images",label:"Images",required:false,minItems:0,maxItems:9},{key:"reference_videos",type:"videos",label:"Videos",required:false,minItems:0,maxItems:3},{key:"reference_audios",type:"audios",label:"Audios",required:false,minItems:0,maxItems:3}]),"video").videoInputMode).toBe("REFERENCE_MEDIA");
+  });
+
   it("validates a custom plural reference bound with its own min/max", () => {
     const field = { key: "images", type: "images" as const, label: "Images", required: true, minItems: 1, maxItems: 4 };
     expect(validateShotReferenceImages(field, [])).toBe("参考图至少需要 1 张。");

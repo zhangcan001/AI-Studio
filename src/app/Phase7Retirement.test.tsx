@@ -9,6 +9,8 @@ import { resolve, dirname } from "node:path";
 import { createHash } from "node:crypto";
 // @ts-expect-error Build-time boundary helper, never browser production.
 import { backendPerformanceBoundary } from "../../scripts/backend-boundary-guard.mjs";
+// @ts-expect-error Node-only successor projection, never browser production.
+import { minimaxVideoPhase2ParentReader } from "../../scripts/minimax-video-phase2-successor-guard.mjs";
 import ts from "typescript";
 import { ShellHost } from "./ShellHost";
 import { fromLegacyLocation } from "./routes/legacyAdapter";
@@ -94,13 +96,15 @@ it("phase7_target15 keyboard skip focus and active navigation survive single she
  const navigate=vi.fn();render(<ShellHost route={create} projectSelector={null} navigate={navigate} back={vi.fn()}><p>content</p></ShellHost>);expect(screen.getByRole("button",{name:"创作"}).getAttribute("aria-current")).toBe("page");expect(screen.getByRole("link",{name:"跳到主要内容"}).getAttribute("href")).toBe("#v3-main");document.getElementById("v3-main")!.focus();expect(document.activeElement?.id).toBe("v3-main");fireEvent.keyDown(window,{key:"k",ctrlKey:true});fireEvent.keyDown(window,{key:"K",metaKey:true});expect(navigate).toHaveBeenCalledTimes(2);expect(navigate).toHaveBeenLastCalledWith({kind:"create",projectId:project,stage:"image"});
 });
 it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()=>{
- expect(readdirSync("src-tauri/migrations").some((f:string)=>f.startsWith("043"))).toBe(false);expect(read("src-tauri/src/application/project_backup_service.rs")).toContain("const BACKUP_VERSION: u32 = 20;");
+ const successor=minimaxVideoPhase2ParentReader('.');expect(successor.violations).toEqual([]);
+ expect(readdirSync("src-tauri/migrations").filter((f:string)=>!successor.addedPaths.includes(`src-tauri/migrations/${f}`)).some((f:string)=>f.startsWith("043"))).toBe(false);expect(successor.read("src-tauri/src/application/project_backup_service.rs")).toContain("const BACKUP_VERSION: u32 = 20;");
  function allFiles(dir:string):string[]{return readdirSync(dir,{withFileTypes:true}).flatMap((e:{name:string;isDirectory:()=>boolean})=>e.isDirectory()?allFiles(`${dir}/${e.name}`):[`${dir}/${e.name}`]).sort();}
  // Explicit authorized successors: Phase8 backend structure and Phase9 style entry.
- // Migrations and all other historical boundaries remain pinned.
+ // A validated Phase2 successor projects only its declared additive schema.
+ // All historical migration bytes and the original 42-file hash remain pinned.
  const phase8=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json")) as {backendSourceSnapshot:{files:number;sha256:string}};
  const phase9=JSON.parse(read("docs/architecture/phase9-style-cleanup.json"));
  const reviewed=backendPerformanceBoundary('.',phase8.backendSourceSnapshot,JSON.parse(read('docs/architecture/phase12-performance.json')),phase13BoundaryReview);expect(reviewed.violations).toEqual([]);
- for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,files:reviewed.files ?? phase8.backendSourceSnapshot.files,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root);expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+read(f).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
+ for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,files:reviewed.files ?? phase8.backendSourceSnapshot.files,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root).filter(f=>root!=='src-tauri/migrations'||!successor.addedPaths.includes(f));expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+(root==='src-tauri/migrations'?successor.read(f):read(f)).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
 
 },30000); // Exact historical source traversal, not a runtime performance threshold.

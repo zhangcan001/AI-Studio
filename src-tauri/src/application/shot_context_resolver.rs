@@ -71,6 +71,7 @@ impl From<RepositoryError> for ShotContextResolverError {
 }
 
 pub struct ShotContextResolver {
+    video_inputs: Option<Arc<crate::application::shot_video_input_service::ShotVideoInputService>>,
     project_repository: Arc<dyn ProjectRepository>,
     structure_repository: Arc<dyn ProductionStructureRepository>,
     shot_repository: Arc<dyn ShotRepository>,
@@ -95,6 +96,7 @@ impl ShotContextResolver {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
+            video_inputs: None,
             project_repository,
             structure_repository,
             shot_repository,
@@ -105,6 +107,14 @@ impl ShotContextResolver {
             asset_repository,
             clock,
         }
+    }
+
+    pub fn with_video_inputs(
+        mut self,
+        service: Arc<crate::application::shot_video_input_service::ShotVideoInputService>,
+    ) -> Self {
+        self.video_inputs = Some(service);
+        self
     }
 
     pub async fn resolve_draft(
@@ -299,7 +309,7 @@ impl ShotContextResolver {
             assets: &assets,
         };
         let resolved_at = self.clock.now();
-        shot_ids
+        let mut contexts = shot_ids
             .iter()
             .map(|shot_id| {
                 let data = selected
@@ -308,7 +318,54 @@ impl ShotContextResolver {
                     .expect("selected shots were checked above");
                 build_context(data, &snapshots, resolved_at)
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        if stage == ShotStage::Video {
+            if let Some(service) = &self.video_inputs {
+                for context in &mut contexts {
+                    // Result selection is never a formal video input. Retain
+                    // history elsewhere, but do not authorize it via readiness.
+                    context.stage_input = ResolvedStageInput::default();
+                    context
+                        .diagnostics
+                        .retain(|d| !d.code.starts_with("CONTEXT_SELECTED_IMAGE_"));
+                    if let (Some(version), Some(recipe)) = (
+                        &context.workflow.workflow_version_id,
+                        &context.workflow.recipe_id,
+                    ) {
+                        let scope = crate::application::ports::ShotVideoInputScope {
+                            project_id: project_id.into(),
+                            shot_id: context.structure.shot.id.clone(),
+                            workflow_version_id: version.clone(),
+                            recipe_id: recipe.clone(),
+                        };
+                        match service.context_input(&scope).await {
+                            Ok(inputs) => context.stage_input.video_inputs = Some(inputs),
+                            Err(error) => context.diagnostics.push(ContextDiagnostic::error(
+                                "VIDEO_INPUT_ASSET_INVALID",
+                                error.to_string(),
+                            )),
+                        }
+                    }
+                    // The persisted token, explicit slots and current asset SHA
+                    // enter the existing context identity. Old None contexts keep
+                    // their historical hash; saved inputs cannot look unchanged.
+                    use sha2::Digest;
+                    let bytes = serde_json::to_vec(&(
+                        &context.resolver_identity.context_hash,
+                        &context.stage_input,
+                    ))
+                    .map_err(|e| {
+                        RepositoryError::serialization("video input context", e.to_string())
+                    })?;
+                    context.resolver_identity.context_hash =
+                        format!("{:x}", sha2::Sha256::digest(bytes));
+                    context.partial = context.diagnostics.iter().any(|d| {
+                        d.severity == crate::domain::shot_context::ContextDiagnosticSeverity::Error
+                    });
+                }
+            }
+        }
+        Ok(contexts)
     }
 }
 
@@ -1019,6 +1076,7 @@ fn resolve_stage_input(
         Some(asset) => ResolvedStageInput {
             selected_image_asset_id: Some(asset_id.to_owned()),
             selected_image_sha256: Some(asset.sha256.clone()),
+            video_inputs: None,
         },
     }
 }

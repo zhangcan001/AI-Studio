@@ -133,6 +133,7 @@ fn plan_view(project_id: &str, stage: ShotStage, planned: Vec<PlannedShot>) -> S
 }
 
 pub struct ShotBatchService {
+    video_inputs: Option<Arc<crate::application::shot_video_input_service::ShotVideoInputService>>,
     shot_repository: Arc<dyn ShotRepository>,
     shot_batch_repository: Arc<dyn ShotBatchRepository>,
     task_repository: Arc<dyn TaskRepository>,
@@ -157,6 +158,7 @@ impl ShotBatchService {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
+            video_inputs: None,
             shot_repository,
             shot_batch_repository,
             task_repository,
@@ -171,6 +173,14 @@ impl ShotBatchService {
 
     pub fn with_stage_prompt_repository(mut self, repository: Arc<dyn ShotBulkRepository>) -> Self {
         self.stage_prompt_repository = Some(repository);
+        self
+    }
+
+    pub fn with_video_inputs(
+        mut self,
+        service: Arc<crate::application::shot_video_input_service::ShotVideoInputService>,
+    ) -> Self {
+        self.video_inputs = Some(service);
         self
     }
 
@@ -203,6 +213,7 @@ impl ShotBatchService {
 
     async fn validate_new_items(
         &self,
+        project_id: &str,
         items: &[ProductionBatchItem],
     ) -> Result<(), ShotBatchServiceError> {
         for item in items {
@@ -226,6 +237,43 @@ impl ShotBatchService {
                 &CompileRequest::new(GenerationInputPreparer::preflight_values(&values)),
             )
             .map_err(|e| ShotBatchServiceError::InvalidInput(e.to_string()))?;
+            if self.new_generation_admission.is_some() {
+                let workflow =
+                    crate::domain::WorkflowDocument::parse(definition.workflow_json.clone())
+                        .map_err(|e| ShotBatchServiceError::InvalidInput(e.to_string()))?;
+                crate::application::product::h3_resolution::compile_checked(
+                    &WorkflowCompiler,
+                    &workflow,
+                    &recipe,
+                    &CompileRequest::new(GenerationInputPreparer::preflight_values(&values)),
+                )
+                .map_err(|e| ShotBatchServiceError::InvalidInput(e.to_string()))?;
+                if let Some(service) = &self.video_inputs {
+                    service
+                        .validate_generation_assets(
+                            project_id,
+                            definition.workflow_json,
+                            &recipe,
+                            &values,
+                        )
+                        .await
+                        .map_err(|e| ShotBatchServiceError::InvalidInput(e.to_string()))?;
+                } else if values.values().any(|v| {
+                    matches!(
+                        v,
+                        GenerationInputValue::ImageAsset(_)
+                            | GenerationInputValue::ImageAssets(_)
+                            | GenerationInputValue::VideoAsset(_)
+                            | GenerationInputValue::VideoAssets(_)
+                            | GenerationInputValue::AudioAsset(_)
+                            | GenerationInputValue::AudioAssets(_)
+                    )
+                }) {
+                    return Err(ShotBatchServiceError::InvalidInput(
+                        "正式素材校验不可用".into(),
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -307,7 +355,7 @@ impl ShotBatchService {
         bindings: &[ShotBatchBinding],
         snapshots: &[PreparationSnapshotRecord],
     ) -> Result<(), ShotBatchServiceError> {
-        self.validate_new_items(items).await?;
+        self.validate_new_items(&batch.project_id, items).await?;
         self.shot_batch_repository
             .insert_prepared_batch_with_bindings(batch, items, bindings, snapshots)
             .await
@@ -374,6 +422,33 @@ impl ShotBatchService {
             );
         }
 
+        if stage == ShotStage::Video {
+            if let Some(inputs) = &context.stage_input.video_inputs {
+                if context.workflow.workflow_version_id.as_deref()
+                    != Some(&inputs.workflow_version_id)
+                    || context.workflow.recipe_id.as_deref() != Some(&inputs.recipe_id)
+                {
+                    return Err("正式视频输入与当前 Recipe 身份不一致".into());
+                }
+                let bindings = inputs
+                    .inputs
+                    .iter()
+                    .map(|i| crate::application::ports::ShotVideoInputAsset {
+                        input_key: i.input_key.clone(),
+                        ordinal: i.ordinal,
+                        asset_id: i.asset_id.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                let media =
+                    crate::application::shot_video_input_service::media_values(recipe, &bindings)
+                        .map_err(|e| e.to_string())?;
+                crate::application::shot_video_input_service::merge_media_inputs(
+                    &mut values,
+                    media,
+                );
+                return freeze_shot_batch_values(stage, values, recipe);
+            }
+        }
         let image_input = recipe.inputs.iter().find_map(|(key, input)| match input {
             InputDefinition::Image { .. } => Some((key.clone(), false)),
             InputDefinition::Images { .. } => Some((key.clone(), true)),
@@ -519,7 +594,7 @@ impl ShotBatchService {
                 production_batch_item_id: item_id.as_str().to_owned(),
             });
         }
-        self.validate_new_items(&items).await?;
+        self.validate_new_items(&batch.project_id, &items).await?;
         self.shot_batch_repository
             .insert_batch_with_bindings(&batch, &items, &bindings)
             .await?;
@@ -762,11 +837,14 @@ impl ShotBatchService {
             ShotVideoInputMode::SingleImage { key } => Some((key.as_str(), false)),
             ShotVideoInputMode::ReferenceImages { key, .. } => Some((key.as_str(), true)),
             ShotVideoInputMode::TextOnly => None,
+            ShotVideoInputMode::FirstLast | ShotVideoInputMode::ReferenceMedia => None,
         });
         if stage == ShotStage::Video {
             if let Some(mode) = input_mode {
                 row.video_mode = Some(match mode {
                     ShotVideoInputMode::TextOnly => "TEXT_ONLY".to_owned(),
+                    ShotVideoInputMode::FirstLast => "FIRST_LAST".to_owned(),
+                    ShotVideoInputMode::ReferenceMedia => "REF2VA".to_owned(),
                     ShotVideoInputMode::SingleImage { .. } => "I2V".to_owned(),
                     ShotVideoInputMode::ReferenceImages { .. } => {
                         if compatibility
@@ -780,6 +858,7 @@ impl ShotBatchService {
                     }
                 });
                 match mode {
+                    ShotVideoInputMode::FirstLast | ShotVideoInputMode::ReferenceMedia => {}
                     ShotVideoInputMode::TextOnly => {}
                     ShotVideoInputMode::SingleImage { .. } => {
                         row.reference_count =
@@ -822,8 +901,47 @@ impl ShotBatchService {
             Err(error) => reasons.push(error),
         }
 
-        if stage == ShotStage::Video {
+        if stage == ShotStage::Video && self.video_inputs.is_some() {
+            let scope = crate::application::ports::ShotVideoInputScope {
+                project_id: project_id.into(),
+                shot_id: data.shot.id.clone(),
+                workflow_version_id: config.workflow_version_id.clone(),
+                recipe_id: config.recipe_id.clone(),
+            };
+            match self
+                .video_inputs
+                .as_ref()
+                .expect("checked above")
+                .values(&scope, &recipe)
+                .await
+            {
+                Ok(media) => {
+                    row.reference_count = media
+                        .values()
+                        .map(|value| match value {
+                            GenerationInputValue::ImageAsset(_)
+                            | GenerationInputValue::VideoAsset(_)
+                            | GenerationInputValue::AudioAsset(_) => 1,
+                            GenerationInputValue::ImageAssets(ids)
+                            | GenerationInputValue::VideoAssets(ids)
+                            | GenerationInputValue::AudioAssets(ids) => ids.len(),
+                            _ => 0,
+                        })
+                        .sum();
+                    row.reference_min = None;
+                    row.reference_max = None;
+                    crate::application::shot_video_input_service::merge_media_inputs(
+                        &mut values,
+                        media,
+                    );
+                }
+                Err(error) => reasons.push(error.to_string()),
+            }
+        } else if stage == ShotStage::Video {
             match input_mode {
+                Some(ShotVideoInputMode::FirstLast | ShotVideoInputMode::ReferenceMedia) => {
+                    reasons.push("正式视频输入不可用；需要重新选择素材".into());
+                }
                 Some(ShotVideoInputMode::TextOnly) | None => {}
                 Some(ShotVideoInputMode::SingleImage { key }) => {
                     if let Some(selected_id) = data.shot.selected_image_asset_id.as_deref() {

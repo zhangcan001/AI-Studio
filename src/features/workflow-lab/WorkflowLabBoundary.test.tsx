@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, expect, it, vi } from "vitest";
 // @ts-expect-error Node helpers are test-only.
 import { readFileSync, readdirSync } from "node:fs";
+// @ts-expect-error Node-only validated historical schema projection.
+import { minimaxVideoPhase2ParentReader } from "../../../scripts/minimax-video-phase2-successor-guard.mjs";
 import { LabBenchmarkPane } from "./LabBenchmarkPane";
 import { LabDiagnosticsPane } from "./LabDiagnosticsPane";
 import { labCreationSelection } from "../../services/workflowLabClient";
@@ -57,5 +59,6 @@ it("phase6_target16 real normal GeneratorSettings, advanced-only Lab and compati
   expect(read("src/features/workflow-lab/WorkflowLabPage.tsx")).toContain("useWorkflowLabController(");
   const nav = read("src/app/v3/AppShellV3.tsx").split('const pages =')[1].split('return <div')[0];
   expect(nav).not.toMatch(/workflow|advanced|generators/);
-  expect(readdirSync("src-tauri/migrations").some((f: string) => f.startsWith("043"))).toBe(false);
+  const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
+  expect(readdirSync("src-tauri/migrations").filter((f: string)=>!schema.addedPaths.includes(`src-tauri/migrations/${f}`)).some((f: string) => f.startsWith("043"))).toBe(false);
 });

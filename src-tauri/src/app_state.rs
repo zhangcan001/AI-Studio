@@ -111,6 +111,7 @@ pub struct ProjectServices {
 
 pub struct ShotServices {
     pub shot: Arc<ShotService>,
+    pub video_inputs: Arc<crate::application::shot_video_input_service::ShotVideoInputService>,
     pub batch: Arc<ShotBatchService>,
     pub bulk: Arc<ShotBulkService>,
     pub readiness: Arc<ShotReadinessService>,

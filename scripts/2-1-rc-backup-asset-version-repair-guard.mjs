@@ -50,7 +50,7 @@ function rcRepairParentReaderUncached(root,override) {
     if(untouched.some(p=>disk(p)!==before(p)))fail(`${name}-untouched-bytes`);
   }
   for(const p of [...blobs.keys()].filter(p=>p.startsWith('docs/architecture/')||p.startsWith('src-tauri/migrations/')))if(disk(p)!==before(p))fail(`frozen:${p}`);
-  if(JSON.stringify(files(root,'src-tauri/migrations',/\.sql$/))!==JSON.stringify([...blobs.keys()].filter(p=>p.startsWith('src-tauri/migrations/')&&p.endsWith('.sql'))))fail('migration-file-set');
+  if(JSON.stringify(files(root,'src-tauri/migrations',/\.sql$/).filter(p=>!publication.addedPaths.includes(p)))!==JSON.stringify([...blobs.keys()].filter(p=>p.startsWith('src-tauri/migrations/')&&p.endsWith('.sql'))))fail('migration-file-set');
   for(const p of ['package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/tauri.conf.json'])if(disk(p)!==before(p))fail(`frozen-config:${p}`);
   // Approve only the frontend budget increase; all commands and other bytes stay frozen.
   const ciPath='.github/workflows/ci.yml',ciBefore=before(ciPath);

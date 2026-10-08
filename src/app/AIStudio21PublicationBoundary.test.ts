@@ -1,5 +1,7 @@
 // @ts-expect-error Node-only successor fixture.
 import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
+// @ts-expect-error Node-only successor.
+import {minimaxVideoPhase2FixtureFiles,MINIMAX_VIDEO_PHASE2_MANIFEST} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @vitest-environment node
 import { expect, it } from 'vitest';
 // @ts-expect-error Node-only acceptance helper.
@@ -85,7 +87,7 @@ it('fails closed on stale live docs and a missing tag in an owned fixture', () =
     paths.push(...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json');
   const readiness=JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
   paths.push(...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json');
-    for (const p of new Set([...paths,...MINIMAX_VIDEO_PHASE1_FILES])) { mkdirSync(dirname(join(root,p)), {recursive:true}); copyFileSync(p,join(root,p)); }
+    for (const p of new Set([...paths,...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.')])) { mkdirSync(dirname(join(root,p)), {recursive:true}); copyFileSync(p,join(root,p)); }
     expect(publicationParentReader(root).violations).toEqual([]);
     const original = readFileSync(join(root, docs[0]), 'utf8');
     writeFileSync(join(root, docs[0]), original.replace('**released**','NOT YET PUBLISHED'));
@@ -99,18 +101,18 @@ it('fails closed on stale live docs and a missing tag in an owned fixture', () =
     const guard = join(root, integration);
     const guardBytes = readFileSync(guard, 'utf8');
     writeFileSync(guard, guardBytes + '\n// owned invalid integration drift\n');
-    expect(publicationParentReader(root).violations).toContain('minimax-video-phase1-scripts-untouched-bytes');
+    expect(publicationParentReader(root).violations).toContain(`minimax-video-phase2-path:${integration}`);
     writeFileSync(guard, guardBytes);
     expect(publicationParentReader(root).violations).toEqual([]);
     const config = join(root, 'src-tauri/tauri.conf.json');
     const configBytes = readFileSync(config, 'utf8');
     writeFileSync(config, configBytes + ' ');
-    expect(publicationParentReader(root).violations).toContain('minimax-video-phase1-frozen:src-tauri/tauri.conf.json');
+    expect(publicationParentReader(root).violations).toContain('minimax-video-phase2-frozen:src-tauri/tauri.conf.json');
     writeFileSync(config, configBytes);
     const runtime = join(root, 'src-tauri/src/domain/asset.rs');
     const runtimeBytes = readFileSync(runtime, 'utf8');
     writeFileSync(runtime, runtimeBytes + '\n// owned invalid runtime drift\n');
-    expect(publicationParentReader(root).violations).toContain('minimax-video-phase1-backend-untouched-bytes');
+    expect(publicationParentReader(root).violations).toContain('minimax-video-phase2-backend-untouched-bytes');
     writeFileSync(runtime, runtimeBytes);
     expect(publicationParentReader(root).violations).toEqual([]);
     writeFileSync(tagRef, '130cbbfaf67e1627fca7e447de322cf0f5f5ae85\n');

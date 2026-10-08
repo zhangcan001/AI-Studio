@@ -105,6 +105,9 @@ pub enum GenerationInputPrepareError {
     H3ReferenceDuration {
         message: String,
     },
+    ExternalImageRequired {
+        asset_id: String,
+    },
     Repository(String),
     Upload {
         input_key: String,
@@ -120,6 +123,7 @@ impl GenerationInputPrepareError {
             Self::AssetProjectMismatch { .. } => "INPUT_ASSET_PROJECT_MISMATCH",
             Self::AssetTypeInvalid { .. } => "INPUT_ASSET_TYPE_INVALID",
             Self::AssetRead { .. } => "INPUT_ASSET_READ_FAILED",
+            Self::ExternalImageRequired { .. } => "INPUT_EXTERNAL_IMAGE_REQUIRED",
             Self::InvalidAssetMime { .. } => "INPUT_ASSET_MIME_INVALID",
             Self::ReferenceMappingIncomplete { .. } => "REFERENCE_MAPPING_INCOMPLETE",
             Self::DuplicateFirstLastAsset { .. } => "INPUT_ASSET_DUPLICATE",
@@ -186,6 +190,11 @@ impl fmt::Display for GenerationInputPrepareError {
             Self::H3ReferenceDuration { message } => {
                 write!(formatter, "{}: {message}", self.code())
             }
+            Self::ExternalImageRequired { asset_id } => write!(
+                formatter,
+                "{}: asset {asset_id} 需要重新选择素材（受管理的正式外部导入图片）",
+                self.code()
+            ),
             Self::Repository(message) => write!(formatter, "{}: {message}", self.code()),
             Self::Upload {
                 input_key,
@@ -210,6 +219,99 @@ pub struct GenerationInputPreparer {
 }
 
 impl GenerationInputPreparer {
+    /// New-generation policy only. Historical reads/preflights remain separate.
+    /// Receipt, ownership, managed file, size, hash and decoded image metadata
+    /// must all agree. No inference from a name, category or source tag.
+    pub async fn validate_external_image_inputs(
+        &self,
+        project_id: &str,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), GenerationInputPrepareError> {
+        let mut ids = std::collections::HashSet::new();
+        for value in values.values() {
+            match value {
+                GenerationInputValue::ImageAsset(id) => {
+                    ids.insert(id.clone());
+                }
+                GenerationInputValue::ImageAssets(values) => {
+                    ids.extend(values.iter().cloned());
+                }
+                _ => {}
+            }
+        }
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let root = self
+            .project_repository
+            .get_storage_root(project_id)
+            .await
+            .map_err(repository_error)?
+            .ok_or_else(|| {
+                GenerationInputPrepareError::Repository("project storage missing".into())
+            })?;
+        for id in ids {
+            let reject = || GenerationInputPrepareError::ExternalImageRequired {
+                asset_id: id.as_str().into(),
+            };
+            let asset = self.load_image_asset(project_id, &id).await?;
+            let receipt = self
+                .asset_repository
+                .find_external_import(project_id, &id)
+                .await
+                .map_err(repository_error)?
+                .ok_or_else(reject)?;
+            if asset.source_task_id.is_some()
+                || asset.category != crate::domain::SOURCE_IMAGE_CATEGORY
+                || receipt.asset_id != id.as_str()
+                || receipt.project_id != project_id
+                || receipt.media_type != "image"
+                || receipt.sha256 != asset.sha256
+                || receipt.mime_type != asset.mime_type
+                || receipt.width != asset.width
+                || receipt.height != asset.height
+                || receipt.file_size != asset.file_size
+                || receipt.duration_ms != asset.duration_ms
+                || asset.file_size == 0
+                || asset.file_size
+                    > crate::application::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES
+            {
+                return Err(reject());
+            }
+            let mut stream = self
+                .asset_store
+                .open_read_stream(&root, std::path::Path::new(&asset.storage_path))
+                .await
+                .map_err(|_| reject())?;
+            let mut bytes = Vec::new();
+            while let Some(chunk) = stream.next_chunk().await.map_err(|_| reject())? {
+                if bytes.len() as u64 + chunk.len() as u64 > asset.file_size {
+                    return Err(reject());
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            if bytes.len() as u64 != asset.file_size {
+                return Err(reject());
+            }
+            let inspected = crate::application::image_inspection::inspect_bytes(&bytes)
+                .map_err(|_| reject())?;
+            if inspected.sha256 != receipt.sha256
+                || inspected.mime_type != receipt.mime_type
+                || inspected.width != receipt.width
+                || inspected.height != receipt.height
+            {
+                return Err(reject());
+            }
+            // Header inspection is insufficient: truncated/corrupt pixel data fails closed.
+            ImageReader::new(Cursor::new(&bytes))
+                .with_guessed_format()
+                .map_err(|_| reject())?
+                .decode()
+                .map_err(|_| reject())?;
+        }
+        Ok(())
+    }
+
     pub fn new(
         asset_repository: Arc<dyn AssetRepository>,
         asset_store: Arc<dyn AssetStore>,
@@ -266,6 +368,107 @@ impl GenerationInputPreparer {
                 (key.clone(), value)
             })
             .collect()
+    }
+
+    /// The shared read-only media gate, before any new Task/Batch is written.
+    pub async fn validate_product_assets(
+        &self,
+        project_id: &str,
+        workflow: serde_json::Value,
+        recipe: &crate::domain::Recipe,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), GenerationInputPrepareError> {
+        self.validate_asset_references(project_id, values).await?;
+        self.validate_external_image_inputs(project_id, values)
+            .await?;
+        self.validate_local_asset_files(project_id, values).await?;
+        self.validate_media_integrity(project_id, values).await?;
+        self.validate_h3_reference_durations(project_id, workflow, recipe, values)
+            .await
+    }
+
+    /// Recheck immutable managed media bytes, not just a still-existing filename.
+    async fn validate_media_integrity(
+        &self,
+        project_id: &str,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), GenerationInputPrepareError> {
+        use sha2::{Digest, Sha256};
+        let ids = values
+            .values()
+            .flat_map(|v| match v {
+                GenerationInputValue::VideoAsset(id) | GenerationInputValue::AudioAsset(id) => {
+                    vec![id]
+                }
+                GenerationInputValue::VideoAssets(ids) | GenerationInputValue::AudioAssets(ids) => {
+                    ids.iter().collect()
+                }
+                _ => Vec::new(),
+            })
+            .collect::<std::collections::HashSet<_>>();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let root = self
+            .project_repository
+            .get_storage_root(project_id)
+            .await
+            .map_err(repository_error)?
+            .ok_or_else(|| {
+                GenerationInputPrepareError::Repository("project storage root unavailable".into())
+            })?;
+        for id in ids {
+            let asset = self
+                .asset_repository
+                .find_by_id(id)
+                .await
+                .map_err(repository_error)?
+                .ok_or_else(|| GenerationInputPrepareError::AssetNotFound {
+                    asset_id: id.to_string(),
+                })?;
+            if asset.project_id != project_id
+                || asset.file_size == 0
+                || asset.duration_ms.unwrap_or(0) == 0
+                || (asset.asset_type == AssetType::Video && (asset.width == 0 || asset.height == 0))
+            {
+                return Err(GenerationInputPrepareError::AssetRead {
+                    asset_id: id.to_string(),
+                    message: "managed media metadata is unavailable".into(),
+                });
+            }
+            let mut stream = self
+                .asset_store
+                .open_read_stream(&root, std::path::Path::new(&asset.storage_path))
+                .await
+                .map_err(|_| GenerationInputPrepareError::AssetRead {
+                    asset_id: id.to_string(),
+                    message: "managed media is unavailable".into(),
+                })?;
+            let mut size = 0u64;
+            let mut hash = Sha256::new();
+            while let Some(bytes) =
+                stream
+                    .next_chunk()
+                    .await
+                    .map_err(|_| GenerationInputPrepareError::AssetRead {
+                        asset_id: id.to_string(),
+                        message: "managed media read failed".into(),
+                    })?
+            {
+                size = size.saturating_add(bytes.len() as u64);
+                if size > asset.file_size {
+                    break;
+                }
+                hash.update(&bytes);
+            }
+            if size != asset.file_size || format!("{:x}", hash.finalize()) != asset.sha256 {
+                return Err(GenerationInputPrepareError::AssetRead {
+                    asset_id: id.to_string(),
+                    message: "managed media integrity changed".into(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub async fn validate_h3_reference_durations(

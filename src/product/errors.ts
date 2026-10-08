@@ -1,6 +1,8 @@
 import type { GeneratorBindingSummary, RunRef } from "./types";
 
 const messages = {
+  SHOT_VIDEO_INPUT_CONFLICT: "镜头输入已被更新，请刷新后重新保存；当前修改未覆盖服务器。",
+  VIDEO_INPUT_INVALID: "视频输入不可用或不属于当前 Recipe，请重新选择受管理素材。",
   LIBRARY_DELETE_CONFIRMATION_REQUIRED: "请先查看删除影响并明确确认。",
   LIBRARY_DELETE_BLOCKED: "资源仍有受保护的引用，不能删除。请刷新使用位置。",
   LIBRARY_EDIT_INVALID: "修改未保存，请检查名称、正文或成员是否有效。",

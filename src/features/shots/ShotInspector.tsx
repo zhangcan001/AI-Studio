@@ -6,6 +6,7 @@ import type { ShotInputValues, ShotStage } from "../../types/shot";
 import { fieldLabel } from "../../i18n/statusLabels";
 import { referenceAnchorKindLabels } from "../assets/referenceAnchorState";
 import "./ShotInspector.css";
+import { ShotVideoInputsPanel } from "./ShotVideoInputsPanel";
 
 export type ShotInspectorTab = "parameters" | "references" | "prompt";
 
@@ -39,6 +40,9 @@ export interface ShotPromptLibraryOption {
 }
 
 export interface ShotInspectorProps {
+  videoInputShotId?: string;
+  onVideoInputsSaved?: () => void;
+  onVideoInputsReadyChange?: (owner: string, ready: boolean) => void;
   projectId: string;
   stage: ShotStage;
   currentDraft?: ShotStageDraftLike;
@@ -81,6 +85,9 @@ const ADVANCED_FIELD_PATTERN = /seed|sampler|denoise|guidance|detail|low[_-]?fre
 
 export function ShotInspector({
   projectId,
+  videoInputShotId,
+  onVideoInputsSaved,
+  onVideoInputsReadyChange,
   stage,
   currentDraft,
   currentRecipe,
@@ -131,6 +138,7 @@ export function ShotInspector({
 
   return (
     <aside className="shot-inspector" aria-label="镜头检查器">
+      {stage === "video" && videoInputShotId && currentRecipe?.persistentInputs && <ShotVideoInputsPanel key={JSON.stringify([projectId,videoInputShotId,currentRecipe.workflowVersionId,currentRecipe.recipeId])} scope={{projectId,shotId:videoInputShotId,workflowVersionId:currentRecipe.workflowVersionId,recipeId:currentRecipe.recipeId}} recipe={currentRecipe} onSaved={onVideoInputsSaved} onReadyChange={onVideoInputsReadyChange} />}
       <div className="shot-inspector-heading">
         <div>
           <span className="shot-inspector-kicker">参数面板</span>

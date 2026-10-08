@@ -174,13 +174,13 @@ export function phase13Boundary(root, review, phase12Review, phase8Snapshot) {
       workflowReview.afterHash !== sourceDigest(frozenRead(workflowPath))) fail('phase13-validation-workflow-drift');
 
   if (review?.privacy?.databaseExport !== false || review?.privacy?.promptExport !== false || review?.privacy?.absolutePathExport !== false || review?.privacy?.assetBytesExport !== false || review?.privacy?.workflowSourceExport !== false || review?.privacy?.recipeSourceExport !== false || review?.privacy?.remoteUpload !== false) fail('phase13-privacy-invariants-missing');
-  const migrations = readdirSync(join(root, 'src-tauri/migrations'));
+  const migrations = readdirSync(join(root, 'src-tauri/migrations')).filter(name=>!release.addedPaths?.includes(`src-tauri/migrations/${name}`));
   if (migrations.some(name => /^043/.test(name)) || !migrations.some(name => /^042/.test(name))) fail('phase13-migration-boundary-changed');
   const baselineMigrations = git(root, 'ls-tree', '-r', '--name-only', PHASE13_BASELINE, 'src-tauri/migrations').trim().split('\n').filter(path => path.endsWith('.sql')).sort();
-  const liveMigrations = sourceFiles(root, 'src-tauri/migrations', /\.sql$/);
+  const liveMigrations = sourceFiles(root, 'src-tauri/migrations', /\.sql$/).filter(path=>!release.addedPaths?.includes(path));
   if (JSON.stringify(baselineMigrations) !== JSON.stringify(liveMigrations) || aggregate(liveMigrations, path => frozenRead(path)) !== aggregate(baselineMigrations, baseRead)) fail('phase13-historical-migrations-changed');
   for (const key of ['newObservabilityAuthority', 'newTelemetryRepository', 'newMetricsDatabase', 'newExecutionAuthority', 'phase12ProfilerPromoted']) if (review?.authority?.[key] !== false) fail(`phase13-authority-invariant:${key}`);
-  if (!readFileSync(join(root, 'src-tauri/src/application/project_backup_service.rs'), 'utf8').includes('const BACKUP_VERSION: u32 = 20;')) fail('phase13-backup-version-changed');
+  if (!frozenRead('src-tauri/src/application/project_backup_service.rs').includes('const BACKUP_VERSION: u32 = 20;')) fail('phase13-backup-version-changed');
   if (review?.commands?.countAdded !== 3 || !Array.isArray(review.commands.addedNames) || review.commands.addedNames.length !== 3) fail('phase13-typed-command-review-missing');
   return { violations, backendFiles: sourceFiles(root, 'src-tauri/src', /\.rs$/).length, frontendFiles: liveTs.length, backendAggregateSha256: release.backendAggregateSha256 ?? backendReview?.aggregateSha256, frontendAggregateSha256: frontendReview?.aggregateSha256 };
 }

@@ -12,6 +12,8 @@ import { phase13Boundary } from "../../scripts/phase13-observability-guard.mjs";
 import { m1ParentReader } from "../../scripts/m1-readiness-boundary-guard.mjs";
 // @ts-expect-error Build-time reviewed additive tag command, not browser production code.
 import { m3LibraryParentReader } from "../../scripts/m3-library-findability-boundary-guard.mjs";
+// @ts-expect-error Node-only schema successor, never production browser code.
+import { minimaxVideoPhase2ParentReader } from "../../scripts/minimax-video-phase2-successor-guard.mjs";
 const read=(p:string):string=>readFileSync(p,"utf8");
 const manifest=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json"));
 const phase13=JSON.parse(read("docs/architecture/phase13-observability.json"));
@@ -42,7 +44,10 @@ it("target1 prevents production SQL growth while recognizing only real test scop
  expect(manifest.rows.every((r:{decision:string})=>!["UNKNOWN","UNCLASSIFIED"].includes(r.decision))).toBe(true);
 });
 it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=>{
- const commands=rustFiles("src-tauri/src/commands").flatMap((p:string)=>[...read(p).matchAll(/#\[tauri::command[^\]]*\]\s*pub\s+async\s+fn\s+(\w+)[\s\S]*?(?=\{)/g)].map(x=>({name:x[1],signature:x[0].replace(/\s+/g," ").trim()}))).sort((a:{name:string},b:{name:string})=>a.name.localeCompare(b.name));
+ const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
+ // Phase2 validates the full live command files before this historical reader
+ // compares Phase1 signatures. Live typed IPC parity is checked independently.
+ const commands=rustFiles("src-tauri/src/commands").flatMap((p:string)=>[...schema.read(p.replace(/\\/g,"/")).matchAll(/#\[tauri::command[^\]]*\]\s*pub\s+async\s+fn\s+(\w+)[\s\S]*?(?=\{)/g)].map((x:RegExpMatchArray)=>({name:x[1],signature:x[0].replace(/\s+/g," ").trim()}))).sort((a:{name:string},b:{name:string})=>a.name.localeCompare(b.name));
  const successor=m3LibraryParentReader(".");expect(successor.violations).toEqual([]);
  expect(commands).toEqual([...manifest.ipcContracts,...phase13.commands.addedSignatures,...successor.addedCommandSignatures].sort((a:{name:string},b:{name:string})=>a.name.localeCompare(b.name)));
  const backend=rustFiles("src-tauri/src").map((p:string)=>p.replace(/\\/g,"/")).sort();
@@ -58,6 +63,7 @@ it("target2 preserves frozen Phase7 consumers through the validated successor",(
  const phase10=JSON.parse(read("docs/architecture/phase10-frontend-architecture.json"));
  const current=m1ParentReader('.');expect(current.violations).toEqual([]);
  for(const [path,digest] of Object.entries(manifest.compatibilityFiles))expect(createHash("sha256").update(read(path).replace(/\r\n/g,"\n")).digest("hex"),path).toBe(current.afterHashes[path]??phase13.frontend.afterHashes[path]??(path==='src/app/App.css'?phase9.styleSnapshots[path]:phase10.frontendSuccessor[path]??digest));
- expect(read('src-tauri/src/application/project_backup_service.rs')).toContain('const BACKUP_VERSION: u32 = 20;');
+ const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
+ expect(schema.read('src-tauri/src/application/project_backup_service.rs')).toContain('const BACKUP_VERSION: u32 = 20;');
 });
 });

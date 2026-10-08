@@ -389,6 +389,7 @@ pub fn evaluate_context(
     let stage_input = ReadinessStageInput {
         selected_image_asset_id: context.stage_input.selected_image_asset_id.clone(),
         selected_image_sha256: context.stage_input.selected_image_sha256.clone(),
+        video_inputs: context.stage_input.video_inputs.clone(),
     };
     Ok(evaluate(&ReadinessEvaluationInput {
         context: &context,

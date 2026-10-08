@@ -345,17 +345,6 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     data_dirs.projects.clone(),
                 ));
 
-            let shot_context_resolver = Arc::new(ShotContextResolver::new(
-                project_repository.clone(),
-                production_structure_repository.clone(),
-                shot_repository.clone(),
-                consistency_scope_repository.clone(),
-                consistency_profile_repository.clone(),
-                reference_set_repository.clone(),
-                shot_consistency_repository.clone(),
-                asset_repository.clone(),
-                clock.clone(),
-            ));
             let consistency_scope_binding_service = Arc::new(
                 ConsistencyScopeBindingService::new_with_clock(
                     consistency_scope_repository.clone(),
@@ -636,8 +625,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             ));
             let reference_set_service = Arc::new(ReferenceSetService::new(
-                reference_set_repository,
-                consistency_profile_repository,
+                reference_set_repository.clone(),
+                consistency_profile_repository.clone(),
                 asset_repository.clone(),
                 reference_anchor_repository,
                 project_repository.clone(),
@@ -781,6 +770,26 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 diagnostics_service.clone(),
                 workflow_lifecycle_service.clone(),
             ));
+            let video_input_preparer = Arc::new(application::generation_input_preparer::GenerationInputPreparer::new(
+                asset_repository.clone(), asset_store.clone(), project_repository.clone(), comfy_adapter.clone(),
+            ));
+            let shot_video_input_service = Arc::new(application::shot_video_input_service::ShotVideoInputService::new(
+                asset_repository.clone(),
+                Arc::new(database::repositories::SqliteShotVideoInputRepository::new(database_pool.clone())),
+                shot_repository.clone(), definition_repository.clone(), workflow_registry_service.clone(),
+                video_input_preparer, clock.clone(),
+            ));
+            let shot_context_resolver = Arc::new(ShotContextResolver::new(
+                project_repository.clone(),
+                production_structure_repository.clone(),
+                shot_repository.clone(),
+                consistency_scope_repository.clone(),
+                consistency_profile_repository.clone(),
+                reference_set_repository.clone(),
+                shot_consistency_repository.clone(),
+                asset_repository.clone(),
+                clock.clone(),
+            ).with_video_inputs(shot_video_input_service.clone()));
             let shot_readiness_service = Arc::new(ShotReadinessService::new(
                 shot_context_resolver.clone(),
                 comfy_preflight_service.clone(),
@@ -846,7 +855,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             )
             .with_stage_prompt_repository(shot_bulk_repository.clone())
-            .with_generation_snapshot_repository(snapshot_repository.clone()));
+            .with_generation_snapshot_repository(snapshot_repository.clone()).with_video_inputs(shot_video_input_service.clone()));
             let shot_batch_service = Arc::new(ShotBatchService::new(
                 shot_repository,
                 shot_batch_repository.clone(),
@@ -856,7 +865,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_repository.clone(),
                 clock.clone(),
             )
-            .with_stage_prompt_repository(shot_bulk_repository)
+            .with_stage_prompt_repository(shot_bulk_repository).with_video_inputs(shot_video_input_service.clone())
             .with_new_generation_admission(workflow_registry_service.clone()));
             let production_preparation_service = Arc::new(ProductionPreparationService::new(
                 shot_batch_service.clone(),
@@ -961,6 +970,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_context,
                 ShotServices {
                     shot: shot_service,
+                    video_inputs: shot_video_input_service,
                     batch: shot_batch_service,
                     bulk: shot_bulk_service,
                     readiness: shot_readiness_service,
@@ -1127,6 +1137,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
         .invoke_handler(tauri::generate_handler![
             commands::product::product_project_overview,
             commands::product::product_creation_get,
+            commands::product::product_creation_inputs_get,
+            commands::product::product_creation_inputs_save,
+            commands::product::product_creation_assets_import,
             commands::product::product_creation_readiness_get,
             commands::product::product_creation_generate,
             commands::product::product_creation_shot_create,
@@ -1415,6 +1428,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::shot::shot_reorder,
             commands::shot::shot_stage_config_set,
             commands::shot::shot_references_replace,
+            commands::shot::shot_video_inputs_get,
+            commands::shot::shot_video_inputs_save,
+            commands::shot::shot_video_inputs_assets,
             commands::shot::shot_result_select,
             commands::shot::shot_generate,
             commands::shot_batch::shot_batch_plan,
@@ -1459,6 +1475,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::asset::asset_list_recent,
             commands::asset::asset_pick_and_import_image,
             commands::asset::asset_pick_and_import_source_assets,
+            commands::asset::asset_pick_and_import_source_folder,
             commands::asset::asset_pick_and_import_video,
             commands::asset::asset_pick_and_import_audio,
             commands::asset::asset_read_image,

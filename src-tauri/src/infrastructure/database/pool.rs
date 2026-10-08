@@ -67,7 +67,7 @@ mod tests {
                'production_batches', 'production_batch_items', 'asset_tags', 'asset_tag_links',
                'asset_favorites', 'project_templates', 'prompt_entries', 'prompt_versions',
                'shots', 'shot_stage_configs', 'shot_reference_assets', 'shot_generation_links',
-               'shot_stage_prompts',
+               'shot_stage_prompts', 'shot_video_input_sets', 'shot_video_input_assets', 'external_asset_imports',
                'asset_video_prompts', 'production_item_reviews', 'benchmark_experiments',
                'benchmark_candidates', 'benchmark_runs', 'benchmark_quality_scores',
                'production_runs', 'production_stages', 'production_stage_items',
@@ -101,13 +101,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 71);
+        assert_eq!(table_count(&pool).await, 74);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            42
+            43
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -342,7 +342,7 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 71);
+        assert_eq!(table_count(&second_pool).await, 74);
         second_pool.close().await;
     }
 
@@ -350,9 +350,33 @@ mod tests {
     async fn migration_042_backfills_historical_binding_occ_identity() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("pre-042.db");
-        let pool = initialize(&database_path)
+        // Exercise a real pre-042 database, not the newest schema with a marker
+        // removed. Later migrations must not weaken this historical upgrade probe.
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&database_path)
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
             .await
-            .expect("current schema should initialize");
+            .expect("legacy database should open");
+        let mut historical = sqlx::migrate::Migrator::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"),
+        )
+        .await
+        .expect("historical migrations should load");
+        historical.migrations = std::borrow::Cow::Owned(
+            historical
+                .iter()
+                .filter(|m| m.version <= 41)
+                .cloned()
+                .collect(),
+        );
+        historical
+            .run(&pool)
+            .await
+            .expect("schema through 041 should initialize");
 
         sqlx::query(
             "INSERT INTO projects (id, name, root_path, created_at, updated_at)
@@ -365,16 +389,6 @@ mod tests {
         .execute(&pool)
         .await
         .expect("legacy projects should insert");
-        sqlx::query("DROP TABLE project_workflow_bindings")
-            .execute(&pool)
-            .await
-            .expect("binding table should be replaceable in the isolated fixture");
-        sqlx::raw_sql(include_str!(
-            "../../../migrations/027_project_workflow_bindings.sql"
-        ))
-        .execute(&pool)
-        .await
-        .expect("pre-042 binding schema should be recreated");
         sqlx::query(
             "INSERT INTO project_workflow_bindings
              (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
@@ -387,10 +401,6 @@ mod tests {
         .execute(&pool)
         .await
         .expect("historical binding rows should insert");
-        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 42")
-            .execute(&pool)
-            .await
-            .expect("042 migration marker should be removable in the isolated fixture");
         pool.close().await;
 
         let upgraded = initialize(&database_path)
@@ -401,7 +411,16 @@ mod tests {
                 .fetch_one(&upgraded)
                 .await
                 .expect("latest migration should be readable"),
-            42
+            43
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 42 AND success = 1"
+            )
+            .fetch_one(&upgraded)
+            .await
+            .expect("042 marker should be readable"),
+            1
         );
         let rows: Vec<(i64, String)> = sqlx::query_as(
             "SELECT revision, binding_instance_id

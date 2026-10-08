@@ -348,6 +348,23 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
         }
 
         let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT DISTINCT asset_id, shot_id FROM shot_video_input_assets WHERE project_id = ",
+        );
+        query.push_bind(project_id).push(" AND asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(") ORDER BY shot_id");
+        for row in query
+            .build_query_as::<ShotReferenceReferenceRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?
+        {
+            if let Some(reference) = references.get_mut(&row.asset_id) {
+                push_unique(&mut reference.shot_video_input_ids, row.shot_id);
+            }
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT id AS shot_id, selected_image_asset_id, selected_video_asset_id
              FROM shots
              WHERE project_id = ",

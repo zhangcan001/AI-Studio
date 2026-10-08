@@ -38,3 +38,14 @@ _Avoid_: Auto-Approve、Auto-Start、Unattended Generation
 
 **Source Provenance**：正式结构或 Draft 节点与原始 ScriptDocument、source span、解析版本和人工修改之间的来源关系。
 _Avoid_: Full Source Copy、Prompt History
+
+## Video Media Inputs
+
+**External Import Receipt**：后端正式导入外部媒体时保留的来源凭据。它与素材归属和文件完整性共同确认外部来源，不由文件名、分类或历史生成结果推断。
+_Avoid_: Generated Image、Source Provenance、Filename Tag
+
+**Shot Video Input Set**：镜头为一个精确生成器版本与 Recipe 保存的媒体输入集合。每项具有明确槽位和槽内顺序；输入修改不会改变已经冻结的生产快照。
+_Avoid_: Selected Result、Stage Parameters、Production Snapshot
+
+**Input Slot**：Recipe 明确声明的媒体用途，例如首帧、尾帧、参考图片、参考视频或参考音频。不同用途不能由媒体排列顺序猜测。
+_Avoid_: Candidate、Selected Image、Implicit First Frame

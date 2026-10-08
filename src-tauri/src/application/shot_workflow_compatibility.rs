@@ -6,6 +6,8 @@ pub const SHOT_WORKFLOW_UNSUPPORTED_MEDIA_INPUT: &str = "SHOT_WORKFLOW_UNSUPPORT
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShotVideoInputMode {
     TextOnly,
+    FirstLast,
+    ReferenceMedia,
     SingleImage {
         key: String,
     },
@@ -47,6 +49,58 @@ pub fn classify_shot_recipe(
         ));
     }
 
+    // Explicit formal shapes do not inherit legacy image-only Ref2VA bounds.
+    let media_count = recipe
+        .inputs
+        .values()
+        .filter(|input| {
+            matches!(
+                input,
+                InputDefinition::Image { .. }
+                    | InputDefinition::Images { .. }
+                    | InputDefinition::Video { .. }
+                    | InputDefinition::Videos { .. }
+                    | InputDefinition::Audio { .. }
+                    | InputDefinition::Audios { .. }
+            )
+        })
+        .count();
+    if stage == ShotStage::Video
+        && media_count == 2
+        && matches!(
+            recipe.inputs.get("first_frame"),
+            Some(InputDefinition::Image { .. })
+        )
+        && matches!(
+            recipe.inputs.get("last_frame"),
+            Some(InputDefinition::Image { .. })
+        )
+    {
+        return Ok(ShotWorkflowCompatibility {
+            input_mode: ShotVideoInputMode::FirstLast,
+            ref2va_bounds: None,
+        });
+    }
+    if stage == ShotStage::Video
+        && media_count == 3
+        && matches!(
+            recipe.inputs.get("reference_images"),
+            Some(InputDefinition::Images { .. })
+        )
+        && matches!(
+            recipe.inputs.get("reference_videos"),
+            Some(InputDefinition::Videos { .. })
+        )
+        && matches!(
+            recipe.inputs.get("reference_audios"),
+            Some(InputDefinition::Audios { .. })
+        )
+    {
+        return Ok(ShotWorkflowCompatibility {
+            input_mode: ShotVideoInputMode::ReferenceMedia,
+            ref2va_bounds: None,
+        });
+    }
     let mut image_input = None;
     for (key, input) in &recipe.inputs {
         match input {
@@ -221,7 +275,35 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_media_and_dual_image_inputs_fail_closed() {
+    fn four_authorized_recipe_shapes_are_complete_without_legacy_ref2va_image_bounds() {
+        let expected = [
+            ShotVideoInputMode::TextOnly,
+            ShotVideoInputMode::SingleImage {
+                key: "first_frame".into(),
+            },
+            ShotVideoInputMode::FirstLast,
+            ShotVideoInputMode::ReferenceMedia,
+        ];
+        for (package, mode) in crate::application::minimax_video_product_policy::AUTHORIZED_PACKAGES
+            .into_iter()
+            .zip(expected)
+        {
+            let yaml = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("runtime_packages")
+                    .join(package)
+                    .join("recipe.yaml"),
+            )
+            .unwrap();
+            let recipe = crate::compiler::RecipeParser::parse(&yaml).unwrap();
+            let classified = classify_shot_recipe(ShotStage::Video, package, &recipe).unwrap();
+            assert_eq!(classified.input_mode, mode);
+            assert!(classified.ref2va_bounds.is_none());
+        }
+    }
+
+    #[test]
+    fn unsupported_media_fails_closed_and_explicit_dual_frames_are_supported() {
         let audio = classify_shot_recipe(
             ShotStage::Video,
             "wfl_custom_audio",
@@ -262,7 +344,7 @@ mod tests {
                 OutputType::Video,
             ),
         )
-        .expect_err("dual frame should not be expressible by Shot");
-        assert!(dual_frame.starts_with("SHOT_WORKFLOW_UNSUPPORTED_MEDIA_INPUT:"));
+        .expect("independent named first/last slots are expressible");
+        assert_eq!(dual_frame.input_mode, ShotVideoInputMode::FirstLast);
     }
 }

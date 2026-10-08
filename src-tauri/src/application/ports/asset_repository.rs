@@ -4,6 +4,23 @@ use crate::domain::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+/// Backend import attestation, separate from client-editable Asset metadata.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExternalAssetImportRecord {
+    pub asset_id: String,
+    pub project_id: String,
+    pub media_type: String,
+    pub sha256: String,
+    pub mime_type: String,
+    pub file_size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub duration_ms: Option<u64>,
+    pub imported_at: DateTime<Utc>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskOutputAssetMapping {
@@ -17,6 +34,22 @@ pub struct TaskOutputAssetMapping {
 #[async_trait]
 pub trait AssetRepository: Send + Sync {
     async fn insert_many(&self, assets: &[Asset]) -> Result<(), RepositoryError>;
+
+    /// Source import alone owns this write; Asset and receipt must commit atomically.
+    async fn insert_external_source(&self, _asset: &Asset) -> Result<(), RepositoryError> {
+        Err(RepositoryError::integrity(
+            "external import receipts are not supported",
+        ))
+    }
+
+    async fn find_external_import(
+        &self,
+        _project_id: &str,
+        _asset_id: &AssetId,
+    ) -> Result<Option<ExternalAssetImportRecord>, RepositoryError> {
+        // Absence fails closed for image adoption, including unsupported test ports.
+        Ok(None)
+    }
 
     async fn find_by_id(&self, asset_id: &AssetId) -> Result<Option<Asset>, RepositoryError>;
 

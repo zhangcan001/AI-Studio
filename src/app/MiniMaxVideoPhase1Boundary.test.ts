@@ -11,11 +11,14 @@ import {join,dirname} from 'node:path';
 // @ts-expect-error Node-only successor.
 import {minimaxVideoPhase1ParentReader,readinessLifecycleParentFacts,readinessLifecycleParentReader,MINIMAX_VIDEO_PHASE1_PARENT,MINIMAX_VIDEO_PHASE1_MANIFEST,MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 
+// @ts-expect-error Node-only successor.
+import {minimaxVideoPhase2FixtureFiles,MINIMAX_VIDEO_PHASE2_MANIFEST} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 it('validates current live aggregates before projecting historical source, with no schema/package/UI changes',()=>{
  const proof=JSON.parse(readFileSync(MINIMAX_VIDEO_PHASE1_MANIFEST,'utf8'));
  const accepted=minimaxVideoPhase1ParentReader('.');expect(accepted.violations).toEqual([]);
  const chain=readinessLifecycleParentReader('.');expect(chain.violations).toEqual([]);
- expect(chain.backendAggregateSha256).toBe(proof.backend.afterAggregateHash);
+ expect(chain.backendAggregateSha256).toBe(JSON.parse(readFileSync(MINIMAX_VIDEO_PHASE2_MANIFEST,'utf8')).backend.afterAggregateHash);
+ expect(proof.invariants.schemaChanged).toBe(false);expect(proof.invariants.backupFormatChanged).toBe(false);
  expect(proof.backend.afterAggregateHash).not.toBe(proof.backend.beforeAggregateHash);
  for(const group of ['migrations','packages','styles'])expect(proof[group].afterAggregateHash).toBe(proof[group].beforeAggregateHash);
  const path='src-tauri/src/application/generation_service.rs';
@@ -45,7 +48,7 @@ it('rejects changed and untouched byte drift, historical-proof edits, additions 
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
   execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
   writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of new Set([...readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE1_PARENT).paths,...MINIMAX_VIDEO_PHASE1_FILES]) as Set<string>){
+  for(const p of new Set([...readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE1_PARENT).paths,...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.')]) as Set<string>){
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
@@ -63,7 +66,7 @@ it('rejects changed and untouched byte drift, historical-proof edits, additions 
   for(const p of ['src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
    'docs/architecture/readiness-post-run-fix.json','src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml']){
    const path=join(root,p),original=readFileSync(path,'utf8');rmSync(path);
-   const denied=minimaxVideoPhase1ParentReader(root);expect(denied.violations).toContain('minimax-video-phase1-missing-evidence');
+   const denied=minimaxVideoPhase1ParentReader(root);expect(denied.violations).toContain('minimax-video-phase2-missing-evidence');
    expect(denied.addedPaths).toEqual([]);expect(denied.backendAggregateSha256).toBeUndefined();
    writeFileSync(path,original);expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
   }
@@ -88,8 +91,8 @@ it('keeps one policy on all production composition and write/dispatch seams',()=
   expect(block).toMatch(/ensure_new_generation_allowed|prepare_queue_values|inspect_start_admitted/);
  }
  const batch=read('src-tauri/src/application/shot_batch_service.rs');
- expect(batch).toMatch(/validate_new_items\(items\)\.await\?[\s\S]*?insert_prepared_batch_with_bindings/);
- expect(batch).toMatch(/validate_new_items\(&items\)\.await\?[\s\S]*?insert_batch_with_bindings/);
+ expect(batch).toMatch(/validate_new_items\(&batch\.project_id, items\)\.await\?[\s\S]*?insert_prepared_batch_with_bindings/);
+ expect(batch).toMatch(/validate_new_items\(&batch\.project_id, &items\)\.await\?[\s\S]*?insert_batch_with_bindings/);
  expect(read('src-tauri/src/application/generation_service.rs')).toContain('inspect_new_generation_availability(workflow_version_id, recipe_id)');
  expect(read('src-tauri/src/application/project_workflow_binding_service.rs')).toContain('.inspect_new_generation_availability(workflow_version_id, recipe_id)');
  for(const file of ['workflow_benchmark_service','h3_local_import_service','production_orchestrator_service'])

@@ -151,7 +151,7 @@ impl MediaProbe for CommandMediaProbe {
                 "-select_streams",
                 "a:0",
                 "-show_entries",
-                "format=duration",
+                "format=duration:stream=codec_type",
                 "-of",
                 "json",
             ])
@@ -169,6 +169,14 @@ impl MediaProbe for CommandMediaProbe {
         };
         if !output.status.success() {
             tracing::debug!("ffprobe could not inspect audio");
+            return AudioMetadata::default();
+        }
+        if !serde_json::from_slice::<Value>(&output.stdout)
+            .ok()
+            .and_then(|v| v.get("streams").cloned())
+            .and_then(|s| s.as_array().cloned())
+            .is_some_and(|streams| streams.iter().any(|s| s["codec_type"] == "audio"))
+        {
             return AudioMetadata::default();
         }
         AudioMetadata {

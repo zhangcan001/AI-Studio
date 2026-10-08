@@ -9,6 +9,7 @@ export interface GeneratorOption {
   availabilityReason: string | null;
   recommended: boolean;
   fields: import("../types/generation").RecipeField[];
+  persistentInputs?: boolean;
   resolutionPresets?: { id: string; label: string; width: number; height: number }[];
 }
 export interface GeneratorBindingSummary {

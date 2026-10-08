@@ -102,6 +102,17 @@ describe("shot production read model", () => {
     expect(step(failed, "image")).toMatchObject({ status: "FAILED" });
   });
 
+  it("keeps external input adoption separate from image success and navigates formal video without a generated keyframe", () => {
+    const model = buildShotProductionReadModel(shot({stageConfigs:[config("video")]}), context({
+      image:{available:false,configured:false},
+      video:{available:true,configured:true,videoInputMode:"SINGLE_IMAGE",persistentInputs:true},
+    }));
+    expect(step(model,"image")?.status).not.toBe("COMPLETE");
+    expect(step(model,"image-review")?.status).not.toBe("COMPLETE");
+    expect(step(model,"video")?.status).toBe("READY");
+    expect(model.nextAction.stepId).toBe("video");
+  });
+
   it("requires a selected keyframe for single-image video and skips an unconfigured video after image completion", () => {
     const singleImage = context({ video: { available: true, configured: true, videoInputMode: "SINGLE_IMAGE" } });
     const blocked = buildShotProductionReadModel(shot({ stageConfigs: [config("image"), config("video")] }), singleImage);

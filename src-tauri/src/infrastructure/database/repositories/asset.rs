@@ -2,7 +2,9 @@ use super::{
     format_datetime, i64_to_u64, map_domain_error, map_sqlx_error, parse_datetime, parse_json,
     serialize_json,
 };
-use crate::application::ports::{AssetRepository, RepositoryError, TaskOutputAssetMapping};
+use crate::application::ports::{
+    AssetRepository, ExternalAssetImportRecord, RepositoryError, TaskOutputAssetMapping,
+};
 use crate::domain::{
     Asset, AssetId, AssetRelation, AssetRelationId, AssetRelationType, AssetType, AssetVersion,
     AssetVersionId, TaskId,
@@ -23,6 +25,67 @@ impl SqliteAssetRepository {
 
 #[async_trait]
 impl AssetRepository for SqliteAssetRepository {
+    async fn insert_external_source(&self, asset: &Asset) -> Result<(), RepositoryError> {
+        asset
+            .validate()
+            .map_err(|error| map_domain_error("source asset validation", error))?;
+        if asset.source_task_id.is_some()
+            || asset.category != format!("source_{}", asset.asset_type.as_str())
+        {
+            return Err(RepositoryError::integrity(
+                "external source cannot be a generated Asset",
+            ));
+        }
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        insert_asset(&mut tx, asset).await?;
+        sqlx::query(
+            "INSERT INTO external_asset_imports
+             (asset_id, project_id, media_type, sha256, mime_type, file_size, width, height, duration_ms, imported_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(asset.id.as_str()).bind(&asset.project_id).bind(asset.asset_type.as_str())
+        .bind(&asset.sha256).bind(&asset.mime_type)
+        .bind(i64::try_from(asset.file_size).map_err(|_| RepositoryError::integrity("source size overflow"))?)
+        .bind(i64::from(asset.width)).bind(i64::from(asset.height))
+        .bind(asset.duration_ms.map(i64::try_from).transpose().map_err(|_| RepositoryError::integrity("source duration overflow"))?)
+        .bind(format_datetime(asset.created_at))
+        .execute(&mut *tx).await.map_err(map_sqlx_error)?;
+        tx.commit().await.map_err(map_sqlx_error)
+    }
+
+    async fn find_external_import(
+        &self,
+        project_id: &str,
+        asset_id: &AssetId,
+    ) -> Result<Option<ExternalAssetImportRecord>, RepositoryError> {
+        let row = sqlx::query_as::<_, ExternalImportRow>(
+            "SELECT asset_id, project_id, media_type, sha256, mime_type, file_size, width, height, duration_ms, imported_at
+             FROM external_asset_imports WHERE project_id = ? AND asset_id = ?",
+        )
+        .bind(project_id).bind(asset_id.as_str())
+        .fetch_optional(&self.pool).await.map_err(map_sqlx_error)?;
+        row.map(|r| {
+            Ok(ExternalAssetImportRecord {
+                asset_id: r.asset_id,
+                project_id: r.project_id,
+                media_type: r.media_type,
+                sha256: r.sha256,
+                mime_type: r.mime_type,
+                file_size: i64_to_u64("external import file_size", r.file_size)?,
+                width: u32::try_from(r.width)
+                    .map_err(|_| RepositoryError::integrity("invalid import width"))?,
+                height: u32::try_from(r.height)
+                    .map_err(|_| RepositoryError::integrity("invalid import height"))?,
+                duration_ms: r
+                    .duration_ms
+                    .map(|v| i64_to_u64("external import duration_ms", v))
+                    .transpose()?,
+                imported_at: parse_datetime("external import imported_at", &r.imported_at)?,
+            })
+        })
+        .transpose()
+    }
+
     async fn insert_many(&self, assets: &[Asset]) -> Result<(), RepositoryError> {
         if assets.is_empty() {
             return Ok(());
@@ -432,6 +495,20 @@ impl AssetRepository for SqliteAssetRepository {
         transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(())
     }
+}
+
+#[derive(sqlx::FromRow)]
+struct ExternalImportRow {
+    asset_id: String,
+    project_id: String,
+    media_type: String,
+    sha256: String,
+    mime_type: String,
+    file_size: i64,
+    width: i64,
+    height: i64,
+    duration_ms: Option<i64>,
+    imported_at: String,
 }
 
 const ASSET_SELECT: &str = "SELECT
