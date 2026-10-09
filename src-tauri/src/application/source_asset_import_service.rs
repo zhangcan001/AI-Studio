@@ -314,16 +314,50 @@ impl SourceAssetImportService {
             });
             return result;
         }
-        for path in paths {
+        for (index, path) in paths.iter().enumerate() {
             let display_name = source_display_name(path);
+            // Only report the ordinal and media kind: never log absolute source paths.
+            let extension = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let kind = match extension.as_str() {
+                "png" | "jpg" | "jpeg" | "webp" => "image",
+                "mp4" | "webm" | "mov" | "mkv" => "video",
+                "wav" | "flac" | "mp3" | "ogg" | "opus" | "m4a" => "audio",
+                _ => "unsupported",
+            };
+            tracing::info!(
+                ordinal = index + 1,
+                total = paths.len(),
+                kind,
+                "source import: file started"
+            );
             match self.import_file(project_id, path).await {
-                Ok(asset) => result.imported.push(asset),
-                Err(error) => result.failed.push(SourceAssetImportFailure {
-                    display_name,
-                    error: public_import_error(&error),
-                }),
+                Ok(asset) => {
+                    tracing::info!(ordinal = index + 1, kind, "source import: file published");
+                    result.imported.push(asset);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        ordinal = index + 1,
+                        kind,
+                        error_code = error.code(),
+                        "source import: file failed"
+                    );
+                    result.failed.push(SourceAssetImportFailure {
+                        display_name,
+                        error: public_import_error(&error),
+                    });
+                }
             }
         }
+        tracing::info!(
+            imported = result.imported.len(),
+            failed = result.failed.len(),
+            "source import: batch completed"
+        );
         result
     }
 
@@ -449,6 +483,7 @@ impl SourceAssetImportService {
             message: error.to_string(),
         })?;
 
+        tracing::info!(?kind, "source import: stream started");
         let stream = stream_source_file(path, writer.as_mut(), max_bytes, kind).await;
         let streamed = match stream {
             Ok(streamed) => streamed,
@@ -466,6 +501,11 @@ impl SourceAssetImportService {
                 "source file changed while streaming",
             ));
         }
+        tracing::info!(
+            ?kind,
+            bytes = streamed.file_size,
+            "source import: stream complete, publish started"
+        );
         let stored = match writer.commit().await {
             Ok(stored) => stored,
             Err(error) => {
@@ -474,6 +514,10 @@ impl SourceAssetImportService {
                 })
             }
         };
+        tracing::info!(
+            ?kind,
+            "source import: media file published, probing started"
+        );
         let mut stored_paths = vec![stored.path.clone()];
         let media_probe = &self.media_probe;
         let (width, height, duration_ms, thumbnail_path) = match kind {
@@ -525,6 +569,7 @@ impl SourceAssetImportService {
                 (None, None, metadata.duration_ms, None)
             }
         };
+        tracing::info!(?kind, "source import: media validation complete");
         let metadata = json!({
             "source": "native_import",
             "mediaKind": match kind {
@@ -570,12 +615,14 @@ impl SourceAssetImportService {
             }
         };
         asset.thumbnail_path = thumbnail_path;
+        tracing::info!(?kind, "source import: database publish started");
         if let Err(error) = self.asset_repository.insert_external_source(&asset).await {
             self.compensate(&stored_paths).await;
             return Err(SourceAssetImportError::AssetPersistence {
                 message: error.to_string(),
             });
         }
+        tracing::info!(?kind, "source import: database publish complete");
         Ok(asset)
     }
 
@@ -1262,6 +1309,57 @@ mod tests {
         assert_eq!(repository.assets.lock().unwrap().len(), 2);
         assert_eq!(result.imported[0].category, "source_image");
         assert_eq!(result.imported[1].category, "source_audio");
+    }
+
+    #[tokio::test]
+    async fn four_selected_image_image_audio_video_files_return_complete_atomic_receipt() {
+        let project_root = tempdir().unwrap();
+        let fixture_root = tempdir().unwrap();
+        let names_and_bytes = [
+            ("first.png", png()),
+            ("second.png", png()),
+            ("sound.wav", wav_prefix()),
+            ("clip.mp4", mp4_prefix()),
+        ];
+        let paths = names_and_bytes
+            .iter()
+            .map(|(name, bytes)| {
+                let path = fixture_root.path().join(name);
+                std::fs::write(&path, bytes).unwrap();
+                path
+            })
+            .collect::<Vec<_>>();
+        let repository = FakeAssetRepository::default();
+        let receipt = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            service(project_root.path(), repository.clone()).import_files("project-1", &paths),
+        )
+        .await
+        .expect("four-file Native-shaped batch must return its receipt");
+        assert_eq!(receipt.failed.len(), 0, "{:?}", receipt.failed);
+        assert_eq!(receipt.imported.len(), 4);
+        assert_eq!(
+            receipt
+                .imported
+                .iter()
+                .map(|asset| asset.category.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "source_image",
+                "source_image",
+                "source_audio",
+                "source_video"
+            ]
+        );
+        assert_eq!(repository.assets.lock().unwrap().len(), 4);
+        for (asset, path) in receipt.imported.iter().zip(paths.iter()) {
+            assert!(Path::new(&asset.storage_path).is_file());
+            assert_eq!(
+                std::fs::read(&asset.storage_path).unwrap(),
+                std::fs::read(path).unwrap()
+            );
+            assert!(asset.source_task_id.is_none());
+        }
     }
 
     #[tokio::test]

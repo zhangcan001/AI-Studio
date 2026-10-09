@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "MINIMAX_VIDEO_UI_PHASE4_NATIVE_IMPORT_REPAIR",
+  "parentHead": "b2718afd2d1a1293d78b97a8bb2291900d739239",
+  "invariants": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "queueAuthorityChanged": false,
+    "studioStoreAuthorityChanged": false,
+    "runtimePackagesChanged": false,
+    "historicalProofsRewritten": false,
+    "nativeMixedImportAccepted": false
+  },
+  "paths": {
+    "scripts/minimax-video-v2-ui-phase3-successor-guard.mjs": {
+      "beforeHash": "215d6569f7863f85620dd8cbef8aac47c6d9a31488294b05caf01cd850482da0",
+      "afterHash": "f6f053504052b5dda8e33a5cfe9c6c308c963d7a933837e8eeeba68db1666754"
+    },
+    "scripts/ui-phase4-ci-repair-successor-guard.mjs": {
+      "beforeHash": "83d8df7fa6689d535439badcb184b69a9f862393694f22f75e261e7f803f0201",
+      "afterHash": "31d34a4d8102d25e3d897e8ee47c4d4072801331d18e8b9053207d9daf1ce326"
+    },
+    "src-tauri/Cargo.lock": {
+      "beforeHash": "2c737facb788886dca12319f2a6bd346d49a195652e3eeae2239b77c94ed8f31",
+      "afterHash": "d94f11e1eece5f031d810b0957d61eff0e214ab27be459f9e2e2903fd5132774"
+    },
+    "src-tauri/Cargo.toml": {
+      "beforeHash": "b79009f9648b740569463cee2aa25e3fdd2079b5b511e9990fdf0833b9e24459",
+      "afterHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36"
+    },
+    "src-tauri/src/application/media_probe.rs": {
+      "beforeHash": "7b0ee93fe2108d02bc8978d7d2dd557d87c321f3103c57961e392b5e2154d408",
+      "afterHash": "dccc20859032fe795f57fb504416da059b7c804c8565a4d62f5e8939e5bd482e"
+    },
+    "src-tauri/src/application/source_asset_import_service.rs": {
+      "beforeHash": "28d4ad10ac8e0b4370ad15047787a48e2b70274c3c5c56cf95a20d941e838c41",
+      "afterHash": "f98d4e5b489ae856bf390c01dd0272487826f2a3a1198c7f8842eb9b79d8b324"
+    },
+    "src-tauri/src/infrastructure/filesystem/asset_store.rs": {
+      "beforeHash": "7a10fbd4cecb724287a80385c228db91a451011cdd32665a48ec920bc3cc1458",
+      "afterHash": "9be4df690b4aeb97b84a81a9891c6ffbbdfa4001ffdd236d357067095fdfbf93"
+    },
+    "scripts/ui-phase4-native-import-repair-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "0778ac58909eec345b3a14a79af6338ca9a06679f87f2e62284e12bc1f239659"
+    },
+    "src/app/UiPhase4NativeImportRepairBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "f5d09ff2690af48cf07ad9e859f18d77584eee15465d4ea6f36e13edf2ab509c"
+    }
+  }
+}

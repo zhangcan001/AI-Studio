@@ -1,6 +1,31 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use std::{path::Path, process::Command};
+use std::{path::Path, process::Stdio, time::Duration};
+use tokio::{process::Command, time::timeout};
+
+// A hung decoder must not prevent a serial import batch from returning its receipt.
+const PROBE_BUDGET: Duration = Duration::from_secs(20);
+const POSTER_BUDGET: Duration = Duration::from_secs(30);
+
+async fn bounded_output(command: &mut Command, budget: Duration) -> Option<std::process::Output> {
+    command.kill_on_drop(true);
+    command.stdin(Stdio::null());
+    command.stderr(Stdio::null());
+    match timeout(budget, command.output()).await {
+        Ok(Ok(output)) => Some(output),
+        Ok(Err(error)) => {
+            tracing::debug!(
+                error_type = std::any::type_name_of_val(&error),
+                "media probe process unavailable"
+            );
+            None
+        }
+        Err(_) => {
+            tracing::warn!("media probe process exceeded its bounded execution budget");
+            None
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VideoMetadata {
@@ -53,35 +78,29 @@ impl Default for CommandMediaProbe {
 #[async_trait]
 impl MediaProbe for CommandMediaProbe {
     async fn inspect_preview(&self, path: &Path, audio: bool) -> MediaProbeOutcome {
-        let command = self.ffprobe.clone();
-        let path = path.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            match Command::new(command)
-                .args([
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    if audio { "a:0" } else { "v:0" },
-                    "-show_entries",
-                    "stream=codec_type",
-                    "-of",
-                    "json",
-                ])
-                .arg(path)
-                .stderr(std::process::Stdio::null())
-                .output()
-            {
-                Ok(output) if output.status.success() => MediaProbeOutcome::Decodable,
-                Ok(_) => MediaProbeOutcome::DecodeFailed,
-                Err(_) => MediaProbeOutcome::ProbeUnavailable,
-            }
-        })
-        .await
-        .unwrap_or(MediaProbeOutcome::ProbeUnavailable)
+        let mut command = Command::new(&self.ffprobe);
+        command
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                if audio { "a:0" } else { "v:0" },
+                "-show_entries",
+                "stream=codec_type",
+                "-of",
+                "json",
+            ])
+            .arg(path);
+        match bounded_output(&mut command, PROBE_BUDGET).await {
+            Some(output) if output.status.success() => MediaProbeOutcome::Decodable,
+            Some(_) => MediaProbeOutcome::DecodeFailed,
+            None => MediaProbeOutcome::ProbeUnavailable,
+        }
     }
 
     async fn probe_video(&self, path: &Path) -> VideoMetadata {
-        let output = match Command::new(&self.ffprobe)
+        let mut command = Command::new(&self.ffprobe);
+        command
             .args([
                 "-v",
                 "error",
@@ -92,17 +111,9 @@ impl MediaProbe for CommandMediaProbe {
                 "-of",
                 "json",
             ])
-            .arg(path)
-            .output()
-        {
-            Ok(output) => output,
-            Err(error) => {
-                tracing::debug!(
-                    error_type = std::any::type_name_of_val(&error),
-                    "ffprobe unavailable; video metadata remains optional"
-                );
-                return VideoMetadata::default();
-            }
+            .arg(path);
+        let Some(output) = bounded_output(&mut command, PROBE_BUDGET).await else {
+            return VideoMetadata::default();
         };
         if !output.status.success() {
             tracing::debug!("ffprobe could not inspect video");
@@ -112,8 +123,9 @@ impl MediaProbe for CommandMediaProbe {
     }
 
     async fn generate_video_poster(&self, path: &Path) -> Option<Vec<u8>> {
-        let output = match Command::new(&self.ffmpeg)
-            .args(["-v", "error", "-i"])
+        let mut command = Command::new(&self.ffmpeg);
+        command
+            .args(["-nostdin", "-v", "error", "-i"])
             .arg(path)
             .args([
                 "-frames:v",
@@ -123,17 +135,9 @@ impl MediaProbe for CommandMediaProbe {
                 "-vcodec",
                 "png",
                 "pipe:1",
-            ])
-            .output()
-        {
-            Ok(output) => output,
-            Err(error) => {
-                tracing::debug!(
-                    error_type = std::any::type_name_of_val(&error),
-                    "ffmpeg unavailable; video poster skipped"
-                );
-                return None;
-            }
+            ]);
+        let Some(output) = bounded_output(&mut command, POSTER_BUDGET).await else {
+            return None;
         };
         if output.status.success() && !output.stdout.is_empty() {
             Some(output.stdout)
@@ -144,7 +148,8 @@ impl MediaProbe for CommandMediaProbe {
     }
 
     async fn probe_audio(&self, path: &Path) -> AudioMetadata {
-        let output = match Command::new(&self.ffprobe)
+        let mut command = Command::new(&self.ffprobe);
+        command
             .args([
                 "-v",
                 "error",
@@ -155,17 +160,9 @@ impl MediaProbe for CommandMediaProbe {
                 "-of",
                 "json",
             ])
-            .arg(path)
-            .output()
-        {
-            Ok(output) => output,
-            Err(error) => {
-                tracing::debug!(
-                    error_type = std::any::type_name_of_val(&error),
-                    "ffprobe unavailable; audio metadata remains optional"
-                );
-                return AudioMetadata::default();
-            }
+            .arg(path);
+        let Some(output) = bounded_output(&mut command, PROBE_BUDGET).await else {
+            return AudioMetadata::default();
         };
         if !output.status.success() {
             tracing::debug!("ffprobe could not inspect audio");
@@ -231,6 +228,31 @@ fn parse_duration_ms(bytes: &[u8]) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::parse_probe_json;
+
+    #[tokio::test]
+    async fn hung_probe_returns_without_waiting_for_child() {
+        use super::*;
+        #[cfg(windows)]
+        let mut command = {
+            let mut cmd = Command::new("powershell.exe");
+            cmd.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 8",
+            ]);
+            cmd
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", "sleep 8"]);
+            cmd
+        };
+        assert!(bounded_output(&mut command, Duration::from_millis(500))
+            .await
+            .is_none());
+    }
 
     #[tokio::test]
     async fn typed_probe_spawn_failure_is_unavailable_and_default_fake_does_not_claim_success() {
