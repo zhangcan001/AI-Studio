@@ -33,8 +33,5 @@
 @media (max-width:800px) { .create-content { display:block; } .create-header label { max-width:none; } }
 
 .create-inputs fieldset { border:0; margin:0; padding:0; min-width:0; }
-/* Only normal Create owns a viewport-bound scroll region; legacy surfaces stay unchanged. */
-.v3-shell:has(.create-page) { display:flex; flex-direction:column; height:100vh; min-height:0; overflow:hidden; }
-.v3-layout:has(.create-page) { flex:1; min-height:0; }
-.v3-main:has(.create-page) { display:flex; flex-direction:column; min-height:0; gap:10px; }
 .app-main-content:has(>.create-page) { flex:1; min-height:0; }
+.create-page.create-history { overflow:auto; }

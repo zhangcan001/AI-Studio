@@ -49,12 +49,12 @@ it.each([{ runtimeBusy: true }, { productionBusy: true }, { activeTaskCount: 2 }
   const { region, navigate } = await page({ ...ready, ...patch });
   expect(region.getByText(patch.activeTaskCount ? "运行资源：忙碌 · 活动任务 2" : "运行资源：忙碌")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "创建第一个镜头" }));
-  expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "A", stage: "image" });
+  expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "A", stage: "video" });
 });
 it("keeps an empty offline project's Create CTA and settings action independent", async () => {
   const { region, navigate } = await page({ ...unknown, connection: "OFFLINE" });
   fireEvent.click(screen.getByRole("button", { name: "创建第一个镜头" }));
-  expect(navigate).toHaveBeenLastCalledWith({ kind: "create", projectId: "A", stage: "image" });
+  expect(navigate).toHaveBeenLastCalledWith({ kind: "create", projectId: "A", stage: "video" });
   fireEvent.click(region.getByRole("button", { name: "检查运行环境" }));
   expect(navigate).toHaveBeenLastCalledWith({ kind: "system-settings", section: "general", returnTo: { kind: "project", projectId: "A", page: "overview" } });
   expect(mocks.getOverview).toHaveBeenCalledTimes(1);

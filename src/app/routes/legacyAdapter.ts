@@ -20,7 +20,7 @@ export function fromLegacyLocation(location: LegacyLocation): AppRoute {
     case "prompts": return { kind: "library", projectId, filter: "prompts" };
     case "tasks":
     case "shots": {
-      if (workspace === "shots" && section !== "production" && section !== "review") return { kind: "create", projectId, shotId, stage: (location.stage === "VIDEO" || location.stage === "video") ? "video" : "image" };
+      if (workspace === "shots" && section !== "production" && section !== "review") return { kind: "create", projectId, shotId, stage: (location.stage === "IMAGE" || location.stage === "image") ? "image" : "video" };
       const context = { shotId, taskId: location.taskId, batchId: location.batchId, assetId: location.assetId, itemId: location.itemId, reviewId: location.reviewId, stage: location.stage, collectionFilter: location.collectionFilter };
       return { kind: "runs", projectId, run: location.taskId && !location.reviewId ? { source: "task", id: location.taskId } : location.batchId ? { source: "queue-batch", id: location.batchId } : location.taskId ? { source: "task", id: location.taskId } : undefined, filter: workspace === "tasks" ? "tasks" : section === "review" ? "review" : "production", context };
     }

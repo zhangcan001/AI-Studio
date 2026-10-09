@@ -1,21 +1,22 @@
 :root {
   /* Calm ink surfaces keep attention on the work instead of the chrome. */
-  --studio-bg: #0e1117;
-  --studio-surface-1: #141821;
-  --studio-surface-2: #1a202b;
-  --studio-surface-3: #222a38;
+  --studio-bg: #080f1c;
+  --studio-surface-1: #101a2b;
+  --studio-surface-2: #152238;
+  --studio-surface-3: #1e304b;
   --studio-border: rgba(148, 163, 184, 0.16);
   --studio-border-strong: rgba(148, 163, 184, 0.28);
 
   --studio-text: #f1f5f9;
   --studio-text-secondary: #b3bdcc;
-  --studio-text-muted: #7f8a9c;
+  --studio-text-muted: #93a4bc;
 
-  /* Indigo is the single interactive accent; status colors stay semantic. */
-  --studio-accent: #a78bfa;
-  --studio-accent-strong: #7c3aed;
-  --studio-accent-hover: #c4b5fd;
-  --studio-accent-soft: rgba(139, 92, 246, 0.16);
+  /* Blue is the interactive accent; connectivity is not model readiness. */
+  --studio-accent: #60a5fa;
+  --studio-accent-strong: #2563eb;
+  --studio-accent-hover: #93c5fd;
+  --studio-accent-primary-hover: #1d4ed8;
+  --studio-accent-soft: rgba(59, 130, 246, 0.14);
   --studio-success: #4ade80;
   --studio-warning: #fbbf24;
   --studio-danger: #fb7185;
@@ -58,6 +59,12 @@
   --studio-shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.22);
   --studio-shadow-popover: 0 20px 48px rgba(0, 0, 0, 0.34);
   --studio-font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --studio-font-xs: 12px;
+  --studio-font-sm: 14px;
+  --studio-font-md: 16px;
+  --studio-font-lg: 18px;
+  --studio-font-title: 28px;
+  --studio-line-height: 1.5;
 
   /* Keep the legacy feature styles on the same visual language inside StudioShell. */
   --ux-surface-0: var(--studio-bg);

@@ -54,7 +54,7 @@ export function resolveResume(payload: unknown, legacy: WorkspaceResume, project
     // A damaged child locator must not resurrect an unrelated legacy location.
     if (!parsed && raw && typeof raw === "object") {
       const value = raw as Record<string, unknown>;
-      if (text(value.projectId)) parsed = value.kind === "runs" ? { kind: "runs", projectId: value.projectId } : value.kind === "library" ? { kind: "library", projectId: value.projectId } : value.kind === "create" ? { kind: "create", projectId: value.projectId, stage: value.stage === "video" ? "video" : "image" } : { kind: "project", projectId: value.projectId, page: "overview" };
+      if (text(value.projectId)) parsed = value.kind === "runs" ? { kind: "runs", projectId: value.projectId } : value.kind === "library" ? { kind: "library", projectId: value.projectId } : value.kind === "create" ? { kind: "create", projectId: value.projectId, stage: value.stage === "image" ? "image" : "video" } : { kind: "project", projectId: value.projectId, page: "overview" };
     }
   }
   const route = parsed ?? fromLegacyLocation({ projectId: legacy.lastProjectId ?? undefined, workspace: isWorkspace(legacy.lastWorkspace) ? legacy.lastWorkspace : "command-center", shotId: legacy.lastShotId ?? undefined });

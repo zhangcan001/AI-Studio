@@ -25,7 +25,7 @@ function context(stage: "image" | "video", shotId: string | null = "shot1"): Cre
 function run(status: ProductRun["status"] = "QUEUED", actions: string[] = []): ProductRun { return { ref: { source: "queue-batch", id: "run" }, projectId: "project", title: "run", status, phase: status, createdAt: "", updatedAt: "", progress: { total: 1, succeeded: status === "SUCCEEDED" ? 1 : 0, failed: status === "FAILED" ? 1 : 0, cancelled: 0 }, recoverability: { retryItemIds: ["old-item"], reviewRequired: 0 }, resultsSummary: [], errorSummary: null, preferredParent: null, availableActions: actions }; }
 const navigations = vi.fn(); const dirty = vi.fn();
 const runtime = { status: "CONNECTED", endpoint: "http://fixture.invalid", devices: [], runtimeGeneration: 1 } as const;
-function Host({ initialStage = "image", initialShot = "shot1" }: { initialStage?: "image" | "video"; initialShot?: string }) {
+function Host({ initialStage = "video", initialShot = "shot1" }: { initialStage?: "image" | "video"; initialShot?: string }) {
   const [route, setRoute] = useState<AppRoute>({ kind: "create", projectId: "project", shotId: initialShot || undefined, stage: initialStage });
   if (route.kind !== "create") return <p>离开创作</p>;
   return <CreatePage runtime={{ ...runtime, devices: [] }} route={route} onDirtyChange={dirty} navigate={next => { navigations(next); setRoute(next); }} />;
@@ -79,7 +79,7 @@ describe("M1-1 readiness actions", () => {
     await show("SELECT_GENERATOR");
     fireEvent.click(await screen.findByRole("button", { name: "重新选择生成器" }));
     expect(document.activeElement).toBe(screen.getByLabelText("选择生成器"));
-    expect((screen.getByLabelText("选择生成器") as HTMLSelectElement).value).toBe("image-opaque");
+    expect((screen.getByLabelText("选择生成器") as HTMLSelectElement).value).toBe("t2v-opaque");
     expect(api.generate).not.toHaveBeenCalled(); expect(navigations).not.toHaveBeenCalled();
   });
   it.each([undefined, "future_field"])("falls back to the actual input region for field %s", async field => {
@@ -147,7 +147,7 @@ describe("M1-1 readiness actions", () => {
   });
   it.each(["resolve", "reject"])("ignores a manual recheck %s after switching project", async outcome => {
     let resolve!: (value: unknown) => void; let reject!: (error: unknown) => void;
-    const a = { kind: "create", projectId: "project", shotId: "shot1", stage: "image" } as const;
+    const a = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
     api.readinessGet.mockResolvedValue(blocked("TRY_LATER"));
     const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={a} navigate={navigations} />); await loaded();
     const button = await screen.findByRole("button", { name: "重新检查" });
@@ -167,21 +167,24 @@ describe("M1-1 readiness actions", () => {
 afterEach(cleanup);
 const loaded = () => screen.findByLabelText("选择生成器");
 describe("Target11 controller", () => {
-  it("uses canonical routes and restores each stage draft", async () => {
-    render(<StrictMode><Host /></StrictMode>); await loaded();
-    fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "image edit" } });
-    fireEvent.click(screen.getByRole("button", { name: "视频" })); await waitFor(() => expect(screen.getByLabelText("提示词").getAttribute("rows")).toBe("5"));
-    await waitFor(() => expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("video prompt"));
+  it("preserves the video draft through historical image access without exposing new image generation", async () => {
+    const video = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
+    const view = render(<CreatePage route={video} runtime={{ ...runtime, devices: [] }} navigate={navigations} onDirtyChange={dirty} />); await loaded();
     fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "video edit" } });
-    fireEvent.click(screen.getByRole("button", { name: "图片" })); await loaded();
-    await waitFor(() => expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("image edit"));
-    fireEvent.click(screen.getByRole("button", { name: "视频" })); await loaded();
+    view.rerender(<CreatePage route={{ ...video, stage: "image" }} navigate={navigations} />);
+    await screen.findByRole("heading", { name: "历史图片" });
+    expect(screen.queryByLabelText("选择生成器")).toBeNull();
+    expect(screen.queryByRole("button", { name: "生成" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "新建镜头" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "视频创作" }));
+    expect(navigations).toHaveBeenLastCalledWith({ ...video, surface: undefined });
+    view.rerender(<CreatePage route={video} runtime={{ ...runtime, devices: [] }} navigate={navigations} onDirtyChange={dirty} />); await loaded();
     await waitFor(() => expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("video edit"));
     expect(navigations.mock.calls.every(([r]) => r.kind === "create" && r.shotId === "shot1")).toBe(true); expect(dirty).toHaveBeenCalledWith(true);
     fireEvent.change(screen.getByLabelText("镜头"), { target: { value: "shot2" } }); await loaded(); expect(navigations).toHaveBeenLastCalledWith(expect.objectContaining({ shotId: "shot2", kind: "create" }));
   });
   it("has one empty-project primary CTA and navigates newly created Shot", async () => {
-    api.get.mockResolvedValueOnce({ ...context("image", null), shots: [] }); render(<Host initialShot="" />);
+    api.get.mockResolvedValueOnce({ ...context("video", null), shots: [] }); render(<Host initialShot="" />);
     fireEvent.click(await screen.findByRole("button", { name: "创建第一个镜头" }));
     await waitFor(() => expect(navigations).toHaveBeenCalledWith(expect.objectContaining({ kind: "create", shotId: "shot1" })));
   });
@@ -209,18 +212,18 @@ describe("Target12 media", () => {
   it("persistent references use only image choices and keep backend scope checks", async () => {
     render(<Host />); await loaded(); fireEvent.click(screen.getByText("镜头长期参考图"));
     fireEvent.click(screen.getByRole("checkbox", { name: "首帧素材" })); fireEvent.click(screen.getByRole("button", { name: "保存长期参考图" }));
-    await waitFor(() => expect(api.referencesSet).toHaveBeenCalledWith("project", "shot1", "image", ["img1"]));
+    await waitFor(() => expect(api.referencesSet).toHaveBeenCalledWith("project", "shot1", "video", ["img1"]));
     expect(screen.queryByRole("checkbox", { name: "参考视频素材" })).toBeNull();
   });
 });
 describe("Target13 inputs", () => {
   it("edits prompts, uses inline library, and presents friendly schema controls", async () => {
-    render(<Host />); await loaded(); expect(screen.getByLabelText("负向提示词")).toBeTruthy();
+    render(<Host />); await loaded(); expect(screen.queryByLabelText("负向提示词")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "选择提示词" })); fireEvent.click(screen.getByRole("button", { name: "我的提示词 · 版本 2" }));
     expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("chosen prompt");
     expect(screen.queryByText(/wfl_/)).toBeNull(); expect(api.bindingSet).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "1280" } }); expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1280 });
-    fireEvent.click(screen.getByRole("button", { name: "视频" })); await loaded(); await waitFor(() => expect(screen.queryByLabelText("负向提示词")).toBeNull());
+    expect(screen.queryByRole("button", { name: "图片" })).toBeNull();
     expect(screen.getByLabelText("时长（秒）").getAttribute("max")).toBe("10"); expect(videos.map(modeLabel)).toEqual(["文生视频", "图生视频", "首尾帧", "参考视频"]);
   });
 });
@@ -245,7 +248,7 @@ describe("Target14 run", () => {
 describe("Target15 candidates", () => {
   it("displays only stage candidates; selection keeps other candidates and separate review", async () => {
     candidates = [{ id: "c1", name: "候选一", mediaKind: "image", selected: false }, { id: "c2", name: "候选二", mediaKind: "image", selected: false }, { id: "old-video", name: "不属于当前阶段", mediaKind: "video", selected: false }];
-    render(<Host />); await loaded(); expect(screen.queryByText("不属于当前阶段")).toBeNull(); fireEvent.click(screen.getAllByRole("button", { name: "选用此结果" })[1]);
+    render(<Host initialStage="image" />); await screen.findByRole("heading", { name: "历史图片" }); expect(screen.queryByText("不属于当前阶段")).toBeNull(); fireEvent.click(screen.getAllByRole("button", { name: "选用此结果" })[1]);
     await waitFor(() => expect(api.selectResult).toHaveBeenCalledWith("project", "shot1", "image", "c2")); expect(await screen.findByText("已选用")).toBeTruthy(); expect(screen.getAllByText("候选一").length).toBeGreaterThan(0); expect(screen.getByText(/选用不等于审核/)).toBeTruthy();
   });
 });
@@ -257,7 +260,7 @@ describe("Target16 architecture", () => {
     const app = readFileSync("src/app/App.tsx", "utf8"); // Phase10: retain the normal-route proof at its actual composition owner.
     const pages = readFileSync("src/app/NormalProductPages.tsx", "utf8");
     expect(app).toContain("<NormalProductPages project={activeProject} runtime={comfy} route={route} navigate={navigate} onDirtyChange={setShotDraftDirty} />");
-    expect(pages).toContain('normalCreate(route) && route.kind === "create"');
+    expect(pages).toContain('normalCreate(route) || (route.kind === "create" && route.stage === "image")');
     expect(pages).toContain('runtime={runtime}');
     for (const path of readdirSync("src/features/create").filter((path: string) => /\.(tsx?|css)$/.test(path) && !path.includes("test"))) {
       const source = readFileSync(`src/features/create/${path}`, "utf8"); expect(source).not.toMatch(/tauriClient|@tauri-apps|services\/ipc|create\s*\(.*=>/); expect(source).not.toMatch(/<ShotWorkspace|<GenerationStudio|<DirectGenerationEntry/);
@@ -266,7 +269,7 @@ describe("Target16 architecture", () => {
   }, 15000);
 });
 it("phase6_target4 canonical Lab routes and legacy deep links preserve Create draft on return", async () => {
-  const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "image" } as const;
+  const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
   const navigate = vi.fn();
   const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
   fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "Lab return draft" } });
@@ -338,7 +341,7 @@ describe("M2-2 precise library reuse", () => {
     expect(api.generate).not.toHaveBeenCalled();
   });
   it("keeps incompatible prompt intent visible without changing generator", async () => {
-    api.generatorsList.mockResolvedValue([option("no-prompt",params,"image")]);
+    api.generatorsList.mockResolvedValue([option("no-prompt",params,"video")]);
     useStudioStore.getState().setPendingLibraryIntent({kind:"prompt",projectId:"project",promptId:"p",promptVersionId:"v",text:"old21",modelVersionId:null});
     render(<Host/>); await loaded();
     expect(screen.getByText(/当前生成器没有可应用提示词的输入/)).toBeTruthy();
@@ -348,16 +351,17 @@ describe("M2-2 precise library reuse", () => {
   });
 });
 
-it("M2-2 typed prompt provenance survives stage and Settings/Workflow return snapshots", async()=>{
- render(<Host/>); await loaded();
+it("M2-2 video prompt provenance survives historical stage and Settings/Workflow return snapshots", async()=>{
+ const route = { kind:"create", projectId:"project", shotId:"shot1", stage:"video" } as const;
+ const view = render(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={navigations}/>); await loaded();
  fireEvent.click(screen.getByRole("button",{name:"选择提示词"}));fireEvent.click(screen.getByRole("button",{name:"我的提示词 · 版本 2"}));
- fireEvent.click(screen.getByRole("button",{name:"视频"})); await loaded();
+ view.rerender(<CreatePage route={{...route,stage:"image"}} navigate={navigations}/>); await screen.findByRole("heading",{name:"历史图片"});
  expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
- fireEvent.click(screen.getByRole("button",{name:"图片"}));await loaded();
+ view.rerender(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={navigations}/>); await loaded();
  expect(useStudioStore.getState().creationPromptProvenance).toEqual({promptId:"prm-choice",promptVersionId:"prv-choice"});
  fireEvent.click(screen.getByRole("button",{name:"工作流 / Benchmark"}));
  expect(useStudioStore.getState().creationPromptProvenance?.promptVersionId).toBe("prv-choice");
- expect(useStudioStore.getState().creationLabReturn?.scope).toBe("project:shot1:image");
+ expect(useStudioStore.getState().creationLabReturn?.scope).toBe("project:shot1:video");
 });
 
 it.each(["STARTED", "FAILED_TO_START", "ALREADY_ACCEPTED"] as const)("clearing a submission field invalidates %s acceptance and renews the attempt", async startOutcome => {

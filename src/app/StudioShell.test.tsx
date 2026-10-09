@@ -10,7 +10,7 @@ describe("Canonical shell navigation preserves former StudioShell intent", () =>
     const route = fromLegacyLocation({ ...old, projectId: "p" });
     const html = renderToStaticMarkup(<ShellHost route={route} projectSelector={null} navigate={vi.fn()} back={vi.fn()}><div>content</div></ShellHost>);
     expect(route.kind).toBe(section === "creation" ? "create" : "runs");
-    expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+    expect(html.match(/<button[^>]*aria-current="page"/g)).toHaveLength(1);
     expect(html).not.toContain("studio-global-rail");
     expect(html).toContain(section === "creation" ? "创作" : "运行");
   });

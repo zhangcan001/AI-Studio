@@ -57,7 +57,7 @@ it("phase6_target16 real normal GeneratorSettings, advanced-only Lab and compati
   const host = read("src/app/App.tsx");
   expect(host).toContain('<GeneratorSettingsPage'); expect(host).toContain('<WorkflowLabPage'); expect(host).not.toContain("shellMode");
   expect(read("src/features/workflow-lab/WorkflowLabPage.tsx")).toContain("useWorkflowLabController(");
-  const nav = read("src/app/v3/AppShellV3.tsx").split('const pages =')[1].split('return <div')[0];
+  const nav = read("src/app/v3/ShellChrome.tsx").split('export function ShellNavigation')[1];
   expect(nav).not.toMatch(/workflow|advanced|generators/);
   const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
   expect(readdirSync("src-tauri/migrations").filter((f: string)=>!schema.addedPaths.includes(`src-tauri/migrations/${f}`)).some((f: string) => f.startsWith("043"))).toBe(false);

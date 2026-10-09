@@ -5,7 +5,7 @@ afterEach(() => localStorage.clear());
 describe("versioned route resume", () => {
   it("reads legacy v1 and writes/restarts canonical v2", () => {
     const route = resolveResume(undefined, { lastProjectId: "A", lastWorkspace: "shots", lastShotId: "shotA" }, ["A"]);
-    expect(route).toEqual({ kind: "create", projectId: "A", stage: "image", shotId: "shotA" });
+    expect(route).toEqual({ kind: "create", projectId: "A", stage: "video", shotId: "shotA" });
     writeRouteResume(route);
     expect(resolveResume(readRouteResume(), {}, ["A"])).toEqual(route);
   });

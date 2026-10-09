@@ -1,6 +1,7 @@
 import { cachedBoundary } from './boundary-validation-cache.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { uiPhase3ParentReader, uiPhase3FixtureFiles } from './minimax-video-v2-ui-phase3-successor-guard.mjs';
 import { READINESS_LIFECYCLE_GROUPS, readinessLifecycleParentFacts, readinessLifecycleHash, readinessLifecycleAggregate, MINIMAX_VIDEO_PHASE1_MANIFEST } from './readiness-lifecycle-successor-guard.mjs';
 
 // Reviewed fix on the Phase 2 checkpoint. Do not repin minimax-video-phase2.json.
@@ -42,7 +43,7 @@ export const MINIMAX_VIDEO_PHASE3_ADDED = [
   'src/app/MiniMaxVideoPhase3Boundary.test.ts',
 ];
 export const MINIMAX_VIDEO_PHASE3_FILES = [...MINIMAX_VIDEO_PHASE3_EXISTING, ...MINIMAX_VIDEO_PHASE3_ADDED, MINIMAX_VIDEO_PHASE3_MANIFEST];
-export const minimaxVideoPhase3FixtureFiles = root => [...readinessLifecycleParentFacts(root, MINIMAX_VIDEO_PHASE3_PARENT).paths, ...MINIMAX_VIDEO_PHASE3_FILES];
+export const minimaxVideoPhase3FixtureFiles = root => [...readinessLifecycleParentFacts(root, MINIMAX_VIDEO_PHASE3_PARENT).paths, ...MINIMAX_VIDEO_PHASE3_FILES, ...uiPhase3FixtureFiles(root)];
 export const minimaxVideoPhase3Groups = () => [...READINESS_LIFECYCLE_GROUPS, ['domainDocs', 'docs/architecture', /\.md$/]];
 export const MINIMAX_VIDEO_PHASE3_INVARIANTS = {
   schemaChanged: false, backupFormatChanged: false, queueAuthorityChanged: false,
@@ -61,8 +62,9 @@ const configs = ['package.json', 'pnpm-lock.yaml', 'src-tauri/Cargo.toml', 'src-
   'docs/AI_STUDIO_2_1_CLOSEOUT.md', 'docs/RELEASE_NOTES_v2.1.0-personal.md'];
 
 function validate(root, override) {
-  const violations = [], fail = s => violations.push(`minimax-video-phase3-${s}`);
-  const live = new Map(), disk = p => { if (!live.has(p)) live.set(p, normalize(readFileSync(join(root, p), 'utf8'))); return live.get(p); };
+  const successor = uiPhase3ParentReader(root);
+  const violations = [...successor.violations], fail = s => violations.push(`minimax-video-phase3-${s}`);
+  const live = new Map(), disk = p => { if (!live.has(p)) live.set(p, normalize(successor.violations.length ? readFileSync(join(root, p), 'utf8') : successor.read(p))); return live.get(p); };
   const rejected = () => ({ violations, addedPaths: [], afterHashes: {}, backendAggregateSha256: undefined, read: disk });
   let proof, facts;
   try { proof = override ?? JSON.parse(disk(MINIMAX_VIDEO_PHASE3_MANIFEST)); facts = readinessLifecycleParentFacts(root, MINIMAX_VIDEO_PHASE3_PARENT); }
@@ -88,7 +90,7 @@ function validate(root, override) {
     for (const [name, dir, pattern] of minimaxVideoPhase3Groups()) {
       const base = facts.paths.filter(p => p.startsWith(dir + '/') && pattern.test(p));
       const untouched = base.filter(p => !MINIMAX_VIDEO_PHASE3_EXISTING.includes(p));
-      const current = files(root, dir, pattern).filter(p => p !== MINIMAX_VIDEO_PHASE3_MANIFEST);
+      const current = files(root, dir, pattern).filter(p => p !== MINIMAX_VIDEO_PHASE3_MANIFEST && !successor.addedPaths.includes(p));
       const expected = [...base, ...MINIMAX_VIDEO_PHASE3_ADDED.filter(p => p.startsWith(dir + '/') && pattern.test(p))].sort();
       const record = proof[name];
       if (JSON.stringify(current) !== JSON.stringify(expected) || record?.beforeFiles !== base.length || record?.afterFiles !== current.length) fail(`${name}-files`);
@@ -102,8 +104,8 @@ function validate(root, override) {
   } catch { fail('missing-evidence'); return rejected(); }
   if (violations.length) return rejected();
   return {
-    violations, addedPaths: [...MINIMAX_VIDEO_PHASE3_ADDED, MINIMAX_VIDEO_PHASE3_MANIFEST],
-    afterHashes: Object.fromEntries(scope.map(p => [p, proof.paths[p].afterHash])),
+    violations, addedPaths: [...MINIMAX_VIDEO_PHASE3_ADDED, MINIMAX_VIDEO_PHASE3_MANIFEST, ...successor.addedPaths],
+    afterHashes: { ...Object.fromEntries(scope.map(p => [p, proof.paths[p].afterHash])), ...successor.afterHashes },
     backendAggregateSha256: proof.backend.afterAggregateHash,
     read: p => MINIMAX_VIDEO_PHASE3_EXISTING.includes(p) ? facts.read(p) : disk(p),
   };

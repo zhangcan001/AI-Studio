@@ -73,7 +73,7 @@ it("phase5_target16 one normal entry real page legacy rollback and responsive st
     expect(pages).toContain('<LibraryPage key={activeProject.id}');expect(app).toContain('route.filter === "advanced-assets"');expect(app).toContain('route.filter === "advanced-prompts"');
  for(const path of ["src/features/assets/AssetWorkspace.tsx","src/features/prompts/PromptStudio.tsx","src/features/assets/ConsistencyProfileLibrary.tsx","src/features/assets/ReferenceSetEditor.tsx"])expect(readFileSync(path,"utf8").length).toBeGreaterThan(0);
  render(<LibraryPage route={{kind:"library",projectId:"project-a"}} navigate={vi.fn()}/>);await screen.findByRole("button",{name:/测试提示词/});expect(screen.getByRole("navigation",{name:"资源分类"})).toBeTruthy();expect(screen.getByRole("button",{name:"近期资源"})).toBeTruthy();expect(screen.queryByText("全部资源")).toBeNull();
- expect(readFileSync("src/features/library/LibraryPage.css","utf8")).toContain(".v3-shell:has(.library-page)");
+ expect(readFileSync("src/features/library/LibraryPage.css","utf8")).toContain(".v3-main:has(.library-page)");expect(readFileSync("src/features/library/LibraryPage.css","utf8")).not.toMatch(/\.v3-shell:has|\.v3-layout:has/);
 });
 
 it("M2-2 exact Create-origin route wins over standalone stage choice and applies Prompt21 identity",async()=>{
