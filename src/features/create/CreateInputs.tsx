@@ -3,11 +3,13 @@ import type { CreationContext } from "../../product/types";
 import type { RecipeField } from "../../types/generation";
 import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, generatorLabel, mediaKind, mediaValue } from "./createModel";
+import { CreateMediaPreview } from "./CreateMediaPreview";
+import { modeLabel } from "../../product/generatorPresentation";
 function textValue(value?: import("../../types/generation").DraftValue) { return value?.type === "string" ? value.value : ""; }
 export function GeneratorPanel({ controller: c }: { controller: CreateController }) {
-  return <section><h2>生成器</h2><label>选择生成器<select id="create-field-selectionRef" aria-label="选择生成器" value={c.selection} disabled={c.busy} onChange={e => c.chooseGenerator(e.target.value)}>
+  return <section aria-label="视频模式"><h2>视频模式</h2><label>选择生成器<select id="create-field-selectionRef" aria-label="选择生成器" value={c.selection} disabled={c.busy || c.videoInputs.busy} onChange={e => c.chooseGenerator(e.target.value)}>
     <option value="">请选择</option>{c.generators.map((item, index) => <option key={item.selectionRef} value={item.selectionRef} disabled={!item.availability}>{generatorLabel(item, index)}{!item.availability ? "（不可用）" : ""}</option>)}
-  </select></label>{c.generator?.availabilityReason && <p>{c.generator.availabilityReason}</p>}</section>;
+  </select></label>{c.generator && <span className="create-state-pill">{modeLabel(c.generator)}</span>}{c.generator?.availabilityReason && <p>{c.generator.availabilityReason}</p>}</section>;
 }
 export function PromptPanel({ controller: c }: { controller: CreateController }) {
   const [picker, setPicker] = useState(false);
@@ -28,13 +30,17 @@ function MediaField({ field, controller: c }: { field: RecipeField; controller: 
   const plural = ["images", "videos", "audios"].includes(field.type);
   const choices = (c.videoInputs.enabled ? c.videoInputs.view?.assets : c.context?.mediaInputs)?.filter(asset => asset.mediaKind === kind) ?? [];
   const set = (next: string[]) => next.length ? c.setValue(field.key, mediaValue(field, next)) : c.removeValue(field.key);
-  return <label>{fieldLabel(field)}{("required" in field && field.required) ? "（必需）" : "（可选）"}
+  return <div className="create-media-field"><label htmlFor={`create-field-${field.key}`}>{fieldLabel(field)}{("required" in field && field.required) ? "（必需）" : "（可选）"}{plural && ` · ${ids.length} 项`}</label>
     <select id={`create-field-${field.key}`} aria-label={fieldLabel(field)} value={plural ? "" : ids[0] ?? ""} onChange={e => set(plural ? [...ids, e.target.value].filter(Boolean) : e.target.value ? [e.target.value] : [])}>
       <option value="">{plural ? "添加素材" : "未选择"}</option>{choices.filter(item => !plural || !ids.includes(item.id)).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
     </select>
-    {plural && <ol>{ids.map((id, index) => <li key={id}>{choices.find(item => item.id === id)?.name ?? "素材不可用"}<button type="button" aria-label={`${fieldLabel(field)}移除第${index + 1}项`} onClick={() => set(ids.filter(item => item !== id))}>移除</button>{index > 0 && <button type="button" onClick={() => { const next = [...ids]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; set(next); }}>上移</button>}</li>)}</ol>}
+    <ol>{ids.map((id, index) => { const asset = choices.find(item => item.id === id); return <li key={id}><strong>{asset?.name ?? "素材不可用"}</strong><div className="create-media-actions"><button type="button" aria-label={`${fieldLabel(field)}移除第${index + 1}项`} onClick={() => set(ids.filter(item => item !== id))}>移除</button>{plural && <><button type="button" aria-label={`${fieldLabel(field)}上移第${index + 1}项`} disabled={index === 0} onClick={() => { const next = [...ids]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; set(next); }}>上移</button><button type="button" aria-label={`${fieldLabel(field)}下移第${index + 1}项`} disabled={index === ids.length - 1} onClick={() => { const next = [...ids]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; set(next); }}>下移</button></>}</div>{asset && <InputPreview key={`${c.context?.projectId}:${c.selection}:${field.key}:${id}`} projectId={c.context!.projectId} asset={asset} />}{!asset && <small role="status">请刷新输入并重新选择；不会自动替换素材。</small>}</li>; })}</ol>
     {plural && "maxItems" in field && <small>按顺序输入，允许 {field.minItems}–{field.maxItems} 项。</small>}
-  </label>;
+  </div>;
+}
+function InputPreview({ projectId, asset }: { projectId: string; asset: { id: string; name: string; mediaKind: "image" | "video" | "audio" } }) {
+  const [open, setOpen] = useState(false);
+  return <details className="create-input-preview" onToggle={e => setOpen(e.currentTarget.open)}><summary>预览{asset.name}</summary>{open && <CreateMediaPreview key={`${projectId}:${asset.id}`} projectId={projectId} asset={asset} />}</details>;
 }
 export function MediaInputPanel({ controller: c }: { controller: CreateController }) {
   const fields=c.generator?.fields.filter(field=>mediaKind(field)) ?? [];
@@ -43,8 +49,9 @@ export function MediaInputPanel({ controller: c }: { controller: CreateControlle
       {!fields.length && <p>T2V 无需图片输入。</p>}
       <button type="button" onClick={()=>void c.videoInputs.importAssets(false)}>导入图片、视频或音频</button><button type="button" onClick={()=>void c.videoInputs.importAssets(true)}>导入图片文件夹</button>
       <button type="button" onClick={()=>void c.videoInputs.save()} disabled={!c.videoInputs.dirty}>保存视频输入</button>
-    </fieldset><button type="button" disabled={c.videoInputs.busy} onClick={()=>void c.videoInputs.refresh()}>刷新已保存输入</button>
-    {c.videoInputs.loading && <p>正在加载当前 Recipe 输入…</p>}{c.videoInputs.dirty && <p>输入尚未保存。</p>}{c.videoInputs.error && <p role="alert">{c.videoInputs.error}</p>}</section>;
+    </fieldset><button type="button" disabled={c.busy || c.videoInputs.busy} onClick={()=>void c.videoInputs.refresh()}>刷新已保存输入</button>
+    {c.generator?.mode?.toUpperCase() === "REF2VA" && <small>混合参考：图片最多9项、视频3项、音频3项，共12项。可仅用合法视频；纯音频不支持。时长和媒体约束由统一预检确认。</small>}
+    {c.videoInputs.loading && <p>正在加载当前 Recipe 输入…</p>}{c.videoInputs.dirty ? <p>输入尚未保存。</p> : c.videoInputs.view && <small>当前 Recipe 输入已保存</small>}{c.videoInputs.importReceipt && <p role="status">{c.videoInputs.importReceipt}</p>}{c.videoInputs.error && <p role="alert">{c.videoInputs.error}</p>}</section>;
   return <section><h2>本次生成素材</h2>{fields.map(field => <MediaField key={field.key} field={field} controller={c} />)}{fields.length>0&&<p>下拉列表显示当前项目近期100项素材，并包含当前镜头明确关联的素材。更早的素材可从资源库查找。</p>}{fields.some(field=>mediaKind(field)==="image")&&<button type="button" onClick={()=>c.openLibrary("images")}>在资源库查找更多图片</button>}{fields.some(field=>mediaKind(field)==="video")&&<button type="button" onClick={()=>c.openLibrary("videos")}>在资源库查找更多视频</button>}<small>这些媒体输入只属于本次草稿，不会修改镜头长期参考图。</small></section>;
 }
 export function ReferencePanel({ context, save, busy }: { context: CreationContext; save: (ids: string[]) => unknown; busy: boolean }) {

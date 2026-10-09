@@ -14,6 +14,18 @@ const generator: GeneratorOption = { selectionRef:"exact-a",name:"FL",version:"2
 function view(selectionRef="exact-a",revision=1): VideoInputView { return {selectionRef,token:{instanceId:`instance-${selectionRef}`,revision},inputs:[{inputKey:"first_frame",ordinal:0,assetId:`${selectionRef}-first`},{inputKey:"last_frame",ordinal:0,assetId:`${selectionRef}-last`}],assets:[]}; }
 beforeEach(()=>{ vi.clearAllMocks(); useStudioStore.getState().loadCreationDraft({prompt:{type:"string",value:"move"}}); api.inputsGet.mockImplementation((s:VideoInputSelection)=>Promise.resolve(view(s.selectionRef))); api.inputsSave.mockImplementation(async r=>({...view(r.selection.selectionRef,2),inputs:r.inputs})); api.assetsImport.mockResolvedValue({imported:[],failed:[],cancelled:false}); });
 describe("persistent video input ownership",()=>{
+  it("preserves a same-owner unsaved/cleared return draft, while explicit refresh reads persisted OCC",async()=>{
+    const restored={first_frame:{type:"image_asset",assetId:"unsaved"} as const};
+    const {result}=renderHook(()=>usePersistentVideoInputs(route,generator,false,restored));await waitFor(()=>expect(result.current.view).toBeTruthy());
+    expect(useStudioStore.getState().values.first_frame).toEqual(restored.first_frame);expect(useStudioStore.getState().values.last_frame).toBeUndefined();expect(result.current.dirty).toBe(true);
+    await act(async()=>{await result.current.refresh();});expect(useStudioStore.getState().values.last_frame).toEqual({type:"image_asset",assetId:"exact-a-last"});expect(result.current.dirty).toBe(false);
+  });
+  it("reports cancellation and partial import receipts without filling input slots",async()=>{
+    const {result}=renderHook(()=>usePersistentVideoInputs(route,generator,false));await waitFor(()=>expect(result.current.ready).toBe(true));
+    api.assetsImport.mockResolvedValueOnce({imported:[],failed:[],cancelled:true});await act(async()=>{await result.current.importAssets(false);});expect(result.current.importReceipt).toContain("已取消");
+    api.assetsImport.mockResolvedValueOnce({imported:[{id:"source",name:"source",mediaKind:"image"}],failed:[{displayName:"broken",error:"unsupported"}],cancelled:false});await act(async()=>{await result.current.importAssets(false);});
+    expect(result.current.importReceipt).toContain("已导入 1 项；失败 1 项");expect(result.current.error).toContain("broken");expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"exact-a-first"});expect(api.inputsSave).not.toHaveBeenCalled();
+  });
   it("maps independent first/last slots and sends the exact OCC token",async()=>{
     const {result}=renderHook(()=>usePersistentVideoInputs(route,generator,false));
     await waitFor(()=>expect(result.current.ready).toBe(true));
