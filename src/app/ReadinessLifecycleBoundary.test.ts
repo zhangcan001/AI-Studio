@@ -68,7 +68,7 @@ it('denies post-run drift including the previous readiness proof and runtime pac
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
   execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
   writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of [...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...readinessLifecycleParentFacts('.',POST_RUN_READINESS_PARENT).paths,postRunManifest]){
+  for(const p of new Set<string>([...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...readinessLifecycleParentFacts('.',POST_RUN_READINESS_PARENT).paths,postRunManifest])){
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(postRunReadinessParentReader(root).violations).toEqual([]);

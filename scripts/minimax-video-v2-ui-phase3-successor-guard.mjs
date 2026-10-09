@@ -1,4 +1,5 @@
 import { cachedBoundary } from './boundary-validation-cache.mjs';
+import { uiPhase3CiRepairParentReader, CI_REPAIR_FILES } from './ui-phase3-ci-repair-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,7 +30,7 @@ export const UI_PHASE3_ADDED = [
   'docs/architecture/minimax-video-v2-ui-phase3-plan.md',
 ];
 export const UI_PHASE3_FILES = [...UI_PHASE3_EXISTING, ...UI_PHASE3_ADDED, UI_PHASE3_MANIFEST];
-export const uiPhase3FixtureFiles = root => [...readinessLifecycleParentFacts(root, UI_PHASE3_PARENT).paths, ...UI_PHASE3_FILES];
+export const uiPhase3FixtureFiles = root => [...readinessLifecycleParentFacts(root, UI_PHASE3_PARENT).paths, ...UI_PHASE3_FILES, ...CI_REPAIR_FILES];
 export const uiPhase3Groups = () => [...READINESS_LIFECYCLE_GROUPS, ['domainDocs', 'docs/architecture', /\.md$/]];
 export const UI_PHASE3_INVARIANTS = {
   schemaChanged: false, backupFormatChanged: false, queueAuthorityChanged: false,
@@ -47,9 +48,10 @@ const frozen = ['CONTEXT.md', 'package.json', 'pnpm-lock.yaml', 'src-tauri/Cargo
 const historical = [1,2,3].map(n => `docs/architecture/minimax-video-phase${n}.json`);
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 function validate(root, override) {
-  const violations = [], fail = name => violations.push(`minimax-video-ui-phase3-${name}`);
+  const successor = uiPhase3CiRepairParentReader(root);
+  const violations = [...successor.violations], fail = name => violations.push(`minimax-video-ui-phase3-${name}`);
   const live = new Map(), disk = p => {
-    if (!live.has(p)) live.set(p, normalize(readFileSync(join(root,p),'utf8')));
+    if (!live.has(p)) live.set(p, normalize(successor.read(p)));
     return live.get(p);
   };
   const rejected = () => ({ violations, addedPaths:[], afterHashes:{}, read:disk });
@@ -73,7 +75,7 @@ function validate(root, override) {
     for (const [name,dir,pattern] of uiPhase3Groups()) {
       const base = facts.paths.filter(p => p.startsWith(dir + '/') && pattern.test(p));
       const untouched = base.filter(p => !UI_PHASE3_EXISTING.includes(p));
-      const current = files(root,dir,pattern).filter(p => p !== UI_PHASE3_MANIFEST);
+      const current = files(root,dir,pattern).filter(p => p !== UI_PHASE3_MANIFEST && !successor.addedPaths.includes(p));
       const expected = [...base,...UI_PHASE3_ADDED.filter(p => p.startsWith(dir + '/') && pattern.test(p))].sort();
       const record = proof[name];
       if (JSON.stringify(current) !== JSON.stringify(expected) || record?.beforeFiles !== base.length || record?.afterFiles !== current.length) fail(`${name}-files`);
@@ -94,8 +96,8 @@ function validate(root, override) {
   } catch { fail('missing-evidence'); return rejected(); }
   if (violations.length) return rejected();
   return {
-    violations, addedPaths:[...UI_PHASE3_ADDED,UI_PHASE3_MANIFEST],
-    afterHashes:Object.fromEntries(scope.map(p => [p,proof.paths[p].afterHash])),
+    violations, addedPaths:[...UI_PHASE3_ADDED,UI_PHASE3_MANIFEST,...successor.addedPaths],
+    afterHashes:{...Object.fromEntries(scope.map(p => [p,proof.paths[p].afterHash])),...successor.afterHashes},
     // Only fully validated live bytes authorize this parent projection.
     read:p => UI_PHASE3_EXISTING.includes(p) ? facts.read(p) : disk(p),
   };
