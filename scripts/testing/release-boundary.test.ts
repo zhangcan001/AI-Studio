@@ -10,9 +10,10 @@ describe('exact release-only serialization successor', () => {
     const gate = releaseParentReader('.');
     expect(gate.violations).toEqual([]);
     expect(gate.read(rust)).not.toBe(readFileSync(rust, 'utf8'));
-  // Cold immutable history validation now includes the post-release repair:
-  // measured ~5.4s (32 read-only Git calls), not a runtime/queue timeout.
-  }, 10000);
+  // The merged UI + validation repair chain measured 10.08s / 50 Git calls
+  // cold on Windows after immutable fixture IO optimization. Give this one
+  // complete cold-history probe finite 3x headroom; no runtime/global timeout.
+  }, 30000);
 
   it.each(['path', 'untouched', 'scope', 'authority', 'workflow'])('rejects %s drift', (kind) => {
     const invalid = structuredClone(proof);

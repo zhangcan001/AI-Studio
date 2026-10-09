@@ -1,18 +1,42 @@
 // Immutable Git objects persist; live acceptance is keyed by freshly read bytes.
 import { createHash } from 'node:crypto';
 import { execFileSync as exec } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 const gitObjects = new Map(), results = new Map(), validatedProofs = new Map();
 let session;
+function immutableObjectStore(root, env) {
+  // Only immutable SHA queries share IO. Live acceptance and mutable refs stay
+  // root-scoped and freshly hashed. Environment-directed Git layouts do not
+  // participate in alternate-store sharing.
+  const harmless = ['GIT_PAGER','GIT_TERMINAL_PROMPT','GIT_OPTIONAL_LOCKS','GIT_ASKPASS','GIT_LFS_SKIP_SMUDGE'];
+  const gitEnv = Object.entries(env ?? process.env).filter(([key]) => key.startsWith('GIT_') && !harmless.includes(key)).sort();
+  if (gitEnv.length) return JSON.stringify([resolve(root), gitEnv]);
+  try {
+    const dot = join(root, '.git');
+    let git = statSync(dot).isDirectory() ? dot : resolve(root, readFileSync(dot,'utf8').trim().replace(/^gitdir: /,''));
+    if (existsSync(join(git,'commondir'))) git = resolve(git,readFileSync(join(git,'commondir'),'utf8').trim());
+    const objects = join(git,'objects'), alternates = join(objects,'info/alternates');
+    const empty = readdirSync(objects).every(p => p === 'info' || p === 'pack')
+      && (!existsSync(join(objects,'pack')) || readdirSync(join(objects,'pack')).length === 0);
+    if (empty && existsSync(alternates)) {
+      const paths = readFileSync(alternates,'utf8').trim().split(/\r?\n/);
+      if (paths.length === 1 && paths[0]) return realpathSync(resolve(objects,paths[0]));
+    }
+    return realpathSync(objects);
+  } catch { return resolve(root); } // Missing Git evidence must still reach Git and fail.
+}
 export function immutableGit(command, args, options = {}) {
+  let tree = 1;
+  while (args[tree] === '-r' || args[tree] === '--name-only') tree++;
   const immutable = command === 'git' && (
-    args[0] === 'ls-tree' && args.some(a => /^[a-f0-9]{40}$/.test(a)) ||
+    args[0] === 'ls-tree' && /^[a-f0-9]{40}$/.test(args[tree] ?? '') ||
     args[0] === 'cat-file' && args[1] === '--batch' &&
     String(options.input ?? '').trim().split('\n').every(a => /^[a-f0-9]{40}:/.test(a)));
   if (!immutable) return exec(command, args, options);
-  const key = JSON.stringify([resolve(options.cwd ?? '.'), args, options.input, options.encoding]);
-  if (!gitObjects.has(key)) gitObjects.set(key, exec(command, args, options));
+  const key = JSON.stringify([immutableObjectStore(options.cwd ?? '.',options.env), args, options.input, options.encoding]);
+  // Mutable replace refs must not redefine a supposedly immutable SHA query.
+  if (!gitObjects.has(key)) gitObjects.set(key, exec(command, ['--no-replace-objects',...args], options));
   const value = gitObjects.get(key);
   return Buffer.isBuffer(value) ? Buffer.from(value) : value;
 }
