@@ -84,11 +84,12 @@ it('phase10_target6 delegates shot and scope bindings without changing command p
   expect(await h.result.current.loadConsistencyContext({scopeType:'PROJECT',scopeId:'a',scopeName:'Project'},'image')).toBeNull();
 });
 it('phase10_target7 preserves normal route composition draft handoff and explicit Advanced opt-in',async()=>{
-  const project={id:'a'} as ProjectView,dirty=vi.fn(),navigate=vi.fn();let route:AppRoute={kind:'create',projectId:'a',stage:'image'};
+  const project={id:'a'} as ProjectView,dirty=vi.fn(),navigate=vi.fn();let route:AppRoute={kind:'create',projectId:'a',stage:'video'};
   const view=(r:AppRoute)=><Suspense fallback={<p>loading</p>}><NormalProductPages project={project} route={r} navigate={navigate} onDirtyChange={dirty}/></Suspense>;
   const h=render(view(route));fireEvent.click(await screen.findByText('create-owned-draft'));expect(dirty).toHaveBeenCalledWith(true);
   fireEvent.click(screen.getByText('批量创作'));expect(navigate).toHaveBeenCalledWith({...route,surface:'batch'});
   h.rerender(view({...route,surface:'batch'}));expect(screen.queryByText('create-owned-draft')).toBeNull();
+  h.rerender(view({...route,stage:'image',surface:'batch'}));expect(await screen.findByText('create-owned-draft')).toBeTruthy();expect(screen.queryByText('批量创作')).toBeNull();
   route={kind:'runs',projectId:'a'};h.rerender(view(route));expect(await screen.findByText('normal-runs')).toBeTruthy();
   h.rerender(view({kind:'library',projectId:'a',filter:'all'}));expect(await screen.findByText('normal-library')).toBeTruthy();
   h.rerender(view({kind:'library',projectId:'a',filter:'advanced-assets'}));expect(screen.queryByText('normal-library')).toBeNull();

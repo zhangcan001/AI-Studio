@@ -10,6 +10,8 @@ import { phase13Boundary } from '../../scripts/phase13-observability-guard.mjs';
 import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
 // @ts-expect-error Validated M3-2 stylesheet successor; historical manifest stays immutable.
 import { m3VisualParentReader } from '../../scripts/m3-bounded-visual-library-boundary-guard.mjs';
+// @ts-expect-error Validated UI successor; do not repin historical style metrics.
+import { uiPhase3ParentReader } from '../../scripts/minimax-video-v2-ui-phase3-successor-guard.mjs';
 const m=JSON.parse(readFileSync('docs/architecture/phase9-style-cleanup.json','utf8'));
 it('phase9_target1 accounts for all styles and classifies inline candidates',()=>{
  expect(m.BLOCKED_UNKNOWN).toBe(0);expect(m.rows.length).toBe(m.before.selectors);
@@ -17,7 +19,9 @@ it('phase9_target1 accounts for all styles and classifies inline candidates',()=
  // Exact reviewed delta: one CSS line / three scoped thumbnail-pagination
  // selectors. All other inventory counts and debt budgets remain frozen.
  expect(m3VisualParentReader('.').violations).toEqual([]);
- const now=styleInventory('.');expect(now.metrics).toEqual({...m.after,lines:m.after.lines+1,selectors:m.after.selectors+3});expect(now.inline.every((r:{decision:string})=>['KEEP','DEFER'].includes(r.decision))).toBe(true);
+ const parent=uiPhase3ParentReader('.');expect(parent.violations).toEqual([]);
+ const now=styleInventory('.',true,parent);expect(now.metrics).toEqual({...m.after,lines:m.after.lines+1,selectors:m.after.selectors+3});expect(now.inline.every((r:{decision:string})=>['KEEP','DEFER'].includes(r.decision))).toBe(true);
+ expect(styleInventory('.',false).metrics).not.toEqual(now.metrics);
 },15000); // Full source/inline inventory; bounded static guard, not a browser test.
 it('phase9_target2 prevents new important IDs deep and global selectors',()=>{
  expect(debtViolations({'new':{important:1,id:1,deep:1,global:1}},{})).toHaveLength(4);
@@ -43,7 +47,8 @@ it('phase9_target5 removes only the retired root without deleting active quality
 });
 it('phase9_target6 uses existing exact-value tokens without a parallel system',()=>{
  expect(m.proofs.tokens.newTokens).toBe(0);expect(m.proofs.tokens.replacements).toBe(47);
- expect(read('src/app/v3/AppShellV3.css')).toContain('var(--studio-space-4, 16px)');expect(read('src/styles/studioTokens.css')).toContain('--studio-space-4: 16px');
+ const parent=uiPhase3ParentReader('.');expect(parent.violations).toEqual([]);
+ expect(parent.read('src/app/v3/AppShellV3.css')).toContain('var(--studio-space-4, 16px)');expect(read('src/styles/studioTokens.css')).toContain('--studio-space-4: 16px');
  expect(read('src/features/create/CreatePage.css')).toContain('--text-primary,#e5e7eb');
 });
 it('phase9_target7 lowers specificity and merges only the redundant media rule',()=>{

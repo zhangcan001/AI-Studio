@@ -42,23 +42,23 @@ describe("project-first shell and facade overview", () => {
       if (originalClose) Object.defineProperty(HTMLDialogElement.prototype, "close", originalClose); else Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
     }
   });
-  it("shows four project pages, secondary settings and canonical navigation", () => {
+  it("shows five primary pages, secondary settings and canonical navigation", () => {
     const navigate = vi.fn(); const back = vi.fn();
     render(<AppShellV3 route={{ kind: "project", projectId: "A", page: "overview" }} projectName="项目 A" projectSelector={<select aria-label="当前项目"><option>A</option></select>} navigate={navigate} back={back}><p>content</p></AppShellV3>);
-    expect(screen.getByRole("navigation", { name: "项目导航" }).querySelectorAll("button")).toHaveLength(4);
+    expect(screen.getByRole("navigation", { name: "项目导航" }).querySelectorAll("button")).toHaveLength(5);
     expect(screen.getByRole("button", { name: "概览" }).getAttribute("aria-current")).toBe("page");
     expect(screen.queryByRole("button", { name: "工作流" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "运行" }));
     expect(navigate).toHaveBeenLastCalledWith({ kind: "runs", projectId: "A" });
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(navigate).toHaveBeenLastCalledWith({ kind: "create", projectId: "A", stage: "image" });
+    expect(navigate).toHaveBeenLastCalledWith({ kind: "create", projectId: "A", stage: "video" });
     fireEvent.click(screen.getByRole("button", { name: "返回" })); expect(back).toHaveBeenCalled();
   });
   it("fixes empty project primary CTA and hides technical IDs", async () => {
     mocks.getOverview.mockResolvedValue(overview); const navigate = vi.fn();
     render(<ProjectOverviewPage projectId="A" navigate={navigate} />);
     fireEvent.click(await screen.findByRole("button", { name: "创建第一个镜头" }));
-    expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "A", stage: "image" });
+    expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "A", stage: "video" });
     expect(document.querySelectorAll(".primary-button")).toHaveLength(1);
     expect(document.body.textContent).not.toContain("internal");
     expect(mocks.getOverview).toHaveBeenCalledWith("A");
@@ -79,9 +79,9 @@ describe("project-first shell and facade overview", () => {
   it("preserves existing StudioStore draft through same-project navigation", async () => {
     useStudioStore.getState().setValue("prompt", { type: "string", value: "unsaved draft" });
     const { result } = renderHook(() => useAppRoute());
-    act(() => result.current.restore({ kind: "create", projectId: "A", stage: "image", surface: "batch" }));
+    act(() => result.current.restore({ kind: "create", projectId: "A", stage: "video", surface: "batch" }));
     act(() => result.current.navigate({ kind: "project", projectId: "A", page: "overview" }));
-    act(() => result.current.navigate({ kind: "create", projectId: "A", stage: "image", surface: "batch" }));
+    act(() => result.current.navigate({ kind: "create", projectId: "A", stage: "video", surface: "batch" }));
     expect(useStudioStore.getState().draftDirty).toBe(true);
     expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "unsaved draft" });
     await waitFor(() => expect(localStorage.getItem("aistudio.appRoute.v2")).toContain('"create"'));

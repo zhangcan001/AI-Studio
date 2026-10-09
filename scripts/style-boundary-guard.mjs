@@ -37,16 +37,19 @@ export function specificity(s) {
 }
 export const globalTag = s => !/[.#\[]/.test(s) && !s.includes(':where(');
 export const deep = s => specificity(s)[1]>=5 || s.replace(/\([^)]*\)/g,'').split(/[>+~]|\s+/).filter(Boolean).length>=5;
-export function styleInventory(root='.', detailed=true) {
-  const all=files(`${root}/src`).map(p=>p.slice(root.length+1));
-  const sources=detailed?all.filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')).map(p=>({path:p,text:read(`${root}/${p}`)})):[];
+export function styleInventory(root='.', detailed=true, projection) {
+  // Historical inventory uses a fully validated successor's parent bytes;
+  // ordinary live style/debt validation continues to read the actual checkout.
+  const source=projection?.read ?? (p=>read(`${root}/${p}`));
+  const all=files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>!projection?.addedPaths.includes(p));
+  const sources=detailed?all.filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')).map(p=>({path:p,text:source(p)})):[];
   const rows=[],inline=[];const metrics={files:0,lines:0,selectors:0,global:0,important:0,ids:0,inline:0,variables:0,media:0};
   for(const {path,text} of sources) {
     const ast=ts.createSourceFile(path,text,ts.ScriptTarget.Latest,true);
     function visit(n){if(ts.isJsxAttribute(n)&&n.name.getText(ast)==='style'){const expression=n.initializer?.expression;const fixed=expression&&ts.isObjectLiteralExpression(expression)&&expression.properties.every(p=>ts.isPropertyAssignment(p)&&(ts.isStringLiteral(p.initializer)||ts.isNumericLiteral(p.initializer)));inline.push({path,line:ast.getLineAndCharacterOfPosition(n.pos).line+1,decision:fixed?'DEFER':'KEEP',reason:fixed?'Isolated fixed inline style; no mechanical component rewrite.':'Runtime expression; preserve dynamic authority.'});}ts.forEachChild(n,visit);}visit(ast);
   }
   for(const path of all.filter(p=>/\.(css|scss)$/.test(p))) {
-    const text=read(`${root}/${path}`),ast=postcss.parse(text,{from:path});metrics.files++;metrics.lines+=text.trimEnd().split('\n').length;
+    const text=source(path),ast=postcss.parse(text,{from:path});metrics.files++;metrics.lines+=text.trimEnd().split('\n').length;
     ast.walkAtRules('media',()=>metrics.media++);
     ast.walkDecls(d=>{if(d.important)metrics.important++;if(d.prop.startsWith('--'))metrics.variables++;});
     ast.walkRules(r=>{for(const selector of r.selectors){metrics.selectors++;if(globalTag(selector))metrics.global++;if(specificity(selector)[0])metrics.ids++;
@@ -130,6 +133,11 @@ export function styleBoundary(root,manifest) {
   // manifests and every other CSS boundary stay frozen. No new styles exemption.
   const currentStyles={...manifest.styleSnapshots};
   if(!checkpoint.violations.length && checkpoint.afterHashes['src/features/library/LibraryPage.css'])currentStyles['src/features/library/LibraryPage.css']=checkpoint.afterHashes['src/features/library/LibraryPage.css'];
+  // UI Phase3 advances only these reviewed files, after the complete live
+  // successor chain has validated their bytes. All other CSS stays frozen.
+  if(!checkpoint.violations.length)for(const path of ['src/app/v3/AppShellV3.css','src/features/create/CreatePage.css','src/styles/studioTokens.css','src/features/runs/RunsPage.css']) {
+    if(checkpoint.afterHashes[path])currentStyles[path]=checkpoint.afterHashes[path];
+  }
   for(const [path,digest] of Object.entries(currentStyles))if(hash(read(`${root}/${path}`))!==digest)violations.push(`unreviewed-style:${path}`);
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.(css|scss)$/.test(p)))if(!(path in manifest.styleSnapshots))violations.push(`unreviewed-style:${path}`);
   return {violations,inventory:inv};

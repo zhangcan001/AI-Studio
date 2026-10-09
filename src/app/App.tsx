@@ -71,7 +71,6 @@ import "../styles/studioTokens.css";
 import "../styles/uiPolish.css";
 import "../styles/studioQuality.css";
 
-const GenerationStudio = lazy(() => import("../features/studio/GenerationStudio").then(({ GenerationStudio }) => ({ default: GenerationStudio })));
 const AssetWorkspace = lazy(() => import("../features/assets/AssetWorkspace").then(({ AssetWorkspace }) => ({ default: AssetWorkspace })));
 const PromptStudio = lazy(() => import("../features/prompts/PromptStudio").then(({ PromptStudio }) => ({ default: PromptStudio })));
 const LocalToolHub = lazy(() => import("../features/tools/LocalToolHub").then(({ LocalToolHub }) => ({ default: LocalToolHub })));
@@ -529,7 +528,7 @@ function App() {
       assetType: assetType as StudioAssetType,
     });
     setError(null);
-    void navigate({ kind: "create", projectId: activeProjectId, stage: assetType === "image" ? "image" : "video" });
+    void navigate({ kind: "create", projectId: activeProjectId, stage: "video" });
   }
 
   function handleProjectUpdated(project: ProjectView) {
@@ -606,6 +605,7 @@ function App() {
         back={async () => { if (!shotDraftDirty || await confirmDraftDiscard("镜头有未保存的修改。返回会放弃这些修改，是否继续？")) back(); }}
         projectName={activeProject ? projectDisplayName(activeProject.id, activeProject.name) : undefined}
         projectSelector={projectSelector}
+        runtime={comfy}
       >
         <div className="app-main-content" id="app-main-content" tabIndex={-1}>
 
@@ -664,30 +664,6 @@ function App() {
           >
             {route.kind === "project" ? <ProjectOverviewPage key={activeProject.id} projectId={activeProject.id} navigate={navigate} /> : <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />}
           </WorkspaceErrorBoundary>
-        )}
-        {activeProject && route.kind === "create" && route.surface === "batch" && route.stage === "image" && (
-          <section className="studio-layout">
-            <GenerationStudio
-              projectId={activeProject.id}
-              catalog={catalog}
-              comfyConnected={isConnected}
-              taskEventsReady={taskEventsReady}
-              taskEventError={taskEventError}
-              productionAdmission={productionAdmission}
-              focusProductionBatchId={focusedProductionBatchId}
-              onCatalogChanged={reloadCatalog}
-              onProductionAdmissionChanged={refreshProductionAdmission}
-              onProductionBatchFocused={() => undefined}
-              onOpenWorkflows={() => navigateToWorkspace("workflows")}
-              onReconnectComfy={() => void reconnectComfy()}
-              onOpenTask={(taskId) => {
-                openTask(taskId);
-              }}
-              onOpenProductionQueue={(batchId) => {
-                openProductionQueueFromShot(batchId);
-              }}
-            />
-          </section>
         )}
         {activeProject && route.kind === "library" && route.filter === "advanced-assets" && (
           <AssetWorkspace
