@@ -12,6 +12,21 @@ import { uiPhase4ParentReader, UI_PHASE4_PARENT, UI_PHASE4_MANIFEST } from '../.
 import { uiPhase3ParentReader, uiPhase3FixtureFiles } from '../../scripts/minimax-video-v2-ui-phase3-successor-guard.mjs';
 // @ts-expect-error Historical proof reader.
 import { uiPhase3CiRepairParentReader } from '../../scripts/ui-phase3-ci-repair-successor-guard.mjs';
+// @ts-expect-error Validation-only repair preserves the published Phase4 checkpoint.
+import { uiPhase4CiRepairParentReader, UI_PHASE4_CI_REPAIR_MANIFEST } from '../../scripts/ui-phase4-ci-repair-successor-guard.mjs';
+it('validates style CI repair before the immutable Phase4 checkpoint and rejects forged repair evidence',()=>{
+  const proof=JSON.parse(readFileSync(UI_PHASE4_CI_REPAIR_MANIFEST,'utf8'));
+  expect(proof.parentHead).toBe('70dff1874d9314ce800c58c3bd49a99b04321e16');
+  const accepted=uiPhase4CiRepairParentReader('.');expect(accepted.violations).toEqual([]);
+  expect(accepted.read('scripts/style-boundary-guard.mjs')).not.toContain('const classCallers=');
+  expect(readFileSync('scripts/style-boundary-guard.mjs','utf8')).toContain('const classCallers=');
+  for(const modify of [
+    (p:typeof proof)=>{p.parentHead='0'.repeat(40);},
+    (p:typeof proof)=>{p.invariants.validationOnly=false;},
+    (p:typeof proof)=>{p.paths['scripts/style-boundary-guard.mjs'].afterHash='0'.repeat(64);},
+    (p:typeof proof)=>{p.paths['src/services/ipc.ts']={beforeHash:null,afterHash:'0'.repeat(64)};},
+  ]){const bad=structuredClone(proof);modify(bad);const denied=uiPhase4CiRepairParentReader('.',bad);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);}
+},30000);
 it('validates Phase4 before projecting immutable repair and UI proofs; rejects forged evidence',()=>{
   const proof=JSON.parse(readFileSync(UI_PHASE4_MANIFEST,'utf8'));
   expect(proof.parentHead).toBe(UI_PHASE4_PARENT);expect(proof.phaseCommitsBeforeCheckpoint).toEqual([]);
@@ -38,10 +53,10 @@ it('fresh live cache rejects edits, proofs/deletion, illegal additions and liter
     for(const p of paths){mkdirSync(dirname(join(fixture,p)),{recursive:true});copyFileSync(join(root,p),join(fixture,p));}
     const pass=()=>{expect(uiPhase4ParentReader(fixture).violations).toEqual([]);};pass();
     const deny=()=>{const denied=uiPhase4ParentReader(fixture);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);expect(uiPhase3ParentReader(fixture).violations.length).toBeGreaterThan(0);};
-    for(const p of ['src/features/create/CreatePage.tsx','src/app/ShellHost.tsx','docs/architecture/ui-phase3-ci-repair.json',UI_PHASE4_MANIFEST,
+    for(const p of ['src/features/create/CreatePage.tsx','scripts/style-boundary-guard.mjs','src/app/ShellHost.tsx','docs/architecture/ui-phase3-ci-repair.json',UI_PHASE4_MANIFEST,UI_PHASE4_CI_REPAIR_MANIFEST,
       paths.find((p:string)=>p.startsWith('src-tauri/runtime_packages/')&&p.endsWith('.json'))!]){
       const original=readFileSync(join(fixture,p));
-      if(p===UI_PHASE4_MANIFEST){const forged=JSON.parse(original.toString());forged.parentHead='0'.repeat(40);writeFileSync(join(fixture,p),JSON.stringify(forged));}
+      if(p===UI_PHASE4_MANIFEST||p===UI_PHASE4_CI_REPAIR_MANIFEST){const forged=JSON.parse(original.toString());forged.parentHead='0'.repeat(40);writeFileSync(join(fixture,p),JSON.stringify(forged));}
       else writeFileSync(join(fixture,p),new Uint8Array([...original,10]));
       deny();writeFileSync(join(fixture,p),original);pass();
     }
