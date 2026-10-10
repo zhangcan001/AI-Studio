@@ -36,7 +36,7 @@ export function queueLifecycleParentFacts(root){
 function queueLifecycleParentReaderUncached(root,override){
  const successor=readinessLifecycleParentReader(root);
  const live=new Map(),disk=p=>{if(!live.has(p))live.set(p,normalize(successor.read(p)));return live.get(p);};
- const violations=[...successor.violations],fail=s=>violations.push(`queue-lifecycle-${s}`),rejected=()=>({violations,addedPaths:[],afterHashes:{},read:disk});
+ const violations=[...successor.violations],fail=s=>violations.push(`queue-lifecycle-${s}`),rejected=()=>({violations,addedPaths:[],afterHashes:{},read:p=>normalize(readFileSync(join(root,p),'utf8'))});
  let proof,facts;
  try{proof=override??JSON.parse(disk(manifest));facts=queueLifecycleParentFacts(root);}catch{fail('missing-evidence');return rejected();}
  if(proof.schemaVersion!==1||proof.checkpoint!=='QUEUE_LIFECYCLE_REPAIR'||proof.parentHead!==QUEUE_LIFECYCLE_PARENT)fail('header');

@@ -900,6 +900,12 @@ async fn remove_migration_043_schema(pool: &SqlitePool) {
 }
 
 async fn remove_migration_035_schema(pool: &SqlitePool) {
+    // Fixture reconstruction must remove 044 schema as well as its ledger row;
+    // otherwise replaying migration 044 would recreate an already existing table.
+    sqlx::query("DROP TABLE IF EXISTS production_deferred_starts")
+        .execute(pool)
+        .await
+        .expect("044 deferred start table should be removable from the isolated fixture");
     remove_migration_043_schema(pool).await;
     for statement in [
         "ALTER TABLE project_workflow_bindings DROP COLUMN binding_instance_id",
@@ -1298,9 +1304,10 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 43);
+    assert_eq!(max_migration(pool).await, 44);
     assert_eq!(migration_marker_count(pool, 42).await, 1);
     assert_eq!(migration_marker_count(pool, 43).await, 1);
+    assert_eq!(migration_marker_count(pool, 44).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1462,10 +1469,14 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_043() {
+async fn dev055_migration_matrix_reaches_044() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(43));
+    assert_eq!(versions.last().copied(), Some(44));
+    assert!(
+        versions.contains(&43),
+        "historical migration 043 must remain present"
+    );
     assert!(
         versions.contains(&42),
         "repository must still contain migration 042"

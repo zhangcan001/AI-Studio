@@ -297,9 +297,10 @@ async fn remove_022_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
 }
 
 async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
-    // 043 is applied by the initial initialize(). Replaying 024..043 must drop
-    // those objects first; leaving the identity indexes makes CREATE UNIQUE INDEX fail.
+    // The current schema is applied by initialize(). Replaying 024..044 in
+    // this isolated fixture must first drop the later objects and indexes.
     for statement in [
+        "DROP TABLE IF EXISTS production_deferred_starts",
         "DROP TABLE IF EXISTS shot_video_input_assets",
         "DROP TABLE IF EXISTS shot_video_input_sets",
         "DROP TABLE IF EXISTS external_asset_imports",
@@ -625,7 +626,7 @@ fn reference_binding(
 }
 
 #[tokio::test]
-async fn dev048_fresh_migration_001_to_043_creates_only_the_frozen_tables() {
+async fn dev048_fresh_migration_001_to_044_keeps_frozen_tables() {
     let directory = tempdir().unwrap();
     let pool = initialize(&directory.path().join("fresh.db"))
         .await
@@ -635,7 +636,7 @@ async fn dev048_fresh_migration_001_to_043_creates_only_the_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        43
+        44
     );
     let required_tables = [
         "profile_revisions",
@@ -701,7 +702,7 @@ async fn dev048_021_to_043_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        43
+        44
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -769,7 +770,7 @@ async fn dev052_existing_023_to_043_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        43
+        44
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1598,12 +1599,12 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
             .iter()
             .filter(|name| name.starts_with("044_"))
             .count(),
-        0
+        1
     );
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 43)
+            .is_some_and(|version| version <= 44)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"2.1.0-personal\""));

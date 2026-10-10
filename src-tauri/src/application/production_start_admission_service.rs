@@ -357,6 +357,11 @@ impl ProductionStartAdmissionService {
             }
 
             self.queue.commit_start_admitted(&latest).await?;
+            // Once a manual or deferred Start succeeds, its old waiting marker
+            // must not survive as an apparent BLOCKED/WAITING run state.
+            if let Err(error) = self.queue.clear_deferred_start(project_id, batch_id).await {
+                tracing::warn!(%error, batch_id, "started batch but could not remove deferred marker");
+            }
             return Ok(());
         }
 

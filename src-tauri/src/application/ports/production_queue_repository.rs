@@ -14,6 +14,15 @@ pub struct ActiveProductionItem {
     pub item: ProductionBatchItem,
 }
 
+/// Persisted direct-generation start request awaiting the existing runtime
+/// admission and production-queue runner. Not a separate Task or executor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeferredProductionStart {
+    pub batch_id: String,
+    pub project_id: String,
+    pub requested_at: DateTime<Utc>,
+}
+
 /// One terminal production item outcome recorded by the queue worker.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerminalItemTransition<'a> {
@@ -25,6 +34,59 @@ pub struct TerminalItemTransition<'a> {
 
 #[async_trait]
 pub trait ProductionQueueRepository: Send + Sync {
+    /// Persist a user-submitted start request only for its own READY batch.
+    /// SQLite implements this atomically with the batch owner/status check.
+    async fn enqueue_deferred_start(
+        &self,
+        _project_id: &str,
+        _batch_id: &ProductionBatchId,
+        _at: DateTime<Utc>,
+    ) -> Result<bool, RepositoryError> {
+        Err(RepositoryError::integrity(
+            "deferred admission not implemented",
+        ))
+    }
+
+    /// Only WAITING requests are runnable. BLOCKED requests remain auditable.
+    async fn list_deferred_starts(&self) -> Result<Vec<DeferredProductionStart>, RepositoryError> {
+        Err(RepositoryError::integrity(
+            "deferred admission not implemented",
+        ))
+    }
+
+    /// Returns (WAITING|BLOCKED, failure detail). Queries are owner-scoped.
+    async fn deferred_start_state(
+        &self,
+        _project_id: &str,
+        _batch_id: &ProductionBatchId,
+    ) -> Result<Option<(String, Option<String>)>, RepositoryError> {
+        Err(RepositoryError::integrity(
+            "deferred admission not implemented",
+        ))
+    }
+
+    async fn finish_deferred_start(
+        &self,
+        _project_id: &str,
+        _batch_id: &ProductionBatchId,
+    ) -> Result<(), RepositoryError> {
+        Err(RepositoryError::integrity(
+            "deferred admission not implemented",
+        ))
+    }
+
+    async fn block_deferred_start(
+        &self,
+        _project_id: &str,
+        _batch_id: &ProductionBatchId,
+        _reason: &str,
+        _at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError> {
+        Err(RepositoryError::integrity(
+            "deferred admission not implemented",
+        ))
+    }
+
     async fn insert(
         &self,
         batch: &ProductionBatch,

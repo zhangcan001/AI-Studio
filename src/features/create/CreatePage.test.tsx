@@ -124,7 +124,7 @@ describe("M1-1 readiness actions", () => {
     fireEvent.change(screen.getByLabelText("尾帧"), { target: { value: "img2" } });
     fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "1280" } });
     fireEvent.click(screen.getByRole("button", { name: "生成" }));
-    await screen.findByText("已加入队列，启动失败");
+    await screen.findByText("已保存运行，启动失败");
     // Preserve accepted independently of dirty; editing removes accepted by existing contract.
     useStudioStore.getState().setValue("width", { type: "integer", value: 1280 });
     api.readinessGet.mockResolvedValue(blocked("OPEN_RUNTIME_SETTINGS"));
@@ -140,7 +140,7 @@ describe("M1-1 readiness actions", () => {
     expect(useStudioStore.getState().draftDirty).toBe(true);
     expect((screen.getByLabelText("选择生成器") as HTMLSelectElement).value).toBe("fl-opaque");
     expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("Settings return draft");
-    await screen.findByText("已加入队列，启动失败");
+    await screen.findByText("已保存运行，启动失败");
     fireEvent.click(screen.getByRole("button", { name: "查看运行详情" }));
     expect(navigate).toHaveBeenLastCalledWith({ kind: "runs", projectId: "project", run: { source: "queue-batch", id: "run" } });
     expect(api.generate).toHaveBeenCalledTimes(1);
@@ -231,7 +231,7 @@ describe("Target14 run", () => {
   it("preserves failed-start RunRef and accepted is not success", async () => {
     api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "FAILED_TO_START", startIssue: { code: "RUNTIME_BLOCKED" } });
     render(<Host />); await loaded(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
-    expect(await screen.findByText("已加入队列，启动失败")).toBeTruthy(); expect(screen.queryByText("已完成")).toBeNull();
+    expect(await screen.findByText("已保存运行，启动失败")).toBeTruthy(); expect(screen.queryByText("已完成")).toBeNull();
     expect(await screen.findByText("排队中")).toBeTruthy(); fireEvent.click(screen.getByRole("button", { name: "查看运行详情" }));
     expect(navigations).toHaveBeenLastCalledWith({ kind: "runs", projectId: "project", run: { source: "queue-batch", id: "run" } });
   });
@@ -364,16 +364,16 @@ it("M2-2 video prompt provenance survives historical stage and Settings/Workflow
  expect(useStudioStore.getState().creationLabReturn?.scope).toBe("project:shot1:video");
 });
 
-it.each(["STARTED", "FAILED_TO_START", "ALREADY_ACCEPTED"] as const)("clearing a submission field invalidates %s acceptance and renews the attempt", async startOutcome => {
+it.each(["STARTED", "QUEUED", "FAILED_TO_START", "ALREADY_ACCEPTED"] as const)("clearing a submission field invalidates %s acceptance and renews the attempt", async startOutcome => {
   api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome, startIssue: null });
   render(<Host />); await loaded();
   fireEvent.click(screen.getByRole("button", { name: "生成" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(useStudioStore.getState().draftDirty).toBe(false));
-  expect(await screen.findByText(startOutcome === "FAILED_TO_START" ? "已加入队列，启动失败" : "请求已接受")).toBeTruthy();
+  expect(await screen.findByText(startOutcome === "FAILED_TO_START" ? "已保存运行，启动失败" : startOutcome === "QUEUED" ? "任务已排队，将在当前任务结束后自动启动" : "请求已接受")).toBeTruthy();
   const first = api.generate.mock.calls[0][0].submissionIdempotencyKey;
   fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "" } });
-  await waitFor(() => expect(screen.queryByText(/已加入队列|请求已接受/)).toBeNull());
+  await waitFor(() => expect(screen.queryByText(/已保存运行|任务已排队|请求已接受/)).toBeNull());
   expect(useStudioStore.getState().values.width).toBeUndefined();
   expect(screen.getByRole("button", { name: "查看运行详情" })).toBeTruthy();
   // The historical RunRef remains available; it is not an accepted submission.

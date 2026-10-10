@@ -73,7 +73,7 @@ it("one player, preview is not selection, explicit selection is not review, miss
   page.rerender(<CreatePage route={{...route,projectId:"other",shotId:"two"}} runtime={{...runtime,devices:[]}} navigate={nav}/>);await screen.findByLabelText("选择生成器");await waitFor(()=>expect(api.mediaUrl).toHaveBeenLastCalledWith("other","b","video"));expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();expect(HTMLMediaElement.prototype.load).toHaveBeenCalled();
 });
 it("failed-to-start is not success, retry uses frozen RunRef despite draft edits",async()=>{
-  api.generate.mockResolvedValue({accepted:true,runRef:run().ref,startOutcome:"FAILED_TO_START",startIssue:null});api.runGet.mockResolvedValue(run("FAILED",["RETRY"]));api.retry.mockResolvedValue(run());await start();fireEvent.click(screen.getByRole("button",{name:"生成"}));expect(await screen.findByText("已加入队列，启动失败")).toBeTruthy();
+  api.generate.mockResolvedValue({accepted:true,runRef:run().ref,startOutcome:"FAILED_TO_START",startIssue:null});api.runGet.mockResolvedValue(run("FAILED",["RETRY"]));api.retry.mockResolvedValue(run());await start();fireEvent.click(screen.getByRole("button",{name:"生成"}));expect(await screen.findByText("已保存运行，启动失败")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"edited draft"}});fireEvent.click(await screen.findByRole("button",{name:"重试原运行"}));await waitFor(()=>expect(api.retry).toHaveBeenCalledWith("owned",{ref:run().ref,selectedItemIds:["original"]}));expect(api.generate).toHaveBeenCalledTimes(1);fireEvent.click(screen.getByRole("button",{name:"查看运行详情"}));expect(nav).toHaveBeenLastCalledWith({kind:"runs",projectId:"owned",run:run().ref});
 });
 it("image previews ignore late owner reads, revoke URLs, and video detaches on unmount",async()=>{

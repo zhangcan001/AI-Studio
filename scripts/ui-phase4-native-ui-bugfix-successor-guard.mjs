@@ -1,5 +1,6 @@
 // Validate the Phase4 Native UI bug fixes before projecting any published checkpoint.
 import { cachedBoundary } from './boundary-validation-cache.mjs';
+import { uiPhase4SerialQueueParentReader } from './ui-phase4-serial-queue-successor-guard.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readinessLifecycleParentFacts, readinessLifecycleHash } from './readiness-lifecycle-successor-guard.mjs';
@@ -25,9 +26,10 @@ export const NATIVE_UI_BUGFIX_INVARIANTS = {
 };
 const normalized = s => s.replaceAll('\r\n', '\n');
 function validate(root, override) {
-  const violations = [], fail = name => violations.push('ui-phase4-native-ui-bugfix-' + name);
+  const successor = uiPhase4SerialQueueParentReader(root);
+  const violations = [...successor.violations], fail = name => violations.push('ui-phase4-native-ui-bugfix-' + name);
   const live = new Map(), disk = p => {
-    if (!live.has(p)) live.set(p, normalized(readFileSync(join(root, p), 'utf8')));
+    if (!live.has(p)) live.set(p, normalized(successor.read(p)));
     return live.get(p);
   };
   const rejected = () => ({ violations, addedPaths: [], afterHashes: {}, read: disk });
@@ -55,8 +57,8 @@ function validate(root, override) {
   if (violations.length) return rejected();
   return {
     violations,
-    addedPaths: [...NATIVE_UI_BUGFIX_ADDED, NATIVE_UI_BUGFIX_MANIFEST],
-    afterHashes: Object.fromEntries(paths.map(p => [p, proof.paths[p].afterHash])),
+    addedPaths: [...NATIVE_UI_BUGFIX_ADDED, NATIVE_UI_BUGFIX_MANIFEST, ...successor.addedPaths],
+    afterHashes: { ...Object.fromEntries(paths.map(p => [p, proof.paths[p].afterHash])), ...successor.afterHashes },
     read: p => NATIVE_UI_BUGFIX_EXISTING.includes(p) ? parent.read(p) : disk(p),
   };
 }

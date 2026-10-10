@@ -98,7 +98,7 @@ export interface CreationReadiness {
 export interface CreationAccepted {
   accepted: boolean;
   runRef: RunRef;
-  startOutcome: "STARTED" | "FAILED_TO_START" | "ALREADY_ACCEPTED";
+  startOutcome: "STARTED" | "QUEUED" | "FAILED_TO_START" | "ALREADY_ACCEPTED";
   startIssue: CreationReadiness["issues"][number] | null;
 }
 

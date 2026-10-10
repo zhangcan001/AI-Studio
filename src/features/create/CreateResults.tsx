@@ -8,7 +8,7 @@ import { focusCreateInput, resolveCreateReadinessAction, type CreateReadinessAct
 export function RunStatusCard({ controller: c }: { controller: CreateController }) {
   const edit = () => document.querySelector<HTMLTextAreaElement>(".create-page textarea")?.focus();
   return <section aria-label="本次运行" aria-live="polite"><h2>本次运行</h2>
-    {c.accepted && <p>{c.accepted.startOutcome === "FAILED_TO_START" ? "已加入队列，启动失败" : "请求已接受"}</p>}
+    {c.accepted && <p>{c.accepted.startOutcome === "FAILED_TO_START" ? "已保存运行，启动失败" : c.accepted.startOutcome === "QUEUED" ? "任务已排队，将在当前任务结束后自动启动" : "请求已接受"}</p>}
     {c.run && <><p className="create-state-pill">{runLabels[c.run.status]}</p><p>{c.run.progress.succeeded}/{c.run.progress.total} 已完成</p><p>{c.run.progress.failed} 失败 · {c.run.progress.cancelled} 已取消</p>{c.run.errorSummary && <p>运行遇到问题，请查看详情。</p>}</>}
     {!c.runRef && <p>尚未生成</p>}
     {c.run?.availableActions.includes("EDIT_INPUT") && <button type="button" onClick={edit}>修改输入</button>}

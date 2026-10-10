@@ -251,6 +251,7 @@ impl ProductRunFacade {
         let mut results = HashSet::new();
         let mut retry_item_ids = Vec::new();
         let mut review_required = 0;
+        let mut deferred_error = None;
         let mut preferred_parent = None;
         let mut available_actions = Vec::new();
         let (title, status, phase, created_at, updated_at) = match run_ref.source {
@@ -260,6 +261,23 @@ impl ProductRunFacade {
                     .get(project_id, &run_ref.id)
                     .await
                     .map_err(queue_error)?;
+                let deferred_start = self
+                    .queue
+                    .deferred_start_state(project_id, &run_ref.id)
+                    .await
+                    .map_err(queue_error)?;
+                if let Some((state, reason)) = &deferred_start {
+                    if state == "BLOCKED" && detail.batch.status == ProductionBatchStatus::Ready {
+                        deferred_error = Some(
+                            reason
+                                .as_deref()
+                                .map(|reason| format!("排队任务无法自动启动：{reason}"))
+                                .unwrap_or_else(|| {
+                                    "排队任务无法自动启动，请查看运行详情。".to_owned()
+                                }),
+                        );
+                    }
+                }
                 if detail.batch.project_id != project_id {
                     return Err(ProductError::new(
                         "PROJECT_SCOPE_VIOLATION",
@@ -280,6 +298,10 @@ impl ProductRunFacade {
                         )
                     });
                     if pending
+                        && !(detail.batch.status == ProductionBatchStatus::Ready
+                            && deferred_start
+                                .as_ref()
+                                .is_some_and(|(state, _)| state == "WAITING"))
                         && matches!(
                             detail.batch.status,
                             ProductionBatchStatus::Ready | ProductionBatchStatus::Paused
@@ -345,6 +367,7 @@ impl ProductRunFacade {
                         id,
                     });
                 let status = match detail.batch.status {
+                    ProductionBatchStatus::Ready if deferred_error.is_some() => "PAUSED",
                     ProductionBatchStatus::Ready => "QUEUED",
                     ProductionBatchStatus::Running => "RUNNING",
                     ProductionBatchStatus::Paused => "PAUSED",
@@ -567,8 +590,10 @@ impl ProductRunFacade {
         if review_required > 0 {
             available_actions.push("EDIT_INPUT".to_owned());
         }
-        let error_summary = (progress.failed > 0 || review_required > 0)
-            .then(|| "部分生成未完成，请检查失败项与输入。".to_owned());
+        let error_summary = deferred_error.or_else(|| {
+            (progress.failed > 0 || review_required > 0)
+                .then(|| "部分生成未完成，请检查失败项与输入。".to_owned())
+        });
         let mut results_summary: Vec<String> = results.into_iter().collect();
         results_summary.sort();
         Ok(ProductRun {

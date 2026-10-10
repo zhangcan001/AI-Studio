@@ -47,6 +47,27 @@ pub struct CreationAccepted {
     pub start_issue: Option<ProductError>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CreationStartDisposition {
+    Started,
+    Queued,
+}
+
+impl From<()> for CreationStartDisposition {
+    fn from(_: ()) -> Self {
+        Self::Started
+    }
+}
+
+impl CreationStartDisposition {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "STARTED",
+            Self::Queued => "QUEUED",
+        }
+    }
+}
+
 impl ProductCreationFacade {
     /// Shared preparation is rerun on generate. A readiness response is not an authorization.
     async fn prepare_submission(
@@ -175,11 +196,8 @@ impl ProductCreationFacade {
         let error = match result {
             Err(error) => Some(error),
             Ok(_) => match queue.admission_status().await {
-                Ok(status) if status.busy => Some(ProductError::new(
-                    "RUNTIME_BLOCKED",
-                    "运行资源正在使用中，请稍后生成。",
-                    Some("TRY_LATER"),
-                )),
+                // A busy execution slot is not an input-readiness error: the
+                // authoritative Start admission will persist it as a wait request.
                 Ok(_) => None,
                 Err(error) => Some(ProductError::internal(error)),
             },
@@ -200,8 +218,8 @@ impl ProductCreationFacade {
         }
     }
 
-    /// `start` is the existing admission service, injected to keep Tauri outside
-    /// application orchestration. No ledger, queue, executor or state machine here.
+    /// Legacy start callers retain an unambiguous Result<(), ProductError>.
+    /// Only the product command opts into explicit STARTED/QUEUED acceptance.
     pub async fn generate<F, Fut>(
         &self,
         queue: &ProductionQueueService,
@@ -212,6 +230,27 @@ impl ProductCreationFacade {
     where
         F: FnOnce(String, String) -> Fut,
         Fut: Future<Output = Result<(), ProductError>>,
+    {
+        self.generate_with_disposition(queue, prompts, request, move |project, batch| async move {
+            start(project, batch)
+                .await
+                .map(|()| CreationStartDisposition::Started)
+        })
+        .await
+    }
+
+    /// Explicit Queue Start disposition, shared with the same frozen
+    /// submission, idempotency, and RunRef persistence authority.
+    pub async fn generate_with_disposition<F, Fut>(
+        &self,
+        queue: &ProductionQueueService,
+        prompts: &crate::application::prompt_library_service::PromptLibraryService,
+        request: CreationSubmission,
+        start: F,
+    ) -> Result<CreationAccepted, ProductError>
+    where
+        F: FnOnce(String, String) -> Fut,
+        Fut: Future<Output = Result<CreationStartDisposition, ProductError>>,
     {
         let prepared = self.prepare_submission(queue, prompts, request).await?;
         let project_id = prepared.project_id.clone();
@@ -235,7 +274,7 @@ impl ProductCreationFacade {
             });
         }
         let (start_outcome, start_issue) = match start(project_id, id).await {
-            Ok(()) => ("STARTED", None),
+            Ok(disposition) => (CreationStartDisposition::from(disposition).as_str(), None),
             Err(error) => ("FAILED_TO_START", Some(error)),
         };
         // Persistence succeeded even if admission/start failed. Never lose RunRef.
