@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "MINIMAX_VIDEO_UI_PHASE4_NATIVE_UI_BUGFIX",
+  "parentHead": "d321080844b71af493c0eb1f39ad7f973820c691",
+  "invariants": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "queueAuthorityChanged": false,
+    "storeAuthorityChanged": false,
+    "runtimePackagesChanged": false,
+    "historicalProofsRewritten": false,
+    "nativeImportProofPreserved": true,
+    "userInterfaceBugfixOnly": true,
+    "phase5Started": false
+  },
+  "paths": {
+    "scripts/minimax-video-v2-ui-phase3-successor-guard.mjs": {
+      "beforeHash": "f6f053504052b5dda8e33a5cfe9c6c308c963d7a933837e8eeeba68db1666754",
+      "afterHash": "3d6ed2531b8e26f6cee3d02df199ed6d5976f9b2c9745fcbe42e023a8ad93e30"
+    },
+    "scripts/ui-phase4-native-import-repair-successor-guard.mjs": {
+      "beforeHash": "0778ac58909eec345b3a14a79af6338ca9a06679f87f2e62284e12bc1f239659",
+      "afterHash": "50ee0d2a78ff7b1d3c0191d305075be461d01e936f9c0f47ab1d4c2b855c2346"
+    },
+    "scripts/ui-phase4-native-ui-bugfix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "40848555d074e064e10efd57e4da9386e6ab07bcfb282f14aff155aa1719ddf5"
+    },
+    "src/app/UiPhase4NativeUiBugfixBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "4c75dfb0fe42e0bde1a7ee1caff851d37c86d687d21080b996db992fcf789f94"
+    },
+    "src/features/create/CreateController.ts": {
+      "beforeHash": "57c346e36ad14ec84d7f09ee8034d79cc1162e0926d293794d159b38e6b684b4",
+      "afterHash": "2ad4acca612b6c8a16a07494691ea8187239fbbe0b287c83367b123a18b26af6"
+    },
+    "src/features/create/CreateVideoWorkspace.test.tsx": {
+      "beforeHash": "eb7d7386d4ec16f30bfd99201e730c29dc97620f1393bf1d742dcef06c9ec2fc",
+      "afterHash": "8f4b984338d037d2a23734a70e1d76ab6c726b758e8065d41fa9c469d4f5ae57"
+    }
+  }
+}

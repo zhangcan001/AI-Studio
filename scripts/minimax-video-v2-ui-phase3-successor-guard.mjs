@@ -3,6 +3,7 @@ import { uiPhase3CiRepairParentReader, CI_REPAIR_FILES } from './ui-phase3-ci-re
 import { UI_PHASE4_FILES } from './minimax-video-v2-ui-phase4-successor-guard.mjs';
 import { UI_PHASE4_CI_REPAIR_FILES } from './ui-phase4-ci-repair-successor-guard.mjs';
 import { NATIVE_REPAIR_FILES } from './ui-phase4-native-import-repair-successor-guard.mjs';
+import { NATIVE_UI_BUGFIX_FILES } from './ui-phase4-native-ui-bugfix-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,7 +34,7 @@ export const UI_PHASE3_ADDED = [
   'docs/architecture/minimax-video-v2-ui-phase3-plan.md',
 ];
 export const UI_PHASE3_FILES = [...UI_PHASE3_EXISTING, ...UI_PHASE3_ADDED, UI_PHASE3_MANIFEST];
-export const uiPhase3FixtureFiles = root => [...readinessLifecycleParentFacts(root, UI_PHASE3_PARENT).paths, ...UI_PHASE3_FILES, ...CI_REPAIR_FILES, ...UI_PHASE4_FILES, ...UI_PHASE4_CI_REPAIR_FILES, ...NATIVE_REPAIR_FILES];
+export const uiPhase3FixtureFiles = root => [...readinessLifecycleParentFacts(root, UI_PHASE3_PARENT).paths, ...UI_PHASE3_FILES, ...CI_REPAIR_FILES, ...UI_PHASE4_FILES, ...UI_PHASE4_CI_REPAIR_FILES, ...NATIVE_REPAIR_FILES, ...NATIVE_UI_BUGFIX_FILES];
 export const uiPhase3Groups = () => [...READINESS_LIFECYCLE_GROUPS, ['domainDocs', 'docs/architecture', /\.md$/]];
 export const UI_PHASE3_INVARIANTS = {
   schemaChanged: false, backupFormatChanged: false, queueAuthorityChanged: false,

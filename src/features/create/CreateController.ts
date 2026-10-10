@@ -36,13 +36,18 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const key = scopeKey(route);
   const runtimeStatus = runtime?.status, runtimeEndpoint = runtime?.endpoint, runtimeGeneration = runtime?.runtimeGeneration;
   const runStatus = run?.status;
-  const currentDraft = useRef({ key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus });
-  currentDraft.current = { key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus };
+  const generator = generators.find(item => item.selectionRef === selection);
+  const videoInputs = usePersistentVideoInputs(route, generator, loading, restoredDraft?.key === key && restoredDraft.selection === selection ? restoredDraft.values : undefined);
+  // Server-side readiness depends on the saved Recipe input revision, not only the draft fields.
+  const inputRevision = videoInputs.enabled ? JSON.stringify(videoInputs.view?.token ?? null) : null;
+  const currentDraft = useRef({ key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, inputRevision });
+  currentDraft.current = { key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, inputRevision };
   const [readinessCheck, setReadinessCheck] = useState<{ result: CreationReadiness; draft: typeof currentDraft.current }>();
   function matchesDraft(draft: typeof currentDraft.current) {
     const current = currentDraft.current;
     return draft.key === current.key && draft.selection === current.selection && draft.values === current.values && draft.provenance === current.provenance
-      && draft.runtimeStatus === current.runtimeStatus && draft.runtimeEndpoint === current.runtimeEndpoint && draft.runtimeGeneration === current.runtimeGeneration;
+      && draft.runtimeStatus === current.runtimeStatus && draft.runtimeEndpoint === current.runtimeEndpoint && draft.runtimeGeneration === current.runtimeGeneration
+      && draft.inputRevision === current.inputRevision;
   }
   function matchesReadiness(draft: typeof currentDraft.current) {
     return matchesDraft(draft) && draft.runRef === currentDraft.current.runRef && draft.runStatus === currentDraft.current.runStatus;
@@ -50,8 +55,6 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   // Both positive and transient negative prechecks belong to the observed run lifecycle.
   const readiness = readinessCheck && matchesReadiness(readinessCheck.draft) && runtimeStatus === "CONNECTED" ? readinessCheck.result : undefined;
   const readinessState = !runtime ? "CHECKING" : runtimeStatus !== "CONNECTED" ? "RUNTIME_OFFLINE" : readiness ? readiness.ready ? "READY" : "NOT_READY" : "CHECKING";
-  const generator = generators.find(item => item.selectionRef === selection);
-  const videoInputs = usePersistentVideoInputs(route, generator, loading, restoredDraft?.key === key && restoredDraft.selection === selection ? restoredDraft.values : undefined);
   useEffect(() => {
     if (previousOwner.current !== owner) { snapshots.current.clear(); previousOwner.current = owner; }
     const token = ++epoch.current;
@@ -94,14 +97,14 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   useEffect(() => {
     ++readinessEpoch.current;
     setReadinessCheck(undefined);
-  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus]);
+  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, inputRevision]);
   useEffect(() => {
-    if (loading || busy || readiness || runtimeStatus !== "CONNECTED" || !route.shotId || !generator?.availability) return;
+    if (loading || busy || (videoInputs.enabled && !videoInputs.ready) || readiness || runtimeStatus !== "CONNECTED" || !route.shotId || !generator?.availability) return;
     const timer = setTimeout(() => { void recheckReadiness(); }, 600);
     return () => { ++readinessEpoch.current; clearTimeout(timer); };
-  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, busy]);
+  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, busy, inputRevision, videoInputs.ready]);
   async function recheckReadiness() {
-    if (loading || !route.shotId || !generator?.availability || actionLock.current) return;
+    if (loading || (videoInputs.enabled && !videoInputs.ready) || !route.shotId || !generator?.availability || actionLock.current) return;
     const token = epoch.current;
     const requestEpoch = ++readinessEpoch.current;
     const draft = currentDraft.current;
@@ -242,7 +245,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     },
     openProjects: () => navigate({ kind: "project-list" }),
     refresh: () => mutate(() => refreshContext()),
-    selectShot: (shotId: string) => navigate({ ...route, shotId }),
+    selectShot: (shotId: string) => navigate({ ...route, shotId: shotId || undefined }),
     selectStage: (stage: "image" | "video") => navigate({ ...route, stage }),
     openRun: () => runRef && navigate({ kind: "runs", projectId: route.projectId, run: runRef }),
     openAdvanced: (section: "batch" | "production" | "workflows") => {

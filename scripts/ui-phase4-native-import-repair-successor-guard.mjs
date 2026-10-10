@@ -1,5 +1,6 @@
 // Validate an explicit Phase4 Native import repair before replaying frozen UI proofs.
 import { cachedBoundary } from './boundary-validation-cache.mjs';
+import { uiPhase4NativeUiBugfixParentReader } from './ui-phase4-native-ui-bugfix-successor-guard.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readinessLifecycleParentFacts, readinessLifecycleHash } from './readiness-lifecycle-successor-guard.mjs';
@@ -31,9 +32,10 @@ export const NATIVE_REPAIR_INVARIANTS = {
 const normalize = s => s.replaceAll('\r\n', '\n');
 
 function validate(root, override) {
-  const violations = [], fail = label => violations.push('ui-phase4-native-repair-' + label);
+  const successor = uiPhase4NativeUiBugfixParentReader(root);
+  const violations = [...successor.violations], fail = label => violations.push('ui-phase4-native-repair-' + label);
   const live = new Map(), disk = p => {
-    if (!live.has(p)) live.set(p, normalize(readFileSync(join(root, p), 'utf8')));
+    if (!live.has(p)) live.set(p, normalize(successor.read(p)));
     return live.get(p);
   };
   const rejected = () => ({ violations, addedPaths: [], afterHashes: {}, read: disk });
@@ -62,8 +64,8 @@ function validate(root, override) {
   if (violations.length) return rejected();
   return {
     violations,
-    addedPaths: [...NATIVE_REPAIR_ADDED, NATIVE_REPAIR_MANIFEST],
-    afterHashes: Object.fromEntries(paths.map(p => [p, proof.paths[p].afterHash])),
+    addedPaths: [...NATIVE_REPAIR_ADDED, NATIVE_REPAIR_MANIFEST, ...successor.addedPaths],
+    afterHashes: { ...Object.fromEntries(paths.map(p => [p, proof.paths[p].afterHash])), ...successor.afterHashes },
     read: p => NATIVE_REPAIR_EXISTING.includes(p) ? parent.read(p) : disk(p),
   };
 }

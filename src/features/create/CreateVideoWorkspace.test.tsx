@@ -85,6 +85,41 @@ it("StrictMode replay restores the controlled stream after its cleanup without a
   const page=render(<StrictMode><CreateMediaPreview projectId="owned" asset={{id:"v",name:"strict video",mediaKind:"video"}}/></StrictMode>);
   const node=document.querySelector("video")!;expect(node.getAttribute("src")).toBe("http://fixture.invalid/owned/v");expect(node.autoplay).toBe(false);expect(HTMLMediaElement.prototype.load).toHaveBeenCalled();page.unmount();expect(node.getAttribute("src")).toBeNull();
 });
+it("clearing the Shot picker navigates to an unselected Shot without losing the picker",async()=>{
+  const page=await start();
+  fireEvent.change(screen.getByLabelText("镜头"),{target:{value:""}});
+  expect(nav).toHaveBeenLastCalledWith({...route,shotId:undefined});
+  api.get.mockImplementation((p,s)=>s===""?Promise.reject(new Error("invalid Shot")):Promise.resolve(context(p,s)));
+  page.rerender(<CreatePage route={{...route,shotId:undefined}} runtime={{...runtime,devices:[]}} navigate={nav}/>);
+  await waitFor(()=>expect(api.get).toHaveBeenLastCalledWith("owned",null,"video"));
+  expect(await screen.findByText("选择一个镜头开始创作。")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("镜头"),{target:{value:"two"}});
+  expect(nav).toHaveBeenLastCalledWith({...route,shotId:"two"});
+});
+it("a saved media OCC revision replaces stale missing-input readiness without draft edits",async()=>{
+  api.inputsSave.mockImplementation(async r=>{
+    const old=view(r.selection.selectionRef);
+    const next={...old,token:{instanceId:"receipt",revision:(old.token?.revision??0)+1},inputs:r.inputs};
+    saved.set(r.selection.selectionRef,next);return next;
+  });
+  api.readinessGet.mockImplementation(async request=>{
+    const bindings=view(request.selectionRef).inputs;
+    const complete=bindings.some(i=>i.inputKey==="first_frame") && bindings.some(i=>i.inputKey==="last_frame");
+    return {ready:complete,issues:complete?[]:[{code:"INPUT_REQUIRED",details:{field:"first_frame",action:"EDIT_INPUT"}}],fieldErrors:[],actions:[]};
+  });
+  await start();await mode("opaque-2");
+  fireEvent.change(screen.getByLabelText("首帧"),{target:{value:"first"}});
+  fireEvent.change(screen.getByLabelText("尾帧"),{target:{value:"last"}});
+  await save();await waitFor(()=>expect(screen.getByText("可以生成")).toBeTruthy());
+  fireEvent.change(screen.getByLabelText("首帧"),{target:{value:""}});
+  await save();await waitFor(()=>expect(screen.getByText("请检查输入或运行环境")).toBeTruthy());
+  const before=api.readinessGet.mock.calls.length;
+  fireEvent.change(screen.getByLabelText("首帧"),{target:{value:"first"}});
+  await save();
+  await waitFor(()=>expect(api.readinessGet.mock.calls.length).toBeGreaterThan(before));
+  await waitFor(()=>expect(screen.getByText("可以生成")).toBeTruthy());
+  expect(api.generate).not.toHaveBeenCalled();
+});
 it("Library return preserves unsaved persistent media only for the exact owner",async()=>{
   const page=await start();await mode("opaque-1");fireEvent.change(screen.getByLabelText("首帧"),{target:{value:"first"}});
   fireEvent.click(screen.getByRole("button",{name:"在资源库查找更多提示词"}));expect(nav).toHaveBeenLastCalledWith({kind:"library",projectId:"owned",filter:"prompts"});page.unmount();
