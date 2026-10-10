@@ -14,19 +14,19 @@
   },
   "paths": {
     "scripts/minimax-video-phase2-successor-guard.mjs": {
-      "afterHash": "bef3469ad3198b13c6ebd6a34580e37845cd55b65901b24702304c7a137f8894"
+      "afterHash": "8b6079e838561ae086417cef91455ba2d03e4294ed2a7d3e00f2811b3f0e2aeb"
     },
     "scripts/minimax-video-v2-ui-phase3-successor-guard.mjs": {
-      "afterHash": "c3eb0e8b05d643513798264305a4b89823a5cbb9cbba41cd456570ffb69488ed"
+      "afterHash": "4ba481cd75358cc9aa67abc3380a92343ca40826896b901fe8c7249a043a6ba3"
     },
     "scripts/queue-lifecycle-repair-successor-guard.mjs": {
-      "afterHash": "1ebcbba7c2d04414c538daa13ff801e5e8624af1edd4e5d1e36d4d6a0c45affb"
+      "afterHash": "ea3279dcbe7c85973faa2615162a4796a372e9ebd493be5e0288cfe95ca05c26"
     },
     "scripts/ui-phase4-native-ui-bugfix-successor-guard.mjs": {
       "afterHash": "fa71ce545c66569527ff723169c6cfe466d101495cffa7ddfca79e2153488af5"
     },
     "scripts/ui-phase4-serial-queue-successor-guard.mjs": {
-      "afterHash": "01c7af3fcf6d2fb8ed5303d5d7ea0fb9d3157e38a8b29ead20c9f219f37b7c26"
+      "afterHash": "3d548a8480b73806e1833efa90f5c856da3e31b2d990df3f46b4028946bb2434"
     },
     "src-tauri/migrations/044_deferred_direct_generation.sql": {
       "afterHash": "7dcf1fab6dd7e77eff36ff4ac4c1c3a60a4eba2159be690fd36750ca58bc084a"
@@ -92,19 +92,19 @@
       "afterHash": "1b10b1c8524f6eea893161f936ff80968a98cbfb6fa96feee529cc2e60cac4ef"
     },
     "src/app/UiPhase4SerialQueueBoundary.test.ts": {
-      "afterHash": "941c89c35edece076b8714a8085920a9203b25752df000f12fb0e1c5ed1c0b19"
+      "afterHash": "436f477b4725ea12e5e1ce5230a2fa50d3ada50f61005353b3ee13fb85d976dd"
     },
     "src/features/create/CreatePage.test.tsx": {
       "afterHash": "033d8c9feee7c5b7eb45bc05500021c1f53e1a226aa36a8db6b3c7a62d190a88"
     },
     "src/features/create/CreateResults.tsx": {
-      "afterHash": "5cd0f6f1c53840a3bd4a5ad4e8f8d2738996e51d76f6c0f40f2235ae1968fb10"
+      "afterHash": "e776119e0436e66457dab865ca9fb1aea6d91ae5f040ab2f6a089e5f4a01945f"
     },
     "src/features/create/CreateVideoWorkspace.test.tsx": {
-      "afterHash": "569354342950093986998dc705941f8ff9f00c31a4341c18f574e44ea256ca3d"
+      "afterHash": "77cebc6c252dfb8129b544526d4c1630a335dd32d717f5fc5a6178a8b4e6e1b2"
     },
     "src/product/types.ts": {
-      "afterHash": "998e705fa453ae1b40a93039b20c420e1818cb2be0ce1bc65993a1401df05549"
+      "afterHash": "2a18cc5712e17996cdec7d65db81e41cc91a8f64446f7092f6eec65556f72f18"
     }
   }
 }

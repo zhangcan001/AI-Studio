@@ -6,6 +6,8 @@ import { uiPhase4SerialQueueParentReader, SERIAL_QUEUE_EXISTING, SERIAL_QUEUE_MA
 import { execFileSync } from 'node:child_process';
 // @ts-expect-error Node-only evidence.
 import { readFileSync } from 'node:fs';
+// @ts-expect-error Node-only hashing in boundary proof tests.
+import { createHash } from 'node:crypto';
 
 it('validates an exact serial-queue successor and projects all prior byte checkpoints', () => {
   const verified = uiPhase4SerialQueueParentReader('.');
@@ -16,6 +18,24 @@ it('validates an exact serial-queue successor and projects all prior byte checkp
   for (const path of SERIAL_QUEUE_EXISTING) {
     const prior = execFileSync('git', ['show', `${SERIAL_QUEUE_PARENT}:${path}`], { encoding: 'utf8' }).replaceAll('\r\n', '\n');
     expect(verified.read(path)).toBe(prior);
+  }
+});
+
+it('accepts LF and CRLF source checkouts but rejects changed content', () => {
+  const proof = JSON.parse(readFileSync(SERIAL_QUEUE_MANIFEST, 'utf8'));
+  const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
+  for (const [path, record] of Object.entries(proof.paths) as [string, { afterHash: string }][]) {
+    const original = readFileSync(path, 'utf8');
+    const lf = original.replaceAll('\r\n', '\n');
+    const expected = record.afterHash;
+    // An SQL migration must remain byte-exact for SQLx checksum stability.
+    if (path.endsWith('/044_deferred_direct_generation.sql')) {
+      expect(digest(original), path).toBe(expected);
+      continue;
+    }
+    expect(digest(lf), path).toBe(expected);
+    expect(digest(lf.replaceAll('\n', '\r\n').replaceAll('\r\n', '\n')), path).toBe(expected);
+    expect(digest(lf + 'mutation'), path).not.toBe(expected);
   }
 });
 

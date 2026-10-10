@@ -63,7 +63,12 @@ function validate(root, override) {
     if (!live.has(p)) live.set(p, readFileSync(join(root, p)));
     return live.get(p);
   };
+  // Git normalizes source text blobs to LF while Windows checkout may use
+  // CRLF. Keep the SQL migration byte-exact; historical Runtime Package and
+  // frozen proof validators retain their independent raw-byte requirements.
   const read = p => normalized(disk(p).toString('utf8'));
+  const canonicalHash = p => p === 'src-tauri/migrations/044_deferred_direct_generation.sql'
+    ? hash(disk(p)) : hash(Buffer.from(read(p), 'utf8'));
   const denied = () => ({ violations, addedPaths: [], afterHashes: {}, read });
   let proof, parent;
   try {
@@ -78,20 +83,20 @@ function validate(root, override) {
   if (violations.length) return denied();
   for (const p of SERIAL_QUEUE_EXISTING) {
     try {
-      if (!parent.paths.includes(p) || proof.paths[p]?.afterHash !== hash(disk(p))) fail('path:' + p);
+      if (!parent.paths.includes(p) || proof.paths[p]?.afterHash !== canonicalHash(p)) fail('path:' + p);
     } catch { fail('missing:' + p); }
   }
   for (const p of SERIAL_QUEUE_ADDED) {
     try {
-      if (parent.paths.includes(p) || proof.paths[p]?.afterHash !== hash(disk(p))) fail('addition:' + p);
+      if (parent.paths.includes(p) || proof.paths[p]?.afterHash !== canonicalHash(p)) fail('addition:' + p);
     } catch { fail('missing:' + p); }
   }
   if (violations.length) return denied();
   return {
     violations, addedPaths: [...SERIAL_QUEUE_ADDED, SERIAL_QUEUE_MANIFEST],
-    // Immutable proof checks exact on-disk bytes above; historical frontend
-    // snapshot consumers consistently hash LF-normalized source text.
-    afterHashes: Object.fromEntries(scope.map(p => [p, hash(Buffer.from(read(p), 'utf8'))])),
+    // Current successor validates Git-canonical text bytes above; historical
+    // readers hash the same LF-normalized source without altering their proofs.
+    afterHashes: Object.fromEntries(scope.map(p => [p, canonicalHash(p)])),
     read: p => SERIAL_QUEUE_EXISTING.includes(p) ? parent.read(p) : read(p),
   };
 }
