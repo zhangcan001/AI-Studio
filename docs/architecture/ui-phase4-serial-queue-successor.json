@@ -26,7 +26,7 @@
       "afterHash": "fa71ce545c66569527ff723169c6cfe466d101495cffa7ddfca79e2153488af5"
     },
     "scripts/ui-phase4-serial-queue-successor-guard.mjs": {
-      "afterHash": "3d548a8480b73806e1833efa90f5c856da3e31b2d990df3f46b4028946bb2434"
+      "afterHash": "2e3a9e455423ae1cbe5849bc5db2164d5fa2730582dd5a7362a174c4b491e5ab"
     },
     "src-tauri/migrations/044_deferred_direct_generation.sql": {
       "afterHash": "7dcf1fab6dd7e77eff36ff4ac4c1c3a60a4eba2159be690fd36750ca58bc084a"
@@ -105,6 +105,9 @@
     },
     "src/product/types.ts": {
       "afterHash": "2a18cc5712e17996cdec7d65db81e41cc91a8f64446f7092f6eec65556f72f18"
+    },
+    "src/features/workflow-lab/WorkflowLabBoundary.test.tsx": {
+      "afterHash": "d3f30a79b447ddfc79dbdc3165174928d1ae581bb23a5d448648864e799f8609"
     }
   }
 }

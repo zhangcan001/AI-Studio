@@ -37,6 +37,7 @@ export const SERIAL_QUEUE_EXISTING = [
   'src/features/create/CreatePage.test.tsx',
   'src/features/create/CreateResults.tsx',
   'src/features/create/CreateVideoWorkspace.test.tsx',
+  'src/features/workflow-lab/WorkflowLabBoundary.test.tsx',
   'src/product/types.ts',
 ].sort();
 export const SERIAL_QUEUE_ADDED = [
