@@ -44,6 +44,7 @@ export const SERIAL_QUEUE_ADDED = [
   'scripts/ui-phase4-serial-queue-successor-guard.mjs',
   'src/app/UiPhase4SerialQueueBoundary.test.ts',
   'src-tauri/migrations/044_deferred_direct_generation.sql',
+  'src-tauri/tests/phase4_deferred_restart_fairness.rs',
 ].sort();
 export const SERIAL_QUEUE_FILES = [...SERIAL_QUEUE_EXISTING, ...SERIAL_QUEUE_ADDED, SERIAL_QUEUE_MANIFEST];
 export const SERIAL_QUEUE_INVARIANTS = {
