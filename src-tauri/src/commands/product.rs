@@ -3,8 +3,8 @@ use crate::{
     application::product::{
         creation_facade::{
             CreationAccepted, CreationContext, CreationReadiness, CreationShot,
-            CreationShotSummary, CreationShotUpdate, CreationSubmission, GeneratorOption,
-            ProductCreationFacade,
+            CreationShotSummary, CreationShotUpdate, CreationStartDisposition, CreationSubmission,
+            GeneratorOption, ProductCreationFacade,
         },
         error::ProductError,
         project_facade::{
@@ -321,24 +321,39 @@ pub async fn product_creation_generate(
     request: CreationSubmissionDto,
 ) -> Result<CreationAccepted, ProductError> {
     let admission = state.production.admission.clone();
+    let queue = state.production.queue.clone();
     creation(&state)
-        .generate(
+        .generate_with_disposition(
             &state.production.queue,
             &state.catalog.prompt_library,
             request.into_application()?,
             move |project_id, batch_id| async move {
-                admission
-                    .start(&project_id, &batch_id)
-                    .await
-                    .map_err(|error| {
+                use crate::application::production_queue_service::ProductionQueueError;
+                use crate::application::production_start_admission_service::ProductionStartAdmissionError;
+                // Preserve FIFO for already waiting batches, without adding
+                // another Task authority or bypassing start-time admission.
+                if queue.has_deferred_starts().await.map_err(ProductError::internal)? {
+                    queue.defer_start(&project_id, &batch_id)
+                        .await.map_err(ProductError::internal)?;
+                    return Ok(CreationStartDisposition::Queued);
+                }
+                match admission.start(&project_id, &batch_id).await {
+                    Ok(()) => Ok(CreationStartDisposition::Started),
+                    Err(ProductionStartAdmissionError::Queue(ProductionQueueError::Busy(_))) => {
+                        queue.defer_start(&project_id, &batch_id)
+                            .await.map_err(ProductError::internal)?;
+                        Ok(CreationStartDisposition::Queued)
+                    }
+                    Err(error) => {
                         let mut result = ProductError::new(
                             "RUNTIME_BLOCKED",
-                            "生成已加入队列，但暂时无法启动。",
+                            "生成任务已保存，但暂时无法启动。",
                             Some("OPEN_RUN"),
                         );
                         result.details.technical_details = Some(error.to_string());
-                        result
-                    })
+                        Err(result)
+                    }
+                }
             },
         )
         .await

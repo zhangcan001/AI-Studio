@@ -109,7 +109,8 @@ pub use preset_repository::PresetRepository;
 pub use production_audit_repository::*;
 pub use production_orchestrator_repository::*;
 pub use production_queue_repository::{
-    ActiveProductionItem, ProductionQueueRepository, TerminalItemTransition,
+    ActiveProductionItem, DeferredProductionStart, ProductionQueueRepository,
+    TerminalItemTransition,
 };
 pub use production_structure_repository::{
     ProductionStructureRepository, ProductionStructureTreeData,

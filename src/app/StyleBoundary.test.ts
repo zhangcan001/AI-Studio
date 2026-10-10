@@ -22,7 +22,7 @@ it('phase9_target1 accounts for all styles and classifies inline candidates',()=
  const parent=uiPhase3ParentReader('.');expect(parent.violations).toEqual([]);
  const now=styleInventory('.',true,parent);expect(now.metrics).toEqual({...m.after,lines:m.after.lines+1,selectors:m.after.selectors+3});expect(now.inline.every((r:{decision:string})=>['KEEP','DEFER'].includes(r.decision))).toBe(true);
  expect(styleInventory('.',false).metrics).not.toEqual(now.metrics);
-},15000); // Full source/inline inventory; bounded static guard, not a browser test.
+},25000); // Cold historical Git + full inventory: measured 17.392s on Windows CI; finite static-guard budget, not runtime latency.
 it('phase9_target2 prevents new important IDs deep and global selectors',()=>{
  expect(debtViolations({'new':{important:1,id:1,deep:1,global:1}},{})).toHaveLength(4);
  expect(debtViolations({'old':{important:2,id:0,deep:0,global:0}},{old:{important:1}})).toEqual(['important:old']);

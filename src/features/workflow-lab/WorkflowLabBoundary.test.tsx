@@ -61,4 +61,4 @@ it("phase6_target16 real normal GeneratorSettings, advanced-only Lab and compati
   expect(nav).not.toMatch(/workflow|advanced|generators/);
   const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
   expect(readdirSync("src-tauri/migrations").filter((f: string)=>!schema.addedPaths.includes(`src-tauri/migrations/${f}`)).some((f: string) => f.startsWith("043"))).toBe(false);
-});
+}, 15000); // Cold historical Git/source projection: 4.37s local, 5.33s under CI contention; same assertions, finite per-test budget.

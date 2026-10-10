@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "MINIMAX_VIDEO_V2_UI_PHASE_4_CI_REPAIR",
+  "parentHead": "70dff1874d9314ce800c58c3bd49a99b04321e16",
+  "planningParentHead": "70dff1874d9314ce800c58c3bd49a99b04321e16",
+  "phaseCommitsBeforeCheckpoint": [],
+  "invariants": {
+    "businessRuntimeChanged": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "queueAuthorityChanged": false,
+    "storeAuthorityChanged": false,
+    "uiV2Changed": false,
+    "historicalProofsPreserved": true,
+    "immutablePackagesPreserved": true,
+    "liveAcceptanceFresh": true,
+    "validationOnly": true,
+    "validationScopeChanged": false
+  },
+  "database": {
+    "migrationBefore": 43,
+    "migrationAfter": 43,
+    "newTables": 0,
+    "backupBefore": 21,
+    "backupAfter": 21
+  },
+  "paths": {
+    "docs/architecture/ui-phase4-ci-repair-plan.md": {
+      "beforeHash": null,
+      "afterHash": "c86eefe059112b5ab4d5670c5449afa9e726c8bb3a3b4f7458e48c1055decfa3"
+    },
+    "scripts/minimax-video-v2-ui-phase3-successor-guard.mjs": {
+      "beforeHash": "9932434403874a1fa55ec4dfa68a1130aad75974f6f7900463411ebbf9c502d6",
+      "afterHash": "215d6569f7863f85620dd8cbef8aac47c6d9a31488294b05caf01cd850482da0"
+    },
+    "scripts/minimax-video-v2-ui-phase4-successor-guard.mjs": {
+      "beforeHash": "97bd22a7a6ef76257704675b8ce366896a8701c1f8637116c806a0a7b963b05b",
+      "afterHash": "41808041a335d158438a729430a283b692aa9c02b0f4bea89fc09ed5cfecdc5a"
+    },
+    "scripts/style-boundary-guard.mjs": {
+      "beforeHash": "491e9d587bd580156463f34e9fb726d52c273196660d2f68d256721210b12b6e",
+      "afterHash": "6e0402348636ec30105fb091dd654bd0a619120569fcfdb881c11b1038f7702b"
+    },
+    "scripts/ui-phase4-ci-repair-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "83d8df7fa6689d535439badcb184b69a9f862393694f22f75e261e7f803f0201"
+    },
+    "src/app/MiniMaxVideoUiPhase4Boundary.test.ts": {
+      "beforeHash": "693a9f2b67e24cf20191fd2a7eae761542416097b2eb122067f26b3a78a962db",
+      "afterHash": "eb9cfa430fd374d3948b56d82184ae339413ebf3726d885cfc4d895d4a9dbddb"
+    },
+    "src/app/StyleBoundary.test.ts": {
+      "beforeHash": "469e4eff62253bafef467bafe778011cfb769bd4d349114ea3fd71eb21fabe98",
+      "afterHash": "cf0a89903f01b2a6938db8f3f474140c8ec34cd5ef823800cf5f78ac8f8123db"
+    },
+    "src/app/StyleInventoryCache.test.ts": {
+      "beforeHash": null,
+      "afterHash": "529cf8edafb38f14439b98c2d30c794f1dbf32632e65d3c92eed822e3f5187b5"
+    }
+  },
+  "backend": {
+    "beforeFiles": 355,
+    "afterFiles": 355,
+    "beforeAggregateHash": "932cc82896a01581d8b294150b6d4185b0cfeb516d0d4ee26d4b5956ec7984f4",
+    "untouchedAggregateHash": "932cc82896a01581d8b294150b6d4185b0cfeb516d0d4ee26d4b5956ec7984f4",
+    "afterAggregateHash": "932cc82896a01581d8b294150b6d4185b0cfeb516d0d4ee26d4b5956ec7984f4"
+  },
+  "tests": {
+    "beforeFiles": 58,
+    "afterFiles": 58,
+    "beforeAggregateHash": "e7ac810a91474b745dea331818fa28a12938988d59ebb04cb3780b104b926a6d",
+    "untouchedAggregateHash": "e7ac810a91474b745dea331818fa28a12938988d59ebb04cb3780b104b926a6d",
+    "afterAggregateHash": "e7ac810a91474b745dea331818fa28a12938988d59ebb04cb3780b104b926a6d"
+  },
+  "frontend": {
+    "beforeFiles": 518,
+    "afterFiles": 519,
+    "beforeAggregateHash": "b4c1bf7d2e8d4c1c6a8a94560b5e69b9bae02ee2a8e8bccaaa898de0a6bf7bf9",
+    "untouchedAggregateHash": "d9c42887d60b92e7f94ecddd0cc6306c64fd3caf7744de7c5fb7893896c189b5",
+    "afterAggregateHash": "3b3e1d4693dafdd49fdc2833548dbdb1f015a28bea0d307253e1765a2eeb8692"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0",
+    "untouchedAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0",
+    "afterAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0"
+  },
+  "scripts": {
+    "beforeFiles": 39,
+    "afterFiles": 40,
+    "beforeAggregateHash": "b7232a4717f668948c484a8ef8c55808e5fa21e79a3075da00e0081bab9928ec",
+    "untouchedAggregateHash": "30d446a262528be7d2f11ea040d82fc324cbe9e81b5ac3d422725a0c7c3566eb",
+    "afterAggregateHash": "23f0ade26f75c1eec0e0c939b7ff2652a3738b5577498af17826a20536099420"
+  },
+  "migrations": {
+    "beforeFiles": 43,
+    "afterFiles": 43,
+    "beforeAggregateHash": "1098f8ad6328efbeab05e700d4b26802e0eccdb21b87a0d558f5003a41f45893",
+    "untouchedAggregateHash": "1098f8ad6328efbeab05e700d4b26802e0eccdb21b87a0d558f5003a41f45893",
+    "afterAggregateHash": "1098f8ad6328efbeab05e700d4b26802e0eccdb21b87a0d558f5003a41f45893"
+  },
+  "architecture": {
+    "beforeFiles": 37,
+    "afterFiles": 37,
+    "beforeAggregateHash": "67a0752edb9b2d9c0fa169a93d6f6b279de5e2ffd85d4b5ca3f9ce418178554b",
+    "untouchedAggregateHash": "67a0752edb9b2d9c0fa169a93d6f6b279de5e2ffd85d4b5ca3f9ce418178554b",
+    "afterAggregateHash": "67a0752edb9b2d9c0fa169a93d6f6b279de5e2ffd85d4b5ca3f9ce418178554b"
+  },
+  "packages": {
+    "beforeFiles": 51,
+    "afterFiles": 51,
+    "beforeAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "untouchedAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "afterAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884"
+  },
+  "domainDocs": {
+    "beforeFiles": 18,
+    "afterFiles": 19,
+    "beforeAggregateHash": "826961e3417b5132478ed8734726ec38cb456d56ed3d1b22654ca4a0f4da8ef1",
+    "untouchedAggregateHash": "826961e3417b5132478ed8734726ec38cb456d56ed3d1b22654ca4a0f4da8ef1",
+    "afterAggregateHash": "c7152f9deabd45d6b30d1f29a56a95edd9ced3573190fcb4b03a3ac7e6d7a22f"
+  }
+}

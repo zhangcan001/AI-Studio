@@ -43,6 +43,18 @@ export function styleInventory(root='.', detailed=true, projection) {
   const source=projection?.read ?? (p=>read(`${root}/${p}`));
   const all=files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>!projection?.addedPaths.includes(p));
   const sources=detailed?all.filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')).map(p=>({path:p,text:source(p)})):[];
+  // Invocation-local associations: retain literal substring matching and source
+  // order, but do not rescan every source's full text for repeated CSS classes.
+  // Never reuse this map across live inventories or historical projections.
+  const classCallers=new Map();
+  const callersFor=classes=>{
+    const matched=new Set();
+    for(const name of classes){
+      if(!classCallers.has(name))classCallers.set(name,sources.filter(s=>s.text.includes(name)).map(s=>s.path));
+      for(const path of classCallers.get(name))matched.add(path);
+    }
+    return sources.filter(s=>matched.has(s.path)).map(s=>s.path);
+  };
   const rows=[],inline=[];const metrics={files:0,lines:0,selectors:0,global:0,important:0,ids:0,inline:0,variables:0,media:0};
   for(const {path,text} of sources) {
     const ast=ts.createSourceFile(path,text,ts.ScriptTarget.Latest,true);
@@ -55,7 +67,7 @@ export function styleInventory(root='.', detailed=true, projection) {
     ast.walkRules(r=>{for(const selector of r.selectors){metrics.selectors++;if(globalTag(selector))metrics.global++;if(specificity(selector)[0])metrics.ids++;
       const classes=[...selector.matchAll(/\.([\w-]+)/g)].map(m=>m[1]);
       // Candidate references, not a dead-code oracle: templates/conditional strings included.
-      const callers=sources.filter(s=>classes.some(c=>s.text.includes(c))).map(s=>s.path);
+      const callers=callersFor(classes);
       rows.push({path,selector_or_scope:selector,context:context(r),owner:path.includes('/features/')?path.split('/features/')[1].split('/')[0]:path.includes('/v3/')?'V3 shell':'shared/compatibility',usage_count:callers.length,callers,global_scope:globalTag(selector),specificity:specificity(selector),duplicate_group:null,legacy:selector.includes('studio-shell'),decision:globalTag(selector)?'KEEP_GLOBAL':path==='src/app/App.css'?'DEFER':'KEEP',replacement:null,risk:'Retain unless exact ownership/deletion proof is recorded.',tests:['Phase9 style guard','Native before/after responsive capture']});
     }});
   }

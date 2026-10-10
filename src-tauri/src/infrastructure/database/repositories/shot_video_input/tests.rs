@@ -451,7 +451,7 @@ async fn generic_asset_insert_does_not_forge_external_provenance() {
 }
 
 #[tokio::test]
-async fn migration_043_upgrades_v42_without_inventing_inputs_or_receipts() {
+async fn migration_043_and_044_upgrade_v42_without_inventing_inputs_or_receipts() {
     let fixture = Fixture::with_schema(false).await;
     let scope = fixture.scope();
     // A true 001..042 schema: never downgrade live tables or migration markers.
@@ -497,7 +497,7 @@ async fn migration_043_upgrades_v42_without_inventing_inputs_or_receipts() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        43
+        44
     );
     upgraded.close().await;
 }

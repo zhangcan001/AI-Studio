@@ -17,6 +17,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const [context, setContext] = useState<CreationContext>();
   const [generators, setGenerators] = useState<GeneratorOption[]>([]);
   const [selection, setSelection] = useState("");
+  const [restoredDraft, setRestoredDraft] = useState<{ key: string; selection: string; values: GenerationValues }>();
   const [accepted, setAccepted] = useState<CreationAccepted | null>(null);
   const [runRef, setRunRef] = useState<RunRef | null>(null);
   const [run, setRun] = useState<ProductRun>();
@@ -35,13 +36,18 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const key = scopeKey(route);
   const runtimeStatus = runtime?.status, runtimeEndpoint = runtime?.endpoint, runtimeGeneration = runtime?.runtimeGeneration;
   const runStatus = run?.status;
-  const currentDraft = useRef({ key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus });
-  currentDraft.current = { key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus };
+  const generator = generators.find(item => item.selectionRef === selection);
+  const videoInputs = usePersistentVideoInputs(route, generator, loading, restoredDraft?.key === key && restoredDraft.selection === selection ? restoredDraft.values : undefined);
+  // Server-side readiness depends on the saved Recipe input revision, not only the draft fields.
+  const inputRevision = videoInputs.enabled ? JSON.stringify(videoInputs.view?.token ?? null) : null;
+  const currentDraft = useRef({ key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, inputRevision });
+  currentDraft.current = { key, selection, values, provenance, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, inputRevision };
   const [readinessCheck, setReadinessCheck] = useState<{ result: CreationReadiness; draft: typeof currentDraft.current }>();
   function matchesDraft(draft: typeof currentDraft.current) {
     const current = currentDraft.current;
     return draft.key === current.key && draft.selection === current.selection && draft.values === current.values && draft.provenance === current.provenance
-      && draft.runtimeStatus === current.runtimeStatus && draft.runtimeEndpoint === current.runtimeEndpoint && draft.runtimeGeneration === current.runtimeGeneration;
+      && draft.runtimeStatus === current.runtimeStatus && draft.runtimeEndpoint === current.runtimeEndpoint && draft.runtimeGeneration === current.runtimeGeneration
+      && draft.inputRevision === current.inputRevision;
   }
   function matchesReadiness(draft: typeof currentDraft.current) {
     return matchesDraft(draft) && draft.runRef === currentDraft.current.runRef && draft.runStatus === currentDraft.current.runStatus;
@@ -49,8 +55,6 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   // Both positive and transient negative prechecks belong to the observed run lifecycle.
   const readiness = readinessCheck && matchesReadiness(readinessCheck.draft) && runtimeStatus === "CONNECTED" ? readinessCheck.result : undefined;
   const readinessState = !runtime ? "CHECKING" : runtimeStatus !== "CONNECTED" ? "RUNTIME_OFFLINE" : readiness ? readiness.ready ? "READY" : "NOT_READY" : "CHECKING";
-  const generator = generators.find(item => item.selectionRef === selection);
-  const videoInputs = usePersistentVideoInputs(route, generator, loading);
   useEffect(() => {
     if (previousOwner.current !== owner) { snapshots.current.clear(); previousOwner.current = owner; }
     const token = ++epoch.current;
@@ -69,6 +73,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
         const selected = reuse ? options.find(item => item.selectionRef === reuse.selectionRef) : saved ? options.find(item => item.selectionRef === saved.selection) : options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
         if ((reuse || saved) && !selected) setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
         initialized = true; setContext(next); setGenerators(options); setSelection(selected?.selectionRef ?? "");
+        setRestoredDraft(saved && selected ? { key, selection: selected.selectionRef, values: saved.values } : undefined);
         const reused = reuse && selected?.selectionRef === reuse.selectionRef && next.selectedShot;
         useStudioStore.getState().loadCreationDraft(reused ? draftFor(selected, next.selectedShot, reuse.values) : saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), reused ? true : saved?.dirty ?? false, reused ? undefined : saved?.provenance);
         if (reused) useStudioStore.getState().setPendingRunIntent(undefined);
@@ -92,14 +97,14 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   useEffect(() => {
     ++readinessEpoch.current;
     setReadinessCheck(undefined);
-  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus]);
+  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, inputRevision]);
   useEffect(() => {
-    if (loading || busy || readiness || runtimeStatus !== "CONNECTED" || !route.shotId || !generator?.availability) return;
+    if (loading || busy || (videoInputs.enabled && !videoInputs.ready) || readiness || runtimeStatus !== "CONNECTED" || !route.shotId || !generator?.availability) return;
     const timer = setTimeout(() => { void recheckReadiness(); }, 600);
     return () => { ++readinessEpoch.current; clearTimeout(timer); };
-  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, busy]);
+  }, [values, provenance, selection, loading, key, runtimeStatus, runtimeEndpoint, runtimeGeneration, runRef, runStatus, busy, inputRevision, videoInputs.ready]);
   async function recheckReadiness() {
-    if (loading || !route.shotId || !generator?.availability || actionLock.current) return;
+    if (loading || (videoInputs.enabled && !videoInputs.ready) || !route.shotId || !generator?.availability || actionLock.current) return;
     const token = epoch.current;
     const requestEpoch = ++readinessEpoch.current;
     const draft = currentDraft.current;
@@ -111,7 +116,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   }
   async function refreshContext(token = epoch.current) {
     const next = await productClient.creation.get(route.projectId, route.shotId ?? null, route.stage);
-    if (token === epoch.current) setContext(next);
+    if (mounted.current && token === epoch.current) setContext(next);
   }
   useEffect(() => {
     if (loading || !runRef) return;
@@ -200,16 +205,18 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     return navigate({kind:"library",projectId:route.projectId,filter});
   }
   function chooseGenerator(ref: string) {
-    const option = generators.find(item => item.selectionRef === ref); if (!option) return;
+    const option = generators.find(item => item.selectionRef === ref); if (!option || busy || videoInputs.busy || !option.availability) return;
     useStudioStore.getState().setPendingRunIntent(undefined);
-    attempt.current = null; setSelection(ref); setAccepted(null);
-    useStudioStore.getState().loadCreationDraft(draftFor(option, context?.selectedShot ?? null, values), true, option.fields.some(field=>field.key==="prompt" && field.type==="textarea") ? useStudioStore.getState().creationPromptProvenance : undefined);
+    attempt.current = null; setSelection(ref); setAccepted(null); setRestoredDraft(undefined);
+    const previous = option.persistentInputs ? Object.fromEntries(Object.entries(values).filter(([,v]) => !("assetId" in v || "assetIds" in v))) : values;
+    useStudioStore.getState().loadCreationDraft(draftFor(option, context?.selectedShot ?? null, previous), true, option.fields.some(field=>field.key==="prompt" && field.type==="textarea") ? useStudioStore.getState().creationPromptProvenance : undefined);
   }
   async function mutate(action: () => Promise<void>) {
     if (actionLock.current) return;
     actionLock.current = true; setBusy(true); setError(undefined);
-    try { await action(); } catch (error) { setError(normalizeProductError(error).message); }
-    finally { actionLock.current = false; setBusy(false); }
+    const token = epoch.current;
+    try { await action(); } catch (error) { if (mounted.current && token === epoch.current) setError(normalizeProductError(error).message); }
+    finally { actionLock.current = false; if (mounted.current) setBusy(false); }
   }
   function generate() { return mutate(async () => {
     if (!videoInputs.ready) { setError("请先加载并保存当前 Recipe 的视频输入。"); return; }
@@ -222,14 +229,14 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (!mounted.current || token !== epoch.current || !matchesDraft(draft)) return;
     setReadinessCheck({ result: ready, draft }); if (!ready.ready || draft.runtimeStatus !== "CONNECTED") return;
     const ack = await productClient.creation.generate(request);
-    if (token !== epoch.current) return;
+    if (!mounted.current || token !== epoch.current || !matchesDraft(draft)) return;
     setAccepted(ack); setRunRef(ack.runRef); setRun(undefined);
     useStudioStore.getState().loadCreationDraft(request.values, false, request.promptId && request.promptVersionId ? {promptId:request.promptId,promptVersionId:request.promptVersionId} : undefined);
   }); }
   const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); if (token === epoch.current) navigate({ ...route, shotId: shot.id }); });
   const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
-  const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); setRun(next); setRunRef(next.ref); setAccepted(null); });
+  const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const token = epoch.current; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); if (!mounted.current || token !== epoch.current) return; setRun(next); setRunRef(next.ref); setAccepted(null); });
   return { videoInputs, libraryIntent, librarySlots, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy,
     setValue, removeValue, chooseResolution, applyPromptChoice, openLibrary, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
     openRuntimeSettings: () => {
@@ -238,7 +245,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     },
     openProjects: () => navigate({ kind: "project-list" }),
     refresh: () => mutate(() => refreshContext()),
-    selectShot: (shotId: string) => navigate({ ...route, shotId }),
+    selectShot: (shotId: string) => navigate({ ...route, shotId: shotId || undefined }),
     selectStage: (stage: "image" | "video") => navigate({ ...route, stage }),
     openRun: () => runRef && navigate({ kind: "runs", projectId: route.projectId, run: runRef }),
     openAdvanced: (section: "batch" | "production" | "workflows") => {

@@ -406,7 +406,7 @@ async fn dev035_migration_020_to_021_fresh_and_reopen_are_compatible() {
             .fetch_one(&pool)
             .await
             .expect("DEV035 migration version should be readable"),
-        43
+        44
     );
     assert_eq!(production_table_count(&pool).await, 4);
     assert_eq!(
@@ -439,7 +439,16 @@ async fn dev035_migration_020_to_021_fresh_and_reopen_are_compatible() {
             .fetch_one(&upgraded)
             .await
             .expect("DEV035 upgraded migration version should be readable"),
-        43
+        44
+    );
+    // Replaying migration 021 must restore its historical row, even though
+    // initialize() also retains the newer Phase 4 schema head (044).
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 21")
+            .fetch_one(&upgraded)
+            .await
+            .expect("DEV035 historical migration 021 should be recorded"),
+        1
     );
 }
 

@@ -25,7 +25,7 @@ async fn phase11_project_database_isolated_resources_survive_reopen_and_clean_te
         .fetch_one(&mut *first_connection)
         .await
         .unwrap();
-    assert_eq!(max_version, 43);
+    assert_eq!(max_version, 44);
     first_connection.close().await.unwrap();
     second_connection.close().await.unwrap();
     first.pool.close().await;

@@ -10,7 +10,7 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const ASSET_READ_CHUNK_BYTES: usize = 1024 * 1024;
 
@@ -95,7 +95,7 @@ impl FileSystemAssetStore {
 struct FileSystemVideoWriteSession {
     temporary: PathBuf,
     target: PathBuf,
-    file: Option<fs::File>,
+    file: Option<tokio::fs::File>,
 }
 
 struct FileSystemAssetReadStream {
@@ -126,6 +126,7 @@ impl AssetWriteSession for FileSystemVideoWriteSession {
             .as_mut()
             .ok_or_else(|| AssetStoreError::Write("video writer is already closed".to_owned()))?
             .write_all(bytes)
+            .await
             .map_err(|error| AssetStoreError::Write(format!("write video chunk: {error}")))
     }
 
@@ -134,14 +135,16 @@ impl AssetWriteSession for FileSystemVideoWriteSession {
             .file
             .take()
             .ok_or_else(|| AssetStoreError::Write("video writer is already closed".to_owned()))?;
-        let result = (|| {
-            file.flush()?;
-            file.sync_all()?;
-            fs::rename(&self.temporary, &self.target)?;
+        let result = async {
+            file.flush().await?;
+            file.sync_all().await?;
+            drop(file);
+            tokio::fs::rename(&self.temporary, &self.target).await?;
             Ok::<(), std::io::Error>(())
-        })();
+        }
+        .await;
         if let Err(error) = result {
-            let _ = fs::remove_file(&self.temporary);
+            let _ = tokio::fs::remove_file(&self.temporary).await;
             return Err(AssetStoreError::Write(format!(
                 "publish {}: {error}",
                 self.target.display()
@@ -154,7 +157,7 @@ impl AssetWriteSession for FileSystemVideoWriteSession {
 
     async fn abort(mut self: Box<Self>) -> Result<(), AssetStoreError> {
         self.file.take();
-        match fs::remove_file(&self.temporary) {
+        match tokio::fs::remove_file(&self.temporary).await {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(AssetStoreError::Delete(format!(
@@ -598,17 +601,19 @@ impl FileSystemAssetStore {
         let parent = target.parent().ok_or_else(|| {
             AssetStoreError::InvalidPath("media target has no parent directory".to_owned())
         })?;
-        fs::create_dir_all(parent).map_err(|error| {
+        tokio::fs::create_dir_all(parent).await.map_err(|error| {
             AssetStoreError::Write(format!("create {}: {error}", parent.display()))
         })?;
-        if target.exists() {
+        if tokio::fs::try_exists(&target).await.map_err(|error| {
+            AssetStoreError::Write(format!("inspect {}: {error}", target.display()))
+        })? {
             return Err(AssetStoreError::Write(format!(
                 "asset target already exists: {}",
                 target.display()
             )));
         }
         let temporary = parent.join(format!(".{}.tmp", asset_id.as_str()));
-        let file = fs::File::create(&temporary).map_err(|error| {
+        let file = tokio::fs::File::create(&temporary).await.map_err(|error| {
             AssetStoreError::Write(format!("create {}: {error}", temporary.display()))
         })?;
         Ok(Box::new(FileSystemVideoWriteSession {
@@ -657,6 +662,54 @@ mod tests {
             source.path,
             root.path().join("assets/source/image/ast_test-1.png")
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn streamed_source_audio_commits_atomically_and_aborted_video_leaves_no_temp() {
+        let root = tempdir().expect("temp root");
+        let store = FileSystemAssetStore::new();
+        let audio_id = AssetId::parse("ast_stream-audio").expect("asset id");
+        let payload = vec![0x5au8; 2 * 1024 * 1024];
+        let mut session = store
+            .begin_source_audio_write(root.path(), &audio_id, "wav")
+            .await
+            .expect("start audio write");
+        session
+            .write_chunk(&payload[..1024])
+            .await
+            .expect("chunk one");
+        session
+            .write_chunk(&payload[1024..])
+            .await
+            .expect("chunk two");
+        let target = root.path().join("assets/source/audio/ast_stream-audio.wav");
+        assert!(!target.exists(), "no partially published source asset");
+        let stored = session.commit().await.expect("publish stored file");
+        assert_eq!(stored.path, target);
+        assert_eq!(std::fs::read(&stored.path).unwrap(), payload);
+        assert!(!root
+            .path()
+            .join("assets/source/audio/.ast_stream-audio.tmp")
+            .exists());
+
+        let video_id = AssetId::parse("ast_stream-video").expect("asset id");
+        let mut abandoned = store
+            .begin_source_video_write(root.path(), &video_id, "mp4")
+            .await
+            .expect("start video write");
+        abandoned
+            .write_chunk(b"unfinished")
+            .await
+            .expect("stage chunk");
+        abandoned.abort().await.expect("abort stage");
+        assert!(!root
+            .path()
+            .join("assets/source/video/ast_stream-video.mp4")
+            .exists());
+        assert!(!root
+            .path()
+            .join("assets/source/video/.ast_stream-video.tmp")
+            .exists());
     }
 
     fn source_asset(id: &AssetId, storage_path: String, thumbnail_path: Option<String>) -> Asset {

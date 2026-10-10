@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE4_SERIAL_QUEUE_SUCCESSOR",
+  "parentHead": "6c7399d061b253897cd4ff3108d4a5ea7ee9b0ef",
+  "invariants": {
+    "runtimePackagesChanged": false,
+    "historicalProofsRewritten": false,
+    "backupFormatChanged": false,
+    "extraTaskExecutorAdded": false,
+    "officialQueueAndStartAdmissionPreserved": true,
+    "maxConcurrentVideoGeneration": 1,
+    "deferredRequestsDurable": true,
+    "phase5Started": false
+  },
+  "paths": {
+    "scripts/minimax-video-phase2-successor-guard.mjs": {
+      "afterHash": "8b6079e838561ae086417cef91455ba2d03e4294ed2a7d3e00f2811b3f0e2aeb"
+    },
+    "scripts/minimax-video-v2-ui-phase3-successor-guard.mjs": {
+      "afterHash": "4ba481cd75358cc9aa67abc3380a92343ca40826896b901fe8c7249a043a6ba3"
+    },
+    "scripts/queue-lifecycle-repair-successor-guard.mjs": {
+      "afterHash": "ea3279dcbe7c85973faa2615162a4796a372e9ebd493be5e0288cfe95ca05c26"
+    },
+    "scripts/ui-phase4-native-ui-bugfix-successor-guard.mjs": {
+      "afterHash": "fa71ce545c66569527ff723169c6cfe466d101495cffa7ddfca79e2153488af5"
+    },
+    "scripts/ui-phase4-serial-queue-successor-guard.mjs": {
+      "afterHash": "6ff0f4acf5a72ddf8c899fd189c91397593bc637c60e0319fdb3aae566873716"
+    },
+    "src-tauri/migrations/044_deferred_direct_generation.sql": {
+      "afterHash": "7dcf1fab6dd7e77eff36ff4ac4c1c3a60a4eba2159be690fd36750ca58bc084a"
+    },
+    "src-tauri/src/application/ports/mod.rs": {
+      "afterHash": "570a408201a00bcdd1fcfb7024faf1d7fb21e609a854776a0d1e15dacc63ab3d"
+    },
+    "src-tauri/src/application/ports/production_queue_repository.rs": {
+      "afterHash": "83e072fe6d131be36fb5734aaee4e258d30931d0ff891bece176f451b08f563d"
+    },
+    "src-tauri/src/application/product/creation_facade/submission.rs": {
+      "afterHash": "afa960843777eb2d7ea634904c247ec67efa59c86fdf2cefab54fdd80c92e02b"
+    },
+    "src-tauri/src/application/product/run_facade.rs": {
+      "afterHash": "f405ca669bc2445ee3b5c089903bf4b95500cb51edc68d394edb4363e5cc1c73"
+    },
+    "src-tauri/src/application/production_queue_service.rs": {
+      "afterHash": "6ad0048238227803cae69d09707058fbf667307baf83b57bc8218e204629e3f3"
+    },
+    "src-tauri/src/application/production_start_admission_service.rs": {
+      "afterHash": "f0bc688748737050010034eb1e8b11be82f6a42582eb2be1a442bdb30e1bc8c2"
+    },
+    "src-tauri/src/commands/product.rs": {
+      "afterHash": "2306a3e249c2bd548aa9b468e64e15369a82f6ab1692860b0bc37233d537018b"
+    },
+    "src-tauri/src/infrastructure/database/dev048_consistency_e2e.rs": {
+      "afterHash": "a75c1c0d973010c433efc4bd9c91f795003146aaa9332392c063def312dc442a"
+    },
+    "src-tauri/src/infrastructure/database/pool.rs": {
+      "afterHash": "5631aa4b921a18b9dd2cd272a6aa77bcacca8b9c2ef365243482d6e2b4df4a1d"
+    },
+    "src-tauri/src/infrastructure/database/repositories/production_queue.rs": {
+      "afterHash": "35cf746dcdf675927a934ac49f6ef8e7c6edb9f79536fa4bcd58591171956653"
+    },
+    "src-tauri/src/infrastructure/database/repositories/shot_video_input/tests.rs": {
+      "afterHash": "8eb862dde00ace91fc395dd1d9b9df318f63a7dcbf6c8a30c60b24a685787b98"
+    },
+    "src-tauri/src/lib.rs": {
+      "afterHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77"
+    },
+    "src-tauri/tests/dev035_structure_e2e.rs": {
+      "afterHash": "1e5d852d04fc5f3207261e439105be2dfb392698a9cbe44fe50398f3c2448f50"
+    },
+    "src-tauri/tests/dev040_safety.rs": {
+      "afterHash": "027e4058fd64885f6cc42e62ae61c15ee2c53fabffd216c7acd1c8fb32de4308"
+    },
+    "src-tauri/tests/dev049_context_resolver.rs": {
+      "afterHash": "af5a44becefa1d4365f68ee9999a7db53f99c2920298b7e167af49196b6cc909"
+    },
+    "src-tauri/tests/dev052_runtime_integration.rs": {
+      "afterHash": "e2733d573135f7f661033e71eb63b06c2d05ee367ac34e88087afe9e81f51612"
+    },
+    "src-tauri/tests/dev055_release_compatibility.rs": {
+      "afterHash": "2db9e0a4506971dd7085314a95df7fd00e956e33bd8d5be5c7893d10a2915e6b"
+    },
+    "src-tauri/tests/product_library_contract.rs": {
+      "afterHash": "7bce48ba3a30b7db84c2192505a9a891b9c49e92d8c0a045352a247d9d1c17e6"
+    },
+    "src-tauri/tests/project_database_fixture.rs": {
+      "afterHash": "8ed42e145395ebebc84575f9d5538c5fba7b01044d74d49cb555d561c56da686"
+    },
+    "src-tauri/tests/support/creation_submission_contract.rs": {
+      "afterHash": "1b10b1c8524f6eea893161f936ff80968a98cbfb6fa96feee529cc2e60cac4ef"
+    },
+    "src/app/UiPhase4SerialQueueBoundary.test.ts": {
+      "afterHash": "436f477b4725ea12e5e1ce5230a2fa50d3ada50f61005353b3ee13fb85d976dd"
+    },
+    "src/features/create/CreatePage.test.tsx": {
+      "afterHash": "033d8c9feee7c5b7eb45bc05500021c1f53e1a226aa36a8db6b3c7a62d190a88"
+    },
+    "src/features/create/CreateResults.tsx": {
+      "afterHash": "e776119e0436e66457dab865ca9fb1aea6d91ae5f040ab2f6a089e5f4a01945f"
+    },
+    "src/features/create/CreateVideoWorkspace.test.tsx": {
+      "afterHash": "77cebc6c252dfb8129b544526d4c1630a335dd32d717f5fc5a6178a8b4e6e1b2"
+    },
+    "src/product/types.ts": {
+      "afterHash": "2a18cc5712e17996cdec7d65db81e41cc91a8f64446f7092f6eec65556f72f18"
+    },
+    "src/features/workflow-lab/WorkflowLabBoundary.test.tsx": {
+      "afterHash": "d3f30a79b447ddfc79dbdc3165174928d1ae581bb23a5d448648864e799f8609"
+    },
+    "src-tauri/tests/phase4_deferred_restart_fairness.rs": {
+      "afterHash": "4552f56b0e94f4f1ef3fb00ef4aae96024ff7f05cdae1b5164cfda71b92c74c0"
+    }
+  }
+}

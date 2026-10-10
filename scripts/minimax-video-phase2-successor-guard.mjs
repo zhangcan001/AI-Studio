@@ -178,7 +178,12 @@ function validate(root, override) {
       const current = files(root,dir,pattern).filter(p => p !== MINIMAX_VIDEO_PHASE2_MANIFEST && !successor.addedPaths.includes(p));
       const expected = [...base,...MINIMAX_VIDEO_PHASE2_ADDED.filter(p => p.startsWith(dir+'/') && pattern.test(p))].sort(), r = proof[name];
       if (JSON.stringify(current) !== JSON.stringify(expected) || r?.beforeFiles !== base.length || r?.afterFiles !== current.length) fail(`${name}-files`);
-      if (untouched.some(p => disk(p) !== facts.read(p))) fail(`${name}-untouched-bytes`);
+      // Visit every required file: early byte drift must not hide later missing evidence.
+      let untouchedDrift = false;
+      for (const p of untouched) {
+        if (disk(p) !== facts.read(p)) untouchedDrift = true;
+      }
+      if (untouchedDrift) fail(`${name}-untouched-bytes`);
       // Runtime Package preservation is literal bytes, including newline-only drift.
       if (name === 'packages' && (
         JSON.stringify(files(root,dir,/./)) !== JSON.stringify(base)

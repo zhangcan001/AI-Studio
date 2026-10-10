@@ -289,16 +289,21 @@ fn dev040_architecture_reuses_shot_batch_and_has_no_second_runtime_path() {
             .count(),
         1
     );
+    // Phase 4 adds exactly one authorized 044 migration without another
+    // scene executor; later, unreviewed schema revisions remain forbidden.
     assert_eq!(
         migrations
             .iter()
             .filter(|name| name.starts_with("044_"))
             .count(),
-        0
+        1
     );
+    assert!(migrations
+        .iter()
+        .any(|name| name == "044_deferred_direct_generation.sql"));
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 43)
+            .is_some_and(|version| version <= 44)
     }));
 }

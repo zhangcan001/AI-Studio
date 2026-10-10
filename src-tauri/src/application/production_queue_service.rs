@@ -30,7 +30,7 @@ use std::{
     fmt,
     sync::{Arc, Mutex},
 };
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
+use tokio::sync::{Mutex as AsyncMutex, Notify, OwnedMutexGuard};
 use tokio::time::{sleep, Duration};
 
 const MAX_PRODUCTION_BATCH_ITEMS: usize = 100;
@@ -277,6 +277,7 @@ pub struct ProductionQueueService {
     admission_gate: Arc<AsyncMutex<()>>,
     idempotency_gate: Arc<AsyncMutex<()>>,
     recovery_tasks: Arc<Mutex<HashSet<String>>>,
+    deferred_start_notify: Arc<Notify>,
     new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
 }
 
@@ -302,6 +303,7 @@ impl ProductionQueueService {
             admission_gate: Arc::new(AsyncMutex::new(())),
             idempotency_gate: Arc::new(AsyncMutex::new(())),
             recovery_tasks: Arc::new(Mutex::new(HashSet::new())),
+            deferred_start_notify: Arc::new(Notify::new()),
             new_generation_admission: None,
         }
     }
@@ -312,6 +314,127 @@ impl ProductionQueueService {
     ) -> Self {
         self.new_generation_admission = Some(admission);
         self
+    }
+
+    /// Enqueue a *start request*, not a Task: the same queue and runtime
+    /// admission service will still perform every safety check before dispatch.
+    pub async fn defer_start(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
+        let id = parse_batch_id(batch_id)?;
+        let persisted = self
+            .repository
+            .enqueue_deferred_start(project_id, &id, self.clock.now())
+            .await?;
+        if !persisted {
+            return Err(ProductionQueueError::InvalidState(
+                "batch is not an owned READY auto-start candidate".to_owned(),
+            ));
+        }
+        self.deferred_start_notify.notify_one();
+        Ok(())
+    }
+
+    pub async fn has_deferred_starts(&self) -> Result<bool, ProductionQueueError> {
+        Ok(!self.repository.list_deferred_starts().await?.is_empty())
+    }
+
+    pub async fn deferred_start_state(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<Option<(String, Option<String>)>, ProductionQueueError> {
+        let id = parse_batch_id(batch_id)?;
+        Ok(self
+            .repository
+            .deferred_start_state(project_id, &id)
+            .await?)
+    }
+
+    /// Remove stale waiting/blocked intent after formal Start commits.
+    pub async fn clear_deferred_start(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
+        let id = parse_batch_id(batch_id)?;
+        self.repository
+            .finish_deferred_start(project_id, &id)
+            .await?;
+        Ok(())
+    }
+
+    /// The only background component here asks the existing start admission to
+    /// start an already-persisted batch; it never creates Tasks or executes a
+    /// workflow. The DB request survives process restart, and unexpected
+    /// runtime errors block that request rather than bypassing preflight.
+    pub async fn run_deferred_starts(
+        self: Arc<Self>,
+        admission: Arc<
+            crate::application::production_start_admission_service::ProductionStartAdmissionService,
+        >,
+    ) {
+        use crate::application::production_start_admission_service::ProductionStartAdmissionError;
+        loop {
+            let requests = match self.repository.list_deferred_starts().await {
+                Ok(requests) => requests,
+                Err(error) => {
+                    tracing::error!(%error, "deferred start read failed");
+                    sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            let Some(next) = requests.first() else {
+                self.deferred_start_notify.notified().await;
+                continue;
+            };
+            let batch_id = match ProductionBatchId::parse(next.batch_id.clone()) {
+                Ok(id) => id,
+                Err(error) => {
+                    tracing::error!(%error, batch_id = %next.batch_id, "invalid deferred batch id");
+                    sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            match admission.start(&next.project_id, &next.batch_id).await {
+                Ok(()) => {
+                    if let Err(error) = self
+                        .repository
+                        .finish_deferred_start(&next.project_id, &batch_id)
+                        .await
+                    {
+                        tracing::error!(%error, "deferred start cleanup failed");
+                    }
+                    // The runner itself holds the single active production slot.
+                }
+                Err(ProductionStartAdmissionError::Queue(ProductionQueueError::Busy(_))) => {
+                    // Do not spin while another task occupies the queue.
+                }
+                Err(error) => {
+                    tracing::warn!(%error, batch_id = %next.batch_id, "deferred start blocked by actual admission failure");
+                    if let Err(store_error) = self
+                        .repository
+                        .block_deferred_start(
+                            &next.project_id,
+                            &batch_id,
+                            &error.to_string(),
+                            self.clock.now(),
+                        )
+                        .await
+                    {
+                        tracing::error!(%store_error, "deferred start failure recording failed");
+                    }
+                }
+            }
+            // Poll only while there are outstanding requests. The worker also
+            // receives a prompt wakeup on completion of an active runner.
+            tokio::select! {
+                _ = self.deferred_start_notify.notified() => {},
+                _ = sleep(Duration::from_millis(500)) => {},
+            }
+        }
     }
 
     pub async fn create(
@@ -1841,6 +1964,7 @@ impl ProductionQueueService {
                     .lock()
                     .expect("production queue runner registry mutex poisoned")
                     .remove(&key);
+                service.deferred_start_notify.notify_one();
                 return;
             }
         });

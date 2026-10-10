@@ -3,7 +3,7 @@ use super::{
     parse_optional_datetime, serialize_json,
 };
 use crate::application::ports::{
-    ActiveProductionItem, ActiveShotBatchBinding, ProductionBatchShotLink,
+    ActiveProductionItem, ActiveShotBatchBinding, DeferredProductionStart, ProductionBatchShotLink,
     ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
     TerminalItemTransition,
 };
@@ -99,6 +99,127 @@ impl ProductionBatchRunbookRepository for SqliteProductionQueueRepository {
 
 #[async_trait]
 impl ProductionQueueRepository for SqliteProductionQueueRepository {
+    async fn enqueue_deferred_start(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        at: DateTime<Utc>,
+    ) -> Result<bool, RepositoryError> {
+        // The owner and READY predicate are evaluated in the INSERT itself;
+        // concurrent cancellation/completion cannot enqueue the wrong batch.
+        let inserted = sqlx::query(
+            "INSERT INTO production_deferred_starts
+             (batch_id, project_id, state, last_error, requested_at, updated_at)
+             SELECT id, project_id, 'WAITING', NULL, ?, ?
+             FROM production_batches
+             WHERE id = ? AND project_id = ? AND status = 'READY' AND archived_at IS NULL
+             ON CONFLICT(batch_id) DO NOTHING",
+        )
+        .bind(format_datetime(at))
+        .bind(format_datetime(at))
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        if inserted.rows_affected() > 0 {
+            return Ok(true);
+        }
+        let state: Option<String> = sqlx::query_scalar(
+            "SELECT d.state FROM production_deferred_starts d
+             INNER JOIN production_batches b ON b.id = d.batch_id
+             WHERE d.batch_id = ? AND b.project_id = ?
+               AND b.status = 'READY' AND b.archived_at IS NULL",
+        )
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(state.as_deref() == Some("WAITING"))
+    }
+
+    async fn list_deferred_starts(&self) -> Result<Vec<DeferredProductionStart>, RepositoryError> {
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT d.batch_id, d.project_id, d.requested_at
+             FROM production_deferred_starts d
+             INNER JOIN production_batches b ON b.id = d.batch_id
+             WHERE d.state = 'WAITING' AND b.status = 'READY'
+               AND b.archived_at IS NULL AND b.project_id = d.project_id
+             ORDER BY d.requested_at ASC, d.batch_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(|(batch_id, project_id, at)| {
+                Ok(DeferredProductionStart {
+                    batch_id,
+                    project_id,
+                    requested_at: parse_datetime("deferred_start.requested_at", &at)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn deferred_start_state(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+    ) -> Result<Option<(String, Option<String>)>, RepositoryError> {
+        sqlx::query_as(
+            "SELECT d.state, d.last_error
+             FROM production_deferred_starts d
+             JOIN production_batches b ON b.id = d.batch_id
+             WHERE d.batch_id = ? AND d.project_id = ? AND b.project_id = ?",
+        )
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .bind(project_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)
+    }
+
+    async fn finish_deferred_start(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+    ) -> Result<(), RepositoryError> {
+        sqlx::query(
+            "DELETE FROM production_deferred_starts
+             WHERE batch_id = ? AND project_id = ?",
+        )
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn block_deferred_start(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        reason: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError> {
+        sqlx::query(
+            "UPDATE production_deferred_starts
+             SET state = 'BLOCKED', last_error = ?, updated_at = ?
+             WHERE batch_id = ? AND project_id = ? AND state = 'WAITING'",
+        )
+        .bind(reason.chars().take(2000).collect::<String>())
+        .bind(format_datetime(at))
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
     async fn insert(
         &self,
         batch: &ProductionBatch,
@@ -1940,6 +2061,138 @@ mod tests {
     use serde_json::json;
     use sqlx::SqlitePool;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn deferred_starts_are_durable_fifo_idempotent_and_owner_scoped() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("deferred-starter.db"))
+            .await
+            .unwrap();
+        for (id, name) in [("deferred-owner-a", "A"), ("deferred-owner-b", "B")] {
+            sqlx::query(
+                "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+                 VALUES (?, ?, NULL, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(id)
+            .bind(name)
+            .bind(format!("C:/{id}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let a = ProductionBatchId::new();
+        let b = ProductionBatchId::new();
+        for (batch, owner, status) in [
+            (&a, "deferred-owner-a", "READY"),
+            (&b, "deferred-owner-b", "RUNNING"),
+        ] {
+            sqlx::query(
+                "INSERT INTO production_batches
+                 (id, project_id, name, status, continue_on_failure, created_at, updated_at)
+                 VALUES (?, ?, 'deferred-test', ?, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(batch.as_str())
+            .bind(owner)
+            .bind(status)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let repo = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc::now();
+        assert!(repo
+            .enqueue_deferred_start("deferred-owner-a", &a, now)
+            .await
+            .unwrap());
+        assert!(repo
+            .enqueue_deferred_start("deferred-owner-a", &a, now)
+            .await
+            .unwrap());
+        assert!(!repo
+            .enqueue_deferred_start("deferred-owner-b", &a, now)
+            .await
+            .unwrap());
+        assert!(!repo
+            .enqueue_deferred_start("deferred-owner-b", &b, now)
+            .await
+            .unwrap());
+
+        let restarted = SqliteProductionQueueRepository::new(pool.clone());
+        let queued = restarted.list_deferred_starts().await.unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].batch_id, a.as_str());
+        assert_eq!(queued[0].project_id, "deferred-owner-a");
+        assert!(restarted
+            .deferred_start_state("deferred-owner-b", &a)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            restarted
+                .deferred_start_state("deferred-owner-a", &a)
+                .await
+                .unwrap()
+                .unwrap()
+                .0,
+            "WAITING"
+        );
+
+        // A later distinct owner/batch waits behind A, even across a new
+        // repository instance; an active RUNNING batch was rejected above.
+        sqlx::query("UPDATE production_batches SET status = 'READY' WHERE id = ?")
+            .bind(b.as_str())
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(restarted
+            .enqueue_deferred_start("deferred-owner-b", &b, now + chrono::Duration::seconds(1))
+            .await
+            .unwrap());
+        let fifo = restarted.list_deferred_starts().await.unwrap();
+        assert_eq!(fifo.len(), 2);
+        assert_eq!(fifo[0].batch_id, a.as_str());
+        assert_eq!(fifo[1].batch_id, b.as_str());
+
+        restarted
+            .block_deferred_start("deferred-owner-a", &a, "runtime unavailable", now)
+            .await
+            .unwrap();
+        let remaining = restarted.list_deferred_starts().await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].batch_id, b.as_str());
+        assert_eq!(
+            restarted
+                .deferred_start_state("deferred-owner-a", &a)
+                .await
+                .unwrap()
+                .unwrap(),
+            ("BLOCKED".to_owned(), Some("runtime unavailable".to_owned()))
+        );
+        assert!(!restarted
+            .enqueue_deferred_start("deferred-owner-a", &a, now)
+            .await
+            .unwrap());
+        restarted
+            .finish_deferred_start("deferred-owner-a", &a)
+            .await
+            .unwrap();
+        restarted
+            .finish_deferred_start("deferred-owner-b", &b)
+            .await
+            .unwrap();
+        assert!(restarted
+            .deferred_start_state("deferred-owner-a", &a)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(restarted.list_deferred_starts().await.unwrap().is_empty());
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+        pool.close().await;
+    }
 
     #[tokio::test]
     async fn submission_idempotency_is_project_scoped_and_database_unique() {

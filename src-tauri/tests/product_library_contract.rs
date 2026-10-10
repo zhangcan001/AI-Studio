@@ -1221,5 +1221,5 @@ async fn phase5_target8_typed_detail_preserves_versions_config_and_member_roles(
         .fetch_one(&f.pool)
         .await
         .unwrap();
-    assert_eq!(max, 43);
+    assert_eq!(max, 44);
 }
