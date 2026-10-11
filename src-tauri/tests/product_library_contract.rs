@@ -168,6 +168,7 @@ fn query(category: LibraryCategory) -> LibraryQuery {
         category,
         favorite_only: None,
         tag_id: None,
+        source_kind: None,
         keyword: None,
         cursor: None,
         limit: Some(2),

@@ -38,7 +38,7 @@ it("phase5_target12 canonical details search actual paging missing resource and 
 });
 it("phase5_target13 Library Create typed intents require explicit compatible slots and create no tasks",async()=>{
  const navigate=vi.fn();api.useInCreation.mockResolvedValue({kind:"prompt",projectId:"project-a",promptId:"prompt-a",promptVersionId:"version-a",text:"复用正文",modelVersionId:null});
- render(<LibraryPage route={route} navigate={navigate}/>);fireEvent.click(await screen.findByRole("button",{name:"用于图片创作"}));await waitFor(()=>expect(navigate).toHaveBeenCalledWith({kind:"create",projectId:"project-a",stage:"image"}));cleanup();
+ render(<LibraryPage route={route} navigate={navigate}/>);expect(screen.queryByRole("button",{name:"用于图片创作"})).toBeNull();fireEvent.click(await screen.findByRole("button",{name:"用于视频创作"}));await waitFor(()=>expect(navigate).toHaveBeenCalledWith({kind:"create",projectId:"project-a",stage:"video"}));cleanup();
  const create={kind:"create",projectId:"project-a",shotId:"shot-a",stage:"video"} as const;
  render(<CreatePage route={create} navigate={navigate}/>);await waitFor(()=>expect(useStudioStore.getState().values.prompt).toEqual({type:"string",value:"复用正文"}));expect(useStudioStore.getState().pendingLibraryIntent).toBeUndefined();cleanup();
  for(const [mediaKind,assetId,button] of [["image","image-a","应用到首帧"],["video","video-a","应用到参考视频"]] as const){useStudioStore.getState().setPendingLibraryIntent({kind:"asset",projectId:"project-a",assetId,mediaKind});render(<CreatePage route={create} navigate={navigate}/>);fireEvent.click(await screen.findByRole("button",{name:button}));expect(useStudioStore.getState().values[mediaKind==="image"?"first_frame":"reference_video"]).toMatchObject({assetId});expect(useStudioStore.getState().values.last_frame).not.toMatchObject({assetId});cleanup();}
@@ -114,10 +114,24 @@ it("M2-2 non-recent Asset101 fetches exact id and changes only the explicitly ch
 it("M2-2 invalid return project falls back to explicit standalone choice, audio retains playback without Create CTA",async()=>{
  useStudioStore.getState().setCreationLabReturn({scope:"other:s:video",route:{kind:"create",projectId:"other",shotId:"s",stage:"video"},selectionRef:"ref",runRef:null,accepted:null});
  const view=render(<LibraryPage route={route} navigate={vi.fn()}/>);
- await screen.findByRole("button",{name:"用于图片创作"}); expect(screen.getByRole("button",{name:"用于视频创作"})).toBeTruthy();
+ await screen.findByRole("button",{name:"用于视频创作"}); expect(screen.queryByRole("button",{name:"用于图片创作"})).toBeNull();
  expect(screen.queryByRole("button",{name:"用于创作"})).toBeNull(); view.unmount();
  api.get.mockResolvedValue({kind:"asset",asset:{id:"audio",projectId:"project-a",name:"历史音频",assetType:"audio"}});
  render(<LibraryPage route={{...route,resource:{kind:"asset",id:"audio"}}} navigate={vi.fn()}/>);
- await screen.findByText(/当前普通图片\/H3创作未启用音频输入/);
+ await screen.findByText(/当前普通视频创作未启用纯音频输入/);
  expect(document.querySelector("audio")).toBeTruthy(); expect(screen.queryByRole("button",{name:/用于.*创作/})).toBeNull();
+});
+it("A08 historical images remain readable while ordinary Library blocks new image generation",async()=>{
+ const navigate=vi.fn();
+ api.useInCreation.mockResolvedValue({kind:"asset",projectId:"project-a",assetId:"hist-img",mediaKind:"image"});
+ api.get.mockResolvedValue({kind:"asset",asset:{id:"hist-img",projectId:"project-a",name:"历史生成图",assetType:"image",width:512,height:512,mimeType:"image/png",sourceTaskId:"tsk_old"}});
+ api.imageGet.mockResolvedValue([9,9,9]);
+ render(<LibraryPage route={{kind:"library",projectId:"project-a",filter:"images",resource:{kind:"asset",id:"hist-img"}}} navigate={navigate}/>);
+ await screen.findByText("历史生成图");
+ expect(await screen.findByRole("img",{name:"历史生成图"})).toBeTruthy();
+ expect(screen.queryByRole("button",{name:"用于图片创作"})).toBeNull();
+ expect(screen.getByText(/历史图片可预览与审计/)).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"用于视频创作"}));
+ await waitFor(()=>expect(navigate).toHaveBeenCalledWith({kind:"create",projectId:"project-a",stage:"video"}));
+ expect(navigate.mock.calls.some(call=>call[0]?.stage==="image")).toBe(false);
 });

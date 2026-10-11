@@ -32,13 +32,14 @@ it("page20 polling and invalidation each query current page once; polling does n
  expect(api.list).toHaveBeenCalledTimes(1);expect(api.list.mock.lastCall?.[1].cursor.position.id).toBe("570");expect(api.tagsList).not.toHaveBeenCalled();
  act(()=>invalidateRuns("a"));await act(async()=>vi.advanceTimersByTime(150));await drain();expect(api.list).toHaveBeenCalledTimes(2);expect(api.tagsList).toHaveBeenCalledTimes(1);
 });
-it.each(["keyword","favorite","tag","category","project"] as const)("%s change clears cursor stack and starts one fresh first page",async(change)=>{
+it.each(["keyword","favorite","tag","category","project","source"] as const)("%s change clears cursor stack and starts one fresh first page",async(change)=>{
  const view=renderHook(({project,category})=>useLibraryController({route:{kind:"library",projectId:project,filter:category},navigate:vi.fn()}),{initialProps:{project:"a",category:"images"}});await drain();act(()=>view.result.current.nextPage());await drain();
  if(change==="keyword")act(()=>view.result.current.setSearch("new"));
  if(change==="favorite")act(()=>view.result.current.setFavoriteOnly(true));
  if(change==="tag")act(()=>view.result.current.setTagId("tag"));
  if(change==="category")view.rerender({project:"a",category:"videos"});
  if(change==="project")view.rerender({project:"b",category:"images"});
+ if(change==="source")act(()=>view.result.current.setSourceKind("source"));
  await drain();expect(view.result.current.pageIndex).toBe(0);expect(view.result.current.canPrevious).toBe(false);expect(api.list.mock.lastCall?.[1].cursor).toBeNull();
 });
 it("pending next page cannot publish after query/project changes or a newer previous-page request",async()=>{

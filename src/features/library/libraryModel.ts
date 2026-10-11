@@ -1,6 +1,7 @@
 import type { AppRoute } from "../../app/routes/types";
 import type { LibraryCategory, LibraryDetail, LibraryRelationLocation, ResourceRef } from "../../product/libraryTypes";
 export type LibraryRoute = Extract<AppRoute, { kind: "library" }>;
+export const sourceKinds: { key: import("../../product/libraryTypes").LibrarySourceKind; label: string }[] = [{key:"all",label:"全部来源"},{key:"source",label:"外部导入"},{key:"generated",label:"生成结果"}];
 export const categories: { key: LibraryCategory; label: string }[] = [{key:"all",label:"近期资源"},{key:"media",label:"媒体"},{key:"images",label:"图片"},{key:"videos",label:"视频"},{key:"audio",label:"音频"},{key:"prompts",label:"提示词"},{key:"profiles",label:"角色 / 场景 / 道具 / 风格"},{key:"reference-sets",label:"参考集"}];
 export const categoryFor = (route: LibraryRoute): LibraryCategory => categories.find(c=>c.key===route.filter)?.key ?? "all";
 export const resourceKey = (resource?: ResourceRef) => resource ? `${resource.kind}:${resource.id}` : "";

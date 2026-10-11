@@ -13,21 +13,22 @@ afterEach(()=>{cleanup();vi.useRealTimers();});
 
 it.each(["media","images","videos","audio"] as const)("media-only typed filters visible in %s and empty tags remain usable",async filter=>{
  api.tagsList.mockResolvedValueOnce([]);render(<LibraryPage route={{kind:"library",projectId:"a",filter}} navigate={vi.fn()}/>);
- await screen.findByText("first");expect(screen.getByRole("checkbox",{name:"仅收藏"})).toBeTruthy();expect(screen.getAllByRole("option").map(x=>x.textContent)).toEqual(["全部标签"]);
+ await screen.findByText("first");expect(screen.getByRole("checkbox",{name:"仅收藏"})).toBeTruthy();expect(screen.getByLabelText("素材来源")).toBeTruthy();expect(screen.getByLabelText("标签")).toBeTruthy();
  expect(api.tagsList).toHaveBeenCalledWith("a");expect(screen.getByText("当前分类数据库分页结果。")).toBeTruthy();
 });
 it.each(["all","prompts","profiles","reference-sets"] as const)("non-media category %s hides asset filters",async filter=>{
- render(<LibraryPage route={{kind:"library",projectId:"a",filter}} navigate={vi.fn()}/>);await screen.findByText("first");expect(screen.queryByRole("checkbox")).toBeNull();expect(screen.queryByLabelText("标签")).toBeNull();expect(api.tagsList).not.toHaveBeenCalled();
+ render(<LibraryPage route={{kind:"library",projectId:"a",filter}} navigate={vi.fn()}/>);await screen.findByText("first");expect(screen.queryByRole("checkbox")).toBeNull();expect(screen.queryByLabelText("标签")).toBeNull();expect(screen.queryByLabelText("素材来源")).toBeNull();expect(api.tagsList).not.toHaveBeenCalled();
  if(filter==="all"){expect(screen.getByRole("button",{name:"近期资源"})).toBeTruthy();expect(screen.getByText(/切换到媒体/)).toBeTruthy();}
 });
 it("combined server query resets pages and uses only current cursor; deleted tag clears on refresh",async()=>{
- const cursor={projectId:"a",category:"images",keyword:null,favoriteOnly:false,tagId:null,position:{id:"first",createdAt:"date"}};
+ const cursor={projectId:"a",category:"images",keyword:null,favoriteOnly:false,tagId:null,sourceKind:"all",position:{id:"first",createdAt:"date"}};
  api.list.mockImplementation(async(_p,q)=>page(q.cursor?"second":"first",q.cursor?null:cursor));
  const view=render(<LibraryPage route={{kind:"library",projectId:"a",filter:"images"}} navigate={vi.fn()}/>);await screen.findByText("first");
  fireEvent.click(screen.getByRole("button",{name:"下一页"}));await screen.findByText("second");
- fireEvent.click(screen.getByRole("checkbox",{name:"仅收藏"}));await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({favoriteOnly:true,cursor:null})));expect(screen.queryByText("second")).toBeNull();
- fireEvent.change(screen.getByLabelText("标签"),{target:{value:"tag-a"}});await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({tagId:"tag-a",favoriteOnly:true,cursor:null})));
- fireEvent.change(screen.getByLabelText("搜索资源名称"),{target:{value:" unique "}});await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({category:"images",keyword:"unique",tagId:"tag-a",favoriteOnly:true,cursor:null,limit:30})));
+ fireEvent.change(screen.getByLabelText("素材来源"),{target:{value:"source"}});await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({sourceKind:"source",cursor:null})));expect(screen.queryByText("second")).toBeNull();
+ fireEvent.click(screen.getByRole("checkbox",{name:"仅收藏"}));await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({favoriteOnly:true,sourceKind:"source",cursor:null})));
+ fireEvent.change(screen.getByLabelText("标签"),{target:{value:"tag-a"}});await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({tagId:"tag-a",favoriteOnly:true,sourceKind:"source",cursor:null})));
+ fireEvent.change(screen.getByLabelText("搜索资源名称"),{target:{value:" unique "}});await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({category:"images",keyword:"unique",tagId:"tag-a",favoriteOnly:true,sourceKind:"source",cursor:null,limit:30})));
  api.tagsList.mockResolvedValue([tags[1]]);fireEvent.click(screen.getByRole("button",{name:"刷新"}));await waitFor(()=>expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({tagId:null,cursor:null})));expect((screen.getByLabelText("标签") as HTMLSelectElement).value).toBe("");
  view.unmount();
 });
@@ -40,19 +41,19 @@ it("pending old keyword/filter responses cannot overwrite current query or proje
  act(()=>view.result.current.setSearch("old"));await drain();act(()=>view.result.current.setSearch("new"));await drain();expect(view.result.current.list?.items[0].title).toBe("new");
  await act(async()=>oldResolve(page("STALE")));expect(view.result.current.list?.items[0].title).toBe("new");
  act(()=>view.result.current.setSearch("old"));await drain();view.rerender({project:"b"});await drain();await act(async()=>oldResolve(page("A LEAK")));
- expect(view.result.current.search).toBe("");expect(view.result.current.favoriteOnly).toBe(false);expect(view.result.current.tagId).toBe("");expect(view.result.current.tags.map(t=>t.name)).toEqual(["B only"]);expect(view.result.current.list?.items[0].title).toBe("fresh");
- expect(api.list).toHaveBeenLastCalledWith("b",expect.objectContaining({keyword:null,favoriteOnly:false,tagId:null,cursor:null}));
+ expect(view.result.current.search).toBe("");expect(view.result.current.favoriteOnly).toBe(false);expect(view.result.current.tagId).toBe("");expect(view.result.current.sourceKind).toBe("all");expect(view.result.current.tags.map(t=>t.name)).toEqual(["B only"]);expect(view.result.current.list?.items[0].title).toBe("fresh");
+ expect(api.list).toHaveBeenLastCalledWith("b",expect.objectContaining({keyword:null,favoriteOnly:false,tagId:null,sourceKind:"all",cursor:null}));
 });
 it("invalid query displays understandable error and explicit refresh recovers without retry loops",async()=>{
  api.list.mockRejectedValueOnce({code:"LIBRARY_QUERY_INVALID"});render(<LibraryPage route={{kind:"library",projectId:"a",filter:"images"}} navigate={vi.fn()}/>);await screen.findByRole("alert");expect(api.list).toHaveBeenCalledTimes(1);fireEvent.click(screen.getByRole("button",{name:"刷新"}));await screen.findByText("first");expect(screen.queryByRole("alert")).toBeNull();
 });
 it("nextPage carries the active normalized favorite/tag/keyword cursor rather than a previous query cursor",async()=>{
- api.list.mockImplementation(async(project,q)=>page(q.cursor?"next":"first",q.cursor?null:{projectId:project,category:q.category,keyword:q.keyword,favoriteOnly:q.favoriteOnly,tagId:q.tagId,position:{id:q.keyword||"default",createdAt:"date"}}));
+ api.list.mockImplementation(async(project,q)=>page(q.cursor?"next":"first",q.cursor?null:{projectId:project,category:q.category,keyword:q.keyword,favoriteOnly:q.favoriteOnly,tagId:q.tagId,sourceKind:q.sourceKind,position:{id:q.keyword||"default",createdAt:"date"}}));
  const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"a",filter:"images"},navigate:vi.fn()}));await drain();
- act(()=>view.result.current.setSearch(" new "));await drain();act(()=>view.result.current.setFavoriteOnly(true));await drain();act(()=>view.result.current.setTagId("tag-b"));await drain();
+ act(()=>view.result.current.setSearch(" new "));await drain();act(()=>view.result.current.setFavoriteOnly(true));await drain();act(()=>view.result.current.setTagId("tag-b"));await drain();act(()=>view.result.current.setSourceKind("generated"));await drain();
  const cursor=view.result.current.list!.nextCursor;
- expect(cursor).toMatchObject({projectId:"a",category:"images",keyword:"new",favoriteOnly:true,tagId:"tag-b"});
- act(()=>view.result.current.nextPage());await drain();expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({keyword:"new",favoriteOnly:true,tagId:"tag-b",cursor}));expect(view.result.current.list?.items.map(x=>x.title)).toEqual(["next"]);
+ expect(cursor).toMatchObject({projectId:"a",category:"images",keyword:"new",favoriteOnly:true,tagId:"tag-b",sourceKind:"generated"});
+ act(()=>view.result.current.nextPage());await drain();expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({keyword:"new",favoriteOnly:true,tagId:"tag-b",sourceKind:"generated",cursor}));expect(view.result.current.list?.items.map(x=>x.title)).toEqual(["next"]);
 });
 it("pending old favorite and project tag requests cannot publish after ownership changes",async()=>{
  let resolveFavorite:(p:ReturnType<typeof page>)=>void=()=>{};let resolveTags:(t:typeof tags)=>void=()=>{};
@@ -61,4 +62,18 @@ it("pending old favorite and project tag requests cannot publish after ownership
  act(()=>view.result.current.setFavoriteOnly(true));await drain();act(()=>view.result.current.setFavoriteOnly(false));await drain();await act(async()=>resolveFavorite(page("OLD FAVORITE")));expect(view.result.current.list?.items[0].title).toBe("not favorite");
  api.tagsList.mockImplementation(project=>project==="a"?new Promise(resolve=>{resolveTags=resolve;}):Promise.resolve([]));
  act(()=>{void view.result.current.refresh();});await drain();view.rerender({project:"b"});await drain();await act(async()=>resolveTags(tags));expect(view.result.current.tags).toEqual([]);expect(api.list).toHaveBeenLastCalledWith("b",expect.anything());
+});
+
+it("sourceKind change clears cursor stack and pending generated responses cannot leak",async()=>{
+ let resolveGenerated:(p:ReturnType<typeof page>)=>void=()=>{};
+ api.list.mockImplementation(async(_p,q)=>q.sourceKind==="generated"?new Promise(resolve=>{resolveGenerated=resolve;}):page(q.sourceKind==="source"?"source-only":"all-items"));
+ const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"a",filter:"images"},navigate:vi.fn()}));await drain();
+ act(()=>view.result.current.nextPage());await drain();
+ act(()=>view.result.current.setSourceKind("generated"));await drain();
+ act(()=>view.result.current.setSourceKind("source"));await drain();
+ await act(async()=>resolveGenerated(page("STALE GENERATED")));
+ expect(view.result.current.pageIndex).toBe(0);
+ expect(view.result.current.sourceKind).toBe("source");
+ expect(view.result.current.list?.items[0].title).toBe("source-only");
+ expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({sourceKind:"source",cursor:null}));
 });

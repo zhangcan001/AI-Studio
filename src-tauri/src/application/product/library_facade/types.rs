@@ -39,6 +39,16 @@ pub enum LibraryCategory {
     ReferenceSets,
 }
 
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LibrarySourceKind {
+    #[default]
+    All,
+    Source,
+    Generated,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LibraryCursor {
@@ -49,6 +59,8 @@ pub struct LibraryCursor {
     pub favorite_only: bool,
     #[serde(default)]
     pub tag_id: Option<String>,
+    #[serde(default)]
+    pub source_kind: LibrarySourceKind,
     pub position: PageCursor,
 }
 
@@ -59,6 +71,8 @@ pub struct LibraryQuery {
     pub keyword: Option<String>,
     pub favorite_only: Option<bool>,
     pub tag_id: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<LibrarySourceKind>,
     pub cursor: Option<LibraryCursor>,
     pub limit: Option<u32>,
 }

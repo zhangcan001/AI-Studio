@@ -26,14 +26,16 @@ impl LibraryServices<'_> {
             .tag_id
             .map(|v| v.trim().to_owned())
             .filter(|v| !v.is_empty());
-        if (favorite_only || tag_id.is_some())
-            && !matches!(
-                query.category,
-                LibraryCategory::Media
-                    | LibraryCategory::Images
-                    | LibraryCategory::Videos
-                    | LibraryCategory::Audio
-            )
+        let source_kind = query.source_kind.unwrap_or_default();
+        let media_category = matches!(
+            query.category,
+            LibraryCategory::Media
+                | LibraryCategory::Images
+                | LibraryCategory::Videos
+                | LibraryCategory::Audio
+        );
+        if (favorite_only || tag_id.is_some() || source_kind != LibrarySourceKind::All)
+            && !media_category
         {
             return Err(invalid_query());
         }
@@ -43,7 +45,8 @@ impl LibraryServices<'_> {
                     && cursor.category == query.category
                     && cursor.keyword == keyword
                     && cursor.favorite_only == favorite_only
-                    && cursor.tag_id == tag_id =>
+                    && cursor.tag_id == tag_id
+                    && cursor.source_kind == source_kind =>
             {
                 Some(cursor.position)
             }
@@ -71,6 +74,7 @@ impl LibraryServices<'_> {
                         keyword.clone(),
                         false,
                         None,
+                        LibrarySourceKind::All,
                         None,
                         12,
                     )
@@ -116,6 +120,7 @@ impl LibraryServices<'_> {
                         keyword.clone(),
                         favorite_only,
                         tag_id.clone(),
+                        source_kind,
                         cursor,
                         limit,
                     )
@@ -131,6 +136,7 @@ impl LibraryServices<'_> {
                 keyword,
                 favorite_only,
                 tag_id,
+                source_kind,
                 position,
             }),
             coverage,
@@ -151,6 +157,7 @@ impl LibraryServices<'_> {
         keyword: Option<String>,
         favorite_only: bool,
         tag_id: Option<String>,
+        source_kind: LibrarySourceKind,
         cursor: Option<crate::application::pagination::PageCursor>,
         limit: u32,
     ) -> Result<
@@ -172,7 +179,11 @@ impl LibraryServices<'_> {
                     LibraryCategory::Audio => AssetMediaTypeFilter::Audio,
                     _ => AssetMediaTypeFilter::All,
                 },
-                source_kind: AssetSourceFilter::All,
+                source_kind: match source_kind {
+                    LibrarySourceKind::All => AssetSourceFilter::All,
+                    LibrarySourceKind::Source => AssetSourceFilter::Source,
+                    LibrarySourceKind::Generated => AssetSourceFilter::Generated,
+                },
                 favorite_only,
                 tag_id,
                 created_order: AssetCreatedOrder::Newest,

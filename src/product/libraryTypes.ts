@@ -8,8 +8,9 @@ export type ResourceRef =
   | { kind: "profile"; id: string }
   | { kind: "reference-set"; id: string };
 export type LibraryCategory = "all" | "media" | "images" | "videos" | "audio" | "prompts" | "profiles" | "reference-sets";
-export interface LibraryCursor { projectId: string; category: LibraryCategory; keyword: string | null; favoriteOnly?: boolean; tagId?: string | null; position: PageCursor }
-export interface LibraryQuery { category: LibraryCategory; keyword: string | null; favoriteOnly?: boolean | null; tagId?: string | null; cursor: LibraryCursor | null; limit: number | null }
+export type LibrarySourceKind = "all" | "source" | "generated";
+export interface LibraryCursor { projectId: string; category: LibraryCategory; keyword: string | null; favoriteOnly?: boolean; tagId?: string | null; sourceKind?: LibrarySourceKind; position: PageCursor }
+export interface LibraryQuery { category: LibraryCategory; keyword: string | null; favoriteOnly?: boolean | null; tagId?: string | null; sourceKind?: LibrarySourceKind | null; cursor: LibraryCursor | null; limit: number | null }
 export interface LibraryItem { resourceRef: ResourceRef; title: string; subtype: string; createdAt: string; updatedAt: string; thumbnailAvailable: boolean }
 export interface LibraryList { items: LibraryItem[]; nextCursor: LibraryCursor | null; coverage: "recent-summary" | "keyset-page" | "complete-category"; coverageMessage: string }
 

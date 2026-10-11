@@ -4,20 +4,21 @@ import type { AppRoute } from "../../app/routes/types";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import { invalidateRuns, subscribeRunInvalidation } from "../../product/runInvalidation";
-import type { LibraryDeletionInspection, LibraryDetail, LibraryEditRequest, LibraryList, LibraryRelation, LibraryVersions, LibraryTag, ResourceRef } from "../../product/libraryTypes";
+import type { LibraryDeletionInspection, LibraryDetail, LibraryEditRequest, LibraryList, LibraryRelation, LibraryVersions, LibraryTag, LibrarySourceKind, ResourceRef } from "../../product/libraryTypes";
 import { useStudioStore } from "../../stores/studioStore";
 import { categoryFor, resourceKey, type LibraryRoute } from "./libraryModel";
 export interface LibraryProps { route: LibraryRoute; navigate: (route: AppRoute) => unknown }
 interface Projection {scope:string;list:LibraryList;detail?:LibraryDetail;relations:LibraryRelation[];versions?:LibraryVersions}
 export function useLibraryController({route,navigate}:LibraryProps) {
-  const [queryState,setQueryState]=useState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:""});
+  const [queryState,setQueryState]=useState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:"",sourceKind:"all" as LibrarySourceKind});
   const [tagProjection,setTagProjection]=useState<{projectId:string;items:LibraryTag[]}>();
   const mediaCategory=["media","images","videos","audio"].includes(categoryFor(route));
-  const ownedQuery=queryState.projectId===route.projectId ? queryState : {projectId:route.projectId,search:"",favoriteOnly:false,tagId:""};
-  const search=ownedQuery.search, favoriteOnly=mediaCategory&&ownedQuery.favoriteOnly, tagId=mediaCategory ? ownedQuery.tagId.trim() : "";
+  const ownedQuery=queryState.projectId===route.projectId ? queryState : {projectId:route.projectId,search:"",favoriteOnly:false,tagId:"",sourceKind:"all" as LibrarySourceKind};
+  const search=ownedQuery.search, favoriteOnly=mediaCategory&&ownedQuery.favoriteOnly, tagId=mediaCategory ? ownedQuery.tagId.trim() : "", sourceKind=mediaCategory ? ownedQuery.sourceKind : "all";
   const setSearch=(search:string)=>setQueryState(state=>({...state,projectId:route.projectId,search}));
   const setFavoriteOnly=(favoriteOnly:boolean)=>setQueryState(state=>({...state,projectId:route.projectId,favoriteOnly}));
   const setTagId=(tagId:string)=>setQueryState(state=>({...state,projectId:route.projectId,tagId}));
+  const setSourceKind=(sourceKind:LibrarySourceKind)=>setQueryState(state=>({...state,projectId:route.projectId,sourceKind}));
   const mediaInspection=useLibraryMediaInspection(route.projectId,route.resource);
   const [projection,setProjection]=useState<Projection>();
   const [queryError,setQueryError]=useState<string>();const [actionError,setActionError]=useState<string>();const [notice,setNotice]=useState<string>();
@@ -28,7 +29,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   const tagsOwner=useRef<string|undefined>(undefined);
   const navigating=useRef(false);
   const selfEditInvalidation=useRef(false);
-  const category=categoryFor(route);const queryScope=JSON.stringify([route.projectId,category,search.trim(),favoriteOnly,tagId]);
+  const category=categoryFor(route);const queryScope=JSON.stringify([route.projectId,category,search.trim(),favoriteOnly,tagId,sourceKind]);
   const scope=JSON.stringify([queryScope,resourceKey(route.resource)]);
   const liveScope=useRef(scope);liveScope.current=scope;
   const previousProject=useRef(route.projectId);
@@ -51,7 +52,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
           setQueryState(state=>({...state,tagId:""}));return;
         }
       }
-      const list=await productClient.library.list(route.projectId,{category,keyword:search.trim()||null,favoriteOnly,tagId:tagId||null,cursor,limit:30});
+      const list=await productClient.library.list(route.projectId,{category,keyword:search.trim()||null,favoriteOnly,tagId:tagId||null,sourceKind,cursor,limit:30});
       if(!owns())return;
       let detail:LibraryDetail|undefined;let relations:LibraryRelation[]=[];let versions:LibraryVersions|undefined;
       if(route.resource) {
@@ -76,7 +77,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   },[scope]);
   useEffect(()=>{
     inspectionOpen.current=false;setProjection(undefined);setInspection(undefined);setQueryError(undefined);setActionError(undefined);setLoading(true);
-    if(previousProject.current!==route.projectId){previousProject.current=route.projectId;setQueryState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:""});setTagProjection(undefined);setNotice(undefined);
+    if(previousProject.current!==route.projectId){previousProject.current=route.projectId;setQueryState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:"",sourceKind:"all"});setTagProjection(undefined);setNotice(undefined);
       if(route.resource)navigate({...route,resource:undefined});}
     if(pages.current.owner!==queryScope){pages.current={owner:queryScope,index:0,starts:[null]};setPageIndex(0);}
     void refresh({tags:false});
@@ -101,12 +102,14 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   const returnRoute=savedReturn?.route?.projectId===route.projectId && savedReturn.scope===`${savedReturn.route.projectId}:${savedReturn.route.shotId ?? ""}:${savedReturn.route.stage}` ? savedReturn.route : undefined;
   const useInCreation=(stage?: "image" | "video")=>mutate(async()=>{
     if(!route.resource || (!returnRoute && !stage))return;
+    // Ordinary Library is video-first: new Krea2/image generation is unreachable.
+    if(!returnRoute && stage==="image")return;
     const intent=await productClient.library.useInCreation(route.projectId,route.resource);
     if(liveScope.current!==scope || intent.projectId!==route.projectId || (intent.kind==="asset" && intent.mediaKind==="audio"))return;
     useStudioStore.getState().setPendingLibraryIntent(intent);
     navigate(returnRoute ?? {kind:"create",projectId:route.projectId,stage:stage!});
   });
-  return {mediaInspection,returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
+  return {mediaInspection,returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,sourceKind,setSourceKind,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
     pageIndex,canPrevious:pageIndex>0,
     nextPage:()=>{if(current?.list.nextCursor)void refresh({tags:false,page:pages.current.index+1,cursor:current.list.nextCursor});},
     previousPage:()=>{if(pages.current.index>0)void refresh({tags:false,page:pages.current.index-1});},

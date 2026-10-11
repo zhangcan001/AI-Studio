@@ -1,6 +1,7 @@
 // Authorize the Phase5J per-file forks worker + dedicated Boundary job before replaying Phase5I or older proofs.
 // Nothing in the historical manifests or Runtime Package bytes may be rewritten.
 import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
+import { uiPhase6AParentReader, phase6AFixtureFiles } from './ui-phase6a-library-source-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -78,11 +79,12 @@ function files(root,dir) {
     return entry.isDirectory()?files(root,p):[p];
   }).sort();
 }
-export const phase5JFixtureFiles = root => [...new Set([...phase5JParentFacts(root).paths,...PHASE5J_FILES])];
+export const phase5JFixtureFiles = root => [...new Set([...phase5JParentFacts(root).paths,...PHASE5J_FILES,...phase6AFixtureFiles(root)])];
 function validate(root,override) {
-  const violations=[],fail=name=>violations.push('ui-phase5j-ci-per-file-worker-'+name);
+  const successor=uiPhase6AParentReader(root);
+  const violations=[...successor.violations],fail=name=>violations.push('ui-phase5j-ci-per-file-worker-'+name);
   const live=new Map(),read=p=>{
-    if(!live.has(p))live.set(p,normalize(readFileSync(join(root,p),'utf8')));
+    if(!live.has(p))live.set(p,normalize(successor.read(p)));
     return live.get(p);
   };
   const denied=()=>({violations,addedPaths:[],afterHashes:{},read:p=>normalize(readFileSync(join(root,p),'utf8'))});
@@ -99,7 +101,7 @@ function validate(root,override) {
   if(JSON.stringify(Object.keys(proof.paths??{}).sort())!==JSON.stringify(scope))fail('scope');
   if(JSON.stringify(proof.invariants)!==JSON.stringify(PHASE5J_INVARIANTS)
     ||JSON.stringify(proof.database)!==JSON.stringify(PHASE5J_DATABASE))fail('contract');
-  if(violations.length)return denied();
+  if(violations.length>successor.violations.length)return denied();
   try {
     for(const p of PHASE5J_EXISTING){
       if(!parent.paths.includes(p)||proof.paths[p]?.beforeHash!==phase5JHash(parent.read(p))
@@ -112,7 +114,8 @@ function validate(root,override) {
     for(const dir of directories){
       const expected=[...parent.paths.filter(p=>p.startsWith(dir+'/')),
         ...PHASE5J_ADDED.filter(p=>p.startsWith(dir+'/')),
-        ...[PHASE5J_MANIFEST].filter(p=>p.startsWith(dir+'/'))].sort();
+        ...[PHASE5J_MANIFEST].filter(p=>p.startsWith(dir+'/')),
+        ...successor.addedPaths.filter(p=>p.startsWith(dir+'/'))].sort();
       if(JSON.stringify(files(root,dir))!==JSON.stringify(expected))fail('inventory:'+dir);
     }
     for(const p of parent.paths.filter(p=>!PHASE5J_EXISTING.includes(p))){
@@ -137,8 +140,8 @@ function validate(root,override) {
       ||rawAggregate(p=>readFileSync(join(root,p)))!==baselines[profile])fail('runtime-package-bytes');
   }catch{fail('missing-evidence');}
   if(violations.length)return denied();
-  return {violations,addedPaths:[...PHASE5J_ADDED,PHASE5J_MANIFEST],
-    afterHashes:Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),
+  return {violations,addedPaths:[...PHASE5J_ADDED,PHASE5J_MANIFEST,...successor.addedPaths],
+    afterHashes:{...Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),...successor.afterHashes},
     read:p=>PHASE5J_EXISTING.includes(p)?parent.read(p):read(p)};
 }
 export function uiPhase5JParentReader(root,override) {

@@ -11,7 +11,7 @@ describe("product facade client", () => {
     invokeCommand.mockResolvedValueOnce(tags);
     expect(await productClient.library.tagsList("project-a")).toEqual(tags);
     expect(invokeCommand).toHaveBeenLastCalledWith("product_library_tags_list",{projectId:"project-a"});
-    const query={category:"images",keyword:"later",favoriteOnly:true,tagId:"tag-a",cursor:null,limit:30} as const;
+    const query={category:"images",keyword:"later",favoriteOnly:true,tagId:"tag-a",sourceKind:"source",cursor:null,limit:30} as const;
     invokeCommand.mockResolvedValueOnce({items:[]});await productClient.library.list("project-a",query);
     expect(invokeCommand).toHaveBeenLastCalledWith("product_library_list",{projectId:"project-a",query});
   });
@@ -40,7 +40,7 @@ describe("product facade client", () => {
     const script = new URL("../../scripts/dev088-architecture-guard.mjs", import.meta.url).href;
     const guard = await import(/* @vite-ignore */ script);
     expect(guard.productBoundaryVerified).toBe(true);
-  }, 30_000); // M2-2 full guard finished in 18.05s on CI (local ~10s); finite verification budget, not a product performance threshold.
+  }, 60_000); // Phase6A lengthens the successor chain; keep a finite budget, not a product performance threshold.
   beforeEach(() => { invokeCommand.mockReset(); });
   it("routes the five original typed use cases through the single transport", async () => {
     invokeCommand.mockResolvedValue([]);
