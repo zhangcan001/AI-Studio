@@ -43,24 +43,61 @@ it('validates Phase4 before projecting immutable repair and UI proofs; rejects f
     (p:typeof proof)=>{p.paths['src/services/ipc.ts']={beforeHash:null,afterHash:'0'.repeat(64)};},
   ]) {const invalid=structuredClone(proof);modify(invalid);const denied=uiPhase4ParentReader('.',invalid);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);}
 },30000);
-it('fresh live cache rejects edits, proofs/deletion, illegal additions and literal packages; restoration passes',()=>{
-  const root=resolve('.'),fixture=mkdtempSync(join(root,'.codex-ui-phase4-probe-'));
-  try {
-    execFileSync('git',['init','--quiet',fixture]);
-    const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{cwd:root,encoding:'utf8'}).trim();
-    writeFileSync(join(fixture,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-    const paths=[...new Set<string>(uiPhase3FixtureFiles(root))];
-    for(const p of paths){mkdirSync(dirname(join(fixture,p)),{recursive:true});copyFileSync(join(root,p),join(fixture,p));}
-    const pass=()=>{expect(uiPhase4ParentReader(fixture).violations).toEqual([]);};pass();
-    const deny=()=>{const denied=uiPhase4ParentReader(fixture);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);expect(uiPhase3ParentReader(fixture).violations.length).toBeGreaterThan(0);};
-    for(const p of ['src/features/create/CreatePage.tsx','scripts/style-boundary-guard.mjs','src/app/ShellHost.tsx','docs/architecture/ui-phase3-ci-repair.json',UI_PHASE4_MANIFEST,UI_PHASE4_CI_REPAIR_MANIFEST,
-      paths.find((p:string)=>p.startsWith('src-tauri/runtime_packages/')&&p.endsWith('.json'))!]){
-      const original=readFileSync(join(fixture,p));
-      if(p===UI_PHASE4_MANIFEST||p===UI_PHASE4_CI_REPAIR_MANIFEST){const forged=JSON.parse(original.toString());forged.parentHead='0'.repeat(40);writeFileSync(join(fixture,p),JSON.stringify(forged));}
-      else writeFileSync(join(fixture,p),new Uint8Array([...original,10]));
-      deny();writeFileSync(join(fixture,p),original);pass();
-    }
-    const original=readFileSync(join(fixture,UI_PHASE4_MANIFEST));rmSync(join(fixture,UI_PHASE4_MANIFEST));deny();writeFileSync(join(fixture,UI_PHASE4_MANIFEST),original);pass();
-    const illegal=join(fixture,'src/features/create/IllegalAuthority.ts');writeFileSync(illegal,'export const authority = true;');deny();rmSync(illegal);pass();
-  }finally{if(!fixture.startsWith(root+'/')&&!fixture.startsWith(root+'\\'))throw Error('outside owned workspace');if(!fixture.includes('.codex-ui-phase4-probe-'))throw Error('unexpected fixture');rmSync(fixture,{recursive:true,force:true});}
-},30000);
+async function withPhase4Probe(run:(fixture:string,paths:string[])=>void){
+ const root=resolve('.'),fixture=mkdtempSync(join(root,'.codex-ui-phase4-probe-'));
+ try{
+  execFileSync('git',['init','--quiet',fixture]);
+  const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{cwd:root,encoding:'utf8'}).trim();
+  writeFileSync(join(fixture,'.git/objects/info/alternates'),join(git,'objects')+'\n');
+  const paths=[...new Set<string>(uiPhase3FixtureFiles(root))];
+  for(const p of paths){mkdirSync(dirname(join(fixture,p)),{recursive:true});copyFileSync(join(root,p),join(fixture,p));}
+  expect(uiPhase4ParentReader(fixture).violations).toEqual([]);
+  run(fixture,paths);
+ }finally{
+  if(!fixture.startsWith(root+'/')&&!fixture.startsWith(root+'\\'))throw Error('outside owned workspace');
+  if(!fixture.includes('.codex-ui-phase4-probe-'))throw Error('unexpected fixture');
+  rmSync(fixture,{recursive:true,force:true});
+  // Allow Vitest worker RPC updates between expensive synchronous proof replays.
+  await new Promise<void>(resolve=>setTimeout(resolve,0));
+ }
+}
+const denyPhase4=(fixture:string)=>{
+ const denied=uiPhase4ParentReader(fixture);
+ expect(denied.violations.length).toBeGreaterThan(0);
+ expect(denied.addedPaths).toEqual([]);
+ expect(uiPhase3ParentReader(fixture).violations.length).toBeGreaterThan(0);
+};
+it.each(['src/features/create/CreatePage.tsx','scripts/style-boundary-guard.mjs','src/app/ShellHost.tsx'])('rejects edited source and style bytes: %s',p=>withPhase4Probe(fixture=>{
+  const path=join(fixture,p),original=readFileSync(path);
+  writeFileSync(path,new Uint8Array([...original,10]));
+  denyPhase4(fixture);writeFileSync(path,original);
+ expect(uiPhase4ParentReader(fixture).violations).toEqual([]);
+}),30000);
+it.each(['docs/architecture/ui-phase3-ci-repair.json',UI_PHASE4_MANIFEST,UI_PHASE4_CI_REPAIR_MANIFEST])('rejects altered Phase3 and Phase4 proof: %s',p=>withPhase4Probe(fixture=>{
+
+  const path=join(fixture,p),original=readFileSync(path);
+  if(p===UI_PHASE4_MANIFEST||p===UI_PHASE4_CI_REPAIR_MANIFEST){
+   const forged=JSON.parse(original.toString());forged.parentHead='0'.repeat(40);
+   writeFileSync(path,JSON.stringify(forged));
+  }else writeFileSync(path,new Uint8Array([...original,10]));
+  denyPhase4(fixture);writeFileSync(path,original);
+ expect(uiPhase4ParentReader(fixture).violations).toEqual([]);
+}),30000);
+it.each(['runtime','missing-proof','illegal-source'] as const)(
+ 'rejects literal Runtime, missing proof or illegal source: %s',kind=>withPhase4Probe((fixture,paths)=>{
+  if(kind==='runtime'){
+   const p=paths.find(p=>p.startsWith('src-tauri/runtime_packages/')&&p.endsWith('.json'))!;
+   const path=join(fixture,p),original=readFileSync(path);
+   try{writeFileSync(path,new Uint8Array([...original,10]));denyPhase4(fixture);}
+   finally{writeFileSync(path,original);}
+  }else if(kind==='missing-proof'){
+   const path=join(fixture,UI_PHASE4_MANIFEST),original=readFileSync(path);
+   try{rmSync(path);denyPhase4(fixture);}
+   finally{writeFileSync(path,original);}
+  }else{
+   const path=join(fixture,'src/features/create/IllegalAuthority.ts');
+   try{writeFileSync(path,'export const authority = true;');denyPhase4(fixture);}
+   finally{rmSync(path,{force:true});}
+  }
+  expect(uiPhase4ParentReader(fixture).violations).toEqual([]);
+ }),30000);

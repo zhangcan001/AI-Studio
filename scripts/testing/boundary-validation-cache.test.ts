@@ -95,4 +95,4 @@ it('validates the new repair before projecting unchanged historical proof bytes 
   const denied = uiPhase3CiRepairParentReader('.',forged);
   expect(denied.violations.length).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
   expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
-});
+},30000);

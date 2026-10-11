@@ -42,40 +42,65 @@ it('validates current live aggregates before projecting historical source, with 
  }
 },30000);
 
-it('rejects changed and untouched byte drift, historical-proof edits, additions and missing evidence',()=>{
+async function withPhase1Fixture(run:(root:string)=>void) {
  const root=mkdtempSync(join(tmpdir(),'ai-studio-minimax-video-policy-'));
- try{
+ try {
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
   execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
   writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of new Set([...readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE1_PARENT).paths,...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.')]) as Set<string>){
+  for(const p of new Set([...readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE1_PARENT).paths,...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.')]) as Set<string>) {
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
-  for(const p of ['src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
-   'src-tauri/src/application/minimax_video_product_policy.rs','docs/architecture/readiness-post-run-fix.json',
-   'src-tauri/runtime_packages/kera2_t2i_local_v2_1_1_1_90894e9e/recipe.yaml','src-tauri/tauri.conf.json']){
-   const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-   const denied=minimaxVideoPhase1ParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);
-   expect(denied.addedPaths).toEqual([]);expect(denied.backendAggregateSha256).toBeUndefined();
-   writeFileSync(path,original);expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
-  }
-  const proofPath=join(root,MINIMAX_VIDEO_PHASE1_MANIFEST),proof=readFileSync(proofPath,'utf8');rmSync(proofPath);
-  expect(minimaxVideoPhase1ParentReader(root).violations).toContain('minimax-video-phase1-missing-evidence');
-  writeFileSync(proofPath,proof);expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
-  for(const p of ['src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
-   'docs/architecture/readiness-post-run-fix.json','src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml']){
-   const path=join(root,p),original=readFileSync(path,'utf8');rmSync(path);
-   const denied=minimaxVideoPhase1ParentReader(root);expect(denied.violations).toContain('minimax-video-phase2-missing-evidence');
-   expect(denied.addedPaths).toEqual([]);expect(denied.backendAggregateSha256).toBeUndefined();
-   writeFileSync(path,original);expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
-  }
-  for(const p of ['src/unreviewed.ts','src-tauri/migrations/043_unreviewed.sql','src-tauri/src/unreviewed.rs']){
-   const path=join(root,p);writeFileSync(path,'// unreviewed');
-   expect(minimaxVideoPhase1ParentReader(root).violations.length).toBeGreaterThan(0);rmSync(path);
-  }
- }finally{rmSync(root,{recursive:true,force:true});}
-},30000);
+  run(root);
+ } finally{rmSync(root,{recursive:true,force:true});await new Promise<void>(resolve=>setTimeout(resolve,0));}
+}
+it('rejects modified policy service and backend bytes with restoration',()=>withPhase1Fixture(root=>{
+ for(const p of ['src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs','src-tauri/src/application/minimax_video_product_policy.rs']){
+  const path=join(root,p),before=readFileSync(path,'utf8');
+  writeFileSync(path,before+'\n# drift\n');
+  const denied=minimaxVideoPhase1ParentReader(root);
+  expect(denied.violations.length).toBeGreaterThan(0);
+  expect(denied.addedPaths).toEqual([]);
+  expect(denied.backendAggregateSha256).toBeUndefined();
+  writeFileSync(path,before);
+ }
+ expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
+}),30000);
+it('rejects historical proof, literal Runtime Package and config drift',()=>withPhase1Fixture(root=>{
+ for(const p of ['docs/architecture/readiness-post-run-fix.json',
+  'src-tauri/runtime_packages/kera2_t2i_local_v2_1_1_1_90894e9e/recipe.yaml','src-tauri/tauri.conf.json']){
+  const path=join(root,p),before=readFileSync(path,'utf8');
+  writeFileSync(path,before+'\n# drift\n');
+  const denied=minimaxVideoPhase1ParentReader(root);
+  expect(denied.violations.length).toBeGreaterThan(0);
+  expect(denied.addedPaths).toEqual([]);
+  expect(denied.backendAggregateSha256).toBeUndefined();
+  writeFileSync(path,before);
+ }
+ expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
+}),30000);
+it('rejects missing Phase1 proof and missing source evidence',()=>withPhase1Fixture(root=>{
+ const paths=[MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
+  'docs/architecture/readiness-post-run-fix.json','src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml'];
+ for(const p of paths){
+  const path=join(root,p),bytes=readFileSync(path);rmSync(path);
+  const denied=minimaxVideoPhase1ParentReader(root);
+  expect(denied.violations).toContain(p===MINIMAX_VIDEO_PHASE1_MANIFEST?'minimax-video-phase1-missing-evidence':'minimax-video-phase2-missing-evidence');
+  expect(denied.addedPaths).toEqual([]);
+  expect(denied.backendAggregateSha256).toBeUndefined();
+  writeFileSync(path,bytes);
+ }
+ expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
+}),30000);
+it('rejects illegal frontend, migration and backend additions',()=>withPhase1Fixture(root=>{
+ for(const p of ['src/unreviewed.ts','src-tauri/migrations/043_unreviewed.sql','src-tauri/src/unreviewed.rs']){
+  const path=join(root,p);writeFileSync(path,'// unreviewed');
+  expect(minimaxVideoPhase1ParentReader(root).violations.length).toBeGreaterThan(0);
+  rmSync(path);
+ }
+ expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
+}),30000);
 
 it('keeps one policy on all production composition and write/dispatch seams',()=>{
  const read=(p:string)=>readFileSync(p,'utf8');const composition=read('src-tauri/src/lib.rs');

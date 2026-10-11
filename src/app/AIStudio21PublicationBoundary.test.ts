@@ -64,10 +64,9 @@ it('rejects altered provenance, reviewed hashes and invariants without exposing 
   }
 }, 30000);
 
-it('fails closed on stale live docs and a missing tag in an owned fixture', () => {
+async function withPublicationFixture(run: (root: string, tagRef: string) => void) {
   const root = mkdtempSync(join(tmpdir(), 'ai-studio-publication-'));
   try {
-    // Own all refs; borrow immutable Git objects read-only, never user tags.
     const gitDir = execFileSync('git', ['rev-parse','--absolute-git-dir'], {encoding:'utf8'}).trim();
     execFileSync('git', ['init','--quiet',root]);
     mkdirSync(join(root, '.git/objects/info'), {recursive:true});
@@ -83,45 +82,49 @@ it('fails closed on stale live docs and a missing tag in an owned fixture', () =
       docs.includes(p) || ['package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
         'src-tauri/tauri.conf.json','src-tauri/build.rs','.github/workflows/ci.yml'].includes(p)),
       manifest, 'scripts/2-1-publication-successor-guard.mjs', 'src/app/AIStudio21PublicationBoundary.test.ts'];
-    const queue=JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
+    const queue = JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
     paths.push(...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json');
-  const readiness=JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
-  paths.push(...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json');
-    for (const p of new Set([...paths,...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.')])) { mkdirSync(dirname(join(root,p)), {recursive:true}); copyFileSync(p,join(root,p)); }
+    const readiness = JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
+    paths.push(...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json');
+    for (const p of new Set([...paths,...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.')])) {
+      mkdirSync(dirname(join(root,p)), {recursive:true}); copyFileSync(p,join(root,p));
+    }
     expect(publicationParentReader(root).violations).toEqual([]);
-    const original = readFileSync(join(root, docs[0]), 'utf8');
-    writeFileSync(join(root, docs[0]), original.replace('**released**','NOT YET PUBLISHED'));
-    const rejected = publicationParentReader(root);
-    expect(rejected.violations.length).toBeGreaterThan(0);
-    expect(rejected.addedPaths).toEqual([]);
-    expect(rejected.read(docs[0])).toContain('NOT YET PUBLISHED');
-    // Cached immutable facts must not hide changed live evidence on later calls.
-    writeFileSync(join(root, docs[0]), original);
-    expect(publicationParentReader(root).violations).toEqual([]);
-    const guard = join(root, integration);
-    const guardBytes = readFileSync(guard, 'utf8');
-    writeFileSync(guard, guardBytes + '\n// owned invalid integration drift\n');
-    expect(publicationParentReader(root).violations).toContain(`minimax-video-phase2-path:${integration}`);
-    writeFileSync(guard, guardBytes);
-    expect(publicationParentReader(root).violations).toEqual([]);
-    const config = join(root, 'src-tauri/tauri.conf.json');
-    const configBytes = readFileSync(config, 'utf8');
-    writeFileSync(config, configBytes + ' ');
-    expect(publicationParentReader(root).violations).toContain('minimax-video-phase2-frozen:src-tauri/tauri.conf.json');
-    writeFileSync(config, configBytes);
-    const runtime = join(root, 'src-tauri/src/domain/asset.rs');
-    const runtimeBytes = readFileSync(runtime, 'utf8');
-    writeFileSync(runtime, runtimeBytes + '\n// owned invalid runtime drift\n');
-    expect(publicationParentReader(root).violations).toContain('minimax-video-phase2-backend-untouched-bytes');
-    writeFileSync(runtime, runtimeBytes);
-    expect(publicationParentReader(root).violations).toEqual([]);
-    writeFileSync(tagRef, '130cbbfaf67e1627fca7e447de322cf0f5f5ae85\n');
-    const wrongTag = publicationParentReader(root);
-    expect(wrongTag.violations).toContain('publication-tag-target');
-    expect(wrongTag.addedPaths).toEqual([]);
-    rmSync(tagRef);
-    const missing = publicationParentReader(root);
-    expect(missing.violations).toContain('publication-missing-git-or-proof-evidence');
-    expect(missing.addedPaths).toEqual([]);
-  } finally { rmSync(root, {recursive:true, force:true}); }
-}, 30000);
+    run(root,tagRef);
+  } finally { rmSync(root, {recursive:true, force:true}); await new Promise<void>(resolve=>setTimeout(resolve,0)); }
+}
+it('rejects stale publication docs and tampered integration guard', () => withPublicationFixture(root => {
+  const doc = join(root, docs[0]), original = readFileSync(doc,'utf8');
+  writeFileSync(doc,original.replace('**released**','NOT YET PUBLISHED'));
+  const rejected = publicationParentReader(root);
+  expect(rejected.violations.length).toBeGreaterThan(0);
+  expect(rejected.addedPaths).toEqual([]);
+  expect(rejected.read(docs[0])).toContain('NOT YET PUBLISHED');
+  writeFileSync(doc,original);
+  const guard = join(root,integration), before = readFileSync(guard,'utf8');
+  writeFileSync(guard,before+'\n// owned invalid integration drift\n');
+  expect(publicationParentReader(root).violations).toContain(`minimax-video-phase2-path:${integration}`);
+  writeFileSync(guard,before);
+  expect(publicationParentReader(root).violations).toEqual([]);
+}),30000);
+it('rejects modified publication config and backend runtime bytes', () => withPublicationFixture(root => {
+  const config=join(root,'src-tauri/tauri.conf.json'), before=readFileSync(config,'utf8');
+  writeFileSync(config,before+' ');
+  expect(publicationParentReader(root).violations).toContain('minimax-video-phase2-frozen:src-tauri/tauri.conf.json');
+  writeFileSync(config,before);
+  const runtime=join(root,'src-tauri/src/domain/asset.rs'), original=readFileSync(runtime,'utf8');
+  writeFileSync(runtime,original+'\n// owned invalid runtime drift\n');
+  expect(publicationParentReader(root).violations).toContain('minimax-video-phase2-backend-untouched-bytes');
+  writeFileSync(runtime,original);
+  expect(publicationParentReader(root).violations).toEqual([]);
+}),30000);
+it('rejects wrong and missing immutable publication tag without hidden success', () => withPublicationFixture((root,tagRef) => {
+  writeFileSync(tagRef,'130cbbfaf67e1627fca7e447de322cf0f5f5ae85\n');
+  const wrong=publicationParentReader(root);
+  expect(wrong.violations).toContain('publication-tag-target');
+  expect(wrong.addedPaths).toEqual([]);
+  rmSync(tagRef);
+  const missing=publicationParentReader(root);
+  expect(missing.violations).toContain('publication-missing-git-or-proof-evidence');
+  expect(missing.addedPaths).toEqual([]);
+}),30000);

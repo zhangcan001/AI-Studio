@@ -75,7 +75,7 @@ it('selects raw-byte baselines explicitly and never accepts the other representa
   }
 },30000);
 
-function withPhase2OwnedFixture(run:(root:string)=>void) {
+async function withPhase2OwnedFixture(run:(root:string)=>void) {
   const root=mkdtempSync(join(tmpdir(),'ai-studio-phase2-successor-'));
   try {
     const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
@@ -86,21 +86,22 @@ function withPhase2OwnedFixture(run:(root:string)=>void) {
     }
     expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
     run(root);
-  } finally {rmSync(root,{recursive:true,force:true});}
+  } finally {rmSync(root,{recursive:true,force:true}); await new Promise<void>(resolve=>setTimeout(resolve,0));}
 }
 
-it('rejects undeclared source, design and migration drift in fresh bytes',()=>withPhase2OwnedFixture(root=>{
-  for (const p of ['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
-    MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/migrations/042_project_workflow_binding_revision.sql','src-tauri/tauri.conf.json']) {
-    const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-    const rejected=minimaxVideoPhase2ParentReader(root);
-    expect(rejected.violations.length).toBeGreaterThan(0);
-    expect(rejected.addedPaths).toEqual([]);
-    expect(rejected.backendAggregateSha256).toBeUndefined();
-    writeFileSync(path,original);
-  }
-  expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-}),30000);
+it.each(['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
+ MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/migrations/042_project_workflow_binding_revision.sql','src-tauri/tauri.conf.json'])(
+ 'rejects individual undeclared source, design and migration drift: %s',p=>withPhase2OwnedFixture(root=>{
+   const path=join(root,p),original=readFileSync(path,'utf8');
+   try {
+     writeFileSync(path,original+'\n# drift\n');
+     const rejected=minimaxVideoPhase2ParentReader(root);
+     expect(rejected.violations.length).toBeGreaterThan(0);
+     expect(rejected.addedPaths).toEqual([]);
+     expect(rejected.backendAggregateSha256).toBeUndefined();
+   } finally {writeFileSync(path,original);}
+   expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
+ }),30000);
 
 it('rejects literal Runtime Package line endings and new source files',()=>withPhase2OwnedFixture(root=>{
   const packagePath=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml'),original=readFileSync(packagePath);

@@ -47,18 +47,21 @@ jobs:
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1
 
-  frontend:
-    name: Frontend source checks
+  frontend_tests:
+    name: Frontend tests (${{ matrix.shard }}/3)
     runs-on: windows-latest
-    # The exact Phase5A run spent 854s in passing tests and exhausted 15m
-    # during architecture checks. Keep a finite budget for all mandatory gates;
-    # individual test deadlines and all negative proof checks remain unchanged.
+    # Split independent test files across three Windows runners. Keep existing
+    # individual test deadlines, assertions, and complete source coverage.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Exact successor proofs read immutable Phase8/12/13 baseline commits.
+          # Frozen historical proofs require their full immutable parent history.
           fetch-depth: 0
 
       - name: Set up pnpm 10
@@ -75,16 +78,37 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Frontend tests
-        run: pnpm test --maxWorkers=1
+      - name: Frontend tests (full shard)
+        run: pnpm test --maxWorkers=1 --shard=${{ matrix.shard }}/3
 
       - name: Architecture guards
+        if: ${{ matrix.shard == 1 }}
         run: pnpm test:architecture
 
       - name: TypeScript check
+        if: ${{ matrix.shard == 1 }}
         run: pnpm exec tsc --noEmit
 
       - name: Frontend build
-        # TypeScript was checked immediately above; build the same Vite bundle
-        # without repeating tsc. Keep both independent authoritative gates.
+        if: ${{ matrix.shard == 1 }}
+        # TypeScript checked above; avoid redundant tsc.
         run: pnpm exec vite build
+
+  frontend:
+    name: Frontend source checks
+    # Retain the stable required-check name and require all shard checks.
+    needs: [frontend_tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all frontend shards and mandatory gates
+        shell: bash
+        env:
+          SHARD_RESULT: ${{ needs.frontend_tests.result }}
+        run: |
+          if [ "$SHARD_RESULT" != "success" ]; then
+            echo "At least one frontend shard or mandatory gate did not succeed: $SHARD_RESULT"
+            exit 1
+          fi
+          echo "All three shards, architecture, TypeScript and Vite succeeded."
