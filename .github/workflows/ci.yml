@@ -56,7 +56,9 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
-    timeout-minutes: 20
+    # Shards of heavy Boundary probes run ~15–17 minutes on Windows; leave
+    # headroom for forks teardown after the last onTaskUpdate flush.
+    timeout-minutes: 35
     env:
       # Historical successor probes retain immutable blobs; raise the heap ceiling
       # without relaxing assertions or dropping negative proof coverage.

@@ -8,8 +8,20 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
   // Historical Native diagnostic copies are evidence, not executable tests.
+  // Forks + singleFork keep one child process for the whole shard so heavy
+  // sync Boundary hashing cannot leave a threads/RPC worker half-closed.
+  // Raised teardownTimeout covers Windows GC after ~15–17 minute shards;
+  // without it vitest reports onTaskUpdate timeouts after all tests passed.
   test: {
     exclude: [...configDefaults.exclude, "**/.ai-bridge/**", "**/local-fixtures/**"],
+    pool: "forks",
+    fileParallelism: false,
+    teardownTimeout: 120_000,
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
