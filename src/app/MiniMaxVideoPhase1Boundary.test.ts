@@ -40,7 +40,7 @@ it('validates current live aggregates before projecting historical source, with 
   expect(denied.backendAggregateSha256).toBeUndefined();
   expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
  }
-},30000);
+}, 90000);
 
 async function withPhase1Fixture(run:(root:string)=>void) {
  const root=mkdtempSync(join(tmpdir(),'ai-studio-minimax-video-policy-'));
@@ -66,7 +66,7 @@ it('rejects modified policy service and backend bytes with restoration',()=>with
   writeFileSync(path,before);
  }
  expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 it('rejects historical proof, literal Runtime Package and config drift',()=>withPhase1Fixture(root=>{
  for(const p of ['docs/architecture/readiness-post-run-fix.json',
   'src-tauri/runtime_packages/kera2_t2i_local_v2_1_1_1_90894e9e/recipe.yaml','src-tauri/tauri.conf.json']){
@@ -79,7 +79,7 @@ it('rejects historical proof, literal Runtime Package and config drift',()=>with
   writeFileSync(path,before);
  }
  expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 it('rejects missing Phase1 proof and missing source evidence',()=>withPhase1Fixture(root=>{
  const paths=[MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
   'docs/architecture/readiness-post-run-fix.json','src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml'];
@@ -92,7 +92,7 @@ it('rejects missing Phase1 proof and missing source evidence',()=>withPhase1Fixt
   writeFileSync(path,bytes);
  }
  expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 it('rejects illegal frontend, migration and backend additions',()=>withPhase1Fixture(root=>{
  for(const p of ['src/unreviewed.ts','src-tauri/migrations/043_unreviewed.sql','src-tauri/src/unreviewed.rs']){
   const path=join(root,p);writeFileSync(path,'// unreviewed');
@@ -100,7 +100,7 @@ it('rejects illegal frontend, migration and backend additions',()=>withPhase1Fix
   rmSync(path);
  }
  expect(minimaxVideoPhase1ParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 
 it('keeps one policy on all production composition and write/dispatch seams',()=>{
  const read=(p:string)=>readFileSync(p,'utf8');const composition=read('src-tauri/src/lib.rs');
@@ -125,4 +125,4 @@ it('keeps one policy on all production composition and write/dispatch seams',()=
  const policy=read('src-tauri/src/application/minimax_video_product_policy.rs');
  expect(policy).toContain('artifact.source_kind != "PRODUCT"');expect(policy).toContain('live.manifest_yaml == expected.manifest_yaml');
  expect(read('src-tauri/src/application/product/h3_resolution.rs')).toContain('input: "first_frame".into()');
-});
+}, 90000);

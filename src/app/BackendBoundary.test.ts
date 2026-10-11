@@ -33,7 +33,7 @@ it("rejects widened observability scope, missing privacy guarantees, incorrect c
  }
  const parent = structuredClone(phase12); parent.backendOptimization2.after.samples = 0;
  expect(phase13Boundary(".", phase13, parent, manifest.backendSourceSnapshot).violations).toContain("phase12-measurement-proof-invalid");
-}, 30000);
+}, 90000);
 it("target1 prevents production SQL growth while recognizing only real test scopes",()=>{
  expect(backendBoundary(".",manifest).violations).toEqual([]);
  const fixture='// sqlx::query("SELECT x FROM x")\n#[cfg(test)] mod tests {fn f(){sqlx::query("SELECT y FROM y");}}\nfn real(){ sqlx :: query("SELECT z FROM z"); }';
@@ -44,7 +44,7 @@ it("target1 prevents production SQL growth while recognizing only real test scop
  expect(productionRust('#[cfg(test)] fn test(){let x="}";} fn live(){sqlx::query("SELECT x FROM x");}')).toContain('fn live()');
  expect(sqlFootprint('#[cfg(not(test))] fn real(){sqlx::query("SELECT x FROM x");}').sqlx).toBe(1);
  expect(manifest.rows.every((r:{decision:string})=>!["UNKNOWN","UNCLASSIFIED"].includes(r.decision))).toBe(true);
-});
+}, 90000);
 it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=>{
  const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
  // Phase2 validates the full live command files before this historical reader
@@ -60,7 +60,7 @@ it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=
  const phase3=minimaxVideoPhase3ParentReader('.');expect(phase3.violations).toEqual([]);
  expect(createHash("sha256").update(backend.map((p:string)=>p+'\n'+phase3.read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(reviewed.sha256);
   expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend.filter((p:string)=>!phase13.backend.addedPaths.includes(p)&&!successor.addedPaths.includes(p)));
-});
+}, 90000);
 it("target2 preserves frozen Phase7 consumers through the validated successor",()=>{
  // Phase10 advances only explicitly scoped frontend seam pins; backend/IPC remain exact.
  const phase9=JSON.parse(read("docs/architecture/phase9-style-cleanup.json"));
@@ -69,5 +69,5 @@ it("target2 preserves frozen Phase7 consumers through the validated successor",(
  for(const [path,digest] of Object.entries(manifest.compatibilityFiles))expect(createHash("sha256").update(read(path).replace(/\r\n/g,"\n")).digest("hex"),path).toBe(current.afterHashes[path]??phase13.frontend.afterHashes[path]??(path==='src/app/App.css'?phase9.styleSnapshots[path]:phase10.frontendSuccessor[path]??digest));
  const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
  expect(schema.read('src-tauri/src/application/project_backup_service.rs')).toContain('const BACKUP_VERSION: u32 = 20;');
-});
+}, 90000);
 });

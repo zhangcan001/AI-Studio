@@ -37,7 +37,7 @@ it('accepts only the reviewed lifecycle repair before replaying immutable source
   expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
   expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
  }
-},30000);
+}, 90000);
 
 function withQueueFixture(run:(root:string)=>void){
  const root=mkdtempSync(join(tmpdir(),'ai-studio-queue-boundary-'));

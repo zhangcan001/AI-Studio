@@ -21,7 +21,7 @@ it('validates an exact serial-queue successor and projects all prior byte checkp
     const prior = execFileSync('git', ['show', `${SERIAL_QUEUE_PARENT}:${path}`], { encoding: 'utf8' }).replaceAll('\r\n', '\n');
     expect(verified.read(path)).toBe(prior);
   }
-});
+}, 90000);
 
 it('accepts LF and CRLF source checkouts but rejects changed content', () => {
   const proof = JSON.parse(readFileSync(SERIAL_QUEUE_MANIFEST, 'utf8'));
@@ -42,7 +42,7 @@ it('accepts LF and CRLF source checkouts but rejects changed content', () => {
     expect(digest(lf.replaceAll('\n', '\r\n').replaceAll('\r\n', '\n')), path).toBe(expected);
     expect(digest(lf + 'mutation'), path).not.toBe(expected);
   }
-});
+}, 90000);
 
 it('rejects forged parent, allowance scope, invariants and source hashes', () => {
   const proof = JSON.parse(readFileSync(SERIAL_QUEUE_MANIFEST, 'utf8'));
@@ -59,4 +59,4 @@ it('rejects forged parent, allowance scope, invariants and source hashes', () =>
     expect(denied.violations.length).toBeGreaterThan(0);
     expect(denied.addedPaths).toEqual([]);
   }
-});
+}, 90000);

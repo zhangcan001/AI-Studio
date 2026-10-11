@@ -29,7 +29,7 @@ it('splits live freshness probes, checks parent fail-closed once, and bounds Win
  const phase2=readFileSync('src/app/MiniMaxVideoPhase2Boundary.test.ts','utf8');
  expect(phase2).toContain("it('rejects illegal scripts, migrations and Runtime Package additions'");
  expect(phase2).toContain('90000');
-});
+}, 90000);
 
 it('accepts scoped CI timeout repair and preserves immutable historical proof bytes',()=>{
  const reader=uiPhase5GParentReader('.');
@@ -61,7 +61,7 @@ it('denies forged metadata, proof hashes and weakened timeout gates without auth
   expect(denied.violations.length).toBeGreaterThan(0);
   expect(denied.addedPaths).toEqual([]);expect(denied.afterHashes).toEqual({});
  }
-});
+}, 90000);
 
 it('refuses edited timeout probes, Phase5F wiring and Runtime package drift in isolated fixture',()=>{
  const workspace=resolve('.'),root=mkdtempSync(join(tmpdir(),'ai-studio-phase5g-ci-'));

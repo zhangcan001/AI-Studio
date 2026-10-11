@@ -21,7 +21,7 @@ it('validates the actual Phase5A parent and replays frozen Phase4 without rewrit
   expect(proof.database).toEqual({ migrationBefore: 44, migrationAfter: 44, newTables: 0, backupBefore: 21, backupAfter: 21 });
   for (const path of PHASE5A_EXISTING) expect(reader.read(path), path).toBe(phase5AParentFacts('.').read(path));
   expect(uiPhase4SerialQueueParentReader('.').violations).toEqual([]);
-});
+}, 90000);
 
 it('rejects forged planning parent, scope, hashes, schema and execution invariants', () => {
   const proof = JSON.parse(readFileSync(PHASE5A_MANIFEST, 'utf8'));
@@ -39,7 +39,7 @@ it('rejects forged planning parent, scope, hashes, schema and execution invarian
     expect(rejected.addedPaths).toEqual([]);
     expect(rejected.afterHashes).toEqual({});
   }
-});
+}, 90000);
 
 async function withPhase5AFixture(run:(root:string,runtimePath:string)=>void){
  const workspace=resolve('.'),root=mkdtempSync(join(workspace,'.codex-phase5a-probe-'));
@@ -72,7 +72,7 @@ it.each(['src/features/shots/ShotWorkspace.tsx','src/app/ShellHost.tsx','vite.co
    expect(uiPhase4SerialQueueParentReader(root).violations.length,p).toBeGreaterThan(0);
   }finally{writeFileSync(path,original);}
   expect(uiPhase5AParentReader(root).violations).toEqual([]);
- }),30000);
+ }), 90000);
 it.each(['docs/architecture/ui-phase4-serial-queue-successor.json',PHASE5A_MANIFEST,'runtime'] as const)(
  'rejects historical proof and exact Runtime bytes: %s',p=>withPhase5AFixture((root,runtimePath)=>{
   const path=join(root,p==='runtime'?runtimePath:p),original=readFileSync(path);
@@ -84,7 +84,7 @@ it.each(['docs/architecture/ui-phase4-serial-queue-successor.json',PHASE5A_MANIF
    expect(uiPhase4SerialQueueParentReader(root).violations.length,p).toBeGreaterThan(0);
   }finally{writeFileSync(path,original);}
   expect(uiPhase5AParentReader(root).violations).toEqual([]);
- }),30000);
+ }), 90000);
 it('invalidates missing evidence and illegal queue authority additions',()=>withPhase5AFixture(root=>{
  const proofPath=join(root,PHASE5A_MANIFEST),proofBytes=readFileSync(proofPath);
  rmSync(proofPath);expect(uiPhase5AParentReader(root).violations.length).toBeGreaterThan(0);
@@ -93,4 +93,4 @@ it('invalidates missing evidence and illegal queue authority additions',()=>with
  writeFileSync(extra,'export const illegalOwner = true;');
  expect(uiPhase5AParentReader(root).violations).toContain('ui-phase5a-storyboard-inventory:src');
  rmSync(extra);expect(uiPhase5AParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);

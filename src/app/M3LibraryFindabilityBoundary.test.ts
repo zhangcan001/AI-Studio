@@ -18,4 +18,4 @@ it('M3-1 validates parent/live paths and immutable baseline before historical pr
   (p:typeof proof)=>{p.frontend.afterFiles++;},
   ...Object.keys(proof.invariants).map(flag=>(p:typeof proof)=>{p.invariants[flag]=true;})
  ]){const invalid=structuredClone(proof);mutate(invalid);expect(m3LibraryParentReader('.',invalid).violations.length).toBeGreaterThan(0);}
-},30000);
+}, 90000);

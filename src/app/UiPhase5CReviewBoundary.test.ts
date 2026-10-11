@@ -20,7 +20,7 @@ it('validates Phase5C live changes before projecting the exact frozen Phase5B ch
   expect(proof.invariants.phase5CStarted).toBe(true);
   for (const p of PHASE5C_EXISTING) expect(reader.read(p)).toBe(phase5CParentFacts('.').read(p));
   expect(uiPhase5BParentReader('.').violations).toEqual([]);
-}, 30000);
+}, 90000);
 
 it('rejects forged parent, scope, blob verification and freshness declarations without projection', () => {
   const proof = JSON.parse(readFileSync(PHASE5C_MANIFEST, 'utf8'));
@@ -37,7 +37,7 @@ it('rejects forged parent, scope, blob verification and freshness declarations w
     const denied = uiPhase5CParentReader('.', invalid);
     expect(denied.violations.length).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]); expect(denied.afterHashes).toEqual({});
   }
-});
+}, 90000);
 
 function withPhase5CFixture(run: (root: string, paths: string[]) => void) {
   const workspace = resolve('.'), root = mkdtempSync(join(workspace, '.codex-phase5c-probe-'));

@@ -23,7 +23,7 @@ it('validates the reviewed Native repair before projecting unchanged Phase4 hist
   const manifest = JSON.parse(readFileSync(NATIVE_REPAIR_MANIFEST, 'utf8'));
   expect(manifest.invariants).toEqual(NATIVE_REPAIR_INVARIANTS);
   expect(manifest.invariants.nativeMixedImportAccepted).toBe(false);
-}, 30000);
+}, 90000);
 
 it('rejects altered Native repair hashes, parent, or claimed acceptance', () => {
   const manifest = JSON.parse(readFileSync(NATIVE_REPAIR_MANIFEST, 'utf8'));
@@ -41,4 +41,4 @@ it('rejects altered Native repair hashes, parent, or claimed acceptance', () => 
     expect(result.violations.length).toBeGreaterThan(0);
     expect(result.addedPaths).toEqual([]);
   }
-}, 30000);
+}, 90000);

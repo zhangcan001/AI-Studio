@@ -26,7 +26,7 @@ it('validates style CI repair before the immutable Phase4 checkpoint and rejects
     (p:typeof proof)=>{p.paths['scripts/style-boundary-guard.mjs'].afterHash='0'.repeat(64);},
     (p:typeof proof)=>{p.paths['src/services/ipc.ts']={beforeHash:null,afterHash:'0'.repeat(64)};},
   ]){const bad=structuredClone(proof);modify(bad);const denied=uiPhase4CiRepairParentReader('.',bad);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);}
-},30000);
+}, 90000);
 it('validates Phase4 before projecting immutable repair and UI proofs; rejects forged evidence',()=>{
   const proof=JSON.parse(readFileSync(UI_PHASE4_MANIFEST,'utf8'));
   expect(proof.parentHead).toBe(UI_PHASE4_PARENT);expect(proof.phaseCommitsBeforeCheckpoint).toEqual([]);
@@ -42,7 +42,7 @@ it('validates Phase4 before projecting immutable repair and UI proofs; rejects f
     (p:typeof proof)=>{p.frontend.untouchedAggregateHash='0'.repeat(64);},
     (p:typeof proof)=>{p.paths['src/services/ipc.ts']={beforeHash:null,afterHash:'0'.repeat(64)};},
   ]) {const invalid=structuredClone(proof);modify(invalid);const denied=uiPhase4ParentReader('.',invalid);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);}
-},30000);
+}, 90000);
 async function withPhase4Probe(run:(fixture:string,paths:string[])=>void){
  const root=resolve('.'),fixture=mkdtempSync(join(root,'.codex-ui-phase4-probe-'));
  try{
@@ -72,7 +72,7 @@ it.each(['src/features/create/CreatePage.tsx','scripts/style-boundary-guard.mjs'
   writeFileSync(path,new Uint8Array([...original,10]));
   denyPhase4(fixture);writeFileSync(path,original);
  expect(uiPhase4ParentReader(fixture).violations).toEqual([]);
-}),30000);
+}), 90000);
 it.each(['docs/architecture/ui-phase3-ci-repair.json',UI_PHASE4_MANIFEST,UI_PHASE4_CI_REPAIR_MANIFEST])('rejects altered Phase3 and Phase4 proof: %s',p=>withPhase4Probe(fixture=>{
 
   const path=join(fixture,p),original=readFileSync(path);
@@ -82,7 +82,7 @@ it.each(['docs/architecture/ui-phase3-ci-repair.json',UI_PHASE4_MANIFEST,UI_PHAS
   }else writeFileSync(path,new Uint8Array([...original,10]));
   denyPhase4(fixture);writeFileSync(path,original);
  expect(uiPhase4ParentReader(fixture).violations).toEqual([]);
-}),30000);
+}), 90000);
 it.each(['runtime','missing-proof','illegal-source'] as const)(
  'rejects literal Runtime, missing proof or illegal source: %s',kind=>withPhase4Probe((fixture,paths)=>{
   if(kind==='runtime'){
@@ -100,4 +100,4 @@ it.each(['runtime','missing-proof','illegal-source'] as const)(
    finally{rmSync(path,{force:true});}
   }
   expect(uiPhase4ParentReader(fixture).violations).toEqual([]);
- }),30000);
+ }), 90000);

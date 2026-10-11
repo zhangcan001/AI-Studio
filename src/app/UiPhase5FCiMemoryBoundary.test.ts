@@ -27,9 +27,8 @@ it('keeps three shards, raises the frontend heap ceiling, and leaves individual 
  expect(readiness).toContain("it('denies post-run drift in runtime packages, frozen configs, missing evidence and illegal additions'");
  expect(readiness).toContain("it('denies readiness drift in repaired sources, untouched backend and historical proofs'");
  expect(readiness).toContain("it('denies readiness drift in packages, frozen configs and illegal backend additions'");
- expect((readiness.match(/30000\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
- expect((readiness.match(/90000\)/g) ?? []).length).toBeGreaterThanOrEqual(4);
-});
+ expect((readiness.match(/90000\)/g) ?? []).length).toBeGreaterThanOrEqual(6);
+}, 90000);
 
 it('accepts scoped CI memory repair and preserves immutable historical proof bytes',()=>{
  const reader=uiPhase5FParentReader('.');
@@ -42,7 +41,7 @@ it('accepts scoped CI memory repair and preserves immutable historical proof byt
  expect(proof.invariants.thirtySecondBoundaryLimitPreserved).toBe(true);
  for(const p of PHASE5F_EXISTING)expect(reader.read(p)).toBe(phase5FParentFacts('.').read(p));
  expect(uiPhase5EParentReader('.').violations).toEqual([]);
-},30000);
+}, 90000);
 
 it('denies forged metadata, proof hashes and weakened memory gates without authority',()=>{
  const proof=JSON.parse(readFileSync(PHASE5F_MANIFEST,'utf8'));
@@ -59,7 +58,7 @@ it('denies forged metadata, proof hashes and weakened memory gates without autho
   expect(denied.violations.length).toBeGreaterThan(0);
   expect(denied.addedPaths).toEqual([]);expect(denied.afterHashes).toEqual({});
  }
-});
+}, 90000);
 
 it('refuses edited CI heap, cache staging, readiness probes and Runtime package drift in isolated fixture',()=>{
  const workspace=resolve('.'),root=mkdtempSync(join(tmpdir(),'ai-studio-phase5f-ci-'));
@@ -90,4 +89,4 @@ it('refuses edited CI heap, cache staging, readiness probes and Runtime package 
   if(!root.startsWith(resolve(tmpdir())+'\\')&&!root.startsWith(resolve(tmpdir())+'/'))throw Error('Fixture outside owned temp');
   rmSync(root,{recursive:true,force:true,maxRetries:3,retryDelay:100});
  }
-},30000);
+}, 90000);

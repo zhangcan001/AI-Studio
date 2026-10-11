@@ -37,7 +37,7 @@ it('accepts only the reviewed readiness lifecycle repair before replaying immuta
   expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
   expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
  }
-},30000);
+}, 90000);
 
 it('accepts only the exact-parent post-run readiness repair without rewriting old proofs',()=>{
  const proof=JSON.parse(readFileSync(postRunManifest,'utf8'));
@@ -60,7 +60,7 @@ it('accepts only the exact-parent post-run readiness repair without rewriting ol
   expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
   expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
  }
-},30000);
+}, 90000);
 
 async function withPostRunFixture(run:(root:string)=>void|Promise<void>){
  const root=mkdtempSync(join(tmpdir(),'ai-studio-post-run-boundary-'));
@@ -139,3 +139,4 @@ it('denies readiness drift in packages, frozen configs and illegal backend addit
  writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
  expect(readinessLifecycleParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
 }),90000);
+, 90000

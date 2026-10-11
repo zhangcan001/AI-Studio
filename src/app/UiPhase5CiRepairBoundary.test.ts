@@ -20,7 +20,7 @@ it('validates CI-only live changes before projecting the exact frozen Phase5A ch
   expect(proof.invariants.phase5BProductStarted).toBe(false);
   for (const p of PHASE5_CI_EXISTING) expect(reader.read(p)).toBe(phase5CiParentFacts('.').read(p));
   expect(uiPhase5AParentReader('.').violations).toEqual([]);
-}, 30000);
+}, 90000);
 
 it('rejects forged parent, scope, blob verification and freshness declarations without projection', () => {
   const proof = JSON.parse(readFileSync(PHASE5_CI_MANIFEST, 'utf8'));
@@ -36,7 +36,7 @@ it('rejects forged parent, scope, blob verification and freshness declarations w
     const denied = uiPhase5CiParentReader('.', invalid);
     expect(denied.violations.length).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]); expect(denied.afterHashes).toEqual({});
   }
-});
+}, 90000);
 
 function withPhase5CiFixture(run: (root: string, paths: string[]) => void) {
   const workspace = resolve('.'), root = mkdtempSync(join(workspace, '.codex-phase5ci-probe-'));

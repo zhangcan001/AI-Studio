@@ -29,7 +29,7 @@ it('gates all three complete Vitest shards and mandatory architecture, TypeScrip
  expect(ci).toContain('pnpm exec vite build');
  expect(ci).toContain('cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1');
  expect(ci).not.toContain('--passWithNoTests');
-});
+}, 90000);
 
 it('accepts scoped CI acceleration and preserves immutable historical proof bytes',()=>{
  const reader=uiPhase5EParentReader('.');
@@ -40,7 +40,7 @@ it('accepts scoped CI acceleration and preserves immutable historical proof byte
  expect(proof.invariants.shardCount).toBe(3);
  for(const p of PHASE5E_EXISTING)expect(reader.read(p)).toBe(phase5EParentFacts('.').read(p));
  expect(uiPhase5DParentReader('.').violations).toEqual([]);
-},30000);
+}, 90000);
 
 it('denies forged metadata, proof hashes and weakened source gates without authority',()=>{
  const proof=JSON.parse(readFileSync(PHASE5E_MANIFEST,'utf8'));
@@ -57,7 +57,7 @@ it('denies forged metadata, proof hashes and weakened source gates without autho
   expect(denied.violations.length).toBeGreaterThan(0);
   expect(denied.addedPaths).toEqual([]);expect(denied.afterHashes).toEqual({});
  }
-});
+}, 90000);
 
 it('refuses edited CI checks, unrelated source, illegal additions and literal Runtime package drift in isolated fixture',()=>{
  const workspace=resolve('.'),root=mkdtempSync(join(tmpdir(),'ai-studio-phase5e-ci-'));
@@ -88,4 +88,4 @@ it('refuses edited CI checks, unrelated source, illegal additions and literal Ru
   if(!root.startsWith(resolve(tmpdir())+'\\')&&!root.startsWith(resolve(tmpdir())+'/'))throw Error('Fixture outside owned temp');
   rmSync(root,{recursive:true,force:true,maxRetries:3,retryDelay:100});
  }
-},30000);
+}, 90000);

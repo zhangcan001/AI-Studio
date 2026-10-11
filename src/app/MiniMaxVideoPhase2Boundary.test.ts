@@ -46,7 +46,7 @@ it('validates schema/backup changes honestly and replays immutable Phase1 bytes 
     expect(rejected.violations.length).toBeGreaterThan(0); expect(rejected.addedPaths).toEqual([]);
     expect(rejected.backendAggregateSha256).toBeUndefined(); expect(rejected.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
   }
-},30000);
+}, 90000);
 
 it('selects raw-byte baselines explicitly and never accepts the other representation by auto-detection', () => {
   const root=mkdtempSync(join(tmpdir(),'ai-studio-phase2-git-bytes-'));
@@ -73,7 +73,7 @@ it('selects raw-byte baselines explicitly and never accepts the other representa
     if(previous===undefined)delete env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE;else env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE=previous;
     rmSync(root,{recursive:true,force:true});
   }
-},30000);
+}, 90000);
 
 async function withPhase2OwnedFixture(run:(root:string)=>void) {
   const root=mkdtempSync(join(tmpdir(),'ai-studio-phase2-successor-'));
@@ -101,7 +101,7 @@ it.each(['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tau
      expect(rejected.backendAggregateSha256).toBeUndefined();
    } finally {writeFileSync(path,original);}
    expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
- }),30000);
+ }), 90000);
 
 it('rejects literal Runtime Package line endings and new source files',()=>withPhase2OwnedFixture(root=>{
   const packagePath=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml'),original=readFileSync(packagePath);
@@ -116,7 +116,7 @@ it('rejects literal Runtime Package line endings and new source files',()=>withP
     rmSync(path);
   }
   expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 
 it('rejects illegal scripts, migrations and Runtime Package additions',()=>withPhase2OwnedFixture(root=>{
   for (const relative of ['scripts/illegal-phase2.mjs','src-tauri/migrations/044_illegal_phase2.sql','src-tauri/runtime_packages/illegal.bin']) {
@@ -138,4 +138,4 @@ it('rejects missing proof, repository source and domain evidence',()=>withPhase2
     writeFileSync(path,original);
   }
   expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);

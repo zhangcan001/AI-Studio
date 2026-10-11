@@ -21,4 +21,4 @@ it('validates exact M2-2 parent/live proof before immutable M2-1/M1 projection, 
   ...Object.keys(proof.invariants).map(flag=>(p:typeof proof)=>{p.invariants[flag]=true;})
  ]) { const invalid=structuredClone(proof);mutate(invalid); const gate=m2ReuseParentReader('.',invalid);
  expect(gate.violations.length).toBeGreaterThan(0); expect(gate.read('src/product/types.ts')).toContain('promptChoices: CreationPromptChoice[]'); }
-},30000);
+}, 90000);

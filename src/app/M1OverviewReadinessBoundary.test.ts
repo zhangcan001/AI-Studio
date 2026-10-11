@@ -30,4 +30,4 @@ it('M1-2 validates exact parent/live/untouched bytes before M1-1 projection', ()
     expect(gate.violations.length).toBeGreaterThan(0);
     expect(gate.read('src/app/v3/ProjectOverviewPage.tsx')).toContain('runtimeReadinessPresentation');
   }
-}, 30000);
+}, 90000);

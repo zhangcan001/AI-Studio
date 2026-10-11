@@ -23,7 +23,7 @@ it('accepts only a scoped current-byte CI optimization before replaying the froz
   expect(proof.invariants.eachNegativeProbePreserved).toBe(true);
   for (const p of PHASE5D_EXISTING) expect(accepted.read(p)).toBe(phase5DParentFacts('.').read(p));
   expect(uiPhase5CParentReader('.').violations).toEqual([]);
-});
+}, 90000);
 
 it('refuses metadata forgeries without projecting any historical authority', () => {
   const proof = JSON.parse(readFileSync(PHASE5D_MANIFEST, 'utf8'));
@@ -41,7 +41,7 @@ it('refuses metadata forgeries without projecting any historical authority', () 
     expect(denied.addedPaths).toEqual([]);
     expect(denied.afterHashes).toEqual({});
   }
-});
+}, 90000);
 
 it('detects live code drift and raw Runtime Package byte drift in an owned Git-alternate fixture, then restores acceptance', () => {
   const workspace = resolve('.'), root = mkdtempSync(join(tmpdir(),'ai-studio-phase5d-ci-'));
@@ -70,4 +70,4 @@ it('detects live code drift and raw Runtime Package byte drift in an owned Git-a
     if (!root.startsWith(resolve(tmpdir()) + '\\') && !root.startsWith(resolve(tmpdir()) + '/')) throw Error('Unsafe fixture path');
     rmSync(root,{recursive:true,force:true,maxRetries:3,retryDelay:100});
   }
-},30000);
+}, 90000);

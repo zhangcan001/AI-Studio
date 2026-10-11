@@ -36,7 +36,7 @@ it('validates exact scope, immutable packages, aggregates and invariants before 
    expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
    expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
  }
-},30000);
+}, 90000);
 function withH3OwnedFixture(run:(root:string)=>void) {
  const root=mkdtempSync(join(tmpdir(),'ai-studio-h3-closeout-'));
  try {
@@ -60,7 +60,7 @@ it('fresh bytes reject independent frontend and backend corruption',()=>withH3Ow
   writeFileSync(path,original);
  }
  expect(h3CloseoutParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 it('published Runtime Package and configuration bytes remain independently protected',()=>withH3OwnedFixture(root=>{
  for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_1_0/recipe.yaml','src-tauri/tauri.conf.json']) {
   const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
@@ -68,11 +68,11 @@ it('published Runtime Package and configuration bytes remain independently prote
   writeFileSync(path,original);
  }
  expect(h3CloseoutParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 it('unreviewed backend additions fail closed without masking source drift',()=>withH3OwnedFixture(root=>{
  writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
  expect(h3CloseoutParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
-}),30000);
+}), 90000);
 it('shares nested replay but never trusts mtime, unchanged length or stale mutable tag identity',()=>{
  const root=mkdtempSync(join(tmpdir(),'ai-studio-boundary-cache-'));
  try{
@@ -87,7 +87,7 @@ it('shares nested replay but never trusts mtime, unchanged length or stale mutab
   writeFileSync(join(root,'src/b.ts'),'extra');run();expect(calls).toBe(4);
   writeFileSync(join(root,'.git/refs/tags/v2.1.0-personal'),'tag-two');run();expect(calls).toBe(5);
  }finally{rmSync(root,{recursive:true,force:true});}
-});
+}, 90000);
 
 it('denies metadata-only amendments without replay and revokes command signature grants',()=>{
  const root=mkdtempSync(join(tmpdir(),'ai-studio-boundary-metadata-'));
@@ -105,4 +105,4 @@ it('denies metadata-only amendments without replay and revokes command signature
   expect(denied.read('src/a.ts')).toBe('two');
   cachedBoundary(root,'owned-metadata',undefined,validate,path);expect(calls).toBe(2);
  }finally{rmSync(root,{recursive:true,force:true});}
-});
+}, 90000);

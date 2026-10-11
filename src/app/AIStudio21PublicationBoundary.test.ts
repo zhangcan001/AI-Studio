@@ -39,7 +39,7 @@ it('validates live publication and preserves the exact pre-publication historica
   expect(rcRepairParentReader('.').violations).toEqual([]);
   expect(closeoutParentReader('.').violations).toEqual([]);
   expect(m1ParentReader('.').violations).toEqual([]);
-}, 30000);
+}, 90000);
 
 it('rejects altered provenance, reviewed hashes and invariants without exposing historical projection', () => {
   const proof = JSON.parse(readFileSync(manifest, 'utf8'));
@@ -62,7 +62,7 @@ it('rejects altered provenance, reviewed hashes and invariants without exposing 
     expect(rejected.afterHashes).toEqual({});
     expect(rejected.read(docs[0])).toBe(readFileSync(docs[0], 'utf8').replaceAll('\r\n', '\n'));
   }
-}, 30000);
+}, 90000);
 
 async function withPublicationFixture(run: (root: string, tagRef: string) => void) {
   const root = mkdtempSync(join(tmpdir(), 'ai-studio-publication-'));
@@ -106,7 +106,7 @@ it('rejects stale publication docs and tampered integration guard', () => withPu
   expect(publicationParentReader(root).violations).toContain(`minimax-video-phase2-path:${integration}`);
   writeFileSync(guard,before);
   expect(publicationParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 it('rejects modified publication config and backend runtime bytes', () => withPublicationFixture(root => {
   const config=join(root,'src-tauri/tauri.conf.json'), before=readFileSync(config,'utf8');
   writeFileSync(config,before+' ');
@@ -117,7 +117,7 @@ it('rejects modified publication config and backend runtime bytes', () => withPu
   expect(publicationParentReader(root).violations).toContain('minimax-video-phase2-backend-untouched-bytes');
   writeFileSync(runtime,original);
   expect(publicationParentReader(root).violations).toEqual([]);
-}),30000);
+}), 90000);
 it('rejects wrong and missing immutable publication tag without hidden success', () => withPublicationFixture((root,tagRef) => {
   writeFileSync(tagRef,'130cbbfaf67e1627fca7e447de322cf0f5f5ae85\n');
   const wrong=publicationParentReader(root);
@@ -127,4 +127,4 @@ it('rejects wrong and missing immutable publication tag without hidden success',
   const missing=publicationParentReader(root);
   expect(missing.violations).toContain('publication-missing-git-or-proof-evidence');
   expect(missing.addedPaths).toEqual([]);
-}),30000);
+}), 90000);

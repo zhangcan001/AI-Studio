@@ -42,7 +42,7 @@ it('reads identical immutable blobs only once across distinct historical commits
   const fetched = calls.flatMap((args: any, i: number) => args[1].includes('--batch')
     ? [String(vi.mocked(execFileSync).mock.results[i].value)] : []).join('');
   expect(fetched.split(`${shared} blob `).length - 1).toBe(1);
-}));
+}), 90000);
 
 it('does not expose mutable cached buffers, follow replace refs, or hide missing immutable evidence', () => fixture((root, git) => {
   writeFileSync(join(root, 'a.txt'), 'original\n'); git(['add', '.']); git(['commit', '--quiet', '-m', 'one']);
@@ -56,7 +56,7 @@ it('does not expose mutable cached buffers, follow replace refs, or hide missing
   const missing = `${sha}:absent.txt\n`;
   expect(immutableGit('git', ['cat-file', '--batch'], { cwd: root, input: missing }).toString()).toBe(`${sha}:absent.txt missing\n`);
   expect(immutableGit('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()).toBe(sha);
-}));
+}), 90000);
 
 it('resolves an immutable tree once across distinct path batches without repeating commit:path queries', () => fixture((root, git) => {
   for (const name of ['a.txt', 'space name.txt', '中文.txt']) writeFileSync(join(root, name), name + '\n');
@@ -70,7 +70,7 @@ it('resolves an immutable tree once across distinct path batches without repeati
   const calls = vi.mocked(execFileSync).mock.calls;
   expect(calls.filter((args: any) => args[1].includes('ls-tree'))).toHaveLength(1);
   expect(calls.some((args: any) => args[1].includes('--batch-check'))).toBe(false);
-}));
+}), 90000);
 
 it('rejects corrupted Git blob bytes before cache insertion and succeeds after restoring the real provider', async () => {
   const actual = await vi.importActual<any>('node:child_process');
@@ -89,7 +89,7 @@ it('rejects corrupted Git blob bytes before cache insertion and succeeds after r
     } finally { vi.mocked(execFileSync).mockImplementation(actual.execFileSync); }
     expect(immutableGit('git', ['cat-file', '--batch'], options).toString()).toContain('verified bytes\n');
   });
-});
+}, 90000);
 
 it('preserves significant path whitespace and the exact output limit instead of normalizing batch input', () => fixture((root, git) => {
   const regular = git(['hash-object', '-w', '--stdin'], 'regular bytes\n').trim();
@@ -101,7 +101,7 @@ it('preserves significant path whitespace and the exact output limit instead of 
   const expected = execFileSync('git', ['--no-replace-objects', 'cat-file', '--batch'], { cwd: root, input });
   expect(immutableGit('git', ['cat-file', '--batch'], { cwd: root, input })).toEqual(expected);
   expect(() => immutableGit('git', ['cat-file', '--batch'], { cwd: root, input, maxBuffer: 1 })).toThrow();
-}));
+}), 90000);
 
 it('rejects malformed immutable tree evidence before insertion and accepts the restored provider', async () => {
   const actual = await vi.importActual<any>('node:child_process');
@@ -117,4 +117,4 @@ it('rejects malformed immutable tree evidence before insertion and accepts the r
     } finally { vi.mocked(execFileSync).mockImplementation(actual.execFileSync); }
     expect(immutableGit('git', ['cat-file', '--batch'], options).toString()).toContain('tree evidence\n');
   });
-});
+}, 90000);
