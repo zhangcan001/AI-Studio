@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync as exec } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-const gitObjects = new Map(), results = new Map(), validatedProofs = new Map();
+const gitObjects = new Map(), gitBlobs = new Map(), results = new Map(), validatedProofs = new Map();
 let session;
 function immutableObjectStore(root, env) {
   // Only immutable SHA queries share IO. Live acceptance and mutable refs stay
@@ -34,11 +34,50 @@ export function immutableGit(command, args, options = {}) {
     args[0] === 'cat-file' && args[1] === '--batch' &&
     String(options.input ?? '').trim().split('\n').every(a => /^[a-f0-9]{40}:/.test(a)));
   if (!immutable) return exec(command, args, options);
-  const key = JSON.stringify([immutableObjectStore(options.cwd ?? '.',options.env), args, options.input, options.encoding]);
+  const store = immutableObjectStore(options.cwd ?? '.',options.env);
+  const key = JSON.stringify([store, args, options.input, options.encoding]);
   // Mutable replace refs must not redefine a supposedly immutable SHA query.
-  if (!gitObjects.has(key)) gitObjects.set(key, exec(command, ['--no-replace-objects',...args], options));
+  if (!gitObjects.has(key)) gitObjects.set(key, args.length === 2 && args[0] === 'cat-file'
+    ? immutableBlobBatch(store, args, options) : exec(command, ['--no-replace-objects',...args], options));
   const value = gitObjects.get(key);
   return Buffer.isBuffer(value) ? Buffer.from(value) : value;
+}
+function immutableBlobBatch(store, args, options) {
+  // Different historical commits mostly contain the same immutable blobs. Ask
+  // Git for identities first; transfer each verified object only once per store.
+  // Commit:path resolution still goes through Git with replace refs disabled.
+  const checked = exec('git', ['--no-replace-objects', 'cat-file', '--batch-check'], { ...options, encoding: 'utf8' });
+  const headers = checked.trimEnd().split('\n').map(line => /^([a-f0-9]{40}) blob (\d+)$/.exec(line));
+  if (headers.some(header => !header)) return exec('git', ['--no-replace-objects', ...args], options);
+  let blobs = gitBlobs.get(store);
+  if (!blobs) gitBlobs.set(store, blobs = new Map());
+  const missing = [...new Set(headers.map(header => header[1]).filter(id => !blobs.has(id)))];
+  if (missing.length) {
+    const bytes = exec('git', ['--no-replace-objects', 'cat-file', '--batch'], {
+      ...options, input: missing.join('\n') + '\n', encoding: undefined,
+    });
+    const fetched = new Map(); let offset = 0;
+    for (const id of missing) {
+      const end = bytes.indexOf(10, offset), header = /^([a-f0-9]{40}) blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
+      if (!header || header[1] !== id) throw Error('Immutable Git blob header mismatch');
+      const start = end + 1, size = Number(header[2]), content = bytes.subarray(start, start + size);
+      if (content.length !== size || bytes[start + size] !== 10
+          || createHash('sha1').update(`blob ${size}\0`).update(content).digest('hex') !== id) throw Error('Immutable Git blob bytes mismatch');
+      fetched.set(id, Buffer.from(content)); offset = start + size + 1;
+    }
+    if (offset !== bytes.length) throw Error('Immutable Git blob trailing bytes');
+    for (const [id, content] of fetched) blobs.set(id, content);
+  }
+  const chunks = [];
+  for (const header of headers) {
+    const content = blobs.get(header[1]);
+    if (content.length !== Number(header[2])) throw Error('Immutable Git blob size mismatch');
+    chunks.push(Buffer.from(header[0] + '\n'), content, Buffer.from('\n'));
+  }
+  const result = Buffer.concat(chunks);
+  // Preserve execFileSync's output limit and encoding contract, including failure.
+  if (result.length > (options.maxBuffer ?? 1024 * 1024)) return exec('git', ['--no-replace-objects', ...args], options);
+  return options.encoding && options.encoding !== 'buffer' ? result.toString(options.encoding) : result;
 }
 function identity(root) {
   const hash = createHash('sha256');

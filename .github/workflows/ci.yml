@@ -50,7 +50,10 @@ jobs:
   frontend:
     name: Frontend source checks
     runs-on: windows-latest
-    timeout-minutes: 15
+    # The exact Phase5A run spent 854s in passing tests and exhausted 15m
+    # during architecture checks. Keep a finite budget for all mandatory gates;
+    # individual test deadlines and all negative proof checks remain unchanged.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
