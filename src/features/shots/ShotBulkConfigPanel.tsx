@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   admitProjectProduction,
   getProjectProductionPreflight,
@@ -10,7 +10,7 @@ import type {
 } from "../../types/productionPreparation";
 import { preparationStatusLabel } from "../../types/productionPreparation";
 import { toUserMessage } from "../../i18n/errorMessages";
-import { deriveShotStatus, deriveStageStatus, statusLabel } from "./shotDomain";
+import { deriveStageStatus, statusLabel } from "./shotDomain";
 import "./ProjectProductionPipeline.css";
 
 export type BulkSelectionPreset = "all" | "ready" | "unconfigured";
@@ -25,9 +25,15 @@ export interface ShotBulkConfigPanelProps {
   onConfigureStage?: (stage: ShotStage, shotIds: string[]) => void | Promise<void>;
   onBulkPrompt?: (stage: ShotStage, shotIds: string[], promptText: string) => void | Promise<void>;
   onOpenProductionQueue?: (batchId?: string) => void | Promise<void>;
+  onOpenShot?: (shotId: string) => void;
 }
 
 export const MAX_BULK_PREPARATION_ITEMS = 100;
+
+// Only fixed, locally authored validation messages may bypass IPC error
+// sanitization. Unknown backend/transport errors keep the shared formatter.
+class PreparationUiError extends Error {}
+const preparationErrorMessage = (error: unknown) => error instanceof PreparationUiError ? error.message : toUserMessage(error);
 
 export function shotHasStageConfig(shot: ShotView, stage: ShotStage): boolean {
   return shot.stageConfigs.some((config) => config.stage === stage);
@@ -58,7 +64,12 @@ function promptPreview(text: string): string {
   return `${normalized.slice(0, 93)}…`;
 }
 
-export function ShotBulkConfigPanel({
+export function ShotBulkConfigPanel(props: ShotBulkConfigPanelProps) {
+  // Project identity is a lifecycle boundary, not merely a filter on shared IDs.
+  return <ScopedShotBulkConfigPanel key={props.projectId} {...props} />;
+}
+
+function ScopedShotBulkConfigPanel({
   projectId,
   shots,
   onRefresh,
@@ -67,8 +78,9 @@ export function ShotBulkConfigPanel({
   onConfigureStage,
   onBulkPrompt,
   onOpenProductionQueue,
+  onOpenShot,
 }: ShotBulkConfigPanelProps) {
-  const [stage, setStage] = useState<ShotStage>("image");
+  const [stage, setStage] = useState<ShotStage>("video");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busyAction, setBusyAction] = useState<string>();
   const [localError, setLocalError] = useState<string>();
@@ -80,6 +92,14 @@ export function ShotBulkConfigPanel({
   const [preparationResult, setPreparationResult] = useState<ProjectProductionAdmissionResult>();
   const [filter, setFilter] = useState<BulkPreparationFilter>("all");
   const shotIdKey = shots.map((shot) => shot.id).join("|");
+  const mounted = useRef(true);
+  const actionLock = useRef(false);
+  const planRequest = useRef(0);
+  const owner = JSON.stringify([projectId, stage]);
+  const currentOwner = useRef(owner);
+  currentOwner.current = owner;
+  const isCurrent = (requestedOwner: string) => mounted.current && currentOwner.current === requestedOwner;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   useEffect(() => {
     const available = new Set(shots.map((shot) => shot.id));
@@ -94,16 +114,17 @@ export function ShotBulkConfigPanel({
   );
   const visibleShots = useMemo(
     () => shots.filter((shot) => {
+      if (shot.projectId !== projectId) return false;
       const item = planByShotId.get(shot.id);
       switch (filter) {
         case "ready": return item?.status === "READY" && !item.alreadyPrepared;
         case "prepared": return Boolean(item?.alreadyPrepared);
         case "blocked": return item?.status === "BLOCKED";
-        case "done": return deriveShotStatus(shot) === "COMPLETED";
+        case "done": return stage === "video" ? Boolean(shot.selectedVideoAssetId) : Boolean(shot.selectedImageAssetId);
         case "all": return true;
       }
-    }),
-    [filter, planByShotId, shots],
+    }).sort((a, b) => a.ordinal - b.ordinal || a.id.localeCompare(b.id)),
+    [filter, planByShotId, shots, stage, projectId],
   );
   const selectedIdsInOrder = useMemo(
     () => shots
@@ -125,23 +146,35 @@ export function ShotBulkConfigPanel({
     onNotice?.(message);
   }
 
-  useEffect(() => {
-    let active = true;
+  async function refreshPlan() {
+    const requestedOwner = owner;
+    const requestId = ++planRequest.current;
     setPlanLoading(true);
+    try {
+      const next = await getProjectProductionPreflight({ projectId, stage });
+      if (!isCurrent(requestedOwner) || requestId !== planRequest.current) return;
+      const ownedIds = new Set(shots.filter(shot => shot.projectId === projectId).map(shot => shot.id));
+      if (next.projectId !== projectId || next.stage !== stage || next.items.some(item => !ownedIds.has(item.shotId))) {
+        throw new PreparationUiError("生产预检归属不一致，请刷新项目后重试。");
+      }
+      setProjectPlan(next);
+      return next;
+    } finally {
+      if (isCurrent(requestedOwner) && requestId === planRequest.current) setPlanLoading(false);
+    }
+  }
+
+  useEffect(() => {
     setProjectPlan(undefined);
     setPreparationResult(undefined);
-    void getProjectProductionPreflight({ projectId, stage })
-      .then((next) => {
-        if (active) setProjectPlan(next);
-      })
-      .catch((error: unknown) => {
-        if (active) reportError(toUserMessage(error));
-      })
-      .finally(() => {
-        if (active) setPlanLoading(false);
-      });
-    return () => { active = false; };
-  }, [projectId, stage]);
+    setSelectedIds(new Set());
+    setLocalError(undefined);
+    setLocalNotice(undefined);
+    void refreshPlan().catch((error: unknown) => { if (isCurrent(owner)) reportError(preparationErrorMessage(error)); });
+    return () => { planRequest.current++; };
+    // A saved Shot edit invalidates readiness, even when its ID is unchanged.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, stage, shots]);
 
   function applyPreset(preset: BulkSelectionPreset) {
     const ids = preset === "ready" && projectPlan
@@ -150,7 +183,7 @@ export function ShotBulkConfigPanel({
         .sort((left, right) => left.ordinal - right.ordinal || left.shotId.localeCompare(right.shotId))
         .slice(0, MAX_BULK_PREPARATION_ITEMS)
         .map((item) => item.shotId)
-      : bulkSelectionIds(shots, preset, stage);
+      : preset === "ready" ? [] : bulkSelectionIds(shots.filter(shot => shot.projectId === projectId), preset, stage);
     setSelectedIds(new Set(ids));
     setPreparationResult(undefined);
     reportNotice(
@@ -177,21 +210,26 @@ export function ShotBulkConfigPanel({
     actionName: string,
     action: (shotIds: string[]) => void | Promise<void>,
     successMessage: string,
+    refreshWorkspace = true,
   ) {
+    if (actionLock.current) return;
     if (!selectedIdsInOrder.length) {
       reportError("请先选择至少一个镜头。");
       return;
     }
+    const requestedOwner = owner;
+    actionLock.current = true;
     setBusyAction(actionName);
     reportError(undefined);
     try {
       await action(selectedIdsInOrder);
+      if (!isCurrent(requestedOwner)) return;
       reportNotice(successMessage);
-      await onRefresh?.();
+      if (refreshWorkspace) await onRefresh?.();
     } catch (error: unknown) {
-      reportError(toUserMessage(error));
+      if (isCurrent(requestedOwner)) reportError(preparationErrorMessage(error));
     } finally {
-      setBusyAction(undefined);
+      if (isCurrent(requestedOwner)) { actionLock.current = false; setBusyAction(undefined); }
     }
   }
 
@@ -224,12 +262,22 @@ export function ShotBulkConfigPanel({
   }
 
   async function prepareBatch(nextStage: ShotStage) {
+    if (nextStage !== "video" || stage !== "video") return;
+    const requestedOwner = owner;
     setPreparationResult(undefined);
     await runAction(
       `prepare-${nextStage}`,
       async (shotIds) => {
         if (selectedOverLimit) {
-          throw new Error(`本次最多准备 ${MAX_BULK_PREPARATION_ITEMS} 个镜头。`);
+          throw new PreparationUiError(`本次最多准备 ${MAX_BULK_PREPARATION_ITEMS} 个镜头。`);
+        }
+        const fresh = await refreshPlan();
+        if (!isCurrent(requestedOwner)) return;
+        if (!fresh) throw new PreparationUiError("镜头资料已变更，预检已失效，请重新准备。");
+        const selected = fresh.items.filter(item => shotIds.includes(item.shotId));
+        if (selected.length !== shotIds.length) throw new PreparationUiError("所选镜头已变更或不属于当前项目。");
+        if (!allowPartial && selected.some(item => item.status !== "READY" || item.alreadyPrepared)) {
+          throw new PreparationUiError("最新预检未通过或镜头已经准备，请检查阻塞原因和陈旧快照。");
         }
         const result = await admitProjectProduction({
           projectId,
@@ -237,16 +285,18 @@ export function ShotBulkConfigPanel({
           shotIds,
           allowPartial,
         });
+        if (!isCurrent(requestedOwner)) return;
+        if (result.projectId !== projectId || result.stage !== nextStage) throw new PreparationUiError("批次准入回执归属不一致。");
         setPreparationResult(result);
         setSelectedIds(new Set());
-        void getProjectProductionPreflight({ projectId, stage: nextStage })
-          .then((nextPlan) => {
-            if (nextStage === stage) setProjectPlan(nextPlan);
-          })
-          .catch(() => undefined);
+        await refreshPlan();
+        if (!isCurrent(requestedOwner)) return;
         reportNotice(`${stageLabel(nextStage)}已准备 ${result.createdCount} 个镜头；不会启动 GPU，请前往生产队列明确启动。`);
       },
       `${stageLabel(nextStage)}准备操作已完成；批次仍为待启动状态。`,
+      // Admission changes batches, not Shot drafts. Fresh plan data above is
+      // authoritative; a whole-workspace reload would erase this receipt.
+      false,
     );
   }
 
@@ -256,7 +306,7 @@ export function ShotBulkConfigPanel({
         <div>
           <span className="section-label">批量配置</span>
           <h3>镜头批量生产入口</h3>
-          <p className="pipeline-muted">先选择镜头，再进入图片/视频配置、提示词或现有镜头批次队列。</p>
+          <p className="pipeline-muted">按镜头顺序准备视频；T2V 不要求图片，其他模式使用各自正式输入。未归档镜头同样可准备。</p>
         </div>
         <span className="pipeline-selection-count">{selectedCount} 个镜头已选择</span>
       </div>
@@ -270,8 +320,9 @@ export function ShotBulkConfigPanel({
             role="tab"
             aria-selected={stage === nextStage}
             onClick={() => setStage(nextStage)}
+            disabled={Boolean(busyAction)}
           >
-            {nextStage === "image" ? "图片阶段" : "视频阶段"}
+            {nextStage === "image" ? "图片历史" : "视频阶段"}
           </button>
         ))}
       </div>
@@ -293,7 +344,7 @@ export function ShotBulkConfigPanel({
       </div>
 
       <div className="pipeline-action-grid">
-        <button type="button" onClick={() => void configureStage("image")} disabled={Boolean(busyAction) || !selectedCount}>
+        <button type="button" onClick={() => void configureStage("image")} disabled>
           配置图片阶段
         </button>
         <button type="button" onClick={() => void configureStage("video")} disabled={Boolean(busyAction) || !selectedCount}>
@@ -302,13 +353,15 @@ export function ShotBulkConfigPanel({
         <button type="button" onClick={() => void assignPrompt()} disabled={Boolean(busyAction) || !selectedCount}>
           批量应用提示词
         </button>
-        <button type="button" onClick={() => void prepareBatch("image")} disabled={Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit}>
+        <button type="button" disabled>
           {busyAction === "prepare-image" ? "正在准备图片生产…" : "准备图片生产"}
         </button>
-        <button type="button" onClick={() => void prepareBatch("video")} disabled={Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit}>
+        <button type="button" onClick={() => void prepareBatch("video")} disabled={stage !== "video" || Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit}>
           {busyAction === "prepare-video" ? "正在准备视频生产…" : "准备视频生产"}
         </button>
       </div>
+      {stage === "image" && <p className="pipeline-muted">图片生成已退休；仅保留历史记录、候选和提示词编辑，不创建新图片生产。</p>}
+      <button type="button" className="quiet-button" onClick={() => void refreshPlan().catch(error => { if (isCurrent(owner)) reportError(toUserMessage(error)); })} disabled={Boolean(busyAction) || planLoading}>重新检查资格</button>
 
       <div className="pipeline-preparation-summary" aria-label="项目生产准备计划">
         <span>{planLoading ? "正在进行项目级 Live preflight…" : `当前${stageLabel(stage)}计划：${projectPlan?.total ?? 0} 个镜头`}</span>
@@ -340,9 +393,9 @@ export function ShotBulkConfigPanel({
                     aria-label={`选择 ${shot.name}`}
                   />
                 </td>
-                <td><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong><small>{shot.id}</small></td>
+                <td><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong><small>{shot.id}</small>{onOpenShot && <button type="button" className="quiet-button" onClick={() => onOpenShot(shot.id)}>编辑输入与查看结果</button>}</td>
                 <td><span className="pipeline-prompt-preview">{promptPreview(shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptText ?? shot.promptText)}</span><small>{shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptEntryId && shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId ? `提示词库版本 ${shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId?.slice(-8)}` : "手工/导入阶段快照"}</small></td>
-                <td><strong>{planByShotId.get(shot.id)?.status ? preparationStatusLabel(planByShotId.get(shot.id)!.status) : statusLabel(deriveStageStatus(shot, stage))}</strong><small>{planByShotId.get(shot.id)?.alreadyPrepared ? "已准备，待启动" : planByShotId.get(shot.id)?.blockers?.[0] ?? "可继续检查"}</small></td>
+                <td><strong>{planByShotId.get(shot.id)?.status ? preparationStatusLabel(planByShotId.get(shot.id)!.status) : "等待正式预检"}</strong><small>{planByShotId.get(shot.id)?.alreadyPrepared ? "已准备，待启动" : planByShotId.get(shot.id)?.blockers?.join("；") ?? "可继续检查"}</small>{Boolean(planByShotId.get(shot.id)?.stalePreparedBatchIds?.length) && <small>陈旧准备版本；旧批次快照保留</small>}</td>
                 <td><small>{planByShotId.get(shot.id)?.workflowVersionId && planByShotId.get(shot.id)?.recipeId ? `${planByShotId.get(shot.id)?.workflowVersionId} / ${planByShotId.get(shot.id)?.recipeId}` : "未配置精确配对"}</small></td>
                 <td>{planByShotId.get(shot.id)?.referenceCount ?? 0}</td>
                 <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "image"))}</span></td>
@@ -354,7 +407,7 @@ export function ShotBulkConfigPanel({
         </table>
       </div>
 
-      <p className="pipeline-human-review-note"><strong>人工审核保持不变：</strong>批量操作不会自动选择第一张图片、最新图片或第一个视频；图片生成后停在图片审核，视频生成后停在视频审核。</p>
+      <p className="pipeline-human-review-note"><strong>人工审核保持不变：</strong>生成成功、候选选用和人工审核通过是三个独立状态；准备与生成不会自动选择候选或通过审核。</p>
       {preparationResult && <div className="pipeline-preparation-result" role="status"><strong>已准备完成 · {preparationResult.createdCount} 个镜头</strong><span>已创建待启动批次；当前尚未开始生产。已准备 {preparationResult.alreadyPreparedCount} · 阻塞跳过 {preparationResult.skippedBlocked} · 不完整跳过 {preparationResult.skippedIncomplete}。</span>{onOpenProductionQueue && preparationResult.createdCount > 0 && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue(preparationResult.batchId ?? preparationResult.createdBatchIds?.[0])}>打开生产队列</button>}</div>}
       {localNotice && <p className="studio-notice">{localNotice}</p>}
       {localError && <p className="error-message" role="alert">{localError}</p>}

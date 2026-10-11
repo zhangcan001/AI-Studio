@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AssetView } from "../../types/asset";
 import { ShotInspector } from "./ShotInspector";
 
@@ -34,8 +37,23 @@ const recipe = {
     { key: "seed", type: "seed" as const, label: "Seed", required: false, defaultMode: "random" as const },
   ],
 };
+afterEach(cleanup);
 
 describe("ShotInspector", () => {
+  it("selects the exact workflow version and recipe pair even when recipe IDs collide", async () => {
+    const onRecipeChange = vi.fn();
+    render(<ShotInspector projectId="project-1" stage="video" currentRecipe={recipe}
+      currentDraft={{ workflowVersionId: "h3-v1", recipeId: "h3-r1", values: {} }}
+      stageRecipes={[recipe, { ...recipe, workflowVersionId: "h3-v2", name: "Second version" }]}
+      onRecipeChange={onRecipeChange} onGenerate={vi.fn()} />);
+    await userEvent.setup().selectOptions(screen.getByRole("combobox", { name: "工作流 / 配方" }), JSON.stringify(["h3-v2", "h3-r1"]));
+    expect(onRecipeChange).toHaveBeenCalledExactlyOnceWith("h3-r1", "h3-v2");
+  });
+
+  it("retains image configuration history without reopening image generation", () => {
+    render(<ShotInspector projectId="project-1" stage="image" currentRecipe={recipe} canGenerate onGenerate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "图片生成已退休" }).hasAttribute("disabled")).toBe(true);
+  });
   it("renders the primary generate action and collapsed advanced parameters", () => {
     const html = renderToStaticMarkup(
       <ShotInspector

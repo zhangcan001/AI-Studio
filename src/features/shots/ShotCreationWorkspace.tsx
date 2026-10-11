@@ -222,7 +222,7 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
       <section className="shot-preview-candidate-shell" aria-label="主预览与候选">
         <div className="shot-main-preview">
           <div className="shot-main-preview-heading"><span>{previewLabel}</span>{previewAsset && <small>{previewAsset.name}</small>}</div>
-          {previewAsset ? <ShotMediaPreview projectId={projectId} asset={previewAsset} variant="main" resetKey={`${previewResetKey}:${previewAsset.id}`} /> : <EmptyWorkspaceState title="尚未生成候选" detail="生成完成后，候选会出现在右侧；确认动作仍由你显式触发。" actionLabel={busy ? "生成中…" : "生成第一个候选"} onAction={onGenerate} disabled={busy} />}
+          {previewAsset ? <ShotMediaPreview projectId={projectId} asset={previewAsset} variant="main" resetKey={`${previewResetKey}:${previewAsset.id}`} /> : <EmptyWorkspaceState title="尚未生成候选" detail="生成完成后，候选会出现在右侧；确认动作仍由你显式触发。" actionLabel={stage === "image" ? "图片生成已退休" : busy ? "生成中…" : "生成第一个候选"} onAction={onGenerate} disabled={stage !== "video" || busy} />}
         </div>
         <aside className="shot-candidate-rail" aria-label="候选列表">
           <div className="shot-candidate-rail-heading"><strong>候选</strong><span>{candidates.length}</span></div>

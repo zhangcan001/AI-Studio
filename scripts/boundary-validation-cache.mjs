@@ -58,7 +58,7 @@ function identity(root) {
   };
   for (const dir of ['src', 'src-tauri/src', 'src-tauri/tests', 'src-tauri/examples',
     'src-tauri/migrations', 'src-tauri/runtime_packages', 'scripts', 'docs', '.github']) visit(dir);
-  for (const path of ['CONTEXT.md','README.md','package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
+  for (const path of ['CONTEXT.md','README.md','package.json','pnpm-lock.yaml','vite.config.ts','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
     'src-tauri/tauri.conf.json','src-tauri/build.rs']) {
     if (existsSync(join(root,path))) {hash.update(path); hash.update(readFileSync(join(root,path)));}
   }

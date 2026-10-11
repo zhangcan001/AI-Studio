@@ -2,6 +2,7 @@
 // projecting the exact committed predecessor into immutable historical guards.
 // Historical manifests, runtime packages and previous proof bytes are not edited.
 import { cachedBoundary } from './boundary-validation-cache.mjs';
+import { uiPhase5AParentReader, PHASE5A_FILES } from './ui-phase5a-storyboard-successor-guard.mjs';
 import { readinessLifecycleParentFacts } from './readiness-lifecycle-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -46,7 +47,7 @@ export const SERIAL_QUEUE_ADDED = [
   'src-tauri/migrations/044_deferred_direct_generation.sql',
   'src-tauri/tests/phase4_deferred_restart_fairness.rs',
 ].sort();
-export const SERIAL_QUEUE_FILES = [...SERIAL_QUEUE_EXISTING, ...SERIAL_QUEUE_ADDED, SERIAL_QUEUE_MANIFEST];
+export const SERIAL_QUEUE_FILES = [...SERIAL_QUEUE_EXISTING, ...SERIAL_QUEUE_ADDED, SERIAL_QUEUE_MANIFEST, ...PHASE5A_FILES];
 export const SERIAL_QUEUE_INVARIANTS = {
   runtimePackagesChanged: false,
   historicalProofsRewritten: false,
@@ -60,9 +61,11 @@ export const SERIAL_QUEUE_INVARIANTS = {
 const hash = b => createHash('sha256').update(b).digest('hex');
 const normalized = s => s.replaceAll('\r\n', '\n');
 function validate(root, override) {
-  const violations = [], fail = k => violations.push('serial-queue-successor-' + k);
+  const successor = uiPhase5AParentReader(root);
+  const violations = [...successor.violations], fail = k => violations.push('serial-queue-successor-' + k);
   const live = new Map(), disk = p => {
-    if (!live.has(p)) live.set(p, readFileSync(join(root, p)));
+    if (!live.has(p)) live.set(p, p === 'src-tauri/migrations/044_deferred_direct_generation.sql'
+      ? readFileSync(join(root, p)) : Buffer.from(successor.read(p), 'utf8'));
     return live.get(p);
   };
   // Git normalizes source text blobs to LF while Windows checkout may use
@@ -95,10 +98,10 @@ function validate(root, override) {
   }
   if (violations.length) return denied();
   return {
-    violations, addedPaths: [...SERIAL_QUEUE_ADDED, SERIAL_QUEUE_MANIFEST],
+    violations, addedPaths: [...SERIAL_QUEUE_ADDED, SERIAL_QUEUE_MANIFEST, ...successor.addedPaths],
     // Current successor validates Git-canonical text bytes above; historical
     // readers hash the same LF-normalized source without altering their proofs.
-    afterHashes: Object.fromEntries(scope.map(p => [p, canonicalHash(p)])),
+    afterHashes: { ...Object.fromEntries(scope.map(p => [p, canonicalHash(p)])), ...successor.afterHashes },
     read: p => SERIAL_QUEUE_EXISTING.includes(p) ? parent.read(p) : read(p),
   };
 }

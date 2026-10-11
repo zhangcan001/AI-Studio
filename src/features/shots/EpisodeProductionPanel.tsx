@@ -40,7 +40,7 @@ export function EpisodeProductionPanel({
 }: EpisodeProductionPanelProps) {
   const episodeOptions = useMemo(() => productionEpisodeOptions(tree), [tree]);
   const [episodeId, setEpisodeId] = useState(initialPlan?.episodeId ?? episodeOptions[0]?.value ?? "");
-  const [stage, setStage] = useState<EpisodeProductionStage>(initialPlan?.stage ?? "image");
+  const [stage, setStage] = useState<EpisodeProductionStage>(initialPlan?.stage ?? "video");
   const [plan, setPlan] = useState<EpisodeProductionPlan | undefined>(initialPlan);
   const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<EpisodeProductionFilter>("all");
@@ -152,7 +152,7 @@ export function EpisodeProductionPanel({
   }
 
   async function prepare() {
-    if (!plan || !episodeId || !selectedPlans.length || !selectedShotIds.length) return;
+    if (stage !== "video" || !plan || !episodeId || !selectedPlans.length || !selectedShotIds.length) return;
     if (!allowPartial && selectedPlans.some((scene) => scene.blocked > 0)) {
       setResult(blockedPrepareResult(projectId, episodeId, stage, selectedPlans));
       setNotice("严格模式未创建批次：所选场景存在阻塞项。");
@@ -263,7 +263,7 @@ export function EpisodeProductionPanel({
           <div className="episode-production-card-heading"><div><span className="section-label">准备</span><h4>准备所选场景</h4></div><span>{selectedShotIds.length} 个镜头</span></div>
           <label className="episode-production-partial-toggle"><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 跳过阻塞场景，仅准备当前可生产内容</label>
           <p className="episode-production-hint">默认严格模式；确认文字会明确提示“不会自动启动 GPU”。每个场景最多准备一个就绪批次。</p>
-          <button type="button" className="episode-production-primary-action" onClick={() => void prepare()} disabled={isBusy || !selectedPlans.length || !selectedShotIds.length}>{busyAction === "prepare" ? "准备中…" : "准备所选场景"}</button>
+          <button type="button" className="episode-production-primary-action" onClick={() => void prepare()} disabled={stage !== "video" || isBusy || !selectedPlans.length || !selectedShotIds.length}>{busyAction === "prepare" ? "准备中…" : "准备所选场景"}</button>
         </section>
       </> : <div className="episode-production-loading" role="status">正在加载集生产计划…</div>}
 

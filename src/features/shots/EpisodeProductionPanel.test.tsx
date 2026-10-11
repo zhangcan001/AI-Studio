@@ -46,6 +46,12 @@ const plan: EpisodeProductionPlan = {
 };
 
 describe("EpisodeProductionPanel", () => {
+  it("defaults ordinary episode planning to video without removing explicit image history", () => {
+    const html = renderToStaticMarkup(<EpisodeProductionPanel projectId="project-1" tree={tree} shots={[]} />);
+    expect(html).toContain('role="tab" aria-selected="true">视频');
+    const history = renderToStaticMarkup(<EpisodeProductionPanel projectId="project-1" tree={tree} shots={[]} initialPlan={plan} />);
+    expect(history).toContain('role="tab" aria-selected="true">图片');
+  });
   it("renders Episode/stage selectors, summary, filters, scene rows, strict default and safe prepare copy", () => {
     const html = renderToStaticMarkup(<EpisodeProductionPanel projectId="project-1" tree={tree} shots={[shot("shot-1", 0), shot("shot-2", 1), shot("shot-3", 2)]} initialPlan={plan} />);
     expect(html).toContain("集选择");

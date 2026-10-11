@@ -48,7 +48,7 @@ export interface ShotInspectorProps {
   currentDraft?: ShotStageDraftLike;
   currentRecipe?: RecipeViewModel;
   stageRecipes?: RecipeViewModel[];
-  onRecipeChange?: (recipeId: string) => void;
+  onRecipeChange?: (recipeId: string, workflowVersionId: string) => void;
   onScalarChange?: (field: ScalarRecipeField, value: DraftValue) => void;
   busy?: boolean;
   canGenerate?: boolean;
@@ -147,8 +147,8 @@ export function ShotInspector({
         <span className="shot-inspector-stage">{stage === "image" ? "图片" : "视频"}</span>
       </div>
       <div className="shot-inspector-actions">
-        <button type="button" className="shot-inspector-generate" onClick={() => void onGenerate()} disabled={busy || !canGenerate}>
-          {busy ? "生成中…" : "生成"}
+        <button type="button" className="shot-inspector-generate" onClick={() => void onGenerate()} disabled={stage !== "video" || busy || !canGenerate}>
+          {stage === "image" ? "图片生成已退休" : busy ? "生成中…" : "生成"}
         </button>
         {configDirty && onSave && <button type="button" className="quiet-button" onClick={() => void onSave()} disabled={busy}>保存配置</button>}
       </div>
@@ -165,9 +165,12 @@ export function ShotInspector({
             {stageRecipes.length > 0 && (
               <label className="shot-inspector-field">
                 <span>工作流 / 配方</span>
-                <select value={currentDraft?.recipeId ?? ""} onChange={(event) => onRecipeChange?.(event.target.value)} disabled={busy || !onRecipeChange}>
+                <select value={currentDraft ? JSON.stringify([currentDraft.workflowVersionId, currentDraft.recipeId]) : ""} onChange={(event) => {
+                  const recipe = stageRecipes.find(item => JSON.stringify([item.workflowVersionId, item.recipeId]) === event.target.value);
+                  if (recipe) onRecipeChange?.(recipe.recipeId, recipe.workflowVersionId);
+                }} disabled={busy || !onRecipeChange}>
                   <option value="">选择兼容配方</option>
-                  {stageRecipes.map((recipe) => <option key={`${recipe.workflowVersionId}:${recipe.recipeId}`} value={recipe.recipeId}>{recipe.name} · {recipe.mode}</option>)}
+                  {stageRecipes.map((recipe) => <option key={`${recipe.workflowVersionId}:${recipe.recipeId}`} value={JSON.stringify([recipe.workflowVersionId, recipe.recipeId])}>{recipe.name} · {recipe.mode}</option>)}
                 </select>
               </label>
             )}

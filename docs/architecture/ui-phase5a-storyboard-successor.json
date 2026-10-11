@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE5A_STORYBOARD_SUCCESSOR",
+  "parentHead": "a770c2090d3fde190d4dde775495164c1ecd5a05",
+  "planningParentHead": "a770c2090d3fde190d4dde775495164c1ecd5a05",
+  "phaseCommitsBeforeCheckpoint": [],
+  "invariants": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "backendChanged": false,
+    "queueAuthorityChanged": false,
+    "storeAuthorityChanged": false,
+    "runtimePackagesChanged": false,
+    "historicalProofsRewritten": false,
+    "typedIpcPreserved": true,
+    "exactRecipeInputIdentity": true,
+    "freshPreflightAndFrozenAdmission": true,
+    "preparationStartsGeneration": false,
+    "imageGenerationReopened": false,
+    "automaticHumanApproval": false,
+    "videoFirstStoryboard": true,
+    "unassignedShotsPreserved": true,
+    "phase5AStarted": true,
+    "phase5BStarted": false,
+    "phase6Started": false
+  },
+  "database": {
+    "migrationBefore": 44,
+    "migrationAfter": 44,
+    "newTables": 0,
+    "backupBefore": 21,
+    "backupAfter": 21
+  },
+  "paths": {
+    "scripts/boundary-validation-cache.mjs": {
+      "beforeHash": "dfd095f48ca773a91d784d30744385f9791c16bd62852c5eef61f167ae056276",
+      "afterHash": "23aea0a08d5c495c5e8decef6657501daa0c1b0e9f9de3761ef4dc0e9d212555"
+    },
+    "scripts/minimax-video-v2-ui-phase3-successor-guard.mjs": {
+      "beforeHash": "4ba481cd75358cc9aa67abc3380a92343ca40826896b901fe8c7249a043a6ba3",
+      "afterHash": "29787123fa93a3c78d2e136a9fd046a2412aab2c721ad6948313da57b860d723"
+    },
+    "scripts/ui-phase4-serial-queue-successor-guard.mjs": {
+      "beforeHash": "6ff0f4acf5a72ddf8c899fd189c91397593bc637c60e0319fdb3aae566873716",
+      "afterHash": "c805051a2e8a16b1dfc818d3e6af26fb8122194d17cffbf0adaf33f01f464441"
+    },
+    "scripts/ui-phase5a-storyboard-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "4b060b8b863382cbda3aaf4b3e93f36a8e1c969e5ead6ab2a0d1305fcd2c21af"
+    },
+    "src/app/UiPhase4SerialQueueBoundary.test.ts": {
+      "beforeHash": "436f477b4725ea12e5e1ce5230a2fa50d3ada50f61005353b3ee13fb85d976dd",
+      "afterHash": "7606fd6009fbee20c306f79f7f8f79c5fbdbf47dd3ceb14427cafc5b48a26786"
+    },
+    "src/app/UiPhase5AStoryboardBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "982df6eac9de03092e81e06f963e9298ef59b4d6b2b6d85126589e3d42ca44e8"
+    },
+    "src/features/shots/EpisodeProductionPanel.test.tsx": {
+      "beforeHash": "d07133540c193cdde66d64484cf273eb7b1cf11ef89aa4c0c6127706a099603e",
+      "afterHash": "1ab1db314d537dc1c3ddb4232b4d5135e1a0ed961b85aed8e69bdb1bc4ad9927"
+    },
+    "src/features/shots/EpisodeProductionPanel.tsx": {
+      "beforeHash": "6a0dda4639f2d6104eeb5028a4639e024b63112a24b359459cf08dd31a936768",
+      "afterHash": "e5e38054749f996e8f5a3889dd9dd57fe5e6868a9c9c7d630660af2853fad50e"
+    },
+    "src/features/shots/ProjectProductionPipeline.tsx": {
+      "beforeHash": "d5b1f57cb1784395400be15913029bf6d383401c90b272591a08226adc44c214",
+      "afterHash": "c90777b732e4ea7823f633eefd72b778335fe3447b6522c42c82395cb19345bb"
+    },
+    "src/features/shots/ProjectStructureTree.test.tsx": {
+      "beforeHash": "e2b6be34c8533d3286f8b92f459ff8106777947f30882fef24f0b7ac20af4b01",
+      "afterHash": "9155e0cf5b36db9ab9af4d5ec5b93f305c79c0af30e9d51b045a37016b98198b"
+    },
+    "src/features/shots/ProjectStructureTree.tsx": {
+      "beforeHash": "74039b2872002b59fddac96aca4b52efc7fd9290229a33d6a082f48dbdb81e8d",
+      "afterHash": "02f190697c6527babcadba35a329b524b69d846918396dbeb58f321e03a7a9dd"
+    },
+    "src/features/shots/ProjectWorkflowFormalProductionUat.test.tsx": {
+      "beforeHash": "6e56a88dfc8789dd9fd756fa55cd8e1a538b2da397efa9b7557a767e2b2feaf6",
+      "afterHash": "418071ed8c5db41f0d6cb91b7de0b2ddddd4ddba86a4701617afcaeacccc6995"
+    },
+    "src/features/shots/SceneProductionPanel.tsx": {
+      "beforeHash": "52f4d12abd39397adaeb96a5599e0e9ea38b41af26175a66082e2fdfa8f5f626",
+      "afterHash": "49e3639487ac1d2471a3e29d6ab687986d250e3b453896d2b87724c0585705f4"
+    },
+    "src/features/shots/SceneProductionPreparation.test.tsx": {
+      "beforeHash": "e58e6b49e3a2a99a222f8f6a6d4b222b6bd880c03d5dd18993227b4bd9222419",
+      "afterHash": "f83461d9e79b8f209b16f4b2714f8fcf0641836a2d7255e6d6c529308a782279"
+    },
+    "src/features/shots/SceneProductionPreparation.tsx": {
+      "beforeHash": "48d02b2778ebff307ddb5e352d701d9e30706c26291394f66680402907611ebc",
+      "afterHash": "ef7198452d0b93b0d40f31137fd047b0f597ffdd359833c8801d66148695d583"
+    },
+    "src/features/shots/SeriesProductionPanel.test.tsx": {
+      "beforeHash": "88cf562822544466d4765c85b62ba0fff569175f048081ed89935caa76911185",
+      "afterHash": "5d3434d6a6d71f75a70ff4b018035c61c04ab0abaa7b3b4f26e817be06adb5c5"
+    },
+    "src/features/shots/SeriesProductionPanel.tsx": {
+      "beforeHash": "4b4af80f4dcadbd80b8b0a4dcdd455e7634415a7ea1f6df8dc9d0c460909125a",
+      "afterHash": "78d8b9916687d801b961742808ff99fef06a366cf88babbb92d45de4f74f186c"
+    },
+    "src/features/shots/ShotBulkConfigPanel.phase5.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "02efd0029a68e11ca05aaddf24810e4d0159793457e66e57c988c0f8e6455bed"
+    },
+    "src/features/shots/ShotBulkConfigPanel.tsx": {
+      "beforeHash": "6f64787488e03f5db8a0cf1b3c68b4831053f30a3ebb0d1acd95ceecd0246a0a",
+      "afterHash": "b12f7d96fde72d01beb8d9ff04114047e1bece5a0d910336955ed7bc6d3ac77c"
+    },
+    "src/features/shots/ShotCreationWorkspace.tsx": {
+      "beforeHash": "9f386750b2bb8365aef319d0216d1f7e70b6906e786d56d095e1ec2331dcaacc",
+      "afterHash": "cf06c94a96b9b033c167e93c5bf4508c69af95ba97684279167a98a20076c3e2"
+    },
+    "src/features/shots/ShotInspector.test.tsx": {
+      "beforeHash": "4cadf7219c9d8844556c073d37d5e83d9ad1ddba89b44a6282caee2dc8c28010",
+      "afterHash": "93935a5b4b1e1d312ac879f48cca5bd731d01972f1a06542ed8d74814b7ab2b3"
+    },
+    "src/features/shots/ShotInspector.tsx": {
+      "beforeHash": "3b6ca3a227d91dc37f51d916890598eaf27a5f29580d28b3bb53a72a1849e6ea",
+      "afterHash": "d5ae06fee11817fb3a2dc799e5720cd6b780e723d8e4434c0395f09e26d451e3"
+    },
+    "src/features/shots/ShotWorkspace.tsx": {
+      "beforeHash": "e9384aa3e05a79767359f654e3703db9b22600edf6ad6053e846f5c1f9716ad5",
+      "afterHash": "f742882d919cafaa502da63c162928f4376c5e4026c7876e8cdfd06bc3499869"
+    },
+    "vite.config.ts": {
+      "beforeHash": "984a7dc46a9ce7323a84297e755a7b93ced451917c05b0481e684fde32ed090f",
+      "afterHash": "55aab895dde2398109f0ccd053f4a2fd02a3f72563207c68a2b07d8c3920869a"
+    }
+  },
+  "backend": {
+    "beforeFiles": 355,
+    "afterFiles": 355,
+    "beforeAggregateHash": "63fe099c5af272ef42ab42840ae2e39f3a80da4e8975a2a9ae6dd0fbe3c079e4",
+    "untouchedAggregateHash": "63fe099c5af272ef42ab42840ae2e39f3a80da4e8975a2a9ae6dd0fbe3c079e4",
+    "afterAggregateHash": "63fe099c5af272ef42ab42840ae2e39f3a80da4e8975a2a9ae6dd0fbe3c079e4"
+  },
+  "tests": {
+    "beforeFiles": 59,
+    "afterFiles": 59,
+    "beforeAggregateHash": "db30f530947adfe79f804fe914996f128850b7e181b29e45ba8aba767287a527",
+    "untouchedAggregateHash": "db30f530947adfe79f804fe914996f128850b7e181b29e45ba8aba767287a527",
+    "afterAggregateHash": "db30f530947adfe79f804fe914996f128850b7e181b29e45ba8aba767287a527"
+  },
+  "frontend": {
+    "beforeFiles": 522,
+    "afterFiles": 524,
+    "beforeAggregateHash": "e4dbcc9210eae0dcd2379b2a530fb185fe0f41e53afca03c6f4797dd591ca371",
+    "untouchedAggregateHash": "0f59f9b703b3d339c47aa19d70ef20adbfdc1720437b94b68f5a0606c7407bb9",
+    "afterAggregateHash": "a9b80f8632ce32bfcea8534a7b19d2f5c5fda14ed7522845cb38a85f2de0b975"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0",
+    "untouchedAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0",
+    "afterAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0"
+  },
+  "scripts": {
+    "beforeFiles": 43,
+    "afterFiles": 44,
+    "beforeAggregateHash": "89a8a74d4775e45702dfeec4ba0ca61741e61b894bc99448b468c24da1e18a8e",
+    "untouchedAggregateHash": "0eff72d35c5bb467636680c5404e5b045c01441c5a69daca7352d0f10007eed6",
+    "afterAggregateHash": "2744720b3cdc9f52133ff2969ec1679b3953f2bf73f85f3a29aa50196ee46871"
+  },
+  "migrations": {
+    "beforeFiles": 44,
+    "afterFiles": 44,
+    "beforeAggregateHash": "01e12c682d768cb11e66d3428695c1b4cd9a1231bf533e867d780a08c6bdfde8",
+    "untouchedAggregateHash": "01e12c682d768cb11e66d3428695c1b4cd9a1231bf533e867d780a08c6bdfde8",
+    "afterAggregateHash": "01e12c682d768cb11e66d3428695c1b4cd9a1231bf533e867d780a08c6bdfde8"
+  },
+  "architecture": {
+    "beforeFiles": 41,
+    "afterFiles": 41,
+    "beforeAggregateHash": "febc17b6fca970f664a5799bef8d3e87bb3fb44f66551558b2a897be1adac531",
+    "untouchedAggregateHash": "febc17b6fca970f664a5799bef8d3e87bb3fb44f66551558b2a897be1adac531",
+    "afterAggregateHash": "febc17b6fca970f664a5799bef8d3e87bb3fb44f66551558b2a897be1adac531"
+  },
+  "packages": {
+    "beforeFiles": 51,
+    "afterFiles": 51,
+    "beforeAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "untouchedAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "afterAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884"
+  },
+  "domainDocs": {
+    "beforeFiles": 19,
+    "afterFiles": 19,
+    "beforeAggregateHash": "c7152f9deabd45d6b30d1f29a56a95edd9ced3573190fcb4b03a3ac7e6d7a22f",
+    "untouchedAggregateHash": "c7152f9deabd45d6b30d1f29a56a95edd9ced3573190fcb4b03a3ac7e6d7a22f",
+    "afterAggregateHash": "c7152f9deabd45d6b30d1f29a56a95edd9ced3573190fcb4b03a3ac7e6d7a22f"
+  }
+}

@@ -37,7 +37,7 @@ export function SeriesProductionPanel({
 }: SeriesProductionPanelProps) {
   const seriesOptions = useMemo(() => productionSeriesOptions(tree), [tree]);
   const [seriesId, setSeriesId] = useState(initialPlan?.seriesId ?? seriesOptions[0]?.value ?? "");
-  const [stage, setStage] = useState<SeriesProductionStage>(initialPlan?.stage ?? "image");
+  const [stage, setStage] = useState<SeriesProductionStage>(initialPlan?.stage ?? "video");
   const [plan, setPlan] = useState<SeriesProductionPlan | undefined>(initialPlan);
   const [selectedEpisodeIds, setSelectedEpisodeIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<SeriesProductionFilter>("all");
@@ -149,7 +149,7 @@ export function SeriesProductionPanel({
   }
 
   async function prepare() {
-    if (!plan || !selectedEpisodeIds.length || !onPrepare) return;
+    if (stage !== "video" || !plan || !selectedEpisodeIds.length || !onPrepare) return;
     const strictBlockers = selectedEpisodePlans.filter((episode) => episode.classification === "BLOCKED" || episode.classification === "PARTIAL");
     if (!allowPartial && strictBlockers.length) {
       setResult(blockedPrepareResult(projectId, seriesId, stage, selectedEpisodePlans));
@@ -234,7 +234,7 @@ export function SeriesProductionPanel({
 
         </div>
 
-        <section className="series-production-card series-production-prepare" aria-label="系列准备"><div className="series-production-card-heading"><div><span className="section-label">准备</span><h4>准备所选集</h4></div><span>预计 {selectedSceneIds.length} 个场景 · 最多 {selectedSceneIds.length} 个就绪批次</span></div><label className="series-production-partial-toggle"><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 跳过阻塞内容，仅准备当前可生产场景</label><p className="series-production-hint">默认严格模式；严格模式遇到阻塞或部分完成时保持 0 次变更。不会自动启动 GPU，也不会自动启动下一批。</p><button type="button" className="series-production-primary-action" onClick={() => void prepare()} disabled={isBusy || !selectedEpisodeIds.length || !onPrepare}>{busyAction === "prepare" ? "准备中…" : "准备所选集"}</button></section>
+        <section className="series-production-card series-production-prepare" aria-label="系列准备"><div className="series-production-card-heading"><div><span className="section-label">准备</span><h4>准备所选集</h4></div><span>预计 {selectedSceneIds.length} 个场景 · 最多 {selectedSceneIds.length} 个就绪批次</span></div><label className="series-production-partial-toggle"><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 跳过阻塞内容，仅准备当前可生产场景</label><p className="series-production-hint">默认严格模式；严格模式遇到阻塞或部分完成时保持 0 次变更。不会自动启动 GPU，也不会自动启动下一批。</p><button type="button" className="series-production-primary-action" onClick={() => void prepare()} disabled={stage !== "video" || isBusy || !selectedEpisodeIds.length || !onPrepare}>{busyAction === "prepare" ? "准备中…" : "准备所选集"}</button></section>
       </> : <div className="series-production-loading" role="status">正在加载系列生产计划…</div>}
 
       {result && <SeriesPrepareResultView result={result} onOpenProductionQueue={onOpenProductionQueue} disabled={isBusy} onNavigateToEpisode={onNavigateToEpisode} />}

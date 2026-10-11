@@ -293,7 +293,11 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, showCreationLanding = false, onDraftDirtyChange, onStageSelected, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, onOpenProductionQueue, comfyStatus, capabilityLoading = false, onRefreshComfyCapabilities, onOpenSettings, consistencyWorkspace }: Props) {
+export function ShotWorkspace(props: Props) {
+  return <ScopedShotWorkspace key={props.projectId} {...props} />;
+}
+
+function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, showCreationLanding = false, onDraftDirtyChange, onStageSelected, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, onOpenProductionQueue, comfyStatus, capabilityLoading = false, onRefreshComfyCapabilities, onOpenSettings, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -302,7 +306,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     selectShot,
     reconcileSelectedShot,
   } = useShotWorkspaceSelection({ projectId, initialSelectedShotId, onShotSelected });
-  const [stage, setStage] = useState<ShotStage>((initialCollectionFilter?.kind === "shots" ? initialCollectionFilter.stage : undefined) ?? "image");
+  const [stage, setStage] = useState<ShotStage>((initialCollectionFilter?.kind === "shots" ? initialCollectionFilter.stage : undefined) ?? "video");
   const [stageDrafts, setStageDrafts] = useState<Partial<Record<ShotStage, StageDraft>>>(emptyStageDrafts);
   const [dirtyStages, setDirtyStages] = useState<Set<ShotStage>>(new Set());
   const [references, setReferences] = useState<Record<ShotStage, string[]>>({ image: [], video: [] });
@@ -761,8 +765,8 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     setDirtyStages((current) => new Set(current).add(nextStage));
   }
 
-  function changeStageRecipe(recipeId: string) {
-    const recipe = stageRecipes.find((item) => item.recipeId === recipeId);
+  function changeStageRecipe(recipeId: string, workflowVersionId: string) {
+    const recipe = stageRecipes.find((item) => item.recipeId === recipeId && item.workflowVersionId === workflowVersionId);
     if (!recipe) return;
     const wasRef2va = stage === "video" && isRef2vaRecipe(currentRecipe);
     setStageDrafts((current) => ({
@@ -773,7 +777,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         values: defaultScalarValues(recipe),
       },
     }));
-    if (stage === "video" && isRef2vaRecipe(recipe) && !wasRef2va) {
+    if (!recipe.persistentInputs && stage === "video" && isRef2vaRecipe(recipe) && !wasRef2va) {
       setReferences((current) => ({
         ...current,
         video: ensurePrimaryReference(current.video, selectedShot?.selectedImageAssetId),
@@ -781,7 +785,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
       if (selectedShot?.selectedImageAssetId) {
         setNotice("已将当前关键帧放到 REF2VA 的 @图片1；其余参考图顺序保持不变。 ");
       }
-    } else if (stage === "video" && isRef2vaRecipe(currentRecipe)) {
+    } else if (!recipe.persistentInputs && stage === "video" && isRef2vaRecipe(currentRecipe)) {
       setNotice("已切回 I2V；当前已选关键帧保持不变，不会被参考图顺序覆盖。 ");
     }
     markStageDirty(stage);
@@ -1264,6 +1268,30 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     onSelectNextProductionPackage: selectNextProductionPackage,
   };
 
+  const projectStoryboard = (
+    <ProjectProductionPipeline
+      projectId={projectId}
+      shots={shots}
+      onRefresh={reload}
+      onNotice={(message) => setNotice(message)}
+      onError={(message) => setError(message)}
+      onConfigureStage={configureBulkStage}
+      onBulkPrompt={assignBulkPrompt}
+      onOpenProductionQueue={onOpenProductionQueue}
+      onOpenShot={(shotId) => {
+        if (onNavigate) onNavigate({ destination: "shots", section: "creation", shotId, stage: "video" });
+        else { setStage("video"); selectWorkspaceSelection({ type: "shot", shotId }); }
+      }}
+      busy={busy}
+      onOpenCandidates={(reviewStage, shotIds) => {
+        if (busy || !shotIds.length) return;
+        setStage(reviewStage);
+        if (onNavigate) onNavigate({ destination: "shots", section: "creation", shotId: shotIds[0], stage: reviewStage });
+        else selectWorkspaceSelection({ type: "shot", shotId: shotIds[0] });
+      }}
+    />
+  );
+
   const productionSurface = (
     <ProductionModeTabs
       activeTab={productionModeTab}
@@ -1299,26 +1327,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
             onNavigateToEpisode={(episodeId) => selectWorkspaceSelection({ type: "episode", episodeId })}
             onNavigateToScene={(sceneId) => selectWorkspaceSelection({ type: "scene", sceneId })}
           />
-          <ProjectProductionPipeline
-            projectId={projectId}
-            shots={shots}
-            onRefresh={reload}
-            onNotice={(message) => setNotice(message)}
-            onError={(message) => setError(message)}
-            onConfigureStage={configureBulkStage}
-            onBulkPrompt={assignBulkPrompt}
-            onOpenProductionQueue={onOpenProductionQueue}
-            busy={busy}
-            onOpenCandidates={(reviewStage, shotIds) => {
-              if (busy || !shotIds.length) return;
-              setStage(reviewStage);
-              if (onNavigate) {
-                onNavigate({ destination: "shots", section: "creation", shotId: shotIds[0], stage: reviewStage });
-              } else {
-                selectWorkspaceSelection({ type: "shot", shotId: shotIds[0] });
-              }
-            }}
-          />
+          {projectStoryboard}
         </div>
       )}
       multiPackagePanel={(
@@ -1416,7 +1425,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
             </div>
             <span className="shot-context-selection">{workspaceSelection.type === "project" ? (projectName ?? projectId) : "已选结构节点"}</span>
           </div>}
-          {contextSurface === "review" ? reviewSurface : contextSurface === "production" ? productionSurface : contextSurface === "shot" ? (
+          {contextSurface === "review" ? reviewSurface : contextSurface === "production" ? productionSurface : contextSurface === "project" ? projectStoryboard : contextSurface === "shot" ? (
             <ShotCreationWorkspace
               projectId={projectId}
               shot={selectedShot}
@@ -1501,11 +1510,6 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
                 if (nextSelection) selectWorkspaceSelection(nextSelection);
               }}
             />
-          ) : contextSurface === "project" ? (
-            <section className="shot-context-empty" data-surface="creation-project">
-              <strong>从项目结构开始</strong>
-              <p>选择系列、集、场景或镜头，当前工作区会只显示对应的制作上下文。</p>
-            </section>
           ) : contextSurface === "series" ? (
             <SeriesProductionPanel
               projectId={projectId}

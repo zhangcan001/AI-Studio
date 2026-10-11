@@ -2,6 +2,8 @@
 import { expect, it } from 'vitest';
 // @ts-expect-error Node-only successor checkpoint.
 import { uiPhase4SerialQueueParentReader, SERIAL_QUEUE_EXISTING, SERIAL_QUEUE_MANIFEST, SERIAL_QUEUE_PARENT, SERIAL_QUEUE_INVARIANTS } from '../../scripts/ui-phase4-serial-queue-successor-guard.mjs';
+// @ts-expect-error Node-only lawful successor byte projection.
+import { uiPhase5AParentReader } from '../../scripts/ui-phase5a-storyboard-successor-guard.mjs';
 // @ts-expect-error Node-only immutable Git proof.
 import { execFileSync } from 'node:child_process';
 // @ts-expect-error Node-only evidence.
@@ -23,9 +25,12 @@ it('validates an exact serial-queue successor and projects all prior byte checkp
 
 it('accepts LF and CRLF source checkouts but rejects changed content', () => {
   const proof = JSON.parse(readFileSync(SERIAL_QUEUE_MANIFEST, 'utf8'));
+  const predecessor = uiPhase5AParentReader('.');
+  expect(predecessor.violations).toEqual([]);
   const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
   for (const [path, record] of Object.entries(proof.paths) as [string, { afterHash: string }][]) {
-    const original = readFileSync(path, 'utf8');
+    const original = path.endsWith('/044_deferred_direct_generation.sql')
+      ? readFileSync(path, 'utf8') : predecessor.read(path);
     const lf = original.replaceAll('\r\n', '\n');
     const expected = record.afterHash;
     // An SQL migration must remain byte-exact for SQLx checksum stability.
