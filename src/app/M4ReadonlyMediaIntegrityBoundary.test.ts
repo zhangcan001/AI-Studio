@@ -1,10 +1,7 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only test helper.
 import {readFileSync} from 'node:fs';
-// @ts-expect-error Build-time read-only successor guard.
 import {m4MediaParentReader} from '../../scripts/m4-readonly-media-integrity-boundary-guard.mjs';
-// @ts-expect-error Full validated historical successor chain.
 import {m1ParentReader} from '../../scripts/m1-readiness-boundary-guard.mjs';
 it('validates readonly M4 inspection before projecting immutable M3/M2/M1 and rejects widening',()=>{
  const proof=JSON.parse(readFileSync('docs/architecture/m4-1-readonly-media-integrity.json','utf8'));

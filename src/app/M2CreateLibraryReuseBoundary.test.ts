@@ -1,10 +1,7 @@
 // @vitest-environment node
 import { expect,it } from 'vitest';
-// @ts-expect-error Node-only test helper.
 import { readFileSync } from 'node:fs';
-// @ts-expect-error Build-time guard.
 import { m2ReuseParentReader } from '../../scripts/m2-create-library-reuse-boundary-guard.mjs';
-// @ts-expect-error Full frozen chain.
 import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
 it('validates exact M2-2 parent/live proof before immutable M2-1/M1 projection, failing closed',()=>{
  const proof=JSON.parse(readFileSync('docs/architecture/m2-2-create-library-reuse.json','utf8'));

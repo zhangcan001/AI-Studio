@@ -1,8 +1,6 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
-// @ts-expect-error Node-only proof test.
 import { readFileSync } from "node:fs";
-// @ts-expect-error Node-only Phase6C successor.
 import {
   uiPhase6CParentReader,
   PHASE6C_MANIFEST,
@@ -10,7 +8,6 @@ import {
   PHASE6C_INVARIANTS,
   PHASE6C_DATABASE,
 } from "../../scripts/ui-phase6c-runs-queue-unify-successor-guard.mjs";
-// @ts-expect-error Immutable Phase6B parent reader.
 import { uiPhase6BParentReader } from "../../scripts/ui-phase6b-library-shot-bind-successor-guard.mjs";
 
 it("wires honest Runs/Queue RunRef projection without mixed cursor or new persistence", () => {

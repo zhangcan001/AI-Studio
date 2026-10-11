@@ -1,14 +1,9 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only boundary fixture.
 import { readFileSync } from 'node:fs';
-// @ts-expect-error Node-only boundary fixture.
 import { execFileSync } from 'node:child_process';
-// @ts-expect-error Node-only successor.
 import { minimaxVideoPhase3ParentReader, MINIMAX_VIDEO_PHASE3_PARENT, MINIMAX_VIDEO_PHASE3_MANIFEST } from '../../scripts/minimax-video-phase3-successor-guard.mjs';
-// @ts-expect-error Node-only successor.
 import { minimaxVideoPhase2ParentReader } from '../../scripts/minimax-video-phase2-successor-guard.mjs';
-// @ts-expect-error Node-only successor.
 import { MINIMAX_VIDEO_PHASE1_MANIFEST } from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 
 it('keeps the Phase 2 proof byte-stable and projects that checkpoint to older readers', () => {

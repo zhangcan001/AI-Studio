@@ -1,20 +1,12 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only boundary fixture.
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-// @ts-expect-error Node-only boundary fixture.
 import { execFileSync } from 'node:child_process';
-// @ts-expect-error Node-only boundary fixture.
 import { tmpdir } from 'node:os';
-// @ts-expect-error Node-only boundary fixture.
 import { join, dirname } from 'node:path';
-// @ts-expect-error Node-only byte-profile fixture.
 import { env } from 'node:process';
-// @ts-expect-error Node-only successor.
 import { minimaxVideoPhase2ParentReader, MINIMAX_VIDEO_PHASE2_PARENT, MINIMAX_VIDEO_PHASE2_MANIFEST, MINIMAX_VIDEO_PHASE2_FILES } from '../../scripts/minimax-video-phase2-successor-guard.mjs';
-// @ts-expect-error Node-only successor.
 import { minimaxVideoPhase3FixtureFiles } from '../../scripts/minimax-video-phase3-successor-guard.mjs';
-// @ts-expect-error Node-only successor.
 import { readinessLifecycleParentFacts, readinessLifecycleParentReader, MINIMAX_VIDEO_PHASE1_MANIFEST } from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 
 it('validates schema/backup changes honestly and replays immutable Phase1 bytes through a legal successor', () => {

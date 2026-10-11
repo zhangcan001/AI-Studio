@@ -2,11 +2,8 @@
 import { Suspense } from "react";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-// @ts-expect-error Test-only Node module.
 import { readFileSync } from "node:fs";
-// @ts-expect-error Existing build-time guard, not browser code.
 import { frontendBoundary } from "../../scripts/frontend-boundary-guard.mjs";
-// @ts-expect-error Existing build-time inventory, not browser code.
 import { frontendInventory } from "../../scripts/frontend-architecture-inventory.mjs";
 import { useProjectTaskRecovery } from "../features/tasks/useProjectTaskRecovery";
 import { useShotConsistencyController } from "../features/shots/useShotConsistencyController";

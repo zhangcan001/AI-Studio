@@ -1,5 +1,4 @@
 import { expect, it } from 'vitest';
-// @ts-expect-error Node measurement helper, excluded from application transport.
 import { createRuntimeMeasurement, summarizeSamples } from '../../scripts/testing/runtime-performance.mjs';
 
 it('phase12_measurement preserves attempts without exporting sensitive request bodies', () => {

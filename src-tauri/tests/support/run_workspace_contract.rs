@@ -763,7 +763,6 @@ async fn phase4_target_7_pending_cancel_preserves_success_and_history() {
     );
 }
 
-
 #[tokio::test]
 async fn phase6c_list_coverage_is_honest_recent_and_rejects_mixed_cursor() {
     let dir = tempdir().unwrap();

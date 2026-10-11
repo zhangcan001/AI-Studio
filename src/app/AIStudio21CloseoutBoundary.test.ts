@@ -1,12 +1,8 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only acceptance helper.
 import {readFileSync} from 'node:fs';
-// @ts-expect-error Build-time release successor, not browser code.
 import {closeoutParentReader} from '../../scripts/ai-studio-2-1-closeout-boundary-guard.mjs';
-// @ts-expect-error Complete historical validation chain.
 import {m1ParentReader} from '../../scripts/m1-readiness-boundary-guard.mjs';
-// @ts-expect-error Node-only RC successor.
 import {rcRepairParentReader} from '../../scripts/2-1-rc-backup-asset-version-repair-guard.mjs';
 it('validates version-only 2.1 release candidate before immutable M4/M3/M2/M1 projection and rejects drift',()=>{
   const proof=JSON.parse(readFileSync('docs/architecture/ai-studio-2-1-closeout.json','utf8'));

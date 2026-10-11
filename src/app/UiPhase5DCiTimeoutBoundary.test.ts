@@ -1,16 +1,10 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only frozen-successor proof.
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-// @ts-expect-error Node-only test fixture.
 import { execFileSync } from 'node:child_process';
-// @ts-expect-error Node-only paths.
 import { dirname, join, resolve } from 'node:path';
-// @ts-expect-error Node-only tempdir.
 import { tmpdir } from 'node:os';
-// @ts-expect-error Node-only successor.
 import { uiPhase5DParentReader, phase5DParentFacts, phase5DFixtureFiles, PHASE5D_MANIFEST, PHASE5D_PARENT, PHASE5D_EXISTING } from '../../scripts/ui-phase5d-ci-timeout-successor-guard.mjs';
-// @ts-expect-error Node-only historic successor.
 import { uiPhase5CParentReader } from '../../scripts/ui-phase5c-review-successor-guard.mjs';
 
 it('accepts only a scoped current-byte CI optimization before replaying the frozen Phase5C and historical source', () => {

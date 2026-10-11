@@ -1,10 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only owned inventory fixture.
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-// @ts-expect-error Node-only owned inventory fixture.
 import { join, resolve } from 'node:path';
-// @ts-expect-error Existing static inventory, not browser code.
 import { styleInventory } from '../../scripts/style-boundary-guard.mjs';
 function fixture(check: (root: string) => void) {
   const workspace=resolve('.'),root=mkdtempSync(join(workspace,'.codex-style-inventory-'));

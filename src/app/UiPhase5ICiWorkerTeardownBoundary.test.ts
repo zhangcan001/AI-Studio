@@ -1,16 +1,10 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only proof test.
 import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-// @ts-expect-error Node-only fixture.
 import {execFileSync} from 'node:child_process';
-// @ts-expect-error Node-only paths.
 import {dirname,join,resolve} from 'node:path';
-// @ts-expect-error Node-only tmpdir.
 import {tmpdir} from 'node:os';
-// @ts-expect-error Node-only Phase5I successor.
 import {uiPhase5IParentReader,phase5IParentFacts,phase5IFixtureFiles,PHASE5I_MANIFEST,PHASE5I_PARENT,PHASE5I_EXISTING} from '../../scripts/ui-phase5i-ci-worker-teardown-successor-guard.mjs';
-// @ts-expect-error Immutable Phase5H parent.
 import {uiPhase5HParentReader} from '../../scripts/ui-phase5h-ci-timeout-budget-successor-guard.mjs';
 
 it('keeps forks without singleFork and a dedicated Boundary CI job after long probes',()=>{

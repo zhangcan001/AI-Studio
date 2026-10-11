@@ -1,8 +1,6 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only acceptance helper.
 import {readFileSync} from 'node:fs';
-// @ts-expect-error Build-time repair proof, not browser runtime.
 import {rcRepairParentReader} from '../../scripts/2-1-rc-backup-asset-version-repair-guard.mjs';
 it('validates canonical restore and persisted-only legacy compatibility before historical projection',()=>{
   const proof=JSON.parse(readFileSync('docs/architecture/2-1-rc-backup-asset-version-repair.json','utf8'));

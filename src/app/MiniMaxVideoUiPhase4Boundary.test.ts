@@ -1,18 +1,11 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only owned fixture.
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
-// @ts-expect-error Node-only owned fixture.
 import { join, dirname, resolve } from 'node:path';
-// @ts-expect-error Node-only Git object-store fixture.
 import { execFileSync } from 'node:child_process';
-// @ts-expect-error Node-only legal successor.
 import { uiPhase4ParentReader, UI_PHASE4_PARENT, UI_PHASE4_MANIFEST } from '../../scripts/minimax-video-v2-ui-phase4-successor-guard.mjs';
-// @ts-expect-error Historical proof fixture.
 import { uiPhase3ParentReader, uiPhase3FixtureFiles } from '../../scripts/minimax-video-v2-ui-phase3-successor-guard.mjs';
-// @ts-expect-error Historical proof reader.
 import { uiPhase3CiRepairParentReader } from '../../scripts/ui-phase3-ci-repair-successor-guard.mjs';
-// @ts-expect-error Validation-only repair preserves the published Phase4 checkpoint.
 import { uiPhase4CiRepairParentReader, UI_PHASE4_CI_REPAIR_MANIFEST } from '../../scripts/ui-phase4-ci-repair-successor-guard.mjs';
 it('validates style CI repair before the immutable Phase4 checkpoint and rejects forged repair evidence',()=>{
   const proof=JSON.parse(readFileSync(UI_PHASE4_CI_REPAIR_MANIFEST,'utf8'));

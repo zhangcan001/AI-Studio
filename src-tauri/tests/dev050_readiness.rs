@@ -11,8 +11,9 @@ mod domain {
         pub use ai_studio_lib::domain::shot_context::*;
     }
 
-    #[path = "../../src/domain/shot_readiness.rs"]
-    pub mod shot_readiness;
+    pub mod shot_readiness {
+        pub use ai_studio_lib::domain::shot_readiness::*;
+    }
 }
 
 mod application {

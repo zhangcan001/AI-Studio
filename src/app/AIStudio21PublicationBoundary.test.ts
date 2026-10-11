@@ -1,24 +1,14 @@
-// @ts-expect-error Node-only successor fixture.
 import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
-// @ts-expect-error Node-only successor.
-import {minimaxVideoPhase2FixtureFiles,MINIMAX_VIDEO_PHASE2_MANIFEST} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
+import {minimaxVideoPhase2FixtureFiles,} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only acceptance helper.
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-// @ts-expect-error Node-only acceptance helper.
 import { execFileSync } from 'node:child_process';
-// @ts-expect-error Node-only acceptance helper.
 import { tmpdir } from 'node:os';
-// @ts-expect-error Node-only acceptance helper.
 import { dirname, join } from 'node:path';
-// @ts-expect-error Build-time publication proof, not browser runtime.
 import { publicationParentReader } from '../../scripts/2-1-publication-successor-guard.mjs';
-// @ts-expect-error Existing build-time successor.
 import { rcRepairParentReader } from '../../scripts/2-1-rc-backup-asset-version-repair-guard.mjs';
-// @ts-expect-error Existing build-time successor.
 import { closeoutParentReader } from '../../scripts/ai-studio-2-1-closeout-boundary-guard.mjs';
-// @ts-expect-error Existing build-time successor.
 import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
 
 const manifest = 'docs/architecture/2-1-publication-successor.json';

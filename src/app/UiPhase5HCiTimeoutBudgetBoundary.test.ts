@@ -1,16 +1,10 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only proof test.
 import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-// @ts-expect-error Node-only fixture.
 import {execFileSync} from 'node:child_process';
-// @ts-expect-error Node-only paths.
 import {dirname,join,resolve} from 'node:path';
-// @ts-expect-error Node-only tmpdir.
 import {tmpdir} from 'node:os';
-// @ts-expect-error Node-only Phase5H successor.
 import {uiPhase5HParentReader,phase5HParentFacts,phase5HFixtureFiles,PHASE5H_MANIFEST,PHASE5H_PARENT,PHASE5H_EXISTING} from '../../scripts/ui-phase5h-ci-timeout-budget-successor-guard.mjs';
-// @ts-expect-error Immutable Phase5G parent.
 import {uiPhase5GParentReader} from '../../scripts/ui-phase5g-ci-timeout-successor-guard.mjs';
 
 it('budgets every Boundary successor/drift it() at a fail-closed 90s Windows ceiling',()=>{

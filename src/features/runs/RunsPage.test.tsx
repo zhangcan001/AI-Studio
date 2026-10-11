@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-// @ts-expect-error Node helpers are used only in Vitest.
 import { readFileSync, readdirSync } from "node:fs";
 import { RunsPage } from "./RunsPage";
 import { CreatePage } from "../create/CreatePage";

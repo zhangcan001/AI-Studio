@@ -39,7 +39,6 @@ pub enum LibraryCategory {
     ReferenceSets,
 }
 
-
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum LibrarySourceKind {

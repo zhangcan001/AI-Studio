@@ -110,7 +110,10 @@ mod tests {
 
     #[test]
     fn data_root_override_accepts_only_non_empty_absolute_paths() {
-        let override_root = PathBuf::from("C:/isolated/AIStudioData");
+        #[cfg(windows)]
+        let override_root = PathBuf::from(r"C:\isolated\AIStudioData");
+        #[cfg(not(windows))]
+        let override_root = PathBuf::from("/isolated/AIStudioData");
 
         assert_eq!(
             resolve_data_root_from(Some(override_root.as_os_str().to_os_string())),

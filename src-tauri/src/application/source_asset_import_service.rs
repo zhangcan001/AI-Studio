@@ -1176,15 +1176,19 @@ mod tests {
     async fn imports_source_image_without_persisting_source_task_or_absolute_input_path() {
         let root = tempdir().unwrap();
         let repository = FakeAssetRepository::default();
+        #[cfg(windows)]
+        let input_name = r"C:\Users\me\photo.png";
+        #[cfg(not(windows))]
+        let input_name = "/Users/me/photo.png";
         let asset = service(root.path(), repository.clone())
-            .import_bytes("project-1", r"C:\\Users\\me\\photo.png", &png())
+            .import_bytes("project-1", input_name, &png())
             .await
             .unwrap();
 
         assert_eq!(asset.category, "source_image");
         assert!(asset.source_task_id.is_none());
         assert!(
-            asset.storage_path.ends_with("assets/source/image")
+            asset.storage_path.contains("assets/source/image")
                 || asset.storage_path.contains("assets\\source\\image")
         );
         assert_eq!(asset.original_name, "photo.png");

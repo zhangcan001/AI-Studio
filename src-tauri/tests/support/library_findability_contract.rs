@@ -94,7 +94,9 @@ async fn m3_cursor_binds_every_normalized_filter_and_rejects_mismatch() {
     assert_eq!(cursor.keyword.as_deref(), Some("Resource"));
     assert!(!cursor.favorite_only);
     assert!(cursor.tag_id.is_none());
-    for field in ["project", "category", "keyword", "favorite", "tag", "source"] {
+    for field in [
+        "project", "category", "keyword", "favorite", "tag", "source",
+    ] {
         let mut changed = q.clone();
         changed.cursor = Some(cursor.clone());
         let mut project = "prj_default";
@@ -170,7 +172,12 @@ async fn phase6a_source_kind_filters_across_pages_without_leak_or_dup() {
         }
         // Every returned media id must be an odd seed (= source_* after baseline flip of evens).
         for item in &page.items {
-            let n: i64 = item.resource_ref.id().trim_start_matches("ast_scale_").parse().unwrap();
+            let n: i64 = item
+                .resource_ref
+                .id()
+                .trim_start_matches("ast_scale_")
+                .parse()
+                .unwrap();
             assert_ne!(n % 2, 0, "generated leak {}", item.resource_ref.id());
         }
         match page.next_cursor {
@@ -191,8 +198,18 @@ async fn phase6a_source_kind_filters_across_pages_without_leak_or_dup() {
     let page = f.facade().list("prj_default", generated).await.unwrap();
     assert!(!page.items.is_empty());
     for item in &page.items {
-        let n: i64 = item.resource_ref.id().trim_start_matches("ast_scale_").parse().unwrap();
-        assert_eq!(n % 2, 0, "source leak into generated images {}", item.resource_ref.id());
+        let n: i64 = item
+            .resource_ref
+            .id()
+            .trim_start_matches("ast_scale_")
+            .parse()
+            .unwrap();
+        assert_eq!(
+            n % 2,
+            0,
+            "source leak into generated images {}",
+            item.resource_ref.id()
+        );
     }
 
     // Five classifications: explicit rows cover source image/video/audio,
@@ -221,11 +238,31 @@ async fn phase6a_source_kind_filters_across_pages_without_leak_or_dup() {
         }
     }
     for (category, source, expect_id) in [
-        (LibraryCategory::Images, LibrarySourceKind::Source, "ast_cls_source_image"),
-        (LibraryCategory::Images, LibrarySourceKind::Generated, "ast_cls_generated_image"),
-        (LibraryCategory::Videos, LibrarySourceKind::Source, "ast_cls_source_video"),
-        (LibraryCategory::Videos, LibrarySourceKind::Generated, "ast_cls_generated_video"),
-        (LibraryCategory::Audio, LibrarySourceKind::Source, "ast_cls_source_audio"),
+        (
+            LibraryCategory::Images,
+            LibrarySourceKind::Source,
+            "ast_cls_source_image",
+        ),
+        (
+            LibraryCategory::Images,
+            LibrarySourceKind::Generated,
+            "ast_cls_generated_image",
+        ),
+        (
+            LibraryCategory::Videos,
+            LibrarySourceKind::Source,
+            "ast_cls_source_video",
+        ),
+        (
+            LibraryCategory::Videos,
+            LibrarySourceKind::Generated,
+            "ast_cls_generated_video",
+        ),
+        (
+            LibraryCategory::Audio,
+            LibrarySourceKind::Source,
+            "ast_cls_source_audio",
+        ),
     ] {
         let mut shaped = query(category);
         shaped.limit = Some(100);
@@ -235,11 +272,17 @@ async fn phase6a_source_kind_filters_across_pages_without_leak_or_dup() {
         assert!(
             page.items.iter().any(|i| i.resource_ref.id() == expect_id),
             "{category:?}/{source:?} missing {expect_id}: {:?}",
-            page.items.iter().map(|i| i.resource_ref.id()).collect::<Vec<_>>()
+            page.items
+                .iter()
+                .map(|i| i.resource_ref.id())
+                .collect::<Vec<_>>()
         );
         assert!(
-            !page.items.iter().any(|i| i.resource_ref.id().starts_with("ast_cls_")
-                && i.resource_ref.id() != expect_id),
+            !page
+                .items
+                .iter()
+                .any(|i| i.resource_ref.id().starts_with("ast_cls_")
+                    && i.resource_ref.id() != expect_id),
             "{category:?}/{source:?} leaked other class ids"
         );
     }
@@ -272,20 +315,24 @@ async fn phase6a_source_plus_favorite_tag_keyword_stable_keyset() {
     q.keyword = Some("Resource".into());
     let first = f.facade().list("prj_default", q.clone()).await.unwrap();
     assert!(!first.items.is_empty());
-    assert_eq!(first.next_cursor.as_ref().map(|c| c.source_kind), Some(LibrarySourceKind::Source));
+    assert_eq!(
+        first.next_cursor.as_ref().map(|c| c.source_kind),
+        Some(LibrarySourceKind::Source)
+    );
     for item in &first.items {
-        let n: i64 = item.resource_ref.id().trim_start_matches("ast_scale_").parse().unwrap();
+        let n: i64 = item
+            .resource_ref
+            .id()
+            .trim_start_matches("ast_scale_")
+            .parse()
+            .unwrap();
         assert_ne!(n % 2, 0);
         assert_eq!(n % 3, 0);
     }
     if let Some(cursor) = first.next_cursor.clone() {
         q.cursor = Some(cursor);
         let second = f.facade().list("prj_default", q).await.unwrap();
-        let overlap: HashSet<_> = first
-            .items
-            .iter()
-            .map(|i| i.resource_ref.id())
-            .collect();
+        let overlap: HashSet<_> = first.items.iter().map(|i| i.resource_ref.id()).collect();
         for item in &second.items {
             assert!(!overlap.contains(item.resource_ref.id()));
         }

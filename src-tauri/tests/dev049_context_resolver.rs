@@ -7,44 +7,14 @@ mod domain {
 }
 
 mod ports {
-    #[path = "../../src/application/ports/repository_error.rs"]
-    pub mod repository_error;
-    pub use repository_error::RepositoryError;
-    #[path = "../../src/application/ports/clock.rs"]
-    pub mod clock;
-    pub use clock::{Clock, MonotonicEventClock};
-    #[path = "../../src/application/ports/project_repository.rs"]
-    pub mod project_repository;
-    pub use project_repository::{ProjectRecord, ProjectRepository};
-    #[path = "../../src/application/ports/production_structure_repository.rs"]
-    pub mod production_structure_repository;
-    pub use production_structure_repository::{
-        ProductionStructureRepository, ProductionStructureTreeData,
+    pub use ai_studio_lib::application::ports::{
+        AssetRepository, Clock, ConsistencyProfileRepository, ConsistencyScopeRepository,
+        MonotonicEventClock, ProductionStructureRepository, ProductionStructureTreeData,
+        ProjectRecord, ProjectRepository, ReferenceSetRepository, RepositoryError, ShotBulkData,
+        ShotBulkRepository, ShotConsistencyRepository, ShotData, ShotGenerationLinkRecord,
+        ShotRecord, ShotReferenceAssetRecord, ShotRepository, ShotStageConfigRecord,
+        ShotStagePromptRecord, TaskOutputAssetMapping,
     };
-    #[path = "../../src/application/ports/shot_bulk_repository.rs"]
-    pub mod shot_bulk_repository;
-    pub use shot_bulk_repository::{ShotBulkData, ShotBulkRepository, ShotStagePromptRecord};
-    #[path = "../../src/application/ports/shot_repository.rs"]
-    pub mod shot_repository;
-    pub use shot_repository::{
-        ShotData, ShotGenerationLinkRecord, ShotRecord, ShotReferenceAssetRecord, ShotRepository,
-        ShotStageConfigRecord,
-    };
-    #[path = "../../src/application/ports/asset_repository.rs"]
-    pub mod asset_repository;
-    pub use asset_repository::{AssetRepository, TaskOutputAssetMapping};
-    #[path = "../../src/application/ports/consistency_profile_repository.rs"]
-    pub mod consistency_profile_repository;
-    pub use consistency_profile_repository::ConsistencyProfileRepository;
-    #[path = "../../src/application/ports/consistency_scope_repository.rs"]
-    pub mod consistency_scope_repository;
-    pub use consistency_scope_repository::ConsistencyScopeRepository;
-    #[path = "../../src/application/ports/reference_set_repository.rs"]
-    pub mod reference_set_repository;
-    pub use reference_set_repository::ReferenceSetRepository;
-    #[path = "../../src/application/ports/shot_consistency_repository.rs"]
-    pub mod shot_consistency_repository;
-    pub use shot_consistency_repository::ShotConsistencyRepository;
 }
 #[path = "../src/application/prompt_context_builder.rs"]
 pub mod prompt_context_builder;

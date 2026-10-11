@@ -1,8 +1,6 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Test-only Node helper.
 import { readFileSync } from 'node:fs';
-// @ts-expect-error Build-time successor validation, not application code.
 import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
 import { preservesCreateDraftForSettings } from './App';
 import type { AppRoute } from './routes/types';

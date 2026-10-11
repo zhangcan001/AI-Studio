@@ -1,16 +1,10 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only proof test.
 import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-// @ts-expect-error Node-only fixture.
 import {execFileSync} from 'node:child_process';
-// @ts-expect-error Node-only paths.
 import {dirname,join,resolve} from 'node:path';
-// @ts-expect-error Node-only tmpdir.
 import {tmpdir} from 'node:os';
-// @ts-expect-error Node-only Phase5F successor.
 import {uiPhase5FParentReader,phase5FParentFacts,phase5FFixtureFiles,PHASE5F_MANIFEST,PHASE5F_PARENT,PHASE5F_EXISTING} from '../../scripts/ui-phase5f-ci-memory-successor-guard.mjs';
-// @ts-expect-error Immutable Phase5E parent.
 import {uiPhase5EParentReader} from '../../scripts/ui-phase5e-ci-shard-successor-guard.mjs';
 
 it('keeps three shards, raises the frontend heap ceiling, and leaves individual bounded probes in force',()=>{

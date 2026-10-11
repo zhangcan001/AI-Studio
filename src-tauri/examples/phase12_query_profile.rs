@@ -225,6 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 tag_id: None,
                                 category: LibraryCategory::Prompts,
                                 keyword: None,
+                                source_kind: None,
                                 cursor: None,
                                 limit: Some(30),
                             },

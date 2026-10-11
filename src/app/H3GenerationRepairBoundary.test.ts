@@ -1,18 +1,11 @@
-// @ts-expect-error Node-only successor fixture.
 import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
-// @ts-expect-error Node-only successor.
-import {minimaxVideoPhase2FixtureFiles,MINIMAX_VIDEO_PHASE2_MANIFEST} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
+import {minimaxVideoPhase2FixtureFiles,} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only boundary evidence.
 import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-// @ts-expect-error Node-only boundary evidence.
 import {execFileSync} from 'node:child_process';
-// @ts-expect-error Node-only boundary evidence.
 import {tmpdir} from 'node:os';
-// @ts-expect-error Node-only boundary evidence.
 import {join,dirname} from 'node:path';
-// @ts-expect-error Build-time helper, not browser runtime.
 import {h3RepairParentReader,H3_REPAIR_PARENT,h3ParentFacts} from '../../scripts/h3-generation-repair-successor-guard.mjs';
 const manifest='docs/architecture/h3-generation-repair-successor.json';
 it('validates the exact runtime repair before projecting immutable publication history',()=>{
@@ -54,7 +47,6 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
  }finally{rmSync(root,{recursive:true,force:true});}
 }, 90000);
 
-// @ts-expect-error Node-only immutable boundary helper.
 import {m2ReuseParentReader} from '../../scripts/m2-create-library-reuse-boundary-guard.mjs';
 it('rejects impossible review metadata before historical replay and leaves live bytes unprojected',()=>{
  const root=mkdtempSync(join(tmpdir(),'ai-studio-h3-invalid-review-'));

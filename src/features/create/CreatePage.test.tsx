@@ -2,7 +2,6 @@
 import { StrictMode, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-// @ts-expect-error Node helpers execute only in Vitest; application excludes Node types.
 import { readFileSync, readdirSync } from "node:fs";
 import { CreatePage } from "./CreatePage";
 import { useStudioStore } from "../../stores/studioStore";

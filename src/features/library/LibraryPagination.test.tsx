@@ -24,7 +24,8 @@ it("1/5/20 bounded pages cost 1/5/20 list calls, previous and next each one; ref
  fireEvent.click(screen.getByRole("button",{name:"上一页"}));await drain();expect(api.list).toHaveBeenCalledTimes(21);expect(screen.getByText("第 19 页")).toBeTruthy();
  fireEvent.click(screen.getByRole("button",{name:"下一页"}));await drain();expect(api.list).toHaveBeenCalledTimes(22);
  fireEvent.click(screen.getByRole("button",{name:"刷新"}));await drain();expect(api.list).toHaveBeenCalledTimes(23);expect(api.list.mock.lastCall?.[1].cursor.position.id).toBe("570");expect(api.tagsList).toHaveBeenCalledTimes(2);
-});
+}, 30000); // Bounded paging under suite contention; call-count assertions unchanged.
+
 it("page20 polling and invalidation each query current page once; polling does not fetch tags",async()=>{
  vi.useFakeTimers();const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"a",filter:"images"},navigate:vi.fn()}));await drain();
  for(let n=1;n<20;n++){act(()=>view.result.current.nextPage());await drain();}

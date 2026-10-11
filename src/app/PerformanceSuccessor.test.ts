@@ -1,5 +1,4 @@
 import { expect, it } from 'vitest';
-// @ts-expect-error Existing static guard helper, excluded from browser application.
 import { performanceSuccessor } from '../../scripts/style-boundary-guard.mjs';
 
 it('phase12_guard permits only measured existing source successors chained to the frozen parent', () => {

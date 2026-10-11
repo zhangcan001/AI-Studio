@@ -1,14 +1,9 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only source proof.
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
-// @ts-expect-error Node-only owned fixtures.
 import { join, dirname, resolve } from 'node:path';
-// @ts-expect-error Node-only immutable object-store fixture.
 import { execFileSync } from 'node:child_process';
-// @ts-expect-error Node-only immutable checkpoint.
 import { uiPhase5AParentReader, phase5AFixtureFiles, PHASE5A_MANIFEST, PHASE5A_PARENT, PHASE5A_EXISTING, phase5AParentFacts } from '../../scripts/ui-phase5a-storyboard-successor-guard.mjs';
-// @ts-expect-error Node-only historical checkpoint.
 import { uiPhase4SerialQueueParentReader } from '../../scripts/ui-phase4-serial-queue-successor-guard.mjs';
 
 it('validates the actual Phase5A parent and replays frozen Phase4 without rewriting historical proofs', () => {

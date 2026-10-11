@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:architecture": "node scripts/dev088-architecture-guard.mjs",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:boundary": "node scripts/run-boundary-tests.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

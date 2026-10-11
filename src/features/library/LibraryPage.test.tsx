@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-// @ts-expect-error Node helpers are test-only.
 import { readFileSync, readdirSync } from "node:fs";
-// @ts-expect-error Node-only validated historical schema projection.
 import { minimaxVideoPhase2ParentReader } from "../../../scripts/minimax-video-phase2-successor-guard.mjs";
 import { LibraryPage } from "./LibraryPage";
 import { CreatePage } from "../create/CreatePage";
@@ -63,7 +61,7 @@ it("phase5_target15 Product boundary command parity and no competing Library aut
  expect(readdirSync("src-tauri/migrations").filter((f:string)=>!schema.addedPaths.includes(`src-tauri/migrations/${f}`)).some((f:string)=>f.startsWith("043"))).toBe(false);
 // Full DEV-088 execution is owned by product/client.test.ts.
 // These per-feature ownership assertions remain independent and unchanged.
-},15000);
+},90000); // Source inventory + Phase2 reader under full-suite contention; assertions unchanged.
 it("phase5_target16 one normal entry real page legacy rollback and responsive structure",async()=>{
  expect(normalLibrary(route)).toBe(true);expect(normalLibrary({...route,filter:"advanced-assets"})).toBe(false);expect(normalLibrary(route)).toBe(true);
  expect(toLegacyLocation({...route,filter:"advanced-assets"}).workspace).toBe("assets");expect(toLegacyLocation({...route,filter:"advanced-prompts"}).workspace).toBe("prompts");

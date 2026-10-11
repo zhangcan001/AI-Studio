@@ -1,14 +1,9 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only successor checkpoint.
 import { uiPhase4SerialQueueParentReader, SERIAL_QUEUE_EXISTING, SERIAL_QUEUE_MANIFEST, SERIAL_QUEUE_PARENT, SERIAL_QUEUE_INVARIANTS } from '../../scripts/ui-phase4-serial-queue-successor-guard.mjs';
-// @ts-expect-error Node-only lawful successor byte projection.
 import { uiPhase5AParentReader } from '../../scripts/ui-phase5a-storyboard-successor-guard.mjs';
-// @ts-expect-error Node-only immutable Git proof.
 import { execFileSync } from 'node:child_process';
-// @ts-expect-error Node-only evidence.
 import { readFileSync } from 'node:fs';
-// @ts-expect-error Node-only hashing in boundary proof tests.
 import { createHash } from 'node:crypto';
 
 it('validates an exact serial-queue successor and projects all prior byte checkpoints', () => {

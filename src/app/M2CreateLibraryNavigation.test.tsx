@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import {cleanup,render,screen} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
-// @ts-expect-error Node-only source guard.
 import {readFileSync} from 'node:fs';
 import {AppShellV3} from './v3/AppShellV3';
 import {projectDisplayName} from '../i18n/statusLabels';

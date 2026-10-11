@@ -1,16 +1,10 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only proof test.
 import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-// @ts-expect-error Node-only fixture.
 import {execFileSync} from 'node:child_process';
-// @ts-expect-error Node-only paths.
 import {dirname,join,resolve} from 'node:path';
-// @ts-expect-error Node-only tmpdir.
 import {tmpdir} from 'node:os';
-// @ts-expect-error Node-only Phase5E successor.
 import {uiPhase5EParentReader,phase5EParentFacts,phase5EFixtureFiles,PHASE5E_MANIFEST,PHASE5E_PARENT,PHASE5E_EXISTING} from '../../scripts/ui-phase5e-ci-shard-successor-guard.mjs';
-// @ts-expect-error Immutable Phase5D parent.
 import {uiPhase5DParentReader} from '../../scripts/ui-phase5d-ci-timeout-successor-guard.mjs';
 
 it('gates all three complete Vitest shards and mandatory architecture, TypeScript and Vite under the stable frontend status',()=>{

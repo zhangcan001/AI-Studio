@@ -1,18 +1,11 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only proof test.
 import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-// @ts-expect-error Node-only fixture.
 import {execFileSync} from 'node:child_process';
-// @ts-expect-error Node-only paths.
 import {dirname,join,resolve} from 'node:path';
-// @ts-expect-error Node-only tmpdir.
 import {tmpdir} from 'node:os';
-// @ts-expect-error Node-only Phase6A successor.
 import {uiPhase6AParentReader,phase6AParentFacts,phase6AFixtureFiles,PHASE6A_MANIFEST,PHASE6A_PARENT,PHASE6A_EXISTING} from '../../scripts/ui-phase6a-library-source-successor-guard.mjs';
-// @ts-expect-error Immutable Phase5J parent reader.
 import {uiPhase5JParentReader} from '../../scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs';
-// @ts-expect-error Historical library findability reader.
 import {m3LibraryParentReader} from '../../scripts/m3-library-findability-boundary-guard.mjs';
 
 it('wires ordinary Library SOURCE/GENERATED filters before pagination and blocks new image generation',()=>{

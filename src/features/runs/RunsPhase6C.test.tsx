@@ -24,7 +24,7 @@ const task: ProductRun = {
   ref: { source: "task", id: "task-a" }, projectId: "project-a", title: "任务 A", status: "SUCCEEDED",
   phase: "SUCCEEDED", createdAt: "2026-10-02T00:00:00Z", updatedAt: "2026-10-02T00:00:00Z",
   progress: { total: 1, succeeded: 1, failed: 0, cancelled: 0 }, recoverability: { retryItemIds: [], reviewRequired: 0 },
-  resultsSummary: [{ assetId: "ast-1", name: "结果", mediaKind: "video" }], errorSummary: null, preferredParent: null,
+  resultsSummary: ["ast-1"], errorSummary: null, preferredParent: null,
   availableActions: [], detail: { sources: [], inputs: [] },
 };
 const batch: ProductRun = {

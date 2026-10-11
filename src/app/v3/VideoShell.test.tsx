@@ -10,7 +10,6 @@ import type { AppRoute } from "../routes/types";
 import type { ComfyStatus } from "../../types/comfy";
 import { useAppRoute } from "../routes/useAppRoute";
 import { useDraftConfirmation } from "../routes/useDraftConfirmation";
-// @ts-expect-error Node-only style assertions supplement Native screenshots.
 import { readFileSync } from "node:fs";
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 const create = { kind:"create",projectId:"p",shotId:"s",stage:"video" } as const;

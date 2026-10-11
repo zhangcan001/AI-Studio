@@ -1,16 +1,10 @@
 // @vitest-environment node
 import { it, expect } from 'vitest';
-// @ts-expect-error Node helpers are test-only.
 import { readFileSync } from 'node:fs';
-// @ts-expect-error Existing build-time guard module, not browser code.
 import { styleBoundary, styleInventory, specificity, debtViolations, expandedCss, canonical, read, hash } from '../../scripts/style-boundary-guard.mjs';
-// @ts-expect-error Build-time exact successor validator, not browser code.
 import { phase13Boundary } from '../../scripts/phase13-observability-guard.mjs';
-// @ts-expect-error Build-time current successor, not application code.
 import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
-// @ts-expect-error Validated M3-2 stylesheet successor; historical manifest stays immutable.
 import { m3VisualParentReader } from '../../scripts/m3-bounded-visual-library-boundary-guard.mjs';
-// @ts-expect-error Validated UI successor; do not repin historical style metrics.
 import { uiPhase3ParentReader } from '../../scripts/minimax-video-v2-ui-phase3-successor-guard.mjs';
 const m=JSON.parse(readFileSync('docs/architecture/phase9-style-cleanup.json','utf8'));
 it('phase9_target1 accounts for all styles and classifies inline candidates',()=>{

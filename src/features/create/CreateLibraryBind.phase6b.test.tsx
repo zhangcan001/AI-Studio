@@ -46,9 +46,9 @@ const ref2va: GeneratorOption = {
   fields: [
     { key: "prompt", type: "textarea", label: "提示词", required: true, default: "" },
     ...params,
-    { key: "reference_images", type: "images", label: "参考图", required: false },
-    { key: "reference_videos", type: "videos", label: "参考视频", required: false },
-    { key: "reference_audios", type: "audios", label: "参考音频", required: false },
+    { key: "reference_images", type: "images", label: "参考图", required: false, minItems: 0, maxItems: 9 },
+    { key: "reference_videos", type: "videos", label: "参考视频", required: false, minItems: 0, maxItems: 3 },
+    { key: "reference_audios", type: "audios", label: "参考音频", required: false, minItems: 0, maxItems: 3 },
   ],
 };
 function ctx(selectionRef = "exact-fl"): CreationContext {
@@ -107,7 +107,7 @@ it("B02 generated video requires confirm and only binds reference_videos", async
   expect(apply.hasAttribute('disabled')).toBe(false);
   fireEvent.click(apply);
   await waitFor(() => expect(api.inputsSave).toHaveBeenCalled());
-  expect(api.inputsSave.mock.calls.at(-1)![0].inputs).toEqual([{ inputKey: "reference_videos", ordinal: 0, assetId: "gen-vid" }]);
+  expect(api.inputsSave.mock.calls[api.inputsSave.mock.calls.length - 1][0].inputs).toEqual([{ inputKey: "reference_videos", ordinal: 0, assetId: "gen-vid" }]);
   expect(api.generate).not.toHaveBeenCalled();
 });
 

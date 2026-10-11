@@ -1,18 +1,11 @@
-// @ts-expect-error Node-only successor fixture.
 import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
-// @ts-expect-error Node-only successor.
-import {minimaxVideoPhase2FixtureFiles,MINIMAX_VIDEO_PHASE2_MANIFEST} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
+import {minimaxVideoPhase2FixtureFiles,} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only boundary fixture.
 import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-// @ts-expect-error Node-only boundary fixture.
 import {execFileSync} from 'node:child_process';
-// @ts-expect-error Node-only boundary fixture.
 import {tmpdir} from 'node:os';
-// @ts-expect-error Node-only boundary fixture.
 import {join,dirname} from 'node:path';
-// @ts-expect-error Node-only successor.
 import {readinessLifecycleParentReader,readinessLifecycleParentFacts,READINESS_LIFECYCLE_PARENT,postRunReadinessParentReader,POST_RUN_READINESS_PARENT} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 const manifest='docs/architecture/readiness-lifecycle-fix.json';
 const postRunManifest='docs/architecture/readiness-post-run-fix.json';

@@ -1,10 +1,7 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-// @ts-expect-error Node-only guard.
 import {readFileSync} from 'node:fs';
-// @ts-expect-error Build-time source validator.
 import {m3VisualParentReader,visualCandidateViolations} from '../../scripts/m3-bounded-visual-library-boundary-guard.mjs';
-// @ts-expect-error Complete historical successor chain.
 import {m1ParentReader} from '../../scripts/m1-readiness-boundary-guard.mjs';
 it('validates bounded visual Library successor before historical projection and rejects proof widening',()=>{
  const proof=JSON.parse(readFileSync('docs/architecture/m3-2-bounded-visual-library.json','utf8'));

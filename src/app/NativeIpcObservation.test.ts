@@ -1,5 +1,4 @@
 import { expect, it } from 'vitest';
-// @ts-expect-error Node acceptance helper, excluded from application transport.
 import { classifyIpcRequest, createIpcObserver } from '../../scripts/testing/native-ipc-observer.mjs';
 
 it('phase11_ipc distinguishes preflight probes malformed payloads and real retry attempts', () => {

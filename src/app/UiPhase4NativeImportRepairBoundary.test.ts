@@ -1,14 +1,9 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only proof fixture.
 import { readFileSync } from 'node:fs';
-// @ts-expect-error Immutable Git snapshot source.
 import { readinessLifecycleParentFacts } from '../../scripts/readiness-lifecycle-successor-guard.mjs';
-// @ts-expect-error Native repair successor.
 import { uiPhase4NativeImportRepairParentReader, NATIVE_REPAIR_MANIFEST, NATIVE_REPAIR_PARENT, NATIVE_REPAIR_INVARIANTS } from '../../scripts/ui-phase4-native-import-repair-successor-guard.mjs';
-// @ts-expect-error Frozen checkpoint reader.
 import { uiPhase4CiRepairParentReader } from '../../scripts/ui-phase4-ci-repair-successor-guard.mjs';
-// @ts-expect-error Immutable Phase4 UI reader.
 import { uiPhase4ParentReader } from '../../scripts/minimax-video-v2-ui-phase4-successor-guard.mjs';
 
 it('validates the reviewed Native repair before projecting unchanged Phase4 historical proofs', () => {

@@ -1,8 +1,6 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
-// @ts-expect-error Node-only proof test.
 import { readFileSync } from "node:fs";
-// @ts-expect-error Node-only Phase6D successor.
 import {
   uiPhase6DParentReader,
   PHASE6D_MANIFEST,
@@ -10,7 +8,6 @@ import {
   PHASE6D_INVARIANTS,
   PHASE6D_DATABASE,
 } from "../../scripts/ui-phase6d-scale-integrity-successor-guard.mjs";
-// @ts-expect-error Immutable Phase6C parent reader.
 import { uiPhase6CParentReader } from "../../scripts/ui-phase6c-runs-queue-unify-successor-guard.mjs";
 
 it("wires Phase6D scale correctness + mock E2E without claiming Native/GPU", () => {

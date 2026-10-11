@@ -1,8 +1,6 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
-// @ts-expect-error Node-only proof test.
 import { readFileSync } from "node:fs";
-// @ts-expect-error Node-only Phase6B successor.
 import {
   uiPhase6BParentReader,
   PHASE6B_MANIFEST,
@@ -10,7 +8,6 @@ import {
   PHASE6B_INVARIANTS,
   PHASE6B_DATABASE,
 } from "../../scripts/ui-phase6b-library-shot-bind-successor-guard.mjs";
-// @ts-expect-error Immutable Phase6A parent reader.
 import { uiPhase6AParentReader } from "../../scripts/ui-phase6a-library-source-successor-guard.mjs";
 
 it("wires Library→exact Shot video input bind without Task/Run or schema change", () => {

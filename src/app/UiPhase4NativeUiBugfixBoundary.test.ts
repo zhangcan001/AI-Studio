@@ -1,14 +1,9 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only immutable source.
 import { readFileSync } from 'node:fs';
-// @ts-expect-error Current bugfix successor.
 import { uiPhase4NativeUiBugfixParentReader, NATIVE_UI_BUGFIX_INVARIANTS, NATIVE_UI_BUGFIX_MANIFEST, NATIVE_UI_BUGFIX_PARENT } from '../../scripts/ui-phase4-native-ui-bugfix-successor-guard.mjs';
-// @ts-expect-error Historical Native import successor.
 import { uiPhase4NativeImportRepairParentReader } from '../../scripts/ui-phase4-native-import-repair-successor-guard.mjs';
-// @ts-expect-error Frozen UI Phase4 reader.
 import { uiPhase4ParentReader } from '../../scripts/minimax-video-v2-ui-phase4-successor-guard.mjs';
-// @ts-expect-error Git parent facts.
 import { readinessLifecycleParentFacts } from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 
 it('accepts exactly the two reviewed Native UI fixes and preserves original Phase4 checkpoint bytes', () => {

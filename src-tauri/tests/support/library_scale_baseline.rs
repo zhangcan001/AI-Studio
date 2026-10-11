@@ -177,7 +177,10 @@ async fn phase6d_library_scale_paging_stability_and_source_filter() {
         assert!(pages < 200, "pagination failed to terminate");
     }
     let walk_ms = walk_start.elapsed().as_secs_f64() * 1000.0;
-    assert!(items > 0, "SOURCE media should return rows on {N}-asset seed");
+    assert!(
+        items > 0,
+        "SOURCE media should return rows on {N}-asset seed"
+    );
     assert_eq!(seen.len(), items);
 
     // Generated filter must not leak SOURCE-only ids from the walk above when disjoint.
@@ -197,15 +200,12 @@ async fn phase6d_library_scale_paging_stability_and_source_filter() {
     // Foreign project isolation.
     assert!(f
         .facade()
-        .list(
-            "prj_11111111-1111-4111-8111-111111111111",
-            {
-                let mut foreign = query(LibraryCategory::Media);
-                foreign.limit = Some(30);
-                foreign.source_kind = Some(LibrarySourceKind::Source);
-                foreign
-            }
-        )
+        .list("prj_11111111-1111-4111-8111-111111111111", {
+            let mut foreign = query(LibraryCategory::Media);
+            foreign.limit = Some(30);
+            foreign.source_kind = Some(LibrarySourceKind::Source);
+            foreign
+        })
         .await
         .unwrap()
         .items

@@ -1,14 +1,9 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only owned proof fixture.
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
-// @ts-expect-error Node-only fixture bounds.
 import { join, dirname, resolve } from 'node:path';
-// @ts-expect-error Node-only immutable object store.
 import { execFileSync } from 'node:child_process';
-// @ts-expect-error Node-only successor.
 import { uiPhase5CParentReader, PHASE5C_MANIFEST, PHASE5C_PARENT, PHASE5C_EXISTING, phase5CParentFacts, phase5CFixtureFiles } from '../../scripts/ui-phase5c-review-successor-guard.mjs';
-// @ts-expect-error Node-only frozen predecessor.
 import { uiPhase5BParentReader } from '../../scripts/ui-phase5b-mixed-video-successor-guard.mjs';
 
 it('validates Phase5C live changes before projecting the exact frozen Phase5B checkpoint and historical chain', () => {

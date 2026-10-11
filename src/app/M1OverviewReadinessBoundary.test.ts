@@ -1,10 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only architecture guard.
 import { readFileSync } from 'node:fs';
-// @ts-expect-error Node-only successor validation.
 import { m1OverviewParentReader } from '../../scripts/m1-overview-readiness-boundary-guard.mjs';
-// @ts-expect-error Node-only historical successor validation.
 import { m1ParentReader } from '../../scripts/m1-readiness-boundary-guard.mjs';
 
 it('M1-2 validates exact parent/live/untouched bytes before M1-1 projection', () => {

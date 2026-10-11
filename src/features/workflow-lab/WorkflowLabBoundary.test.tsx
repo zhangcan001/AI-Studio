@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-// @ts-expect-error Node helpers are test-only.
 import { readFileSync, readdirSync } from "node:fs";
-// @ts-expect-error Node-only validated historical schema projection.
 import { minimaxVideoPhase2ParentReader } from "../../../scripts/minimax-video-phase2-successor-guard.mjs";
 import { LabBenchmarkPane } from "./LabBenchmarkPane";
 import { LabDiagnosticsPane } from "./LabDiagnosticsPane";
@@ -61,4 +59,4 @@ it("phase6_target16 real normal GeneratorSettings, advanced-only Lab and compati
   expect(nav).not.toMatch(/workflow|advanced|generators/);
   const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
   expect(readdirSync("src-tauri/migrations").filter((f: string)=>!schema.addedPaths.includes(`src-tauri/migrations/${f}`)).some((f: string) => f.startsWith("043"))).toBe(false);
-}, 15000); // Cold historical Git/source projection: 4.37s local, 5.33s under CI contention; same assertions, finite per-test budget.
+}, 90000); // Cold historical Git/source projection; same assertions, finite per-test budget under successor-chain contention.

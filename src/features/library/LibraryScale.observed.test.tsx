@@ -2,9 +2,7 @@
 // Opt-in frontend observation: real React/controller, typed API fixture, not Native IPC.
 import {act,cleanup,render} from "@testing-library/react";
 import {expect,it,vi} from "vitest";
-// @ts-expect-error Node-only opt-in benchmark.
 import process from "node:process";
-// @ts-expect-error Node-only opt-in benchmark.
 import {writeFileSync} from "node:fs";
 import {LibraryPage} from "./LibraryPage";
 import {LibraryThumbnail,LibraryThumbnailScope} from "./LibraryThumbnail";

@@ -1,20 +1,12 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-// @ts-expect-error Node helpers are used only by this source-boundary test.
 import { readFileSync } from "node:fs";
-// @ts-expect-error Node helpers are used only by this source-boundary test.
 import { createHash } from "node:crypto";
-// @ts-expect-error Build-time architecture module, not browser production code.
 import { backendPerformanceBoundary, backendBoundary, productionRust, sqlFootprint, rustFiles } from "../../scripts/backend-boundary-guard.mjs";
-// @ts-expect-error Build-time successor validator, never production browser code.
 import { phase13Boundary } from "../../scripts/phase13-observability-guard.mjs";
-// @ts-expect-error Build-time current successor, not application code.
 import { m1ParentReader } from "../../scripts/m1-readiness-boundary-guard.mjs";
-// @ts-expect-error Build-time reviewed additive tag command, not browser production code.
 import { m3LibraryParentReader } from "../../scripts/m3-library-findability-boundary-guard.mjs";
-// @ts-expect-error Node-only schema successor, never production browser code.
 import { minimaxVideoPhase2ParentReader } from "../../scripts/minimax-video-phase2-successor-guard.mjs";
-// @ts-expect-error Node-only schema successor, never production browser code.
 import { minimaxVideoPhase3ParentReader } from "../../scripts/minimax-video-phase3-successor-guard.mjs";
 const read=(p:string):string=>readFileSync(p,"utf8");
 const manifest=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json"));

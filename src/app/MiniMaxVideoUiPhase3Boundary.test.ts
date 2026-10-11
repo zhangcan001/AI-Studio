@@ -1,12 +1,8 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-// @ts-expect-error Node-only fixture.
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
-// @ts-expect-error Node-only fixture.
 import { join, dirname, resolve } from 'node:path';
-// @ts-expect-error Node-only boundary.
 import { uiPhase3ParentReader, uiPhase3FixtureFiles, UI_PHASE3_PARENT, UI_PHASE3_MANIFEST } from '../../scripts/minimax-video-v2-ui-phase3-successor-guard.mjs';
-// @ts-expect-error Node-only historical boundary.
 import { minimaxVideoPhase3ParentReader } from '../../scripts/minimax-video-phase3-successor-guard.mjs';
 it('validates live UI bytes before projecting all three historical immutable proofs', () => {
   const accepted=uiPhase3ParentReader('.');
