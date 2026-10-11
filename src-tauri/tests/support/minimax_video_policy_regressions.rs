@@ -47,6 +47,11 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
+    fixture_with_capability(false).await
+}
+
+// Capability data is a deterministic in-process adapter, not Native/GPU proof.
+async fn fixture_with_capability(capability: bool) -> Fixture {
     let owned = tempdir().unwrap();
     let root = owned.path().join("library");
     let pool = initialize(&owned.path().join("owned.sqlite"))
@@ -118,7 +123,24 @@ async fn fixture() -> Fixture {
                 v.recipes[0].recipe_id.clone(),
             )
         })
-        .collect();
+        .collect::<Vec<_>>();
+    if capability {
+        // This owned environment enables only the four installed test products.
+        // Preserve legacy definitions, but do not let their intentionally missing
+        // plugins block the environment-wide Comfy preflight for this fixture.
+        let state = SqliteWorkflowRuntimeStateRepository::new(pool.clone());
+        for version in &versions {
+            if !pairs
+                .iter()
+                .any(|(id, _)| *id == version.workflow_version_id)
+            {
+                state
+                    .set_enabled(&version.workflow_version_id, false, Utc::now())
+                    .await
+                    .unwrap();
+            }
+        }
+    }
     let registry = Arc::new(
         WorkflowRegistryService::new(
             runtime,
@@ -140,9 +162,29 @@ async fn fixture() -> Fixture {
             owned.path().join("staging"),
         ))),
     );
-    let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Success));
-    let services =
-        build_services_with_admission(&pool, comfy.clone(), &root, None, Some(registry.clone()));
+    let mut adapter = ControlledComfy::new(ComfyBehavior::Success);
+    if capability {
+        adapter.output_node = "21".into(); // Exact Base 2.2.0 recipe output, not the legacy fixture's node 11.
+        let mut nodes = serde_json::Map::new();
+        for name in AUTHORIZED_PACKAGES {
+            let graph: Value = serde_json::from_slice(
+                &fs::read(root.join(name).join("workflow_api.json")).unwrap(),
+            )
+            .unwrap();
+            for node in graph.as_object().unwrap().values() {
+                nodes.insert(node["class_type"].as_str().unwrap().to_owned(), json!({}));
+            }
+        }
+        adapter.object_info = Some(Value::Object(nodes));
+    }
+    let comfy = Arc::new(adapter);
+    let services = build_services_with_admission(
+        &pool,
+        comfy.clone(),
+        if capability { owned.path() } else { &root },
+        None,
+        Some(registry.clone()),
+    );
     Fixture {
         _owned: owned,
         root,

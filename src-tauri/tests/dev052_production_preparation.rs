@@ -209,7 +209,11 @@ fn preparation_commands_match_the_landed_domain_contract() {
         normalized_commands.contains("state.organization.production_structure.tree(project_id)")
     );
     assert!(commands.contains(".plan_many("));
-    assert!(commands.contains(".admit("));
+    // Current commands must carry exact hierarchy ownership into the same
+    // formal admission authority, not fall back to its legacy unscoped seam.
+    assert!(normalized_commands.contains(".admit_scoped(&request.project_id,&request.shot_ids,stage,request.allow_partial,Some(&PreparationScope::Scene{id:request.scene_id.clone(),}),)"));
+    assert!(normalized_commands.contains(".admit_scoped(&request.project_id,&request.shot_ids,stage,request.allow_partial,request.scope.as_ref(),)"));
+    assert!(!commands.contains(".admit("));
     assert!(commands.contains(".plan_detail("));
 }
 
@@ -233,6 +237,7 @@ fn scene_preflight_is_read_only_and_does_not_start_work() {
         preflight,
         &[
             ".admit(",
+            ".admit_scoped(",
             "insert_prepared_batch_with_bindings",
             "production_queue_service",
             ".start(",

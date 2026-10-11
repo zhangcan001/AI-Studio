@@ -11,6 +11,8 @@ import type {
 import { preparationStatusLabel } from "../../types/productionPreparation";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { deriveStageStatus, statusLabel } from "./shotDomain";
+import type { ProductionStructureTree } from "../../types/productionStructure";
+import { videoPreparationShots, type VideoPreparationScope } from "./videoPreparationScope";
 import "./ProjectProductionPipeline.css";
 
 export type BulkSelectionPreset = "all" | "ready" | "unconfigured";
@@ -19,6 +21,8 @@ export type BulkPreparationFilter = "all" | "ready" | "prepared" | "blocked" | "
 export interface ShotBulkConfigPanelProps {
   projectId: string;
   shots: ShotView[];
+  tree?: ProductionStructureTree;
+  scope?: VideoPreparationScope;
   onRefresh?: () => Promise<void>;
   onNotice?: (message: string) => void;
   onError?: (message?: string) => void;
@@ -66,12 +70,14 @@ function promptPreview(text: string): string {
 
 export function ShotBulkConfigPanel(props: ShotBulkConfigPanelProps) {
   // Project identity is a lifecycle boundary, not merely a filter on shared IDs.
-  return <ScopedShotBulkConfigPanel key={props.projectId} {...props} />;
+  return <ScopedShotBulkConfigPanel key={JSON.stringify([props.projectId, props.scope?.kind, props.scope?.id])} {...props} />;
 }
 
 function ScopedShotBulkConfigPanel({
   projectId,
   shots,
+  tree,
+  scope,
   onRefresh,
   onNotice,
   onError,
@@ -91,18 +97,24 @@ function ScopedShotBulkConfigPanel({
   const [allowPartial, setAllowPartial] = useState(false);
   const [preparationResult, setPreparationResult] = useState<ProjectProductionAdmissionResult>();
   const [filter, setFilter] = useState<BulkPreparationFilter>("all");
-  const shotIdKey = shots.map((shot) => shot.id).join("|");
+  const scopeKey = JSON.stringify(scope ?? { kind: "project" });
+  const scoped = useMemo(() => {
+    try { return { shots: videoPreparationShots(projectId, shots, tree, scope), error: undefined }; }
+    catch (error) { return { shots: [], error: error instanceof Error ? error.message : "生产范围不可用。" }; }
+  }, [projectId, shots, tree, scopeKey]);
+  const scopeShots = scoped.shots;
+  const shotIdKey = scopeShots.map((shot) => shot.id).join("|");
   const mounted = useRef(true);
   const actionLock = useRef(false);
   const planRequest = useRef(0);
-  const owner = JSON.stringify([projectId, stage]);
+  const owner = JSON.stringify([projectId, stage, scopeKey, shotIdKey]);
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
   const isCurrent = (requestedOwner: string) => mounted.current && currentOwner.current === requestedOwner;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   useEffect(() => {
-    const available = new Set(shots.map((shot) => shot.id));
+    const available = new Set(scopeShots.map((shot) => shot.id));
     setSelectedIds((current) => new Set([...current].filter((id) => available.has(id))));
   }, [shotIdKey]);
 
@@ -113,7 +125,7 @@ function ScopedShotBulkConfigPanel({
     [projectPlan],
   );
   const visibleShots = useMemo(
-    () => shots.filter((shot) => {
+    () => scopeShots.filter((shot) => {
       if (shot.projectId !== projectId) return false;
       const item = planByShotId.get(shot.id);
       switch (filter) {
@@ -123,15 +135,14 @@ function ScopedShotBulkConfigPanel({
         case "done": return stage === "video" ? Boolean(shot.selectedVideoAssetId) : Boolean(shot.selectedImageAssetId);
         case "all": return true;
       }
-    }).sort((a, b) => a.ordinal - b.ordinal || a.id.localeCompare(b.id)),
-    [filter, planByShotId, shots, stage, projectId],
+    }),
+    [filter, planByShotId, scopeShots, stage, projectId],
   );
   const selectedIdsInOrder = useMemo(
-    () => shots
+    () => scopeShots
       .filter((shot) => selectedIds.has(shot.id))
-      .sort((left, right) => left.ordinal - right.ordinal || left.id.localeCompare(right.id))
       .map((shot) => shot.id),
-    [selectedIds, shots],
+    [selectedIds, scopeShots],
   );
 
   function reportError(message?: string) {
@@ -147,16 +158,18 @@ function ScopedShotBulkConfigPanel({
   }
 
   async function refreshPlan() {
+    if (scoped.error) throw new PreparationUiError(scoped.error);
     const requestedOwner = owner;
     const requestId = ++planRequest.current;
     setPlanLoading(true);
     try {
-      const next = await getProjectProductionPreflight({ projectId, stage });
+      const next = await getProjectProductionPreflight({ projectId, stage, ...(scope ? { scope } : {}) });
       if (!isCurrent(requestedOwner) || requestId !== planRequest.current) return;
       const ownedIds = new Set(shots.filter(shot => shot.projectId === projectId).map(shot => shot.id));
       if (next.projectId !== projectId || next.stage !== stage || next.items.some(item => !ownedIds.has(item.shotId))) {
         throw new PreparationUiError("生产预检归属不一致，请刷新项目后重试。");
       }
+      if (new Set(next.items.map(item => item.shotId)).size !== next.items.length) throw new PreparationUiError("预检返回重复镜头，请刷新项目。");
       setProjectPlan(next);
       return next;
     } finally {
@@ -174,21 +187,20 @@ function ScopedShotBulkConfigPanel({
     return () => { planRequest.current++; };
     // A saved Shot edit invalidates readiness, even when its ID is unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, stage, shots]);
+  }, [projectId, stage, shots, tree, scopeKey]);
 
   function applyPreset(preset: BulkSelectionPreset) {
     const ids = preset === "ready" && projectPlan
-      ? projectPlan.items
-        .filter((item) => item.status === "READY" && !item.alreadyPrepared)
-        .sort((left, right) => left.ordinal - right.ordinal || left.shotId.localeCompare(right.shotId))
+      ? scopeShots
+        .filter((shot) => planByShotId.get(shot.id)?.status === "READY" && !planByShotId.get(shot.id)?.alreadyPrepared)
         .slice(0, MAX_BULK_PREPARATION_ITEMS)
-        .map((item) => item.shotId)
-      : preset === "ready" ? [] : bulkSelectionIds(shots.filter(shot => shot.projectId === projectId), preset, stage);
+        .map((shot) => shot.id)
+      : preset === "ready" ? [] : scopeShots.filter(shot => preset === "all" || !shotHasStageConfig(shot, stage)).map(shot => shot.id);
     setSelectedIds(new Set(ids));
     setPreparationResult(undefined);
     reportNotice(
       preset === "all"
-        ? `已选择全部 ${shots.length} 个镜头。`
+        ? `已选择本范围全部 ${scopeShots.length} 个镜头。`
         : preset === "ready"
           ? `已选择当前${stageLabel(stage)}待启动的镜头。`
           : `已选择当前${stageLabel(stage)}未配置的镜头。`,
@@ -229,7 +241,10 @@ function ScopedShotBulkConfigPanel({
     } catch (error: unknown) {
       if (isCurrent(requestedOwner)) reportError(preparationErrorMessage(error));
     } finally {
-      if (isCurrent(requestedOwner)) { actionLock.current = false; setBusyAction(undefined); }
+      // The lock fences this action until it settles, even if a refreshed tree
+      // changes the selected scope's Shot IDs. Ignore stale results, but release
+      // the same mounted instance so it can prepare its new scope again.
+      if (mounted.current) { actionLock.current = false; setBusyAction(undefined); }
     }
   }
 
@@ -276,14 +291,15 @@ function ScopedShotBulkConfigPanel({
         if (!fresh) throw new PreparationUiError("镜头资料已变更，预检已失效，请重新准备。");
         const selected = fresh.items.filter(item => shotIds.includes(item.shotId));
         if (selected.length !== shotIds.length) throw new PreparationUiError("所选镜头已变更或不属于当前项目。");
-        if (!allowPartial && selected.some(item => item.status !== "READY" || item.alreadyPrepared)) {
-          throw new PreparationUiError("最新预检未通过或镜头已经准备，请检查阻塞原因和陈旧快照。");
+        if (!allowPartial && selected.some(item => item.status !== "READY")) {
+          throw new PreparationUiError("最新预检未通过，请检查阻塞原因和陈旧快照。");
         }
         const result = await admitProjectProduction({
           projectId,
           stage: nextStage,
           shotIds,
           allowPartial,
+          ...(scope ? { scope } : {}),
         });
         if (!isCurrent(requestedOwner)) return;
         if (result.projectId !== projectId || result.stage !== nextStage) throw new PreparationUiError("批次准入回执归属不一致。");
@@ -332,7 +348,7 @@ function ScopedShotBulkConfigPanel({
         <button type="button" className="quiet-button" onClick={() => setSelectedIds(new Set())} disabled={Boolean(busyAction) || !selectedCount}>取消全选</button>
         <button type="button" className="quiet-button" onClick={() => applyPreset("ready")} disabled={Boolean(busyAction)}>选择就绪项</button>
         <button type="button" className="quiet-button" onClick={() => applyPreset("unconfigured")} disabled={Boolean(busyAction)}>选择未配置</button>
-        <span>{selectedCount} / {shots.length} 已选择</span>
+        <span>{selectedCount} / {scopeShots.length} 已选择</span>
       </div>
 
       <div className="pipeline-filter-tabs" role="group" aria-label="项目生产计划筛选">
@@ -364,8 +380,8 @@ function ScopedShotBulkConfigPanel({
       <button type="button" className="quiet-button" onClick={() => void refreshPlan().catch(error => { if (isCurrent(owner)) reportError(toUserMessage(error)); })} disabled={Boolean(busyAction) || planLoading}>重新检查资格</button>
 
       <div className="pipeline-preparation-summary" aria-label="项目生产准备计划">
-        <span>{planLoading ? "正在进行项目级 Live preflight…" : `当前${stageLabel(stage)}计划：${projectPlan?.total ?? 0} 个镜头`}</span>
-        <span>可准备 {projectPlan?.readyCount ?? 0} · 已准备 {projectPlan?.preparedCount ?? 0} · 阻塞 {projectPlan?.blockedCount ?? 0}</span>
+        <span>{planLoading ? "正在进行项目级 Live preflight…" : `本范围${stageLabel(stage)}计划：${scopeShots.length} 个镜头`}</span>
+        <span>可准备 {scopeShots.filter(s => planByShotId.get(s.id)?.status === "READY" && !planByShotId.get(s.id)?.alreadyPrepared).length} · 已准备 {scopeShots.filter(s => planByShotId.get(s.id)?.alreadyPrepared).length} · 不完整 {scopeShots.filter(s => planByShotId.get(s.id)?.status === "INCOMPLETE").length} · 阻塞 {scopeShots.filter(s => planByShotId.get(s.id)?.status === "BLOCKED").length}</span>
         <label><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={Boolean(busyAction) || planLoading} /> 允许部分准备：只准备当前可准备镜头，阻塞镜头不写入本批次</label>
         <small>可准备只是准备前状态；已创建批次为待启动，不等于运行中。只有生产队列的“开始生产”会执行。</small>
       </div>
@@ -408,7 +424,7 @@ function ScopedShotBulkConfigPanel({
       </div>
 
       <p className="pipeline-human-review-note"><strong>人工审核保持不变：</strong>生成成功、候选选用和人工审核通过是三个独立状态；准备与生成不会自动选择候选或通过审核。</p>
-      {preparationResult && <div className="pipeline-preparation-result" role="status"><strong>已准备完成 · {preparationResult.createdCount} 个镜头</strong><span>已创建待启动批次；当前尚未开始生产。已准备 {preparationResult.alreadyPreparedCount} · 阻塞跳过 {preparationResult.skippedBlocked} · 不完整跳过 {preparationResult.skippedIncomplete}。</span>{onOpenProductionQueue && preparationResult.createdCount > 0 && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue(preparationResult.batchId ?? preparationResult.createdBatchIds?.[0])}>打开生产队列</button>}</div>}
+      {preparationResult && <div className="pipeline-preparation-result" role="status"><strong>已准备完成 · {preparationResult.createdCount} 个镜头</strong><span>已创建待启动批次；当前尚未开始生产。已准备 {preparationResult.alreadyPreparedCount} · 阻塞跳过 {preparationResult.skippedBlocked} · 不完整跳过 {preparationResult.skippedIncomplete}。</span>{onOpenProductionQueue && (preparationResult.createdCount > 0 || preparationResult.alreadyPreparedCount > 0) && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue(preparationResult.batchId ?? preparationResult.createdBatchIds?.[0] ?? preparationResult.matchingPreparedBatchIds?.[0])}>打开生产队列</button>}</div>}
       {localNotice && <p className="studio-notice">{localNotice}</p>}
       {localError && <p className="error-message" role="alert">{localError}</p>}
     </section>

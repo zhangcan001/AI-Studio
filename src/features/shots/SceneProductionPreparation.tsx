@@ -67,6 +67,7 @@ function ScopedSceneProductionPreparation({
   const [error, setError] = useState<PreparationError>();
   const [notice, setNotice] = useState<string>();
   const [admissionResult, setAdmissionResult] = useState<SceneProductionAdmissionResult>();
+  const [allowPartial, setAllowPartial] = useState(false);
 
   const owner = JSON.stringify([projectId, sceneId, stage]);
   const currentOwner = useRef(owner);
@@ -142,7 +143,7 @@ function ScopedSceneProductionPreparation({
   }
 
   function toggleShot(item: ShotProductionPlanSummary) {
-    if (item.status !== "READY" || item.alreadyPrepared || isBusy) return;
+    if (isBusy || (!allowPartial && (item.status !== "READY" || item.alreadyPrepared))) return;
     setSelectedShotIds((current) => {
       const next = new Set(current);
       if (next.has(item.shotId)) next.delete(item.shotId);
@@ -182,7 +183,7 @@ function ScopedSceneProductionPreparation({
 
   async function admit() {
     if (!sceneId || !selectedCount || isBusy || admissionLock.current || stage !== "video") return;
-    const ids = [...selectedShotIds];
+    const ids = items.filter(item => selectedShotIds.has(item.shotId)).map(item => item.shotId);
     if (!confirmAdmission(ids.length)) return;
     const requestedOwner = owner;
     admissionLock.current = true;
@@ -194,13 +195,13 @@ function ScopedSceneProductionPreparation({
       if (!isCurrent(requestedOwner)) return;
       if (fresh.projectId !== projectId || fresh.sceneId !== sceneId || fresh.stage !== stage) throw new Error("场景预检归属不一致");
       setView(fresh);
-      if (ids.some(id => !fresh.items.some(item => item.shotId === id && item.status === "READY" && !item.alreadyPrepared))) throw new Error("最新预检未通过或镜头已经准备");
+      if (new Set(fresh.items.map(item => item.shotId)).size !== fresh.items.length || ids.some(id => !fresh.items.some(item => item.shotId === id && (allowPartial || item.status === "READY")))) throw new Error("最新预检未通过或镜头已离开场景");
       const result = await admitSceneProduction({
         projectId,
         sceneId,
         stage,
-        shotIds: ids,
-        allowPartial: false,
+        shotIds: fresh.items.filter(item => selectedShotIds.has(item.shotId)).map(item => item.shotId),
+        allowPartial,
       });
       if (!isCurrent(requestedOwner)) return;
       if (result.projectId !== projectId || result.stage !== stage || (result.sceneId && result.sceneId !== sceneId)) throw new Error("场景准入回执归属不一致");
@@ -268,9 +269,10 @@ function ScopedSceneProductionPreparation({
           {readyItems.length > MAX_PREPARATION_BATCH_ITEMS && <p className="scene-preparation-limit" role="status">可准备镜头超过 {MAX_PREPARATION_BATCH_ITEMS} 个；选择全部时只取前 {MAX_PREPARATION_BATCH_ITEMS} 个，单批次最多 {MAX_PREPARATION_BATCH_ITEMS} 个镜头。</p>}
           {!view && busyAction === "preflight" && <div className="scene-preparation-empty"><strong>正在检查场景</strong><span>只执行一次场景级 Live preflight，不会创建 Batch、Task 或生成任务。</span></div>}
           {view && !items.length && <div className="scene-preparation-empty"><strong>场景暂无镜头</strong><span>请回到现有内容结构分配镜头。</span></div>}
-          {items.length > 0 && <div className="scene-preparation-shot-list">{items.map((item) => <ShotPreparationCard key={item.shotId} item={item} selected={selectedShotIds.has(item.shotId)} onToggle={() => toggleShot(item)} onInspect={() => void openDetail(item)} disabled={isBusy} />)}</div>}
+          {items.length > 0 && <div className="scene-preparation-shot-list">{items.map((item) => <ShotPreparationCard key={item.shotId} item={item} selected={selectedShotIds.has(item.shotId)} onToggle={() => toggleShot(item)} onInspect={() => void openDetail(item)} disabled={isBusy} allowPartial={allowPartial} />)}</div>}
+          <label><input type="checkbox" checked={allowPartial} onChange={event => setAllowPartial(event.target.checked)} disabled={isBusy} /> 允许部分准备：显式跳过当前不合格镜头，以回执为准</label>
           <div className="scene-preparation-admission-bar">
-            <div><strong>{selectedCount ? "将创建 " + selectedCount + " 个待启动批次项目" : "请选择可准备镜头"}</strong><span>后端会再次 Live preflight；本动作只创建待启动批次，不会开始真实生产。</span></div>
+            <div><strong>{selectedCount ? "将提交 " + selectedCount + " 个镜头，实际创建、复用及跳过以回执为准" : "请选择可准备镜头"}</strong><span>后端会再次 Live preflight；本动作只创建待启动批次，不会开始真实生产。</span></div>
             <button type="button" onClick={() => void admit()} disabled={stage !== "video" || isBusy || selectedCount === 0}>{busyAction === "admit" ? "创建中…" : "创建待启动批次"}</button>
           </div>
         </section>
@@ -282,7 +284,7 @@ function ScopedSceneProductionPreparation({
       {admissionResult && <section className="scene-preparation-success" aria-label="待启动批次创建结果">
         <div><strong>已准备完成 · 待启动</strong><span>已创建待启动批次和项目；当前尚未开始生产，也没有提交生成。</span></div>
         <dl><div><dt>创建</dt><dd>{admissionResult.createdCount}</dd></div><div><dt>复用</dt><dd>{admissionResult.alreadyPreparedCount}</dd></div><div><dt>跳过</dt><dd>{admissionResult.skippedIncomplete + admissionResult.skippedBlocked}</dd></div></dl>
-        <button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(admissionResult.batchId ?? admissionResult.createdBatchIds?.[0])} disabled={!onOpenProductionQueue}>前往生产队列</button>
+        <button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(admissionResult.batchId ?? admissionResult.createdBatchIds?.[0] ?? admissionResult.matchingPreparedBatchIds?.[0])} disabled={!onOpenProductionQueue || (!admissionResult.createdCount && !admissionResult.alreadyPreparedCount)}>前往生产队列</button>
       </section>}
       <p className="scene-preparation-footer-note">生产队列仍由现有 Runbook 手动操作；本页面只负责准备并创建待启动批次。</p>
       {stage === "image" && <p>图片生成已退休；保留历史计划，不创建新图片生产。</p>}
@@ -294,8 +296,8 @@ function SummaryCard({ label, value, tone }: { label: string; value: number; ton
   return <div className={"scene-preparation-summary-card" + (tone ? " scene-preparation-summary-" + tone : "")}><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function ShotPreparationCard({ item, selected, onToggle, onInspect, disabled }: { item: ShotProductionPlanSummary; selected: boolean; onToggle: () => void; onInspect: () => void; disabled: boolean }) {
-  const isSelectable = item.status === "READY" && !item.alreadyPrepared;
+function ShotPreparationCard({ item, selected, onToggle, onInspect, disabled, allowPartial }: { item: ShotProductionPlanSummary; selected: boolean; onToggle: () => void; onInspect: () => void; disabled: boolean; allowPartial: boolean }) {
+  const isSelectable = allowPartial || item.status === "READY" && !item.alreadyPrepared;
   const stale = (item.stalePreparedBatchIds?.length ?? 0) > 0;
   return (
     <article className={"scene-preparation-shot-card scene-preparation-shot-" + item.status.toLowerCase()} data-shot-id={item.shotId}>

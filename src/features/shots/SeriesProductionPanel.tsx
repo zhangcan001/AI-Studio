@@ -12,6 +12,7 @@ import type {
 } from "../../types/seriesProduction";
 import { orderedEpisodes, orderedScenes, orderedSeries } from "./productionStructureState";
 import { sceneProductionStageLabel } from "../../types/sceneProduction";
+import { ShotBulkConfigPanel } from "./ShotBulkConfigPanel";
 import "./SeriesProductionPanel.css";
 
 const STAGES: SeriesProductionStage[] = ["image", "video"];
@@ -19,12 +20,18 @@ const FILTERS: SeriesProductionFilter[] = ["all", "ready", "blocked", "prepared"
 
 type SeriesError = { code: string; message: string };
 
-export function SeriesProductionPanel({
+export function SeriesProductionPanel(props: SeriesProductionPanelProps) {
+  return <ScopedSeriesProductionPanel key={JSON.stringify([props.projectId, props.currentSeriesId])} {...props} />;
+}
+
+function ScopedSeriesProductionPanel({
   projectId,
   tree,
   shots,
   initialPresets = [],
   initialPlan,
+  currentSeriesId,
+  onOpenShot,
   onPlan,
   onPrepare,
   onApplyPreset,
@@ -36,7 +43,7 @@ export function SeriesProductionPanel({
   onNavigateToEpisode,
 }: SeriesProductionPanelProps) {
   const seriesOptions = useMemo(() => productionSeriesOptions(tree), [tree]);
-  const [seriesId, setSeriesId] = useState(initialPlan?.seriesId ?? seriesOptions[0]?.value ?? "");
+  const [seriesId, setSeriesId] = useState(currentSeriesId ?? initialPlan?.seriesId ?? seriesOptions[0]?.value ?? "");
   const [stage, setStage] = useState<SeriesProductionStage>(initialPlan?.stage ?? "video");
   const [plan, setPlan] = useState<SeriesProductionPlan | undefined>(initialPlan);
   const [selectedEpisodeIds, setSelectedEpisodeIds] = useState<string[]>([]);
@@ -69,12 +76,13 @@ export function SeriesProductionPanel({
   const selectedPreset = presets.find((preset) => preset.id === selectedPresetId);
 
   useEffect(() => {
+    if (currentSeriesId && !seriesOptions.some(option => option.value === currentSeriesId)) return;
     if (seriesId && seriesOptions.some((option) => option.value === seriesId)) return;
     setSeriesId(seriesOptions[0]?.value ?? "");
-  }, [seriesId, seriesOptions]);
+  }, [seriesId, seriesOptions, currentSeriesId]);
 
   useEffect(() => {
-    if (!onPlan || !seriesId) return;
+    if (stage === "video" || !onPlan || !seriesId) return;
     if (initialPlan?.seriesId === seriesId && initialPlan.stage === stage) return;
     let active = true;
     setBusyAction("plan");
@@ -117,7 +125,7 @@ export function SeriesProductionPanel({
   }
 
   async function refreshPlan() {
-    if (!onPlan || !seriesId) return;
+    if (stage === "video" || !onPlan || !seriesId) return;
     await runAction("plan", async () => setPlan(await onPlan({ projectId, seriesId, stage })));
   }
 
@@ -214,10 +222,10 @@ export function SeriesProductionPanel({
       <div className="series-production-toolbar">
         <label><span>系列</span><select value={seriesId} onChange={(event) => selectSeries(event.target.value)} disabled={isBusy} aria-label="系列选择">{seriesOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
         <div className="series-production-stage-tabs" role="tablist" aria-label="生产阶段">{STAGES.map((nextStage) => <button key={nextStage} type="button" className={stage === nextStage ? "active" : ""} role="tab" aria-selected={stage === nextStage} onClick={() => selectStage(nextStage)} disabled={isBusy}>{sceneProductionStageLabel(nextStage)}</button>)}</div>
-        <button type="button" className="quiet-button" onClick={() => void refreshPlan()} disabled={isBusy || !onPlan}>{busyAction === "plan" ? "检查中…" : "重新检查计划"}</button>
+        {stage === "image" && <button type="button" className="quiet-button" onClick={() => void refreshPlan()} disabled={isBusy || !onPlan}>{busyAction === "plan" ? "检查中…" : "重新检查计划"}</button>}
       </div>
 
-      {plan ? <>
+      {stage === "video" ? <ShotBulkConfigPanel projectId={projectId} shots={shots} tree={tree} scope={{ kind: "series", id: seriesId }} onRefresh={onRefresh} onNotice={onNotice} onError={message => onError?.(message ?? "")} onOpenProductionQueue={onOpenProductionQueue} onOpenShot={onOpenShot} /> : plan ? <>
         <div className="series-production-summary" aria-label="系列汇总">
           <div><span>系列</span><strong>{plan.seriesName || currentSeries?.label || "—"}</strong></div><div><span>集</span><strong>{plan.episodeTotal}</strong></div><div><span>场景</span><strong>{plan.sceneTotal}</strong></div><div><span>镜头</span><strong>{plan.shotTotal}</strong></div><div><span>已完成</span><strong>{plan.done}</strong></div><div><span>已准备</span><strong>{plan.prepared}</strong></div><div><span>可生产</span><strong>{plan.eligible}</strong></div><div><span>已阻塞</span><strong>{plan.blocked}</strong></div><div><span>可生产集</span><strong>{plan.readyEpisodeCount}</strong></div><div><span>阻塞集</span><strong>{plan.blockedEpisodeCount}</strong></div><div><span>已完成集</span><strong>{plan.completedEpisodeCount}</strong></div>
         </div>
@@ -234,7 +242,7 @@ export function SeriesProductionPanel({
 
         </div>
 
-        <section className="series-production-card series-production-prepare" aria-label="系列准备"><div className="series-production-card-heading"><div><span className="section-label">准备</span><h4>准备所选集</h4></div><span>预计 {selectedSceneIds.length} 个场景 · 最多 {selectedSceneIds.length} 个就绪批次</span></div><label className="series-production-partial-toggle"><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 跳过阻塞内容，仅准备当前可生产场景</label><p className="series-production-hint">默认严格模式；严格模式遇到阻塞或部分完成时保持 0 次变更。不会自动启动 GPU，也不会自动启动下一批。</p><button type="button" className="series-production-primary-action" onClick={() => void prepare()} disabled={stage !== "video" || isBusy || !selectedEpisodeIds.length || !onPrepare}>{busyAction === "prepare" ? "准备中…" : "准备所选集"}</button></section>
+        <section className="series-production-card series-production-prepare" aria-label="系列准备"><div className="series-production-card-heading"><div><span className="section-label">准备</span><h4>准备所选集</h4></div><span>预计 {selectedSceneIds.length} 个场景 · 最多 {selectedSceneIds.length} 个就绪批次</span></div><label className="series-production-partial-toggle"><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 跳过阻塞内容，仅准备当前可生产场景</label><p className="series-production-hint">默认严格模式；严格模式遇到阻塞或部分完成时保持 0 次变更。不会自动启动 GPU，也不会自动启动下一批。</p><button type="button" className="series-production-primary-action" onClick={() => void prepare()} disabled>{busyAction === "prepare" ? "准备中…" : "准备所选集"}</button></section>
       </> : <div className="series-production-loading" role="status">正在加载系列生产计划…</div>}
 
       {result && <SeriesPrepareResultView result={result} onOpenProductionQueue={onOpenProductionQueue} disabled={isBusy} onNavigateToEpisode={onNavigateToEpisode} />}

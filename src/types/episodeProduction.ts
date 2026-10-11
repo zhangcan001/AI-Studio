@@ -82,6 +82,8 @@ export interface EpisodeProductionPrepareResult {
 }
 
 export interface EpisodeProductionPanelProps {
+  currentEpisodeId?: string;
+  onOpenShot?: (shotId: string) => void;
   projectId: string;
   tree: ProductionStructureTree;
   shots: ShotView[];

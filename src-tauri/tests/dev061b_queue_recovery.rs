@@ -135,6 +135,9 @@ struct ControlledComfy {
     upload_entered: Arc<tokio::sync::Notify>,
     upload_release: Arc<tokio::sync::Notify>,
     object_info: Option<Value>,
+    output_node: String,
+    active_execution: Arc<AtomicUsize>,
+    max_concurrent: Arc<AtomicUsize>,
     fail_second: bool,
     behavior: Arc<Mutex<ComfyBehavior>>,
     submit_calls: Arc<AtomicUsize>,
@@ -149,6 +152,9 @@ impl ControlledComfy {
             upload_entered: Arc::new(tokio::sync::Notify::new()),
             upload_release: Arc::new(tokio::sync::Notify::new()),
             object_info: None,
+            output_node: "11".into(),
+            active_execution: Arc::new(AtomicUsize::new(0)),
+            max_concurrent: Arc::new(AtomicUsize::new(0)),
             fail_second: false,
             behavior: Arc::new(Mutex::new(behavior)),
             submit_calls: Arc::new(AtomicUsize::new(0)),
@@ -176,6 +182,8 @@ struct ControlledEvents {
     behavior: Arc<Mutex<ComfyBehavior>>,
     last_prompt_id: Arc<Mutex<Option<String>>>,
     started: bool,
+    finished: bool,
+    active_execution: Arc<AtomicUsize>,
 }
 
 struct ControlledVideoStream {
@@ -277,6 +285,10 @@ impl ComfyEventSubscription for ControlledEvents {
                     .clone()
                     .expect("submit should precede execution events");
                 if self.started {
+                    if !self.finished {
+                        self.finished = true;
+                        self.active_execution.fetch_sub(1, Ordering::SeqCst);
+                    }
                     Ok(Some(ComfyExecutionEvent::ExecutionSucceeded { prompt_id }))
                 } else {
                     self.started = true;
@@ -365,7 +377,7 @@ impl ComfyAdapter for ControlledComfy {
                     messages: None,
                 },
                 outputs: std::collections::BTreeMap::from([(
-                    "11".to_owned(),
+                    self.output_node.clone(),
                     ComfyNodeOutput {
                         images: vec![ComfyOutputFile {
                             filename: "ComfyUI_00001.mp4".to_owned(),
@@ -426,6 +438,8 @@ impl ComfyAdapter for ControlledComfy {
             .last_prompt_id
             .lock()
             .expect("prompt id mutex should work") = Some(prompt_id.to_owned());
+        let active = self.active_execution.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_concurrent.fetch_max(active, Ordering::SeqCst);
         Ok(PromptSubmission {
             prompt_id: prompt_id.to_owned(),
             number: Some(1),
@@ -448,6 +462,8 @@ impl ComfyAdapter for ControlledComfy {
             behavior: Arc::clone(&self.behavior),
             last_prompt_id: Arc::clone(&self.last_prompt_id),
             started: false,
+            finished: false,
+            active_execution: self.active_execution.clone(),
         }))
     }
 }
@@ -612,7 +628,14 @@ fn build_services_with_admission(
         Arc::new(SqliteProjectRepository::new(pool.clone()));
     let asset_repository: Arc<dyn AssetRepository> =
         Arc::new(SqliteAssetRepository::new(pool.clone()));
-    let (asset_store_impl, asset_reads) = GuardedAssetStore::new(package_root);
+    // The capability fixture uses an environment root containing separate
+    // library/project dirs. Protect package bytes, not its managed project media.
+    let guarded_packages = if comfy.object_info.is_some() {
+        package_root.join("library")
+    } else {
+        package_root.to_path_buf()
+    };
+    let (asset_store_impl, asset_reads) = GuardedAssetStore::new(&guarded_packages);
     let asset_store: Arc<dyn AssetStore> = Arc::new(asset_store_impl);
     let task_repository: Arc<dyn TaskRepository> =
         Arc::new(SqliteTaskRepository::new(pool.clone()));

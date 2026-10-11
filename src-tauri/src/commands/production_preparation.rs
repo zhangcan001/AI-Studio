@@ -17,6 +17,7 @@
 //! The command returns the stable domain DTOs directly; their
 //! `camelCase` serde representation is the public wire shape.
 
+use crate::domain::production_preparation::PreparationScope;
 use crate::{
     app_state::AppState,
     application::production_preparation_service::ProductionPreparationService,
@@ -66,6 +67,8 @@ pub struct ShotProductionPlanDetailRequest {
 pub struct ProjectProductionPreflightRequest {
     pub project_id: String,
     pub stage: String,
+    #[serde(default)]
+    pub scope: Option<PreparationScope>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +79,8 @@ pub struct ProjectProductionAdmitRequest {
     pub shot_ids: Vec<String>,
     #[serde(default)]
     pub allow_partial: bool,
+    #[serde(default)]
+    pub scope: Option<PreparationScope>,
 }
 
 /// Read-only scene preparation. This command must not create a batch, task,
@@ -120,11 +125,14 @@ pub async fn scene_production_admit(
     let result = state
         .production
         .preparation
-        .admit(
+        .admit_scoped(
             &request.project_id,
             &request.shot_ids,
             stage,
             request.allow_partial,
+            Some(&PreparationScope::Scene {
+                id: request.scene_id.clone(),
+            }),
         )
         .await
         .map_err(map_preparation_error)?;
@@ -156,7 +164,7 @@ pub async fn project_production_preflight(
     request: ProjectProductionPreflightRequest,
 ) -> Result<ProjectPreparationView, AppError> {
     let stage = parse_stage(&request.stage)?;
-    let shot_ids = project_scope(&state, &request.project_id).await?;
+    let shot_ids = project_scope(&state, &request.project_id, request.scope.as_ref()).await?;
     if shot_ids.is_empty() {
         return Ok(project_view(request.project_id, stage, Vec::new()));
     }
@@ -177,7 +185,8 @@ pub async fn project_production_admit(
     request: ProjectProductionAdmitRequest,
 ) -> Result<ProductionPreparationAdmission, AppError> {
     let stage = parse_stage(&request.stage)?;
-    let project_shot_ids = project_scope(&state, &request.project_id).await?;
+    let project_shot_ids =
+        project_scope(&state, &request.project_id, request.scope.as_ref()).await?;
     validate_project_shot_ids(
         &request.shot_ids,
         &project_shot_ids,
@@ -186,11 +195,12 @@ pub async fn project_production_admit(
     state
         .production
         .preparation
-        .admit(
+        .admit_scoped(
             &request.project_id,
             &request.shot_ids,
             stage,
             request.allow_partial,
+            request.scope.as_ref(),
         )
         .await
         .map_err(map_preparation_error)
@@ -228,7 +238,11 @@ fn project_view(
     }
 }
 
-async fn project_scope(state: &AppState, project_id: &str) -> Result<Vec<String>, AppError> {
+async fn project_scope(
+    state: &AppState,
+    project_id: &str,
+    scope: Option<&PreparationScope>,
+) -> Result<Vec<String>, AppError> {
     let tree = state
         .organization
         .production_structure
@@ -240,6 +254,16 @@ async fn project_scope(state: &AppState, project_id: &str) -> Result<Vec<String>
     for series in tree.series {
         for episode in series.episodes {
             for scene in episode.scenes {
+                let include = match scope {
+                    None | Some(PreparationScope::Project) => true,
+                    Some(PreparationScope::Series { id }) => *id == series.series.id,
+                    Some(PreparationScope::Episode { id }) => *id == episode.episode.id,
+                    Some(PreparationScope::Scene { id }) => *id == scene.scene.id,
+                    Some(PreparationScope::Unassigned) => false,
+                };
+                if !include {
+                    continue;
+                }
                 for shot_id in scene.shot_ids {
                     if seen.insert(shot_id.clone()) {
                         shot_ids.push(shot_id);
@@ -248,7 +272,12 @@ async fn project_scope(state: &AppState, project_id: &str) -> Result<Vec<String>
             }
         }
     }
-    for shot_id in tree.unassigned_shot_ids {
+    for shot_id in tree.unassigned_shot_ids.into_iter().filter(|_| {
+        matches!(
+            scope,
+            None | Some(PreparationScope::Project | PreparationScope::Unassigned)
+        )
+    }) {
         if seen.insert(shot_id.clone()) {
             shot_ids.push(shot_id);
         }
@@ -345,6 +374,27 @@ fn map_preparation_error(error: impl std::fmt::Display) -> AppError {
 mod tests {
     use super::{parse_stage, validate_project_shot_ids};
     use crate::domain::ShotStage;
+
+    #[test]
+    fn project_scope_dto_is_optional_for_history_and_strict_for_new_hierarchy_requests() {
+        use super::{ProjectProductionAdmitRequest, ProjectProductionPreflightRequest};
+        use serde_json::json;
+        assert!(serde_json::from_value::<ProjectProductionPreflightRequest>(
+            json!({"projectId":"p","stage":"video"})
+        )
+        .is_ok());
+        assert!(serde_json::from_value::<ProjectProductionAdmitRequest>(json!({"projectId":"p","stage":"video","shotIds":["s"],"scope":{"kind":"episode","id":"e"}})).is_ok());
+        for scope in [
+            json!({"kind":"episode"}),
+            json!({"kind":"UNKNOWN","id":"e"}),
+            json!({"kind":"series","id":"s","frozenValues":{}}),
+        ] {
+            assert!(serde_json::from_value::<ProjectProductionPreflightRequest>(
+                json!({"projectId":"p","stage":"video","scope":scope})
+            )
+            .is_err());
+        }
+    }
 
     #[test]
     fn parse_stage_accepts_wire_case() {

@@ -542,7 +542,7 @@ export function ProductionQueuePanel({
                     </button>
                   </>
                 ) : queue.status === "RUNNING" ? (
-                  <button type="button" className="quiet-button" onClick={() => void pauseQueue(queue.id)} disabled={busy}>
+                  <button type="button" className="quiet-button" onClick={() => void pauseQueue(queue.id)} disabled={busy} title="仅停止后续派发，已提交任务继续运行到结束">
                     暂停
                   </button>
                 ) : (
@@ -660,6 +660,7 @@ export function ProductionQueuePanel({
             <p role="alert">工作流与当前 ComfyUI 不兼容，剩余 {detail.pending} 项尚未执行。修复原插件后可继续；若改用兼容工作流，请新建生产任务，原批次和失败记录保留。</p>
           )}
           <div className="production-queue-stats">
+            <p>暂停仅停止后续派发，已提交任务继续运行；取消待执行项不取消当前任务。继续生产会重新检查正式启动资格，不自动重试失败项。</p>
             <span>总数 <strong>{detail.total}</strong></span>
             <span>待执行 <strong>{detail.pending}</strong></span>
             <span>运行中 <strong>{detail.running}</strong></span>

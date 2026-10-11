@@ -1270,6 +1270,7 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
 
   const projectStoryboard = (
     <ProjectProductionPipeline
+      tree={productionStructure}
       projectId={projectId}
       shots={shots}
       onRefresh={reload}
@@ -1512,6 +1513,8 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
             />
           ) : contextSurface === "series" ? (
             <SeriesProductionPanel
+              currentSeriesId={workspaceSelection.type === "series" ? workspaceSelection.seriesId : undefined}
+              onOpenShot={(shotId) => { setStage("video"); selectWorkspaceSelection({ type: "shot", shotId }); }}
               projectId={projectId}
               tree={productionStructure}
               shots={shots}
@@ -1537,6 +1540,8 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
             />
           ) : contextSurface === "episode" ? (
             <EpisodeProductionPanel
+              currentEpisodeId={workspaceSelection.type === "episode" ? workspaceSelection.episodeId : undefined}
+              onOpenShot={(shotId) => { setStage("video"); selectWorkspaceSelection({ type: "shot", shotId }); }}
               projectId={projectId}
               tree={productionStructure}
               shots={shots}

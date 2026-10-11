@@ -1,5 +1,6 @@
 // Validate the CI-only immutable-blob optimization before replaying frozen Phase5A.
 import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
+import { uiPhase5BParentReader, phase5BFixtureFiles } from './ui-phase5b-mixed-video-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -52,11 +53,12 @@ function files(root, dir) {
     return entry.isDirectory() ? files(root, p) : [p];
   }).sort();
 }
-export const phase5CiFixtureFiles = root => [...new Set([...phase5CiParentFacts(root).paths, ...PHASE5_CI_FILES])];
+export const phase5CiFixtureFiles = root => [...new Set([...phase5CiParentFacts(root).paths, ...PHASE5_CI_FILES, ...phase5BFixtureFiles(root)])];
 function validate(root, override) {
-  const violations = [], fail = name => violations.push('ui-phase5-ci-repair-' + name);
+  const successor = uiPhase5BParentReader(root);
+  const violations = [...successor.violations], fail = name => violations.push('ui-phase5-ci-repair-' + name);
   const live = new Map(), read = p => {
-    if (!live.has(p)) live.set(p, normalize(readFileSync(join(root, p), 'utf8')));
+    if (!live.has(p)) live.set(p, normalize(successor.read(p)));
     return live.get(p);
   };
   const denied = () => ({ violations, addedPaths: [], afterHashes: {}, read });
@@ -74,7 +76,7 @@ function validate(root, override) {
   if (JSON.stringify(Object.keys(proof.paths ?? {}).sort()) !== JSON.stringify(scope)) fail('scope');
   if (JSON.stringify(proof.invariants) !== JSON.stringify(PHASE5_CI_INVARIANTS)
       || JSON.stringify(proof.database) !== JSON.stringify(PHASE5_CI_DATABASE)) fail('contract');
-  if (violations.length) return denied();
+  if (violations.length > successor.violations.length) return denied();
   try {
     for (const p of PHASE5_CI_EXISTING) {
       if (!parent.paths.includes(p) || proof.paths[p]?.beforeHash !== phase5CiHash(parent.read(p))
@@ -87,7 +89,8 @@ function validate(root, override) {
     for (const dir of directories) {
       const expected = [...parent.paths.filter(p => p.startsWith(dir + '/')),
         ...PHASE5_CI_ADDED.filter(p => p.startsWith(dir + '/')),
-        ...[PHASE5_CI_MANIFEST].filter(p => p.startsWith(dir + '/'))].sort();
+        ...[PHASE5_CI_MANIFEST].filter(p => p.startsWith(dir + '/')),
+        ...successor.addedPaths.filter(p => p.startsWith(dir + '/'))].sort();
       if (JSON.stringify(files(root, dir)) !== JSON.stringify(expected)) fail('inventory:' + dir);
     }
     // Every untouched file is protected, including historical proof JSON and
@@ -115,8 +118,8 @@ function validate(root, override) {
         || rawAggregate(p => readFileSync(join(root, p))) !== baselines[profile]) fail('runtime-package-bytes');
   } catch { fail('missing-evidence'); }
   if (violations.length) return denied();
-  return { violations, addedPaths: [...PHASE5_CI_ADDED, PHASE5_CI_MANIFEST],
-    afterHashes: Object.fromEntries(scope.map(p => [p, proof.paths[p].afterHash])),
+  return { violations, addedPaths: [...PHASE5_CI_ADDED, PHASE5_CI_MANIFEST, ...successor.addedPaths],
+    afterHashes: { ...Object.fromEntries(scope.map(p => [p, proof.paths[p].afterHash])), ...successor.afterHashes },
     read: p => PHASE5_CI_EXISTING.includes(p) ? parent.read(p) : read(p) };
 }
 export function uiPhase5CiParentReader(root, override) {

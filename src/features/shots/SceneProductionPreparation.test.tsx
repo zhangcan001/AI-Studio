@@ -22,6 +22,26 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.mocked(invoke).mockReset(); });
 
+it("Phase5B scene partial admission is opt-in and preserves authoritative scene order despite click order", async () => {
+  const user = userEvent.setup();
+  const sceneView = { ...view, stage: "video" as const };
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  vi.mocked(invoke).mockImplementation(async command => {
+    if (command === "scene_production_preflight") return sceneView;
+    if (command === "scene_production_admit") return { projectId: "project-1", sceneId: "scene-1", stage: "video", createdCount: 1, alreadyPreparedCount: 0, skippedIncomplete: 1, skippedBlocked: 0, createdBatchIds: ["partial"] };
+    throw Error(`Unexpected IPC ${command}`);
+  });
+  render(<SceneProductionPreparation projectId="project-1" sceneOptions={[{ value: "scene-1", label: "scene" }]} currentSceneId="scene-1" />);
+  const missing = await screen.findByRole("checkbox", { name: "选择 屋檐切换" });
+  expect(missing.hasAttribute("disabled")).toBe(true);
+  await user.click(screen.getByRole("checkbox", { name: /允许部分准备/ }));
+  await user.click(missing); await user.click(screen.getByRole("checkbox", { name: "选择 雨夜入口" }));
+  await user.click(screen.getByRole("button", { name: "创建待启动批次" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("scene_production_admit", { request: { projectId: "project-1", sceneId: "scene-1", stage: "video", shotIds: ["shot-1", "shot-3"], allowPartial: true } }));
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "production_queue_start")).toBe(false);
+  await screen.findByText(/已准备完成：已创建 1/);
+});
+
 const summary = (overrides: Partial<ShotProductionPlanSummary> = {}): ShotProductionPlanSummary => ({
   shotId: "shot-1",
   ordinal: 0,
@@ -97,7 +117,7 @@ describe("SceneProductionPreparation", () => {
     expect(html).not.toContain("开始全部");
     expect(html).not.toContain("启动生产");
 
-    const checkboxes = html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? [];
+    const checkboxes = (html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? []).filter(markup => markup.includes('aria-label="选择 '));
     expect(checkboxes).toHaveLength(4);
     expect(checkboxes.find((markup) => markup.includes('aria-label="选择 雨夜入口"'))).not.toContain("disabled");
     expect(checkboxes.find((markup) => markup.includes('aria-label="选择 巷口近景"'))).toContain("disabled");
@@ -123,7 +143,7 @@ describe("SceneProductionPreparation", () => {
     );
     expect(html).toContain("可准备镜头超过 100 个");
     expect(html).toContain("只取前 100 个");
-    expect(html.match(/type="checkbox"/g) ?? []).toHaveLength(105);
+    expect((html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? []).filter(markup => markup.includes('aria-label="选择 '))).toHaveLength(105);
   });
 });
 
