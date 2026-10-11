@@ -1,4 +1,5 @@
 // Validate bounded mixed-mode/hierarchy Phase5B before replaying frozen CI/Phase5A bytes.
+import { uiPhase5CParentReader, phase5CFixtureFiles } from './ui-phase5c-review-successor-guard.mjs';
 import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -52,11 +53,18 @@ function files(root, dir) {
     return entry.isDirectory() ? files(root, p) : [p];
   }).sort();
 }
-export const phase5BFixtureFiles = root => [...new Set([...phase5BParentFacts(root).paths, ...PHASE5B_FILES])];
+export const phase5BFixtureFiles = root => [...new Set([...phase5BParentFacts(root).paths, ...PHASE5B_FILES, ...phase5CFixtureFiles(root)])];
 function validate(root, override) {
-  const violations = [], fail = name => violations.push('ui-phase5b-mixed-video-' + name);
+  const successor = uiPhase5CParentReader(root);
+  const violations = [...successor.violations], fail = name => violations.push('ui-phase5b-mixed-video-' + name);
+  // Preserve the predecessor's inventory diagnostic without accepting a denied
+  // child projection or changing any frozen proof/negative-test contract.
+  for (const violation of successor.violations) {
+    if (violation.startsWith('ui-phase5c-review-inventory:'))
+      fail(violation.slice('ui-phase5c-review-'.length));
+  }
   const live = new Map(), read = p => {
-    if (!live.has(p)) live.set(p, normalize(readFileSync(join(root, p), 'utf8')));
+    if (!live.has(p)) live.set(p, normalize(successor.read(p)));
     return live.get(p);
   };
   const denied = () => ({ violations, addedPaths: [], afterHashes: {}, read });
@@ -87,6 +95,7 @@ function validate(root, override) {
     for (const dir of directories) {
       const expected = [...parent.paths.filter(p => p.startsWith(dir + '/')),
         ...PHASE5B_ADDED.filter(p => p.startsWith(dir + '/')),
+        ...successor.addedPaths.filter(p => p.startsWith(dir + '/')),
         ...[PHASE5B_MANIFEST].filter(p => p.startsWith(dir + '/'))].sort();
       if (JSON.stringify(files(root, dir)) !== JSON.stringify(expected)) fail('inventory:' + dir);
     }
@@ -115,8 +124,8 @@ function validate(root, override) {
         || rawAggregate(p => readFileSync(join(root, p))) !== baselines[profile]) fail('runtime-package-bytes');
   } catch { fail('missing-evidence'); }
   if (violations.length) return denied();
-  return { violations, addedPaths: [...PHASE5B_ADDED, PHASE5B_MANIFEST],
-    afterHashes: Object.fromEntries(scope.map(p => [p, proof.paths[p].afterHash])),
+  return { violations, addedPaths: [...PHASE5B_ADDED, PHASE5B_MANIFEST, ...successor.addedPaths],
+    afterHashes: { ...Object.fromEntries(scope.map(p => [p, proof.paths[p].afterHash])), ...successor.afterHashes },
     read: p => PHASE5B_EXISTING.includes(p) ? parent.read(p) : read(p) };
 }
 export function uiPhase5BParentReader(root, override) {

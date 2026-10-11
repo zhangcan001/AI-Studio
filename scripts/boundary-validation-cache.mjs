@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync as exec } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-const gitObjects = new Map(), gitBlobs = new Map(), results = new Map(), validatedProofs = new Map();
+const gitObjects = new Map(), gitBlobs = new Map(), gitTrees = new Map(), results = new Map(), validatedProofs = new Map();
 let session;
 function immutableObjectStore(root, env) {
   // Only immutable SHA queries share IO. Live acceptance and mutable refs stay
@@ -35,7 +35,7 @@ export function immutableGit(command, args, options = {}) {
     String(options.input ?? '').trim().split('\n').every(a => /^[a-f0-9]{40}:/.test(a)));
   if (!immutable) return exec(command, args, options);
   const store = immutableObjectStore(options.cwd ?? '.',options.env);
-  const key = JSON.stringify([store, args, options.input, options.encoding]);
+  const key = JSON.stringify([store, args, options.input, options.encoding, options.maxBuffer]);
   // Mutable replace refs must not redefine a supposedly immutable SHA query.
   if (!gitObjects.has(key)) gitObjects.set(key, args.length === 2 && args[0] === 'cat-file'
     ? immutableBlobBatch(store, args, options) : exec(command, ['--no-replace-objects',...args], options));
@@ -46,12 +46,33 @@ function immutableBlobBatch(store, args, options) {
   // Different historical commits mostly contain the same immutable blobs. Ask
   // Git for identities first; transfer each verified object only once per store.
   // Commit:path resolution still goes through Git with replace refs disabled.
-  const checked = exec('git', ['--no-replace-objects', 'cat-file', '--batch-check'], { ...options, encoding: 'utf8' });
-  const headers = checked.trimEnd().split('\n').map(line => /^([a-f0-9]{40}) blob (\d+)$/.exec(line));
-  if (headers.some(header => !header)) return exec('git', ['--no-replace-objects', ...args], options);
   let blobs = gitBlobs.get(store);
   if (!blobs) gitBlobs.set(store, blobs = new Map());
-  const missing = [...new Set(headers.map(header => header[1]).filter(id => !blobs.has(id)))];
+  const queries = String(options.input).split('\n');
+  if (queries.at(-1) === '') queries.pop();
+  if (queries.some(query => !/^[a-f0-9]{40}:/.test(query)))
+    return exec('git', ['--no-replace-objects', ...args], options);
+  const ids = queries.map(query => {
+    const commit = query.slice(0, 40), path = query.slice(41), key = JSON.stringify([store, commit]);
+    if (!gitTrees.has(key)) {
+      // Resolve immutable commit paths once, rather than traversing the same
+      // trees separately for thousands of batch-check queries in each reader.
+      const bytes = exec('git', ['--no-replace-objects', 'ls-tree', '-r', '-z', '--full-tree', commit],
+        { ...options, input: undefined, encoding: undefined, maxBuffer: 64 * 1024 * 1024 });
+      const entries = bytes.toString('utf8').split('\0'), tree = new Map();
+      if (entries.pop() !== '') throw Error('Immutable Git tree boundary mismatch');
+      for (const entry of entries) {
+        const match = /^[0-7]{6} (blob|commit) ([a-f0-9]{40})\t([\s\S]+)$/.exec(entry);
+        if (!match || tree.has(match[3])) throw Error('Immutable Git tree entry mismatch');
+        tree.set(match[3], match[1] === 'blob' ? match[2] : undefined);
+      }
+      gitTrees.set(key, tree);
+    }
+    return gitTrees.get(key).get(path);
+  });
+  // Preserve Git's missing/directory/path-expression behavior verbatim.
+  if (ids.some(id => !id)) return exec('git', ['--no-replace-objects', ...args], options);
+  const missing = [...new Set(ids.filter(id => !blobs.has(id)))];
   if (missing.length) {
     const bytes = exec('git', ['--no-replace-objects', 'cat-file', '--batch'], {
       ...options, input: missing.join('\n') + '\n', encoding: undefined,
@@ -69,10 +90,9 @@ function immutableBlobBatch(store, args, options) {
     for (const [id, content] of fetched) blobs.set(id, content);
   }
   const chunks = [];
-  for (const header of headers) {
-    const content = blobs.get(header[1]);
-    if (content.length !== Number(header[2])) throw Error('Immutable Git blob size mismatch');
-    chunks.push(Buffer.from(header[0] + '\n'), content, Buffer.from('\n'));
+  for (const id of ids) {
+    const content = blobs.get(id);
+    chunks.push(Buffer.from(`${id} blob ${content.length}\n`), content, Buffer.from('\n'));
   }
   const result = Buffer.concat(chunks);
   // Preserve execFileSync's output limit and encoding contract, including failure.

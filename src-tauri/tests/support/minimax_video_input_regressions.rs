@@ -1182,3 +1182,288 @@ async fn mixed_reference_contract_accepts_video_only_and_rejects_audio_only_befo
     assert_eq!(count(&f.pool, "production_batches").await, before);
     assert_eq!(count(&f.pool, "tasks").await, 1); // Only the explicitly seeded historical task.
 }
+
+#[tokio::test]
+async fn phase5c_four_mode_selection_review_occ_and_cold_sqlite_persistence_are_independent() {
+    use ai_studio_lib::application::artifact_service::ArtifactService;
+    use ai_studio_lib::application::ports::ArtifactRepository;
+    use ai_studio_lib::domain::{ArtifactReviewDecision as Decision, AssetType, ShotStage};
+    use ai_studio_lib::infrastructure::database::SqliteArtifactRepository;
+    let f = fixture_with_capability(true).await;
+    let (inputs, first, last) = setup(&f).await;
+    let video = managed_media(&f, &first, AssetType::Video).await;
+    let audio = managed_media(&f, &first, AssetType::Audio).await;
+    let ids = ["c_t2v", "c_i2v", "c_fl", "c_ref"];
+    for (i, id) in ids.iter().enumerate() {
+        formal_video_shot(&f, id, i).await;
+    }
+    for (i, bindings) in [
+        (1, vec![input("first_frame", 0, &first.id)]),
+        (
+            2,
+            vec![
+                input("first_frame", 0, &first.id),
+                input("last_frame", 0, &last.id),
+            ],
+        ),
+        (
+            3,
+            vec![
+                input("reference_images", 0, &first.id),
+                input("reference_videos", 0, &video.id),
+                input("reference_audios", 0, &audio.id),
+            ],
+        ),
+    ] {
+        inputs
+            .save(&formal_scope(&f, ids[i], i), None, &bindings)
+            .await
+            .unwrap();
+    }
+    let (prepare, start) = formal_preparation(&f, inputs.clone()).await;
+    let order: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+    let admitted = prepare
+        .admit(PROJECT_ID, &order, ShotStage::Video, false)
+        .await
+        .unwrap();
+    let batch_id = &admitted.created_batch_ids[0];
+    assert_eq!(count(&f.pool, "tasks").await, 0);
+    start.start(PROJECT_ID, batch_id).await.unwrap();
+    wait_for_batch_status(&f.pool, batch_id, ProductionBatchStatus::Completed).await;
+    let executed = f.services.queue.get(PROJECT_ID, batch_id).await.unwrap();
+    assert_eq!(count(&f.pool, "tasks").await, 4);
+    assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 4);
+    let reviews = Arc::new(SqliteArtifactRepository::new(f.pool.clone()));
+    let review_service = ArtifactService::new(
+        reviews.clone(),
+        Arc::new(SqliteProjectRepository::new(f.pool.clone())),
+        Arc::new(SqliteTaskRepository::new(f.pool.clone())),
+        f.services.queue.clone(),
+        Arc::new(SystemClock),
+    );
+    let shots = shot_service(&f, inputs.clone());
+    let mut outputs = Vec::new();
+    for (i, item) in executed.items.iter().enumerate() {
+        assert_eq!(&item.workflow_version_id, &f.pairs[i].0);
+        assert_eq!(&item.recipe_id, &f.pairs[i].1);
+        let task = item.task_id.as_ref().unwrap();
+        let artifacts = review_service
+            .task_artifacts(PROJECT_ID, &[task.clone()])
+            .await
+            .unwrap();
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].review_status.as_deref(), Some("PENDING"));
+        let asset_id = artifacts[0].id.clone();
+        let before = shots.get(PROJECT_ID, ids[i]).await.unwrap();
+        assert!(before.selected_video_asset_id.is_none());
+        // Reading/previewing a registered result cannot select or approve it.
+        review_service
+            .task_artifacts(PROJECT_ID, &[task.clone()])
+            .await
+            .unwrap();
+        assert!(shots
+            .get(PROJECT_ID, ids[i])
+            .await
+            .unwrap()
+            .selected_video_asset_id
+            .is_none());
+        if i != 3 {
+            let chosen = shots
+                .select_result(PROJECT_ID, ids[i], ShotStage::Video, &asset_id, true)
+                .await
+                .unwrap();
+            assert_eq!(
+                chosen.selected_video_asset_id.as_deref(),
+                Some(asset_id.as_str())
+            );
+            assert_eq!(
+                reviews
+                    .find_review(PROJECT_ID, &AssetId::parse(asset_id.clone()).unwrap())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .decision,
+                Decision::Pending
+            );
+        }
+        outputs.push(asset_id);
+    }
+    let approved = review_service
+        .submit_review(
+            PROJECT_ID,
+            &outputs[0],
+            Decision::Approved,
+            "human approved".into(),
+            0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(approved.revision, 1);
+    let rejected = review_service
+        .submit_review(
+            PROJECT_ID,
+            &outputs[1],
+            Decision::Rejected,
+            "human rejection: frame drift".into(),
+            0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.revision, 1);
+    assert!(review_service
+        .submit_review(PROJECT_ID, &outputs[2], Decision::Rejected, "   ".into(), 0)
+        .await
+        .is_err());
+    assert!(review_service
+        .submit_review(
+            PROJECT_ID,
+            &outputs[0],
+            Decision::Rejected,
+            "conflicting reviewer".into(),
+            0
+        )
+        .await
+        .is_err());
+    assert_eq!(
+        review_service
+            .submit_review(
+                PROJECT_ID,
+                &outputs[0],
+                Decision::Approved,
+                "human approved".into(),
+                0
+            )
+            .await
+            .unwrap()
+            .revision,
+        1
+    );
+    review_service
+        .submit_review(
+            PROJECT_ID,
+            &outputs[3],
+            Decision::Approved,
+            "approve without selecting".into(),
+            0,
+        )
+        .await
+        .unwrap();
+    assert!(shots
+        .get(PROJECT_ID, ids[3])
+        .await
+        .unwrap()
+        .selected_video_asset_id
+        .is_none());
+    assert_eq!(
+        shots
+            .get(PROJECT_ID, ids[1])
+            .await
+            .unwrap()
+            .selected_video_asset_id
+            .as_deref(),
+        Some(outputs[1].as_str())
+    );
+    assert!(shots
+        .select_result("foreign", ids[0], ShotStage::Video, &outputs[0], true)
+        .await
+        .is_err());
+    assert!(shots
+        .select_result(PROJECT_ID, ids[0], ShotStage::Video, &outputs[1], true)
+        .await
+        .is_err());
+    assert!(shots
+        .select_result(
+            PROJECT_ID,
+            ids[0],
+            ShotStage::Video,
+            first.id.as_str(),
+            false
+        )
+        .await
+        .is_err());
+    assert!(shots
+        .select_result(PROJECT_ID, ids[0], ShotStage::Video, "missing_asset", true)
+        .await
+        .is_err());
+    assert!(review_service
+        .submit_review(
+            "foreign",
+            &outputs[0],
+            Decision::Approved,
+            "foreign".into(),
+            0
+        )
+        .await
+        .is_err());
+    assert!(review_service
+        .submit_review(
+            PROJECT_ID,
+            "missing_asset",
+            Decision::Approved,
+            "missing".into(),
+            0
+        )
+        .await
+        .is_err());
+    assert_eq!(count(&f.pool, "tasks").await, 4);
+    assert_eq!(count(&f.pool, "production_batches").await, 1);
+    assert_eq!(count(&f.pool, "shot_generation_links").await, 4);
+    assert_eq!(count(&f.pool, "task_output_assets").await, 4);
+    assert_eq!(f.comfy.max_concurrent.load(Ordering::SeqCst), 1);
+    // Cold reopen the actual owned SQLite file, not an in-memory fake.
+    f.pool.close().await;
+    let cold = initialize(&f._owned.path().join("owned.sqlite"))
+        .await
+        .unwrap();
+    let cold_shots = SqliteShotRepository::new(cold.clone());
+    let cold_reviews = SqliteArtifactRepository::new(cold.clone());
+    for (i, id) in ids.iter().enumerate() {
+        let data = cold_shots.find(PROJECT_ID, id).await.unwrap().unwrap();
+        assert_eq!(data.generation_links.len(), 1);
+        assert_eq!(data.generation_links[0].task_id, executed.items[i].task_id);
+        assert_eq!(
+            data.generation_links[0].production_batch_item_id.as_deref(),
+            Some(executed.items[i].id.as_str())
+        );
+        assert_eq!(
+            data.shot.selected_video_asset_id.as_deref(),
+            if i == 3 {
+                None
+            } else {
+                Some(outputs[i].as_str())
+            }
+        );
+        let r = cold_reviews
+            .find_review(PROJECT_ID, &AssetId::parse(outputs[i].clone()).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            r.decision,
+            [
+                Decision::Approved,
+                Decision::Rejected,
+                Decision::Pending,
+                Decision::Approved
+            ][i]
+        );
+        assert_eq!(r.revision, if i == 2 { 0 } else { 1 });
+        if i == 1 {
+            assert_eq!(r.comment, "human rejection: frame drift");
+        }
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
+            .fetch_one(&cold)
+            .await
+            .unwrap(),
+        44
+    );
+    assert!(sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&cold)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(count(&cold, "tasks").await, 4);
+    assert_eq!(count(&cold, "production_batches").await, 1);
+}

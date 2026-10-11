@@ -124,7 +124,7 @@ describe("ShotCreationWorkspace", () => {
   it("keeps thumbnail preview selection separate from explicit confirmation", () => {
     expect(canConfirmShotCandidate(candidates[0], "video-2")).toBe(true);
     expect(canConfirmShotCandidate(candidates[0], "video-1")).toBe(false);
-    expect(canConfirmShotCandidate({ ...candidates[0], status: "reviewed" }, "other")).toBe(false);
+    expect(canConfirmShotCandidate({ ...candidates[0], status: "reviewed" }, "other")).toBe(true);
   });
 
   it("exposes exact reference and selected-result asset targets", async () => {

@@ -16,7 +16,11 @@ interface Props {
   mode?: "summary" | "workspace";
 }
 
-export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" }: Props) {
+export function ProductionReviewInbox(props: Props) {
+  return <ScopedReviewInbox key={`${props.projectId ?? "none"}:${props.mode ?? "summary"}`} {...props} />;
+}
+
+function ScopedReviewInbox({ projectId, onNavigate, mode = "summary" }: Props) {
   const pageSize = mode === "workspace" ? WORKSPACE_PAGE_SIZE : SUMMARY_LIMIT;
   const [page, setPage] = useState<ArtifactReviewQueuePageDto>();
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
@@ -25,15 +29,25 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const mounted = useRef(false);
+  const loadGeneration = useRef(0);
+  const submitLock = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; loadGeneration.current += 1; };
+  }, []);
   const pageRef = useRef<ArtifactReviewQueuePageDto | undefined>(undefined);
   const selectedArtifactIdRef = useRef<string | undefined>(undefined);
 
   const load = useCallback(async (offset = 0, append = false, advanceFromId?: string) => {
-    if (!projectId) return;
+    if (!projectId || !mounted.current) return;
+    const generation = ++loadGeneration.current;
+    const currentRequest = () => mounted.current && generation === loadGeneration.current;
     setLoading(true);
     setError(undefined);
     try {
       const next = await getArtifactReviewQueue(projectId, pageSize, offset);
+      if (!currentRequest()) return;
       const current = pageRef.current;
       const items = append && current ? [...current.items, ...next.items] : next.items;
       const complete = { ...next, items };
@@ -51,9 +65,9 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
       setSelectedArtifactId(nextId);
       setComment(complete.items.find((item) => item.artifact.id === nextId)?.review.comment ?? "");
     } catch (cause: unknown) {
-      setError(toUserMessage(cause));
+      if (currentRequest()) setError(toUserMessage(cause));
     } finally {
-      setLoading(false);
+      if (currentRequest()) setLoading(false);
     }
   }, [pageSize, projectId]);
 
@@ -73,11 +87,12 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
   );
 
   async function submit(decision: Exclude<ArtifactReviewDecision, "PENDING">) {
-    if (!projectId || !selected || submitting || selected.artifact.availability !== "available") return;
+    if (!projectId || !selected || submitLock.current || !mounted.current || selected.artifact.availability !== "available") return;
     if (decision === "REJECTED" && !comment.trim()) {
       setError("驳回时请填写原因，便于后续处理。");
       return;
     }
+    submitLock.current = true;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -88,12 +103,14 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
         comment: comment.trim(),
         expectedRevision: selected.review.revision,
       });
+      if (!mounted.current) return;
       setHistoryRefreshKey((value) => value + 1);
       await load(0, false, selected.artifact.id);
     } catch (cause: unknown) {
-      setError(toUserMessage(cause));
+      if (mounted.current) setError(toUserMessage(cause));
     } finally {
-      setSubmitting(false);
+      submitLock.current = false;
+      if (mounted.current) setSubmitting(false);
     }
   }
 
@@ -130,7 +147,7 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
       <aside className="artifact-review-queue" aria-label="待审核产物列表">
         <ol>
           {items.map((item) => <li key={item.artifact.id}>
-            <button type="button" className={selectedArtifactId === item.artifact.id ? "is-selected" : ""} aria-pressed={selectedArtifactId === item.artifact.id} onClick={() => { selectedArtifactIdRef.current = item.artifact.id; setSelectedArtifactId(item.artifact.id); setComment(item.review.comment); setError(undefined); }}>
+            <button type="button" className={selectedArtifactId === item.artifact.id ? "is-selected" : ""} aria-pressed={selectedArtifactId === item.artifact.id} disabled={submitting} onClick={() => { selectedArtifactIdRef.current = item.artifact.id; setSelectedArtifactId(item.artifact.id); setComment(item.review.comment); setError(undefined); }}>
               <span>{item.artifact.name}</span><ReviewBadge decision={item.review.decision} />
               <small>任务 {item.task?.id ?? item.artifact.taskId} · {item.artifact.mediaType.toUpperCase()}</small>
               {item.artifact.availability !== "available" && <small className="artifact-missing-label">{availabilityLabel(item.artifact.availability)}</small>}
@@ -142,7 +159,7 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
       {selected ? <>
         <main className="artifact-review-main">
           <div className="artifact-review-selected-heading"><div><h3>{selected.artifact.name}</h3><ReviewBadge decision={selected.review.decision} /></div><ArtifactActions artifact={selected.artifact} /></div>
-          <ArtifactPreview projectId={projectId} artifact={selected.artifact} />
+          <ArtifactPreview key={`${projectId}:${selected.artifact.id}`} projectId={projectId} artifact={selected.artifact} />
           <ArtifactMetadata artifact={selected.artifact} />
           {selected.review.comment && <p className="artifact-review-existing-comment"><strong>当前备注：</strong>{selected.review.comment}</p>}
         </main>
@@ -171,20 +188,27 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
 }
 
 function ReviewHistory({ projectId, refreshKey }: { projectId: string; refreshKey: number }) {
+  const mounted = useRef(false);
+  const generationRef = useRef(0);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; generationRef.current += 1; }; }, []);
   const [page, setPage] = useState<ArtifactReviewQueuePageDto>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
 
   const load = useCallback(async (offset = 0, append = false) => {
+    if (!mounted.current) return;
+    const generation = ++generationRef.current;
+    const currentRequest = () => mounted.current && generation === generationRef.current;
     setLoading(true);
     setError(undefined);
     try {
       const next = await getArtifactReviewQueue(projectId, WORKSPACE_PAGE_SIZE, offset, "completed");
+      if (!currentRequest()) return;
       setPage((current) => append && current ? { ...next, items: [...current.items, ...next.items] } : next);
     } catch (cause: unknown) {
-      setError(toUserMessage(cause));
+      if (currentRequest()) setError(toUserMessage(cause));
     } finally {
-      setLoading(false);
+      if (currentRequest()) setLoading(false);
     }
   }, [projectId]);
 

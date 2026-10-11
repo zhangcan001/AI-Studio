@@ -325,7 +325,9 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
   const [selectedPromptId, setSelectedPromptId] = useState("");
   const [shotWorkspaceTab, setShotWorkspaceTab] = useState<ShotCreationWorkspaceTab>("generate");
   const [inspectorTab, setInspectorTab] = useState<ShotInspectorTab>("parameters");
-  const [previewAssetId, setPreviewAssetId] = useState<string>();
+  const [previewSelection, setPreviewSelection] = useState<{ owner: string; assetId: string }>();
+  const candidateSelectionPending = useRef<object | undefined>(undefined);
+  const candidateOwnerRef = useRef("");
   const [structureManagementOpen, setStructureManagementOpen] = useState(false);
   const [name, setName] = useState("");
   const [promptText, setPromptText] = useState("");
@@ -497,8 +499,15 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
   }, []);
 
   useEffect(() => {
-    setPreviewAssetId(undefined);
+    setPreviewSelection(undefined);
   }, [selectedShotId, stage]);
+
+  const candidateOwner = JSON.stringify([projectId, selectedShotId, stage, currentDraft?.workflowVersionId, currentDraft?.recipeId]);
+  candidateOwnerRef.current = candidateOwner;
+  useEffect(() => () => { candidateOwnerRef.current = ""; }, []);
+  useEffect(() => {
+    if (candidateSelectionPending.current) { candidateSelectionPending.current = undefined; setBusy(false); }
+  }, [candidateOwner]);
 
   const applyShot = useCallback((next: ShotView) => {
     setShots((current) => {
@@ -901,11 +910,22 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
   }
 
   async function selectResult(assetId: string, fromLinkedTask: boolean) {
-    if (!selectedShot) return;
+    if (!selectedShot || candidateSelectionPending.current) return;
+    const owner = candidateOwner, shotId = selectedShot.id, token = {};
+    candidateSelectionPending.current = token;
     setBusy(true); setError(undefined);
-    try { applyShot(await selectShotResult({ projectId, shotId: selectedShot.id, stage, assetId, fromLinkedTask })); }
-    catch (selectError: unknown) { setError(toUserMessage(selectError)); }
-    finally { setBusy(false); }
+    try {
+      const next = await selectShotResult({ projectId, shotId, stage, assetId, fromLinkedTask });
+      if (candidateOwnerRef.current !== owner) return;
+      if (next.projectId !== projectId || next.id !== shotId) throw new Error("选用回执不属于当前项目和镜头。");
+      applyShot(next);
+    } catch (selectError: unknown) { if (candidateOwnerRef.current === owner) setError(toUserMessage(selectError)); }
+    finally {
+      if (candidateSelectionPending.current === token) {
+        candidateSelectionPending.current = undefined;
+        if (candidateOwnerRef.current === owner) setBusy(false);
+      }
+    }
   }
 
   async function generate() {
@@ -1066,7 +1086,7 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
     }
     return [...result.values()];
   }, [manualAssets, selectedAssetId, stageCandidateLinks, stageCandidates]);
-  const previewAsset = assets.find((asset) => asset.id === previewAssetId)
+  const previewAsset = assets.find((asset) => previewSelection?.owner === candidateOwner && asset.id === previewSelection.assetId)
     ?? assets.find((asset) => asset.id === selectedAssetId)
     ?? shotCandidates[0]?.asset;
   const inspectorReferences = currentReferences.map((assetId, index) => ({
@@ -1437,7 +1457,8 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
               candidates={shotCandidates}
               selectedAssetId={selectedAssetId}
               previewAsset={previewAsset}
-              onCandidateSelect={(candidate) => setPreviewAssetId(candidate.asset.id)}
+              onCandidateSelect={(candidate) => setPreviewSelection({ owner: candidateOwner, assetId: candidate.asset.id })}
+              onOpenReview={() => onNavigate?.({ destination: "shots", projectId, section: "review" })}
               onCandidateConfirm={(assetId, fromLinkedTask) => void selectResult(assetId, fromLinkedTask ?? false)}
               onOpenAsset={onOpenAsset}
               onOpenTask={onOpenTask}
