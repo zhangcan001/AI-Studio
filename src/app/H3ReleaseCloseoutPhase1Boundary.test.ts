@@ -37,7 +37,7 @@ it('validates exact scope, immutable packages, aggregates and invariants before 
    expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
  }
 },30000);
-it('fresh bytes and path sets invalidate cached acceptance, including published package drift',()=>{
+function withH3OwnedFixture(run:(root:string)=>void) {
  const root=mkdtempSync(join(tmpdir(),'ai-studio-h3-closeout-'));
  try {
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
@@ -46,19 +46,33 @@ it('fresh bytes and path sets invalidate cached acceptance, including published 
   const proof=JSON.parse(readFileSync(manifest,'utf8'));
   const queue=JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
   const readiness=JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
-  for(const p of new Set([...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...h3CloseoutParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json',...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json']) as Set<string>){
+  for(const p of new Set([...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...h3CloseoutParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json',...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json']) as Set<string>) {
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(h3CloseoutParentReader(root).violations).toEqual([]);
-  for(const p of ['src/features/create/CreateController.ts','src-tauri/src/domain/asset.rs','src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_1_0/recipe.yaml','src-tauri/tauri.conf.json']){
-   const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-   const denied=h3CloseoutParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
-   writeFileSync(path,original);expect(h3CloseoutParentReader(root).violations).toEqual([]);
-  }
-  writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
-  expect(h3CloseoutParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
- }finally{rmSync(root,{recursive:true,force:true});}
-},30000);
+  run(root);
+ } finally {rmSync(root,{recursive:true,force:true});}
+}
+it('fresh bytes reject independent frontend and backend corruption',()=>withH3OwnedFixture(root=>{
+ for(const p of ['src/features/create/CreateController.ts','src-tauri/src/domain/asset.rs']) {
+  const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
+  const denied=h3CloseoutParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
+  writeFileSync(path,original);
+ }
+ expect(h3CloseoutParentReader(root).violations).toEqual([]);
+}),30000);
+it('published Runtime Package and configuration bytes remain independently protected',()=>withH3OwnedFixture(root=>{
+ for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_1_0/recipe.yaml','src-tauri/tauri.conf.json']) {
+  const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
+  const denied=h3CloseoutParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
+  writeFileSync(path,original);
+ }
+ expect(h3CloseoutParentReader(root).violations).toEqual([]);
+}),30000);
+it('unreviewed backend additions fail closed without masking source drift',()=>withH3OwnedFixture(root=>{
+ writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
+ expect(h3CloseoutParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
+}),30000);
 it('shares nested replay but never trusts mtime, unchanged length or stale mutable tag identity',()=>{
  const root=mkdtempSync(join(tmpdir(),'ai-studio-boundary-cache-'));
  try{
