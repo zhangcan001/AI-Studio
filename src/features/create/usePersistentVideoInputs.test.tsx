@@ -68,4 +68,23 @@ describe("persistent video input ownership",()=>{
     expect(result.current.view?.assets).toEqual([]); expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.assetsImport).toHaveBeenCalledWith("p1",true);
     expect(result.current.busy).toBe(false);
   });
+  it("bindAsset replaces singular slot via OCC save without generate", async () => {
+    const { result } = renderHook(() => usePersistentVideoInputs(route, generator, false));
+    await waitFor(() => expect(result.current.view).toBeTruthy());
+    await act(async () => { expect(await result.current.bindAsset("first_frame", "external-new")).toBe(true); });
+    expect(api.inputsSave).toHaveBeenCalledWith({
+      selection:{projectId:"p1",shotId:"shot1",selectionRef:"exact-a"},
+      expected:{instanceId:"instance-exact-a",revision:1},
+      inputs: expect.arrayContaining([{inputKey:"first_frame",ordinal:0,assetId:"external-new"},{inputKey:"last_frame",ordinal:0,assetId:"exact-a-last"}]),
+    });
+    expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"external-new"});
+  });
+  it("bindAsset OCC conflict keeps previous view and returns false", async () => {
+    const { result } = renderHook(() => usePersistentVideoInputs(route, generator, false));
+    await waitFor(() => expect(result.current.view).toBeTruthy());
+    api.inputsSave.mockRejectedValueOnce({code:"SHOT_VIDEO_INPUT_CONFLICT",message:"conflict"});
+    await act(async () => { expect(await result.current.bindAsset("first_frame", "external-new")).toBe(false); });
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.view?.token).toEqual({instanceId:"instance-exact-a",revision:1});
+  });
 });

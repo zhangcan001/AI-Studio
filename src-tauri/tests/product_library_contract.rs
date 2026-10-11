@@ -1224,3 +1224,76 @@ async fn phase5_target8_typed_detail_preserves_versions_config_and_member_roles(
         .unwrap();
     assert_eq!(max, 44);
 }
+
+#[tokio::test]
+async fn phase6b_shot_video_input_binding_appears_in_relations_and_blocks_delete() {
+    let f = Fixture::new().await;
+    f.asset("ast_bind_video", "prj_default", "video").await;
+    f.shot("sht_bind", None).await;
+    sqlx::query(
+        "INSERT INTO shot_video_input_sets (project_id, shot_id, workflow_version_id, recipe_id, instance_id, revision, updated_at)
+         VALUES ('prj_default','sht_bind','wf_v','rcp_ref','inst-1',1,'2026-01-01T00:00:00Z')",
+    )
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO shot_video_input_assets (project_id, shot_id, workflow_version_id, recipe_id, input_key, ordinal, asset_id)
+         VALUES ('prj_default','sht_bind','wf_v','rcp_ref','reference_videos',0,'ast_bind_video')",
+    )
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let relations = f
+        .operations()
+        .relations_get("prj_default", &asset_ref("ast_bind_video"))
+        .await
+        .unwrap();
+    assert!(
+        relations.iter().any(|r| {
+            r.title.contains("正式视频输入")
+                && r.blocking
+                && matches!(
+                    &r.location,
+                    Some(LibraryRelationLocation::Shot { id, stage })
+                        if id == "sht_bind" && stage.as_deref() == Some("video")
+                )
+        }),
+        "expected deep-linkable shot video input relation, got {relations:?}"
+    );
+    let inspect = f
+        .operations()
+        .deletion_inspect("prj_default", &asset_ref("ast_bind_video"))
+        .await
+        .unwrap();
+    assert!(
+        !inspect.allowed,
+        "delete must be blocked while formal video input binding exists"
+    );
+    assert!(
+        inspect
+            .blockers
+            .iter()
+            .any(|m| m.contains("正式视频输入") || m.contains("视频输入")),
+        "expected video-input delete reason, got {:?}",
+        inspect.blockers
+    );
+    // Unbind then delete should clear the blocking relation path.
+    sqlx::query("DELETE FROM shot_video_input_assets WHERE asset_id='ast_bind_video'")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let after = f
+        .operations()
+        .deletion_inspect("prj_default", &asset_ref("ast_bind_video"))
+        .await
+        .unwrap();
+    assert!(
+        !after
+            .blockers
+            .iter()
+            .any(|m| m.contains("正式视频输入") || m.contains("视频输入")),
+        "unbind should clear video-input block, got {:?}",
+        after.blockers
+    );
+}

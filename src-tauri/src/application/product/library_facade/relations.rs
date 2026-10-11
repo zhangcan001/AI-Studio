@@ -55,6 +55,20 @@ impl LibraryOperations<'_> {
                             location: None,
                         });
                     }
+                    for shot_id in reference.shot_video_input_ids {
+                        items.push(LibraryRelation {
+                            kind: LibraryRelationKind::ShotReference,
+                            title: "正式视频输入".into(),
+                            description: format!(
+                                "该素材已绑定到镜头“{shot_id}”的持久视频输入槽；解除绑定前不可删除。"
+                            ),
+                            blocking: true,
+                            location: Some(LibraryRelationLocation::Shot {
+                                id: shot_id,
+                                stage: Some("video".into()),
+                            }),
+                        });
+                    }
                 }
                 Ok(items)
             }

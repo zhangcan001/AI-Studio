@@ -6,6 +6,11 @@ import type { VideoInputAsset, VideoInputKey, VideoInputView } from "../../types
 import { useStudioStore } from "../../stores/studioStore";
 import { assetIds, mediaKind, mediaValue, type CreateRoute } from "./createModel";
 import type { GenerationValues } from "../../types/generation";
+import type { RecipeField } from "../../types/generation";
+
+function pluralField(field: RecipeField | undefined) {
+  return !!field && (field.type === "images" || field.type === "videos" || field.type === "audios");
+}
 
 export function usePersistentVideoInputs(route: CreateRoute, generator: GeneratorOption | undefined, pageLoading: boolean, restoredDraft?: GenerationValues) {
   const enabled = route.stage === "video" && !!generator?.persistentInputs && !!route.shotId;
@@ -22,6 +27,16 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
   const inputs: VideoInputAsset[] = fields.flatMap(field => assetIds(values[field.key]).map((assetId, ordinal) => ({ inputKey: field.key as VideoInputKey, ordinal, assetId })));
   const ordered = (bindings: VideoInputAsset[]) => JSON.stringify([...bindings].sort((a,b) => a.inputKey.localeCompare(b.inputKey) || a.ordinal-b.ordinal));
   const dirty = enabled && !!view && ordered(inputs) !== ordered(view.inputs);
+
+  function draftFromBindings(bindings: VideoInputAsset[]) {
+    const store = useStudioStore.getState();
+    const merged = Object.fromEntries(Object.entries(store.values).filter(([,v]) => !("assetId" in v || "assetIds" in v)));
+    for (const field of fields) {
+      const ids = bindings.filter(i => i.inputKey === field.key).sort((a,b)=>a.ordinal-b.ordinal).map(i=>i.assetId);
+      if (ids.length) merged[field.key] = mediaValue(field, ids);
+    }
+    store.loadCreationDraft(merged, store.draftDirty, store.creationPromptProvenance);
+  }
 
   async function load(restore = false) {
     if (!enabled || pageLoading) return;
@@ -54,6 +69,38 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     } catch (e) { if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message); }
     finally { if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); } }
   }
+
+  /** Persist one Library/reuse asset into an exact inputKey (+ ordinal) via OCC save. Does not create Task/Run. */
+  async function bindAsset(inputKey: string, assetId: string): Promise<boolean> {
+    if (!enabled || !view || loading || lock.current || !generator) return false;
+    const field = fields.find(f => f.key === inputKey);
+    if (!field || mediaKind(field) == null) return false;
+    const own = owner; const token = epoch.current; lock.current = true; setBusy(true); setError(undefined);
+    try {
+      const others = view.inputs.filter(i => i.inputKey !== inputKey);
+      const currentKey = view.inputs.filter(i => i.inputKey === inputKey).sort((a,b)=>a.ordinal-b.ordinal);
+      let nextKey: VideoInputAsset[];
+      if (pluralField(field)) {
+        const without = currentKey.filter(i => i.assetId !== assetId);
+        nextKey = [...without, { inputKey: inputKey as VideoInputKey, ordinal: without.length, assetId }]
+          .map((item, ordinal) => ({ ...item, ordinal }));
+      } else {
+        nextKey = [{ inputKey: inputKey as VideoInputKey, ordinal: 0, assetId }];
+      }
+      const nextInputs = [...others, ...nextKey];
+      const next = await productClient.creation.inputsSave({ selection, expected: view.token, inputs: nextInputs });
+      if (own !== currentOwner.current || token !== epoch.current) return false;
+      setState({ owner: own, view: next });
+      draftFromBindings(next.inputs);
+      return true;
+    } catch (e) {
+      if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message);
+      return false;
+    } finally {
+      if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); }
+    }
+  }
+
   async function importAssets(folder: boolean) {
     if (lock.current) return;
     const own = owner; const token = epoch.current; lock.current = true; setBusy(true); setError(undefined);
@@ -67,5 +114,5 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     } catch (e) { if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message); }
     finally { if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); } }
   }
-  return { enabled, loading, busy, error, importReceipt, view, dirty, save, refresh: load, importAssets, ready: !enabled || (!!view && !loading && !busy && !dirty && !error) };
+  return { enabled, loading, busy, error, importReceipt, view, dirty, save, bindAsset, refresh: load, importAssets, ready: !enabled || (!!view && !loading && !busy && !dirty && !error) };
 }

@@ -20,6 +20,7 @@ export function relationRoute(projectId: string, location: LibraryRelationLocati
 
 /** Presentation only: never decides whether a protected resource may be deleted. */
 export function deletionMessage(message:string) {
+  if(message.includes("正式视频输入") || message.includes("视频输入使用")) return "该素材仍被镜头正式视频输入使用，请先在创作页解除输入绑定。";
   if(message.includes("selected image asset") || message.includes("selected video asset") || message.includes("选为关键帧")) return "该素材当前已被镜头选用。请先更换镜头结果后再删除。";
   if(message.includes("ReferenceSet"))return "该素材仍被参考集使用，请先从参考集移除素材。";
   if(message.includes("Shot Reference"))return "该素材仍被镜头长期参考使用，请先解除镜头引用。";
