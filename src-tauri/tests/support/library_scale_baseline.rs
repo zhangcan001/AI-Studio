@@ -130,3 +130,106 @@ async fn observed_library_scale_baseline() {
     let output = std::env::var("AI_STUDIO_BENCHMARK_OUTPUT").expect("owned output path required");
     std::fs::write(output,serde_json::to_vec_pretty(&json!({"environment":"Windows single runner; no GPU generation","coldDefinition":"fresh pool; OS cache not evicted","warmup":"one warmup before each warm query shape; 21 measured repetitions","layer":"existing AssetLibraryService + SQLite repository (filters not yet exposed by parent Product facade)","actualNativeIPC":"NOT_AVAILABLE","datasets":datasets})).unwrap()).unwrap();
 }
+
+/// Correctness-only scale gate: thousands of rows, isolated DB, fake metadata only.
+/// Records observed timings without asserting performance percentages.
+#[tokio::test]
+async fn phase6d_library_scale_paging_stability_and_source_filter() {
+    use ai_studio_lib::application::product::library_facade::LibrarySourceKind;
+    use std::collections::HashSet;
+    use std::time::Instant;
+
+    const N: i64 = 3000;
+    let f = Fixture::new().await;
+    let seed_start = Instant::now();
+    seed(&f, N).await;
+    let seed_ms = seed_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Walk SOURCE media pages — no duplicates, cursor advances, project-scoped.
+    let mut q = query(LibraryCategory::Media);
+    q.limit = Some(30);
+    q.source_kind = Some(LibrarySourceKind::Source);
+    let mut seen = HashSet::new();
+    let mut pages = 0usize;
+    let mut items = 0usize;
+    let walk_start = Instant::now();
+    loop {
+        let page = f.facade().list("prj_default", q.clone()).await.unwrap();
+        pages += 1;
+        items += page.items.len();
+        for item in &page.items {
+            let key = match &item.resource_ref {
+                ResourceRef::Asset { id } => id.clone(),
+                other => panic!("expected asset, got {other:?}"),
+            };
+            assert!(
+                seen.insert(key.clone()),
+                "duplicate asset across SOURCE pages: {key}"
+            );
+        }
+        match page.next_cursor {
+            Some(cursor) => {
+                assert_eq!(cursor.source_kind, LibrarySourceKind::Source);
+                q.cursor = Some(cursor);
+            }
+            None => break,
+        }
+        assert!(pages < 200, "pagination failed to terminate");
+    }
+    let walk_ms = walk_start.elapsed().as_secs_f64() * 1000.0;
+    assert!(items > 0, "SOURCE media should return rows on {N}-asset seed");
+    assert_eq!(seen.len(), items);
+
+    // Generated filter must not leak SOURCE-only ids from the walk above when disjoint.
+    let mut generated = query(LibraryCategory::Media);
+    generated.limit = Some(30);
+    generated.source_kind = Some(LibrarySourceKind::Generated);
+    let gen = f.facade().list("prj_default", generated).await.unwrap();
+    for item in &gen.items {
+        if let ResourceRef::Asset { id } = &item.resource_ref {
+            assert!(
+                !seen.contains(id),
+                "generated page leaked source-only asset {id}"
+            );
+        }
+    }
+
+    // Foreign project isolation.
+    assert!(f
+        .facade()
+        .list(
+            "prj_11111111-1111-4111-8111-111111111111",
+            {
+                let mut foreign = query(LibraryCategory::Media);
+                foreign.limit = Some(30);
+                foreign.source_kind = Some(LibrarySourceKind::Source);
+                foreign
+            }
+        )
+        .await
+        .unwrap()
+        .items
+        .is_empty());
+
+    let observation = serde_json::json!({
+        "layer": "Product LibraryFacade + SQLite (isolated Fixture DB; no real media bytes)",
+        "mediaSeedCount": N,
+        "promptSeedCount": N,
+        "seedDurationMs": seed_ms,
+        "sourceMediaWalk": {
+            "pages": pages,
+            "items": items,
+            "pageSize": 30,
+            "durationMs": walk_ms,
+            "avgMsPerPage": if pages == 0 { 0.0 } else { walk_ms / pages as f64 },
+        },
+        "generatedFirstPageItems": gen.items.len(),
+        "nativeGpu": "NOT_VERIFIED",
+        "performanceClaim": "observed timings only; no percentage improvement asserted",
+    });
+    if let Ok(path) = std::env::var("AI_STUDIO_PHASE6D_SCALE_OUTPUT") {
+        std::fs::write(&path, serde_json::to_vec_pretty(&observation).unwrap()).unwrap();
+    }
+    // Always print a one-line summary for the report capture.
+    eprintln!("PHASE6D_SCALE {}", observation);
+}
