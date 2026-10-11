@@ -83,6 +83,10 @@ it("B01/B02 external image binds to first_frame via OCC; generated image cannot 
   api.libraryGet.mockResolvedValue({ kind: "asset", asset: { id: "ext-img", projectId: "project-a", name: "外部图", assetType: "image", category: "source_image", width: 1, height: 1 } });
   render(<CreatePage route={{ kind: "create", projectId: "project-a", shotId: "shot-a", stage: "video" }} navigate={vi.fn()} />);
   await screen.findByRole("button", { name: "应用到首帧" });
+  await waitFor(() => {
+    const btn = screen.getByRole("button", { name: "应用到首帧" });
+    expect(btn.hasAttribute("disabled")).toBe(false);
+  });
   fireEvent.click(screen.getByRole("button", { name: "应用到首帧" }));
   await waitFor(() => expect(api.inputsSave).toHaveBeenCalled());
   expect(api.inputsSave.mock.calls[0][0].inputs).toEqual([{ inputKey: "first_frame", ordinal: 0, assetId: "ext-img" }]);
@@ -102,10 +106,10 @@ it("B02 generated video requires confirm and only binds reference_videos", async
   api.libraryGet.mockResolvedValue({ kind: "asset", asset: { id: "gen-vid", projectId: "project-a", name: "生成视频", assetType: "video", category: "generated_video", sourceTaskId: "tsk" } });
   render(<CreatePage route={{ kind: "create", projectId: "project-a", shotId: "shot-a", stage: "video" }} navigate={vi.fn()} />);
   const apply = await screen.findByRole("button", { name: "应用到参考视频" });
-  expect(apply.hasAttribute('disabled')).toBe(true);
+  expect(apply.hasAttribute("disabled")).toBe(true);
   fireEvent.click(screen.getByRole("checkbox", { name: /确认将生成视频仅作为视频参考/ }));
-  expect(apply.hasAttribute('disabled')).toBe(false);
-  fireEvent.click(apply);
+  await waitFor(() => expect(screen.getByRole("button", { name: "应用到参考视频" }).hasAttribute("disabled")).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "应用到参考视频" }));
   await waitFor(() => expect(api.inputsSave).toHaveBeenCalled());
   expect(api.inputsSave.mock.calls[api.inputsSave.mock.calls.length - 1][0].inputs).toEqual([{ inputKey: "reference_videos", ordinal: 0, assetId: "gen-vid" }]);
   expect(api.generate).not.toHaveBeenCalled();

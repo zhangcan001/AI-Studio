@@ -165,14 +165,20 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     void productClient.library.get(route.projectId,{kind:"asset",id:libraryIntent.assetId}).then(detail=>{
       if(!alive || token!==epoch.current || detail.kind!=="asset" || detail.asset.assetType!==libraryIntent.mediaKind){
         // Historical fixtures may only stub mediaKind; still allow mediaKind-matched slots.
-        if(alive && token===epoch.current) setLibraryAssetMeta({assetId:libraryIntent.assetId,category:"",sourceTaskId:null,mediaKind:libraryIntent.mediaKind});
+        if(alive && token===epoch.current){
+          setLibraryAssetMeta({assetId:libraryIntent.assetId,category:"",sourceTaskId:null,mediaKind:libraryIntent.mediaKind});
+          setContext(current=>current?.projectId===project ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==libraryIntent.assetId),{id:libraryIntent.assetId,name:libraryIntent.assetId,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
+        }
         return;
       }
       setLibraryAssetMeta({assetId:detail.asset.id,category:detail.asset.category ?? "",sourceTaskId:detail.asset.sourceTaskId,mediaKind:libraryIntent.mediaKind});
       setGeneratedVideoConfirm(false);
       setContext(current=>current?.projectId===project ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==detail.asset.id),{id:detail.asset.id,name:detail.asset.name,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
     }).catch(()=>{
-      if(alive && token===epoch.current) setLibraryAssetMeta({assetId:libraryIntent.assetId,category:"",sourceTaskId:null,mediaKind:libraryIntent.mediaKind});
+      if(alive && token===epoch.current){
+        setLibraryAssetMeta({assetId:libraryIntent.assetId,category:"",sourceTaskId:null,mediaKind:libraryIntent.mediaKind});
+        setContext(current=>current?.projectId===project ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==libraryIntent.assetId),{id:libraryIntent.assetId,name:libraryIntent.assetId,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
+      }
     });
     return()=>{alive=false;};
   },[libraryIntent,loading,context,generator,key]);
@@ -223,11 +229,21 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     : undefined;
   const libraryNeedsGeneratedVideoConfirm = !!(libraryIntent?.kind === "asset" && libraryAssetMeta?.assetId === libraryIntent.assetId
     && libraryIntent.mediaKind === "video" && (!!libraryAssetMeta.sourceTaskId || (libraryAssetMeta.category ?? "").startsWith("generated_")));
+  // OCC bind needs resolved meta + mediaInputs + persistent view; keep Apply disabled until then (avoids fireEvent/CI races).
+  const libraryApplyReady = !!(libraryIntent?.kind === "asset"
+    && libraryAssetMeta?.assetId === libraryIntent.assetId
+    && context?.mediaInputs.some(a => a.id === libraryIntent.assetId && a.mediaKind === libraryIntent.mediaKind)
+    && (!videoInputs.enabled || (!!videoInputs.view && !videoInputs.loading && !videoInputs.busy)));
   async function applyLibraryAsset(fieldKey:string) {
     if (busy || (videoInputs.enabled && (videoInputs.loading || videoInputs.busy || !videoInputs.view))) return;
     if(libraryIntent?.kind!=="asset" || libraryIntent.projectId!==route.projectId || !context?.selectedShot)return;
     const field=librarySlots.find(f=>f.key===fieldKey);
-    if(!field || !context.mediaInputs.some(a=>a.id===libraryIntent.assetId && a.mediaKind===libraryIntent.mediaKind))return;
+    if(!field)return;
+    if(!context.mediaInputs.some(a=>a.id===libraryIntent.assetId && a.mediaKind===libraryIntent.mediaKind)){
+      // Meta resolved but mediaInputs lag (effect race / catch path): inject before OCC bind.
+      if(!libraryAssetMeta || libraryAssetMeta.assetId!==libraryIntent.assetId)return;
+      setContext(current=>current?.projectId===route.projectId ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==libraryIntent.assetId),{id:libraryIntent.assetId,name:libraryIntent.assetId,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
+    }
     if (libraryNeedsGeneratedVideoConfirm && !generatedVideoConfirm) {
       setError("生成视频仅可作为视频参考绑定。请确认后再应用到参考视频槽，系统不会抽帧作为首帧。");
       return;
@@ -292,7 +308,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const token = epoch.current; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); if (!mounted.current || token !== epoch.current) return; setRun(next); setRunRef(next.ref); setAccepted(null); });
-  return { videoInputs, libraryIntent, librarySlots, libraryRejectReason, libraryNeedsGeneratedVideoConfirm, generatedVideoConfirm, setGeneratedVideoConfirm, libraryAssetMeta, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy,
+  return { videoInputs, libraryIntent, librarySlots, libraryRejectReason, libraryNeedsGeneratedVideoConfirm, libraryApplyReady, generatedVideoConfirm, setGeneratedVideoConfirm, libraryAssetMeta, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy,
     setValue, removeValue, chooseResolution, applyPromptChoice, openLibrary, chooseGenerator, generate, createShot, selectResult, setReferences, retry, recheckReadiness,
     openRuntimeSettings: () => {
       useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });
