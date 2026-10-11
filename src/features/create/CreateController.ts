@@ -229,9 +229,11 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     : undefined;
   const libraryNeedsGeneratedVideoConfirm = !!(libraryIntent?.kind === "asset" && libraryAssetMeta?.assetId === libraryIntent.assetId
     && libraryIntent.mediaKind === "video" && (!!libraryAssetMeta.sourceTaskId || (libraryAssetMeta.category ?? "").startsWith("generated_")));
-  // OCC bind needs resolved meta + mediaInputs + persistent view; keep Apply disabled until then (avoids fireEvent/CI races).
+  // Apply needs the asset already projected into mediaInputs + OCC view when persistent.
+  // Do not wait for libraryAssetMeta: context may already carry the asset (Library→Create), and
+  // meta is only for post-resolve slot filtering. Waiting for meta broke target13 and hid the
+  // real CI race (click before mediaInputs) behind an over-strict gate.
   const libraryApplyReady = !!(libraryIntent?.kind === "asset"
-    && libraryAssetMeta?.assetId === libraryIntent.assetId
     && context?.mediaInputs.some(a => a.id === libraryIntent.assetId && a.mediaKind === libraryIntent.mediaKind)
     && (!videoInputs.enabled || (!!videoInputs.view && !videoInputs.loading && !videoInputs.busy)));
   async function applyLibraryAsset(fieldKey:string) {
