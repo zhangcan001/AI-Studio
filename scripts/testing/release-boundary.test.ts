@@ -13,7 +13,7 @@ describe('exact release-only serialization successor', () => {
   // The merged UI + validation repair chain measured 10.08s / 50 Git calls
   // cold on Windows after immutable fixture IO optimization. Give this one
   // complete cold-history probe finite 3x headroom; no runtime/global timeout.
-  }, 30000);
+  }, 90000);
 
   it.each(['path', 'untouched', 'scope', 'authority', 'workflow'])('rejects %s drift', (kind) => {
     const invalid = structuredClone(proof);

@@ -17,4 +17,4 @@ it('validates readonly M4 inspection before projecting immutable M3/M2/M1 and re
   (p:typeof proof)=>{delete p.paths['src/product/client.ts'];},
   ...Object.keys(proof.invariants).map(flag=>(p:typeof proof)=>{p.invariants[flag]=true;})
  ]){const invalid=structuredClone(proof);mutate(invalid);const rejected=m4MediaParentReader('.',invalid);expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.backendAggregateSha256).toBeUndefined();expect(rejected.addedCommandSignatures).toEqual([]);}
-},30000);
+}, 90000);

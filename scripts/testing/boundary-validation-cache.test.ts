@@ -42,7 +42,7 @@ it('reuses immutable Git IO across owned fixtures borrowing the same object stor
   // Count actual subprocesses, not a noisy wall-clock threshold.
   expect(execFileSync).toHaveBeenCalledTimes(1);
   expect(() => immutableGit('git', args, {cwd:roots[2], encoding:'utf8'})).toThrow();
-});
+}, 90000);
 
 it('keeps returned raw Git buffers isolated from callers', () => {
   const args = ['cat-file', '--batch'];
@@ -50,14 +50,14 @@ it('keeps returned raw Git buffers isolated from callers', () => {
   const first = immutableGit('git', args, options);
   const original = first.toString(); first.fill(0);
   expect(immutableGit('git', args, options).toString()).toBe(original);
-});
+}, 90000);
 
 it('never treats a hexadecimal path argument as an immutable tree when the tree is a mutable tag', () => {
   vi.mocked(execFileSync).mockClear();
   const args = ['ls-tree','-r','--name-only','v2.1.0-personal','a'.repeat(40)];
   immutableGit('git',args,{encoding:'utf8'}); immutableGit('git',args,{encoding:'utf8'});
   expect(execFileSync).toHaveBeenCalledTimes(2);
-});
+}, 90000);
 
 it('reads fresh raw bytes despite equal size/timestamps and catches proof deletion, addition and tag changes', () => {
   const root = temp(), source = join(root,'src/input.ts'), proof = join(root,'docs/proof.json'), tag = join(root,'.git/refs/tags/v2.1.0-personal');
@@ -83,7 +83,7 @@ it('reads fresh raw bytes despite equal size/timestamps and catches proof deleti
   writeFileSync(proof,bytes); expect(reader().violations).toEqual([]);
   writeFileSync(join(root,'src/illegal.ts'),'unreviewed'); expect(reader().violations).toEqual(['drift']);
   rmSync(join(root,'src/illegal.ts')); expect(reader().violations).toEqual([]);
-});
+}, 90000);
 
 it('validates the new repair before projecting unchanged historical proof bytes and rejects forged authority', () => {
   const accepted = uiPhase3CiRepairParentReader('.');
@@ -95,4 +95,29 @@ it('validates the new repair before projecting unchanged historical proof bytes 
   const denied = uiPhase3CiRepairParentReader('.',forged);
   expect(denied.violations.length).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
   expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
-});
+}, 90000);
+
+it('discards nested successes when the outer live validation rejects, then reuses a restored accept', () => {
+  const root = temp();
+  for (const dir of ['src','docs']) mkdirSync(join(root,dir),{recursive:true});
+  const proof = join(root,'docs/proof.json'), source = join(root,'src/input.ts');
+  writeFileSync(proof,'{"valid":true}'); writeFileSync(source,'alpha');
+  let inner = 0, outer = 0;
+  const nested = () => cachedBoundary(root,'outer-live',undefined,()=>{
+    outer++;
+    const child = cachedBoundary(root,'inner-live',undefined,()=>{
+      inner++;
+      return {violations:[], addedPaths:[], afterHashes:{}, read:(p:string)=>readFileSync(join(root,p),'utf8')};
+    }, undefined);
+    if (child.violations.length) return child;
+    const valid = readFileSync(source,'utf8') === 'alpha';
+    return {violations:valid ? [] : ['drift'], addedPaths:[], afterHashes:{}, read:(p:string)=>readFileSync(join(root,p),'utf8')};
+  }, 'docs/proof.json');
+  expect(nested().violations).toEqual([]); expect(inner).toBe(1); expect(outer).toBe(1);
+  writeFileSync(source,'omega');
+  expect(nested().violations).toEqual(['drift']); expect(inner).toBe(2); expect(outer).toBe(2);
+  // Drifted nested accepts are discarded; the pristine identity remains cached.
+  writeFileSync(source,'alpha');
+  expect(nested().violations).toEqual([]); expect(inner).toBe(2); expect(outer).toBe(2);
+  expect(nested().violations).toEqual([]); expect(inner).toBe(2); expect(outer).toBe(2);
+}, 90000);

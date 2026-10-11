@@ -47,15 +47,25 @@ jobs:
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1
 
-  frontend:
-    name: Frontend source checks
+  frontend_tests:
+    name: Frontend tests (${{ matrix.shard }}/3)
     runs-on: windows-latest
-    timeout-minutes: 15
+    # Ordinary unit/UI shards stay free of multi-minute Boundary probes so the
+    # vitest worker RPC channel is not held open across a 7–17 minute sync run.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    timeout-minutes: 35
+    env:
+      # Historical successor probes retain immutable blobs; raise the heap ceiling
+      # without relaxing assertions or dropping negative proof coverage.
+      NODE_OPTIONS: --max-old-space-size=8192
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Exact successor proofs read immutable Phase8/12/13 baseline commits.
+          # Frozen historical proofs require their full immutable parent history.
           fetch-depth: 0
 
       - name: Set up pnpm 10
@@ -72,16 +82,82 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Frontend tests
-        run: pnpm test --maxWorkers=1
+      - name: Frontend tests (non-Boundary shard)
+        # Keep the established shard CLI; exclude only the heavy Boundary suite
+        # (run in frontend_boundary_tests). Each file still uses a fresh forks
+        # worker because vite.config disables singleFork.
+        run: >-
+          pnpm test --maxWorkers=1 --shard=${{ matrix.shard }}/3
+          --exclude src/app/**/*Boundary*.test.ts
+          --exclude scripts/testing/**/*[Bb]oundary*.test.ts
+          --exclude scripts/testing/immutable-git-cache.test.ts
+          --exclude scripts/testing/release-boundary.test.ts
 
       - name: Architecture guards
+        if: ${{ matrix.shard == 1 }}
         run: pnpm test:architecture
 
       - name: TypeScript check
+        if: ${{ matrix.shard == 1 }}
         run: pnpm exec tsc --noEmit
 
       - name: Frontend build
-        # TypeScript was checked immediately above; build the same Vite bundle
-        # without repeating tsc. Keep both independent authoritative gates.
+        if: ${{ matrix.shard == 1 }}
+        # TypeScript checked above; avoid redundant tsc.
         run: pnpm exec vite build
+
+  frontend_boundary_tests:
+    name: Frontend Boundary probes
+    runs-on: windows-latest
+    # Dedicated job: one file per forks worker, sequenced. Avoids the
+    # single long-lived RPC session that produced onTaskUpdate ELIFECYCLE.
+    timeout-minutes: 90
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Boundary and successor-guard probes
+        run: >-
+          pnpm test --maxWorkers=1
+          src/app/**/*Boundary*.test.ts
+          scripts/testing/**/*[Bb]oundary*.test.ts
+          scripts/testing/immutable-git-cache.test.ts
+          scripts/testing/release-boundary.test.ts
+
+  frontend:
+    name: Frontend source checks
+    # Retain the stable required-check name; require shards + Boundary job.
+    needs: [frontend_tests, frontend_boundary_tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all frontend shards and mandatory gates
+        shell: bash
+        env:
+          SHARD_RESULT: ${{ needs.frontend_tests.result }}
+          BOUNDARY_RESULT: ${{ needs.frontend_boundary_tests.result }}
+        run: |
+          if [ "$SHARD_RESULT" != "success" ] || [ "$BOUNDARY_RESULT" != "success" ]; then
+            echo "Frontend shard or Boundary probes did not succeed: shards=$SHARD_RESULT boundary=$BOUNDARY_RESULT"
+            exit 1
+          fi
+          echo "All three shards, Boundary probes, architecture, TypeScript and Vite succeeded."

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync as exec } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-const gitObjects = new Map(), results = new Map(), validatedProofs = new Map();
+const gitObjects = new Map(), gitBlobs = new Map(), gitTrees = new Map(), results = new Map(), validatedProofs = new Map();
 let session;
 function immutableObjectStore(root, env) {
   // Only immutable SHA queries share IO. Live acceptance and mutable refs stay
@@ -34,11 +34,70 @@ export function immutableGit(command, args, options = {}) {
     args[0] === 'cat-file' && args[1] === '--batch' &&
     String(options.input ?? '').trim().split('\n').every(a => /^[a-f0-9]{40}:/.test(a)));
   if (!immutable) return exec(command, args, options);
-  const key = JSON.stringify([immutableObjectStore(options.cwd ?? '.',options.env), args, options.input, options.encoding]);
+  const store = immutableObjectStore(options.cwd ?? '.',options.env);
+  const key = JSON.stringify([store, args, options.input, options.encoding, options.maxBuffer]);
   // Mutable replace refs must not redefine a supposedly immutable SHA query.
-  if (!gitObjects.has(key)) gitObjects.set(key, exec(command, ['--no-replace-objects',...args], options));
+  if (!gitObjects.has(key)) gitObjects.set(key, args.length === 2 && args[0] === 'cat-file'
+    ? immutableBlobBatch(store, args, options) : exec(command, ['--no-replace-objects',...args], options));
   const value = gitObjects.get(key);
   return Buffer.isBuffer(value) ? Buffer.from(value) : value;
+}
+function immutableBlobBatch(store, args, options) {
+  // Different historical commits mostly contain the same immutable blobs. Ask
+  // Git for identities first; transfer each verified object only once per store.
+  // Commit:path resolution still goes through Git with replace refs disabled.
+  let blobs = gitBlobs.get(store);
+  if (!blobs) gitBlobs.set(store, blobs = new Map());
+  const queries = String(options.input).split('\n');
+  if (queries.at(-1) === '') queries.pop();
+  if (queries.some(query => !/^[a-f0-9]{40}:/.test(query)))
+    return exec('git', ['--no-replace-objects', ...args], options);
+  const ids = queries.map(query => {
+    const commit = query.slice(0, 40), path = query.slice(41), key = JSON.stringify([store, commit]);
+    if (!gitTrees.has(key)) {
+      // Resolve immutable commit paths once, rather than traversing the same
+      // trees separately for thousands of batch-check queries in each reader.
+      const bytes = exec('git', ['--no-replace-objects', 'ls-tree', '-r', '-z', '--full-tree', commit],
+        { ...options, input: undefined, encoding: undefined, maxBuffer: 64 * 1024 * 1024 });
+      const entries = bytes.toString('utf8').split('\0'), tree = new Map();
+      if (entries.pop() !== '') throw Error('Immutable Git tree boundary mismatch');
+      for (const entry of entries) {
+        const match = /^[0-7]{6} (blob|commit) ([a-f0-9]{40})\t([\s\S]+)$/.exec(entry);
+        if (!match || tree.has(match[3])) throw Error('Immutable Git tree entry mismatch');
+        tree.set(match[3], match[1] === 'blob' ? match[2] : undefined);
+      }
+      gitTrees.set(key, tree);
+    }
+    return gitTrees.get(key).get(path);
+  });
+  // Preserve Git's missing/directory/path-expression behavior verbatim.
+  if (ids.some(id => !id)) return exec('git', ['--no-replace-objects', ...args], options);
+  const missing = [...new Set(ids.filter(id => !blobs.has(id)))];
+  if (missing.length) {
+    const bytes = exec('git', ['--no-replace-objects', 'cat-file', '--batch'], {
+      ...options, input: missing.join('\n') + '\n', encoding: undefined,
+    });
+    const fetched = new Map(); let offset = 0;
+    for (const id of missing) {
+      const end = bytes.indexOf(10, offset), header = /^([a-f0-9]{40}) blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
+      if (!header || header[1] !== id) throw Error('Immutable Git blob header mismatch');
+      const start = end + 1, size = Number(header[2]), content = bytes.subarray(start, start + size);
+      if (content.length !== size || bytes[start + size] !== 10
+          || createHash('sha1').update(`blob ${size}\0`).update(content).digest('hex') !== id) throw Error('Immutable Git blob bytes mismatch');
+      fetched.set(id, Buffer.from(content)); offset = start + size + 1;
+    }
+    if (offset !== bytes.length) throw Error('Immutable Git blob trailing bytes');
+    for (const [id, content] of fetched) blobs.set(id, content);
+  }
+  const chunks = [];
+  for (const id of ids) {
+    const content = blobs.get(id);
+    chunks.push(Buffer.from(`${id} blob ${content.length}\n`), content, Buffer.from('\n'));
+  }
+  const result = Buffer.concat(chunks);
+  // Preserve execFileSync's output limit and encoding contract, including failure.
+  if (result.length > (options.maxBuffer ?? 1024 * 1024)) return exec('git', ['--no-replace-objects', ...args], options);
+  return options.encoding && options.encoding !== 'buffer' ? result.toString(options.encoding) : result;
 }
 function identity(root) {
   const hash = createHash('sha256');
@@ -58,7 +117,7 @@ function identity(root) {
   };
   for (const dir of ['src', 'src-tauri/src', 'src-tauri/tests', 'src-tauri/examples',
     'src-tauri/migrations', 'src-tauri/runtime_packages', 'scripts', 'docs', '.github']) visit(dir);
-  for (const path of ['CONTEXT.md','README.md','package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
+  for (const path of ['CONTEXT.md','README.md','package.json','pnpm-lock.yaml','vite.config.ts','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
     'src-tauri/tauri.conf.json','src-tauri/build.rs']) {
     if (existsSync(join(root,path))) {hash.update(path); hash.update(readFileSync(join(root,path)));}
   }
@@ -85,25 +144,30 @@ export function cachedBoundary(root, name, override, validate, proofPath) {
       read: p => readFileSync(join(root,p),'utf8').replaceAll('\r\n','\n')};
   }
   const outer = !session;
-  if (outer) session = {root, identity: identity(root)};
+  // Stage nested successes until the outer live validation commits. A drifted
+  // outer identity must not retain nested accepts under a doomed byte profile.
+  if (outer) session = {root, identity: identity(root), staged: new Map()};
   try {
     if (session.root !== root) throw Error('Mixed boundary roots in one validation');
     const key = JSON.stringify([root, session.identity, name, override ?? null]);
-    if (!results.has(key)) {
-      const result = validate();
-      // Never reuse a rejected reader: its live fallback must remain fresh.
-      if (!result.violations.length) {
-        if (results.size >= 128) results.clear();
-        results.set(key,result);
+    if (results.has(key)) return results.get(key);
+    if (session.staged.has(key)) return session.staged.get(key);
+    const result = validate();
+    // Never reuse a rejected reader: its live fallback must remain fresh.
+    if (!result.violations.length) {
+      session.staged.set(key, result);
+      if (outer) {
+        if (results.size + session.staged.size >= 128) results.clear();
+        for (const [stagedKey, stagedResult] of session.staged) results.set(stagedKey, stagedResult);
+        session.staged.clear();
         if (!override && proofPath) validatedProofs.set(proofKey,JSON.stringify(JSON.parse(readFileSync(join(root,proofPath),'utf8'))));
       }
-      if (outer && !result.violations.length && identity(root) !== session.identity) {
-        results.clear(); validatedProofs.clear();
-        return {violations: ['boundary-live-drift-during-validation'],addedPaths:[],afterHashes:{},addedCommandSignatures:[],
-          read: p => readFileSync(join(root,p),'utf8').replaceAll('\r\n','\n')};
-      }
-      return result;
     }
-    return results.get(key);
+    if (outer && !result.violations.length && identity(root) !== session.identity) {
+      results.clear(); validatedProofs.clear();
+      return {violations: ['boundary-live-drift-during-validation'],addedPaths:[],afterHashes:{},addedCommandSignatures:[],
+        read: p => readFileSync(join(root,p),'utf8').replaceAll('\r\n','\n')};
+    }
+    return result;
   } finally { if (outer) session = undefined; }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatUiError } from "../../i18n/errorMessages";
 import {
   admitSceneProduction,
@@ -36,11 +36,15 @@ interface PreparationError {
   technicalMessage?: string;
 }
 
-export function SceneProductionPreparation({
+export function SceneProductionPreparation(props: SceneProductionPreparationProps) {
+  return <ScopedSceneProductionPreparation key={JSON.stringify([props.projectId, props.currentSceneId])} {...props} />;
+}
+
+function ScopedSceneProductionPreparation({
   projectId,
   sceneOptions,
   currentSceneId,
-  initialStage = "image",
+  initialStage,
   initialView,
   onOpenProductionQueue,
   onNotice,
@@ -49,9 +53,10 @@ export function SceneProductionPreparation({
     ? currentSceneId
     : sceneOptions[0]?.value ?? "";
   const [sceneId, setSceneId] = useState(firstSceneId);
-  const [stage, setStage] = useState<SceneProductionStage>(initialStage);
+  const firstStage = initialStage ?? initialView?.stage ?? "video";
+  const [stage, setStage] = useState<SceneProductionStage>(firstStage);
   const [view, setView] = useState<ScenePreparationView | undefined>(
-    initialView && initialView.projectId === projectId && initialView.sceneId === firstSceneId && initialView.stage === initialStage
+    initialView && initialView.projectId === projectId && initialView.sceneId === firstSceneId && initialView.stage === firstStage
       ? initialView
       : undefined,
   );
@@ -62,8 +67,17 @@ export function SceneProductionPreparation({
   const [error, setError] = useState<PreparationError>();
   const [notice, setNotice] = useState<string>();
   const [admissionResult, setAdmissionResult] = useState<SceneProductionAdmissionResult>();
+  const [allowPartial, setAllowPartial] = useState(false);
 
-  const items = view?.items ?? [];
+  const owner = JSON.stringify([projectId, sceneId, stage]);
+  const currentOwner = useRef(owner);
+  currentOwner.current = owner;
+  const mounted = useRef(true);
+  const detailRequest = useRef(0);
+  const admissionLock = useRef(false);
+  const isCurrent = (requestedOwner: string) => mounted.current && currentOwner.current === requestedOwner;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const items = view?.projectId === projectId && view.sceneId === sceneId && view.stage === stage ? view.items : [];
   const selectedCount = selectedShotIds.size;
   const readyItems = useMemo(
     () => items.filter((item) => item.status === "READY" && !item.alreadyPrepared),
@@ -87,6 +101,7 @@ export function SceneProductionPreparation({
       return;
     }
     let active = true;
+    setView(undefined);
     setBusyAction("preflight");
     setError(undefined);
     setNotice(undefined);
@@ -96,7 +111,8 @@ export function SceneProductionPreparation({
     setDetail(undefined);
     void getSceneProductionPreflight({ projectId, sceneId, stage })
       .then((next) => {
-        if (!active) return;
+        if (!active || !isCurrent(owner)) return;
+        if (next.projectId !== projectId || next.sceneId !== sceneId || next.stage !== stage) throw new Error("场景预检归属不一致");
         setView(next);
       })
       .catch((value: unknown) => {
@@ -127,7 +143,7 @@ export function SceneProductionPreparation({
   }
 
   function toggleShot(item: ShotProductionPlanSummary) {
-    if (item.status !== "READY" || item.alreadyPrepared || isBusy) return;
+    if (isBusy || (!allowPartial && (item.status !== "READY" || item.alreadyPrepared))) return;
     setSelectedShotIds((current) => {
       const next = new Set(current);
       if (next.has(item.shotId)) next.delete(item.shotId);
@@ -147,44 +163,59 @@ export function SceneProductionPreparation({
   }
 
   async function openDetail(item: ShotProductionPlanSummary) {
+    const requestedOwner = owner;
+    const requestId = ++detailRequest.current;
     setSelectedShotId(item.shotId);
     setDetail(undefined);
     setError(undefined);
     setBusyAction("detail");
     try {
-      setDetail(await getShotProductionPlanDetail({ projectId, shotId: item.shotId, stage }));
+      const next = await getShotProductionPlanDetail({ projectId, shotId: item.shotId, stage });
+      if (!isCurrent(requestedOwner) || requestId !== detailRequest.current) return;
+      if (next.projectId !== projectId || next.shotId !== item.shotId || next.stage !== stage) throw new Error("镜头计划归属不一致");
+      setDetail(next);
     } catch (value: unknown) {
-      setError(toPreparationError(value, "SHOT_PRODUCTION_PLAN_DETAIL_FAILED"));
+      if (isCurrent(requestedOwner) && requestId === detailRequest.current) setError(toPreparationError(value, "SHOT_PRODUCTION_PLAN_DETAIL_FAILED"));
     } finally {
-      setBusyAction(undefined);
+      if (isCurrent(requestedOwner) && requestId === detailRequest.current) setBusyAction(undefined);
     }
   }
 
   async function admit() {
-    if (!sceneId || !selectedCount || isBusy) return;
-    const ids = [...selectedShotIds];
+    if (!sceneId || !selectedCount || isBusy || admissionLock.current || stage !== "video") return;
+    const ids = items.filter(item => selectedShotIds.has(item.shotId)).map(item => item.shotId);
     if (!confirmAdmission(ids.length)) return;
+    const requestedOwner = owner;
+    admissionLock.current = true;
     setBusyAction("admit");
     clearFeedback();
     setAdmissionResult(undefined);
     try {
+      const fresh = await getSceneProductionPreflight({ projectId, sceneId, stage });
+      if (!isCurrent(requestedOwner)) return;
+      if (fresh.projectId !== projectId || fresh.sceneId !== sceneId || fresh.stage !== stage) throw new Error("场景预检归属不一致");
+      setView(fresh);
+      if (new Set(fresh.items.map(item => item.shotId)).size !== fresh.items.length || ids.some(id => !fresh.items.some(item => item.shotId === id && (allowPartial || item.status === "READY")))) throw new Error("最新预检未通过或镜头已离开场景");
       const result = await admitSceneProduction({
         projectId,
         sceneId,
         stage,
-        shotIds: ids,
-        allowPartial: false,
+        shotIds: fresh.items.filter(item => selectedShotIds.has(item.shotId)).map(item => item.shotId),
+        allowPartial,
       });
+      if (!isCurrent(requestedOwner)) return;
+      if (result.projectId !== projectId || result.stage !== stage || (result.sceneId && result.sceneId !== sceneId)) throw new Error("场景准入回执归属不一致");
       setAdmissionResult(result);
       setSelectedShotIds(new Set());
       const message = "已准备完成：已创建 " + result.createdCount + " 个待启动项目；当前尚未开始生产。复用 " + result.alreadyPreparedCount + " 个，跳过 " + (result.skippedIncomplete + result.skippedBlocked) + " 个。";
       setNotice(message);
       onNotice?.(message);
-      setView((current) => current ? markAdmittedItems(current, ids, result) : current);
+      const refreshed = await getSceneProductionPreflight({ projectId, sceneId, stage });
+      if (isCurrent(requestedOwner) && refreshed.projectId === projectId && refreshed.sceneId === sceneId && refreshed.stage === stage) setView(refreshed);
     } catch (value: unknown) {
-      setError(toPreparationError(value, "SCENE_PRODUCTION_ADMISSION_FAILED"));
+      if (isCurrent(requestedOwner)) setError(toPreparationError(value, "SCENE_PRODUCTION_ADMISSION_FAILED"));
     } finally {
-      setBusyAction(undefined);
+      if (isCurrent(requestedOwner)) { admissionLock.current = false; setBusyAction(undefined); }
     }
   }
 
@@ -238,10 +269,11 @@ export function SceneProductionPreparation({
           {readyItems.length > MAX_PREPARATION_BATCH_ITEMS && <p className="scene-preparation-limit" role="status">可准备镜头超过 {MAX_PREPARATION_BATCH_ITEMS} 个；选择全部时只取前 {MAX_PREPARATION_BATCH_ITEMS} 个，单批次最多 {MAX_PREPARATION_BATCH_ITEMS} 个镜头。</p>}
           {!view && busyAction === "preflight" && <div className="scene-preparation-empty"><strong>正在检查场景</strong><span>只执行一次场景级 Live preflight，不会创建 Batch、Task 或生成任务。</span></div>}
           {view && !items.length && <div className="scene-preparation-empty"><strong>场景暂无镜头</strong><span>请回到现有内容结构分配镜头。</span></div>}
-          {items.length > 0 && <div className="scene-preparation-shot-list">{items.map((item) => <ShotPreparationCard key={item.shotId} item={item} selected={selectedShotIds.has(item.shotId)} onToggle={() => toggleShot(item)} onInspect={() => void openDetail(item)} disabled={isBusy} />)}</div>}
+          {items.length > 0 && <div className="scene-preparation-shot-list">{items.map((item) => <ShotPreparationCard key={item.shotId} item={item} selected={selectedShotIds.has(item.shotId)} onToggle={() => toggleShot(item)} onInspect={() => void openDetail(item)} disabled={isBusy} allowPartial={allowPartial} />)}</div>}
+          <label><input type="checkbox" checked={allowPartial} onChange={event => setAllowPartial(event.target.checked)} disabled={isBusy} /> 允许部分准备：显式跳过当前不合格镜头，以回执为准</label>
           <div className="scene-preparation-admission-bar">
-            <div><strong>{selectedCount ? "将创建 " + selectedCount + " 个待启动批次项目" : "请选择可准备镜头"}</strong><span>后端会再次 Live preflight；本动作只创建待启动批次，不会开始真实生产。</span></div>
-            <button type="button" onClick={() => void admit()} disabled={isBusy || selectedCount === 0}>{busyAction === "admit" ? "创建中…" : "创建待启动批次"}</button>
+            <div><strong>{selectedCount ? "将提交 " + selectedCount + " 个镜头，实际创建、复用及跳过以回执为准" : "请选择可准备镜头"}</strong><span>后端会再次 Live preflight；本动作只创建待启动批次，不会开始真实生产。</span></div>
+            <button type="button" onClick={() => void admit()} disabled={stage !== "video" || isBusy || selectedCount === 0}>{busyAction === "admit" ? "创建中…" : "创建待启动批次"}</button>
           </div>
         </section>
 
@@ -252,9 +284,10 @@ export function SceneProductionPreparation({
       {admissionResult && <section className="scene-preparation-success" aria-label="待启动批次创建结果">
         <div><strong>已准备完成 · 待启动</strong><span>已创建待启动批次和项目；当前尚未开始生产，也没有提交生成。</span></div>
         <dl><div><dt>创建</dt><dd>{admissionResult.createdCount}</dd></div><div><dt>复用</dt><dd>{admissionResult.alreadyPreparedCount}</dd></div><div><dt>跳过</dt><dd>{admissionResult.skippedIncomplete + admissionResult.skippedBlocked}</dd></div></dl>
-        <button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(admissionResult.batchId ?? admissionResult.createdBatchIds?.[0])} disabled={!onOpenProductionQueue}>前往生产队列</button>
+        <button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(admissionResult.batchId ?? admissionResult.createdBatchIds?.[0] ?? admissionResult.matchingPreparedBatchIds?.[0])} disabled={!onOpenProductionQueue || (!admissionResult.createdCount && !admissionResult.alreadyPreparedCount)}>前往生产队列</button>
       </section>}
       <p className="scene-preparation-footer-note">生产队列仍由现有 Runbook 手动操作；本页面只负责准备并创建待启动批次。</p>
+      {stage === "image" && <p>图片生成已退休；保留历史计划，不创建新图片生产。</p>}
     </section>
   );
 }
@@ -263,8 +296,8 @@ function SummaryCard({ label, value, tone }: { label: string; value: number; ton
   return <div className={"scene-preparation-summary-card" + (tone ? " scene-preparation-summary-" + tone : "")}><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function ShotPreparationCard({ item, selected, onToggle, onInspect, disabled }: { item: ShotProductionPlanSummary; selected: boolean; onToggle: () => void; onInspect: () => void; disabled: boolean }) {
-  const isSelectable = item.status === "READY" && !item.alreadyPrepared;
+function ShotPreparationCard({ item, selected, onToggle, onInspect, disabled, allowPartial }: { item: ShotProductionPlanSummary; selected: boolean; onToggle: () => void; onInspect: () => void; disabled: boolean; allowPartial: boolean }) {
+  const isSelectable = allowPartial || item.status === "READY" && !item.alreadyPrepared;
   const stale = (item.stalePreparedBatchIds?.length ?? 0) > 0;
   return (
     <article className={"scene-preparation-shot-card scene-preparation-shot-" + item.status.toLowerCase()} data-shot-id={item.shotId}>
@@ -299,22 +332,6 @@ function ShotPreparationCard({ item, selected, onToggle, onInspect, disabled }: 
 
 function StatusBadge({ status }: { status: string }) {
   return <span className={"scene-preparation-status scene-preparation-status-" + status.toLowerCase()}>{preparationStatusLabel(status)}</span>;
-}
-
-function markAdmittedItems(view: ScenePreparationView, shotIds: string[], result: SceneProductionAdmissionResult): ScenePreparationView {
-  const ids = new Set(shotIds);
-  const batchId = result.batchId ?? result.createdBatchIds?.[0];
-  return {
-    ...view,
-    preparedCount: view.preparedCount + result.createdCount,
-    items: view.items.map((item) => ids.has(item.shotId)
-      ? { ...item, alreadyPrepared: true, existingBatchIds: unique([...(item.existingBatchIds ?? []), ...(batchId ? [batchId] : [])]) }
-      : item),
-  };
-}
-
-function unique(values: string[]): string[] {
-  return [...new Set(values)];
 }
 
 function confirmAdmission(count: number): boolean {

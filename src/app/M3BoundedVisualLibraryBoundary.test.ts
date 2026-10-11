@@ -18,7 +18,7 @@ it('validates bounded visual Library successor before historical projection and 
   (p:typeof proof)=>{delete p.paths['src/product/client.ts'];},
   ...Object.keys(proof.invariants).map(flag=>(p:typeof proof)=>{p.invariants[flag]=true;})
  ]){const invalid=structuredClone(proof);mutate(invalid);expect(m3VisualParentReader('.',invalid).violations.length).toBeGreaterThan(0);}
-},30000);
+}, 90000);
 it('fixed performance targets fail closed rather than raising budgets after regressions',()=>{
  const baseline=JSON.parse(readFileSync('docs/architecture/m3-1-library-scale-baseline.json','utf8'));
  const candidate=JSON.parse(readFileSync('docs/architecture/m3-2-library-scale-candidate.json','utf8'));
@@ -32,4 +32,4 @@ it('fixed performance targets fail closed rather than raising budgets after regr
   (c:typeof candidate)=>{c.thumbnailObservation.objectUrlsRevoked=0;},
   (c:typeof candidate)=>{c.budgetAdjusted=true;},
  ]){const invalid=structuredClone(candidate);mutate(invalid);expect(visualCandidateViolations(baseline,invalid).length).toBeGreaterThan(0);}
-});
+}, 90000);

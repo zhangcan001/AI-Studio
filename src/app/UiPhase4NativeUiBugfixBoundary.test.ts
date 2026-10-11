@@ -22,7 +22,7 @@ it('accepts exactly the two reviewed Native UI fixes and preserves original Phas
   expect(uiPhase4ParentReader('.').violations).toEqual([]);
   const proof = JSON.parse(readFileSync(NATIVE_UI_BUGFIX_MANIFEST, 'utf8'));
   expect(proof.invariants).toEqual(NATIVE_UI_BUGFIX_INVARIANTS);
-}, 30000);
+}, 90000);
 
 it('rejects forged post-image, new addition, parent, or invariant while leaving published proof immutable', () => {
   const manifest = JSON.parse(readFileSync(NATIVE_UI_BUGFIX_MANIFEST, 'utf8'));
@@ -40,4 +40,4 @@ it('rejects forged post-image, new addition, parent, or invariant while leaving 
     expect(result.violations.length).toBeGreaterThan(0);
     expect(result.addedPaths).toEqual([]);
   }
-}, 30000);
+}, 90000);

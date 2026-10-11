@@ -89,6 +89,32 @@ pub struct ShotProductionPlan {
     pub snapshot_identity: Option<PreparationSnapshotIdentity>,
 }
 
+/// Request scope only; never a second persisted production model.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PreparationScope {
+    Project,
+    Series { id: String },
+    Episode { id: String },
+    Scene { id: String },
+    Unassigned,
+}
+
+impl PreparationScope {
+    pub fn includes(&self, structure: &ResolvedStructure) -> bool {
+        match self {
+            Self::Project => true,
+            Self::Series { id } => structure.series.as_ref().is_some_and(|node| &node.id == id),
+            Self::Episode { id } => structure
+                .episode
+                .as_ref()
+                .is_some_and(|node| &node.id == id),
+            Self::Scene { id } => structure.scene.as_ref().is_some_and(|node| &node.id == id),
+            Self::Unassigned => structure.scene.is_none(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShotProductionPlanSummary {

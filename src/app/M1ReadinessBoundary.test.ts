@@ -21,7 +21,7 @@ it('M1-1 bypasses discard only for an exact scoped Create return with existing s
   ] satisfies AppRoute[]) expect(preservesCreateDraftForSettings(current, route, 'p:s:image')).toBe(false);
   expect(preservesCreateDraftForSettings(current, next)).toBe(false);
   expect(preservesCreateDraftForSettings(current, next, 'other:s:image')).toBe(false);
-});
+}, 90000);
 
 it('M1-1 advances only reviewed live bytes and preserves parent/untouched aggregates', () => {
   const proof = JSON.parse(readFileSync('docs/architecture/m1-1-readiness.json', 'utf8'));
@@ -45,4 +45,4 @@ it('M1-1 advances only reviewed live bytes and preserves parent/untouched aggreg
     // Fail closed: no parent projection may hide live drift when proof is invalid.
     expect(gate.read('src/features/create/CreateResults.tsx')).not.toContain('focus(issue.details.field)');
   }
-}, 30000);
+}, 90000);

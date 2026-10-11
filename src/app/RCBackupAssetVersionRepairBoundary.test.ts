@@ -17,4 +17,4 @@ it('validates canonical restore and persisted-only legacy compatibility before h
     (p:typeof proof)=>{p.invariants.legacyAsvReadOnly=false;},
     ...Object.entries(proof.invariants).filter(([,v])=>v===false).map(([flag])=>(p:typeof proof)=>{p.invariants[flag]=true;})
   ]){const changed=structuredClone(proof);mutate(changed);const rejected=rcRepairParentReader('.',changed);expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);expect(rejected.afterHashes).toEqual({});}
-},30000);
+}, 90000);

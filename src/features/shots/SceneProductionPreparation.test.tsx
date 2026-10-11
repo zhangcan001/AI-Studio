@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import * as tauriClient from "../../services/tauriClient";
 import type {
@@ -16,6 +19,28 @@ import {
 } from "./SceneProductionPreparation";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.mocked(invoke).mockReset(); });
+
+it("Phase5B scene partial admission is opt-in and preserves authoritative scene order despite click order", async () => {
+  const user = userEvent.setup();
+  const sceneView = { ...view, stage: "video" as const };
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  vi.mocked(invoke).mockImplementation(async command => {
+    if (command === "scene_production_preflight") return sceneView;
+    if (command === "scene_production_admit") return { projectId: "project-1", sceneId: "scene-1", stage: "video", createdCount: 1, alreadyPreparedCount: 0, skippedIncomplete: 1, skippedBlocked: 0, createdBatchIds: ["partial"] };
+    throw Error(`Unexpected IPC ${command}`);
+  });
+  render(<SceneProductionPreparation projectId="project-1" sceneOptions={[{ value: "scene-1", label: "scene" }]} currentSceneId="scene-1" />);
+  const missing = await screen.findByRole("checkbox", { name: "选择 屋檐切换" });
+  expect(missing.hasAttribute("disabled")).toBe(true);
+  await user.click(screen.getByRole("checkbox", { name: /允许部分准备/ }));
+  await user.click(missing); await user.click(screen.getByRole("checkbox", { name: "选择 雨夜入口" }));
+  await user.click(screen.getByRole("button", { name: "创建待启动批次" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("scene_production_admit", { request: { projectId: "project-1", sceneId: "scene-1", stage: "video", shotIds: ["shot-1", "shot-3"], allowPartial: true } }));
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "production_queue_start")).toBe(false);
+  await screen.findByText(/已准备完成：已创建 1/);
+});
 
 const summary = (overrides: Partial<ShotProductionPlanSummary> = {}): ShotProductionPlanSummary => ({
   shotId: "shot-1",
@@ -92,7 +117,7 @@ describe("SceneProductionPreparation", () => {
     expect(html).not.toContain("开始全部");
     expect(html).not.toContain("启动生产");
 
-    const checkboxes = html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? [];
+    const checkboxes = (html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? []).filter(markup => markup.includes('aria-label="选择 '));
     expect(checkboxes).toHaveLength(4);
     expect(checkboxes.find((markup) => markup.includes('aria-label="选择 雨夜入口"'))).not.toContain("disabled");
     expect(checkboxes.find((markup) => markup.includes('aria-label="选择 巷口近景"'))).toContain("disabled");
@@ -118,7 +143,7 @@ describe("SceneProductionPreparation", () => {
     );
     expect(html).toContain("可准备镜头超过 100 个");
     expect(html).toContain("只取前 100 个");
-    expect(html.match(/type="checkbox"/g) ?? []).toHaveLength(105);
+    expect((html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? []).filter(markup => markup.includes('aria-label="选择 '))).toHaveLength(105);
   });
 });
 
@@ -163,91 +188,60 @@ describe("Scene preparation client boundary", () => {
   });
 
   it("clicks Select all READY at 100, admits the selection, and navigates to Queue without starting it", async () => {
+    const user = userEvent.setup();
+    const videoView = { ...largeReadyView, stage: "video" as const };
     const admissionResult = {
-      projectId: "project-1",
-      sceneId: "scene-1",
-      stage: "image" as const,
-      batchId: "batch-100",
-      createdBatchIds: ["batch-100"],
-      createdCount: 100,
-      skippedIncomplete: 0,
-      skippedBlocked: 0,
-      alreadyPreparedCount: 0,
+      projectId: "project-1", sceneId: "scene-1", stage: "video" as const,
+      batchId: "batch-100", createdBatchIds: ["batch-100"], createdCount: 100,
+      skippedIncomplete: 0, skippedBlocked: 0, alreadyPreparedCount: 0,
       matchingPreparedBatchIds: [],
     };
     const onOpenProductionQueue = vi.fn();
-    const hookHarness = new HookHarness();
-    const admitMock = vi.fn().mockResolvedValue(admissionResult);
-    const startMock = vi.fn();
-
-    vi.resetModules();
-    vi.doMock("react", async () => {
-      const actual = await vi.importActual<typeof import("react")>("react");
-      return {
-        ...actual,
-        useState: hookHarness.useState.bind(hookHarness),
-        useMemo: hookHarness.useMemo.bind(hookHarness),
-        useEffect: hookHarness.useEffect.bind(hookHarness),
-      };
+    const startSpy = vi.spyOn(tauriClient, "startProductionQueue");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    let admitted = false;
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "scene_production_preflight") return admitted
+        ? { ...videoView, preparedCount: 100, items: videoView.items.map((item, index) => ({ ...item, alreadyPrepared: index < 100 })) }
+        : videoView;
+      if (command === "scene_production_admit") { admitted = true; return admissionResult; }
+      throw new Error(`Unexpected IPC: ${command}`);
     });
-    vi.doMock("../../services/tauriClient", async () => {
-      const actual = await vi.importActual<typeof import("../../services/tauriClient")>("../../services/tauriClient");
-      return {
-        ...actual,
-        getSceneProductionPreflight: vi.fn().mockResolvedValue(largeReadyView),
-        getShotProductionPlanDetail: vi.fn(),
-        admitSceneProduction: admitMock,
-        startProductionQueue: startMock,
-      };
-    });
+    render(<SceneProductionPreparation projectId="project-1"
+      sceneOptions={[{ value: "scene-1", label: "S01 / 雨夜入口" }]}
+      currentSceneId="scene-1" onOpenProductionQueue={onOpenProductionQueue} />);
+    await screen.findByRole("checkbox", { name: "选择 镜头 1" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "选择全部可准备" }).hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getByRole("button", { name: "选择全部可准备" }));
+    expect(screen.getAllByRole("checkbox").filter(input => (input as HTMLInputElement).checked)).toHaveLength(100);
+    await user.click(screen.getByRole("button", { name: "创建待启动批次" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("scene_production_admit", {
+      request: { projectId: "project-1", sceneId: "scene-1", stage: "video",
+        shotIds: expect.arrayContaining(["shot-1", "shot-100"]), allowPartial: false },
+    }));
+    const call = vi.mocked(invoke).mock.calls.find(([command]) => command === "scene_production_admit");
+    expect((call?.[1] as { request: { shotIds: string[] } }).request.shotIds).toHaveLength(100);
+    await screen.findByText(/已准备完成：/);
+    await user.click(screen.getByRole("button", { name: "前往生产队列" }));
+    expect(onOpenProductionQueue).toHaveBeenCalledWith("batch-100");
+    expect(startSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "start_production_queue")).toBe(false);
+  });
 
-    try {
-      const { SceneProductionPreparation: Preparation } = await import("./SceneProductionPreparation");
-      const props = {
-        projectId: "project-1",
-        sceneOptions: [{ value: "scene-1", label: "S01 / 雨夜入口" }],
-        currentSceneId: "scene-1",
-        initialView: largeReadyView,
-        onOpenProductionQueue,
-      };
-      const render = () => {
-        hookHarness.beginRender();
-        return materialize(Preparation(props));
-      };
-
-      let tree = render();
-      const selectAll = findSingle(tree, (element) => element.type === "button" && textContent(element) === "选择全部可准备");
-      (selectAll.props.onClick as () => void)();
-      tree = render();
-      expect(findElements(tree, (element) => element.type === "input" && element.props.type === "checkbox" && element.props.checked === true)).toHaveLength(100);
-
-      const admit = findSingle(tree, (element) => element.type === "button" && textContent(element) === "创建待启动批次");
-      (admit.props.onClick as () => void)();
-      await flushMicrotasks();
-      tree = render();
-
-      expect(admitMock).toHaveBeenCalledWith({
-        projectId: "project-1",
-        sceneId: "scene-1",
-        stage: "image",
-        shotIds: expect.arrayContaining(["shot-1", "shot-100"]),
-        allowPartial: false,
-      });
-      expect(admitMock.mock.calls[0]?.[0].shotIds).toHaveLength(100);
-      expect(textContent(tree)).toContain("已准备完成");
-
-      const queueButton = findSingle(tree, (element) => element.type === "button" && textContent(element) === "前往生产队列");
-      (queueButton.props.onClick as () => void)();
-      expect(onOpenProductionQueue).toHaveBeenCalledWith("batch-100");
-      expect(startMock).not.toHaveBeenCalled();
-    } finally {
-      vi.doUnmock("react");
-      vi.doUnmock("../../services/tauriClient");
-      vi.resetModules();
-    }
+  it("rechecks the scene and rejects a selection that has become blocked", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValueOnce({ ...view, stage: "video" })
+      .mockResolvedValueOnce({ ...view, stage: "video", items: [summary({ status: "BLOCKED", blockers: ["首帧已经删除"] })] });
+    render(<SceneProductionPreparation projectId="project-1" sceneOptions={[{ value: "scene-1", label: "Scene" }]} currentSceneId="scene-1" />);
+    await screen.findByRole("checkbox", { name: "选择 雨夜入口" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "选择全部可准备" }).hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getByRole("button", { name: "选择全部可准备" }));
+    await user.click(screen.getByRole("button", { name: "创建待启动批次" }));
+    await screen.findByText(/最新预检未通过/);
+    expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "scene_production_admit")).toHaveLength(0);
   });
 });
-
 const largeReadyView: ScenePreparationView = {
   ...view,
   total: 105,
@@ -262,76 +256,3 @@ const largeReadyView: ScenePreparationView = {
     name: `镜头 ${index + 1}`,
   })),
 };
-
-class HookHarness {
-  private readonly values: unknown[] = [];
-  private cursor = 0;
-
-  beginRender() {
-    this.cursor = 0;
-  }
-
-  useState<T>(initial: T | (() => T)): [T, (next: T | ((current: T) => T)) => void] {
-    const index = this.cursor++;
-    if (!(index in this.values)) {
-      this.values[index] = typeof initial === "function" ? (initial as () => T)() : initial;
-    }
-    const setState = (next: T | ((current: T) => T)) => {
-      this.values[index] = typeof next === "function"
-        ? (next as (current: T) => T)(this.values[index] as T)
-        : next;
-    };
-    return [this.values[index] as T, setState];
-  }
-
-  useMemo<T>(factory: () => T): T {
-    this.cursor++;
-    return factory();
-  }
-
-  useEffect(_effect: () => void | (() => void), _dependencies?: unknown[]) {
-    this.cursor++;
-  }
-}
-
-interface TestElement {
-  type: unknown;
-  props: Record<string, unknown>;
-}
-
-function isTestElement(value: unknown): value is TestElement {
-  return typeof value === "object" && value !== null && "type" in value && "props" in value;
-}
-
-function materialize(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(materialize);
-  if (!isTestElement(node)) return node;
-  if (typeof node.type === "function") return materialize(node.type(node.props));
-  return { ...node, props: { ...node.props, children: materialize(node.props.children) } };
-}
-
-function findElements(node: unknown, predicate: (element: TestElement) => boolean): TestElement[] {
-  if (Array.isArray(node)) return node.flatMap((child) => findElements(child, predicate));
-  if (!isTestElement(node)) return [];
-  const matches = predicate(node) ? [node] : [];
-  return [...matches, ...findElements(node.props.children, predicate)];
-}
-
-function findSingle(node: unknown, predicate: (element: TestElement) => boolean): TestElement {
-  const matches = findElements(node, predicate);
-  expect(matches).toHaveLength(1);
-  return matches[0]!;
-}
-
-function textContent(node: unknown): string {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(textContent).join("");
-  if (!isTestElement(node)) return "";
-  return textContent(node.props.children);
-}
-
-async function flushMicrotasks() {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-}

@@ -103,6 +103,8 @@ export type SeriesProductionBusyAction =
   | "prepare";
 
 export interface SeriesProductionPanelProps {
+  currentSeriesId?: string;
+  onOpenShot?: (shotId: string) => void;
   projectId: string;
   tree: ProductionStructureTree;
   shots: ShotView[];

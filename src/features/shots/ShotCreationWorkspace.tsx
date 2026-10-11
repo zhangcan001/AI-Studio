@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { productClient } from "../../product/client";
+import type { RunResult } from "../../product/types";
+import { toUserMessage } from "../../i18n/errorMessages";
 import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
 import { formatDateTime, taskStatusLabel } from "../../i18n/statusLabels";
 import type { AssetView } from "../../types/asset";
@@ -37,6 +40,7 @@ export interface ShotCreationWorkspaceProps extends Omit<ShotInspectorProps, "pr
   selectedAssetId?: string;
   previewAsset?: AssetView;
   onCandidateSelect?: (candidate: ShotWorkspaceCandidate) => void;
+  onOpenReview?: () => void;
   onCandidateConfirm?: (assetId: string, fromLinkedTask?: boolean) => void | Promise<void>;
   onOpenAsset?: (assetId: string) => void;
   onOpenTask?: (taskId: string) => void;
@@ -67,7 +71,7 @@ const workspaceTabs: Array<{ id: ShotCreationWorkspaceTab; label: string }> = [
 const candidateStatusLabels: Record<ShotCandidateStatus, string> = {
   ready: "待确认",
   selected: "已选择",
-  reviewed: "已确认",
+  reviewed: "审核已通过",
   failed: "失败",
   generating: "运行中",
   queued: "待执行",
@@ -78,7 +82,7 @@ export function resolveShotPreviewAsset(candidates: ShotWorkspaceCandidate[], se
 }
 
 export function canConfirmShotCandidate(candidate: ShotWorkspaceCandidate, selectedAssetId?: string): boolean {
-  return candidate.asset.id !== selectedAssetId && candidate.status !== "selected" && candidate.status !== "reviewed";
+  return candidate.asset.id !== selectedAssetId && candidate.status !== "selected";
 }
 
 export function ShotCreationWorkspace({
@@ -93,6 +97,7 @@ export function ShotCreationWorkspace({
   previewAsset,
   onCandidateSelect,
   onCandidateConfirm,
+  onOpenReview,
   onOpenTask,
   history,
   onRetry,
@@ -161,6 +166,7 @@ export function ShotCreationWorkspace({
       <div className="shot-creation-layout">
         <main className="shot-creation-main">
           {selectedWorkspaceTab === "generate" && <GenerateWorkspace
+            key={JSON.stringify([projectId, shot.id, stage, inspectorProps.currentRecipe?.workflowVersionId, inspectorProps.currentRecipe?.recipeId])}
             projectId={projectId}
             stage={stage}
             candidates={candidates}
@@ -171,6 +177,8 @@ export function ShotCreationWorkspace({
             onOpenAsset={inspectorProps.onOpenAsset}
             onCandidateSelect={onCandidateSelect}
             onCandidateConfirm={onCandidateConfirm}
+            onOpenReview={onOpenReview}
+            onOpenTask={onOpenTask}
             previewResetKey={`${shot.id}:${stage}`}
             onGenerate={inspectorProps.onGenerate}
             busy={inspectorProps.busy}
@@ -190,7 +198,7 @@ export function ShotCreationWorkspace({
   );
 }
 
-function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, previewAsset, references, keyframeAsset, onOpenAsset, onCandidateSelect, onCandidateConfirm, previewResetKey, onGenerate, busy, promptText, onCopyPrompt, onEditPrompt }: {
+function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, previewAsset, references, keyframeAsset, onOpenAsset, onCandidateSelect, onCandidateConfirm, onOpenReview, onOpenTask, previewResetKey, onGenerate, busy, promptText, onCopyPrompt, onEditPrompt }: {
   projectId: string;
   stage: ShotStage;
   candidates: ShotWorkspaceCandidate[];
@@ -200,7 +208,9 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
   keyframeAsset?: AssetView;
   onOpenAsset?: (assetId: string) => void;
   onCandidateSelect?: (candidate: ShotWorkspaceCandidate) => void;
+  onOpenReview?: () => void;
   onCandidateConfirm?: (assetId: string, fromLinkedTask?: boolean) => void | Promise<void>;
+  onOpenTask?: (taskId: string) => void;
   previewResetKey: string;
   onGenerate: () => void | Promise<void>;
   busy?: boolean;
@@ -222,7 +232,7 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
       <section className="shot-preview-candidate-shell" aria-label="主预览与候选">
         <div className="shot-main-preview">
           <div className="shot-main-preview-heading"><span>{previewLabel}</span>{previewAsset && <small>{previewAsset.name}</small>}</div>
-          {previewAsset ? <ShotMediaPreview projectId={projectId} asset={previewAsset} variant="main" resetKey={`${previewResetKey}:${previewAsset.id}`} /> : <EmptyWorkspaceState title="尚未生成候选" detail="生成完成后，候选会出现在右侧；确认动作仍由你显式触发。" actionLabel={busy ? "生成中…" : "生成第一个候选"} onAction={onGenerate} disabled={busy} />}
+          {previewAsset ? <ShotMediaPreview key={`${projectId}:${previewAsset.id}`} projectId={projectId} asset={previewAsset} variant="main" resetKey={`${previewResetKey}:${previewAsset.id}`} /> : <EmptyWorkspaceState title="尚未生成候选" detail="生成完成后，候选会出现在右侧；确认动作仍由你显式触发。" actionLabel={stage === "image" ? "图片生成已退休" : busy ? "生成中…" : "生成第一个候选"} onAction={onGenerate} disabled={stage !== "video" || busy} />}
         </div>
         <aside className="shot-candidate-rail" aria-label="候选列表">
           <div className="shot-candidate-rail-heading"><strong>候选</strong><span>{candidates.length}</span></div>
@@ -233,6 +243,7 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
           <button type="button" className="shot-candidate-confirm" onClick={() => previewCandidate && void onCandidateConfirm?.(previewCandidate.asset.id, previewCandidate.fromLinkedTask)} disabled={busy || !canConfirmPreview}>确认当前候选</button>
         </aside>
       </section>
+      {previewCandidate && <CandidateReviewSummary key={`${projectId}:${previewCandidate.asset.id}:${previewCandidate.taskId ?? previewCandidate.asset.sourceTaskId ?? "source"}`} projectId={projectId} candidate={previewCandidate} selected={previewCandidate.asset.id === selectedAssetId} onOpenReview={onOpenReview} onOpenTask={onOpenTask} />}
       <AssetContinuitySummary references={references} keyframeAsset={keyframeAsset} candidates={candidates} selectedAssetId={selectedAssetId} onOpenAsset={onOpenAsset} />
       <section className="shot-prompt-preview" aria-label="提示词预览">
         <div className="shot-prompt-preview-heading"><div><span className="shot-creation-kicker">提示词预览</span><strong>当前实际提示词</strong></div><div className="shot-prompt-preview-actions"><button type="button" className="quiet-button" onClick={() => onCopyPrompt?.(promptText)} disabled={!onCopyPrompt || !promptText.trim()}>复制</button><button type="button" className="quiet-button" onClick={onEditPrompt}>编辑</button></div></div>
@@ -240,6 +251,36 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
       </section>
     </div>
   );
+}
+
+function CandidateReviewSummary({ projectId, candidate, selected, onOpenReview, onOpenTask }: {
+  projectId: string; candidate: ShotWorkspaceCandidate; selected: boolean;
+  onOpenReview?: () => void; onOpenTask?: (taskId: string) => void;
+}) {
+  const taskId = candidate.taskId ?? candidate.asset.sourceTaskId;
+  const [fact, setFact] = useState<RunResult>();
+  const [error, setError] = useState<string>();
+  const [loading, setLoading] = useState(Boolean(taskId));
+  useEffect(() => {
+    let active = true;
+    if (!taskId) return;
+    void productClient.run.resultsGet(projectId, { source: "task", id: taskId }).then(results => {
+      if (!active) return;
+      const current = results.find(result => result.assetId === candidate.asset.id);
+      setFact(current);
+      if (!current) setError("未找到当前候选的正式产物");
+    }).catch(cause => { if (active) setError(toUserMessage(cause)); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [candidate.asset.id, projectId, taskId]);
+  const decision = fact?.reviewState;
+  const reviewLabel = decision === "PENDING" ? "待审核" : decision === "APPROVED" ? "已通过" : decision === "REJECTED" ? "已驳回" : "无审核记录";
+  return <section aria-label="候选选用与人工审核" className="shot-creation-view">
+    <p><span>{selected ? "镜头已选用" : "镜头未选用"}</span> · 人工审核：<span>{loading ? "读取中…" : reviewLabel}</span></p>
+    <p className="shot-creation-muted">选用不代表审核通过；审核不会自动选用视频。</p>
+    {error && <p role="alert">{error}</p>}
+    {taskId && <button type="button" className="quiet-button" onClick={() => onOpenTask?.(taskId)} disabled={!onOpenTask}>查看原始任务</button>}
+    <button type="button" className="quiet-button" onClick={onOpenReview} disabled={!onOpenReview}>打开项目人工审核</button>
+  </section>;
 }
 
 function AssetContinuitySummary({ references = [], keyframeAsset, candidates, selectedAssetId, onOpenAsset }: {

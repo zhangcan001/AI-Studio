@@ -179,6 +179,14 @@ export function ProjectStructureTree({
     return result;
   }, [currentSceneId, currentShotId, maxVisibleShots, series, shotById, shotFilter]);
 
+  const visibleUnassignedShotIds = useMemo(() => limitVisibleShotIds(
+    tree.unassignedShotIds.filter(id => {
+      const shot = shotById.get(id);
+      return shot ? (shotFilter?.(shot) ?? true) : false;
+    }).sort((a, b) => (shotById.get(a)?.ordinal ?? 0) - (shotById.get(b)?.ordinal ?? 0) || a.localeCompare(b)),
+    currentShotId, maxVisibleShots,
+  ), [tree, shotById, shotFilter, currentShotId, maxVisibleShots]);
+
   const navigation = useMemo<NavigationModel>(() => {
     const keys: string[] = [];
     const parentByKey = new Map<string, string | undefined>();
@@ -206,10 +214,9 @@ export function ProjectStructureTree({
         }
       }
     }
-    const visibleUnassignedShotId = currentShotId && tree.unassignedShotIds.includes(currentShotId) ? currentShotId : undefined;
-    if (visibleUnassignedShotId) add(nodeKey("shot", visibleUnassignedShotId), projectKey);
+    for (const id of visibleUnassignedShotIds) add(nodeKey("shot", id), projectKey);
     return { keys, parentByKey };
-  }, [currentSceneId, currentShotId, expandedEpisodeIds, expandedSeriesIds, projectExpanded, projectId, series, tree, visibleShotIdsByScene]);
+  }, [currentSceneId, expandedEpisodeIds, expandedSeriesIds, projectExpanded, projectId, series, visibleUnassignedShotIds, visibleShotIdsByScene]);
 
   useEffect(() => {
     setFocusedKey((current) => navigation.keys.includes(current) ? current : navigation.keys[0] ?? nodeKey("project", projectId));
@@ -424,15 +431,15 @@ export function ProjectStructureTree({
     </button>
   );
 
-  const unassignedSelected = currentShotId && tree.unassignedShotIds.includes(currentShotId) ? currentShotId : undefined;
   const projectChildren = (
     <>
       {series.map((item, index) => renderSeries(item, index + 1, series.length))}
       {tree.unassignedShotIds.length > 0 && (
         <div className="project-structure-tree-unassigned" role="group" aria-label={`未归档镜头，共 ${tree.unassignedShotIds.length} 个`}>
           <div className="project-structure-tree-unassigned-heading">未归档镜头 <span>{tree.unassignedShotIds.length}</span></div>
-          {unassignedSelected && renderShot(unassignedSelected, 1, tree.unassignedShotIds.length)}
-          {!unassignedSelected && <div className="project-structure-tree-empty">选择未归档镜头后在此定位</div>}
+          {visibleUnassignedShotIds.map((id, index) => renderShot(id, index + 1, tree.unassignedShotIds.length))}
+          {!visibleUnassignedShotIds.length && <div className="project-structure-tree-empty">没有匹配的未归档镜头</div>}
+          {visibleUnassignedShotIds.length < tree.unassignedShotIds.length && <small>当前显示 {visibleUnassignedShotIds.length} 个；可用镜头筛选定位其他镜头。</small>}
         </div>
       )}
       {!series.length && !tree.unassignedShotIds.length && <div className="project-structure-tree-empty">暂无系列，请使用右上角 + 新建；也可以从项目中心导入 Production Handoff。</div>}

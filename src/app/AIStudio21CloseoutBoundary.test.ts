@@ -21,4 +21,4 @@ it('validates version-only 2.1 release candidate before immutable M4/M3/M2/M1 pr
     (p:typeof proof)=>{p.frontend.afterFiles++;},
     ...Object.keys(proof.invariants).map(flag=>(p:typeof proof)=>{p.invariants[flag]=true;})
   ]){const changed=structuredClone(proof);mutate(changed);const rejected=closeoutParentReader('.',changed);expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);expect(rejected.afterHashes).toEqual({});}
-},30000);
+}, 90000);

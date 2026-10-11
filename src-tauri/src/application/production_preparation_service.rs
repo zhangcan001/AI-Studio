@@ -18,9 +18,9 @@ use crate::application::shot_readiness_service::{
 };
 use crate::compiler::{RecipeParser, WorkflowCompiler};
 use crate::domain::production_preparation::{
-    ComfyCapabilityEvidence, PreparationSnapshotIdentity, PreparationSnapshotRecord,
-    PreparationSnapshotV1, ProductionPreparationAdmission, ResolvedShotContextView,
-    ScenePreparationView, ShotProductionPlan, ShotProductionPlanSummary,
+    ComfyCapabilityEvidence, PreparationScope, PreparationSnapshotIdentity,
+    PreparationSnapshotRecord, PreparationSnapshotV1, ProductionPreparationAdmission,
+    ResolvedShotContextView, ScenePreparationView, ShotProductionPlan, ShotProductionPlanSummary,
 };
 use crate::domain::{
     CompileRequest, ProductionBatch, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
@@ -178,10 +178,33 @@ impl ProductionPreparationService {
         stage: ShotStage,
         allow_partial: bool,
     ) -> Result<ProductionPreparationAdmission, ProductionPreparationError> {
+        self.admit_scoped(project_id, shot_ids, stage, allow_partial, None)
+            .await
+    }
+
+    pub async fn admit_scoped(
+        &self,
+        project_id: &str,
+        shot_ids: &[String],
+        stage: ShotStage,
+        allow_partial: bool,
+        scope: Option<&PreparationScope>,
+    ) -> Result<ProductionPreparationAdmission, ProductionPreparationError> {
         validate_project(project_id)?;
         validate_shot_scope(shot_ids, PREPARATION_BATCH_LIMIT)?;
         let _guard = self.admission_gate.lock().await;
         let evaluated = self.evaluate_many(project_id, shot_ids, stage).await?;
+        // Validate the same freshly resolved bundle that will be frozen, not
+        // a stale UI tree or a separate lookup before acquiring admission_gate.
+        if scope.is_some_and(|scope| {
+            evaluated
+                .iter()
+                .any(|item| !scope.includes(&item.context.structure))
+        }) {
+            return Err(ProductionPreparationError::InvalidInput(
+                "PREPARATION_SCOPE_CHANGED: selected Shot left the requested hierarchy".into(),
+            ));
+        }
 
         let skipped_incomplete = evaluated
             .iter()

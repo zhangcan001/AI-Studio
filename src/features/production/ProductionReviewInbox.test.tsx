@@ -263,3 +263,41 @@ describe("ProductionReviewInbox", () => {
     expect(await screen.findByText(/没有待审核产物/)).toBeTruthy();
   });
 });
+
+// Phase5C: late queue/history/submission responses cannot cross project ownership.
+describe("Phase5C review owner fencing", () => {
+  it("rejects delayed pending and history pages after switching project", async () => {
+    let pending!: (v: ArtifactReviewQueuePageDto) => void, history!: (v: ArtifactReviewQueuePageDto) => void;
+    vi.mocked(getArtifactReviewQueue).mockImplementation(async (project, _limit, _offset, filter) => project === "old" ? new Promise(resolve => { if (filter === "completed") history = resolve; else pending = resolve; }) : page(filter === "completed" ? [] : [item("new")]));
+    const view = render(<ProductionReviewInbox projectId="old" mode="workspace" />);
+    view.rerender(<ProductionReviewInbox projectId="new" mode="workspace" />);
+    await screen.findByRole("heading", { name: "new.mp4" });
+    await act(async () => { pending(page([item("OLD-PENDING")])); history(page([item("OLD-HISTORY", "available", "APPROVED")])); });
+    expect(screen.queryByText("OLD-PENDING.mp4")).toBeNull(); expect(screen.queryByText("OLD-HISTORY.mp4")).toBeNull();
+    await userEvent.setup().click(screen.getByRole("button", { name: "通过" }));
+    expect(submitArtifactReview).toHaveBeenCalledWith(expect.objectContaining({ projectId: "new", artifactId: "new", expectedRevision: 0 }));
+  });
+  it("does not let a stale same-project refresh overwrite the newer page", async () => {
+    let first!: (v: ArtifactReviewQueuePageDto) => void;
+    vi.mocked(getArtifactReviewQueue).mockImplementationOnce(() => new Promise(resolve => { first = resolve; }));
+    const view = render(<ProductionReviewInbox projectId="p" />);
+    // Summary mode has only one initial request; remounting its workspace scope must invalidate it.
+    view.rerender(<ProductionReviewInbox projectId="p" mode="workspace" />);
+    await screen.findByRole("heading", { name: "asset-a.mp4" });
+    await act(async () => first(page([item("OLD-SUMMARY")])));
+    expect(screen.queryByText("OLD-SUMMARY.mp4")).toBeNull();
+  });
+  it("never reloads old ownership after a submitted review resolves following project switch", async () => {
+    let finish!: (v: any) => void;
+    vi.mocked(submitArtifactReview).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const view = render(<ProductionReviewInbox projectId="old" mode="workspace" />);
+    await screen.findByRole("heading", { name: "asset-a.mp4" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "通过" }));
+    view.rerender(<ProductionReviewInbox projectId="new" mode="workspace" />);
+    await screen.findByRole("heading", { name: "asset-a.mp4" });
+    const before = vi.mocked(getArtifactReviewQueue).mock.calls.filter(([p]) => p === "old").length;
+    await act(async () => finish({ artifactId: "asset-a", decision: "APPROVED", revision: 1 }));
+    expect(vi.mocked(getArtifactReviewQueue).mock.calls.filter(([p]) => p === "old")).toHaveLength(before);
+    expect((screen.getByRole("button", { name: "通过" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});

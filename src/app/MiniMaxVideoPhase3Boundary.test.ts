@@ -34,4 +34,4 @@ it('keeps the Phase 2 proof byte-stable and projects that checkpoint to older re
   const rejected = minimaxVideoPhase3ParentReader('.', forged);
   expect(rejected.violations.length).toBeGreaterThan(0);
   expect(rejected.addedPaths).toEqual([]);
-}, 30000);
+}, 90000);

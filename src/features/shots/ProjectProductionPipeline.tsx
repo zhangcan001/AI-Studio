@@ -129,7 +129,7 @@ const METRICS: ReadonlyArray<{
   { key: "videoReady", label: "视频待启动", tone: "muted" },
   { key: "videoGenerating", label: "视频运行中", tone: "active" },
   { key: "videoReview", label: "视频候选待确认", tone: "review" },
-  { key: "completed", label: "已完成", tone: "success" },
+  { key: "completed", label: "视频已选用", tone: "success" },
   { key: "failed", label: "失败", tone: "danger" },
 ];
 
@@ -142,11 +142,13 @@ const STAGE_LABELS: Record<ProjectPipelineStage, string> = {
   VIDEO_CONFIGURED: "视频已配置",
   VIDEO_GENERATING: "视频运行中",
   VIDEO_REVIEW: "视频候选待确认",
-  COMPLETED: "已完成",
+  COMPLETED: "视频已选用",
 };
 
 export function ProjectProductionPipeline({ onOpenCandidates, busy = false, ...bulkProps }: ProjectProductionPipelineProps) {
-  const summary = useMemo(() => deriveProjectPipelineSummary(bulkProps.shots), [bulkProps.shots]);
+  const summary = useMemo(() => ({ ...deriveProjectPipelineSummary(bulkProps.shots),
+    completed: bulkProps.shots.filter(shot => Boolean(shot.selectedVideoAssetId)).length,
+  }), [bulkProps.shots]);
   const completionPercent = projectCompletionPercent(summary);
   const imageCandidateIds = useMemo(() => candidateShotIds(bulkProps.shots, "image"), [bulkProps.shots]);
   const videoCandidateIds = useMemo(() => candidateShotIds(bulkProps.shots, "video"), [bulkProps.shots]);
@@ -165,16 +167,16 @@ export function ProjectProductionPipeline({ onOpenCandidates, busy = false, ...b
       <div className="pipeline-section-heading">
         <div>
           <span className="section-label">项目生产</span>
-          <h2>项目生产管线</h2>
+          <h2>视频分镜工作台</h2>
           <p className="pipeline-muted">进度由当前镜头、阶段配置、任务和人工选择实时派生，不保存容易过期的项目进度字段。</p>
         </div>
-        <strong className="pipeline-completion-count">{summary.completed} / {summary.total} 已完成 · {completionPercent}%</strong>
+        <strong className="pipeline-completion-count">{summary.completed} / {summary.total} 已选用视频 · {completionPercent}%（不等于审核通过）</strong>
       </div>
 
-      <ShotProgressDashboard shots={bulkProps.shots} />
+      <details><summary>历史图片与旧生产进度</summary><ShotProgressDashboard shots={bulkProps.shots} /></details>
 
       <div className="pipeline-summary-grid" aria-label="项目生产状态汇总">
-        {METRICS.map((metric) => (
+        {METRICS.filter(metric => !metric.key.startsWith("image")).map((metric) => (
           <div key={metric.key} className={`pipeline-summary-metric pipeline-summary-metric-${metric.tone}`}>
             <span>{metric.label}</span>
             <strong>{summary[metric.key]}</strong>
@@ -187,12 +189,12 @@ export function ProjectProductionPipeline({ onOpenCandidates, busy = false, ...b
       </div>
 
       <ol className="pipeline-stage-list" aria-label="项目生产阶段">
-        {PROJECT_PIPELINE_STAGES.map((stage) => {
+        {PROJECT_PIPELINE_STAGES.filter(stage => !stage.startsWith("IMAGE_")).map((stage) => {
           const count = projectPipelineStageCount(summary, stage);
           const isReview = stage === "IMAGE_REVIEW" || stage === "VIDEO_REVIEW";
           return (
             <li key={stage} className={`pipeline-stage pipeline-stage-${isReview ? "review" : "default"}`}>
-              <span className="pipeline-stage-index">{PROJECT_PIPELINE_STAGES.indexOf(stage) + 1}</span>
+              <span className="pipeline-stage-index">{PROJECT_PIPELINE_STAGES.filter(item => !item.startsWith("IMAGE_")).indexOf(stage) + 1}</span>
               <span className="pipeline-stage-copy"><strong>{STAGE_LABELS[stage]}</strong><small>{count} / {summary.total}</small></span>
               {isReview && <span className="pipeline-stage-review-badge">人工选择</span>}
             </li>
@@ -203,7 +205,7 @@ export function ProjectProductionPipeline({ onOpenCandidates, busy = false, ...b
       <div className="pipeline-review-actions">
         <div>
           <strong>候选选择由用户完成</strong>
-          <p className="pipeline-muted">镜头阶段的候选确认只决定写入哪个 Shot 结果，不等同于产物审核；REF2VA 的有序参考图也继续由用户配置。</p>
+          <p className="pipeline-muted">生成成功不等于选用，选用也不等于人工审核通过。旧图片候选仍可查看；正式视频输入由各自 Recipe 维护。</p>
         </div>
         <div className="pipeline-action-grid">
           <button type="button" onClick={() => void openCandidates("image", imageCandidateIds)} disabled={busy || !onOpenCandidates || !imageCandidateIds.length}>确认图片候选（{imageCandidateIds.length}）</button>

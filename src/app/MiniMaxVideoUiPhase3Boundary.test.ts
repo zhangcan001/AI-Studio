@@ -24,7 +24,7 @@ it('validates live UI bytes before projecting all three historical immutable pro
   const rejected=uiPhase3ParentReader('.',forged);
   expect(rejected.violations.length).toBeGreaterThan(0);
   expect(rejected.addedPaths).toEqual([]);
-},30000);
+}, 90000);
 it.each(['declared-bytes','undeclared-bytes','undeclared-style','illegal-addition','historical-proof','package-bytes'] as const)('rejects %s without authorizing a historical projection', kind => {
   const root=resolve('.'), fixture=mkdtempSync(join(root,'.codex-ui-phase3-probe-'));
   try {
@@ -47,4 +47,4 @@ it.each(['declared-bytes','undeclared-bytes','undeclared-style','illegal-additio
     if(!fixture.includes('.codex-ui-phase3-probe-')) throw Error('unexpected fixture');
     rmSync(fixture,{recursive:true,force:true});
   }
-},30000);
+}, 90000);

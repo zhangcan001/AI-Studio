@@ -221,6 +221,12 @@ export interface SceneProductionPreflightRequest {
 export interface ProjectProductionPreflightRequest {
   projectId: string;
   stage: ProductionPreparationStage;
+  scope?: VideoPreparationScope;
+}
+
+export interface VideoPreparationScope {
+  kind: "project" | "series" | "episode" | "scene" | "unassigned";
+  id?: string;
 }
 
 export interface ShotProductionPlanDetail {

@@ -46,7 +46,7 @@ it('validates schema/backup changes honestly and replays immutable Phase1 bytes 
     expect(rejected.violations.length).toBeGreaterThan(0); expect(rejected.addedPaths).toEqual([]);
     expect(rejected.backendAggregateSha256).toBeUndefined(); expect(rejected.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
   }
-},30000);
+}, 90000);
 
 it('selects raw-byte baselines explicitly and never accepts the other representation by auto-detection', () => {
   const root=mkdtempSync(join(tmpdir(),'ai-studio-phase2-git-bytes-'));
@@ -73,35 +73,69 @@ it('selects raw-byte baselines explicitly and never accepts the other representa
     if(previous===undefined)delete env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE;else env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE=previous;
     rmSync(root,{recursive:true,force:true});
   }
-},30000);
+}, 90000);
 
-it('rejects undeclared changes, illegal additions, missing evidence and literal Runtime Package byte drift', () => {
+async function withPhase2OwnedFixture(run:(root:string)=>void) {
   const root=mkdtempSync(join(tmpdir(),'ai-studio-phase2-successor-'));
   try {
     const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
-    execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
+    execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
+    writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
     for (const p of new Set([...readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE2_PARENT).paths,...MINIMAX_VIDEO_PHASE2_FILES,...minimaxVideoPhase3FixtureFiles('.')]) as Set<string>) {
       mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
     }
     expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-    for (const p of ['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/migrations/042_project_workflow_binding_revision.sql','src-tauri/tauri.conf.json']) {
-      const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-      const rejected=minimaxVideoPhase2ParentReader(root);expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);expect(rejected.backendAggregateSha256).toBeUndefined();
-      writeFileSync(path,original);expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-    }
-    const packagePath=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml'), original=readFileSync(packagePath);
-    const text=original.toString('utf8');
-    writeFileSync(packagePath,text.includes('\r\n') ? text.replaceAll('\r\n','\n') : text.replaceAll('\n','\r\n'));
-    expect(minimaxVideoPhase2ParentReader(root).violations).toContain('minimax-video-phase2-runtime-package-bytes');
-    writeFileSync(packagePath,original);
-    for (const relative of ['src-tauri/src/application/illegal_phase2.rs','src/illegalPhase2.ts','scripts/illegal-phase2.mjs','src-tauri/migrations/044_illegal_phase2.sql','src-tauri/runtime_packages/illegal.bin']) {
-      const path=join(root,relative);writeFileSync(path,'unauthorized');const rejected=minimaxVideoPhase2ParentReader(root);
-      expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);rmSync(path);
-    }
-    for (const p of [MINIMAX_VIDEO_PHASE2_MANIFEST,'src-tauri/src/application/shot_video_input_service.rs','src-tauri/src/domain/asset.rs']) {
-      const path=join(root,p),original=readFileSync(path);rmSync(path);const rejected=minimaxVideoPhase2ParentReader(root);
-      expect(rejected.violations.some((v:string)=>v.includes('missing-evidence')||v.endsWith('-files'))).toBe(true);expect(rejected.addedPaths).toEqual([]);expect(rejected.backendAggregateSha256).toBeUndefined();writeFileSync(path,original);
-    }
-    expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-  } finally { rmSync(root,{recursive:true,force:true}); }
-},30000);
+    run(root);
+  } finally {rmSync(root,{recursive:true,force:true}); await new Promise<void>(resolve=>setTimeout(resolve,0));}
+}
+
+it.each(['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
+ MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/migrations/042_project_workflow_binding_revision.sql','src-tauri/tauri.conf.json'])(
+ 'rejects individual undeclared source, design and migration drift: %s',p=>withPhase2OwnedFixture(root=>{
+   const path=join(root,p),original=readFileSync(path,'utf8');
+   try {
+     writeFileSync(path,original+'\n# drift\n');
+     const rejected=minimaxVideoPhase2ParentReader(root);
+     expect(rejected.violations.length).toBeGreaterThan(0);
+     expect(rejected.addedPaths).toEqual([]);
+     expect(rejected.backendAggregateSha256).toBeUndefined();
+   } finally {writeFileSync(path,original);}
+   expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
+ }), 90000);
+
+it('rejects literal Runtime Package line endings and new source files',()=>withPhase2OwnedFixture(root=>{
+  const packagePath=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml'),original=readFileSync(packagePath);
+  const text=original.toString('utf8');
+  writeFileSync(packagePath,text.includes('\r\n')?text.replaceAll('\r\n','\n'):text.replaceAll('\n','\r\n'));
+  expect(minimaxVideoPhase2ParentReader(root).violations).toContain('minimax-video-phase2-runtime-package-bytes');
+  writeFileSync(packagePath,original);
+  for (const relative of ['src-tauri/src/application/illegal_phase2.rs','src/illegalPhase2.ts']) {
+    const path=join(root,relative);writeFileSync(path,'unauthorized');
+    const rejected=minimaxVideoPhase2ParentReader(root);
+    expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);
+    rmSync(path);
+  }
+  expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
+}), 90000);
+
+it('rejects illegal scripts, migrations and Runtime Package additions',()=>withPhase2OwnedFixture(root=>{
+  for (const relative of ['scripts/illegal-phase2.mjs','src-tauri/migrations/044_illegal_phase2.sql','src-tauri/runtime_packages/illegal.bin']) {
+    const path=join(root,relative);writeFileSync(path,'unauthorized');
+    const rejected=minimaxVideoPhase2ParentReader(root);
+    expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);
+    rmSync(path);
+  }
+  expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
+}),90000);
+
+it('rejects missing proof, repository source and domain evidence',()=>withPhase2OwnedFixture(root=>{
+  for (const p of [MINIMAX_VIDEO_PHASE2_MANIFEST,'src-tauri/src/application/shot_video_input_service.rs','src-tauri/src/domain/asset.rs']) {
+    const path=join(root,p),original=readFileSync(path);rmSync(path);
+    const rejected=minimaxVideoPhase2ParentReader(root);
+    expect(rejected.violations.some((v:string)=>v.includes('missing-evidence')||v.endsWith('-files'))).toBe(true);
+    expect(rejected.addedPaths).toEqual([]);
+    expect(rejected.backendAggregateSha256).toBeUndefined();
+    writeFileSync(path,original);
+  }
+  expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
+}), 90000);

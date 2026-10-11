@@ -30,4 +30,4 @@ it('M1-3 freezes exact scoped settings/tool/navigation bytes without changing op
     const invalid = structuredClone(proof); mutate(invalid); const gate = m1SettingsParentReader('.', invalid);
     expect(gate.violations.length).toBeGreaterThan(0); expect(gate.read('src/app/App.tsx')).toContain('onOpenToolHub=');
   }
-}, 30000);
+}, 90000);

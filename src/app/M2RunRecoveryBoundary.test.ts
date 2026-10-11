@@ -29,4 +29,4 @@ it('validates scoped M2 recovery presentation before frozen M1 projection and fa
     expect(gate.violations.length).toBeGreaterThan(0);
     expect(gate.read('src/features/runs/RunDetail.tsx')).toContain('runRecoveryPresentation');
   }
-}, 30000);
+}, 90000);

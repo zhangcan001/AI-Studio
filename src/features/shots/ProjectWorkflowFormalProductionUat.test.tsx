@@ -101,14 +101,20 @@ const BUILTIN_IMAGE = imageRecipe(
   "rcp_builtin_kera2",
   "内置 Krea2（fallback 禁止）",
 );
-const CATALOG = [CUSTOM_IMAGE_A, CUSTOM_IMAGE_B, BUILTIN_IMAGE];
+const videoRecipe = (suffix: string): RecipeViewModel => ({
+  ...imageRecipe(`wfl_dev080_video_${suffix}`, `wv_dev080_video_${suffix}`, `rcp_dev080_video_${suffix}`, `Video ${suffix}`),
+  category: "video", mode: "text_to_video", outputTypes: ["video"],
+});
+const CUSTOM_VIDEO_A = videoRecipe("a");
+const CUSTOM_VIDEO_B = videoRecipe("b");
+const CATALOG = [CUSTOM_IMAGE_A, CUSTOM_IMAGE_B, BUILTIN_IMAGE, CUSTOM_VIDEO_A, CUSTOM_VIDEO_B];
 
 function binding(
-  recipe: Pick<RecipeViewModel, "workflowVersionId" | "recipeId">,
+  recipe: Pick<RecipeViewModel, "workflowVersionId" | "recipeId" | "category">,
   available = true,
 ): ProjectWorkflowBindingView {
   return {
-    stage: "IMAGE",
+    stage: recipe.category === "video" ? "VIDEO" : "IMAGE",
     mode: "DEFAULT",
     workflowVersionId: recipe.workflowVersionId,
     recipeId: recipe.recipeId,
@@ -118,8 +124,8 @@ function binding(
   };
 }
 
-function projectConfig(imageDefault?: ProjectWorkflowBindingView): ProjectWorkflowConfigView {
-  return { projectId: PROJECT_ID, imageDefault, videoModeOverrides: [] };
+function projectConfig(imageDefault?: ProjectWorkflowBindingView, videoDefault?: ProjectWorkflowBindingView): ProjectWorkflowConfigView {
+  return { projectId: PROJECT_ID, imageDefault, videoDefault, videoModeOverrides: [] };
 }
 
 function stageConfig(stage: ShotStage, recipe: RecipeViewModel): ShotStageConfig {
@@ -172,7 +178,7 @@ class FakeSqliteProductionAdapter {
     initialConfig: ProjectWorkflowConfigView,
     initialShots: ShotView[],
     catalog: RecipeViewModel[] = CATALOG,
-    defaultAfterBatch: RecipeViewModel = CUSTOM_IMAGE_B,
+    defaultAfterBatch: RecipeViewModel = initialConfig.videoDefault ? CUSTOM_VIDEO_B : CUSTOM_IMAGE_B,
   ) {
     this.config = initialConfig;
     this.catalog = catalog;
@@ -381,7 +387,7 @@ class FakeSqliteProductionAdapter {
   async startProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
     const batch = this.batches.get(batchId);
     if (!batch || batch.projectId !== projectId) throw new Error("missing batch");
-    this.config = { ...this.config, imageDefault: binding(this.defaultAfterBatch) };
+    this.config = { ...this.config, ...(this.defaultAfterBatch.category === "video" ? { videoDefault: binding(this.defaultAfterBatch) } : { imageDefault: binding(this.defaultAfterBatch) }) };
     for (const item of batch.items) {
       const recipe = this.catalog.find((candidate) => candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === item.recipeId);
       if (!recipe) throw new Error("frozen recipe missing from catalog");
@@ -484,7 +490,7 @@ function installAdapter(adapter: FakeSqliteProductionAdapter): void {
   tauriMocks.getProductionAdmissionStatus.mockResolvedValue({ busy: false });
 }
 
-function renderWorkspace(adapter: FakeSqliteProductionAdapter, mode: "creation" | "production" = "creation", onOpenProductionQueue?: (batchId?: string) => void): void {
+function renderWorkspace(adapter: FakeSqliteProductionAdapter, mode: "creation" | "production" = "creation", onOpenProductionQueue?: (batchId?: string) => void, stage?: ShotStage): void {
   installAdapter(adapter);
   render(
     <ShotWorkspace
@@ -492,6 +498,7 @@ function renderWorkspace(adapter: FakeSqliteProductionAdapter, mode: "creation" 
       projectName="DEV-080 Project"
       catalog={CATALOG}
       initialSelectedShotId={SHOT_ID}
+      initialCollectionFilter={stage ? { kind: "shots", stage } : undefined}
       mode={mode}
       onOpenProductionQueue={onOpenProductionQueue}
     />,
@@ -506,27 +513,30 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("DEV-080 formal project workflow production UAT", () => {
-  it("carries a custom image default into Shot config, freezes the exact pair, and reaches fake Comfy", async () => {
-    const adapter = new FakeSqliteProductionAdapter(projectConfig(binding(CUSTOM_IMAGE_A)), [shot()]);
+  it("carries a video default without an image prerequisite into Shot config, freezes the exact pair, and reaches fake Comfy", async () => {
+    const adapter = new FakeSqliteProductionAdapter(projectConfig(undefined, binding(CUSTOM_VIDEO_A)), [shot()]);
     const user = userEvent.setup();
     const onOpenProductionQueue = vi.fn();
     renderWorkspace(adapter, "production", onOpenProductionQueue);
 
     await user.click(await screen.findByRole("tab", { name: "项目生产" }));
     await user.click(screen.getByRole("button", { name: "全选" }));
-    await user.click(screen.getByRole("button", { name: "配置图片阶段" }));
+    await user.click(screen.getByRole("button", { name: "配置视频阶段" }));
 
     await waitFor(() => expect(tauriMocks.bulkSetShotStageConfig).toHaveBeenCalledWith(expect.objectContaining({
       projectId: PROJECT_ID,
-      stage: "image",
-      workflowVersionId: CUSTOM_IMAGE_A.workflowVersionId,
-      recipeId: CUSTOM_IMAGE_A.recipeId,
+      stage: "video",
+      workflowVersionId: CUSTOM_VIDEO_A.workflowVersionId,
+      recipeId: CUSTOM_VIDEO_A.recipeId,
     })));
 
-    await user.click(screen.getByRole("button", { name: "准备图片生产" }));
+    // Config edits invalidate the old selection; select the fresh READY result.
+    await waitFor(() => expect(screen.getByRole("button", { name: "选择就绪项" }).hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getByRole("button", { name: "选择就绪项" }));
+    await user.click(screen.getByRole("button", { name: "准备视频生产" }));
     await waitFor(() => expect(tauriMocks.admitProjectProduction).toHaveBeenCalledWith({
       projectId: PROJECT_ID,
-      stage: "image",
+      stage: "video",
       shotIds: [SHOT_ID],
       allowPartial: false,
     }));
@@ -538,22 +548,22 @@ describe("DEV-080 formal project workflow production UAT", () => {
 
     const frozen = adapter.frozenBatch("pbt-dev080");
     expect(frozen?.items[0]).toMatchObject({
-      workflowVersionId: CUSTOM_IMAGE_A.workflowVersionId,
-      recipeId: CUSTOM_IMAGE_A.recipeId,
+      workflowVersionId: CUSTOM_VIDEO_A.workflowVersionId,
+      recipeId: CUSTOM_VIDEO_A.recipeId,
     });
     await tauriMocks.startProductionQueue(PROJECT_ID, "pbt-dev080");
     expect(adapter.comfySubmissions[0]).toMatchObject({
-      workflowId: CUSTOM_IMAGE_A.workflowId,
-      workflowVersionId: CUSTOM_IMAGE_A.workflowVersionId,
-      recipeId: CUSTOM_IMAGE_A.recipeId,
+      workflowId: CUSTOM_VIDEO_A.workflowId,
+      workflowVersionId: CUSTOM_VIDEO_A.workflowVersionId,
+      recipeId: CUSTOM_VIDEO_A.recipeId,
       workflowJson: {
-        workflowId: CUSTOM_IMAGE_A.workflowId,
-        workflowVersionId: CUSTOM_IMAGE_A.workflowVersionId,
-        recipeId: CUSTOM_IMAGE_A.recipeId,
+        workflowId: CUSTOM_VIDEO_A.workflowId,
+        workflowVersionId: CUSTOM_VIDEO_A.workflowVersionId,
+        recipeId: CUSTOM_VIDEO_A.recipeId,
       },
     });
-    expect((await adapter.getProjectWorkflowConfig(PROJECT_ID)).imageDefault?.recipeId).toBe(CUSTOM_IMAGE_B.recipeId);
-    expect(frozen?.items[0].recipeId).toBe(CUSTOM_IMAGE_A.recipeId);
+    expect((await adapter.getProjectWorkflowConfig(PROJECT_ID)).videoDefault?.recipeId).toBe(CUSTOM_VIDEO_B.recipeId);
+    expect(frozen?.items[0].recipeId).toBe(CUSTOM_VIDEO_A.recipeId);
   });
 
   it("gives a persisted Shot stage config precedence over the project default", async () => {
@@ -561,43 +571,43 @@ describe("DEV-080 formal project workflow production UAT", () => {
       projectConfig(binding(CUSTOM_IMAGE_A)),
       [shot([stageConfig("image", CUSTOM_IMAGE_B)])],
     );
-    renderWorkspace(adapter);
+    renderWorkspace(adapter, "creation", undefined, "image");
 
     const select = await screen.findByLabelText("工作流 / 配方") as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe(CUSTOM_IMAGE_B.recipeId));
-    expect(select.value).not.toBe(CUSTOM_IMAGE_A.recipeId);
+    await waitFor(() => expect(select.value).toBe(JSON.stringify([CUSTOM_IMAGE_B.workflowVersionId, CUSTOM_IMAGE_B.recipeId])));
+    expect(select.value).not.toBe(JSON.stringify([CUSTOM_IMAGE_A.workflowVersionId, CUSTOM_IMAGE_A.recipeId]));
   });
 
   it("fails closed when a project binding is unavailable instead of selecting built-in Krea2", async () => {
     const adapter = new FakeSqliteProductionAdapter(projectConfig(binding(CUSTOM_IMAGE_A, false)), [shot()]);
-    renderWorkspace(adapter);
+    renderWorkspace(adapter, "creation", undefined, "image");
 
     const select = await screen.findByLabelText("工作流 / 配方") as HTMLSelectElement;
-    await waitFor(() => expect(select.value).not.toBe(BUILTIN_IMAGE.recipeId));
+    await waitFor(() => expect(select.value).not.toBe(JSON.stringify([BUILTIN_IMAGE.workflowVersionId, BUILTIN_IMAGE.recipeId])));
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
 
   it("persists a manual Shot workflow, then enqueues and uses official Queue Start", async () => {
     const adapter = new FakeSqliteProductionAdapter(
-      projectConfig(binding(CUSTOM_IMAGE_A)),
-      [shot([stageConfig("image", CUSTOM_IMAGE_A)])],
+      projectConfig(undefined, binding(CUSTOM_VIDEO_A)),
+      [shot([stageConfig("video", CUSTOM_VIDEO_A)])],
     );
     const user = userEvent.setup();
     renderWorkspace(adapter);
 
     const select = await screen.findByLabelText("工作流 / 配方");
-    await user.selectOptions(select, CUSTOM_IMAGE_B.recipeId);
+    await user.selectOptions(select, JSON.stringify([CUSTOM_VIDEO_B.workflowVersionId, CUSTOM_VIDEO_B.recipeId]));
     await user.click(screen.getByRole("button", { name: "生成" }));
 
     await waitFor(() => expect(adapter.events.slice(-3)).toEqual([
-      `set:image:${CUSTOM_IMAGE_B.workflowVersionId}:${CUSTOM_IMAGE_B.recipeId}`,
-      `enqueue:image:${CUSTOM_IMAGE_B.workflowVersionId}:${CUSTOM_IMAGE_B.recipeId}`,
-      `execute:${CUSTOM_IMAGE_B.workflowVersionId}:${CUSTOM_IMAGE_B.recipeId}`,
+      `set:video:${CUSTOM_VIDEO_B.workflowVersionId}:${CUSTOM_VIDEO_B.recipeId}`,
+      `enqueue:video:${CUSTOM_VIDEO_B.workflowVersionId}:${CUSTOM_VIDEO_B.recipeId}`,
+      `execute:${CUSTOM_VIDEO_B.workflowVersionId}:${CUSTOM_VIDEO_B.recipeId}`,
     ]));
     expect(tauriMocks.submitShotGeneration).toHaveBeenCalledWith(expect.objectContaining({
       projectId: PROJECT_ID,
       shotId: SHOT_ID,
-      stage: "image",
+      stage: "video",
       values: expect.any(Object),
     }));
     expect(tauriMocks.startProductionQueue).toHaveBeenCalledWith(PROJECT_ID, "pbt-dev080");

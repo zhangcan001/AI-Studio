@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE5J_CI_PER_FILE_WORKER_SUCCESSOR",
+  "parentHead": "07d134bd437dfd49783e081f922063593bf3f110",
+  "planningParentHead": "07d134bd437dfd49783e081f922063593bf3f110",
+  "phaseCommitsBeforeCheckpoint": [],
+  "invariants": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "backendChanged": false,
+    "queueAuthorityChanged": false,
+    "storeAuthorityChanged": false,
+    "runtimePackagesChanged": false,
+    "historicalProofsRewritten": false,
+    "nestedSuccessStagingOnCommitOnly": true,
+    "readinessDriftProbesSplit": true,
+    "liveFreshnessProbesSplit": true,
+    "parentFailClosedCheckedOncePerFixture": true,
+    "windowsBoundedNinetySecondDriftProbes": true,
+    "allBoundarySuccessorProbesBudgetedAtNinetySeconds": true,
+    "vitestForksSingleForkTeardown": false,
+    "vitestForksPerFileWorker": true,
+    "fileParallelismDisabled": true,
+    "isolateWorkers": true,
+    "teardownTimeoutMs": 120000,
+    "frontendShardJobTimeoutMinutes": 35,
+    "dedicatedBoundaryJob": true,
+    "boundaryExcludedFromShards": true,
+    "frontendShardJobTimeoutMinutesBoundary": 90,
+    "thirtySecondBoundaryLimitPreserved": false,
+    "individualNegativeProbesPreserved": true,
+    "allFrontendTestsSharded": true,
+    "shardCount": 3,
+    "requiredFrontendSummaryPreserved": true,
+    "architectureTscBuildRequired": true,
+    "rawRuntimeBytesPreserved": true,
+    "sourceOnly": true,
+    "nativeGpuExecuted": false,
+    "phase6Started": false
+  },
+  "database": {
+    "migrationBefore": 44,
+    "migrationAfter": 44,
+    "newTables": 0,
+    "backupBefore": 21,
+    "backupAfter": 21
+  },
+  "paths": {
+    ".github/workflows/ci.yml": {
+      "beforeHash": "cea43542abbfe3d958be1909b231f338887c55ed5ba2c886449782bf25f52845",
+      "afterHash": "175f58f2f40d4edfc8e9d246884fcd8a061fb83752ef278d8ada2179a2292f9b"
+    },
+    "scripts/ui-phase5i-ci-worker-teardown-successor-guard.mjs": {
+      "beforeHash": "898b30a3d4b1ae6b13f5cfb7eb3cda185febba255490658733e86cc4e24b44b9",
+      "afterHash": "5129807841a8a07e4b9606f164a31940570496d042f62ebdb9670b5f2daf7506"
+    },
+    "src/app/UiPhase5ECiShardBoundary.test.ts": {
+      "beforeHash": "18c0b1c82f6096da91017b160f63929ca8a8af6dfee4c28daf7b815f995194ec",
+      "afterHash": "bed632df6689fbc56f5ae67c473f3348ea03a8af01dd5755bbf755239d7e9f75"
+    },
+    "src/app/UiPhase5ICiWorkerTeardownBoundary.test.ts": {
+      "beforeHash": "5c098b47e3ec5b117a35422b7ed791fffce019dd361334422a2672276cb882fa",
+      "afterHash": "6f871e117374f14e5e9fd7caf9e2b8ad01f22c89a63d189b6cb5e12b83bbbb33"
+    },
+    "vite.config.ts": {
+      "beforeHash": "944c9207b902a41ead4c8d10246a3674d989316f9696238e46bd930e8e7e3e82",
+      "afterHash": "83d167cbe10500f69d0b2f4dc89447c7b5062fd7b8fcff5d6fad562eb66c6599"
+    },
+    "scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "8b0a3bdde0c1f13d3072cd64ec75208e09f0c0460ff8318fa3ebf4d915781c67"
+    },
+    "src/app/UiPhase5JCiPerFileWorkerBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "62e2ed71348dba60fcf2e61b5c70ed756a7995f422cbc22d36e406195f476b42"
+    }
+  },
+  "backend": {
+    "beforeFiles": 355,
+    "afterFiles": 355,
+    "beforeAggregateHash": "54d68af24b072b425e6472a7fd27ef6a4c64214d6b1ac391956c2528a978e77f",
+    "untouchedAggregateHash": "54d68af24b072b425e6472a7fd27ef6a4c64214d6b1ac391956c2528a978e77f",
+    "afterAggregateHash": "54d68af24b072b425e6472a7fd27ef6a4c64214d6b1ac391956c2528a978e77f"
+  },
+  "tests": {
+    "beforeFiles": 59,
+    "afterFiles": 59,
+    "beforeAggregateHash": "8a154bc0fba25dc71701997a220f5dd397bfa2e1415316eaa866cb8d2ef2b9d2",
+    "untouchedAggregateHash": "8a154bc0fba25dc71701997a220f5dd397bfa2e1415316eaa866cb8d2ef2b9d2",
+    "afterAggregateHash": "8a154bc0fba25dc71701997a220f5dd397bfa2e1415316eaa866cb8d2ef2b9d2"
+  },
+  "frontend": {
+    "beforeFiles": 538,
+    "afterFiles": 539,
+    "beforeAggregateHash": "26e2c464351a30df650d38266411a9250b541b4033c94d2856fe0f7f155287b3",
+    "untouchedAggregateHash": "ebe5fa91c9a5dfca09d744a56b892e63b4f92f311ea4d3417fe45d36e97eb58d",
+    "afterAggregateHash": "575d049e1e8abc7976348451d4a2832e913566e1ce2de460cd5df5bdbac11884"
+  },
+  "styles": {
+    "beforeFiles": 39,
+    "afterFiles": 39,
+    "beforeAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0",
+    "untouchedAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0",
+    "afterAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0"
+  },
+  "scripts": {
+    "beforeFiles": 54,
+    "afterFiles": 55,
+    "beforeAggregateHash": "5c40c7c7fab49f36d53efd96defaecafde2cafeecf380d5e651a844a17d0802b",
+    "untouchedAggregateHash": "ef898a74fa82995750077969aeb7802e987c04bc21a8ab1b9e809308c7a54e87",
+    "afterAggregateHash": "ea028bf0c1164cd9fa273b949af0a2093d21b25b89aaa2b8cb3d2b2c7cb460e7"
+  },
+  "migrations": {
+    "beforeFiles": 44,
+    "afterFiles": 44,
+    "beforeAggregateHash": "01e12c682d768cb11e66d3428695c1b4cd9a1231bf533e867d780a08c6bdfde8",
+    "untouchedAggregateHash": "01e12c682d768cb11e66d3428695c1b4cd9a1231bf533e867d780a08c6bdfde8",
+    "afterAggregateHash": "01e12c682d768cb11e66d3428695c1b4cd9a1231bf533e867d780a08c6bdfde8"
+  },
+  "architecture": {
+    "beforeFiles": 51,
+    "afterFiles": 51,
+    "beforeAggregateHash": "50d3a64efbbe049fb1c70bef1a45e5880df9c5c9dd411bbcf5b162778832a7f8",
+    "untouchedAggregateHash": "50d3a64efbbe049fb1c70bef1a45e5880df9c5c9dd411bbcf5b162778832a7f8",
+    "afterAggregateHash": "50d3a64efbbe049fb1c70bef1a45e5880df9c5c9dd411bbcf5b162778832a7f8"
+  },
+  "packages": {
+    "beforeFiles": 51,
+    "afterFiles": 51,
+    "beforeAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "untouchedAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884",
+    "afterAggregateHash": "dc47656f13864d03154381eca6be72985439779a40368db0e0eb82a4a2da1884"
+  },
+  "domainDocs": {
+    "beforeFiles": 19,
+    "afterFiles": 19,
+    "beforeAggregateHash": "c7152f9deabd45d6b30d1f29a56a95edd9ced3573190fcb4b03a3ac7e6d7a22f",
+    "untouchedAggregateHash": "c7152f9deabd45d6b30d1f29a56a95edd9ced3573190fcb4b03a3ac7e6d7a22f",
+    "afterAggregateHash": "c7152f9deabd45d6b30d1f29a56a95edd9ced3573190fcb4b03a3ac7e6d7a22f"
+  }
+}

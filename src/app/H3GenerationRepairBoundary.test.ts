@@ -27,7 +27,7 @@ it('validates the exact runtime repair before projecting immutable publication h
  for(const mutate of mutations){const changed=structuredClone(proof);mutate(changed);const rejected=h3RepairParentReader('.',changed);
   expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);
   expect(rejected.read(p)).toBe(readFileSync(p,'utf8').replaceAll('\r\n','\n'));}
-},30000);
+}, 90000);
 it('rejects fresh live drift and extra files without hiding it behind cached evidence',()=>{
  const root=mkdtempSync(join(tmpdir(),'ai-studio-h3-repair-'));
  try{
@@ -52,7 +52,7 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
   writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// extra source');
   expect(h3RepairParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
  }finally{rmSync(root,{recursive:true,force:true});}
-},30000);
+}, 90000);
 
 // @ts-expect-error Node-only immutable boundary helper.
 import {m2ReuseParentReader} from '../../scripts/m2-create-library-reuse-boundary-guard.mjs';
@@ -68,4 +68,4 @@ it('rejects impossible review metadata before historical replay and leaves live 
   expect(rejected.addedPaths).toEqual([]);expect(rejected.afterHashes).toEqual({});
   expect(rejected.backendAggregateSha256).toBeUndefined();expect(rejected.read(path)).toBe(value);
  } finally {rmSync(root,{recursive:true,force:true});}
-});
+}, 90000);

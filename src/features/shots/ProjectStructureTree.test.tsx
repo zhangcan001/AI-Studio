@@ -83,6 +83,22 @@ function renderTree(selection?: Parameters<typeof ProjectStructureTree>[0]["sele
 }
 
 describe("ProjectStructureTree", () => {
+  it("lists legacy unassigned shots directly from project selection without requiring a scene", () => {
+    const html = renderTree({ type: "project", projectId: "project-1" });
+    expect(html).toContain("镜头 shot-unassigned");
+    expect(html).toContain('data-node-type="shot"');
+  });
+
+  it("orders and caps unassigned shots while retaining the selected legacy shot", () => {
+    const html = renderToStaticMarkup(<ProjectStructureTree project={{ id: "project-1", name: "Legacy" }}
+      tree={{ projectId: "project-1", series: [], unassignedShotIds: ["c", "b", "a"] }}
+      shots={[shot("c", 2), shot("a", 0), shot("b", 1)]} maxVisibleShots={2}
+      selectedSelection={{ type: "shot", shotId: "c" }} onSelectSelection={() => undefined} onCreate={() => undefined} />);
+    expect(html).toContain("镜头 a");
+    expect(html).toContain("镜头 c");
+    expect(html).not.toContain("镜头 b");
+    expect(html.indexOf("镜头 a")).toBeLessThan(html.indexOf("镜头 c"));
+  });
   it("renders project, series, episode and scenes with series/episode expanded by default", () => {
     const html = renderTree({ type: "project", projectId: "project-1" });
 
