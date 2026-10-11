@@ -762,3 +762,69 @@ async fn phase4_target_7_pending_cancel_preserves_success_and_history() {
         "RUN_CANCEL_UNSUPPORTED"
     );
 }
+
+
+#[tokio::test]
+async fn phase6c_list_coverage_is_honest_recent_and_rejects_mixed_cursor() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("runs.db")).await.unwrap();
+    seed_database(&pool, dir.path()).await;
+    let services = build_services(
+        &pool,
+        Arc::new(ControlledComfy::new(ComfyBehavior::Success)),
+        dir.path(),
+    );
+    let (facade, _) = run_facade(&pool, services.queue.clone());
+    let _batch = batch(&services.queue, 1).await;
+    let _old = standalone(&pool).await;
+    let page = facade
+        .list(PROJECT_ID, RunListFilter::All, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.coverage, "RECENT_50_TASKS_AND_PRODUCTION_WITH_UNARCHIVED_QUEUES",
+        "Runs must advertise bounded recent coverage, not a fake full history"
+    );
+    assert!(page.next_cursor.is_none());
+    assert_eq!(
+        facade
+            .list(PROJECT_ID, RunListFilter::All, Some("forged-cursor"))
+            .await
+            .unwrap_err()
+            .code,
+        "RUN_CURSOR_UNSUPPORTED"
+    );
+}
+
+#[tokio::test]
+async fn phase6c_run_sources_dedupe_and_locate_without_display_name_ids() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("runs.db")).await.unwrap();
+    seed_database(&pool, dir.path()).await;
+    let services = build_services(
+        &pool,
+        Arc::new(ControlledComfy::new(ComfyBehavior::Success)),
+        dir.path(),
+    );
+    let (facade, _) = run_facade(&pool, services.queue.clone());
+    let first = batch(&services.queue, 1).await;
+    let old = standalone(&pool).await;
+    let page = facade
+        .list(PROJECT_ID, RunListFilter::All, None)
+        .await
+        .unwrap();
+    assert!(page.items.iter().any(|item| item.run_ref == old));
+    assert!(page
+        .items
+        .iter()
+        .any(|item| item.run_ref == reference(&first)));
+    for item in &page.items {
+        assert_eq!(item.project_id, PROJECT_ID);
+        assert!(!item.run_ref.id.is_empty());
+        // Identity is source+id; titles are presentation only.
+        assert!(matches!(
+            item.run_ref.source,
+            RunSource::ProductionRun | RunSource::QueueBatch | RunSource::Task
+        ));
+    }
+}

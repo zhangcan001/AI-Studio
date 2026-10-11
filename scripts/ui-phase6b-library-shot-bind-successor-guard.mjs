@@ -1,6 +1,7 @@
 // Authorize Phase 6B Library→exact Shot video input binding before replaying Phase6A or older proofs.
 // Historical manifests, Runtime Package bytes, migrations and BACKUP_VERSION stay immutable.
 import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
+import { uiPhase6CParentReader, phase6CFixtureFiles } from './ui-phase6c-runs-queue-unify-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -79,11 +80,12 @@ function files(root,dir) {
     return entry.isDirectory()?files(root,p):[p];
   }).sort();
 }
-export const phase6BFixtureFiles = root => [...new Set([...phase6BParentFacts(root).paths,...PHASE6B_FILES])];
+export const phase6BFixtureFiles = root => [...new Set([...phase6BParentFacts(root).paths,...PHASE6B_FILES,...phase6CFixtureFiles(root)])];
 function validate(root,override) {
-  const violations=[],fail=name=>violations.push('ui-phase6b-library-shot-bind-'+name);
+  const successor=uiPhase6CParentReader(root);
+  const violations=[...successor.violations],fail=name=>violations.push('ui-phase6b-library-shot-bind-'+name);
   const live=new Map(),read=p=>{
-    if(!live.has(p))live.set(p,normalize(readFileSync(join(root,p),'utf8')));
+    if(!live.has(p))live.set(p,normalize(successor.read(p)));
     return live.get(p);
   };
   const denied=()=>({violations,addedPaths:[],afterHashes:{},read:p=>normalize(readFileSync(join(root,p),'utf8'))});
@@ -100,7 +102,7 @@ function validate(root,override) {
   if(JSON.stringify(Object.keys(proof.paths??{}).sort())!==JSON.stringify(scope))fail('scope');
   if(JSON.stringify(proof.invariants)!==JSON.stringify(PHASE6B_INVARIANTS)
     ||JSON.stringify(proof.database)!==JSON.stringify(PHASE6B_DATABASE))fail('contract');
-  if(violations.length)return denied();
+  if(violations.length>successor.violations.length)return denied();
   try {
     for(const p of PHASE6B_EXISTING){
       if(!parent.paths.includes(p)||proof.paths[p]?.beforeHash!==phase6BHash(parent.read(p))
@@ -113,7 +115,8 @@ function validate(root,override) {
     for(const dir of directories){
       const expected=[...parent.paths.filter(p=>p.startsWith(dir+'/')),
         ...PHASE6B_ADDED.filter(p=>p.startsWith(dir+'/')),
-        ...[PHASE6B_MANIFEST].filter(p=>p.startsWith(dir+'/'))].sort();
+        ...[PHASE6B_MANIFEST].filter(p=>p.startsWith(dir+'/')),
+        ...successor.addedPaths.filter(p=>p.startsWith(dir+'/'))].sort();
       if(JSON.stringify(files(root,dir))!==JSON.stringify(expected))fail('inventory:'+dir);
     }
     for(const p of parent.paths.filter(p=>!PHASE6B_EXISTING.includes(p))){
@@ -158,8 +161,8 @@ function validate(root,override) {
     ]) if(read(frozen)!==parent.read(frozen))fail('frozen-proof:'+frozen);
   }catch{fail('missing-evidence');}
   if(violations.length)return denied();
-  return {violations,addedPaths:[...PHASE6B_ADDED,PHASE6B_MANIFEST],
-    afterHashes:Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),
+  return {violations,addedPaths:[...PHASE6B_ADDED,PHASE6B_MANIFEST,...successor.addedPaths],
+    afterHashes:{...Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),...successor.afterHashes},
     read:p=>PHASE6B_EXISTING.includes(p)?parent.read(p):read(p)};
 }
 export function uiPhase6BParentReader(root,override) {

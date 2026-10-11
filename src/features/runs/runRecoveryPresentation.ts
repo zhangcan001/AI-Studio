@@ -15,7 +15,8 @@ export function runRecoveryPresentation(run: ProductRun) {
     } : undefined,
     needsInputEdit: showRecovery && needsInputEdit,
     inputEditExplanation: "有失败项需要修改输入。这类问题不能通过原快照重试解决，请在下方选择具体输入进行编辑。",
-    summary: run.status === "PAUSED" ? "运行已暂停，不代表已完成或失败；只有点击继续运行才会恢复执行。"
+    summary: run.status === "PAUSED" ? "运行已暂停，不代表已完成或失败；暂停不抢占当前推理，只有显式点击继续运行才会调度后续排队项。"
+      : run.status === "CANCELLED" ? "已取消未开始项；正在推理的项不会被强制杀死，已完成结果与历史仍保留。"
       : retryCount > 0 && needsInputEdit ? "部分失败项可以按原快照重试；另有部分失败项需要修改输入。"
       : retryCount > 0 ? "可安全恢复的失败项可以使用原运行快照重试。"
       : needsInputEdit ? "请检查需要修改的历史输入，再确认是否创建新运行。"

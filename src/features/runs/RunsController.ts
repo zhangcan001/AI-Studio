@@ -23,9 +23,10 @@ export function useRunsController({ route, navigate }: RunsProps) {
   const refresh = useCallback(async () => {
     const token = ++epoch.current;
     try {
-      const page = await productClient.run.list(route.projectId, filter);
+      // Product list is a recent projection only; never request or invent a mixed-history cursor.
+      const page = await productClient.run.list(route.projectId, filter, null);
       if (token !== epoch.current) return;
-      setList(page);
+      setList(page); // Keep coverage/nextCursor evidence; UI never paginates mixed history.
       if (route.run) {
         try {
           const run = await productClient.run.get(route.projectId, route.run);
