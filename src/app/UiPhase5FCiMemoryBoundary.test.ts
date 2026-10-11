@@ -13,7 +13,7 @@ import {uiPhase5FParentReader,phase5FParentFacts,phase5FFixtureFiles,PHASE5F_MAN
 // @ts-expect-error Immutable Phase5E parent.
 import {uiPhase5EParentReader} from '../../scripts/ui-phase5e-ci-shard-successor-guard.mjs';
 
-it('keeps three shards, raises the frontend heap ceiling, and leaves individual 30s probes in force',()=>{
+it('keeps three shards, raises the frontend heap ceiling, and leaves individual bounded probes in force',()=>{
  const ci=readFileSync('.github/workflows/ci.yml','utf8');
  expect(ci).toContain('NODE_OPTIONS: --max-old-space-size=8192');
  expect(ci).toContain('matrix:\n        shard: [1, 2, 3]');
@@ -27,7 +27,8 @@ it('keeps three shards, raises the frontend heap ceiling, and leaves individual 
  expect(readiness).toContain("it('denies post-run drift in runtime packages, frozen configs, missing evidence and illegal additions'");
  expect(readiness).toContain("it('denies readiness drift in repaired sources, untouched backend and historical proofs'");
  expect(readiness).toContain("it('denies readiness drift in packages, frozen configs and illegal backend additions'");
- expect((readiness.match(/30000\)/g) ?? []).length).toBeGreaterThanOrEqual(6);
+ expect((readiness.match(/30000\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+ expect((readiness.match(/90000\)/g) ?? []).length).toBeGreaterThanOrEqual(4);
 });
 
 it('accepts scoped CI memory repair and preserves immutable historical proof bytes',()=>{

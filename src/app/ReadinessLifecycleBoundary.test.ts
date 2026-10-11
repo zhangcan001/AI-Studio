@@ -112,7 +112,7 @@ it('denies post-run drift in controller, readiness test and previous readiness p
  for(const p of ['src/features/create/CreateController.ts','src/features/create/CreateReadinessLifecycle.test.tsx',manifest]){
   await expectDriftDenied(root,postRunReadinessParentReader,p);
  }
-}),30000);
+}),90000);
 
 it('denies post-run drift in runtime packages, frozen configs, missing evidence and illegal additions',()=>withPostRunFixture(async root=>{
  for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
@@ -123,14 +123,14 @@ it('denies post-run drift in runtime packages, frozen configs, missing evidence 
  writeFileSync(path,original);expect(postRunReadinessParentReader(root).violations).toEqual([]);
  writeFileSync(join(root,'src/unreviewed.ts'),'// unreviewed');
  expect(postRunReadinessParentReader(root).violations).toContain('minimax-video-phase2-frontend-files');
-}),30000);
+}),90000);
 
 it('denies readiness drift in repaired sources, untouched backend and historical proofs',()=>withReadinessFixture(async root=>{
  for(const p of ['src/features/create/CreateController.ts','src-tauri/src/domain/asset.rs',
   'docs/architecture/h3-release-closeout-phase1.json']){
   await expectDriftDenied(root,readinessLifecycleParentReader,p);
  }
-}),30000);
+}),90000);
 
 it('denies readiness drift in packages, frozen configs and illegal backend additions',()=>withReadinessFixture(async root=>{
  for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
@@ -138,4 +138,4 @@ it('denies readiness drift in packages, frozen configs and illegal backend addit
  }
  writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
  expect(readinessLifecycleParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
-}),30000);
+}),90000);

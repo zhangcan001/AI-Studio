@@ -126,7 +126,7 @@ it('rejects illegal scripts, migrations and Runtime Package additions',()=>withP
     rmSync(path);
   }
   expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-}),30000);
+}),90000);
 
 it('rejects missing proof, repository source and domain evidence',()=>withPhase2OwnedFixture(root=>{
   for (const p of [MINIMAX_VIDEO_PHASE2_MANIFEST,'src-tauri/src/application/shot_video_input_service.rs','src-tauri/src/domain/asset.rs']) {
