@@ -16,10 +16,12 @@ import {uiPhase5DParentReader} from '../../scripts/ui-phase5d-ci-timeout-success
 it('gates all three complete Vitest shards and mandatory architecture, TypeScript and Vite under the stable frontend status',()=>{
  const ci=readFileSync('.github/workflows/ci.yml','utf8');
  expect(ci).toContain('name: Frontend source checks');
- expect(ci).toContain('needs: [frontend_tests]');
+ expect(ci).toContain('needs: [frontend_tests, frontend_boundary_tests]');
  expect(ci).toContain('if: ${{ always() }}');
  expect(ci).toContain('SHARD_RESULT: ${{ needs.frontend_tests.result }}');
- expect(ci).toContain('if [ "$SHARD_RESULT" != "success" ]; then');
+ expect(ci).toContain('BOUNDARY_RESULT: ${{ needs.frontend_boundary_tests.result }}');
+ expect(ci).toContain('name: Frontend Boundary probes');
+ expect(ci).toContain('--exclude src/app/**/*Boundary*.test.ts');
  expect(ci).toContain('matrix:\n        shard: [1, 2, 3]');
  expect(ci).toContain('fail-fast: false');
  expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/3');

@@ -8,10 +8,11 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
   // Historical Native diagnostic copies are evidence, not executable tests.
-  // Forks + singleFork keep one child process for the whole shard so heavy
-  // sync Boundary hashing cannot leave a threads/RPC worker half-closed.
-  // Raised teardownTimeout covers Windows GC after ~15–17 minute shards;
-  // without it vitest reports onTaskUpdate timeouts after all tests passed.
+  // Do NOT use singleFork/singleThread for whole-shard runs: one long-lived
+  // worker RPC channel dies after ~7+ minutes of sync Boundary hashing and
+  // surfaces as [vitest-worker] onTaskUpdate timeouts after all tests pass.
+  // Keep forks + fileParallelism=false + maxWorkers=1 so each file gets a
+  // fresh child_process/RPC session, sequenced one at a time.
   test: {
     exclude: [...configDefaults.exclude, "**/.ai-bridge/**", "**/local-fixtures/**"],
     pool: "forks",
@@ -19,7 +20,8 @@ export default defineConfig(async () => ({
     teardownTimeout: 120_000,
     poolOptions: {
       forks: {
-        singleFork: true,
+        singleFork: false,
+        isolate: true,
       },
     },
   },
