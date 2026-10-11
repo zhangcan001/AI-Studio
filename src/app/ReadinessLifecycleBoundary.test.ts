@@ -139,4 +139,3 @@ it('denies readiness drift in packages, frozen configs and illegal backend addit
  writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
  expect(readinessLifecycleParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
 }),90000);
-, 90000
