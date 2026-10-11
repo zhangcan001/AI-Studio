@@ -57,6 +57,10 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     timeout-minutes: 20
+    env:
+      # Historical successor probes retain immutable blobs; raise the heap ceiling
+      # without relaxing assertions or dropping negative proof coverage.
+      NODE_OPTIONS: --max-old-space-size=8192
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -96,3 +96,28 @@ it('validates the new repair before projecting unchanged historical proof bytes 
   expect(denied.violations.length).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
   expect(denied.read(path)).toBe(readFileSync(path,'utf8').replaceAll('\r\n','\n'));
 },30000);
+
+it('discards nested successes when the outer live validation rejects, then reuses a restored accept', () => {
+  const root = temp();
+  for (const dir of ['src','docs']) mkdirSync(join(root,dir),{recursive:true});
+  const proof = join(root,'docs/proof.json'), source = join(root,'src/input.ts');
+  writeFileSync(proof,'{"valid":true}'); writeFileSync(source,'alpha');
+  let inner = 0, outer = 0;
+  const nested = () => cachedBoundary(root,'outer-live',undefined,()=>{
+    outer++;
+    const child = cachedBoundary(root,'inner-live',undefined,()=>{
+      inner++;
+      return {violations:[], addedPaths:[], afterHashes:{}, read:(p:string)=>readFileSync(join(root,p),'utf8')};
+    }, undefined);
+    if (child.violations.length) return child;
+    const valid = readFileSync(source,'utf8') === 'alpha';
+    return {violations:valid ? [] : ['drift'], addedPaths:[], afterHashes:{}, read:(p:string)=>readFileSync(join(root,p),'utf8')};
+  }, 'docs/proof.json');
+  expect(nested().violations).toEqual([]); expect(inner).toBe(1); expect(outer).toBe(1);
+  writeFileSync(source,'omega');
+  expect(nested().violations).toEqual(['drift']); expect(inner).toBe(2); expect(outer).toBe(2);
+  // Drifted nested accepts are discarded; the pristine identity remains cached.
+  writeFileSync(source,'alpha');
+  expect(nested().violations).toEqual([]); expect(inner).toBe(2); expect(outer).toBe(2);
+  expect(nested().violations).toEqual([]); expect(inner).toBe(2); expect(outer).toBe(2);
+});

@@ -62,7 +62,7 @@ it('accepts only the exact-parent post-run readiness repair without rewriting ol
  }
 },30000);
 
-it('denies post-run drift including the previous readiness proof and runtime packages',()=>{
+async function withPostRunFixture(run:(root:string)=>void|Promise<void>){
  const root=mkdtempSync(join(tmpdir(),'ai-studio-post-run-boundary-'));
  try {
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
@@ -72,27 +72,11 @@ it('denies post-run drift including the previous readiness proof and runtime pac
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(postRunReadinessParentReader(root).violations).toEqual([]);
-  // A rejected old proof must not leak the accepted successor's parent projection.
-  const invalidOld=JSON.parse(readFileSync(join(root,manifest),'utf8'));
-  const controller='src/features/create/CreateController.ts';invalidOld.paths[controller].afterHash='0'.repeat(64);
-  const deniedOld=readinessLifecycleParentReader(root,invalidOld);
-  expect(deniedOld.violations.length).toBeGreaterThan(0);expect(deniedOld.addedPaths).toEqual([]);
-  expect(deniedOld.read(controller)).toBe(readFileSync(join(root,controller),'utf8').replaceAll('\r\n','\n'));
-  for(const p of ['src/features/create/CreateController.ts','src/features/create/CreateReadinessLifecycle.test.tsx',
-   manifest,'src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
-   const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-   const denied=postRunReadinessParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
-   writeFileSync(path,original);expect(postRunReadinessParentReader(root).violations).toEqual([]);
-  }
-  const path=join(root,postRunManifest),original=readFileSync(path,'utf8');rmSync(path);
-  expect(postRunReadinessParentReader(root).violations).toContain('post-run-readiness-missing-evidence');
-  writeFileSync(path,original);expect(postRunReadinessParentReader(root).violations).toEqual([]);
-  writeFileSync(join(root,'src/unreviewed.ts'),'// unreviewed');
-  expect(postRunReadinessParentReader(root).violations).toContain('minimax-video-phase2-frontend-files');
- }finally{rmSync(root,{recursive:true,force:true});}
-},30000);
+  await run(root);
+ }finally{rmSync(root,{recursive:true,force:true}); await new Promise<void>(r=>setTimeout(r,0));}
+}
 
-it('denies drift in repaired sources, untouched files, historical proofs, packages and frozen configs',()=>{
+async function withReadinessFixture(run:(root:string)=>void|Promise<void>){
  const root=mkdtempSync(join(tmpdir(),'ai-studio-readiness-boundary-'));
  try {
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
@@ -103,13 +87,55 @@ it('denies drift in repaired sources, untouched files, historical proofs, packag
    mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
   }
   expect(readinessLifecycleParentReader(root).violations).toEqual([]);
-  for(const p of ['src/features/create/CreateController.ts','src-tauri/src/domain/asset.rs',
-   'docs/architecture/h3-release-closeout-phase1.json','src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
-   const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-   const denied=readinessLifecycleParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
-   writeFileSync(path,original);expect(readinessLifecycleParentReader(root).violations).toEqual([]);
-  }
-  writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
-  expect(readinessLifecycleParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
- }finally{rmSync(root,{recursive:true,force:true});}
-},30000);
+  await run(root);
+ }finally{rmSync(root,{recursive:true,force:true}); await new Promise<void>(r=>setTimeout(r,0));}
+}
+
+async function expectDriftDenied(root:string,reader:(root:string)=> {violations:string[];addedPaths:string[]},relative:string){
+ const path=join(root,relative),original=readFileSync(path,'utf8');
+ writeFileSync(path,original+'\n# drift\n');
+ const denied=reader(root);
+ expect(denied.violations.length).toBeGreaterThan(0);
+ expect(denied.addedPaths).toEqual([]);
+ writeFileSync(path,original);
+ expect(reader(root).violations).toEqual([]);
+ await new Promise<void>(r=>setTimeout(r,0));
+}
+
+it('denies post-run drift in controller, readiness test and previous readiness proof',()=>withPostRunFixture(async root=>{
+ // A rejected old proof must not leak the accepted successor's parent projection.
+ const invalidOld=JSON.parse(readFileSync(join(root,manifest),'utf8'));
+ const controller='src/features/create/CreateController.ts';invalidOld.paths[controller].afterHash='0'.repeat(64);
+ const deniedOld=readinessLifecycleParentReader(root,invalidOld);
+ expect(deniedOld.violations.length).toBeGreaterThan(0);expect(deniedOld.addedPaths).toEqual([]);
+ expect(deniedOld.read(controller)).toBe(readFileSync(join(root,controller),'utf8').replaceAll('\r\n','\n'));
+ for(const p of ['src/features/create/CreateController.ts','src/features/create/CreateReadinessLifecycle.test.tsx',manifest]){
+  await expectDriftDenied(root,postRunReadinessParentReader,p);
+ }
+}),30000);
+
+it('denies post-run drift in runtime packages, frozen configs, missing evidence and illegal additions',()=>withPostRunFixture(async root=>{
+ for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
+  await expectDriftDenied(root,postRunReadinessParentReader,p);
+ }
+ const path=join(root,postRunManifest),original=readFileSync(path,'utf8');rmSync(path);
+ expect(postRunReadinessParentReader(root).violations).toContain('post-run-readiness-missing-evidence');
+ writeFileSync(path,original);expect(postRunReadinessParentReader(root).violations).toEqual([]);
+ writeFileSync(join(root,'src/unreviewed.ts'),'// unreviewed');
+ expect(postRunReadinessParentReader(root).violations).toContain('minimax-video-phase2-frontend-files');
+}),30000);
+
+it('denies readiness drift in repaired sources, untouched backend and historical proofs',()=>withReadinessFixture(async root=>{
+ for(const p of ['src/features/create/CreateController.ts','src-tauri/src/domain/asset.rs',
+  'docs/architecture/h3-release-closeout-phase1.json']){
+  await expectDriftDenied(root,readinessLifecycleParentReader,p);
+ }
+}),30000);
+
+it('denies readiness drift in packages, frozen configs and illegal backend additions',()=>withReadinessFixture(async root=>{
+ for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
+  await expectDriftDenied(root,readinessLifecycleParentReader,p);
+ }
+ writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
+ expect(readinessLifecycleParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
+}),30000);

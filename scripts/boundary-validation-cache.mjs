@@ -144,25 +144,30 @@ export function cachedBoundary(root, name, override, validate, proofPath) {
       read: p => readFileSync(join(root,p),'utf8').replaceAll('\r\n','\n')};
   }
   const outer = !session;
-  if (outer) session = {root, identity: identity(root)};
+  // Stage nested successes until the outer live validation commits. A drifted
+  // outer identity must not retain nested accepts under a doomed byte profile.
+  if (outer) session = {root, identity: identity(root), staged: new Map()};
   try {
     if (session.root !== root) throw Error('Mixed boundary roots in one validation');
     const key = JSON.stringify([root, session.identity, name, override ?? null]);
-    if (!results.has(key)) {
-      const result = validate();
-      // Never reuse a rejected reader: its live fallback must remain fresh.
-      if (!result.violations.length) {
-        if (results.size >= 128) results.clear();
-        results.set(key,result);
+    if (results.has(key)) return results.get(key);
+    if (session.staged.has(key)) return session.staged.get(key);
+    const result = validate();
+    // Never reuse a rejected reader: its live fallback must remain fresh.
+    if (!result.violations.length) {
+      session.staged.set(key, result);
+      if (outer) {
+        if (results.size + session.staged.size >= 128) results.clear();
+        for (const [stagedKey, stagedResult] of session.staged) results.set(stagedKey, stagedResult);
+        session.staged.clear();
         if (!override && proofPath) validatedProofs.set(proofKey,JSON.stringify(JSON.parse(readFileSync(join(root,proofPath),'utf8'))));
       }
-      if (outer && !result.violations.length && identity(root) !== session.identity) {
-        results.clear(); validatedProofs.clear();
-        return {violations: ['boundary-live-drift-during-validation'],addedPaths:[],afterHashes:{},addedCommandSignatures:[],
-          read: p => readFileSync(join(root,p),'utf8').replaceAll('\r\n','\n')};
-      }
-      return result;
     }
-    return results.get(key);
+    if (outer && !result.violations.length && identity(root) !== session.identity) {
+      results.clear(); validatedProofs.clear();
+      return {violations: ['boundary-live-drift-during-validation'],addedPaths:[],afterHashes:{},addedCommandSignatures:[],
+        read: p => readFileSync(join(root,p),'utf8').replaceAll('\r\n','\n')};
+    }
+    return result;
   } finally { if (outer) session = undefined; }
 }
