@@ -33,7 +33,7 @@
     "afterFiles": 552,
     "beforeAggregateHash": "c718374424868f8e1f5446cfd31ed845822cec1c1f51dfb23d023293896c6e36",
     "untouchedAggregateHash": "e7bf19268b3ba9385256df4685783133813f749819cbddf2ecad3d29fe40abaf",
-    "afterAggregateHash": "4bac62138c1d40df51308e102ae507d805dd16cedb0c82254d73de62a59f9a87"
+    "afterAggregateHash": "68196e5c33c744950de87f205cdcb7d1ed8ae8337958988c90425e26300df7bb"
   },
   "invariants": {
     "schemaChanged": false,
@@ -365,11 +365,11 @@
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "603048ef803233d7e51ce40ed5bca7a92f3083a95f82226fabeb08463a811d3b",
-      "afterHash": "eb753306020904682c1fc7800cbc0a1c47db391e014aa0e0268d4fec27277dd1"
+      "afterHash": "38912505edd803f514710a96b0805075a9db652facd9627be9befa671bc2feea"
     },
     "src/features/create/CreateInputs.tsx": {
       "beforeHash": "4c88afb4e7746dda839597ab882e96fd5f8d4877b79ad21675edab1a89afcfde",
-      "afterHash": "381d4256d8bfb0408d5e3c2dd1d558b81918f73812bdc285d3d5fc37c171be8e"
+      "afterHash": "df95d82fc02829dbee67e3d2f8c266adddc1751f32b9c17559d5d9b3ad9fe799"
     },
     "src/features/create/CreateLibraryBind.phase6b.test.tsx": {
       "beforeHash": "c72694fc702e26db1183a4364baf2e0a994d18e81f287f49befaab437bf334fa",
@@ -377,15 +377,15 @@
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "033d8c9feee7c5b7eb45bc05500021c1f53e1a226aa36a8db6b3c7a62d190a88",
-      "afterHash": "3b8e005e59c80e0fe8d6fca152706d3705600e4c14d750a379b4545d8c2277e2"
+      "afterHash": "7138935a4876b366b266420514f243c9e814c28d098464ac6372b0488fbb16f4"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "82f23d0d3052d5183f4034a19891ec6c3726cd5387331fd25140d7220e6f571a",
-      "afterHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea"
+      "afterHash": "671971ec2a6d3f16491d328e8b4257ed1605e79a87a659a0a38082be48fbfafb"
     },
     "src/features/create/CreateResults.tsx": {
       "beforeHash": "e776119e0436e66457dab865ca9fb1aea6d91ae5f040ab2f6a089e5f4a01945f",
-      "afterHash": "41b2e17bcb3b586d16417d9ebb3f3668a99f666f4c0496957e225e8bef6c1b9e"
+      "afterHash": "c48be281ecda40123ccd36aadf4bf658b05235cf6409d7d2359adabaa2b529e7"
     },
     "src/features/create/usePersistentVideoInputs.test.tsx": {
       "beforeHash": "3e2956882e952f33f51a3dbbccf4dde7c9e8791430f9450182c3129b6d4c43ac",
@@ -401,7 +401,7 @@
     },
     "src/features/library/LibraryPage.css": {
       "beforeHash": "eee5fd995a4f2871f623b0884782af688ae5eff562f65c3cfa439c9ea75bb7cd",
-      "afterHash": "af0309c568fee509764e52f2146a093db2d24d57a95ffda8f269645de8848537"
+      "afterHash": "fd9efb58a638d8b07c597e49ddf17e753d552ac30bf63b28207333368af0a339"
     },
     "src/features/library/LibraryPage.test.tsx": {
       "beforeHash": "3f96fba5f084eadeba11378979048a206837fa616a668c2976c333386c3f58d0",
@@ -409,7 +409,7 @@
     },
     "src/features/library/LibraryPage.tsx": {
       "beforeHash": "43e149b38ca0883a2ebe98ea7dc025fe83926b71bb5fbda87d4bc4e092826e2c",
-      "afterHash": "2a09daa59f211ed9551dd23573c07b336f4e24bb3ada8a828500cd35d5987a79"
+      "afterHash": "41d2be0f3f0eba34abac654687f0df7e07c929e8f276e79a349c9bef692d542d"
     },
     "src/features/library/LibraryPagination.test.tsx": {
       "beforeHash": "cd31d4753619e93c0338b88e8e70fc7f50ab6af38f269c4ee4e3f1c672e69076",
@@ -449,7 +449,7 @@
     },
     "src/features/shots/ShotBatchAssetBindPanel.tsx": {
       "beforeHash": null,
-      "afterHash": "45e35530ba2bcf18111be252489c9cf3f5580e8ecc222c4626f405d80ebac595"
+      "afterHash": "96c8463cc924801c0ad5af2c225b14b55bce6d330b086fe3851002ed4d27cc9f"
     },
     "src/features/shots/ShotBatchPlanner.tsx": {
       "beforeHash": "277e02121d1f8b3f94c2ce21623a1eb3a8ba7db0924e2d6e259358e29e8fb465",
@@ -515,7 +515,7 @@
     "afterFiles": 39,
     "beforeAggregateHash": "7476e9ee0d76d73a69ab3543d731adc6593918b70e5a90c6b79d31452d1dead0",
     "untouchedAggregateHash": "3c98d066a04633e28e178fdf57cde8d82777460dea89b8944fd27641a3db0c00",
-    "afterAggregateHash": "e418e50feb18b037775910d71565a710fea9ca3c1c30c9f52433daba9be68338"
+    "afterAggregateHash": "0ef0e44f535077e9a9ab374e1ffc2dd53bc681d0f3003fa7cc97d3f1f802a94e"
   },
   "tests": {
     "beforeFiles": 59,
