@@ -77,7 +77,10 @@ it("phase4_target_14 Runs to Create consumes exact input intent without immediat
   const navigation = vi.fn();
   function Harness() { const [route, setRoute] = useState<AppRoute>({ kind: "runs", projectId: "project-a", run: ref }); const navigate = (next: AppRoute) => { navigation(next); setRoute(next); }; return route.kind === "create" ? <CreatePage runtime={{ status: "CONNECTED", endpoint: "http://fixture.invalid", devices: [], runtimeGeneration: 1 }} route={route} navigate={navigate} /> : route.kind === "runs" ? <RunsPage route={route} navigate={navigate} /> : null; }
   render(<Harness />); fireEvent.click(await screen.findByRole("button", { name: "编辑这些输入并创建新运行" }));
-  await screen.findByRole("button", { name: "生成" }); expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "原始提示词" }); expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 5 }); expect(useStudioStore.getState().pendingRunIntent).toBeUndefined(); expect(api.generate).not.toHaveBeenCalled();
+  await screen.findByRole("button", { name: "生成" });
+  await screen.findByText("可以入队生成");
+  await waitFor(() => expect(screen.getByRole("button", { name: "生成" }).hasAttribute("disabled")).toBe(false));
+  expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "原始提示词" }); expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 5 }); expect(useStudioStore.getState().pendingRunIntent).toBeUndefined(); expect(api.generate).not.toHaveBeenCalled();
   const acceptedRef = { source: "queue-batch", id: "accepted-owned-run" } as const;
   api.generate.mockResolvedValue({ accepted: true, runRef: acceptedRef, startOutcome: "STARTED", startIssue: null });
   fireEvent.click(screen.getByRole("button", { name: "生成" }));

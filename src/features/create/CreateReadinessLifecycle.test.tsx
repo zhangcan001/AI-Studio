@@ -42,7 +42,7 @@ describe("Create runtime readiness lifecycle", () => {
     api.readinessGet.mockResolvedValue(ready);
     await finishRun(status);
     expect(api.readinessGet).toHaveBeenCalledTimes(calls + 1);
-    expect(screen.getByText("可以生成")).toBeTruthy();
+    expect(screen.getByText("可以入队生成")).toBeTruthy();
     expect(useStudioStore.getState().values).toBe(values);
     expect(api.generate).not.toHaveBeenCalled();
   });
@@ -50,15 +50,15 @@ describe("Create runtime readiness lifecycle", () => {
     withActiveRun(); const old = deferred(); api.readinessGet.mockReturnValueOnce(old.promise);
     await start(); const calls = api.readinessGet.mock.calls.length;
     await finishRun(); expect(api.readinessGet).toHaveBeenCalledTimes(calls + 1);
-    expect(screen.getByText("可以生成")).toBeTruthy();
+    expect(screen.getByText("可以入队生成")).toBeTruthy();
     await act(async () => { old.resolve(blocked); });
-    expect(screen.getByText("可以生成")).toBeTruthy(); expect(api.generate).not.toHaveBeenCalled();
+    expect(screen.getByText("可以入队生成")).toBeTruthy(); expect(api.generate).not.toHaveBeenCalled();
   });
   it("checks the latest draft if it changes during post-run readiness", async () => {
     withActiveRun(); api.readinessGet.mockResolvedValue(blocked); await start();
     const old = deferred(), current = deferred(); api.readinessGet.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
     await finishRun(); fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "new prompt" } }); await settle();
-    await act(async () => { old.resolve(ready); }); expect(screen.queryByText("可以生成")).toBeNull();
+    await act(async () => { old.resolve(ready); }); expect(screen.queryByText("可以入队生成")).toBeNull();
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ values: expect.objectContaining({ prompt: { type: "string", value: "new prompt" } }) }));
     await act(async () => { current.resolve(blocked); }); expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();
     expect(api.generate).not.toHaveBeenCalled();
@@ -67,10 +67,10 @@ describe("Create runtime readiness lifecycle", () => {
     withActiveRun(); api.readinessGet.mockResolvedValue(blocked); const view = await start();
     const pending = deferred(); api.readinessGet.mockReturnValueOnce(pending.promise); await finishRun();
     view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
-    await act(async () => { pending.resolve(ready); }); expect(screen.queryByText("可以生成")).toBeNull();
+    await act(async () => { pending.resolve(ready); }); expect(screen.queryByText("可以入队生成")).toBeNull();
     const calls = api.readinessGet.mock.calls.length; await settle(); expect(api.readinessGet).toHaveBeenCalledTimes(calls);
     api.readinessGet.mockResolvedValue(ready); view.rerender(page({ ...online, runtimeGeneration: 2 })); await settle();
-    expect(screen.getByText("可以生成")).toBeTruthy(); expect(api.generate).not.toHaveBeenCalled();
+    expect(screen.getByText("可以入队生成")).toBeTruthy(); expect(api.generate).not.toHaveBeenCalled();
   });
   it("does not rerun readiness for progress updates with unchanged run identity and status", async () => {
     withActiveRun(); api.runGet.mockResolvedValue(observedRun("RUNNING")); api.readinessGet.mockResolvedValue(blocked); await start();
@@ -90,14 +90,14 @@ describe("Create runtime readiness lifecycle", () => {
     await start(); fireEvent.click(screen.getByRole("button", { name: "生成" })); await act(async () => {});
     api.readinessGet.mockResolvedValue(blocked); await settle(); expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();
     const values = useStudioStore.getState().values; api.readinessGet.mockResolvedValue(ready); await finishRun();
-    expect(screen.getByText("可以生成")).toBeTruthy(); expect(useStudioStore.getState().values).toBe(values);
+    expect(screen.getByText("可以入队生成")).toBeTruthy(); expect(useStudioStore.getState().values).toBe(values);
     expect(api.generate).toHaveBeenCalledTimes(1);
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ submissionIdempotencyKey: "readiness-only" }));
   });
   it("invalidates cached READY immediately when authoritative health becomes offline", async () => {
-    const view = await start(); expect(screen.getByText("可以生成")).toBeTruthy();
+    const view = await start(); expect(screen.getByText("可以入队生成")).toBeTruthy();
     view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
-    expect(screen.queryByText("可以生成")).toBeNull();
+    expect(screen.queryByText("可以入队生成")).toBeNull();
     expect(screen.getByText("运行环境暂时不可用")).toBeTruthy();
     expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "current prompt" });
   });
@@ -105,22 +105,22 @@ describe("Create runtime readiness lifecycle", () => {
     const view = await start(); view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
     const calls = api.readinessGet.mock.calls.length;
     view.rerender(page({ ...online, runtimeGeneration: 2 }));
-    expect(screen.queryByText("可以生成")).toBeNull(); await settle();
+    expect(screen.queryByText("可以入队生成")).toBeNull(); await settle();
     expect(api.readinessGet).toHaveBeenCalledTimes(calls + 1);
-    expect(screen.getByText("可以生成")).toBeTruthy();
+    expect(screen.getByText("可以入队生成")).toBeTruthy();
   });
   it("ignores an old READY completion after disconnect", async () => {
     const pending = deferred(); api.readinessGet.mockReturnValueOnce(pending.promise);
     const view = await start(); view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
     await act(async () => { pending.resolve(ready); });
-    expect(screen.queryByText("可以生成")).toBeNull(); expect(screen.getByText("运行环境暂时不可用")).toBeTruthy();
+    expect(screen.queryByText("可以入队生成")).toBeNull(); expect(screen.getByText("运行环境暂时不可用")).toBeTruthy();
   });
   it("ignores old completion after reconnect has advanced the runtime generation", async () => {
     const old = deferred(), current = deferred(); api.readinessGet.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
     const view = await start(); view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 })); view.rerender(page({ ...online, runtimeGeneration: 2 }));
     await settle(); await act(async () => { old.resolve(ready); });
-    expect(screen.queryByText("可以生成")).toBeNull();
-    await act(async () => { current.resolve(ready); }); expect(screen.getByText("可以生成")).toBeTruthy();
+    expect(screen.queryByText("可以入队生成")).toBeNull();
+    await act(async () => { current.resolve(ready); }); expect(screen.getByText("可以入队生成")).toBeTruthy();
   });
   it("still calls fresh backend readiness for Generate while UI is READY", async () => {
     await start(); const calls = api.readinessGet.mock.calls.length;
@@ -134,25 +134,25 @@ describe("Create runtime readiness lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成" })); await act(async () => {});
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: "project", shotId: "shot" }));
     expect(api.generate).not.toHaveBeenCalled(); // The only creation authority creates task/batch/item together.
-    expect(screen.queryByText("可以生成")).toBeNull();
+    expect(screen.queryByText("可以入队生成")).toBeNull();
   });
   it("rejects the reconnect request if inputs changed while it was in flight", async () => {
     const view = await start(); view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
     const old = deferred(), current = deferred(); api.readinessGet.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
     view.rerender(page({ ...online, runtimeGeneration: 2 })); await settle();
     fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "new prompt" } }); await settle();
-    await act(async () => { old.resolve(ready); }); expect(screen.queryByText("可以生成")).toBeNull();
+    await act(async () => { old.resolve(ready); }); expect(screen.queryByText("可以入队生成")).toBeNull();
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ values: expect.objectContaining({ prompt: { type: "string", value: "new prompt" } }) }));
     await act(async () => { current.resolve(blocked); }); expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();
   });
   it.each([{ runtimeGeneration: 2 }, { endpoint: "http://new-runtime.invalid" }])("invalidates a positive result when runtime identity changes: %s", async change => {
     const view = await start(); view.rerender(page({ ...online, ...change }));
-    expect(screen.queryByText("可以生成")).toBeNull(); await settle(); expect(screen.getByText("可以生成")).toBeTruthy();
+    expect(screen.queryByText("可以入队生成")).toBeNull(); await settle(); expect(screen.getByText("可以入队生成")).toBeTruthy();
   });
   it("does not admit an old submit-time READY after disconnect during the fresh check", async () => {
     const view = await start(); const pending = deferred(); api.readinessGet.mockReturnValueOnce(pending.promise);
     fireEvent.click(screen.getByRole("button", { name: "生成" })); view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
     await act(async () => { pending.resolve(ready); });
-    expect(api.generate).not.toHaveBeenCalled(); expect(screen.queryByText("可以生成")).toBeNull();
+    expect(api.generate).not.toHaveBeenCalled(); expect(screen.queryByText("可以入队生成")).toBeNull();
   });
 });

@@ -281,33 +281,44 @@ if (["multiPackageRunId", "multiPackageRefreshInFlight", "multiPackageRefreshPen
 }
 
 const assetVideoBatchWorkspaceSource = readFileSync(join(root, "src/features/assets/AssetVideoBatchWorkspace.tsx"), "utf8");
-if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoWorkflowController")) {
-  throw new Error("ASSET_VIDEO_WORKFLOW_CONTROLLER failed: AssetVideoBatchWorkspace must delegate workflow resolution ownership to useAssetVideoWorkflowController");
-}
-const assetVideoWorkflowStateLines = assetVideoBatchWorkspaceSource
-  .split(/\r?\n/)
-  .filter((line) => line.includes("useState") && ["manualVideoSelection", "projectWorkflowConfig", "projectWorkflowStrategy", "projectManualOverrides"].some((marker) => line.includes(marker)));
-if (assetVideoWorkflowStateLines.length) {
-  throw new Error("ASSET_VIDEO_WORKFLOW_CONTROLLER failed: AssetVideoBatchWorkspace must not own workflow resolution state");
-}
-if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoLibraryController")) {
-  throw new Error("ASSET_VIDEO_LIBRARY_CONTROLLER failed: AssetVideoBatchWorkspace must delegate asset library query ownership to useAssetVideoLibraryController");
-}
-if (assetVideoBatchWorkspaceSource.includes("assetLibraryRequestVersion") || assetVideoBatchWorkspaceSource.includes("assetLibraryPage(")) {
-  throw new Error("ASSET_VIDEO_LIBRARY_CONTROLLER failed: AssetVideoBatchWorkspace must not own asset library request lifecycle or call assetLibraryPage directly");
-}
-if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoLocalImportController")) {
-  throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must delegate local import session ownership to useAssetVideoLocalImportController");
-}
-const localImportStateMarkers = ["localInspection", "projectSegmentForms", "localBatchName", "localAutoStart", "expandedLocalOrdinal"];
-const localImportStateLines = assetVideoBatchWorkspaceSource
-  .split(/\r?\n/)
-  .filter((line) => line.includes("useState") && localImportStateMarkers.some((marker) => line.includes(marker)));
-if (localImportStateLines.length) {
-  throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must not own local import session state");
-}
-if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegmentDraft("].some((marker) => assetVideoBatchWorkspaceSource.includes(marker))) {
-  throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must delegate local import commands");
+// AVBW is retired to a redirect shell (ShotBatchAssetBindPanel + Production Queue).
+const assetVideoRetired = assetVideoBatchWorkspaceSource.includes("Deprecated")
+  && assetVideoBatchWorkspaceSource.includes("ShotBatchAssetBindPanel")
+  && !assetVideoBatchWorkspaceSource.includes("useState");
+if (assetVideoRetired) {
+  // Retired shell owns no workflow/library/import controllers; keep anti-ownership markers.
+  if (["manualVideoSelection", "projectWorkflowConfig", "assetLibraryPage(", "pickH3LocalImportDirectory(", "localAutoStart"].some((marker) => assetVideoBatchWorkspaceSource.includes(marker))) {
+    throw new Error("ASSET_VIDEO_WORKFLOW_CONTROLLER failed: retired AssetVideoBatchWorkspace must not re-own workflow/library/import state");
+  }
+} else {
+  if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoWorkflowController")) {
+    throw new Error("ASSET_VIDEO_WORKFLOW_CONTROLLER failed: AssetVideoBatchWorkspace must delegate workflow resolution ownership to useAssetVideoWorkflowController");
+  }
+  const assetVideoWorkflowStateLines = assetVideoBatchWorkspaceSource
+    .split(/\r?\n/)
+    .filter((line) => line.includes("useState") && ["manualVideoSelection", "projectWorkflowConfig", "projectWorkflowStrategy", "projectManualOverrides"].some((marker) => line.includes(marker)));
+  if (assetVideoWorkflowStateLines.length) {
+    throw new Error("ASSET_VIDEO_WORKFLOW_CONTROLLER failed: AssetVideoBatchWorkspace must not own workflow resolution state");
+  }
+  if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoLibraryController")) {
+    throw new Error("ASSET_VIDEO_LIBRARY_CONTROLLER failed: AssetVideoBatchWorkspace must delegate asset library query ownership to useAssetVideoLibraryController");
+  }
+  if (assetVideoBatchWorkspaceSource.includes("assetLibraryRequestVersion") || assetVideoBatchWorkspaceSource.includes("assetLibraryPage(")) {
+    throw new Error("ASSET_VIDEO_LIBRARY_CONTROLLER failed: AssetVideoBatchWorkspace must not own asset library request lifecycle or call assetLibraryPage directly");
+  }
+  if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoLocalImportController")) {
+    throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must delegate local import session ownership to useAssetVideoLocalImportController");
+  }
+  const localImportStateMarkers = ["localInspection", "projectSegmentForms", "localBatchName", "localAutoStart", "expandedLocalOrdinal"];
+  const localImportStateLines = assetVideoBatchWorkspaceSource
+    .split(/\r?\n/)
+    .filter((line) => line.includes("useState") && localImportStateMarkers.some((marker) => line.includes(marker)));
+  if (localImportStateLines.length) {
+    throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must not own local import session state");
+  }
+  if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegmentDraft("].some((marker) => assetVideoBatchWorkspaceSource.includes(marker))) {
+    throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must delegate local import commands");
+  }
 }
 
 // Phase6 extracts the existing control plane, preserving all ownership guards.

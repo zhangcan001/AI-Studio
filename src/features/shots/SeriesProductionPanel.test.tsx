@@ -57,7 +57,8 @@ describe("SeriesProductionPanel", () => {
     expect(html).toContain("第一季");
     expect(html).toContain("可生产集");
     expect(html).toContain("全选可准备");
-    expect(html).toContain("跳过阻塞内容，仅准备当前可生产场景");
+    expect(html).toContain("图片阶段已停用批量准备");
+    expect(html).toContain("普通产品以外部素材 + 视频批量准备为准");
     expect(html).toContain("不会自动启动 GPU");
     expect(html).toContain("雨夜");
     expect(html).toContain("缺少图片提示词");

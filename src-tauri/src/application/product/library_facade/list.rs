@@ -298,11 +298,14 @@ impl LibraryServices<'_> {
     }
 }
 
-
 fn media_source_origin(category: &str) -> Option<&'static str> {
-    if category.starts_with("source_") { Some("source") }
-    else if category.starts_with("generated_") { Some("generated") }
-    else { None }
+    if category.starts_with("source_") {
+        Some("source")
+    } else if category.starts_with("generated_") {
+        Some("generated")
+    } else {
+        None
+    }
 }
 fn matches_keyword(name: &str, keyword: Option<&str>) -> bool {
     keyword.is_none_or(|k| name.to_lowercase().contains(&k.to_lowercase()))

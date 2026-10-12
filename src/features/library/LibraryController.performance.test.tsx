@@ -30,7 +30,7 @@ it("phase12_case10 one edit refresh preserves external project poll freshness an
  await act(async()=>{await vi.advanceTimersByTimeAsync(200);});await drain();
  expect(state.library.resourceEdit).toHaveBeenCalledTimes(1);
  for(const name of ["list","get","relationsGet","versionsGet"] as const)expect(state.library[name]).toHaveBeenCalledTimes(1);
- expect(other).toHaveBeenCalledWith("project-a");expect(view.result.current.detail).toMatchObject({prompt:{projectId:"project-a"}});
+ expect(other).toHaveBeenCalledWith("project-a", undefined);expect(view.result.current.detail).toMatchObject({prompt:{projectId:"project-a"}});
  // The next real event must not be swallowed by a stale self-origin token.
  act(()=>invalidateRuns("project-a"));await act(async()=>{await vi.advanceTimersByTimeAsync(150);});await drain();expect(state.library.list).toHaveBeenCalledTimes(2);
  view.rerender({project:"project-b"});await drain();expect(view.result.current.detail).toMatchObject({prompt:{projectId:"project-b"}});

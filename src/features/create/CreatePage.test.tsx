@@ -122,12 +122,12 @@ describe("M1-1 readiness actions", () => {
     fireEvent.change(screen.getByLabelText("首帧"), { target: { value: "img1" } });
     fireEvent.change(screen.getByLabelText("尾帧"), { target: { value: "img2" } });
     fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "1280" } });
+    await readyToGenerate();
     fireEvent.click(screen.getByRole("button", { name: "生成" }));
     await screen.findByText("已保存运行，启动失败");
     // Preserve accepted independently of dirty; editing removes accepted by existing contract.
     useStudioStore.getState().setValue("width", { type: "integer", value: 1280 });
     api.readinessGet.mockResolvedValue(blocked("OPEN_RUNTIME_SETTINGS"));
-    fireEvent.click(screen.getByRole("button", { name: "生成" }));
     fireEvent.click(await screen.findByRole("button", { name: "检查运行环境" }));
     expect(navigate).toHaveBeenLastCalledWith({ kind: "system-settings", section: "general", returnTo: route });
     const draft = useStudioStore.getState().values;
@@ -165,6 +165,10 @@ describe("M1-1 readiness actions", () => {
 });
 afterEach(() => { cleanup(); sessionStorage.clear(); });
 const loaded = () => screen.findByLabelText("选择生成器");
+const readyToGenerate = async () => {
+  await screen.findByText("可以入队生成");
+  await waitFor(() => expect(screen.getByRole("button", { name: "生成" }).hasAttribute("disabled")).toBe(false));
+};
 describe("Target11 controller", () => {
   it("preserves the video draft through historical image access without exposing new image generation", async () => {
     const video = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
@@ -204,6 +208,7 @@ describe("Target12 media", () => {
     expect(useStudioStore.getState().values.first_frame).toEqual({ type: "image_asset", assetId: "img2" }); expect(useStudioStore.getState().values.last_frame).toEqual({ type: "image_asset", assetId: "img1" });
     fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "ref-opaque" } }); fireEvent.change(screen.getByLabelText("参考视频"), { target: { value: "vid1" } });
     expect(within(screen.getByLabelText("参考视频")).queryByText("首帧素材")).toBeNull();
+    await readyToGenerate();
     fireEvent.click(screen.getByRole("button", { name: "生成" }));
     await waitFor(() => expect(api.generate).toHaveBeenCalled()); expect(api.generate.mock.calls[0][0].values.reference_video).toEqual({ type: "video_asset", assetId: "vid1" }); expect(api.referencesSet).not.toHaveBeenCalled();
     expect(mediaValue({ type: "videos", key: "references", label: "Videos", required: true, minItems: 1, maxItems: 3 }, ["v2", "v1"])).toEqual({ type: "video_assets", assetIds: ["v2", "v1"] });
@@ -229,18 +234,18 @@ describe("Target13 inputs", () => {
 describe("Target14 run", () => {
   it("preserves failed-start RunRef and accepted is not success", async () => {
     api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "FAILED_TO_START", startIssue: { code: "RUNTIME_BLOCKED" } });
-    render(<Host />); await loaded(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    render(<Host />); await loaded(); await readyToGenerate(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
     expect(await screen.findByText("已保存运行，启动失败")).toBeTruthy(); expect(screen.queryByText("已完成")).toBeNull();
     expect(await screen.findByText("排队中")).toBeTruthy(); fireEvent.click(screen.getByRole("button", { name: "查看运行详情" }));
     expect(navigations).toHaveBeenLastCalledWith({ kind: "runs", projectId: "project", run: { source: "queue-batch", id: "run" } });
   });
   it("field errors focus input, and retry only uses ProductRun actions/snapshot locator", async () => {
     api.readinessGet.mockResolvedValue({ ready: false, issues: [{ code: "INPUT_OUT_OF_RANGE", message: "secret", details: { field: "width", action: "EDIT_INPUT", retryable: false } }], fieldErrors: [], actions: ["EDIT_INPUT"] });
-    render(<Host />); await loaded(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    render(<Host />); await loaded();
     fireEvent.click(await screen.findByRole("button", { name: "修改此输入" })); expect(document.activeElement).toBe(screen.getByLabelText("宽度")); expect(api.generate).not.toHaveBeenCalled(); expect(screen.queryByText("secret")).toBeNull();
   });
   it("shows retry only when allowed, preserving the old run locator", async () => {
-    api.runGet.mockResolvedValue(run("FAILED", ["RETRY"])); render(<Host />); await loaded(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    api.runGet.mockResolvedValue(run("FAILED", ["RETRY"])); render(<Host />); await loaded(); await readyToGenerate(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
     fireEvent.click(await screen.findByRole("button", { name: "重试原运行" })); await waitFor(() => expect(api.retry).toHaveBeenCalledWith("project", { ref: { source: "queue-batch", id: "run" }, selectedItemIds: ["old-item"] }));
   });
 });
@@ -293,12 +298,14 @@ describe("M2-2 precise library reuse", () => {
     expect(screen.getByText(/最多20个近期提示词/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", {name:"我的提示词 · 版本 2"}));
     expect(useStudioStore.getState().creationPromptProvenance).toEqual({promptId:"prm-choice",promptVersionId:"prv-choice"});
+    await readyToGenerate();
     fireEvent.click(screen.getByRole("button", {name:"生成"}));
     await waitFor(()=>expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({promptId:"prm-choice",promptVersionId:"prv-choice"})));
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({promptId:"prm-choice",promptVersionId:"prv-choice"}));
     fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"chosen prompt!"}});
     expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
     fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"chosen prompt"}});
+    await readyToGenerate();
     fireEvent.click(screen.getByRole("button", {name:"生成"}));
     await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
     expect(api.generate.mock.calls[1][0].promptVersionId).toBeUndefined();
@@ -366,6 +373,7 @@ it("M2-2 video prompt provenance survives historical stage and Settings/Workflow
 it.each(["STARTED", "QUEUED", "FAILED_TO_START", "ALREADY_ACCEPTED"] as const)("clearing a submission field invalidates %s acceptance and renews the attempt", async startOutcome => {
   api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome, startIssue: null });
   render(<Host />); await loaded();
+  await readyToGenerate();
   fireEvent.click(screen.getByRole("button", { name: "生成" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(useStudioStore.getState().draftDirty).toBe(false));
@@ -377,14 +385,12 @@ it.each(["STARTED", "QUEUED", "FAILED_TO_START", "ALREADY_ACCEPTED"] as const)("
   expect(screen.getByRole("button", { name: "查看运行详情" })).toBeTruthy();
   // The historical RunRef remains available; it is not an accepted submission.
   api.readinessGet.mockResolvedValue({ ready: false, issues: [], fieldErrors: [], actions: [] });
-  fireEvent.click(screen.getByRole("button", { name: "生成" }));
-  await waitFor(() => expect(api.readinessGet.mock.calls[api.readinessGet.mock.calls.length - 1]?.[0].submissionIdempotencyKey).not.toBe(first));
+  await waitFor(() => expect(screen.getByRole("button", { name: "生成" }).hasAttribute("disabled")).toBe(true));
   expect(api.generate).toHaveBeenCalledTimes(1);
-  const second = api.readinessGet.mock.calls[api.readinessGet.mock.calls.length - 1]?.[0].submissionIdempotencyKey;
   act(() => useStudioStore.getState().setValue("width", {type:"integer",value:640}));
   api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
+  await readyToGenerate();
   fireEvent.click(screen.getByRole("button", { name: "生成" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2));
-  expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).toBe(second);
   expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(first);
 });

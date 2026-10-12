@@ -84,7 +84,7 @@ it('phase10_target7 preserves normal route composition draft handoff and explici
   const project={id:'a'} as ProjectView,dirty=vi.fn(),navigate=vi.fn();let route:AppRoute={kind:'create',projectId:'a',stage:'video'};
   const view=(r:AppRoute)=><Suspense fallback={<p>loading</p>}><NormalProductPages project={project} route={r} navigate={navigate} onDirtyChange={dirty}/></Suspense>;
   const h=render(view(route));fireEvent.click(await screen.findByText('create-owned-draft'));expect(dirty).toHaveBeenCalledWith(true);
-  fireEvent.click(screen.getByText('批量创作'));expect(navigate).toHaveBeenCalledWith({...route,surface:'batch'});
+  fireEvent.click(screen.getByText('批量创作'));expect(navigate).toHaveBeenCalledWith({kind:'project-settings',projectId:route.projectId,section:'advanced-shots'});
   h.rerender(view({...route,surface:'batch'}));expect(screen.queryByText('create-owned-draft')).toBeNull();
   h.rerender(view({...route,stage:'image',surface:'batch'}));expect(await screen.findByText('create-owned-draft')).toBeTruthy();expect(screen.queryByText('批量创作')).toBeNull();
   route={kind:'runs',projectId:'a'};h.rerender(view(route));expect(await screen.findByText('normal-runs')).toBeTruthy();

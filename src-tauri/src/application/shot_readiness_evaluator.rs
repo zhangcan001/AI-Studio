@@ -218,7 +218,6 @@ fn scene_gate(context: &ResolvedShotContext) -> ReadinessGateResult {
     ReadinessGateResult::new(key, checks)
 }
 
-
 fn video_input_key_label(key: &str) -> &str {
     match key {
         "first_frame" => "首帧",
@@ -1141,7 +1140,11 @@ mod tests {
         });
         let gate = reference_gate(&context, Some("I2V"), Some(&context.stage_input));
         assert_eq!(gate.state, ReadinessCheckState::Incomplete);
-        let required = gate.checks.iter().find(|c| c.code == "VIDEO_INPUT_REQUIRED").expect("formal I2V missing first_frame");
+        let required = gate
+            .checks
+            .iter()
+            .find(|c| c.code == "VIDEO_INPUT_REQUIRED")
+            .expect("formal I2V missing first_frame");
         assert!(required.message.contains("首帧"));
         assert!(!required.message.contains("first_frame"));
     }

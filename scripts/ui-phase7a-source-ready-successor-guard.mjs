@@ -107,6 +107,12 @@ export const PHASE7A_EXISTING = [
   'src/product/errors.ts',
   'src/product/libraryTypes.ts',
   'src/product/runInvalidation.ts',
+  'scripts/dev088-architecture-guard.mjs',
+  'src/features/create/CreateReadinessLifecycle.test.tsx',
+  'src/features/create/CreateVideoWorkspace.test.tsx',
+  'src/features/library/LibraryController.performance.test.tsx',
+  'src/features/shots/EpisodeProductionPanel.test.tsx',
+  'src/features/shots/SeriesProductionPanel.test.tsx',
 ].sort();
 export const PHASE7A_ADDED = [
   'scripts/run-boundary-tests.mjs',

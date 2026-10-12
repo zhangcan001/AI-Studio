@@ -60,7 +60,8 @@ describe("EpisodeProductionPanel", () => {
     expect(html).toContain("夜战");
     expect(html).toContain("全选可准备");
     expect(html).toContain("全选有阻塞");
-    expect(html).toContain("跳过阻塞场景，仅准备当前可生产内容");
+    expect(html).toContain("图片阶段已停用批量准备");
+    expect(html).toContain("普通产品以外部素材 + 视频批量准备为准");
     expect(html).toContain("不会自动启动 GPU");
     expect(html).toContain("巷口");
     expect(html).toContain("缺少图片提示词");
