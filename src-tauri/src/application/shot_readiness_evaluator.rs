@@ -310,16 +310,25 @@ fn reference_gate(
                         "ResolvedVideoInputSet",
                     ));
                 }
-                if audios > 0 && images + videos == 0 {
-                    checks.push(
-                        check(
-                            key,
+                // Empty formal REF2VA (Some(inputs) with no image/video) must not Pass.
+                // Audio-only remains a Blocker; bare empty is Incomplete.
+                if images + videos == 0 {
+                    let (state, code, message) = if audios > 0 {
+                        (
                             ReadinessCheckState::Blocker,
                             "SHOT_VIDEO_INPUT_COMBINATION_INVALID",
                             "全能参考不能只有音频，至少要有一张参考图或一段参考视频。",
-                            "ResolvedVideoInputSet",
                         )
-                        .with_fix_action("补充参考图或参考视频"),
+                    } else {
+                        (
+                            ReadinessCheckState::Incomplete,
+                            "VIDEO_INPUT_REQUIRED",
+                            "全能参考至少要有一张参考图或一段参考视频。",
+                        )
+                    };
+                    checks.push(
+                        check(key, state, code, message, "ResolvedVideoInputSet")
+                            .with_fix_action("补充参考图或参考视频"),
                     );
                 }
                 for media_key in ["reference_videos", "reference_audios"] {
@@ -1121,6 +1130,28 @@ mod tests {
         let gate = reference_gate(&context, Some("I2V"), Some(&context.stage_input));
         assert_eq!(gate.state, ReadinessCheckState::Incomplete);
         assert!(gate.checks.iter().any(|c| c.code == "VIDEO_INPUT_REQUIRED"));
+    }
+
+    #[test]
+    fn formal_ref2va_empty_video_inputs_requires_image_or_video() {
+        use crate::domain::shot_context::ResolvedVideoInputSet;
+        let mut context = context(ShotStage::Video);
+        context.stage_input.video_inputs = Some(ResolvedVideoInputSet {
+            workflow_version_id: "version".into(),
+            recipe_id: "recipe".into(),
+            instance_id: None,
+            revision: None,
+            inputs: Vec::new(),
+        });
+        let gate = reference_gate(&context, Some("REF2VA"), Some(&context.stage_input));
+        assert_eq!(gate.state, ReadinessCheckState::Incomplete);
+        let required = gate
+            .checks
+            .iter()
+            .find(|c| c.code == "VIDEO_INPUT_REQUIRED")
+            .expect("empty formal REF2VA must require image or video");
+        assert!(required.message.contains("参考图") || required.message.contains("参考视频"));
+        assert!(!gate.checks.iter().any(|c| c.code == "REF2VA_REFERENCES_REQUIRED"));
     }
 
     #[test]
