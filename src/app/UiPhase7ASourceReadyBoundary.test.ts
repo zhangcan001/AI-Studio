@@ -32,3 +32,19 @@ it("accepts scoped Phase7A successor and preserves Phase6D proofs", () => {
   expect(PHASE7A_DATABASE.migrationAfter).toBe(44);
   expect(uiPhase6DParentReader(".").violations).toEqual([]);
 }, 120000);
+
+it("template/history/runs reuse stay on video create, not studio/image", () => {
+  const app = readFileSync("src/app/App.tsx", "utf8");
+  expect(app).toMatch(/handleTemplateProjectCreated[\s\S]*?stage: "video"/);
+  expect(app).toMatch(/loadHistoricalInputs[\s\S]*?stage: "video"/);
+  expect(app).not.toMatch(/loadHistoricalInputs[\s\S]*?navigateToWorkspace\("studio"\)/);
+  expect(app).not.toMatch(/handleTemplateProjectCreated[\s\S]*?stage: "image"/);
+  expect(app).toContain("当前产品仅支持视频工作流复用");
+  const runs = readFileSync("src/features/runs/RunsController.ts", "utf8");
+  expect(runs).not.toContain('generatorsList(route.projectId, "image")');
+  expect(runs).toContain('stage: "video"');
+  const library = readFileSync("src/features/library/LibraryController.ts", "utf8");
+  expect(library).toContain('returnRoute?.stage==="image"');
+  expect(library).toContain('stage: "video"');
+}, 30000);
+

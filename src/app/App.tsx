@@ -548,7 +548,7 @@ function App() {
 
   async function handleTemplateProjectCreated(result: TemplateProjectResult) {
     useProjectStore.getState().upsertProject(result.project);
-    if (!await navigate({ kind: "create", projectId: result.project.id, stage: "video" })) return;
+    if (!await navigate({ kind: "create", projectId: result.project.id, stage: "video", surface: "batch" })) return;
     const workflow = catalog.find((item) => item.workflowVersionId === result.workflowVersionId && item.recipeId === result.recipeId);
     if (!workflow) {
       setError("模板项目已创建，但工作流当前不可用。");

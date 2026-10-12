@@ -102,12 +102,12 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   const returnRoute=savedReturn?.route?.projectId===route.projectId && savedReturn.scope===`${savedReturn.route.projectId}:${savedReturn.route.shotId ?? ""}:${savedReturn.route.stage}` ? savedReturn.route : undefined;
   const useInCreation=(stage?: "image" | "video")=>mutate(async()=>{
     if(!route.resource || (!returnRoute && !stage))return;
-    // Ordinary Library is video-first: new Krea2/image generation is unreachable.
-    if(!returnRoute && stage==="image")return;
+    // Video-only product: Library source jumps never open Create image/studio.
+    if(stage==="image" || returnRoute?.stage==="image")return;
     const intent=await productClient.library.useInCreation(route.projectId,route.resource);
     if(liveScope.current!==scope || intent.projectId!==route.projectId || (intent.kind==="asset" && intent.mediaKind==="audio"))return;
     useStudioStore.getState().setPendingLibraryIntent(intent);
-    navigate(returnRoute ?? {kind:"create",projectId:route.projectId,stage:stage!});
+    navigate(returnRoute ? {...returnRoute, stage: "video"} : {kind:"create",projectId:route.projectId,stage:"video"});
   });
   return {mediaInspection,returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,sourceKind,setSourceKind,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
     pageIndex,canPrevious:pageIndex>0,

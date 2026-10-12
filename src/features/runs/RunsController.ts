@@ -71,12 +71,13 @@ export function useRunsController({ route, navigate }: RunsProps) {
   });
   const reuse = (input: RunInput) => mutate(async () => {
     if (!input.selectionRef) return;
-    const [image, video] = await Promise.all([productClient.creation.generatorsList(route.projectId, "image"), productClient.creation.generatorsList(route.projectId, "video")]);
+    // Video-only product: reuse never opens the legacy image/studio stage.
+    const video = await productClient.creation.generatorsList(route.projectId, "video");
     if (scope !== liveScope.current) return;
-    const option = [...image, ...video].find(option => option.selectionRef === input.selectionRef);
-    if (!option) throw { code: "GENERATOR_UNAVAILABLE" };
-    useStudioStore.getState().setPendingRunIntent({ projectId: route.projectId, stage: option.mediaKind, selectionRef: input.selectionRef, values: input.values });
-    navigate({ kind: "create", projectId: route.projectId, stage: option.mediaKind, shotId: detail?.detail?.sources.find(source => source.stage === option.mediaKind)?.id });
+    const option = video.find(option => option.selectionRef === input.selectionRef);
+    if (!option || option.mediaKind !== "video") throw { code: "GENERATOR_UNAVAILABLE" };
+    useStudioStore.getState().setPendingRunIntent({ projectId: route.projectId, stage: "video", selectionRef: input.selectionRef, values: input.values });
+    navigate({ kind: "create", projectId: route.projectId, stage: "video", shotId: detail?.detail?.sources.find(source => source.stage === "video")?.id });
   });
   const review = (result: RunResult, decision: "APPROVED" | "REJECTED", comment = "") => mutate(async () => {
     if (!detail || result.reviewRevision === null) return;
