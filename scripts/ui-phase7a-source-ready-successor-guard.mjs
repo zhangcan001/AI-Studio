@@ -12,8 +12,8 @@ export const PHASE7A_EXISTING = [
   'scripts/ui-phase6d-scale-integrity-successor-guard.mjs',
   'src-tauri/examples/phase12_query_profile.rs',
   'src-tauri/src/application/product/library_facade/types.rs',
-  'src-tauri/src/application/source_asset_import_service.rs',
   'src-tauri/src/application/shot_readiness_evaluator.rs',
+  'src-tauri/src/application/source_asset_import_service.rs',
   'src-tauri/src/infrastructure/filesystem/app_data_dirs.rs',
   'src-tauri/tests/dev049_context_resolver.rs',
   'src-tauri/tests/dev050_readiness.rs',
@@ -68,6 +68,9 @@ export const PHASE7A_EXISTING = [
   'src/app/UiPhase6CRunsQueueUnifyBoundary.test.ts',
   'src/app/UiPhase6DScaleIntegrityBoundary.test.ts',
   'src/app/v3/VideoShell.test.tsx',
+  'src/features/assets/AssetVideoBatchWorkspace.test.tsx',
+  'src/features/assets/AssetVideoBatchWorkspace.tsx',
+  'src/features/assets/AssetVideoGenericQueueSubmission.test.tsx',
   'src/features/create/CreateController.ts',
   'src/features/create/CreateLibraryBind.phase6b.test.tsx',
   'src/features/create/CreatePage.test.tsx',
@@ -80,7 +83,7 @@ export const PHASE7A_EXISTING = [
   'src/features/runs/RunsPage.test.tsx',
   'src/features/runs/RunsPhase6C.test.tsx',
   'src/features/shots/ShotWorkspace.tsx',
-  'src/features/workflow-lab/WorkflowLabBoundary.test.tsx'
+  'src/features/workflow-lab/WorkflowLabBoundary.test.tsx',
 ].sort();
 export const PHASE7A_ADDED = [
   'scripts/run-boundary-tests.mjs',

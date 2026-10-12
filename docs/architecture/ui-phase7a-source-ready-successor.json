@@ -32,8 +32,8 @@
     "beforeFiles": 546,
     "afterFiles": 552,
     "beforeAggregateHash": "c718374424868f8e1f5446cfd31ed845822cec1c1f51dfb23d023293896c6e36",
-    "untouchedAggregateHash": "556b4e8d19fe2d8d9f0d58100d50165f8b6b96d4dab7a1342afa557124e73aec",
-    "afterAggregateHash": "663b97fbb0e1fd5b7c559acd066a92548209e994e6e30c6c28e81af3b697ba50"
+    "untouchedAggregateHash": "fe517163f9d40c3d41d7e31db4c2f91dae9cf43ea8a1c0efe5e0cd5bea003e2d",
+    "afterAggregateHash": "499b073cc3f417c0fe366b8bc9a304b781e4f80025d8d2a29e70838b996c0ee0"
   },
   "invariants": {
     "schemaChanged": false,
@@ -89,7 +89,7 @@
     },
     "scripts/ui-phase7a-source-ready-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "7ea39af46da63b186a5526d2be6425be55580059aff7f7e4704384f33cbea761"
+      "afterHash": "f37873ff88b8844d13325fdfb596f5a94a4e939b5863a2d0e1cca7d409b57545"
     },
     "src-tauri/examples/phase12_query_profile.rs": {
       "beforeHash": "e26dbb6a63400a72ea1b023a687fa217149e165fc8b32953de9304248498b235",
@@ -327,6 +327,18 @@
       "beforeHash": "4e58fb99be1a3ad610dd0b0ab1b43a4d1a1f48bb1952eabe6196384bfbbb16be",
       "afterHash": "ca1b3ad71c5e9f4b3f3190189cf580ceeada8a6812484b3d96a1b503a3b4ae9e"
     },
+    "src/features/assets/AssetVideoBatchWorkspace.test.tsx": {
+      "beforeHash": "c8c44d9bf97e66d819331e23a833ecd2185747f885c2102b0b25884c2693dd00",
+      "afterHash": "a0d6adc667a4cab3e9d031d46e687342bf5fbfc94688eac32234edc9989ff8a8"
+    },
+    "src/features/assets/AssetVideoBatchWorkspace.tsx": {
+      "beforeHash": "7aca116f6e829e9902a3083a52ba52e721d8be1161ea760320b447640a502f7e",
+      "afterHash": "f99b12475ae308b8cee263e505800b9b834e3b5093fa788098c1f17f32afd7cc"
+    },
+    "src/features/assets/AssetVideoGenericQueueSubmission.test.tsx": {
+      "beforeHash": "aa92dfa0d80ef36f9bb641db98d00cd978fe02f88a6db0fa9457ff0f01fdcf5e",
+      "afterHash": "76061a56c7e5bfba9b9b8f63606804cdf0bebc3c31f8625df9a2222947ba40b8"
+    },
     "src/features/create/CreateController.ts": {
       "beforeHash": "603048ef803233d7e51ce40ed5bca7a92f3083a95f82226fabeb08463a811d3b",
       "afterHash": "0ecc1ba0888100377444685e922e476a90a4634d87bc5dd8d12fb30375bd84d0"
@@ -408,7 +420,7 @@
     "afterFiles": 61,
     "beforeAggregateHash": "b004f8a1b0903dbf8aa158974b1a6d826ba1b96a3ba716537c8603bec4f15d64",
     "untouchedAggregateHash": "fc650f07c353574ad4516e2c59034c4c1f0f5b3c45a583b2cd9accfe726558fb",
-    "afterAggregateHash": "4dd615bb5cf304e860958f1b14075f0a2cd39e748b3333b71d6d66071820394d"
+    "afterAggregateHash": "6345acb10d50bdb9a0ca6c75605970bb70e8314c6e8afed32bc93bf0dca4d8d7"
   },
   "styles": {
     "beforeFiles": 39,
