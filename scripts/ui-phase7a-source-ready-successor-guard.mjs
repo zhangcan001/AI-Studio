@@ -1,6 +1,7 @@
 // Authorize Phase 7A source-ready gate fixes before replaying Phase6D or older proofs.
 // Historical manifests, Runtime Package bytes, migrations and BACKUP_VERSION stay immutable.
 import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
+import { uiPhase7BParentReader } from './ui-phase7b-ref2va-empty-readiness-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -184,11 +185,12 @@ function files(root,dir) {
     return entry.isDirectory()?files(root,p):[p];
   }).sort();
 }
-export const phase7AFixtureFiles = root => [...new Set([...phase7AParentFacts(root).paths,...PHASE7A_FILES])];
+export const phase7AFixtureFiles = root => [...new Set([...phase7AParentFacts(root).paths,...PHASE7A_FILES,...uiPhase7BParentReader(root).addedPaths])];
 function validate(root,override) {
-  const violations=[],fail=name=>violations.push('ui-phase7a-source-ready-'+name);
+  const successor=uiPhase7BParentReader(root);
+  const violations=[...successor.violations],fail=name=>violations.push('ui-phase7a-source-ready-'+name);
   const live=new Map(),read=p=>{
-    if(!live.has(p))live.set(p,normalize(readFileSync(join(root,p),'utf8')));
+    if(!live.has(p))live.set(p,normalize(successor.read(p)));
     return live.get(p);
   };
   const denied=()=>({violations,addedPaths:[],afterHashes:{},read:p=>normalize(readFileSync(join(root,p),'utf8'))});
@@ -218,7 +220,8 @@ function validate(root,override) {
     for(const dir of directories){
       const expected=[...parent.paths.filter(p=>p.startsWith(dir+'/')),
         ...PHASE7A_ADDED.filter(p=>p.startsWith(dir+'/')),
-        ...[PHASE7A_MANIFEST].filter(p=>p.startsWith(dir+'/'))].sort();
+        ...[PHASE7A_MANIFEST].filter(p=>p.startsWith(dir+'/')),
+        ...successor.addedPaths.filter(p=>p.startsWith(dir+'/'))].sort();
       if(JSON.stringify(files(root,dir))!==JSON.stringify(expected))fail('inventory:'+dir);
     }
     for(const p of parent.paths.filter(p=>!PHASE7A_EXISTING.includes(p))){
@@ -253,8 +256,8 @@ function validate(root,override) {
     ]) if(read(frozen)!==parent.read(frozen))fail('frozen-proof:'+frozen);
   }catch{fail('missing-evidence');}
   if(violations.length)return denied();
-  return {violations,addedPaths:[...PHASE7A_ADDED,PHASE7A_MANIFEST],
-    afterHashes:Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),
+  return {violations,addedPaths:[...PHASE7A_ADDED,PHASE7A_MANIFEST,...successor.addedPaths],
+    afterHashes:{...Object.fromEntries(scope.map(p=>[p,proof.paths[p].afterHash])),...successor.afterHashes},
     read:p=>PHASE7A_EXISTING.includes(p)?parent.read(p):read(p)};
 }
 export function uiPhase7AParentReader(root,override) {

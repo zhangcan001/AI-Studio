@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE7B_REF2VA_EMPTY_READINESS",
+  "parentHead": "6f5c3c33860749ccf25aff3d079b9982492fca37",
+  "contracts": {
+    "noDatabaseMigration": true,
+    "backupVersionUnchanged": true,
+    "runtimePackageBytesUnchanged": true,
+    "historicalProofsUnchanged": true,
+    "phase7cReleaseNotStarted": true,
+    "nativeGpuMustBeReverified": true,
+    "emptyDraftSaveRemainsAllowed": true,
+    "productionAdmissionRequiresImageOrVideo": true
+  },
+  "files": {
+    "src-tauri/src/application/builtin_runtime_packages.rs": {
+      "beforeHash": "48097c5a63f2cb928b03af0cdefce3cb89177c244aae876af4ea7737dbc11046",
+      "afterHash": "f68aadfec1a666577c9187d1a4903b44a8cbd97ac0d04837960acf961036ec00"
+    },
+    "src-tauri/src/application/product/h3_resolution.rs": {
+      "beforeHash": "9fcc98de21aa409c5c3866607458990d67d334cc0a17d8191943bae9b3e4afdb",
+      "afterHash": "146517af0bf42f92ec777be6a01f83ad05ca7745931387451ae1e1c0948d323f"
+    },
+    "scripts/ui-phase7a-source-ready-successor-guard.mjs": {
+      "beforeHash": "126ab2012a06ca5d5458e4e150ebfa993c1caf2ddbdc03f222de80f679f8b296",
+      "afterHash": "f0f82a9a9ecc7ce61241c78657beab8f97dc11ef764f18a643d4befc67610c8e"
+    },
+    "scripts/ui-phase7b-ref2va-empty-readiness-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "f5f01cb45585b56d72807e4188a99b02a083968214ca2a603067adb8dd908485"
+    },
+    "src/app/UiPhase7BRef2VAEmptyReadinessBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "ac1f9a18c1fc96608f86cc2fc0f97fd6b53a716bcdaefbf28512118748d18a2a"
+    }
+  }
+}

@@ -601,6 +601,15 @@ mod tests {
                         values.insert(field.into(), InputValue::Image(format!("{field}.png")));
                     }
                 }
+                // The REF2VA product requires at least one image or video at
+                // admission; a missing reference is an editable draft, not a
+                // valid production compile fixture.
+                if recipe.inputs.contains_key("reference_videos") {
+                    values.insert(
+                        "reference_videos".into(),
+                        InputValue::Videos(vec!["reference.mp4".into()]),
+                    );
+                }
                 let compiled = crate::application::product::h3_resolution::compile_checked(
                     &WorkflowCompiler,
                     &workflow,
@@ -649,6 +658,14 @@ mod tests {
                             .values
                             .insert(field.into(), InputValue::Image(format!("{field}.png")));
                     }
+                }
+                // Legacy REF recipes are read-only, but this compile fixture
+                // must still satisfy the shared production minimum-media gate.
+                if recipe.inputs.contains_key("reference_videos") {
+                    request.values.insert(
+                        "reference_videos".into(),
+                        InputValue::Videos(vec!["reference.mp4".into()]),
+                    );
                 }
                 assert_eq!(
                     crate::application::product::h3_resolution::compile_checked(
