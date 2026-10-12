@@ -1151,7 +1151,10 @@ mod tests {
             .find(|c| c.code == "VIDEO_INPUT_REQUIRED")
             .expect("empty formal REF2VA must require image or video");
         assert!(required.message.contains("参考图") || required.message.contains("参考视频"));
-        assert!(!gate.checks.iter().any(|c| c.code == "REF2VA_REFERENCES_REQUIRED"));
+        assert!(!gate
+            .checks
+            .iter()
+            .any(|c| c.code == "REF2VA_REFERENCES_REQUIRED"));
     }
 
     #[test]
