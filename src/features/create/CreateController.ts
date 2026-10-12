@@ -334,7 +334,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     openRun: () => runRef && navigate({ kind: "runs", projectId: route.projectId, run: runRef }),
     openAdvanced: (section: "batch" | "production" | "workflows") => {
       if (section === "workflows") useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });
-      return navigate(section === "batch" ? { ...route, surface: "batch" } : section === "production" ? { kind: "runs", projectId: route.projectId, filter: "production" } : { kind: "system-settings", section: "advanced-workflows", returnTo: route });
+      return navigate(section === "batch" ? { kind: "project-settings", projectId: route.projectId, section: "advanced-shots" } : section === "production" ? { kind: "runs", projectId: route.projectId, filter: "production" } : { kind: "system-settings", section: "advanced-workflows", returnTo: route });
     },
   };
 }

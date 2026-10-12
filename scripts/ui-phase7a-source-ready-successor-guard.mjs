@@ -42,6 +42,7 @@ export const PHASE7A_EXISTING = [
   'src/app/MiniMaxVideoUiPhase3Boundary.test.ts',
   'src/app/MiniMaxVideoUiPhase4Boundary.test.ts',
   'src/app/NativeIpcObservation.test.ts',
+  'src/app/NormalProductPages.tsx',
   'src/app/PerformanceSuccessor.test.ts',
   'src/app/Phase7Retirement.test.tsx',
   'src/app/QueueLifecycleRepairBoundary.test.ts',

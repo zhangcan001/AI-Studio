@@ -264,7 +264,7 @@ describe("Target16 architecture", () => {
     for (const path of readdirSync("src/features/create").filter((path: string) => /\.(tsx?|css)$/.test(path) && !path.includes("test"))) {
       const source = readFileSync(`src/features/create/${path}`, "utf8"); expect(source).not.toMatch(/tauriClient|@tauri-apps|services\/ipc|create\s*\(.*=>/); expect(source).not.toMatch(/<ShotWorkspace|<GenerationStudio|<DirectGenerationEntry/);
     }
-    render(<Host />); await loaded(); fireEvent.click(screen.getByText("高级")); fireEvent.click(screen.getByRole("button", { name: "批量生成 / Experiment" })); expect(navigations).toHaveBeenLastCalledWith(expect.objectContaining({ surface: "batch", kind: "create" }));
+    render(<Host />); await loaded(); fireEvent.click(screen.getByText("高级")); fireEvent.click(screen.getByRole("button", { name: "批量生成 / Experiment" })); expect(navigations).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "project-settings", section: "advanced-shots" }));
   }, 15000);
 });
 it("phase6_target4 canonical Lab routes and legacy deep links preserve Create draft on return", async () => {

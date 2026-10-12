@@ -23,7 +23,7 @@ export function NormalProductPages({ project: activeProject, runtime, route, nav
   return <>
     {activeProject && (normalCreate(route) || (route.kind === "create" && route.stage === "image")) && route.kind === "create" && <>
       <CreatePage key={activeProject.id} route={route} runtime={runtime} navigate={navigate} onDirtyChange={onDirtyChange} />
-      {route.stage === "video" && <details><summary>高级创作</summary><button type="button" onClick={() => void navigate({ ...route, surface: "batch" })}>批量创作</button></details>}
+      {route.stage === "video" && <details><summary>高级创作</summary><button type="button" onClick={() => void navigate({ kind: "project-settings", projectId: route.projectId, section: "advanced-shots" })}>批量创作</button></details>}
     </>}
     {activeProject && normalLibrary(route) && route.kind === "library" && <LibraryPage key={activeProject.id} route={route} navigate={navigate} />}
     {activeProject && normalRuns(route) && route.kind === "runs" && <RunsPage key={activeProject.id} route={route} navigate={navigate} />}
