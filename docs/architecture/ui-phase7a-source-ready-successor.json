@@ -338,7 +338,7 @@
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "033d8c9feee7c5b7eb45bc05500021c1f53e1a226aa36a8db6b3c7a62d190a88",
-      "afterHash": "3b8e005e59c80e0fe8d6fca152706d3705600e4c14d750a379b4545d8c2277e2"
+      "afterHash": "2eb984ab27ffca63602e1f2c23446e216eab8111d0ac92c65dea8a8fff852f92"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "82f23d0d3052d5183f4034a19891ec6c3726cd5387331fd25140d7220e6f571a",
@@ -346,7 +346,7 @@
     },
     "src/features/create/CreateResults.tsx": {
       "beforeHash": "e776119e0436e66457dab865ca9fb1aea6d91ae5f040ab2f6a089e5f4a01945f",
-      "afterHash": "41b2e17bcb3b586d16417d9ebb3f3668a99f666f4c0496957e225e8bef6c1b9e"
+      "afterHash": "0626c17eaef1c80cba4d5c6732b88f6fc5a0e9095b028497ce3eebcadc551172"
     },
     "src/features/create/usePersistentVideoInputs.test.tsx": {
       "beforeHash": "3e2956882e952f33f51a3dbbccf4dde7c9e8791430f9450182c3129b6d4c43ac",
@@ -406,11 +406,11 @@
     },
     "src/features/shots/ShotBatchAssetBindPanel.test.tsx": {
       "beforeHash": null,
-      "afterHash": "00a30497cce764d4428c37ed996753d7d0604739011080f66bebe605ddf9a4a5"
+      "afterHash": "510472d92f54b4daca4097577f6239f71f0678e301b7e151890d679d989e28a0"
     },
     "src/features/shots/ShotBatchAssetBindPanel.tsx": {
       "beforeHash": null,
-      "afterHash": "45e35530ba2bcf18111be252489c9cf3f5580e8ecc222c4626f405d80ebac595"
+      "afterHash": "e570e939cc6ae01ce16c0ba0b20030bddc99240dfdbf1b96273ea03d10783991"
     },
     "src/features/shots/ShotBatchPlanner.tsx": {
       "beforeHash": "277e02121d1f8b3f94c2ce21623a1eb3a8ba7db0924e2d6e259358e29e8fb465",
@@ -462,7 +462,7 @@
     },
     "src/product/runInvalidation.test.ts": {
       "beforeHash": null,
-      "afterHash": "529570b14254a75c0d64f0ac24e8bc5700c876330d21b639d330770df2eb7a72"
+      "afterHash": "7d7e337b764dc953ed0c9c6c79c7c7aa3c4fdb8abca14bbcf694c032ebdc1d7c"
     },
     "src/product/runInvalidation.ts": {
       "beforeHash": "1ca205f975b40a378fb6044ea211827c9bbc983102f14676573ec5e3ec76d62c",
@@ -492,7 +492,7 @@
     "afterFiles": 554,
     "beforeAggregateHash": "c718374424868f8e1f5446cfd31ed845822cec1c1f51dfb23d023293896c6e36",
     "untouchedAggregateHash": "af6108645bdb521ca302305597846546268215300d74ab4bea4047df61c16e99",
-    "afterAggregateHash": "9c22117e679cf07dcb4be1bf89b7b1eaa01d899e68a83efbdfc7d280e1eed3fa"
+    "afterAggregateHash": "7963d79b2a197a7534758d0c5a80f615b20874c6f28b8382fa980a3e6b8df467"
   },
   "styles": {
     "beforeFiles": 39,
