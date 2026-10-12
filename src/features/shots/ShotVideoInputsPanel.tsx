@@ -3,11 +3,12 @@ import { productClient } from "../../product/client";
 import type { InputAsset, ShotVideoInputScope, VideoInputView, VideoInputAsset, VideoInputKey } from "../../types/shotVideoInput";
 import type { RecipeViewModel } from "../../types/generation";
 import { normalizeProductError } from "../../product/errors";
+import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 
 /** An OCC edit form for persisted bindings, not an alternate generation draft/executor. */
 export function ShotVideoInputsPanel({ scope, recipe, onSaved, onReadyChange }: { scope: ShotVideoInputScope; recipe: RecipeViewModel; onSaved?: () => void; onReadyChange?: (owner: string, ready: boolean) => void }) {
   const owner = JSON.stringify(scope); const live = useRef(owner); live.current = owner;
-  const epoch = useRef(0); const lock = useRef(false);
+  const epoch = useRef(0); const lock = useRef(false); const selfWrite = useRef(false);
   const [set, setSet] = useState<VideoInputView | null>(null), [inputs, setInputs] = useState<VideoInputAsset[]>([]);
   const [assets, setAssets] = useState<InputAsset[]>([]), [busy, setBusy] = useState(true), [error, setError] = useState<string>(), [loaded, setLoaded] = useState(false);
   const fields = recipe.fields.filter(f=>["image","images","video","videos","audio","audios"].includes(f.type));
@@ -27,11 +28,17 @@ export function ShotVideoInputsPanel({ scope, recipe, onSaved, onReadyChange }: 
     finally { if(live.current===own && token===epoch.current)setBusy(false); }
   }
   useEffect(()=>{lock.current=false;setSet(null);setInputs([]);setAssets([]);void load();return()=>{++epoch.current;};},[owner]);
+  useEffect(() => {
+    return subscribeVideoInputInvalidation((projectId) => {
+      if (projectId !== scope.projectId || selfWrite.current) return;
+      void load();
+    });
+  }, [scope.projectId, owner]);
   async function save() {
     if (!loaded || lock.current) return; lock.current=true;setBusy(true);setError(undefined);
     const own=owner, token=epoch.current;
     const combination=combinationMessage(inputs); if(combination){setError(combination); lock.current=false; setBusy(false); return;}
-    try { const current=await productClient.creation.inputsSave({selection,expected:set?.token??null,inputs}); if(live.current===own && token===epoch.current){setSet(current);onSaved?.();} }
+    try { const current=await productClient.creation.inputsSave({selection,expected:set?.token??null,inputs}); if(live.current===own && token===epoch.current){setSet(current);setInputs(current.inputs);setAssets(current.assets);selfWrite.current=true;try{invalidateVideoInputs(scope.projectId);}finally{selfWrite.current=false;}onSaved?.();} }
     catch(e) {if(live.current===own && token===epoch.current)setError(normalizeProductError(e).message);}
     finally {if(live.current===own && token===epoch.current){lock.current=false;setBusy(false);}}
   }

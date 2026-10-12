@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GeneratorOption } from "../../product/types";
 import type { VideoInputSelection, VideoInputView } from "../../types/shotVideoInput";
 import { useStudioStore } from "../../stores/studioStore";
 import { usePersistentVideoInputs } from "./usePersistentVideoInputs";
+import { invalidateVideoInputs, resetVideoInputInvalidationForTests } from "../../product/videoInputInvalidation";
 import type { CreateRoute } from "./createModel";
 const api = vi.hoisted(()=>({inputsGet:vi.fn(),inputsSave:vi.fn(),assetsImport:vi.fn()}));
 vi.mock("../../product/client",()=>({productClient:{creation:api}}));
@@ -12,6 +13,7 @@ const route: CreateRoute = { kind:"create",projectId:"p1",shotId:"shot1",stage:"
 const generator: GeneratorOption = { selectionRef:"exact-a",name:"FL",version:"2.2",mode:"FIRST_LAST",mediaKind:"video",availability:true,availabilityReason:null,recommended:true,persistentInputs:true,
   fields:[{key:"first_frame",type:"image",label:"首帧",required:true},{key:"last_frame",type:"image",label:"尾帧",required:true}] };
 function view(selectionRef="exact-a",revision=1): VideoInputView { return {selectionRef,token:{instanceId:`instance-${selectionRef}`,revision},inputs:[{inputKey:"first_frame",ordinal:0,assetId:`${selectionRef}-first`},{inputKey:"last_frame",ordinal:0,assetId:`${selectionRef}-last`}],assets:[]}; }
+afterEach(() => { resetVideoInputInvalidationForTests(); });
 beforeEach(()=>{ vi.clearAllMocks(); useStudioStore.getState().loadCreationDraft({prompt:{type:"string",value:"move"}}); api.inputsGet.mockImplementation((s:VideoInputSelection)=>Promise.resolve(view(s.selectionRef))); api.inputsSave.mockImplementation(async r=>({...view(r.selection.selectionRef,2),inputs:r.inputs})); api.assetsImport.mockResolvedValue({imported:[],failed:[],cancelled:false}); });
 describe("persistent video input ownership",()=>{
   it("preserves a same-owner unsaved/cleared return draft, while explicit refresh reads persisted OCC",async()=>{
@@ -102,5 +104,20 @@ describe("persistent video input ownership",()=>{
     await act(async () => { expect(await result.current.bindAsset("first_frame", "external-new")).toBe(false); });
     expect(result.current.error).toBeTruthy();
     expect(result.current.view?.token).toEqual({instanceId:"instance-exact-a",revision:1});
+  });
+});
+
+
+describe("formal video input invalidation", () => {
+  it("re-fetches inputsGet after external invalidate for the same project", async () => {
+    const { result } = renderHook(() => usePersistentVideoInputs(route, generator, false));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(api.inputsGet).toHaveBeenCalledTimes(1);
+    api.inputsGet.mockResolvedValueOnce(view("exact-a", 7));
+    await act(async () => { invalidateVideoInputs("p1"); });
+    await waitFor(() => expect(result.current.view?.token?.revision).toBe(7));
+    expect(api.inputsGet).toHaveBeenCalledTimes(2);
+    await act(async () => { invalidateVideoInputs("other"); });
+    expect(api.inputsGet).toHaveBeenCalledTimes(2);
   });
 });

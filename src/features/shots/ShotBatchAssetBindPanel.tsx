@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { productClient } from "../../product/client";
+import { invalidateVideoInputs } from "../../product/videoInputInvalidation";
 import { normalizeProductError } from "../../product/errors";
 import type { RecipeViewModel } from "../../types/generation";
 import type { ShotView } from "../../types/shot";
@@ -137,6 +138,7 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
       }
       setNotice(`已写入 ${savedShots} 个镜头的正式视频输入（OCC）。未创建任务，也未启动生产队列。`);
       setMatrix({}); setContent(""); setPreviewLines(undefined);
+      invalidateVideoInputs(projectId);
       await onBound?.();
     } catch (value: unknown) {
       setError(value instanceof Error ? value.message : normalizeProductError(value).message);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
+import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import type { GeneratorOption } from "../../product/types";
 import type { VideoInputAsset, VideoInputKey, VideoInputView } from "../../types/shotVideoInput";
 import { useStudioStore } from "../../stores/studioStore";
@@ -16,7 +17,7 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
   const enabled = route.stage === "video" && !!generator?.persistentInputs && !!route.shotId;
   const owner = JSON.stringify([route.projectId, route.shotId, generator?.selectionRef]);
   const currentOwner = useRef(owner); currentOwner.current = owner;
-  const epoch = useRef(0); const lock = useRef(false);
+  const epoch = useRef(0); const lock = useRef(false); const selfWrite = useRef(false);
   const values = useStudioStore(state => state.values);
   const [state, setState] = useState<{ owner: string; view: VideoInputView }>();
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<string>();
@@ -59,13 +60,20 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     finally { if (own === currentOwner.current && token === epoch.current) setLoading(false); }
   }
   useEffect(() => { lock.current = false; setBusy(false); setState(undefined); setError(undefined); setImportReceipt(undefined); setLoading(enabled); void load(true); return () => { ++epoch.current; }; }, [owner, enabled, pageLoading]);
+  useEffect(() => {
+    if (!enabled) return;
+    return subscribeVideoInputInvalidation((projectId) => {
+      if (projectId !== route.projectId || selfWrite.current) return;
+      void load(false);
+    });
+  }, [enabled, route.projectId, owner]);
 
   async function save() {
     if (!enabled || !view || loading || lock.current) return;
     const own = owner; const token = epoch.current; lock.current = true; setBusy(true); setError(undefined);
     try {
       const next = await productClient.creation.inputsSave({ selection, expected: view.token, inputs });
-      if (own === currentOwner.current && token === epoch.current) setState({ owner: own, view: next });
+      if (own === currentOwner.current && token === epoch.current) { setState({ owner: own, view: next }); selfWrite.current = true; try { invalidateVideoInputs(route.projectId); } finally { selfWrite.current = false; } }
     } catch (e) { if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message); }
     finally { if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); } }
   }
@@ -94,6 +102,7 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
       if (own !== currentOwner.current || token !== epoch.current) return false;
       setState({ owner: own, view: next });
       draftFromBindings(next.inputs);
+      selfWrite.current = true; try { invalidateVideoInputs(route.projectId); } finally { selfWrite.current = false; }
       return true;
     } catch (e) {
       if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message);

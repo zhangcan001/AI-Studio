@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   get: vi.fn(),
   inputsGet: vi.fn(),
   inputsSave: vi.fn(),
+  invalidate: vi.fn(),
 }));
 
 vi.mock("../../product/client", () => ({
@@ -24,6 +25,11 @@ vi.mock("../../product/client", () => ({
       inputsSave: (...args: unknown[]) => api.inputsSave(...args),
     },
   },
+}));
+vi.mock("../../product/videoInputInvalidation", () => ({
+  invalidateVideoInputs: (...args: unknown[]) => api.invalidate(...args),
+  subscribeVideoInputInvalidation: () => () => undefined,
+  resetVideoInputInvalidationForTests: () => undefined,
 }));
 
 afterEach(() => {
@@ -184,6 +190,7 @@ describe("ShotBatchAssetBindPanel", () => {
     ]);
     expect(await screen.findByText(/已写入 2 个镜头的正式视频输入/)).toBeTruthy();
     expect(onBound).toHaveBeenCalled();
+    expect(api.invalidate).toHaveBeenCalledWith("p1");
     // No second queue / generate surface in this panel.
     expect(screen.queryByRole("button", { name: /开始生产|生成/ })).toBeNull();
   });

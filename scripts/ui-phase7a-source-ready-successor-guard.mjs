@@ -118,6 +118,8 @@ export const PHASE7A_ADDED = [
   'src/features/shots/shotBatchAssetBind.ts',
   'src/features/studio/ProductionQueuePanel.sync.test.tsx',
   'src/product/runInvalidation.test.ts',
+  'src/product/videoInputInvalidation.test.ts',
+  'src/product/videoInputInvalidation.ts',
   'src/types/mjs-shims.d.ts',
 ].sort();
 export const PHASE7A_FILES = [...PHASE7A_EXISTING, ...PHASE7A_ADDED, PHASE7A_MANIFEST];

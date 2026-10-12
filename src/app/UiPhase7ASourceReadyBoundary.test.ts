@@ -59,3 +59,18 @@ it("Create generate and Queue start invalidate Runs without Library thrash", () 
   const bus = readFileSync("src/product/runInvalidation.ts", "utf8");
   expect(bus).toContain("library?: boolean");
 }, 30000);
+
+
+it("formal video input invalidation refreshes Create and Inspector after batch OCC bind", () => {
+  const invalidation = readFileSync("src/product/videoInputInvalidation.ts", "utf8");
+  expect(invalidation).toContain("invalidateVideoInputs");
+  expect(invalidation).toContain("subscribeVideoInputInvalidation");
+  const bind = readFileSync("src/features/shots/ShotBatchAssetBindPanel.tsx", "utf8");
+  expect(bind).toContain("invalidateVideoInputs(projectId)");
+  const panel = readFileSync("src/features/shots/ShotVideoInputsPanel.tsx", "utf8");
+  expect(panel).toContain("subscribeVideoInputInvalidation");
+  expect(panel).toMatch(/subscribeVideoInputInvalidation[\s\S]*?void load\(\)/);
+  const persistent = readFileSync("src/features/create/usePersistentVideoInputs.ts", "utf8");
+  expect(persistent).toContain("subscribeVideoInputInvalidation");
+  expect(persistent).toMatch(/subscribeVideoInputInvalidation[\s\S]*?void load\(false\)/);
+}, 30000);
