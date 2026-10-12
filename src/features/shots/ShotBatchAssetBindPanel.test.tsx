@@ -227,11 +227,87 @@ describe("ShotBatchAssetBindPanel", () => {
     );
     await user.click(screen.getByRole("button", { name: "检查" }));
     const preview = await screen.findByRole("table", { name: "批量绑定预览" });
-    expect(within(preview).getByText("可写入")).toBeTruthy();
+    await waitFor(() => expect(within(preview).getByText(/只接受匹配类型的外部导入素材/)).toBeTruthy());
+    expect(within(preview).queryByText("可写入")).toBeNull();
+    expect(screen.getByRole("button", { name: "确认写入" })).toHaveProperty("disabled", true);
+    expect(api.get).toHaveBeenCalledWith("p1", { kind: "asset", id: "gen-1" });
+    expect(api.inputsSave).not.toHaveBeenCalled();
+  });
+
+  it("TSV preview rejects wrong media, missing assets and cross-project assets before confirmation", async () => {
+    const user = userEvent.setup();
+    api.get.mockImplementation(async (_project: string, resource: { id: string }) => {
+      if (resource.id === "wrong-audio") return { kind: "asset", asset: { id: resource.id, category: "source_audio" } };
+      throw new Error("LIBRARY_RESOURCE_NOT_FOUND");
+    });
+    render(<ShotBatchAssetBindPanel projectId="p1" shots={[shot("s1", 0, "i2v")]} catalog={[i2v]} />);
+    await user.click(screen.getByRole("tab", { name: "表格文本" }));
+    await user.type(screen.getByLabelText("批量绑定表格内容"), [
+      "1\tfirst_frame\twrong-audio",
+      "1\tfirst_frame\tmissing-asset",
+      "1\tfirst_frame\tforeign-project-asset",
+    ].join("\n"));
+    await user.click(screen.getByRole("button", { name: "检查" }));
+    const preview = await screen.findByRole("table", { name: "批量绑定预览" });
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(within(preview).queryByText("可写入")).toBeNull());
+    expect(within(preview).getByText(/只接受匹配类型的外部导入素材/)).toBeTruthy();
+    expect(within(preview).getAllByText(/暂时无法完成操作/)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "确认写入" })).toHaveProperty("disabled", true);
+    expect(api.inputsSave).not.toHaveBeenCalled();
+  });
+
+  it("TSV confirmation rechecks a previously valid SOURCE and stops when removed", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValueOnce({ kind: "asset", asset: { id: "ext-1", category: "source_image" } })
+      .mockRejectedValueOnce(new Error("LIBRARY_RESOURCE_NOT_FOUND"));
+    render(<ShotBatchAssetBindPanel projectId="p1" shots={[shot("s1", 0, "i2v")]} catalog={[i2v]} />);
+    await user.click(screen.getByRole("tab", { name: "表格文本" }));
+    await user.type(screen.getByLabelText("批量绑定表格内容"), "1\tfirst_frame\text-1");
+    await user.click(screen.getByRole("button", { name: "检查" }));
+    await waitFor(() => expect(screen.getByText("可写入")).toBeTruthy());
     await user.click(screen.getByRole("button", { name: "确认写入" }));
-    await waitFor(() =>
-      expect(screen.getByText(/只接受外部导入素材/)).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText(/暂时无法完成操作/)).toBeTruthy());
+    expect(screen.getByRole("button", { name: "确认写入" })).toHaveProperty("disabled", true);
+    expect(api.inputsGet).not.toHaveBeenCalled();
+    expect(api.inputsSave).not.toHaveBeenCalled();
+  });
+
+  it("TSV preview uses formal SOURCE details and saves exactly once through OCC", async () => {
+    const user = userEvent.setup();
+    render(<ShotBatchAssetBindPanel projectId="p1" shots={[shot("s1", 0, "i2v")]} catalog={[i2v]} />);
+    await user.click(screen.getByRole("tab", { name: "表格文本" }));
+    await user.type(screen.getByLabelText("批量绑定表格内容"), "1\tfirst_frame\text-1");
+    await user.click(screen.getByRole("button", { name: "检查" }));
+    await waitFor(() => expect(screen.getByText("可写入")).toBeTruthy());
+    expect(api.inputsSave).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "确认写入" }));
+    await waitFor(() => expect(api.inputsSave).toHaveBeenCalledTimes(1));
+    expect(api.get).toHaveBeenCalledTimes(3);
+    expect(api.inputsSave.mock.calls[0][0]).toMatchObject({
+      selection: { projectId: "p1", shotId: "s1", selectionRef: "opaque-i2v" },
+      expected: { instanceId: "tok", revision: 1 },
+      inputs: [{ inputKey: "first_frame", ordinal: 0, assetId: "ext-1" }],
+    });
+    expect(screen.getByText(/已写入 1 个镜头/)).toBeTruthy();
+  });
+
+  it("discards a late preview when TSV contents change while Library responds", async () => {
+    const user = userEvent.setup();
+    let finish!: (value: unknown) => void;
+    api.get.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<ShotBatchAssetBindPanel projectId="p1" shots={[shot("s1", 0, "i2v")]} catalog={[i2v]} />);
+    await user.click(screen.getByRole("tab", { name: "表格文本" }));
+    const editor = screen.getByLabelText("批量绑定表格内容");
+    await user.type(editor, "1\tfirst_frame\text-1");
+    await user.click(screen.getByRole("button", { name: "检查" }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "确认写入" })).toHaveProperty("disabled", true);
+    await user.type(editor, "\n1\tfirst_frame\tmissing");
+    finish({ kind: "asset", asset: { id: "ext-1", category: "source_image" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "检查" })).toHaveProperty("disabled", false));
+    expect(screen.queryByRole("table", { name: "批量绑定预览" })).toBeNull();
+    expect(screen.getByRole("button", { name: "确认写入" })).toHaveProperty("disabled", true);
     expect(api.inputsSave).not.toHaveBeenCalled();
   });
 

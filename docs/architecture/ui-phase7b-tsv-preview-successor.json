@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE7B_NATIVE_TSV_PREVIEW_FIX",
+  "parentHead": "192d2358549f57400bbb06ca04c1e6a106969739",
+  "contracts": {
+    "historicalProofBytesUnchanged": true,
+    "runtimeBytesUnchanged": true,
+    "migrationUnchanged": true,
+    "backupUnchanged": true,
+    "tsvPreviewUsesScopedLibrary": true,
+    "confirmationFreshValidation": true,
+    "noSecondQueue": true,
+    "realNativeRetestRequired": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/ui-phase7b-ref2va-empty-readiness-successor-guard.mjs": {
+      "beforeHash": "f5f01cb45585b56d72807e4188a99b02a083968214ca2a603067adb8dd908485",
+      "afterHash": "44ad587d21d9dc60f47d6b00de6121ebcfa3bbf727ff2bdae684f64998627617"
+    },
+    "src/features/shots/ShotBatchAssetBindPanel.tsx": {
+      "beforeHash": "b717f3e5d7670dba34cf870054872e2465a67c5bb68e5916d1e1770d85f910d8",
+      "afterHash": "c7dc7fd1c629295ee091dcdbdd052e622f2d2244e69c0e82e5974741bd237eee"
+    },
+    "src/features/shots/ShotBatchAssetBindPanel.test.tsx": {
+      "beforeHash": "20f45d6fc7c13681c823a6ec026bfc23e6308da46440dcbf6ebf2af4333290c1",
+      "afterHash": "257a04cd78f0feee5349da72285d5820b18423fc66757324ccae4dd2326e47d9"
+    },
+    "scripts/ui-phase7b-tsv-preview-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "60404a78f702f933aa83a86083e407a75d2c35ad456b8062155e84035c6d9c02"
+    },
+    "src/app/UiPhase7BTsvPreviewBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "4dea34fe5f91e037d9b597d3955449a79562a69700e9b29247843db8392a4513"
+    }
+  }
+}

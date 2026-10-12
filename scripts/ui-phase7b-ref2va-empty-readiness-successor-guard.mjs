@@ -1,5 +1,6 @@
 // Phase 7B REF2VA admission repair: exact-base successor. Historical proofs stay frozen.
 import { createHash } from "node:crypto";
+import { uiPhase7BTsvParentReader } from "./ui-phase7b-tsv-preview-successor-guard.mjs";
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
@@ -28,7 +29,8 @@ function baseline(root, file) {
 
 export function uiPhase7BParentReader(root, override = undefined) {
   const base = resolve(root);
-  const violations = [];
+  const successor = uiPhase7BTsvParentReader(root);
+  const violations = [...successor.violations];
   const fail = value => violations.push("ui-phase7b-ref2va-" + value);
   let proof;
   try {
@@ -37,7 +39,7 @@ export function uiPhase7BParentReader(root, override = undefined) {
   const current = path => canonical(
     override && Object.hasOwn(override, path)
       ? override[path]
-      : readFileSync(join(base, path), "utf8")
+      : successor.read(path)
   );
   const parent = path => baseline(base, path);
   const expectedScope = [...PHASE7B_CHANGED, ...PHASE7B_ADDED].sort();
@@ -55,7 +57,8 @@ export function uiPhase7BParentReader(root, override = undefined) {
       p.startsWith("scripts/") || p.startsWith("src/") ||
       p.startsWith("src-tauri/") || p.startsWith("docs/architecture/")
     ))].sort();
-    if (JSON.stringify(actual) !== JSON.stringify(PHASE7B_ALLOWED)) fail("unapproved-tree-change");
+    const accepted = [...new Set([...PHASE7B_ALLOWED, ...successor.changedPaths, ...successor.addedPaths])].sort();
+    if (JSON.stringify(actual) !== JSON.stringify(accepted)) fail("unapproved-tree-change");
     for (const path of PHASE7B_CHANGED) {
       if (!existsSync(join(base, path)) || proof.files[path]?.beforeHash !== sha(parent(path))
           || proof.files[path]?.afterHash !== sha(current(path))) fail("changed:" + path);
@@ -71,8 +74,8 @@ export function uiPhase7BParentReader(root, override = undefined) {
   } catch (error) { fail("verification:" + String(error).slice(0, 120)); }
   return {
     violations,
-    addedPaths: [...PHASE7B_ADDED, PHASE7B_PROOF],
-    afterHashes: Object.fromEntries(expectedScope.map(path => [path, proof?.files?.[path]?.afterHash ?? ""])),
+    addedPaths: [...PHASE7B_ADDED, PHASE7B_PROOF, ...successor.addedPaths],
+    afterHashes: { ...Object.fromEntries(expectedScope.map(path => [path, proof?.files?.[path]?.afterHash ?? ""])), ...successor.afterHashes },
     read: path => PHASE7B_CHANGED.includes(path) ? parent(path) : current(path),
   };
 }
