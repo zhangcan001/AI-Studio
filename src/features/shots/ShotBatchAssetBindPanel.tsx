@@ -184,6 +184,7 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
         <button type="button" role="tab" aria-selected={mode === "tsv"} className={mode === "tsv" ? "active" : ""} onClick={() => setMode("tsv")} disabled={busy}>表格文本</button>
       </div>
       {loadingAssets && <p className="shot-inline-note" role="status">正在加载外部导入素材…</p>}
+      {!loadingAssets && !sourceAssets.length && <p className="empty-state" role="status">没有可用的外部导入素材。请先在资源库导入图片/视频/音频（来源：外部导入）。</p>}
       {mode === "matrix" ? (
         <>
           <div className="shot-batch-table-wrap">

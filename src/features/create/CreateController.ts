@@ -289,7 +289,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (!context?.selectedShot || !generator?.fields.some(field=>field.key==="prompt" && field.type==="textarea")) return;
     attempt.current=null; setAccepted(null); useStudioStore.getState().applyCreationPrompt(choice);
   }
-  function openLibrary(filter: "prompts" | "images" | "videos") {
+  function openLibrary(filter: "prompts" | "images" | "videos" | "audio" | "media") {
     useStudioStore.getState().setCreationLabReturn({scope:key, route, selectionRef:selection, runRef, accepted});
     return navigate({kind:"library",projectId:route.projectId,filter});
   }

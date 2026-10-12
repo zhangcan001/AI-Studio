@@ -48,7 +48,9 @@ export function GenerateBar({ controller: c }: { controller: CreateController })
       case "none": break;
     }
   }
-  return <footer className="create-generate-bar"><div aria-live="polite">{c.readinessState === "RUNTIME_OFFLINE" ? "运行环境暂时不可用" : c.readinessState === "READY" ? "可以生成" : c.readinessState === "NOT_READY" ? "请检查输入或运行环境" : "正在检查准备状态"}
+  const readyCopy = c.readinessState === "RUNTIME_OFFLINE" ? "运行环境暂时不可用" : c.readinessState === "READY" ? "可以入队生成" : c.readinessState === "NOT_READY" ? "请检查输入或运行环境" : "正在检查准备状态";
+  return <footer className="create-generate-bar"><div aria-live="polite"><strong>{readyCopy}</strong>
+    <small>单镜「生成视频」会写入生产队列并尝试启动；批量镜头请先绑定外部素材，再在生产队列点「开始生产」。准备 ≠ 启动。</small>
     {issues.map((issue, index) => {
       // Map known product codes to catalog copy; never collapse typed readiness codes to INTERNAL_ERROR.
       const error = normalizeProductError(issue);
@@ -57,5 +59,5 @@ export function GenerateBar({ controller: c }: { controller: CreateController })
     })}
     {c.error && <p role="alert">{c.error}</p>}</div>
     {c.videoInputs.enabled && <small>{c.videoInputs.loading ? "正在读取输入" : c.videoInputs.dirty ? "请先保存视频输入" : "视频输入按当前 Recipe 保存"}</small>}
-    <button className="primary" aria-label={c.busy ? "正在提交…" : "生成"} type="button" disabled={c.busy || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} onClick={() => void c.generate()}>{c.busy ? "正在提交…" : "生成视频"}</button></footer>;
+    <button className="primary" aria-label={c.busy ? "正在提交…" : "生成视频并尝试启动"} type="button" disabled={c.busy || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} onClick={() => void c.generate()}>{c.busy ? "正在提交…" : "生成视频"}</button></footer>;
 }
