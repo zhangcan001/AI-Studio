@@ -88,6 +88,15 @@ export const PHASE7A_EXISTING = [
   'src/features/runs/RunsPhase6C.test.tsx',
   'src/features/shots/ShotWorkspace.tsx',
   'src/features/workflow-lab/WorkflowLabBoundary.test.tsx',
+  'src/product/errors.ts',
+  'src/product/client.test.ts',
+  'src/features/create/CreateResults.tsx',
+  'src/features/shots/EpisodeProductionPanel.tsx',
+  'src/features/shots/SeriesProductionPanel.tsx',
+  'src/features/studio/ProductionQueuePanel.tsx',
+  'src-tauri/src/application/shot_video_input_service.rs',
+  'src-tauri/src/application/shot_context_resolver.rs',
+  'src-tauri/src/application/product/creation_facade/submission.rs',
 ].sort();
 export const PHASE7A_ADDED = [
   'scripts/run-boundary-tests.mjs',

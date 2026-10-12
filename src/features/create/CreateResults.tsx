@@ -50,9 +50,10 @@ export function GenerateBar({ controller: c }: { controller: CreateController })
   }
   return <footer className="create-generate-bar"><div aria-live="polite">{c.readinessState === "RUNTIME_OFFLINE" ? "运行环境暂时不可用" : c.readinessState === "READY" ? "可以生成" : c.readinessState === "NOT_READY" ? "请检查输入或运行环境" : "正在检查准备状态"}
     {issues.map((issue, index) => {
+      // Map known product codes to catalog copy; never collapse typed readiness codes to INTERNAL_ERROR.
       const error = normalizeProductError(issue);
       const action = resolveCreateReadinessAction(error.details);
-      return <p key={index}>{error.message}{action.kind === "none" ? <small>{action.explanation}</small> : <button type="button" disabled={c.busy} onClick={() => act(action)}>{action.label}</button>}</p>;
+      return <p key={`${error.code}-${index}`}>{error.message}{action.kind === "none" ? <small>{action.explanation}</small> : <button type="button" disabled={c.busy} onClick={() => act(action)}>{action.label}</button>}</p>;
     })}
     {c.error && <p role="alert">{c.error}</p>}</div>
     {c.videoInputs.enabled && <small>{c.videoInputs.loading ? "正在读取输入" : c.videoInputs.dirty ? "请先保存视频输入" : "视频输入按当前 Recipe 保存"}</small>}

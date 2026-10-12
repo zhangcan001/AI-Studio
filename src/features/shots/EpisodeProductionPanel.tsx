@@ -263,8 +263,8 @@ function ScopedEpisodeProductionPanel({
           <section className="episode-production-card" aria-label="集批量预设">
             <div className="episode-production-card-heading"><div><span className="section-label">预设</span><h4>批量应用预设</h4></div><span>{presets.length} / 30</span></div>
             <label><span>批量工作流预设</span><select value={selectedPresetId} onChange={(event) => setSelectedPresetId(event.target.value)} disabled={isBusy}><option value="">选择预设</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{!preset.available ? " · 不可用" : ""}</option>)}</select></label>
-            <div className="episode-production-actions"><button type="button" onClick={() => { setStage("image"); void applyPresetForStage("image"); }} disabled={isBusy || !selectedPreset?.image || !selectedSceneIds.length}>{isBusy && busyAction === "preset-apply" ? "应用中…" : "应用图片预设到所选场景"}</button><button type="button" className="quiet-button" onClick={() => { setStage("video"); void applyPresetForStage("video"); }} disabled={isBusy || !selectedPreset?.video || !selectedSceneIds.length}>应用视频预设到所选场景</button></div>
-            <small className="episode-production-hint">最多一次应用 500 个镜头；不会改变参考素材、已确认图片、已确认视频、锚点或场景归属。</small>
+            <div className="episode-production-actions"><button type="button" onClick={() => { setStage("image"); void applyPresetForStage("image"); }} disabled title="普通产品以外部素材为准，已停用图片阶段批量预设">{isBusy && busyAction === "preset-apply" ? "应用中…" : "应用图片预设到所选场景（已停用）"}</button><button type="button" className="quiet-button" onClick={() => { setStage("video"); void applyPresetForStage("video"); }} disabled={isBusy || !selectedPreset?.video || !selectedSceneIds.length}>应用视频预设到所选场景</button></div>
+            <small className="episode-production-hint">图片预设已停用。视频预设最多一次应用 500 个镜头；不会改变参考素材、正式视频输入、锚点或场景归属。</small>
           </section>
 
         </div>

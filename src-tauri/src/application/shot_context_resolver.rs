@@ -340,10 +340,22 @@ impl ShotContextResolver {
                         };
                         match service.context_input(&scope).await {
                             Ok(inputs) => context.stage_input.video_inputs = Some(inputs),
-                            Err(error) => context.diagnostics.push(ContextDiagnostic::error(
-                                "VIDEO_INPUT_ASSET_INVALID",
-                                error.to_string(),
-                            )),
+                            Err(error) => {
+                                // Keep a formal empty set so reference_gate does not
+                                // fall back to confirmed-result / legacy keyframe copy.
+                                context.stage_input.video_inputs =
+                                    Some(crate::domain::shot_context::ResolvedVideoInputSet {
+                                        workflow_version_id: version.clone(),
+                                        recipe_id: recipe.clone(),
+                                        instance_id: None,
+                                        revision: None,
+                                        inputs: Vec::new(),
+                                    });
+                                context.diagnostics.push(ContextDiagnostic::error(
+                                    "VIDEO_INPUT_ASSET_INVALID",
+                                    error.to_string(),
+                                ));
+                            }
                         }
                     }
                     // The persisted token, explicit slots and current asset SHA

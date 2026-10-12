@@ -101,11 +101,12 @@ describe("product facade client", () => {
     expect(accepted).not.toHaveProperty("success");
   });
   it("keeps typed readiness fields and hides raw runtime diagnostics", () => {
-    for (const code of ["MISSING_INPUT", "INPUT_OUT_OF_RANGE", "ASSET_TYPE_MISMATCH", "ASSET_PROJECT_MISMATCH", "RUNTIME_BLOCKED"] as const) {
+    for (const code of ["MISSING_INPUT", "INPUT_OUT_OF_RANGE", "ASSET_TYPE_MISMATCH", "ASSET_PROJECT_MISMATCH", "RUNTIME_BLOCKED", "BLOCKED_BY_METADATA", "INPUT_EXTERNAL_IMAGE_REQUIRED", "VIDEO_INPUT_REQUIRED", "VIDEO_KEYFRAME_REQUIRED"] as const) {
       const error = normalizeProductError({ code, message: "node=secret input=secret", details: { field: "reference_video", action: "EDIT_INPUT", technicalDetails: "diagnostic" } });
       expect(error.code).toBe(code);
       expect(error.details.field).toBe("reference_video");
       expect(error.message).not.toContain("secret");
+      expect(error.message.length).toBeGreaterThan(0);
     }
   });
   it("falls back safely for unknown errors", () => {

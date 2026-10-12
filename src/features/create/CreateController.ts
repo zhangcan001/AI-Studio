@@ -290,6 +290,8 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   }
   function chooseGenerator(ref: string) {
     const option = generators.find(item => item.selectionRef === ref); if (!option || busy || videoInputs.busy || !option.availability) return;
+    const stripsMedia = option.persistentInputs && Object.values(values).some(value => "assetId" in value || "assetIds" in value);
+    if ((videoInputs.dirty || stripsMedia) && typeof window !== "undefined" && !window.confirm("切换生成器会丢弃当前未保存的媒体输入草稿，已保存的正式输入仍按 Recipe 保留。确定继续？")) return;
     useStudioStore.getState().setPendingRunIntent(undefined);
     attempt.current = null; setSelection(ref); setAccepted(null); setRestoredDraft(undefined);
     const previous = option.persistentInputs ? Object.fromEntries(Object.entries(values).filter(([,v]) => !("assetId" in v || "assetIds" in v))) : values;

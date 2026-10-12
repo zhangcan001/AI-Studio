@@ -254,16 +254,27 @@ impl ShotVideoInputService {
                     .assets
                     .find_by_id(&AssetId::parse(&input.asset_id).map_err(invalid)?)
                     .await
-                    .map_err(invalid)?
-                    .ok_or_else(|| invalid("正式输入素材不存在"))?;
-                inputs.push(ResolvedVideoInputAsset {
-                    input_key: input.input_key.clone(),
-                    ordinal: input.ordinal,
-                    asset_id: input.asset_id.clone(),
-                    media_type: asset.asset_type.as_str().into(),
-                    sha256: asset.sha256,
-                    duration_ms: asset.duration_ms,
-                });
+                    .map_err(invalid)?;
+                // Missing assets keep the formal slot with empty sha so readiness
+                // stays on the formal-input path instead of legacy keyframe semantics.
+                match asset {
+                    Some(asset) => inputs.push(ResolvedVideoInputAsset {
+                        input_key: input.input_key.clone(),
+                        ordinal: input.ordinal,
+                        asset_id: input.asset_id.clone(),
+                        media_type: asset.asset_type.as_str().into(),
+                        sha256: asset.sha256,
+                        duration_ms: asset.duration_ms,
+                    }),
+                    None => inputs.push(ResolvedVideoInputAsset {
+                        input_key: input.input_key.clone(),
+                        ordinal: input.ordinal,
+                        asset_id: input.asset_id.clone(),
+                        media_type: String::new(),
+                        sha256: String::new(),
+                        duration_ms: None,
+                    }),
+                }
             }
         }
         Ok(ResolvedVideoInputSet {

@@ -335,6 +335,9 @@ fn generation_error(error: GenerationServiceError) -> ProductError {
             },
             Some("references".into()),
         ),
+        GenerationServiceError::InputPrepare(P::ExternalImageRequired { .. }) => {
+            ("INPUT_EXTERNAL_IMAGE_REQUIRED", Some("first_frame".into()))
+        }
         GenerationServiceError::InputPrepare(_) => ("INVALID_INPUT", None),
         GenerationServiceError::ExecutionFailed { code, .. }
             if code == "WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION" =>
@@ -346,7 +349,20 @@ fn generation_error(error: GenerationServiceError) -> ProductError {
         }
         _ => ("INTERNAL_ERROR", None),
     };
-    let mut result = ProductError::new(code, "请检查输入或运行环境后重试。", Some("EDIT_INPUT"));
+    let user_message = match code {
+        "BLOCKED_BY_METADATA" => "参考媒体缺少可用时长元数据，请重新探测或重新导入后再生成。",
+        "INPUT_EXTERNAL_IMAGE_REQUIRED" => "图片槽位只接受外部导入的源图片，不能使用生成图。",
+        "ASSET_UNAVAILABLE" => "输入素材不存在或无法读取，请重新选择。",
+        "ASSET_TYPE_MISMATCH" => "输入素材类型不匹配。",
+        "ASSET_PROJECT_MISMATCH" => "输入素材不属于当前项目。",
+        "MISSING_INPUT" => "请填写必需输入。",
+        "INPUT_TYPE_MISMATCH" => "输入类型不匹配，请重新选择。",
+        "INPUT_OUT_OF_RANGE" => "输入超出允许范围或数量，请调整。",
+        "RUNTIME_BLOCKED" => "运行环境暂时不可用，请检查连接或稍后重试。",
+        "GENERATOR_UNAVAILABLE" => "生成器当前不可用，请重新选择。",
+        _ => "请检查输入或运行环境后重试。",
+    };
+    let mut result = ProductError::new(code, user_message, Some("EDIT_INPUT"));
     if code == "RUNTIME_BLOCKED" {
         result.details.action = Some("OPEN_RUNTIME_SETTINGS");
     }
@@ -422,5 +438,14 @@ mod tests {
             assert_eq!(issue.details.action, Some("EDIT_INPUT"));
             assert!(issue.details.technical_details.unwrap().contains(message));
         }
+        let external = generation_error(GenerationServiceError::InputPrepare(
+            crate::application::generation_input_preparer::GenerationInputPrepareError::ExternalImageRequired {
+                asset_id: "asset-generated".into(),
+            },
+        ));
+        assert_eq!(external.code, "INPUT_EXTERNAL_IMAGE_REQUIRED");
+        assert_eq!(external.details.field.as_deref(), Some("first_frame"));
+        assert_eq!(external.details.action, Some("EDIT_INPUT"));
+        assert!(external.message.contains("外部导入"));
     }
 }

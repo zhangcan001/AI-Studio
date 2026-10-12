@@ -15,6 +15,7 @@ import {
   skipProductionQueueItem,
   saveProductionQueueNamePreset,
   startProductionQueue,
+  getProductionAdmissionStatus,
   getReusableDraft,
   getTaskDetail,
 } from "../../services/tauriClient";
@@ -331,6 +332,20 @@ export function ProductionQueuePanel({
       setNotice("请先连接 ComfyUI，再开始生产队列。");
       return;
     }
+    const runningOther = queues.find((queue) => queue.status === "RUNNING" && queue.id !== batchId);
+    if (runningOther) {
+      setNotice(`当前已有批次「${runningOther.name}」在运行。生产队列同一时间只启动一个批次，请等当前批次结束后再开始。`);
+      return;
+    }
+    try {
+      const admission = await getProductionAdmissionStatus();
+      if (admission.busy && admission.batchId && admission.batchId !== batchId) {
+        setNotice("当前已有生产批次占用执行通道。请等当前批次结束后再开始，或到镜头工作区使用串行排队。");
+        return;
+      }
+    } catch {
+      // Admission probe failed: still attempt start; backend remains the authority.
+    }
     await runMutation(async () => {
       const updated = await startProductionQueue(projectId, batchId);
       commitDetail(updated, "生产已启动，任务正在运行；可在生产监控查看进度。");
@@ -552,7 +567,8 @@ export function ProductionQueuePanel({
                         type="button"
                         className="quiet-button"
                         onClick={() => void startQueue(queue.id)}
-                        disabled={busy || !comfyConnected}
+                        disabled={busy || !comfyConnected || queues.some((item) => item.status === "RUNNING" && item.id !== queue.id)}
+                        title={queues.some((item) => item.status === "RUNNING" && item.id !== queue.id) ? "已有批次在运行，同一时间只启动一个批次" : undefined}
                       >
                         {queue.status === "PAUSED" ? "继续生产" : "开始生产"}
                       </button>
