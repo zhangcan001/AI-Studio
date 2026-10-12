@@ -633,6 +633,27 @@ mod tests {
                     .unwrap();
                 }
             }
+            // Exercise the production compile gate with the shipped REF2VA
+            // workflow and Recipe, not only the isolated validator fixture.
+            if recipe.id == "rcp_minimax_h3_reference_video_quality_2_2_0" {
+                let empty = CompileRequest::new(
+                    [
+                        ("duration_seconds".into(), InputValue::Integer(5)),
+                        ("prompt".into(), InputValue::String("test".into())),
+                    ]
+                    .into(),
+                );
+                assert!(matches!(
+                    crate::application::product::h3_resolution::compile_checked(
+                        &WorkflowCompiler,
+                        &workflow,
+                        &recipe,
+                        &empty,
+                    ),
+                    Err(crate::compiler::CompileError::InputRequired { input })
+                        if input == "reference_images_or_videos"
+                ));
+            }
         }
         for old in PACKAGES.iter().filter(|p| {
             p.directory.contains("_quality_2_1_0") || p.directory.ends_with("_quality_2_1_1")

@@ -15,7 +15,7 @@
   "files": {
     "src-tauri/src/application/builtin_runtime_packages.rs": {
       "beforeHash": "48097c5a63f2cb928b03af0cdefce3cb89177c244aae876af4ea7737dbc11046",
-      "afterHash": "f68aadfec1a666577c9187d1a4903b44a8cbd97ac0d04837960acf961036ec00"
+      "afterHash": "6ef5ba5512e83039165d9051a86d8afafa62c01e70f0204c6a9965cac7f43be8"
     },
     "src-tauri/src/application/product/h3_resolution.rs": {
       "beforeHash": "9fcc98de21aa409c5c3866607458990d67d334cc0a17d8191943bae9b3e4afdb",
