@@ -93,7 +93,7 @@
     },
     "scripts/ui-phase7a-source-ready-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "36ef2c37216d077413aa689128fb0abaf4f1fbc4c96fce017ad1adebd7f0f860"
+      "afterHash": "126ab2012a06ca5d5458e4e150ebfa993c1caf2ddbdc03f222de80f679f8b296"
     },
     "src-tauri/examples/phase12_query_profile.rs": {
       "beforeHash": "e26dbb6a63400a72ea1b023a687fa217149e165fc8b32953de9304248498b235",
@@ -138,6 +138,10 @@
     "src-tauri/tests/dev050_readiness.rs": {
       "beforeHash": "345b8cf53ede8ba082905005fc127850ef482675b07ab40c117a1e8801bc6807",
       "afterHash": "2d140d22ff6d6dcbf0b45c097302f974f6ddbc870bdf5c9909130b4d39d6cd7c"
+    },
+    "src-tauri/tests/production_execution_authority_boundary.rs": {
+      "beforeHash": "5b0913f81bc1b0c7e023cd3b713e3e93ce8af69019f404d5f2870de2251f4b2c",
+      "afterHash": "286f9a655df59e55df4ab742aa880aea3833c879f1c47fdb439236614dc3ff5a"
     },
     "src-tauri/tests/support/library_findability_contract.rs": {
       "beforeHash": "798409f40e6182e5e74ae5e904b9ae7a1697f5db2f7bbbf4657dfc84398cf570",
@@ -556,7 +560,7 @@
     "afterFiles": 61,
     "beforeAggregateHash": "b004f8a1b0903dbf8aa158974b1a6d826ba1b96a3ba716537c8603bec4f15d64",
     "untouchedAggregateHash": "70aac5e7d74f77261f1079d4ee4ea5061d481be309863a74c4b69648669b2ed1",
-    "afterAggregateHash": "fc1a4b9548d27515166243fdbc1f0b0463a4270ad59427a1c80c2c038405c519"
+    "afterAggregateHash": "538fa29bcef3063a51c6cbb4207300292f561757ffd05352221f6989bd7a036a"
   },
   "styles": {
     "beforeFiles": 39,
@@ -569,7 +573,7 @@
     "beforeFiles": 59,
     "afterFiles": 59,
     "beforeAggregateHash": "a105a928493e1b4f7d2f2c30e76d1f60b28a74f5a89bde0a5f62dc41b4a9eb54",
-    "untouchedAggregateHash": "b55220de544443d518c5f407e0afd5f720cc94277d6b125363ae9a57935b47d1",
-    "afterAggregateHash": "c6784ec57afa21aff852d75ac0af33e3f1b6f09d1f078927e637c9168c6ce825"
+    "untouchedAggregateHash": "4dba4bf3d7e87624d3b49fae7529180c48cf8676ea57e20dcd92470c7b58b107",
+    "afterAggregateHash": "3f1bbb8b162dfca877b3efe4173bb49649239b8380b39f4550ffb5144e369621"
   }
 }

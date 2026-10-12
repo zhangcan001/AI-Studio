@@ -126,10 +126,6 @@ fn production_execution_requires_queue_start() {
             "submitGeneration({",
         ),
         (
-            "../src/features/assets/AssetVideoBatchWorkspace.tsx",
-            "submitGeneration({",
-        ),
-        (
             "../src/features/tasks/TaskHistoryDetail.tsx",
             "submitGeneration({",
         ),
@@ -150,6 +146,21 @@ fn production_execution_requires_queue_start() {
         assert!(
             !frontend.contains("createGeneration({") && !frontend.contains("generateShot({"),
             "product UI must not use legacy immediate-Task client names: {path}"
+        );
+    }
+
+    // AVBW is a retired redirect shell (ShotBatchAssetBindPanel + Production Queue);
+    // it must not own generation submission or queue start.
+    let retired_avbw = source("../src/features/assets/AssetVideoBatchWorkspace.tsx");
+    for forbidden in [
+        "submitGeneration({",
+        "startProductionQueue(",
+        "createGeneration({",
+        "generateShot({",
+    ] {
+        assert!(
+            !retired_avbw.contains(forbidden),
+            "retired AssetVideoBatchWorkspace must not contain {forbidden}"
         );
     }
 }

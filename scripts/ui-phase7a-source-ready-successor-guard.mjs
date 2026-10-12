@@ -114,6 +114,7 @@ export const PHASE7A_EXISTING = [
   'src/features/shots/EpisodeProductionPanel.test.tsx',
   'src/features/shots/SeriesProductionPanel.test.tsx',
   'src/features/Phase6DProductPath.e2e.test.tsx',
+  'src-tauri/tests/production_execution_authority_boundary.rs',
 ].sort();
 export const PHASE7A_ADDED = [
   'scripts/run-boundary-tests.mjs',
