@@ -441,6 +441,26 @@ export function ProductionQueuePanel({
     });
   }
 
+  async function requeueAllSafeFailed() {
+    if (!detail) return;
+    const targets = detail.items.filter((item) => isSafeProductionQueueRequeue(item));
+    if (!targets.length) {
+      setNotice("没有可安全批量重试的失败/取消项（仅瞬时错误可一键重试）。");
+      return;
+    }
+    if (detail.archivedAt || detail.status === "RUNNING") {
+      setNotice("运行中或已归档批次不能批量创建重试项。");
+      return;
+    }
+    await runMutation(async () => {
+      let updated = detail;
+      for (const item of targets) {
+        updated = await requeueProductionQueueItem(projectId, detail.id, item.id);
+      }
+      commitDetail(updated, `已为 ${targets.length} 个可安全重试项创建新的待执行项；原失败记录保留，仍需手动开始生产。`);
+    });
+  }
+
   async function useResultInStudio(item: ProductionBatchDetail["items"][number]) {
     if (!detail || !item.taskId || !onPromoteWinner) return;
     await runMutation(async () => {
@@ -506,11 +526,11 @@ export function ProductionQueuePanel({
       {!inline && overview && (
         <div className="production-overview" aria-label="生产队列概览">
           <OverviewStat label="队列" value={overview.totalQueues} />
-          <OverviewStat label="运行中" value={overview.runningQueues} />
-          <OverviewStat label="待执行" value={overview.pendingItems} />
-          <OverviewStat label="运行中" value={overview.activeItems} />
-          <OverviewStat label="已完成" value={overview.succeededItems} />
-          <OverviewStat label="失败" value={overview.failedItems} />
+          <OverviewStat label="运行中队列" value={overview.runningQueues} />
+          <OverviewStat label="待执行项" value={overview.pendingItems} />
+          <OverviewStat label="执行中项" value={overview.activeItems} />
+          <OverviewStat label="已成功项" value={overview.succeededItems} />
+          <OverviewStat label="失败项" value={overview.failedItems} />
           <OverviewStat label="已归档" value={overview.archivedQueues} />
         </div>
       )}
@@ -590,7 +610,11 @@ export function ProductionQueuePanel({
                         className="quiet-button"
                         onClick={() => void startQueue(queue.id)}
                         disabled={busy || !comfyConnected || queues.some((item) => item.status === "RUNNING" && item.id !== queue.id)}
-                        title={queues.some((item) => item.status === "RUNNING" && item.id !== queue.id) ? "已有批次在运行，同一时间只启动一个批次" : undefined}
+                        title={!comfyConnected
+                          ? "请先连接 ComfyUI，再开始生产"
+                          : queues.some((item) => item.status === "RUNNING" && item.id !== queue.id)
+                            ? "已有批次在运行，同一时间只启动一个批次"
+                            : undefined}
                       >
                         {queue.status === "PAUSED" ? "继续生产" : "开始生产"}
                       </button>
@@ -605,7 +629,7 @@ export function ProductionQueuePanel({
           ))}
         </div>
       ) : (
-        <p className="disabled-note">当前筛选条件下没有找到队列。</p>
+        <p className="disabled-note" role="status">当前筛选条件下没有找到队列。请先在生产准备中创建待启动批次，再回到这里点击「开始生产」（准备 ≠ 启动）。</p>
       ))}
 
       {inline && inlineQueueHistory.length > 0 && (
@@ -644,16 +668,21 @@ export function ProductionQueuePanel({
             <div className="production-inline-progress" role="status" aria-live="polite">
               <div className="production-inline-progress-heading">
                 <div>
-                  <strong>{processedCount} / {detail.total} 已处理</strong>
+                  <strong>
+                    {detail.succeeded} 成功 · {detail.failed} 失败
+                    {detail.running > 0 ? ` · ${detail.running} 运行中` : ""}
+                    {" · "}
+                    {processedCount}/{detail.total} 已结束
+                  </strong>
                   <span>
                     {activeItem
-                      ? `正在执行第 ${activeItem.ordinal + 1} 项`
+                      ? `正在执行第 ${activeItem.ordinal + 1} 项（进度条为已结束占比，含失败/取消/跳过）`
                       : detail.status === "COMPLETED"
                         ? productionBatchOutcomeLabel(detail)
                         : productionStatusLabel(detail.status)}
                   </span>
                 </div>
-                <strong>{progressPercent}%</strong>
+                <strong title="已结束项 / 总数（含失败）">{progressPercent}%</strong>
               </div>
               <div
                 className="production-inline-progress-track"
@@ -706,6 +735,17 @@ export function ProductionQueuePanel({
             <span>失败 <strong>{detail.failed}</strong></span>
             <span>已取消 <strong>{detail.cancelled}</strong></span>
             <span>已跳过 <strong>{detail.skipped}</strong></span>
+            {detailEditable && detail.items.some((item) => isSafeProductionQueueRequeue(item)) && (
+              <button
+                type="button"
+                className="quiet-button"
+                disabled={busy}
+                onClick={() => void requeueAllSafeFailed()}
+                title="仅为瞬时错误/已取消项创建重试；不会自动开始生产"
+              >
+                批量创建安全重试项
+              </button>
+            )}
           </div>
           <ProductionPartialResumePanel
             projectId={projectId}

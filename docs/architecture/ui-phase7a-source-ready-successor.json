@@ -33,7 +33,7 @@
     "afterFiles": 556,
     "beforeAggregateHash": "c718374424868f8e1f5446cfd31ed845822cec1c1f51dfb23d023293896c6e36",
     "untouchedAggregateHash": "af6108645bdb521ca302305597846546268215300d74ab4bea4047df61c16e99",
-    "afterAggregateHash": "d06130f5e16d4154f5aecd63c50d4739c2d376424e0c6d1d1506f5e8c09bf665"
+    "afterAggregateHash": "c00a1f16ca17807e6f93ff320e3b69e8fa0f9dd341c38694a6dba432668bf818"
   },
   "invariants": {
     "schemaChanged": false,
@@ -445,11 +445,11 @@
     },
     "src/features/shots/ShotBatchAssetBindPanel.test.tsx": {
       "beforeHash": null,
-      "afterHash": "8594f6f92a8aa7ae2cfd4334c1e1008cc47808ea6cbc9b6302eb85176d204b2d"
+      "afterHash": "bd81db7cb25f3d043f77adcdb25d1d28d4de96922a0914658fb661bcbe182b9b"
     },
     "src/features/shots/ShotBatchAssetBindPanel.tsx": {
       "beforeHash": null,
-      "afterHash": "3b947c3e8baf4ec45ded0b96bfe9f25d2448d5d321b996a3113dbfc11a18cb19"
+      "afterHash": "493be2c6405449369b2a929283433d8800c0ff6e96473e070088d72653f5b877"
     },
     "src/features/shots/ShotBatchPlanner.tsx": {
       "beforeHash": "277e02121d1f8b3f94c2ce21623a1eb3a8ba7db0924e2d6e259358e29e8fb465",
@@ -481,7 +481,7 @@
     },
     "src/features/studio/ProductionQueuePanel.tsx": {
       "beforeHash": "625e13374cd117734a86729975cc6bd44ba9616d05028607e0403ba6992ec268",
-      "afterHash": "c7724b0400fbcb664f0d47c3da0cbac33dcc4d1f4c34baed36798718fbc5ddf6"
+      "afterHash": "111b58839a460d45bf0a8eb62c5e1492c2a4d1432dc391008448303158c4a09f"
     },
     "src/features/workflow-lab/WorkflowLabBoundary.test.tsx": {
       "beforeHash": "d3f30a79b447ddfc79dbdc3165174928d1ae581bb23a5d448648864e799f8609",

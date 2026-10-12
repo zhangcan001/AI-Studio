@@ -234,4 +234,22 @@ describe("ShotBatchAssetBindPanel", () => {
     );
     expect(api.inputsSave).not.toHaveBeenCalled();
   });
+
+  it("fill-column copies first selected asset down the matrix without saving", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShotBatchAssetBindPanel
+        projectId="p1"
+        shots={[shot("s1", 0, "i2v"), shot("s2", 1, "i2v")]}
+        catalog={[i2v]}
+      />,
+    );
+    await screen.findByRole("table", { name: "多镜头正式槽绑定矩阵" });
+    await waitFor(() => expect(screen.getByLabelText("镜头 1 首帧")).toBeTruthy());
+    await user.selectOptions(screen.getByLabelText("镜头 1 首帧"), "ext-1");
+    await user.click(screen.getByRole("button", { name: "填充首帧列" }));
+    expect((screen.getByLabelText("镜头 2 首帧") as HTMLSelectElement).value).toBe("ext-1");
+    expect(api.inputsSave).not.toHaveBeenCalled();
+    expect(screen.getByText(/已用首个已选素材填充/)).toBeTruthy();
+  });
 });

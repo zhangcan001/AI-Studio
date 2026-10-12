@@ -75,6 +75,46 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
     setNotice(undefined); setError(undefined);
   }
 
+  /** CapCut/spreadsheet-style: copy the first filled cell in a column into every eligible row. */
+  function fillColumn(key: BatchBindKey) {
+    let seed = "";
+    for (const entry of readyShots) {
+      if (!entry.slots.includes(key)) continue;
+      const value = (matrix[entry.shot.id]?.[key] ?? "").trim();
+      if (value) { seed = value; break; }
+    }
+    if (!seed) {
+      setError(`请先在「${BATCH_BIND_KEY_LABELS[key]}」列选中一格外部素材，再按列填充。`);
+      return;
+    }
+    setMatrix((current) => {
+      const next = { ...current };
+      for (const entry of readyShots) {
+        if (!entry.slots.includes(key)) continue;
+        next[entry.shot.id] = { ...next[entry.shot.id], [key]: seed };
+      }
+      return next;
+    });
+    setError(undefined);
+    setNotice(`已用首个已选素材填充「${BATCH_BIND_KEY_LABELS[key]}」列（仅写入草稿，尚未 OCC 保存）。`);
+  }
+
+  function clearMatrix() {
+    setMatrix({});
+    setNotice(undefined);
+    setError(undefined);
+  }
+
+  function rowFillStats(entry: (typeof readyShots)[number]) {
+    const draft = matrix[entry.shot.id] ?? {};
+    const filled = entry.slots.filter((key) => (draft[key] ?? "").trim()).length;
+    return { filled, total: entry.slots.length };
+  }
+
+  function assetsForKey(key: BatchBindKey) {
+    return sourceAssets.filter((asset) => asset.mediaKind === mediaKindForKey(key));
+  }
+
   function matrixAssignments() {
     const rows: Array<{ line: number; shotId: string; shotName: string; shotOrdinal: number; inputKey: BatchBindKey; assetId: string; selectionRef: string; workflowVersionId: string; recipeId: string; errors: string[] }> = [];
     let line = 1;
@@ -169,10 +209,23 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
   }
 
   const matrixDirtyCount = matrixAssignments().length;
+  const matrixSlotTotal = readyShots.reduce((sum, entry) => sum + entry.slots.length, 0);
+  const matrixFilledSlots = readyShots.reduce((sum, entry) => sum + rowFillStats(entry).filled, 0);
   const tsvValid = !!previewLines && previewLines.length > 0 && previewLines.every((row) => row.errors.length === 0);
 
+  function onPanelKeyDown(event: { ctrlKey: boolean; metaKey: boolean; key: string; preventDefault(): void }) {
+    if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter" || busy || loadingAssets) return;
+    if (mode === "matrix" && matrixDirtyCount > 0) {
+      event.preventDefault();
+      void confirmMatrix();
+    } else if (mode === "tsv" && tsvValid) {
+      event.preventDefault();
+      void confirmTsv();
+    }
+  }
+
   return (
-    <section className="shot-batch-panel shot-batch-panel-open" aria-label="批量绑定外部素材">
+    <section className="shot-batch-panel shot-batch-panel-open" aria-label="批量绑定外部素材" onKeyDown={onPanelKeyDown}>
       <div className="shot-batch-panel-heading">
         <div>
           <span className="section-label">项目生产</span>
@@ -191,19 +244,27 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
         <>
           <div className="shot-batch-table-wrap">
             <table className="shot-batch-table" aria-label="多镜头正式槽绑定矩阵">
-              <thead><tr><th>镜头</th><th>配方</th><th>首帧</th><th>尾帧</th><th>参考图片</th><th>参考视频</th><th>参考音频</th></tr></thead>
+              <thead><tr>
+                <th>镜头</th><th>配方</th><th>进度</th>
+                <th>首帧 <small>({assetsForKey("first_frame").length})</small></th>
+                <th>尾帧 <small>({assetsForKey("last_frame").length})</small></th>
+                <th>参考图片 <small>({assetsForKey("reference_images").length})</small></th>
+                <th>参考视频 <small>({assetsForKey("reference_videos").length})</small></th>
+                <th>参考音频 <small>({assetsForKey("reference_audios").length})</small></th>
+              </tr></thead>
               <tbody>
                 {readyShots.map((entry) => {
                   const draft = matrix[entry.shot.id] ?? {};
+                  const stats = rowFillStats(entry);
                   const cell = (key: BatchBindKey) => {
                     if (!entry.slots.includes(key)) return <td key={key}>—</td>;
-                    const options = sourceAssets.filter((asset) => asset.mediaKind === mediaKindForKey(key));
+                    const options = assetsForKey(key);
                     return (
                       <td key={key}>
                         <select aria-label={`镜头 ${entry.shot.ordinal + 1} ${BATCH_BIND_KEY_LABELS[key]}`} value={draft[key] ?? ""} disabled={busy || loadingAssets}
                           onChange={(event) => setMatrixValue(entry.shot.id, key, event.target.value)}>
                           <option value="">未绑定</option>
-                          {options.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}
+                          {options.map((asset) => <option key={asset.id} value={asset.id} title={asset.title}>外部 · {asset.title}</option>)}
                         </select>
                       </td>
                     );
@@ -212,21 +273,27 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
                     <tr key={entry.shot.id}>
                       <td><strong>{String(entry.shot.ordinal + 1).padStart(2, "0")} {entry.shot.name}</strong></td>
                       <td>{entry.recipe.name} · {entry.recipe.mode}</td>
+                      <td><small aria-label={`镜头 ${entry.shot.ordinal + 1} 槽位进度`}>{stats.filled}/{stats.total}</small></td>
                       {cell("first_frame")}{cell("last_frame")}{cell("reference_images")}{cell("reference_videos")}{cell("reference_audios")}
                     </tr>
                   );
                 })}
-                {!readyShots.length && <tr><td colSpan={7}><p className="empty-state">没有已配置视频配方且含正式媒体槽的镜头。请先批量导入镜头并配置视频配方。</p></td></tr>}
+                {!readyShots.length && <tr><td colSpan={8}><p className="empty-state">没有已配置视频配方且含正式媒体槽的镜头。请先批量导入镜头并配置视频配方。</p></td></tr>}
               </tbody>
             </table>
           </div>
           <div className="shot-batch-selection-bar" aria-label="矩阵绑定操作">
-            <span>待写入槽位：<strong>{matrixDirtyCount}</strong></span>
+            <span>草稿槽位：<strong>{matrixFilledSlots}/{matrixSlotTotal}</strong>（待写入 <strong>{matrixDirtyCount}</strong>）</span>
             <span>外部素材：<strong>{sourceAssets.length}</strong></span>
-            <button type="button" className="shot-primary-action" onClick={() => void confirmMatrix()} disabled={busy || loadingAssets || matrixDirtyCount === 0}>
+            <button type="button" className="quiet-button" onClick={() => fillColumn("first_frame")} disabled={busy || loadingAssets || !readyShots.length} title="用该列第一个已选值填充其余行">填充首帧列</button>
+            <button type="button" className="quiet-button" onClick={() => fillColumn("last_frame")} disabled={busy || loadingAssets || !readyShots.length} title="用该列第一个已选值填充其余行">填充尾帧列</button>
+            <button type="button" className="quiet-button" onClick={() => fillColumn("reference_images")} disabled={busy || loadingAssets || !readyShots.length}>填充参考图列</button>
+            <button type="button" className="quiet-button" onClick={clearMatrix} disabled={busy || matrixFilledSlots === 0}>清空草稿</button>
+            <button type="button" className="shot-primary-action" onClick={() => void confirmMatrix()} disabled={busy || loadingAssets || matrixDirtyCount === 0} title="Ctrl/⌘+Enter">
               {busy ? "正在写入…" : "写入正式输入"}
             </button>
           </div>
+          <p className="shot-inline-note">提示：先在一格选好外部素材，再用「填充×列」铺开；Ctrl/⌘+Enter 等同写入。写入后仍不启动队列。</p>
         </>
       ) : (
         <>
@@ -238,7 +305,7 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
           </label>
           <div className="shot-batch-selection-bar" aria-label="表格绑定操作">
             <button type="button" className="quiet-button" onClick={checkTsv} disabled={busy}>检查</button>
-            <button type="button" className="shot-primary-action" onClick={() => void confirmTsv()} disabled={busy || !tsvValid}>{busy ? "正在写入…" : "确认写入"}</button>
+            <button type="button" className="shot-primary-action" onClick={() => void confirmTsv()} disabled={busy || !tsvValid} title="Ctrl/⌘+Enter">{busy ? "正在写入…" : "确认写入"}</button>
           </div>
           {previewLines && (
             <div className="shot-batch-table-wrap">
