@@ -501,6 +501,10 @@ function App() {
       setError("当前工作流版本已不在运行目录中，请刷新工作流列表。");
       return;
     }
+    if (!workflow.outputTypes?.includes("video")) {
+      setError("当前产品仅支持视频工作流复用，图片工作流已停用。");
+      return;
+    }
     useStudioStore.getState().loadDraft(
       workflow,
       draft.values,
@@ -512,7 +516,8 @@ function App() {
       createdAt: draft.createdAt,
     });
     setError(null);
-    navigateToWorkspace("studio");
+    // Video-only product: never reopen legacy studio/image stage from history reuse.
+    void navigate({ kind: "create", projectId: activeProjectId, stage: "video", surface: "batch" });
   }
 
   function useAssetInStudio(asset: AssetView) {
@@ -543,7 +548,7 @@ function App() {
 
   async function handleTemplateProjectCreated(result: TemplateProjectResult) {
     useProjectStore.getState().upsertProject(result.project);
-    if (!await navigate({ kind: "create", projectId: result.project.id, stage: "image", surface: "batch" })) return;
+    if (!await navigate({ kind: "create", projectId: result.project.id, stage: "video", surface: "batch" })) return;
     const workflow = catalog.find((item) => item.workflowVersionId === result.workflowVersionId && item.recipeId === result.recipeId);
     if (!workflow) {
       setError("模板项目已创建，但工作流当前不可用。");
@@ -791,8 +796,9 @@ function App() {
               const candidates = catalog.filter(item => item.workflowId === workflowId && item.recipeId === recipeId);
               if (!activeProject || candidates.length !== 1) throw new Error("无法确定生成器的确切版本，请刷新后重新选择。");
               const selected = candidates[0];
-              const destination = route.kind === "system-settings" && route.returnTo?.kind === "create" ? { ...route.returnTo, stage: selected.outputTypes?.includes("video") ? "video" as const : "image" as const } : { kind: "create" as const, projectId: activeProject.id, stage: selected.outputTypes?.includes("video") ? "video" as const : "image" as const };
-              useStudioStore.getState().setPendingRunIntent({ projectId: activeProject.id, stage: destination.stage, selectionRef: labCreationSelection(selected.workflowVersionId, selected.recipeId), values: useStudioStore.getState().values });
+              if (!selected.outputTypes?.includes("video")) throw new Error("当前产品仅支持视频生成器，请选择视频工作流。");
+              const destination = route.kind === "system-settings" && route.returnTo?.kind === "create" ? { ...route.returnTo, stage: "video" as const } : { kind: "create" as const, projectId: activeProject.id, stage: "video" as const };
+              useStudioStore.getState().setPendingRunIntent({ projectId: activeProject.id, stage: "video", selectionRef: labCreationSelection(selected.workflowVersionId, selected.recipeId), values: useStudioStore.getState().values });
               await navigate(destination);
             }}
             onUseInProject={openWorkflowForProject}
