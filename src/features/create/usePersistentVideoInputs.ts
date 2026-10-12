@@ -70,15 +70,17 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     finally { if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); } }
   }
 
-  /** Persist one Library/reuse asset into an exact inputKey (+ ordinal) via OCC save. Does not create Task/Run. */
+  /** Persist one Library/reuse asset into an exact inputKey (+ ordinal) via OCC save. Does not create Task/Run.
+   *  Merge from the current Studio draft (same base as save), not OCC view.inputs alone, so unsaved sibling slots survive. */
   async function bindAsset(inputKey: string, assetId: string): Promise<boolean> {
     if (!enabled || !view || loading || lock.current || !generator) return false;
     const field = fields.find(f => f.key === inputKey);
     if (!field || mediaKind(field) == null) return false;
     const own = owner; const token = epoch.current; lock.current = true; setBusy(true); setError(undefined);
     try {
-      const others = view.inputs.filter(i => i.inputKey !== inputKey);
-      const currentKey = view.inputs.filter(i => i.inputKey === inputKey).sort((a,b)=>a.ordinal-b.ordinal);
+      // Draft `inputs` is authority for sibling keys; view.token still guards OCC.
+      const others = inputs.filter(i => i.inputKey !== inputKey);
+      const currentKey = inputs.filter(i => i.inputKey === inputKey).sort((a,b)=>a.ordinal-b.ordinal);
       let nextKey: VideoInputAsset[];
       if (pluralField(field)) {
         const without = currentKey.filter(i => i.assetId !== assetId);

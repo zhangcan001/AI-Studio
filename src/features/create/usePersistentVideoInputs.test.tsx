@@ -79,6 +79,22 @@ describe("persistent video input ownership",()=>{
     });
     expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"external-new"});
   });
+  it("bindAsset merges dirty sibling draft slots into OCC save", async () => {
+    const { result } = renderHook(() => usePersistentVideoInputs(route, generator, false));
+    await waitFor(() => expect(result.current.view).toBeTruthy());
+    act(() => useStudioStore.getState().setValue("last_frame", { type: "image_asset", assetId: "dirty-last" }));
+    expect(result.current.dirty).toBe(true);
+    await act(async () => { expect(await result.current.bindAsset("first_frame", "external-new")).toBe(true); });
+    const saved = api.inputsSave.mock.calls[api.inputsSave.mock.calls.length - 1][0].inputs;
+    expect(saved).toEqual(expect.arrayContaining([
+      { inputKey: "first_frame", ordinal: 0, assetId: "external-new" },
+      { inputKey: "last_frame", ordinal: 0, assetId: "dirty-last" },
+    ]));
+    expect(saved).not.toEqual(expect.arrayContaining([
+      { inputKey: "last_frame", ordinal: 0, assetId: "exact-a-last" },
+    ]));
+    expect(useStudioStore.getState().values.last_frame).toEqual({ type: "image_asset", assetId: "dirty-last" });
+  });
   it("bindAsset OCC conflict keeps previous view and returns false", async () => {
     const { result } = renderHook(() => usePersistentVideoInputs(route, generator, false));
     await waitFor(() => expect(result.current.view).toBeTruthy());

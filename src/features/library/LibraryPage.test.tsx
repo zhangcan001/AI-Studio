@@ -39,6 +39,11 @@ it("phase5_target13 Library Create typed intents require explicit compatible slo
  render(<LibraryPage route={route} navigate={navigate}/>);expect(screen.queryByRole("button",{name:"用于图片创作"})).toBeNull();fireEvent.click(await screen.findByRole("button",{name:"用于视频创作"}));await waitFor(()=>expect(navigate).toHaveBeenCalledWith({kind:"create",projectId:"project-a",stage:"video"}));cleanup();
  const create={kind:"create",projectId:"project-a",shotId:"shot-a",stage:"video"} as const;
  render(<CreatePage route={create} navigate={navigate}/>);await waitFor(()=>expect(useStudioStore.getState().values.prompt).toEqual({type:"string",value:"复用正文"}));expect(useStudioStore.getState().pendingLibraryIntent).toBeUndefined();cleanup();
+ api.get.mockImplementation(async(_project:string,ref?:{kind:string;id:string})=>{
+  if(ref?.kind==="asset"&&ref.id==="image-a")return{kind:"asset",asset:{id:"image-a",projectId:"project-a",name:"图片",assetType:"image",category:"source_image"}};
+  if(ref?.kind==="asset"&&ref.id==="video-a")return{kind:"asset",asset:{id:"video-a",projectId:"project-a",name:"视频",assetType:"video",category:"source_video"}};
+  return detail;
+ });
  for(const [mediaKind,assetId,button] of [["image","image-a","应用到首帧"],["video","video-a","应用到参考视频"]] as const){useStudioStore.getState().setPendingLibraryIntent({kind:"asset",projectId:"project-a",assetId,mediaKind});render(<CreatePage route={create} navigate={navigate}/>);const apply=await screen.findByRole("button",{name:button});await waitFor(()=>expect(apply.hasAttribute("disabled")).toBe(false));fireEvent.click(apply);expect(useStudioStore.getState().values[mediaKind==="image"?"first_frame":"reference_video"]).toMatchObject({assetId});expect(useStudioStore.getState().values.last_frame).not.toMatchObject({assetId});cleanup();}
  const pending:LibraryCreateIntent={kind:"context",projectId:"project-a",resource:{kind:"profile",id:"profile-a"},message:"需要选择应用位置"};useStudioStore.getState().setPendingLibraryIntent(pending);render(<CreatePage route={create} navigate={navigate}/>);await screen.findByText(/尚未自动应用/);expect(useStudioStore.getState().pendingLibraryIntent).toEqual(pending);expect(api.generate).not.toHaveBeenCalled();
  expect(relationRoute("project-a",{kind:"run",runRef:{source:"task",id:"task-a"}})).toEqual({kind:"runs",projectId:"project-a",run:{source:"task",id:"task-a"}});
@@ -92,7 +97,7 @@ it("M2-2 exact Create-origin route wins over standalone stage choice and applies
  expect(useStudioStore.getState().draftDirty).toBe(true); expect(api.generate).not.toHaveBeenCalled();
 });
 it("M2-2 non-recent Asset101 fetches exact id and changes only the explicitly chosen slot",async()=>{
- const asset={id:"asset101",projectId:"project-a",name:"Old asset101",assetType:"image"};
+ const asset={id:"asset101",projectId:"project-a",name:"Old asset101",assetType:"image",category:"source_image"};
  api.get.mockResolvedValue({kind:"asset",asset});
  useStudioStore.getState().setPendingLibraryIntent({kind:"asset",projectId:"project-a",assetId:"asset101",mediaKind:"image"});
  const create={kind:"create",projectId:"project-a",shotId:"shot-a",stage:"video"} as const;

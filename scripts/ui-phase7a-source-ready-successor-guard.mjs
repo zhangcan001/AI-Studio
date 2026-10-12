@@ -71,6 +71,8 @@ export const PHASE7A_EXISTING = [
   'src/features/create/CreateLibraryBind.phase6b.test.tsx',
   'src/features/create/CreatePage.test.tsx',
   'src/features/create/CreatePage.tsx',
+  'src/features/create/usePersistentVideoInputs.test.tsx',
+  'src/features/create/usePersistentVideoInputs.ts',
   'src/features/library/LibraryPage.test.tsx',
   'src/features/library/LibraryPagination.test.tsx',
   'src/features/library/LibraryScale.observed.test.tsx',

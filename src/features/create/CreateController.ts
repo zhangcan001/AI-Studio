@@ -25,6 +25,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [libraryAssetMeta, setLibraryAssetMeta] = useState<{assetId:string;category:string;sourceTaskId?:string|null;mediaKind:string}>();
+  const [libraryMetaFailed, setLibraryMetaFailed] = useState(false);
   const [generatedVideoConfirm, setGeneratedVideoConfirm] = useState(false);
   const snapshots = useRef(new Map<string, StageView>());
   const live = useRef({ selection, runRef, accepted }); live.current = { selection, runRef, accepted };
@@ -147,7 +148,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   }, [intent, generator, loading, context, key]);
   const libraryIntent = useStudioStore(state => state.pendingLibraryIntent);
   useEffect(() => {
-    if (!libraryIntent) { setLibraryAssetMeta(undefined); setGeneratedVideoConfirm(false); return; }
+    if (!libraryIntent) { setLibraryAssetMeta(undefined); setLibraryMetaFailed(false); setGeneratedVideoConfirm(false); return; }
     if (libraryIntent.projectId !== route.projectId) { useStudioStore.getState().setPendingLibraryIntent(undefined); return; }
     if (loading || !context) return;
     if (libraryIntent.kind === "prompt" && context.selectedShot && generator?.fields.some(field => field.key === "prompt" && field.type === "textarea")) {
@@ -162,22 +163,25 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       return;
     }
     let alive=true; const token=epoch.current; const project=route.projectId;
+    setLibraryMetaFailed(false);
     void productClient.library.get(route.projectId,{kind:"asset",id:libraryIntent.assetId}).then(detail=>{
-      if(!alive || token!==epoch.current || detail.kind!=="asset" || detail.asset.assetType!==libraryIntent.mediaKind){
-        // Historical fixtures may only stub mediaKind; still allow mediaKind-matched slots.
-        if(alive && token===epoch.current){
-          setLibraryAssetMeta({assetId:libraryIntent.assetId,category:"",sourceTaskId:null,mediaKind:libraryIntent.mediaKind});
-          setContext(current=>current?.projectId===project ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==libraryIntent.assetId),{id:libraryIntent.assetId,name:libraryIntent.assetId,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
-        }
+      if(!alive || token!==epoch.current) return;
+      // Fail closed when category/meta cannot be confirmed — never inject empty category into Apply.
+      if(detail.kind!=="asset" || detail.asset.assetType!==libraryIntent.mediaKind || !(detail.asset.category ?? "").trim()){
+        setLibraryAssetMeta(undefined);
+        setLibraryMetaFailed(true);
+        setError("无法确认素材来源类别，已阻止应用到镜头输入槽。");
         return;
       }
-      setLibraryAssetMeta({assetId:detail.asset.id,category:detail.asset.category ?? "",sourceTaskId:detail.asset.sourceTaskId,mediaKind:libraryIntent.mediaKind});
+      setLibraryAssetMeta({assetId:detail.asset.id,category:detail.asset.category,sourceTaskId:detail.asset.sourceTaskId,mediaKind:libraryIntent.mediaKind});
+      setLibraryMetaFailed(false);
       setGeneratedVideoConfirm(false);
       setContext(current=>current?.projectId===project ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==detail.asset.id),{id:detail.asset.id,name:detail.asset.name,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
     }).catch(()=>{
       if(alive && token===epoch.current){
-        setLibraryAssetMeta({assetId:libraryIntent.assetId,category:"",sourceTaskId:null,mediaKind:libraryIntent.mediaKind});
-        setContext(current=>current?.projectId===project ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==libraryIntent.assetId),{id:libraryIntent.assetId,name:libraryIntent.assetId,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
+        setLibraryAssetMeta(undefined);
+        setLibraryMetaFailed(true);
+        setError("无法确认素材来源类别，已阻止应用到镜头输入槽。");
       }
     });
     return()=>{alive=false;};
@@ -205,45 +209,51 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     const field = generator?.fields.find(f => f.key === fieldKey);
     const kind = field ? mediaKind(field) : null;
     if (!kind || kind !== libraryIntent.mediaKind) return false;
-    const category = libraryAssetMeta.category ?? "";
+    const category = (libraryAssetMeta.category ?? "").trim();
+    if (!category) return false; // unknown meta must not look allowed
     const generated = !!libraryAssetMeta.sourceTaskId || category.startsWith("generated_");
-    // External images only for image slots; generated images cannot become first/last/reference images.
-    if (kind === "image") return !generated && (category === "source_image" || category.startsWith("source_") || !category);
+    // Batch-video product: image slots accept external source images only.
+    if (kind === "image") return !generated && category === "source_image";
     // Videos (external or generated) only as video reference slots — never auto-extracted as frames.
-    if (kind === "video") return !category || category.includes("video") || libraryIntent.mediaKind === "video";
-    if (kind === "audio") return !category || category.includes("audio") || libraryIntent.mediaKind === "audio";
+    if (kind === "video") return category.includes("video");
+    if (kind === "audio") return category.includes("audio");
     return false;
   };
-  const librarySlots = libraryIntent?.kind === "asset"
+  const librarySlots = libraryIntent?.kind === "asset" && !libraryMetaFailed
     ? (generator?.fields.filter(field => {
         if (mediaKind(field) !== libraryIntent.mediaKind) return false;
-        // Until asset meta resolves, keep mediaKind-compatible slots visible (draft-only apply still works).
+        // Until meta resolves, show mediaKind slots disabled; Apply stays gated on resolved compatible meta.
         if (!libraryAssetMeta || libraryAssetMeta.assetId !== libraryIntent.assetId) return true;
         return libraryAssetCompatible(field.key);
       }) ?? [])
     : [];
-  const libraryRejectReason = libraryIntent?.kind === "asset" && libraryAssetMeta?.assetId === libraryIntent.assetId
-    ? (libraryIntent.mediaKind === "image" && (!!libraryAssetMeta.sourceTaskId || (libraryAssetMeta.category ?? "").startsWith("generated_"))
-        ? "历史生成图片可预览，但不能再绑定为首帧/尾帧或参考图；请使用外部导入图片。"
-        : (!librarySlots.length ? "当前生成器没有与此素材类型兼容的正式输入槽。" : undefined))
+  const libraryRejectReason = libraryIntent?.kind === "asset"
+    ? (libraryMetaFailed
+        ? "无法确认素材来源类别，已阻止应用到镜头输入槽。"
+        : (libraryAssetMeta?.assetId === libraryIntent.assetId
+            ? (libraryIntent.mediaKind === "image" && (!!libraryAssetMeta.sourceTaskId || (libraryAssetMeta.category ?? "").startsWith("generated_"))
+                ? "历史生成图片可预览，但不能再绑定为首帧/尾帧或参考图；请使用外部导入图片。"
+                : (!librarySlots.length ? "当前生成器没有与此素材类型兼容的正式输入槽。" : undefined))
+            : undefined))
     : undefined;
   const libraryNeedsGeneratedVideoConfirm = !!(libraryIntent?.kind === "asset" && libraryAssetMeta?.assetId === libraryIntent.assetId
     && libraryIntent.mediaKind === "video" && (!!libraryAssetMeta.sourceTaskId || (libraryAssetMeta.category ?? "").startsWith("generated_")));
-  // Apply needs the asset already projected into mediaInputs + OCC view when persistent.
-  // Do not wait for libraryAssetMeta: context may already carry the asset (Library→Create), and
-  // meta is only for post-resolve slot filtering. Waiting for meta broke target13 and hid the
-  // real CI race (click before mediaInputs) behind an over-strict gate.
+  // Apply requires resolved compatible meta (fail closed on unknown category) plus mediaInputs + OCC view.
   const libraryApplyReady = !!(libraryIntent?.kind === "asset"
+    && !libraryMetaFailed
+    && libraryAssetMeta?.assetId === libraryIntent.assetId
+    && !!libraryAssetMeta.category?.trim()
     && context?.mediaInputs.some(a => a.id === libraryIntent.assetId && a.mediaKind === libraryIntent.mediaKind)
     && (!videoInputs.enabled || (!!videoInputs.view && !videoInputs.loading && !videoInputs.busy)));
   async function applyLibraryAsset(fieldKey:string) {
     if (busy || (videoInputs.enabled && (videoInputs.loading || videoInputs.busy || !videoInputs.view))) return;
     if(libraryIntent?.kind!=="asset" || libraryIntent.projectId!==route.projectId || !context?.selectedShot)return;
+    if (libraryMetaFailed || !libraryAssetMeta || libraryAssetMeta.assetId !== libraryIntent.assetId) return;
+    if (!libraryAssetCompatible(fieldKey)) return;
     const field=librarySlots.find(f=>f.key===fieldKey);
     if(!field)return;
     if(!context.mediaInputs.some(a=>a.id===libraryIntent.assetId && a.mediaKind===libraryIntent.mediaKind)){
-      // Meta resolved but mediaInputs lag (effect race / catch path): inject before OCC bind.
-      if(!libraryAssetMeta || libraryAssetMeta.assetId!==libraryIntent.assetId)return;
+      // Meta resolved but mediaInputs lag: inject before OCC bind (category already confirmed).
       setContext(current=>current?.projectId===route.projectId ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==libraryIntent.assetId),{id:libraryIntent.assetId,name:libraryIntent.assetId,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
     }
     if (libraryNeedsGeneratedVideoConfirm && !generatedVideoConfirm) {
@@ -258,6 +268,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     }
     useStudioStore.getState().setPendingLibraryIntent(undefined);
     setLibraryAssetMeta(undefined);
+    setLibraryMetaFailed(false);
     setGeneratedVideoConfirm(false);
   }
   function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }

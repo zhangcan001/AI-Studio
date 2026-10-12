@@ -122,3 +122,52 @@ it("B03 foreign project intent is dropped without save", async () => {
   expect(useStudioStore.getState().pendingLibraryIntent).toBeUndefined();
   expect(api.inputsSave).not.toHaveBeenCalled();
 });
+
+it("Apply first_frame keeps unsaved dirty last_frame in OCC payload", async () => {
+  api.inputsGet.mockImplementation(async (s: { selectionRef: string }) => ({
+    selectionRef: s.selectionRef, token: { instanceId: "i1", revision: 1 },
+    inputs: [
+      { inputKey: "first_frame", ordinal: 0, assetId: "old-first" },
+      { inputKey: "last_frame", ordinal: 0, assetId: "old-last" },
+    ],
+    assets: [],
+  }));
+  useStudioStore.getState().setPendingLibraryIntent({ kind: "asset", projectId: "project-a", assetId: "ext-img", mediaKind: "image" });
+  api.libraryGet.mockResolvedValue({ kind: "asset", asset: { id: "ext-img", projectId: "project-a", name: "外部图", assetType: "image", category: "source_image", width: 1, height: 1 } });
+  render(<CreatePage route={{ kind: "create", projectId: "project-a", shotId: "shot-a", stage: "video" }} navigate={vi.fn()} />);
+  await screen.findByRole("button", { name: "应用到首帧" });
+  await waitFor(() => expect(useStudioStore.getState().values.last_frame).toEqual({ type: "image_asset", assetId: "old-last" }));
+  // Dirty sibling before Apply
+  useStudioStore.getState().setValue("last_frame", { type: "image_asset", assetId: "dirty-last" });
+  await waitFor(() => {
+    const btn = screen.getByRole("button", { name: "应用到首帧" });
+    expect(btn.hasAttribute("disabled")).toBe(false);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "应用到首帧" }));
+  await waitFor(() => expect(api.inputsSave).toHaveBeenCalled());
+  const saved = api.inputsSave.mock.calls[api.inputsSave.mock.calls.length - 1][0].inputs;
+  expect(saved).toEqual(expect.arrayContaining([
+    { inputKey: "first_frame", ordinal: 0, assetId: "ext-img" },
+    { inputKey: "last_frame", ordinal: 0, assetId: "dirty-last" },
+  ]));
+  expect(useStudioStore.getState().values.last_frame).toEqual({ type: "image_asset", assetId: "dirty-last" });
+});
+
+it("unknown/empty category after library get failure blocks Apply into image slots", async () => {
+  useStudioStore.getState().setPendingLibraryIntent({ kind: "asset", projectId: "project-a", assetId: "mystery", mediaKind: "image" });
+  api.libraryGet.mockRejectedValue({ code: "LIBRARY_RESOURCE_NOT_FOUND", message: "missing" });
+  render(<CreatePage route={{ kind: "create", projectId: "project-a", shotId: "shot-a", stage: "video" }} navigate={vi.fn()} />);
+  await waitFor(() => expect(screen.getAllByText(/无法确认素材来源类别/).length).toBeGreaterThan(0));
+  expect(screen.queryByRole("button", { name: /应用到首帧/ })).toBeNull();
+  expect(api.inputsSave).not.toHaveBeenCalled();
+  expect(useStudioStore.getState().values.first_frame).toBeUndefined();
+});
+
+it("empty category asset meta fails closed for image Apply", async () => {
+  useStudioStore.getState().setPendingLibraryIntent({ kind: "asset", projectId: "project-a", assetId: "empty-cat", mediaKind: "image" });
+  api.libraryGet.mockResolvedValue({ kind: "asset", asset: { id: "empty-cat", projectId: "project-a", name: "无类别", assetType: "image", category: "", width: 1, height: 1 } });
+  render(<CreatePage route={{ kind: "create", projectId: "project-a", shotId: "shot-a", stage: "video" }} navigate={vi.fn()} />);
+  await waitFor(() => expect(screen.getAllByText(/无法确认素材来源类别/).length).toBeGreaterThan(0));
+  expect(screen.queryByRole("button", { name: /应用到首帧/ })).toBeNull();
+  expect(api.inputsSave).not.toHaveBeenCalled();
+});
