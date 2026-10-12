@@ -106,6 +106,7 @@ export const PHASE7A_EXISTING = [
   'src/product/client.test.ts',
   'src/product/errors.ts',
   'src/product/libraryTypes.ts',
+  'src/product/runInvalidation.ts',
 ].sort();
 export const PHASE7A_ADDED = [
   'scripts/run-boundary-tests.mjs',
@@ -115,6 +116,8 @@ export const PHASE7A_ADDED = [
   'src/features/shots/ShotBatchAssetBindPanel.tsx',
   'src/features/shots/shotBatchAssetBind.test.ts',
   'src/features/shots/shotBatchAssetBind.ts',
+  'src/features/studio/ProductionQueuePanel.sync.test.tsx',
+  'src/product/runInvalidation.test.ts',
   'src/types/mjs-shims.d.ts',
 ].sort();
 export const PHASE7A_FILES = [...PHASE7A_EXISTING, ...PHASE7A_ADDED, PHASE7A_MANIFEST];

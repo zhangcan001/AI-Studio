@@ -48,3 +48,14 @@ it("template/history/runs reuse stay on video create, not studio/image", () => {
   expect(library).toContain('stage: "video"');
 }, 30000);
 
+it("Create generate and Queue start invalidate Runs without Library thrash", () => {
+  const create = readFileSync("src/features/create/CreateController.ts", "utf8");
+  expect(create).toContain('invalidateRuns(route.projectId, { library: false })');
+  const queue = readFileSync("src/features/studio/ProductionQueuePanel.tsx", "utf8");
+  expect(queue).toContain("projectGenerationRef");
+  expect(queue).toContain('invalidateRuns(projectId, { library: false })');
+  const library = readFileSync("src/features/library/LibraryController.ts", "utf8");
+  expect(library).toContain("options?.library===false");
+  const bus = readFileSync("src/product/runInvalidation.ts", "utf8");
+  expect(bus).toContain("library?: boolean");
+}, 30000);

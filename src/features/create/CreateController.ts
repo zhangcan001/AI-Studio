@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
+import { invalidateRuns } from "../../product/runInvalidation";
 import { normalizeProductError } from "../../product/errors";
 import type { CreationAccepted, CreationContext, CreationReadiness, GeneratorOption, ProductRun, RunRef, CreationPromptChoice, CreationPromptProvenance } from "../../product/types";
 import type { GenerationValues, DraftValue } from "../../types/generation";
@@ -321,6 +322,8 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     const ack = await productClient.creation.generate(request);
     if (!mounted.current || token !== epoch.current || !matchesDraft(draft)) return;
     setAccepted(ack); setRunRef(ack.runRef); setRun(undefined);
+    // Runs must see the new batch immediately; Library thrash waits for task://updated assets.
+    invalidateRuns(route.projectId, { library: false });
     useStudioStore.getState().loadCreationDraft(request.values, false, request.promptId && request.promptVersionId ? {promptId:request.promptId,promptVersionId:request.promptVersionId} : undefined);
   }); }
   const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); if (token === epoch.current) navigate({ ...route, shotId: shot.id }); });

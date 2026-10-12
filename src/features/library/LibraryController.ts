@@ -82,7 +82,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     if(pages.current.owner!==queryScope){pages.current={owner:queryScope,index:0,starts:[null]};setPageIndex(0);}
     void refresh({tags:false});
     let event:ReturnType<typeof setTimeout>|undefined;
-    const unsubscribe=subscribeRunInvalidation(project=>{if(project!==route.projectId)return;if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}clearTimeout(event);event=setTimeout(()=>void refresh(),150);});
+    const unsubscribe=subscribeRunInvalidation((project,options)=>{if(project!==route.projectId)return;if(options?.library===false)return;if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}clearTimeout(event);event=setTimeout(()=>void refresh(),150);});
     const timer=setInterval(()=>{if(!navigating.current)void refresh({tags:false});},5000);
     return()=>{++epoch.current;unsubscribe();clearTimeout(event);clearInterval(timer);};
   },[refresh]);

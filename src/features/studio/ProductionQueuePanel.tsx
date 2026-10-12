@@ -20,6 +20,7 @@ import {
   getTaskDetail,
 } from "../../services/tauriClient";
 import { subscribeTaskUpdates } from "../../services/taskEvents";
+import { invalidateRuns } from "../../product/runInvalidation";
 import type {
   ProductionBatchDetail,
   ProductionBatchSummary,
@@ -92,6 +93,10 @@ export function ProductionQueuePanel({
   const [expandedInlineItemId, setExpandedInlineItemId] = useState<string>();
   const [previewAsset, setPreviewAsset] = useState<AssetView>();
   const selectedIdRef = useRef<string | undefined>(undefined);
+  // Incremented on project switch so in-flight refreshes cannot overwrite the new project.
+  const projectGenerationRef = useRef(0);
+  const liveProjectIdRef = useRef(projectId);
+  liveProjectIdRef.current = projectId;
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
     selectedIdRef.current = next?.id;
@@ -101,11 +106,16 @@ export function ProductionQueuePanel({
 
   const refreshQueues = useCallback(
     async (refreshDetail = true) => {
+      const generation = projectGenerationRef.current;
+      const forProject = projectId;
+      const owns = () =>
+        generation === projectGenerationRef.current && liveProjectIdRef.current === forProject;
       try {
         const [nextQueues, nextOverview] = await Promise.all([
-          listProductionQueues(projectId),
-          getProductionQueueOverview(projectId),
+          listProductionQueues(forProject),
+          getProductionQueueOverview(forProject),
         ]);
+        if (!owns()) return;
         setQueues(nextQueues);
         setOverview(nextOverview);
         const selectedId = selectedIdRef.current;
@@ -113,17 +123,22 @@ export function ProductionQueuePanel({
         const shouldRestoreDetail = Boolean(detailId) && (refreshDetail || inline || Boolean(selectedId) || Boolean(focusBatchId));
         if (detailId && shouldRestoreDetail) {
           try {
-            setQueueDetail(await getProductionQueue(projectId, detailId));
+            const nextDetail = await getProductionQueue(forProject, detailId);
+            if (!owns()) return;
+            setQueueDetail(nextDetail);
           } catch {
+            if (!owns()) return;
             // A stale saved selection must not leave the inline panel blank after a restart.
-            if (selectedId === detailId) rememberProductionQueue(projectId);
+            if (selectedId === detailId) rememberProductionQueue(forProject);
             selectedIdRef.current = undefined;
             const fallbackId = inline ? selectProductionQueueId(nextQueues, [], true) : undefined;
             if (fallbackId && fallbackId !== detailId) {
               try {
-                setQueueDetail(await getProductionQueue(projectId, fallbackId));
+                const fallback = await getProductionQueue(forProject, fallbackId);
+                if (!owns()) return;
+                setQueueDetail(fallback);
               } catch {
-                setQueueDetail(undefined);
+                if (owns()) setQueueDetail(undefined);
               }
             } else {
               setQueueDetail(undefined);
@@ -131,13 +146,14 @@ export function ProductionQueuePanel({
           }
         }
       } catch (error: unknown) {
-        setNotice(toUserMessage(error));
+        if (owns()) setNotice(toUserMessage(error));
       }
     },
     [focusBatchId, inline, projectId, setQueueDetail],
   );
 
   useEffect(() => {
+    projectGenerationRef.current += 1;
     setName("");
     setSelectedNamePreset("");
     setContinueOnFailure(false);
@@ -182,19 +198,23 @@ export function ProductionQueuePanel({
   useEffect(() => {
     if (!focusBatchId) return;
     let active = true;
+    const generation = projectGenerationRef.current;
+    const forProject = projectId;
     setBusy(true);
-    void getProductionQueue(projectId, focusBatchId)
+    void getProductionQueue(forProject, focusBatchId)
       .then((focused) => {
-        if (active) setQueueDetail(focused);
+        if (active && generation === projectGenerationRef.current && liveProjectIdRef.current === forProject) {
+          setQueueDetail(focused);
+        }
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (active && generation === projectGenerationRef.current && liveProjectIdRef.current === forProject) {
           setNotice(toUserMessage(error));
           void refreshQueues(true);
         }
       })
       .finally(() => {
-        if (active) {
+        if (active && generation === projectGenerationRef.current && liveProjectIdRef.current === forProject) {
           setBusy(false);
           onFocusedBatchOpened();
         }
@@ -202,7 +222,7 @@ export function ProductionQueuePanel({
     return () => {
       active = false;
     };
-  }, [focusBatchId, onFocusedBatchOpened, projectId, setQueueDetail]);
+  }, [focusBatchId, onFocusedBatchOpened, projectId, refreshQueues, setQueueDetail]);
 
   useEffect(() => {
     let active = true;
@@ -349,6 +369,8 @@ export function ProductionQueuePanel({
     await runMutation(async () => {
       const updated = await startProductionQueue(projectId, batchId);
       commitDetail(updated, "生产已启动，任务正在运行；可在生产监控查看进度。");
+      // Runs projection must update now; Library waits for task://updated asset events.
+      invalidateRuns(projectId, { library: false });
     });
   }
 
