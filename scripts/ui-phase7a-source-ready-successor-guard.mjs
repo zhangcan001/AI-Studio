@@ -92,6 +92,8 @@ export const PHASE7A_EXISTING = [
   'src/features/runs/RunsPhase6C.test.tsx',
   'src/features/shots/EpisodeProductionPanel.tsx',
   'src/features/shots/SeriesProductionPanel.tsx',
+  'src/features/shots/ShotVideoInputsPanel.test.tsx',
+  'src/features/shots/ShotVideoInputsPanel.tsx',
   'src/features/shots/ShotWorkspace.tsx',
   'src/features/studio/ProductionQueuePanel.tsx',
   'src/features/workflow-lab/WorkflowLabBoundary.test.tsx',
@@ -106,6 +108,8 @@ export const PHASE7A_ADDED = [
   'src/features/shots/ShotBatchAssetBindPanel.tsx',
   'src/features/shots/shotBatchAssetBind.test.ts',
   'src/features/shots/shotBatchAssetBind.ts',
+  'src/product/videoInputInvalidation.test.ts',
+  'src/product/videoInputInvalidation.ts',
   'src/types/mjs-shims.d.ts',
 ].sort();
 export const PHASE7A_FILES = [...PHASE7A_EXISTING, ...PHASE7A_ADDED, PHASE7A_MANIFEST];

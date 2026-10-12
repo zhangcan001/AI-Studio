@@ -57,5 +57,5 @@ export function GenerateBar({ controller: c }: { controller: CreateController })
     })}
     {c.error && <p role="alert">{c.error}</p>}</div>
     {c.videoInputs.enabled && <small>{c.videoInputs.loading ? "正在读取输入" : c.videoInputs.dirty ? "请先保存视频输入" : "视频输入按当前 Recipe 保存"}</small>}
-    <button className="primary" aria-label={c.busy ? "正在提交…" : "生成"} type="button" disabled={c.busy || !c.generator?.availability || !c.videoInputs.ready} onClick={() => void c.generate()}>{c.busy ? "正在提交…" : "生成视频"}</button></footer>;
+    <button className="primary" aria-label={c.busy ? "正在提交…" : "生成"} type="button" disabled={c.busy || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} onClick={() => void c.generate()}>{c.busy ? "正在提交…" : "生成视频"}</button></footer>;
 }

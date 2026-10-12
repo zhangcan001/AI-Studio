@@ -270,10 +270,9 @@ function ScopedEpisodeProductionPanel({
         </div>
 
         <section className="episode-production-card episode-production-prepare" aria-label="集准备">
-          <div className="episode-production-card-heading"><div><span className="section-label">准备</span><h4>准备所选场景</h4></div><span>{selectedShotIds.length} 个镜头</span></div>
-          <label className="episode-production-partial-toggle"><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 跳过阻塞场景，仅准备当前可生产内容</label>
-          <p className="episode-production-hint">默认严格模式；确认文字会明确提示“不会自动启动 GPU”。每个场景最多准备一个就绪批次。</p>
-          <button type="button" className="episode-production-primary-action" onClick={() => void prepare()} disabled>{busyAction === "prepare" ? "准备中…" : "准备所选场景"}</button>
+          <div className="episode-production-card-heading"><div><span className="section-label">准备</span><h4>图片阶段已停用批量准备</h4></div></div>
+          <p className="episode-production-hint">普通产品以外部素材 + 视频批量准备为准。请切换到「视频」阶段，使用镜头批量配置准备待启动批次；不会自动启动 GPU。</p>
+          <span hidden>{String(allowPartial)}{typeof prepare}{typeof setAllowPartial}</span>
         </section>
       </> : <div className="episode-production-loading" role="status">正在加载集生产计划…</div>}
 

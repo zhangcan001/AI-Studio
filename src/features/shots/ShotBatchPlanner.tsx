@@ -18,7 +18,7 @@ interface Props {
 
 export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onError }: Props) {
   const [open, setOpen] = useState(false);
-  const [stage, setStage] = useState<ShotStage>("image");
+  const [stage, setStage] = useState<ShotStage>("video");
   const [plan, setPlan] = useState<ShotBatchPlan>();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -87,7 +87,7 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
         <div>
           <span className="section-label">批量规划</span>
           <h3>批量生产与复核</h3>
-          <p className="shot-inline-note">先批量生成关键帧，再由你逐个选定；点击视频批次后才会进入 H3 队列。</p>
+          <p className="shot-inline-note">批量准备视频批次后仍需在生产队列中明确启动；素材由外部提供，不会新建图片生成。</p>
         </div>
         <button type="button" className={open ? "quiet-button" : "shot-primary-action"} onClick={() => setOpen((current) => !current)}>
           {open ? "收起批量规划" : "打开批量规划"}
@@ -98,7 +98,7 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
           <div className="shot-batch-stage-tabs" role="tablist" aria-label="批量阶段">
             {(["image", "video"] as const).map((nextStage) => (
               <button key={nextStage} type="button" className={stage === nextStage ? "active" : ""} onClick={() => setStage(nextStage)} role="tab" aria-selected={stage === nextStage}>
-                {nextStage === "image" ? "Krea2 · 批量关键帧" : "H3 · 批量视频"}
+                {nextStage === "image" ? "历史图片（已停用）" : "批量视频"}
               </button>
             ))}
             <button type="button" className="quiet-button" onClick={() => void loadPlan()} disabled={loading || creating}>重新检查资格</button>
@@ -110,8 +110,8 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
           <div className="shot-batch-selection-bar">
             <label><input type="checkbox" checked={allEligibleSelected} onChange={toggleAll} disabled={!eligibleIds.length || loading || creating} /> 全选符合条件的镜头</label>
             <span>{selectedIds.size} / {plan?.maxItems ?? 100} 已选择 · {plan?.eligibleCount ?? 0} 个符合条件</span>
-            <button type="button" className="shot-primary-action" onClick={() => void prepareBatch()} disabled={creating || loading || !selectedIds.size}>
-              {creating ? "正在准备生产…" : stage === "image" ? "准备批量关键帧" : "准备批量视频（H3）"}
+            <button type="button" className="shot-primary-action" onClick={() => void prepareBatch()} disabled={creating || loading || !selectedIds.size || stage === "image"}>
+              {creating ? "正在准备生产…" : stage === "image" ? "图片批量已停用" : "准备批量视频"}
             </button>
           </div>
           {loading ? <p className="project-loading">正在检查当前工作流、素材与任务状态…</p> : (
@@ -123,7 +123,7 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
                     <tr key={row.shotId} className={row.eligible ? "" : "shot-batch-row-blocked"}>
                       <td><input type="checkbox" checked={selectedIds.has(row.shotId)} onChange={() => toggleShot(row.shotId)} disabled={!row.eligible || creating} aria-label={`选择${row.name}`} /></td>
                       <td><strong>{String(row.ordinal + 1).padStart(2, "0")} · {row.name}</strong><small>{stageLabel(stage)}</small></td>
-                      <td><strong>{shotVideoMode(row)}</strong><small>{row.stage === "video" ? "H3" : "图片生成"}</small></td>
+                      <td><strong>{shotVideoMode(row)}</strong><small>{row.stage === "video" ? "视频" : "历史图片"}</small></td>
                       <td><strong>{shotReferenceCount(row)}</strong><small>{row.stage === "video" ? "有序参考" : "—"}</small></td>
                       <td><span className={`shot-status-chip shot-status-${row.currentStatus.toLowerCase()}`}>{shotStatusLabels[row.currentStatus as keyof typeof shotStatusLabels] ?? row.currentStatus}</span></td>
                       <td><strong>{row.recipeName ?? "未配置"}</strong><small>{row.workflowVersionId ? "当前版本 · 入队时冻结" : "等待配置"}</small></td>

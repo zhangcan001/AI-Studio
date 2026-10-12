@@ -202,6 +202,7 @@ impl LibraryServices<'_> {
                     created_at: a.created_at,
                     updated_at: a.updated_at,
                     thumbnail_available: a.thumbnail_available,
+                    source_origin: media_source_origin(&a.category),
                 })
                 .collect(),
             page.next_cursor,
@@ -237,6 +238,7 @@ impl LibraryServices<'_> {
                     created_at: date(&p.created_at)?,
                     updated_at: date(&p.updated_at)?,
                     thumbnail_available: false,
+                    source_origin: None,
                 })
             })
             .collect::<Result<_, ProductError>>()?;
@@ -262,6 +264,7 @@ impl LibraryServices<'_> {
                 created_at: p.created_at(),
                 updated_at: p.updated_at(),
                 thumbnail_available: false,
+                source_origin: None,
             })
             .collect();
         sort(&mut items);
@@ -287,6 +290,7 @@ impl LibraryServices<'_> {
                 created_at: s.created_at,
                 updated_at: s.updated_at,
                 thumbnail_available: false,
+                source_origin: None,
             })
             .collect();
         sort(&mut items);
@@ -294,6 +298,12 @@ impl LibraryServices<'_> {
     }
 }
 
+
+fn media_source_origin(category: &str) -> Option<&'static str> {
+    if category.starts_with("source_") { Some("source") }
+    else if category.starts_with("generated_") { Some("generated") }
+    else { None }
+}
 fn matches_keyword(name: &str, keyword: Option<&str>) -> bool {
     keyword.is_none_or(|k| name.to_lowercase().contains(&k.to_lowercase()))
 }

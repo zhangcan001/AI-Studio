@@ -11,7 +11,7 @@ export type LibraryCategory = "all" | "media" | "images" | "videos" | "audio" | 
 export type LibrarySourceKind = "all" | "source" | "generated";
 export interface LibraryCursor { projectId: string; category: LibraryCategory; keyword: string | null; favoriteOnly?: boolean; tagId?: string | null; sourceKind?: LibrarySourceKind; position: PageCursor }
 export interface LibraryQuery { category: LibraryCategory; keyword: string | null; favoriteOnly?: boolean | null; tagId?: string | null; sourceKind?: LibrarySourceKind | null; cursor: LibraryCursor | null; limit: number | null }
-export interface LibraryItem { resourceRef: ResourceRef; title: string; subtype: string; createdAt: string; updatedAt: string; thumbnailAvailable: boolean }
+export interface LibraryItem { resourceRef: ResourceRef; title: string; subtype: string; createdAt: string; updatedAt: string; thumbnailAvailable: boolean; sourceOrigin?: "source" | "generated" | null }
 export interface LibraryList { items: LibraryItem[]; nextCursor: LibraryCursor | null; coverage: "recent-summary" | "keyset-page" | "complete-category"; coverageMessage: string }
 
 // Profiles retain their typed domain configuration, not a prompt-only projection.

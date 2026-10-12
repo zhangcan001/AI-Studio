@@ -218,6 +218,18 @@ fn scene_gate(context: &ResolvedShotContext) -> ReadinessGateResult {
     ReadinessGateResult::new(key, checks)
 }
 
+
+fn video_input_key_label(key: &str) -> &str {
+    match key {
+        "first_frame" => "首帧",
+        "last_frame" => "尾帧",
+        "reference_images" => "参考图片",
+        "reference_videos" => "参考视频",
+        "reference_audios" => "参考音频",
+        other => other,
+    }
+}
+
 fn reference_gate(
     context: &ResolvedShotContext,
     mode: Option<&str>,
@@ -281,7 +293,7 @@ fn reference_gate(
                             key,
                             ReadinessCheckState::Incomplete,
                             "VIDEO_INPUT_REQUIRED",
-                            format!("{key_name} 需要重新选择素材"),
+                            format!("{} 需要重新选择素材", video_input_key_label(key_name)),
                             "ResolvedVideoInputSet",
                         )
                         .with_fix_action("绑定正式外部导入素材"),
@@ -366,10 +378,10 @@ fn reference_gate(
                     key,
                     ReadinessCheckState::Incomplete,
                     "VIDEO_KEYFRAME_REQUIRED",
-                    "视频 I2V 工作流需要已确认的图片关键帧。",
+                    "图生视频需要绑定外部导入的首帧图片。",
                     "ResolvedStageInput",
                 )
-                .with_fix_action("选择已确认图片作为视频关键帧"),
+                .with_fix_action("在创作页绑定正式首帧素材"),
             ),
             Some(asset_id) => {
                 let has_sha256 = stage_input
@@ -381,11 +393,11 @@ fn reference_gate(
                             key,
                             ReadinessCheckState::Blocker,
                             "VIDEO_KEYFRAME_SHA256_MISSING",
-                            "已选择的图片关键帧缺少内容校验值。",
+                            "已绑定的首帧图片缺少内容校验值。",
                             "ResolvedStageInput",
                         )
                         .with_entity(asset_id)
-                        .with_fix_action("重新选择已确认的图片关键帧"),
+                        .with_fix_action("重新绑定外部导入的首帧图片"),
                     );
                 }
             }
@@ -1129,7 +1141,9 @@ mod tests {
         });
         let gate = reference_gate(&context, Some("I2V"), Some(&context.stage_input));
         assert_eq!(gate.state, ReadinessCheckState::Incomplete);
-        assert!(gate.checks.iter().any(|c| c.code == "VIDEO_INPUT_REQUIRED"));
+        let required = gate.checks.iter().find(|c| c.code == "VIDEO_INPUT_REQUIRED").expect("formal I2V missing first_frame");
+        assert!(required.message.contains("首帧"));
+        assert!(!required.message.contains("first_frame"));
     }
 
     #[test]

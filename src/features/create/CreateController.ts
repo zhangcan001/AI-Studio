@@ -252,24 +252,28 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (!libraryAssetCompatible(fieldKey)) return;
     const field=librarySlots.find(f=>f.key===fieldKey);
     if(!field)return;
-    if(!context.mediaInputs.some(a=>a.id===libraryIntent.assetId && a.mediaKind===libraryIntent.mediaKind)){
-      // Meta resolved but mediaInputs lag: inject before OCC bind (category already confirmed).
-      setContext(current=>current?.projectId===route.projectId ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==libraryIntent.assetId),{id:libraryIntent.assetId,name:libraryIntent.assetId,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
-    }
-    if (libraryNeedsGeneratedVideoConfirm && !generatedVideoConfirm) {
-      setError("生成视频仅可作为视频参考绑定。请确认后再应用到参考视频槽，系统不会抽帧作为首帧。");
-      return;
-    }
-    // Draft update keeps Studio Store as the temporary projection; persistent save is authority.
-    setValue(field.key,mediaValue(field,[libraryIntent.assetId]));
-    if (videoInputs.enabled) {
-      const ok = await videoInputs.bindAsset(field.key, libraryIntent.assetId);
-      if (!ok) return; // keep intent so the user can retry after OCC/conflict refresh
-    }
-    useStudioStore.getState().setPendingLibraryIntent(undefined);
-    setLibraryAssetMeta(undefined);
-    setLibraryMetaFailed(false);
-    setGeneratedVideoConfirm(false);
+    // Serialize Apply with generate/select/retry through the same actionLock.
+    return mutate(async () => {
+      if(libraryIntent?.kind!=="asset" || libraryIntent.projectId!==route.projectId || !context?.selectedShot)return;
+      if (libraryMetaFailed || !libraryAssetMeta || libraryAssetMeta.assetId !== libraryIntent.assetId) return;
+      if (!libraryAssetCompatible(fieldKey)) return;
+      if(!context.mediaInputs.some(a=>a.id===libraryIntent.assetId && a.mediaKind===libraryIntent.mediaKind)){
+        setContext(current=>current?.projectId===route.projectId ? {...current,mediaInputs:[...current.mediaInputs.filter(a=>a.id!==libraryIntent.assetId),{id:libraryIntent.assetId,name:libraryIntent.assetId,mediaKind:libraryIntent.mediaKind,selected:false}]} : current);
+      }
+      if (libraryNeedsGeneratedVideoConfirm && !generatedVideoConfirm) {
+        setError("生成视频仅可作为视频参考绑定。请确认后再应用到参考视频槽，系统不会抽帧作为首帧。");
+        return;
+      }
+      setValue(field.key,mediaValue(field,[libraryIntent.assetId]));
+      if (videoInputs.enabled) {
+        const ok = await videoInputs.bindAsset(field.key, libraryIntent.assetId);
+        if (!ok) return;
+      }
+      useStudioStore.getState().setPendingLibraryIntent(undefined);
+      setLibraryAssetMeta(undefined);
+      setLibraryMetaFailed(false);
+      setGeneratedVideoConfirm(false);
+    });
   }
   function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
   function removeValue(field: string) { attempt.current = null; setAccepted(null); useStudioStore.getState().removeValue(field); }

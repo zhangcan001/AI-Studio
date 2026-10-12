@@ -50,6 +50,8 @@ export function MediaInputPanel({ controller: c }: { controller: CreateControlle
       <button type="button" onClick={()=>void c.videoInputs.importAssets(false)}>导入图片、视频或音频</button><button type="button" onClick={()=>void c.videoInputs.importAssets(true)}>导入图片文件夹</button>
       <button type="button" onClick={()=>void c.videoInputs.save()} disabled={!c.videoInputs.dirty}>保存视频输入</button>
     </fieldset><button type="button" disabled={c.busy || c.videoInputs.busy} onClick={()=>void c.videoInputs.refresh()}>刷新已保存输入</button>
+    {fields.some(field=>mediaKind(field)==="image")&&<button type="button" onClick={()=>c.openLibrary("images")}>在资源库查找图片</button>}
+    {fields.some(field=>mediaKind(field)==="video")&&<button type="button" onClick={()=>c.openLibrary("videos")}>在资源库查找视频</button>}
     {c.generator?.mode?.toUpperCase() === "REF2VA" && <small>混合参考：图片最多9项、视频3项、音频3项，共12项。可仅用合法视频；纯音频不支持。时长和媒体约束由统一预检确认。</small>}
     {c.videoInputs.loading && <p>正在加载当前 Recipe 输入…</p>}{c.videoInputs.dirty ? <p>输入尚未保存。</p> : c.videoInputs.view && <small>当前 Recipe 输入已保存</small>}{c.videoInputs.importReceipt && <p role="status">{c.videoInputs.importReceipt}</p>}{c.videoInputs.error && <p role="alert">{c.videoInputs.error}</p>}</section>;
   return <section><h2>本次生成素材</h2>{fields.map(field => <MediaField key={field.key} field={field} controller={c} />)}{fields.length>0&&<p>下拉列表显示当前项目近期100项素材，并包含当前镜头明确关联的素材。更早的素材可从资源库查找。</p>}{fields.some(field=>mediaKind(field)==="image")&&<button type="button" onClick={()=>c.openLibrary("images")}>在资源库查找更多图片</button>}{fields.some(field=>mediaKind(field)==="video")&&<button type="button" onClick={()=>c.openLibrary("videos")}>在资源库查找更多视频</button>}<small>这些媒体输入只属于本次草稿，不会修改镜头长期参考图。</small></section>;
