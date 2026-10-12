@@ -94,7 +94,7 @@ describe("M1-1 readiness actions", () => {
     const before = api.readinessGet.mock.calls.length;
     api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
     fireEvent.click(button);
-    await screen.findByText("可以生成");
+    await screen.findByText("可以入队生成");
     expect(api.readinessGet.mock.calls.length).toBe(before + 1);
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ submissionIdempotencyKey: "readiness-only", projectId: "project" }));
     expect(api.generate).not.toHaveBeenCalled(); expect(api.retry).not.toHaveBeenCalled(); expect(navigations).not.toHaveBeenCalled();
@@ -154,7 +154,7 @@ describe("M1-1 readiness actions", () => {
     fireEvent.click(button);
     api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
     view.rerender(<CreatePage runtime={{ ...runtime, devices: [] }} route={{ ...a, projectId: "other" }} navigate={navigations} />);
-    await loaded(); await screen.findByText("可以生成");
+    await loaded(); await screen.findByText("可以入队生成");
     fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "B draft" } });
     await act(async () => { if (outcome === "resolve") resolve(blocked("OPEN_RUNTIME_SETTINGS")); else reject({ code: "ASSET_UNAVAILABLE" }); });
     expect(screen.queryByRole("button", { name: "检查运行环境" })).toBeNull();
