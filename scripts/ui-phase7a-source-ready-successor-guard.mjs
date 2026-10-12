@@ -79,12 +79,17 @@ export const PHASE7A_EXISTING = [
   'src/features/library/LibraryScale.observed.test.tsx',
   'src/features/runs/RunsPage.test.tsx',
   'src/features/runs/RunsPhase6C.test.tsx',
+  'src/features/shots/ShotWorkspace.tsx',
   'src/features/workflow-lab/WorkflowLabBoundary.test.tsx'
 ].sort();
 export const PHASE7A_ADDED = [
   'scripts/run-boundary-tests.mjs',
   'scripts/ui-phase7a-source-ready-successor-guard.mjs',
   'src/app/UiPhase7ASourceReadyBoundary.test.ts',
+  'src/features/shots/ShotBatchAssetBindPanel.test.tsx',
+  'src/features/shots/ShotBatchAssetBindPanel.tsx',
+  'src/features/shots/shotBatchAssetBind.test.ts',
+  'src/features/shots/shotBatchAssetBind.ts',
   'src/types/mjs-shims.d.ts',
 ].sort();
 export const PHASE7A_FILES = [...PHASE7A_EXISTING, ...PHASE7A_ADDED, PHASE7A_MANIFEST];

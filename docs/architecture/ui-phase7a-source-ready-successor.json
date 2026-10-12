@@ -30,10 +30,10 @@
   },
   "frontend": {
     "beforeFiles": 546,
-    "afterFiles": 548,
+    "afterFiles": 552,
     "beforeAggregateHash": "c718374424868f8e1f5446cfd31ed845822cec1c1f51dfb23d023293896c6e36",
-    "untouchedAggregateHash": "123d5703e0912ee8406c2f9e7d4642afb925d175e45fcafdff2e842a868e5922",
-    "afterAggregateHash": "adc07418a65b452f5ff8e08a2cbf16abe7f56ace56496814ec5f2cc2de931c07"
+    "untouchedAggregateHash": "556b4e8d19fe2d8d9f0d58100d50165f8b6b96d4dab7a1342afa557124e73aec",
+    "afterAggregateHash": "663b97fbb0e1fd5b7c559acd066a92548209e994e6e30c6c28e81af3b697ba50"
   },
   "invariants": {
     "schemaChanged": false,
@@ -89,7 +89,7 @@
     },
     "scripts/ui-phase7a-source-ready-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "615ee12ba2f86a41b4102217d645f3458c70c4fc81de1d4e3a2e58cd4ba6697c"
+      "afterHash": "7ea39af46da63b186a5526d2be6425be55580059aff7f7e4704384f33cbea761"
     },
     "src-tauri/examples/phase12_query_profile.rs": {
       "beforeHash": "e26dbb6a63400a72ea1b023a687fa217149e165fc8b32953de9304248498b235",
@@ -371,6 +371,26 @@
       "beforeHash": "259f9023b6cff7819a5bd88684d69cd7658021463a062dbe510ffe071347b121",
       "afterHash": "d0d853275269fc08d4cec0bd486e61d0031717f11871ca363638d0335cbbcfd5"
     },
+    "src/features/shots/ShotBatchAssetBindPanel.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "00a30497cce764d4428c37ed996753d7d0604739011080f66bebe605ddf9a4a5"
+    },
+    "src/features/shots/ShotBatchAssetBindPanel.tsx": {
+      "beforeHash": null,
+      "afterHash": "96c8463cc924801c0ad5af2c225b14b55bce6d330b086fe3851002ed4d27cc9f"
+    },
+    "src/features/shots/ShotWorkspace.tsx": {
+      "beforeHash": "516573d809f2f209015a0fcea67dc94ffeafce87d897e2cc6cec30aade749958",
+      "afterHash": "06c0d067ec22494cba08964ea6f585b8d6e085b3bb44ff38a5b8c85a71ec8353"
+    },
+    "src/features/shots/shotBatchAssetBind.test.ts": {
+      "beforeHash": null,
+      "afterHash": "1abf6b59cb84903175bdeae9367833806f6e9a64891bcb6b7fcabf61986ff80a"
+    },
+    "src/features/shots/shotBatchAssetBind.ts": {
+      "beforeHash": null,
+      "afterHash": "5227adce9412d9eb812535f8024a38f4b6a79dc075e2c18fde7ded1f58e09c6a"
+    },
     "src/features/workflow-lab/WorkflowLabBoundary.test.tsx": {
       "beforeHash": "d3f30a79b447ddfc79dbdc3165174928d1ae581bb23a5d448648864e799f8609",
       "afterHash": "9293c14139d8a302334428a1f8a93ac9626152fd49effc12d14977570abbcf49"
@@ -388,7 +408,7 @@
     "afterFiles": 61,
     "beforeAggregateHash": "b004f8a1b0903dbf8aa158974b1a6d826ba1b96a3ba716537c8603bec4f15d64",
     "untouchedAggregateHash": "fc650f07c353574ad4516e2c59034c4c1f0f5b3c45a583b2cd9accfe726558fb",
-    "afterAggregateHash": "917ccd2d45c24c2049f01d77a28d06d7cf2a8da101de12b7e1596a85e565f688"
+    "afterAggregateHash": "4dd615bb5cf304e860958f1b14075f0a2cd39e748b3333b71d6d66071820394d"
   },
   "styles": {
     "beforeFiles": 39,
