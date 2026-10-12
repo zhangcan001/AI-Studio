@@ -45,6 +45,7 @@ import { comfyStatusLabel } from "../../i18n/statusLabels";
 import { deriveShotStatus, shotStatusLabels } from "./shotDomain";
 import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
 import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
+import { ShotBatchAssetBindPanel } from "./ShotBatchAssetBindPanel";
 import { ShotListToolbar } from "./ShotListToolbar";
 import { ProductionStructurePanel } from "./ProductionStructurePanel";
 import { SceneProductionPanel } from "./SceneProductionPanel";
@@ -341,6 +342,7 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
     setVideoInputsReady(old => old?.owner === owner && old.ready === ready ? old : {owner,ready});
   }, []);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkBindOpen, setBulkBindOpen] = useState(false);
   const [structureMenuOpen, setStructureMenuOpen] = useState(false);
   const [shotListControls, setShotListControls] = useState<ShotListControls>(() => shotListControlsForNavigation(initialCollectionFilter));
   const reloadGeneration = useRef(0);
@@ -1393,6 +1395,13 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
         onImported={async () => { await reload(); setBulkImportOpen(false); }}
         onCancel={() => setBulkImportOpen(false)}
       />}
+      {mode === "creation" && bulkBindOpen && <ShotBatchAssetBindPanel
+        projectId={projectId}
+        shots={shots}
+        catalog={catalog}
+        onBound={async () => { await reload(); }}
+        onCancel={() => setBulkBindOpen(false)}
+      />}
       <div className="shot-production-layout">
         <div className="shot-structure-column">
           <ProjectStructureTree
@@ -1407,7 +1416,8 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
             headerActions={<div className="shot-structure-more">
               <button type="button" className="shot-structure-more-button" aria-label="更多结构操作" aria-haspopup="menu" aria-expanded={structureMenuOpen} onClick={() => setStructureMenuOpen((open) => !open)}>⋯</button>
               {structureMenuOpen && <div className="shot-structure-more-menu" role="menu" aria-label="结构操作菜单">
-                {mode === "creation" && <button type="button" role="menuitem" onClick={() => { setBulkImportOpen((open) => !open); setStructureMenuOpen(false); }}>{bulkImportOpen ? "收起批量导入" : "批量导入"}</button>}
+                {mode === "creation" && <button type="button" role="menuitem" onClick={() => { setBulkImportOpen((open) => !open); setBulkBindOpen(false); setStructureMenuOpen(false); }}>{bulkImportOpen ? "收起批量导入" : "批量导入"}</button>}
+                {mode === "creation" && <button type="button" role="menuitem" onClick={() => { setBulkBindOpen((open) => !open); setBulkImportOpen(false); setStructureMenuOpen(false); }}>{bulkBindOpen ? "收起批量绑定素材" : "批量绑定素材"}</button>}
                 {mode !== "review" && <button type="button" role="menuitem" onClick={() => { openStructureManagement(workspaceSelection); setStructureMenuOpen(false); }}>结构管理</button>}
                 <button type="button" role="menuitem" onClick={() => { void exportManifest(); setStructureMenuOpen(false); }} disabled={busy}>导出清单</button>
                 <button type="button" role="menuitem" onClick={() => { void reload(); setStructureMenuOpen(false); }} disabled={busy}>刷新</button>
