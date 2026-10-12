@@ -164,7 +164,12 @@ it("phase6d mock path: import → library source → bind ordinal → explicit s
   useStudioStore.getState().setPendingLibraryIntent({ kind: "asset", projectId: "project-a", assetId: "ast-ext-video", mediaKind: "video" });
   api.get.mockResolvedValue(externalVideo);
   render(<CreatePage route={{ kind: "create", projectId: "project-a", shotId: "shot-a", stage: "video" }} navigate={navigate} />);
-  fireEvent.click(await screen.findByRole("button", { name: "应用到参考视频" }));
+  // Wait for library meta + OCC view (libraryApplyReady) — clicking while disabled is a silent no-op.
+  await waitFor(() => {
+    const btn = screen.getByRole("button", { name: "应用到参考视频" });
+    expect(btn.hasAttribute("disabled")).toBe(false);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "应用到参考视频" }));
   await waitFor(() => expect(api.inputsSave).toHaveBeenCalled());
   expect(api.inputsSave.mock.calls[0][0].inputs).toEqual([
     { inputKey: "reference_videos", ordinal: 0, assetId: "ast-ext-video" },
@@ -202,7 +207,8 @@ it("phase6d mock path: import → library source → bind ordinal → explicit s
   const apply = await screen.findByRole("button", { name: "应用到参考视频" });
   expect(apply.hasAttribute("disabled")).toBe(true);
   fireEvent.click(screen.getByRole("checkbox", { name: /确认将生成视频仅作为视频参考/ }));
-  fireEvent.click(apply);
+  await waitFor(() => expect(screen.getByRole("button", { name: "应用到参考视频" }).hasAttribute("disabled")).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "应用到参考视频" }));
   await waitFor(() => expect(api.inputsSave).toHaveBeenCalled());
   const lastBind = api.inputsSave.mock.calls[api.inputsSave.mock.calls.length - 1][0].inputs;
   expect(lastBind).toEqual([{ inputKey: "reference_videos", ordinal: 0, assetId: "ast-gen-video" }]);
