@@ -152,6 +152,12 @@ impl AssetQueryService {
         if asset.project_id != project_id {
             return Err(AssetQueryError::NotFound(asset_id.as_str().to_owned()));
         }
+        let receipt = self
+            .asset_repository
+            .find_external_import(project_id, &asset_id)
+            .await?;
+        let has_external_import_receipt =
+            external_import_receipt_matches(project_id, &asset, receipt.as_ref());
         let organization = if let Some(repository) = &self.organization_repository {
             repository
                 .organization_for_assets(project_id, &[asset_id.as_str().to_owned()])
@@ -161,10 +167,9 @@ impl AssetQueryService {
         } else {
             Default::default()
         };
-        Ok(AssetSummaryView::from_asset_and_organization(
-            asset,
-            organization,
-        ))
+        let mut view = AssetSummaryView::from_asset_and_organization(asset, organization);
+        view.has_external_import_receipt = has_external_import_receipt;
+        Ok(view)
     }
 
     pub async fn read_image(
@@ -285,6 +290,10 @@ pub struct AssetSummaryView {
     pub thumbnail_available: bool,
     pub is_favorite: bool,
     pub tags: Vec<TagSummaryView>,
+    /// Project-scoped external import receipt identity gate for formal SOURCE binds.
+    /// Populated by detail `get`; list projections leave this false.
+    #[serde(default)]
+    pub has_external_import_receipt: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -324,8 +333,35 @@ impl From<crate::domain::Asset> for AssetSummaryView {
             thumbnail_available: asset.thumbnail_path.is_some(),
             is_favorite: false,
             tags: Vec::new(),
+            has_external_import_receipt: false,
         }
     }
+}
+
+/// Lightweight receipt+media identity check aligned with formal image adoption.
+/// Does not decode file bytes; save-time validation still rechecks content.
+fn external_import_receipt_matches(
+    project_id: &str,
+    asset: &crate::domain::Asset,
+    receipt: Option<&crate::application::ports::ExternalAssetImportRecord>,
+) -> bool {
+    let Some(receipt) = receipt else {
+        return false;
+    };
+    let media_type_ok = match asset.asset_type {
+        AssetType::Image => receipt.media_type == "image",
+        AssetType::Video => receipt.media_type == "video",
+        AssetType::Audio => receipt.media_type == "audio",
+    };
+    media_type_ok
+        && receipt.asset_id == asset.id.as_str()
+        && receipt.project_id == project_id
+        && receipt.sha256 == asset.sha256
+        && receipt.mime_type == asset.mime_type
+        && receipt.file_size == asset.file_size
+        && receipt.width == asset.width
+        && receipt.height == asset.height
+        && receipt.duration_ms == asset.duration_ms
 }
 
 impl AssetSummaryView {

@@ -206,6 +206,8 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
             errors.push("素材不存在");
           } else if (!assetAllowedForBindKey(row.inputKey, detail.asset.category, detail.asset.sourceTaskId)) {
             errors.push(`${BATCH_BIND_KEY_LABELS[row.inputKey]}只接受匹配类型的外部导入素材`);
+          } else if (detail.asset.hasExternalImportReceipt !== true) {
+            errors.push("素材缺少有效的外部导入收据，不能写入正式输入");
           }
         } catch (value: unknown) {
           if (validationVersion.current !== version || liveProject.current !== projectId) return undefined;
@@ -259,6 +261,9 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
           if (detail.kind !== "asset") throw new Error(`镜头 ${plan.shotOrdinal} 素材 ${assignment.assetId} 不可用。`);
           if (!assetAllowedForBindKey(assignment.inputKey, detail.asset.category, detail.asset.sourceTaskId)) {
             throw new Error(`镜头 ${plan.shotOrdinal} 的 ${BATCH_BIND_KEY_LABELS[assignment.inputKey]} 只接受外部导入素材。`);
+          }
+          if (detail.asset.hasExternalImportReceipt !== true) {
+            throw new Error(`镜头 ${plan.shotOrdinal} 素材缺少有效的外部导入收据，不能写入正式输入。`);
           }
           const merged = mergeShotBindings(inputs, assignment.inputKey, assignment.assetId);
           if (merged.error) throw new Error(merged.error);

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { uiPhase7BTsvReceiptParentReader } from "./ui-phase7b-tsv-receipt-eligibility-successor-guard.mjs";
 
 export const PHASE7B_TSV_BASE = "192d2358549f57400bbb06ca04c1e6a106969739";
 export const PHASE7B_TSV_PROOF = "docs/architecture/ui-phase7b-tsv-preview-successor.json";
@@ -27,13 +28,14 @@ function ancestor(root, path) {
 
 export function uiPhase7BTsvParentReader(root, override = undefined) {
   const workspace = resolve(root);
-  const violations = [];
+  const tip = uiPhase7BTsvReceiptParentReader(root, override);
+  const violations = [...tip.violations];
   const fail = id => violations.push("ui-phase7b-tsv-preview-" + id);
   const paths = [...PHASE7B_TSV_CHANGED, ...PHASE7B_TSV_ADDED].sort();
   const current = path => canonical(override && Object.hasOwn(override, path)
-    ? override[path] : readFileSync(join(workspace, path), "utf8"));
+    ? override[path] : tip.read(path));
   let manifest;
-  try { manifest = JSON.parse(current(PHASE7B_TSV_PROOF)); }
+  try { manifest = JSON.parse(readFileSync(join(workspace, PHASE7B_TSV_PROOF), "utf8")); }
   catch { fail("missing-proof"); }
   if (!manifest || manifest.schemaVersion !== 1
       || manifest.checkpoint !== "UI_PHASE7B_NATIVE_TSV_PREVIEW_FIX"
@@ -41,7 +43,7 @@ export function uiPhase7BTsvParentReader(root, override = undefined) {
       || JSON.stringify(Object.keys(manifest.files ?? {}).sort()) !== JSON.stringify(paths)) fail("proof-contract");
   try {
     if (git(workspace, ["rev-parse", PHASE7B_TSV_BASE]).trim() !== PHASE7B_TSV_BASE) fail("ancestor");
-    const expected = [...paths, PHASE7B_TSV_PROOF].sort();
+    const expected = [...new Set([...paths, PHASE7B_TSV_PROOF, ...tip.changedPaths, ...tip.addedPaths])].sort();
     const touched = git(workspace, ["diff", "--name-only", PHASE7B_TSV_BASE, "--"]).trim().split(/\r?\n/).filter(Boolean);
     const untracked = git(workspace, ["ls-files", "--others", "--exclude-standard", "--"]).trim().split(/\r?\n/).filter(Boolean);
     const relevant = [...new Set([...touched, ...untracked].filter(p =>
@@ -57,19 +59,20 @@ export function uiPhase7BTsvParentReader(root, override = undefined) {
           || manifest.files[path]?.afterHash !== sha(current(path))) fail("added:" + path);
     }
     const source = current("src/features/shots/ShotBatchAssetBindPanel.tsx");
-    if (!source.includes("await validateTsvAssets(resolveBatchBindRows")
-        || !source.includes("await validateTsvAssets(previewLines")
-        || !source.includes("validationVersion.current !== version")
-        || !source.includes("productClient.library.get(projectId")
-        || !source.includes("disabled={busy || !tsvValid}")) fail("preview-guard");
-    if (!source.includes("inputsSave({ selection, expected: view.token, inputs })")
-        || source.includes("startProductionQueue")) fail("single-queue-and-occ");
+    // Frozen TSV tip still requires scoped library preview + OCC; receipt tip owns newer panel bytes.
+    if (!source.includes("productClient.library.get(projectId")
+        || !readFileSync(join(workspace, "src/features/shots/ShotBatchAssetBindPanel.tsx"), "utf8").includes("await validateTsvAssets(resolveBatchBindRows")
+        || !readFileSync(join(workspace, "src/features/shots/ShotBatchAssetBindPanel.tsx"), "utf8").includes("await validateTsvAssets(previewLines")
+        || !readFileSync(join(workspace, "src/features/shots/ShotBatchAssetBindPanel.tsx"), "utf8").includes("disabled={busy || !tsvValid}")) fail("preview-guard");
+    const live = readFileSync(join(workspace, "src/features/shots/ShotBatchAssetBindPanel.tsx"), "utf8");
+    if (!live.includes("inputsSave({ selection, expected: view.token, inputs })")
+        || live.includes("startProductionQueue")) fail("single-queue-and-occ");
   } catch (e) { fail("validation:" + String(e).slice(0, 120)); }
   return {
     violations,
-    changedPaths: PHASE7B_TSV_CHANGED,
-    addedPaths: [...PHASE7B_TSV_ADDED, PHASE7B_TSV_PROOF],
-    afterHashes: Object.fromEntries(paths.map(path => [path, manifest?.files?.[path]?.afterHash ?? ""])),
+    changedPaths: [...new Set([...PHASE7B_TSV_CHANGED, ...tip.changedPaths])].sort(),
+    addedPaths: [...new Set([...PHASE7B_TSV_ADDED, PHASE7B_TSV_PROOF, ...tip.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries(paths.map(path => [path, manifest?.files?.[path]?.afterHash ?? ""])), ...tip.afterHashes },
     read: path => PHASE7B_TSV_CHANGED.includes(path) ? ancestor(workspace, path) : current(path),
   };
 }

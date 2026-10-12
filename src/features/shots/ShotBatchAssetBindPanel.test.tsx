@@ -132,6 +132,7 @@ beforeEach(() => {
       isFavorite: false,
       tags: [],
       assetType: "image",
+      hasExternalImportReceipt: true,
     },
   }));
   api.inputsGet.mockImplementation(async (selection: { selectionRef: string }) => ({
@@ -259,7 +260,7 @@ describe("ShotBatchAssetBindPanel", () => {
 
   it("TSV confirmation rechecks a previously valid SOURCE and stops when removed", async () => {
     const user = userEvent.setup();
-    api.get.mockResolvedValueOnce({ kind: "asset", asset: { id: "ext-1", category: "source_image" } })
+    api.get.mockResolvedValueOnce({ kind: "asset", asset: { id: "ext-1", category: "source_image", hasExternalImportReceipt: true } })
       .mockRejectedValueOnce(new Error("LIBRARY_RESOURCE_NOT_FOUND"));
     render(<ShotBatchAssetBindPanel projectId="p1" shots={[shot("s1", 0, "i2v")]} catalog={[i2v]} />);
     await user.click(screen.getByRole("tab", { name: "表格文本" }));
@@ -304,9 +305,38 @@ describe("ShotBatchAssetBindPanel", () => {
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "确认写入" })).toHaveProperty("disabled", true);
     await user.type(editor, "\n1\tfirst_frame\tmissing");
-    finish({ kind: "asset", asset: { id: "ext-1", category: "source_image" } });
+    finish({ kind: "asset", asset: { id: "ext-1", category: "source_image", hasExternalImportReceipt: true } });
     await waitFor(() => expect(screen.getByRole("button", { name: "检查" })).toHaveProperty("disabled", false));
     expect(screen.queryByRole("table", { name: "批量绑定预览" })).toBeNull();
+    expect(screen.getByRole("button", { name: "确认写入" })).toHaveProperty("disabled", true);
+    expect(api.inputsSave).not.toHaveBeenCalled();
+  });
+
+  it("TSV preview rejects SOURCE assets missing a matching external import receipt", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValueOnce({
+      kind: "asset",
+      asset: {
+        id: "ext-no-receipt",
+        category: "source_image",
+        name: "broken",
+        originalName: "broken.png",
+        mimeType: "image/png",
+        fileSize: 1,
+        createdAt: "",
+        isFavorite: false,
+        tags: [],
+        assetType: "image",
+        hasExternalImportReceipt: false,
+      },
+    });
+    render(<ShotBatchAssetBindPanel projectId="p1" shots={[shot("s1", 0, "i2v")]} catalog={[i2v]} />);
+    await user.click(screen.getByRole("tab", { name: "表格文本" }));
+    await user.type(screen.getByLabelText("批量绑定表格内容"), "1\tfirst_frame\text-no-receipt");
+    await user.click(screen.getByRole("button", { name: "检查" }));
+    const preview = await screen.findByRole("table", { name: "批量绑定预览" });
+    await waitFor(() => expect(within(preview).getByText(/缺少有效的外部导入收据/)).toBeTruthy());
+    expect(within(preview).queryByText("可写入")).toBeNull();
     expect(screen.getByRole("button", { name: "确认写入" })).toHaveProperty("disabled", true);
     expect(api.inputsSave).not.toHaveBeenCalled();
   });
