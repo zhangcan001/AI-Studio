@@ -7,18 +7,42 @@ import { invalidateRuns, subscribeRunInvalidation } from "../../product/runInval
 import type { LibraryDeletionInspection, LibraryDetail, LibraryEditRequest, LibraryList, LibraryRelation, LibraryVersions, LibraryTag, LibrarySourceKind, ResourceRef } from "../../product/libraryTypes";
 import { useStudioStore } from "../../stores/studioStore";
 import { categoryFor, resourceKey, type LibraryRoute } from "./libraryModel";
+
+const LIBRARY_FILTER_KEY = "aistudio.libraryFilters.v1";
+type StickyLibraryFilters = { favoriteOnly: boolean; sourceKind: LibrarySourceKind };
+function readStickyLibraryFilters(projectId: string): StickyLibraryFilters {
+  try {
+    const raw = sessionStorage.getItem(`${LIBRARY_FILTER_KEY}:${projectId}`);
+    if (!raw) return { favoriteOnly: false, sourceKind: "all" };
+    const parsed = JSON.parse(raw) as Partial<StickyLibraryFilters>;
+    const sourceKind = parsed.sourceKind === "source" || parsed.sourceKind === "generated" || parsed.sourceKind === "all"
+      ? parsed.sourceKind : "all";
+    return { favoriteOnly: Boolean(parsed.favoriteOnly), sourceKind };
+  } catch {
+    return { favoriteOnly: false, sourceKind: "all" };
+  }
+}
+function writeStickyLibraryFilters(projectId: string, next: StickyLibraryFilters) {
+  try {
+    sessionStorage.setItem(`${LIBRARY_FILTER_KEY}:${projectId}`, JSON.stringify(next));
+  } catch { /* convenience only */ }
+}
+
 export interface LibraryProps { route: LibraryRoute; navigate: (route: AppRoute) => unknown }
 interface Projection {scope:string;list:LibraryList;detail?:LibraryDetail;relations:LibraryRelation[];versions?:LibraryVersions}
 export function useLibraryController({route,navigate}:LibraryProps) {
-  const [queryState,setQueryState]=useState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:"",sourceKind:"all" as LibrarySourceKind});
+  const [queryState,setQueryState]=useState(()=>{
+    const sticky=readStickyLibraryFilters(route.projectId);
+    return {projectId:route.projectId,search:"",favoriteOnly:sticky.favoriteOnly,tagId:"",sourceKind:sticky.sourceKind};
+  });
   const [tagProjection,setTagProjection]=useState<{projectId:string;items:LibraryTag[]}>();
   const mediaCategory=["media","images","videos","audio"].includes(categoryFor(route));
   const ownedQuery=queryState.projectId===route.projectId ? queryState : {projectId:route.projectId,search:"",favoriteOnly:false,tagId:"",sourceKind:"all" as LibrarySourceKind};
   const search=ownedQuery.search, favoriteOnly=mediaCategory&&ownedQuery.favoriteOnly, tagId=mediaCategory ? ownedQuery.tagId.trim() : "", sourceKind=mediaCategory ? ownedQuery.sourceKind : "all";
   const setSearch=(search:string)=>setQueryState(state=>({...state,projectId:route.projectId,search}));
-  const setFavoriteOnly=(favoriteOnly:boolean)=>setQueryState(state=>({...state,projectId:route.projectId,favoriteOnly}));
+  const setFavoriteOnly=(favoriteOnly:boolean)=>setQueryState(state=>{const next={...state,projectId:route.projectId,favoriteOnly};writeStickyLibraryFilters(route.projectId,{favoriteOnly:next.favoriteOnly,sourceKind:next.sourceKind});return next;});
   const setTagId=(tagId:string)=>setQueryState(state=>({...state,projectId:route.projectId,tagId}));
-  const setSourceKind=(sourceKind:LibrarySourceKind)=>setQueryState(state=>({...state,projectId:route.projectId,sourceKind}));
+  const setSourceKind=(sourceKind:LibrarySourceKind)=>setQueryState(state=>{const next={...state,projectId:route.projectId,sourceKind};writeStickyLibraryFilters(route.projectId,{favoriteOnly:next.favoriteOnly,sourceKind:next.sourceKind});return next;});
   const mediaInspection=useLibraryMediaInspection(route.projectId,route.resource);
   const [projection,setProjection]=useState<Projection>();
   const [queryError,setQueryError]=useState<string>();const [actionError,setActionError]=useState<string>();const [notice,setNotice]=useState<string>();
@@ -77,7 +101,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   },[scope]);
   useEffect(()=>{
     inspectionOpen.current=false;setProjection(undefined);setInspection(undefined);setQueryError(undefined);setActionError(undefined);setLoading(true);
-    if(previousProject.current!==route.projectId){previousProject.current=route.projectId;setQueryState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:"",sourceKind:"all"});setTagProjection(undefined);setNotice(undefined);
+    if(previousProject.current!==route.projectId){previousProject.current=route.projectId;const sticky=readStickyLibraryFilters(route.projectId);setQueryState({projectId:route.projectId,search:"",favoriteOnly:sticky.favoriteOnly,tagId:"",sourceKind:sticky.sourceKind});setTagProjection(undefined);setNotice(undefined);
       if(route.resource)navigate({...route,resource:undefined});}
     if(pages.current.owner!==queryScope){pages.current={owner:queryScope,index:0,starts:[null]};setPageIndex(0);}
     void refresh({tags:false});

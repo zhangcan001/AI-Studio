@@ -105,6 +105,48 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
     setError(undefined);
   }
 
+  /** CapCut fill-down: copy this shot's filled slots onto later shots that expose the same keys. */
+  function copyRowDown(shotId: string) {
+    const source = readyShots.find((entry) => entry.shot.id === shotId);
+    if (!source) return;
+    const draft = matrix[shotId] ?? {};
+    const payload = Object.fromEntries(
+      source.slots
+        .map((key) => [key, (draft[key] ?? "").trim()] as const)
+        .filter(([, value]) => value),
+    ) as Partial<Record<BatchBindKey, string>>;
+    if (!Object.keys(payload).length) {
+      setError("请先在本行选好至少一个槽位，再复制到下方镜头。");
+      return;
+    }
+    const startIndex = readyShots.findIndex((entry) => entry.shot.id === shotId);
+    if (startIndex < 0 || startIndex >= readyShots.length - 1) {
+      setError("下方没有可接收的镜头。");
+      return;
+    }
+    const targets = readyShots.slice(startIndex + 1).filter((entry) =>
+      entry.slots.some((key) => Boolean(payload[key])),
+    );
+    if (!targets.length) {
+      setError("下方镜头没有可匹配的正式槽，未复制。");
+      return;
+    }
+    setMatrix((current) => {
+      const next = { ...current };
+      for (const entry of targets) {
+        const row = { ...next[entry.shot.id] };
+        for (const key of entry.slots) {
+          const value = payload[key];
+          if (value) row[key] = value;
+        }
+        next[entry.shot.id] = row;
+      }
+      return next;
+    });
+    setError(undefined);
+    setNotice(`已把镜头 ${source.shot.ordinal + 1} 的已选槽复制到下方 ${targets.length} 个镜头（草稿，尚未 OCC 保存）。`);
+  }
+
   function rowFillStats(entry: (typeof readyShots)[number]) {
     const draft = matrix[entry.shot.id] ?? {};
     const filled = entry.slots.filter((key) => (draft[key] ?? "").trim()).length;
@@ -273,7 +315,14 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
                     <tr key={entry.shot.id}>
                       <td><strong>{String(entry.shot.ordinal + 1).padStart(2, "0")} {entry.shot.name}</strong></td>
                       <td>{entry.recipe.name} · {entry.recipe.mode}</td>
-                      <td><small aria-label={`镜头 ${entry.shot.ordinal + 1} 槽位进度`}>{stats.filled}/{stats.total}</small></td>
+                      <td>
+                        <small aria-label={`镜头 ${entry.shot.ordinal + 1} 槽位进度`}>{stats.filled}/{stats.total}</small>
+                        {" "}
+                        <button type="button" className="quiet-button" disabled={busy || stats.filled === 0}
+                          aria-label={`镜头 ${entry.shot.ordinal + 1} 复制到下方`}
+                          title="把本行已选槽复制到下方匹配镜头"
+                          onClick={() => copyRowDown(entry.shot.id)}>↓复制下方</button>
+                      </td>
                       {cell("first_frame")}{cell("last_frame")}{cell("reference_images")}{cell("reference_videos")}{cell("reference_audios")}
                     </tr>
                   );

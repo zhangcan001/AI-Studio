@@ -252,4 +252,24 @@ describe("ShotBatchAssetBindPanel", () => {
     expect(api.inputsSave).not.toHaveBeenCalled();
     expect(screen.getByText(/已用首个已选素材填充/)).toBeTruthy();
   });
+
+  it("copy-row-down duplicates filled slots onto later matching shots", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShotBatchAssetBindPanel
+        projectId="p1"
+        shots={[shot("s1", 0, "i2v"), shot("s2", 1, "i2v"), shot("s3", 2, "fl")]}
+        catalog={[i2v, fl]}
+      />,
+    );
+    await screen.findByRole("table", { name: "多镜头正式槽绑定矩阵" });
+    await waitFor(() => expect(screen.getByLabelText("镜头 1 首帧")).toBeTruthy());
+    await user.selectOptions(screen.getByLabelText("镜头 1 首帧"), "ext-1");
+    await user.click(screen.getByRole("button", { name: "镜头 1 复制到下方" }));
+    expect((screen.getByLabelText("镜头 2 首帧") as HTMLSelectElement).value).toBe("ext-1");
+    expect((screen.getByLabelText("镜头 3 首帧") as HTMLSelectElement).value).toBe("ext-1");
+    expect(api.inputsSave).not.toHaveBeenCalled();
+    expect(screen.getByText(/复制到下方 2 个镜头/)).toBeTruthy();
+  });
+
 });

@@ -12,7 +12,7 @@ const page=(project:string,q:{cursor?:{position:{id:string}}|null;category:strin
 };
 const drain=async()=>{await act(async()=>{for(let i=0;i<50;i++)await Promise.resolve();});};
 beforeEach(()=>{vi.clearAllMocks();api.tagsList.mockResolvedValue([{id:"tag",projectId:"a",name:"tag"}]);api.list.mockImplementation(async(p,q)=>page(p,q));});
-afterEach(()=>{cleanup();vi.useRealTimers();});
+afterEach(()=>{cleanup();vi.useRealTimers();sessionStorage.clear();});
 
 it("1/5/20 bounded pages cost 1/5/20 list calls, previous and next each one; refresh only current page",async()=>{
  render(<LibraryPage route={{kind:"library",projectId:"a",filter:"images"}} navigate={vi.fn()}/>);await drain();

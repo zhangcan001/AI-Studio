@@ -9,6 +9,20 @@ import { useStudioStore } from "../../stores/studioStore";
 import type { ComfyStatus } from "../../types/comfy";
 import { assetIds, draftFor, mediaKind, mediaValue, scopeKey, type CreateRoute } from "./createModel";
 import { usePersistentVideoInputs } from "./usePersistentVideoInputs";
+
+const LAST_GENERATOR_KEY = "aistudio.create.lastGenerator.v1";
+function readLastGenerator(projectId: string, stage: string): string | undefined {
+  try {
+    const raw = sessionStorage.getItem(`${LAST_GENERATOR_KEY}:${projectId}:${stage}`);
+    return raw && raw.length <= 512 ? raw : undefined;
+  } catch { return undefined; }
+}
+function writeLastGenerator(projectId: string, stage: string, selectionRef: string) {
+  try {
+    if (selectionRef) sessionStorage.setItem(`${LAST_GENERATOR_KEY}:${projectId}:${stage}`, selectionRef);
+  } catch { /* convenience only */ }
+}
+
 export interface CreateProps { route: CreateRoute; runtime?: ComfyStatus; navigate: (route: AppRoute) => unknown; onDirtyChange?: (dirty: boolean) => void }
 interface StageView { selection: string; values: GenerationValues; dirty: boolean; runRef: RunRef | null; accepted: CreationAccepted | null; provenance?: CreationPromptProvenance }
 export function useCreateController({ route, runtime, navigate, onDirtyChange }: CreateProps) {
@@ -74,9 +88,11 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
         const saved = labReturn ? { selection: labReturn.selectionRef, values: labReturn.values, dirty: labReturn.dirty, runRef: labReturn.runRef, accepted: labReturn.accepted, provenance: labReturn.provenance } : snapshots.current.get(key);
         const intent = useStudioStore.getState().pendingRunIntent;
         const reuse = intent?.projectId === route.projectId && intent.stage === route.stage ? intent : undefined;
-        const selected = reuse ? options.find(item => item.selectionRef === reuse.selectionRef) : saved ? options.find(item => item.selectionRef === saved.selection) : options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
+        const lastUsedRef = !reuse && !saved ? readLastGenerator(route.projectId, route.stage) : undefined;
+        const selected = reuse ? options.find(item => item.selectionRef === reuse.selectionRef) : saved ? options.find(item => item.selectionRef === saved.selection) : options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? (lastUsedRef ? options.find(item => item.selectionRef === lastUsedRef && item.availability) : undefined) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
         if ((reuse || saved) && !selected) setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
         initialized = true; setContext(next); setGenerators(options); setSelection(selected?.selectionRef ?? "");
+        if (selected?.selectionRef) writeLastGenerator(route.projectId, route.stage, selected.selectionRef);
         setRestoredDraft(saved && selected ? { key, selection: selected.selectionRef, values: saved.values } : undefined);
         const reused = reuse && selected?.selectionRef === reuse.selectionRef && next.selectedShot;
         useStudioStore.getState().loadCreationDraft(reused ? draftFor(selected, next.selectedShot, reuse.values) : saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), reused ? true : saved?.dirty ?? false, reused ? undefined : saved?.provenance);
@@ -298,7 +314,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     const stripsMedia = option.persistentInputs && Object.values(values).some(value => "assetId" in value || "assetIds" in value);
     if ((videoInputs.dirty || stripsMedia) && typeof window !== "undefined" && !window.confirm("切换生成器会丢弃当前未保存的媒体输入草稿，已保存的正式输入仍按 Recipe 保留。确定继续？")) return;
     useStudioStore.getState().setPendingRunIntent(undefined);
-    attempt.current = null; setSelection(ref); setAccepted(null); setRestoredDraft(undefined);
+    attempt.current = null; setSelection(ref); writeLastGenerator(route.projectId, route.stage, ref); setAccepted(null); setRestoredDraft(undefined);
     const previous = option.persistentInputs ? Object.fromEntries(Object.entries(values).filter(([,v]) => !("assetId" in v || "assetIds" in v))) : values;
     useStudioStore.getState().loadCreationDraft(draftFor(option, context?.selectedShot ?? null, previous), true, option.fields.some(field=>field.key==="prompt" && field.type==="textarea") ? useStudioStore.getState().creationPromptProvenance : undefined);
   }

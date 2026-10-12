@@ -541,7 +541,7 @@ export function ProductionQueuePanel({
           value={name}
           maxLength={120}
           onChange={(event) => setName(event.target.value)}
-          placeholder="例如：第 01 集 Krea2 + H3"
+          placeholder="例如：第 01 集 外部素材 · H3 批量"
         />
         <div className="production-queue-name-presets">
           <label>
@@ -805,7 +805,11 @@ export function ProductionQueuePanel({
                         创建重试项
                       </button>
                     )}
-                    {reviewRequired && <span className="review-required">需要处理</span>}
+                    {reviewRequired && (
+                      <span className="review-required" title="非瞬时错误不能一键重试">
+                        需要处理：核对素材/配方后跳过或新建批次（不会自动启动）
+                      </span>
+                    )}
                   </div>
                   {resultAssets.length > 0 && item.taskId && (
                     <div className="production-item-results" aria-label={`第 ${item.ordinal + 1} 项输出资产`}>

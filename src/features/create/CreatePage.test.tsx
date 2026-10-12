@@ -163,7 +163,7 @@ describe("M1-1 readiness actions", () => {
     expect(api.generate).not.toHaveBeenCalled();
   });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); sessionStorage.clear(); });
 const loaded = () => screen.findByLabelText("选择生成器");
 describe("Target11 controller", () => {
   it("preserves the video draft through historical image access without exposing new image generation", async () => {

@@ -76,7 +76,7 @@ beforeEach(() => {
   }));
   api.readinessGet.mockResolvedValue({ ready: false, issues: [], fieldErrors: [], actions: [] });
 });
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); sessionStorage.clear(); });
 
 it("B01/B02 external image binds to first_frame via OCC; generated image cannot use image slots", async () => {
   useStudioStore.getState().setPendingLibraryIntent({ kind: "asset", projectId: "project-a", assetId: "ext-img", mediaKind: "image" });
