@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE7B_BACKUP_PROMPTS",
+  "parentHead": "f43bb2175f1e375b763a29ae928dfa148279e9cd",
+  "planningParentHead": "f43bb2175f1e375b763a29ae928dfa148279e9cd",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "backupVersion": 21,
+    "exportDefaultProjectionChanged": true,
+    "strictReaderUnchanged": true,
+    "sourceDatabaseNotWritten": true,
+    "persistedPromptsPreserved": true,
+    "historicalProofBytesUnchanged": true,
+    "runtimeBytesUnchanged": true,
+    "singleQueue": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/testing/ui-phase7b-backup-prompt.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "3bbd32d34e5fde00d1b061c7534ba814867580a55b53c6758f633bd42b667e72"
+    },
+    "scripts/ui-phase7b-backup-prompt-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "3ffffc11d3a12c331a8f9634ac1f09e3d665fdec640eab0e69a114f012d25e32"
+    },
+    "scripts/ui-phase7b-workspace-hydration-successor-guard.mjs": {
+      "beforeHash": "2c0794b6654c7e41c113105cd56dbdaa019fa7004511175e01906fc967965f37",
+      "afterHash": "379f2be99a0a526971804eaebe1b8607678dc01b9955f7c37bba505ac6f9d3d1"
+    },
+    "src-tauri/src/application/project_backup_service.rs": {
+      "beforeHash": "4d30a34ce3611b2ad830d4e88b16b7ef8f49e2882a7df5f157ceb620d8413c9c",
+      "afterHash": "1dfa4e6c5e1bf47c802e9ba51e965494ecff84d512281c6e81772a83fcf89b19"
+    },
+    "src-tauri/src/infrastructure/database/repositories/project_backup.rs": {
+      "beforeHash": "d64a703f57fc3e4a788bed5dcffd2172518b26a98d63bf093c28e6cb0816e69c",
+      "afterHash": "e2f643cd68b54857cfe526fcb658063109beb699023464b8c4d5fc3b08c2d86d"
+    }
+  }
+}

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./boundary-validation-cache.mjs";
+import { uiPhase7BBackupPromptParentReader, phase7BBackupPromptScopeSince, phase7BBackupPromptFixtureFiles } from "./ui-phase7b-backup-prompt-successor-guard.mjs";
 
 export const HYDRATION_BASE = "0b0bd802aa185f4bc76409808cdae31d65aad93d";
 export const HYDRATION_PROOF = "docs/architecture/ui-phase7b-workspace-hydration-successor.json";
@@ -57,20 +58,11 @@ function parentFacts(root, base) {
 }
 // Historical fixtures intentionally have an empty Git index. Scope is established
 // by the validated live-byte checkpoint, NOT git diff's index-dependent deletions.
-const historicalScopes = new Map();
 export function phase7BHydrationScopeSince(root, base) {
-  const key = JSON.stringify([immutableGitStoreIdentity(root), base]);
-  if (historicalScopes.has(key)) return historicalScopes.get(key);
-  const tip = parentFacts(root, HYDRATION_BASE), old = parentFacts(root, base);
-  const scope = [...new Set([
-    ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
-    ...HYDRATION_CHANGED, ...HYDRATION_ADDED, HYDRATION_PROOF,
-  ])].sort();
-  historicalScopes.set(key, scope);
-  return scope;
+  return phase7BBackupPromptScopeSince(root, base);
 }
 export function phase7BHydrationFixtureFiles(root) {
-  return [...parentFacts(root, HYDRATION_BASE).paths, ...HYDRATION_ADDED, HYDRATION_PROOF];
+  return phase7BBackupPromptFixtureFiles(root);
 }
 const contracts = { historicalProofBytesUnchanged: true, runtimeBytesUnchanged: true,
   migrationUnchanged: true, backupUnchanged: true, singleQueue: true,
@@ -82,10 +74,10 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [];
   const fail = id => violations.push("ui-phase7b-hydration-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(successor.read(p));
   const facts = parentFacts(workspace, HYDRATION_BASE);
   const parent = p => facts.read(p);
   let proof;
@@ -103,10 +95,11 @@ function validate(root, override) {
       // src-tauri contains ignored build output; Git inventory below covers those source paths.
       return d === "src-tauri" ? [] : files(workspace, d);
     }).filter(p => !p.includes("node_modules/"));
-    const gitPaths = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"]).trim().split(/\r?\n/).filter(relevant);
+    const gitPaths = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"]).trim().split(/\r?\n/)
+      .filter(p => relevant(p) && !successor.addedPaths.includes(p));
     const expectedPaths = [...basePaths, ...HYDRATION_ADDED, HYDRATION_PROOF].sort();
     if (JSON.stringify([...new Set(gitPaths)].sort()) !== JSON.stringify(expectedPaths)) fail("inventory");
-    if (actualPaths.some(p => !expectedPaths.includes(p))) fail("illegal-file");
+    if (actualPaths.some(p => !successor.addedPaths.includes(p) && !expectedPaths.includes(p))) fail("illegal-file");
     const changed = basePaths.filter(p => live(p) !== parent(p));
     const added = gitPaths.filter(p => !basePaths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -131,14 +124,22 @@ function validate(root, override) {
         || !source.includes("generation !== reloadGeneration.current")
         || !source.includes("setShots(nextShots)") || !source.includes("setLoadWarning(")) fail("hydration-contract");
   } catch (error) { fail("validation:" + String(error).slice(0, 160)); }
-  return { violations, changedPaths: HYDRATION_CHANGED,
-    addedPaths: [...HYDRATION_ADDED, HYDRATION_PROOF],
-    afterHashes: Object.fromEntries([...HYDRATION_CHANGED, ...HYDRATION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations: [...successor.violations, ...violations],
+    changedPaths: [...new Set([...HYDRATION_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...HYDRATION_ADDED, HYDRATION_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...HYDRATION_CHANGED, ...HYDRATION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => HYDRATION_CHANGED.includes(p) ? parent(p) : live(p) };
 }
 export function uiPhase7BWorkspaceHydrationParentReader(root, override = undefined) {
+  const successor = uiPhase7BBackupPromptParentReader(root, override);
+  if (successor.violations.length) {
+    const violations = [...successor.violations];
+    // Preserve the historical guard's precise public rejection reason.
+    if (violations.includes("ui-phase7b-backup-prompts-runtime-package-bytes")) violations.push("ui-phase7b-hydration-runtime-package-bytes");
+    return { ...successor, violations };
+  }
   // These overrides are source bytes, not cachedBoundary's immutable review object.
-  if (override) return validate(root, override);
+  if (override) return validate(root, override, successor);
   return cachedBoundary(root, "uiPhase7BWorkspaceHydrationParentReader", override,
-    () => validate(root, override), HYDRATION_PROOF);
+    () => validate(root, override, successor), HYDRATION_PROOF);
 }
