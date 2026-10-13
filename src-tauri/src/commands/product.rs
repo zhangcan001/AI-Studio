@@ -40,7 +40,21 @@ pub async fn product_creation_inputs_get(
     state: State<'_, AppState>,
     selection: crate::application::product::video_inputs::VideoInputSelection,
 ) -> Result<crate::application::product::video_inputs::VideoInputView, ProductError> {
-    crate::application::product::video_inputs::get(&state.shots.video_inputs, selection).await
+    #[cfg(feature = "native-acceptance-delay")]
+    let probe = crate::native_acceptance::Probe::begin(
+        "product_creation_inputs_get",
+        &selection.project_id,
+        &selection.shot_id,
+    );
+    let result = async {
+        crate::application::product::video_inputs::get(&state.shots.video_inputs, selection).await
+    }
+    .await;
+    #[cfg(feature = "native-acceptance-delay")]
+    if let Some(probe) = probe {
+        probe.finish().await;
+    }
+    result
 }
 
 #[derive(serde::Serialize)]
@@ -392,20 +406,34 @@ pub async fn product_creation_get(
     shot_id: Option<String>,
     stage: String,
 ) -> Result<CreationContext, ProductError> {
-    let facade = creation(&state);
-    let mut context = facade
-        .get(
-            &state.projects.command_center,
-            &state.assets.query,
-            &project_id,
-            shot_id.as_deref(),
-            &stage,
-        )
-        .await?;
-    facade
-        .project_prompt_choices(&mut context, &state.catalog.prompt_library)
-        .await?;
-    Ok(context)
+    #[cfg(feature = "native-acceptance-delay")]
+    let probe = crate::native_acceptance::Probe::begin(
+        "product_creation_get",
+        &project_id,
+        shot_id.as_deref().unwrap_or(""),
+    );
+    let result = async {
+        let facade = creation(&state);
+        let mut context = facade
+            .get(
+                &state.projects.command_center,
+                &state.assets.query,
+                &project_id,
+                shot_id.as_deref(),
+                &stage,
+            )
+            .await?;
+        facade
+            .project_prompt_choices(&mut context, &state.catalog.prompt_library)
+            .await?;
+        Ok(context)
+    }
+    .await;
+    #[cfg(feature = "native-acceptance-delay")]
+    if let Some(probe) = probe {
+        probe.finish().await;
+    }
+    result
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -522,9 +550,19 @@ pub async fn product_run_get(
     project_id: String,
     run_ref: RunRef,
 ) -> Result<ProductRun, ProductError> {
-    runs(&state)
-        .get_detail(&project_id, run_ref, &run_details(&state))
-        .await
+    #[cfg(feature = "native-acceptance-delay")]
+    let probe = crate::native_acceptance::Probe::begin("product_run_get", &project_id, &run_ref.id);
+    let result = async {
+        runs(&state)
+            .get_detail(&project_id, run_ref, &run_details(&state))
+            .await
+    }
+    .await;
+    #[cfg(feature = "native-acceptance-delay")]
+    if let Some(probe) = probe {
+        probe.finish().await;
+    }
+    result
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -533,9 +571,20 @@ pub async fn product_run_results_get(
     project_id: String,
     run_ref: RunRef,
 ) -> Result<Vec<RunResult>, ProductError> {
-    runs(&state)
-        .results_get(&project_id, run_ref, &run_details(&state))
-        .await
+    #[cfg(feature = "native-acceptance-delay")]
+    let probe =
+        crate::native_acceptance::Probe::begin("product_run_results_get", &project_id, &run_ref.id);
+    let result = async {
+        runs(&state)
+            .results_get(&project_id, run_ref, &run_details(&state))
+            .await
+    }
+    .await;
+    #[cfg(feature = "native-acceptance-delay")]
+    if let Some(probe) = probe {
+        probe.finish().await;
+    }
+    result
 }
 
 #[tauri::command(rename_all = "camelCase")]

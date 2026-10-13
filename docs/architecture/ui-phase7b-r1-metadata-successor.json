@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE7B_R1_METADATA",
+  "parentHead": "0c3be97a88d5458fc16851bfa19dc10172007886",
+  "planningParentHead": "0c3be97a88d5458fc16851bfa19dc10172007886",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": true,
+    "backupVersion": 21,
+    "optionalExecutionMetadata": true,
+    "legacyUnknownNonExecutable": true,
+    "restoredOwnerRemapped": true,
+    "typedMediaRemapped": true,
+    "sourceDatabaseNotWritten": true,
+    "historicalProofBytesUnchanged": true,
+    "runtimeBytesUnchanged": true,
+    "singleQueue": true,
+    "gpuExecuted": false,
+    "nativeDelayDebugOnly": true
+  },
+  "files": {
+    "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "b3a83193b412c1f9a69f45dffaee4aa419582669ee94fc00b6425a6015bfc982"
+    },
+    "scripts/ui-phase7b-backup-prompt-successor-guard.mjs": {
+      "beforeHash": "3ffffc11d3a12c331a8f9634ac1f09e3d665fdec640eab0e69a114f012d25e32",
+      "afterHash": "4fa20b6eeb77b4306b3bbe84061bd26dc758f2cebc79f46e27c406911650a02a"
+    },
+    "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "dab3a886920ba4e4aff68c09e3830941121339f524c14b8fa4e5af1e16ab4884"
+    },
+    "src-tauri/Cargo.toml": {
+      "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
+      "afterHash": "0d9ec801780f7e2061f09d426311fd7590a6aac448f93523d745c44cd589da9e"
+    },
+    "src-tauri/src/application/production_queue_service.rs": {
+      "beforeHash": "6ad0048238227803cae69d09707058fbf667307baf83b57bc8218e204629e3f3",
+      "afterHash": "4798a2d442a1d18af0237f29a858cb30ffa5495564f455f6a319f2ec8603fae1"
+    },
+    "src-tauri/src/application/project_backup_service.rs": {
+      "beforeHash": "1dfa4e6c5e1bf47c802e9ba51e965494ecff84d512281c6e81772a83fcf89b19",
+      "afterHash": "caba2d68c845908cf196382fc43732e62eaa3b5c05d602856511699f48882855"
+    },
+    "src-tauri/src/commands/product.rs": {
+      "beforeHash": "2306a3e249c2bd548aa9b468e64e15369a82f6ab1692860b0bc37233d537018b",
+      "afterHash": "4b349e288cf5eabb6f5abaa1565664b4ac06aed757c0a2708de5dd00ea0fd2af"
+    },
+    "src-tauri/src/infrastructure/database/repositories/project_backup.rs": {
+      "beforeHash": "e2f643cd68b54857cfe526fcb658063109beb699023464b8c4d5fc3b08c2d86d",
+      "afterHash": "203c0354ab5c8ea04f3c96b8197eaab9608675004400dc8422dc7aa0d4ac8e2d"
+    },
+    "src-tauri/src/lib.rs": {
+      "beforeHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77",
+      "afterHash": "8e416699a8ab999887d282f336891169d2d7c910cc5544ebb1df90ee5f462516"
+    }
+  }
+}

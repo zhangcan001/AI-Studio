@@ -25,6 +25,163 @@ use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
 const BACKUP_VERSION: u32 = 21;
 
+pub(crate) mod queue_metadata {
+    //! Additive v21 queue metadata; historical archives may omit all three fields.
+    use super::{BackupBatchItem, BackupDocument};
+    use crate::application::production_queue_service::{
+        DIRECT_GENERATION_CONTEXT_KEY, RESTORED_EXECUTION_UNKNOWN,
+    };
+    use crate::error::AppError;
+    use serde_json::{Map, Value};
+    use std::collections::{HashMap, HashSet};
+
+    pub(super) fn validate(document: &BackupDocument) -> Result<(), AppError> {
+        let batches: HashSet<_> = document.batches.iter().map(|x| x.id.as_str()).collect();
+        let assets: HashSet<_> = document.assets.iter().map(|x| x.id.as_str()).collect();
+        let tasks: HashSet<_> = document.tasks.iter().map(|x| x.id.as_str()).collect();
+        let mut ids = HashSet::new();
+        let mut keys = HashSet::new();
+        for item in &document.items {
+            if !ids.insert(item.id.as_str())
+                || !batches.contains(item.batch_id.as_str())
+                || item
+                    .project_id
+                    .as_deref()
+                    .is_some_and(|id| id != document.project.id)
+                // Live tasks are intentionally excluded from archives.
+                || (item.execution_type.is_some() && item.status == "SUCCEEDED"
+                    && item.task_id.as_deref().is_some_and(|id| !tasks.contains(id)))
+            {
+                return Err(AppError::backup_invalid("生产批次项目的身份或项目归属无效"));
+            }
+            if let Some(key) = item.submission_idempotency_key.as_deref() {
+                if key.is_empty() || key.trim() != key || !keys.insert(key) {
+                    return Err(AppError::backup_invalid("生产批次提交幂等键无效或重复"));
+                }
+            }
+            let Some(values) = item.values.as_object() else {
+                return Err(AppError::backup_invalid("生产批次冻结输入必须为对象"));
+            };
+            for value in values.values() {
+                for id in media_ids(value).map_err(AppError::backup_invalid)? {
+                    if item.execution_type.is_some() && !assets.contains(id) {
+                        return Err(AppError::backup_invalid("生产批次冻结输入引用了归档外素材"));
+                    }
+                }
+            }
+            if let Some(context) = values.get(DIRECT_GENERATION_CONTEXT_KEY) {
+                let Some(context) = context.as_object() else {
+                    return Err(AppError::backup_invalid("生产批次执行上下文无效"));
+                };
+                if let Some(kind) = item.execution_type {
+                    if context
+                        .get("executionType")
+                        .and_then(Value::as_str)
+                        .is_some_and(|x| x != kind.as_str())
+                        || context
+                            .get("submissionIdempotencyKey")
+                            .and_then(Value::as_str)
+                            .is_some_and(|x| Some(x) != item.submission_idempotency_key.as_deref())
+                        || context
+                            .get("shotId")
+                            .and_then(Value::as_str)
+                            .is_some_and(|id| {
+                                !document
+                                    .shots
+                                    .iter()
+                                    .any(|shot| shot.id == id && shot.project_id == document.project.id)
+                            })
+                    {
+                        return Err(AppError::backup_invalid(
+                            "生产批次显式执行身份与冻结上下文不一致",
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn media_ids(value: &Value) -> Result<Vec<&str>, String> {
+        match value.get("type").and_then(Value::as_str) {
+            Some("image_asset" | "video_asset" | "audio_asset") => value
+                .get("assetId")
+                .and_then(Value::as_str)
+                .map(|id| vec![id])
+                .ok_or_else(|| "冻结素材引用无效".to_owned()),
+            Some("image_assets" | "video_assets" | "audio_assets") => value
+                .get("assetIds")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "冻结素材序列无效".to_owned())?
+                .iter()
+                .map(|id| id.as_str().ok_or_else(|| "冻结素材序列身份无效".to_owned()))
+                .collect(),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    pub(crate) fn restore_values(
+        item: &BackupBatchItem,
+        assets: &HashMap<String, String>,
+        shots: &HashMap<String, String>,
+    ) -> Result<Value, String> {
+        let mut values = item.values.clone();
+        let object = values
+            .as_object_mut()
+            .ok_or_else(|| "冻结输入必须为对象".to_owned())?;
+        // Only typed media IDs are runtime references. Scalar text and archived
+        // preparation snapshots remain immutable historical evidence.
+        for value in object.values_mut() {
+            match value.get("type").and_then(Value::as_str) {
+                Some("image_asset" | "video_asset" | "audio_asset") => {
+                    let id = value["assetId"]
+                        .as_str()
+                        .ok_or_else(|| "冻结素材引用无效".to_owned())?;
+                    if let Some(remapped) = assets.get(id) {
+                        value["assetId"] = Value::String(remapped.clone());
+                    } else if item.execution_type.is_some() {
+                        return Err("冻结素材无法重映射".to_owned());
+                    }
+                }
+                Some("image_assets" | "video_assets" | "audio_assets") => {
+                    let ids = value["assetIds"]
+                        .as_array_mut()
+                        .ok_or_else(|| "冻结素材序列无效".to_owned())?;
+                    for id in ids {
+                        if let Some(remapped) =
+                            assets.get(id.as_str().ok_or_else(|| "冻结素材身份无效".to_owned())?)
+                        {
+                            *id = Value::String(remapped.clone());
+                        } else if item.execution_type.is_some() {
+                            return Err("冻结素材无法重映射".to_owned());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if item.execution_type.is_none() || object.contains_key(DIRECT_GENERATION_CONTEXT_KEY) {
+            let context = object
+                .entry(DIRECT_GENERATION_CONTEXT_KEY)
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| "执行上下文无效".to_owned())?;
+            if let Some(shot) = context
+                .get("shotId")
+                .and_then(Value::as_str)
+                .and_then(|id| shots.get(id))
+            {
+                context.insert("shotId".to_owned(), Value::String(shot.clone()));
+            }
+            if item.execution_type.is_none() {
+                // No type inference from names, keys or recipe shape. This is a
+                // persisted fail-closed flag in the existing execution context.
+                context.insert(RESTORED_EXECUTION_UNKNOWN.to_owned(), Value::Bool(true));
+            }
+        }
+        Ok(values)
+    }
+}
 mod video_inputs;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
@@ -1804,6 +1961,12 @@ pub(crate) struct BackupBatch {
 pub(crate) struct BackupBatchItem {
     pub(crate) id: String,
     pub(crate) batch_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) execution_type: Option<crate::application::production_queue_service::ExecutionType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) submission_idempotency_key: Option<String>,
     pub(crate) ordinal: i64,
     pub(crate) workflow_version_id: String,
     pub(crate) recipe_id: String,
@@ -2684,6 +2847,7 @@ fn validate_document_entries(
         }
     }
     validate_asset_video_prompt_document(document)?;
+    queue_metadata::validate(document)?;
     validate_project_workflow_binding_document(document, version)?;
     validate_workflow_registry_document(document, version)?;
     validate_production_item_review_document(document)?;
@@ -7896,6 +8060,296 @@ mod tests {
         assert!(restored_binding.5.starts_with("bnd_"));
         assert_ne!(restored_binding.5, "bnd_stale_binding");
         assert_eq!(restored.backup_version, super::BACKUP_VERSION);
+    }
+
+    #[tokio::test]
+    async fn v21_execution_metadata_legacy_omission_stays_unknown_and_non_executable() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        service.export(&project_id, archive.clone()).await.unwrap();
+        let legacy = directory.path().join("legacy-v21.aiarchive");
+        rewrite_v21_queue_document(&archive, &legacy, |document| {
+            for item in document["items"].as_array_mut().unwrap() {
+                for key in ["projectId", "executionType", "submissionIdempotencyKey"] {
+                    item.as_object_mut().unwrap().remove(key);
+                }
+                item["values"] = json!({
+                    "first_frame":{"type":"image_asset","assetId":"ast_deleted_history"},
+                    "__ai_studio_direct_generation_context":{
+                        "executionType":"DIRECT", "submissionIdempotencyKey":"workflow-execution-batch:legacy-key"
+                    }
+                });
+            }
+        });
+        let (manifest, document, _) = inspect_archive(&legacy).unwrap();
+        assert_eq!(manifest.version, 21);
+        assert!(document.items[0].execution_type.is_none());
+        let preview = service.inspect(legacy).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let row: (String,Option<String>,Option<String>,String,String) = sqlx::query_as(
+            "SELECT i.project_id,i.execution_type,i.submission_idempotency_key,i.values_json,i.status FROM production_batch_items i JOIN production_batches b ON b.id=i.batch_id WHERE b.project_id=?")
+            .bind(&restored.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(row.0, restored.id);
+        assert_eq!(
+            row.1, None,
+            "never infer a type from an inline hint or key prefix"
+        );
+        assert_eq!(row.2, None, "do not invent a source idempotency key");
+        assert_eq!(row.4, "SUCCEEDED", "historical outcome remains untouched");
+        let values: serde_json::Value = serde_json::from_str(&row.3).unwrap();
+        assert_eq!(values["first_frame"]["assetId"], "ast_deleted_history");
+        assert!(
+            crate::application::production_queue_service::ensure_restored_execution_known(&values)
+                .is_err()
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_deferred_starts")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE project_id=?")
+                .bind(&project_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn v21_execution_metadata_rejects_forged_owner_type_keys_and_references() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        sqlx::query("UPDATE production_batch_items SET project_id=?,execution_type='DIRECT',submission_idempotency_key='source-key' WHERE id='pbi_current_v20'")
+            .bind(&project_id).execute(&pool).await.unwrap();
+        service.export(&project_id, archive.clone()).await.unwrap();
+        for case in [
+            "owner",
+            "type",
+            "duplicate-key",
+            "empty-key",
+            "asset",
+            "task",
+            "context",
+        ] {
+            let invalid = directory.path().join(format!("invalid-{case}.aiarchive"));
+            rewrite_v21_queue_document(&archive, &invalid, |document| {
+                let items = document["items"].as_array_mut().unwrap();
+                match case {
+                    "owner" => items[0]["projectId"] = json!("another-project"),
+                    "type" => items[0]["executionType"] = json!("GUESSED_FROM_NAME"),
+                    "duplicate-key" => {
+                        let mut duplicate = items[0].clone();
+                        duplicate["id"] = json!("pbi_duplicate");
+                        duplicate["ordinal"] = json!(1);
+                        items.push(duplicate);
+                    }
+                    "empty-key" => items[0]["submissionIdempotencyKey"] = json!(" "),
+                    "asset" => {
+                        items[0]["values"] = json!({"reference_image":{"type":"image_asset","assetId":"ast_outside_project"}})
+                    }
+                    "task" => items[0]["taskId"] = json!("tsk_unresolved"),
+                    "context" => {
+                        items[0]["values"] = json!({"__ai_studio_direct_generation_context":{"executionType":"WORKFLOW_BATCH"}})
+                    }
+                    _ => unreachable!(),
+                }
+            });
+            let error = service.inspect(invalid).await.expect_err(case);
+            assert_eq!(error.code(), "BACKUP_INVALID", "{case}");
+        }
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id LIKE 'prj_%'")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE project_id=?")
+                .bind(&project_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn v21_execution_metadata_repeated_restores_scope_unique_keys_and_consume_confirmation() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        sqlx::query("UPDATE production_batch_items SET project_id=?,execution_type='DIRECT',submission_idempotency_key='same-source-key' WHERE id='pbi_current_v20'")
+            .bind(&project_id).execute(&pool).await.unwrap();
+        service.export(&project_id, archive.clone()).await.unwrap();
+        let preview = service.inspect(archive.clone()).await.unwrap();
+        let first = service.restore(&preview.inspection_id).await.unwrap();
+        assert!(
+            service.restore(&preview.inspection_id).await.is_err(),
+            "same confirmation cannot import history twice"
+        );
+        let second_preview = service.inspect(archive).await.unwrap();
+        let second = service
+            .restore(&second_preview.inspection_id)
+            .await
+            .unwrap();
+        assert_ne!(first.id, second.id);
+        for id in [&first.id, &second.id] {
+            let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM production_batch_items WHERE project_id=? AND submission_idempotency_key='same-source-key'")
+                .bind(id).fetch_one(&pool).await.unwrap();
+            assert_eq!(count, 1);
+        }
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE status!='SUCCEEDED'")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_deferred_starts")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    fn rewrite_v21_queue_document(
+        source: &Path,
+        destination: &Path,
+        mutate: impl FnOnce(&mut serde_json::Value),
+    ) {
+        let mut archive = zip::ZipArchive::new(File::open(source).unwrap()).unwrap();
+        let mut bytes = Vec::new();
+        archive
+            .by_name("project.json")
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        let mut project: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        mutate(&mut project);
+        let project_bytes = serde_json::to_vec_pretty(&project).unwrap();
+        let mut writer = ZipWriter::new(File::create(destination).unwrap());
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).unwrap();
+            let name = entry.name().to_owned();
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            if name == "manifest.json" {
+                let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                manifest["logicalSnapshotChecksum"] = json!(hash_bytes(&project_bytes));
+                bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+            }
+            if name == "project.json" {
+                bytes = project_bytes.clone();
+            }
+            writer.start_file(name, options).unwrap();
+            writer.write_all(&bytes).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    #[tokio::test]
+    async fn v21_execution_metadata_roundtrip_preserves_authority_and_remaps_owned_inputs() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        let values = json!({
+            "reference_image": {"type":"image_asset", "assetId":"ast_current_v20"},
+            "prompt": {"type":"string", "value":"ast_current_v20"},
+            "__ai_studio_direct_generation_context": {
+                "shotId":"sht_current_v20", "stage":"image", "executionType":"DIRECT",
+                "submissionIdempotencyKey":"direct-source-key"
+            }
+        });
+        sqlx::query("UPDATE production_batch_items SET project_id = ?, execution_type = 'DIRECT', submission_idempotency_key = 'direct-source-key', values_json = ? WHERE id = 'pbi_current_v20'")
+            .bind(&project_id).bind(values.to_string()).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO production_batch_items (id,batch_id,ordinal,workflow_version_id,recipe_id,values_json,status,created_at,updated_at,project_id,execution_type,submission_idempotency_key) VALUES ('pbi_workflow_current_v21','pbt_current_v20',1,'workflow-version-1','recipe-1','{}','PENDING','2026-01-01T00:03:00Z','2026-01-01T00:03:00Z',?,'WORKFLOW_BATCH','workflow-source-key')")
+            .bind(&project_id).execute(&pool).await.unwrap();
+        service.export(&project_id, archive.clone()).await.unwrap();
+        let (_, document, _) = inspect_archive(&archive).unwrap();
+        let exported = serde_json::to_value(&document).unwrap();
+        let item = exported["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == "pbi_current_v20")
+            .unwrap();
+        assert_eq!(item["projectId"], json!(project_id));
+        assert_eq!(item["executionType"], "DIRECT");
+        assert_eq!(item["submissionIdempotencyKey"], "direct-source-key");
+        let preview = service.inspect(archive.clone()).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let rows: Vec<(String, Option<String>, Option<String>, String, String, Option<String>)> =
+            sqlx::query_as("SELECT i.project_id,i.execution_type,i.submission_idempotency_key,i.values_json,i.status,i.error_code FROM production_batch_items i JOIN production_batches b ON b.id=i.batch_id WHERE b.project_id=? ORDER BY i.ordinal")
+            .bind(&restored.id).fetch_all(&pool).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.0 == restored.id));
+        assert_eq!(rows[0].1.as_deref(), Some("DIRECT"));
+        assert_eq!(rows[0].2.as_deref(), Some("direct-source-key"));
+        assert_eq!(rows[0].4, "SUCCEEDED");
+        assert_eq!(rows[1].1.as_deref(), Some("WORKFLOW_BATCH"));
+        assert_eq!(rows[1].2.as_deref(), Some("workflow-source-key"));
+        assert_eq!(rows[1].4, "FAILED");
+        assert_eq!(rows[1].5.as_deref(), Some("RESTORED_INCOMPLETE_TASK"));
+        let remapped: serde_json::Value = serde_json::from_str(&rows[0].3).unwrap();
+        let asset: String = sqlx::query_scalar(
+            "SELECT id FROM assets WHERE project_id=? AND name='Generated harbor'",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let shot: String = sqlx::query_scalar("SELECT id FROM shots WHERE project_id=?")
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remapped["reference_image"]["assetId"], asset);
+        assert_eq!(
+            remapped["prompt"]["value"], "ast_current_v20",
+            "scalar text is not an asset reference"
+        );
+        assert_eq!(
+            remapped["__ai_studio_direct_generation_context"]["shotId"],
+            shot
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE project_id=?")
+                .bind(&project_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT values_json FROM production_batch_items WHERE id='pbi_current_v20'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            values.to_string(),
+            "source frozen inputs remain unchanged"
+        );
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

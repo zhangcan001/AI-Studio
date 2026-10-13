@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./boundary-validation-cache.mjs";
 
+import { uiPhase7BR1MetadataParentReader, phase7BR1MetadataScopeSince, phase7BR1MetadataFixtureFiles } from "./ui-phase7b-r1-metadata-successor-guard.mjs";
+
 export const BACKUP_PROMPT_BASE = "f43bb2175f1e375b763a29ae928dfa148279e9cd";
 export const BACKUP_PROMPT_PROOF = "docs/architecture/ui-phase7b-backup-prompt-successor.json";
 export const BACKUP_PROMPT_CHANGED = [
@@ -53,15 +55,12 @@ function facts(root, base) {
   return factsCache.get(key);
 }
 export function phase7BBackupPromptScopeSince(root, base) {
-  const tip = facts(root, BACKUP_PROMPT_BASE), old = facts(root, base);
-  return [...new Set([
-    ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
-    ...BACKUP_PROMPT_CHANGED, ...BACKUP_PROMPT_ADDED, BACKUP_PROMPT_PROOF,
-  ])].sort();
+  return phase7BR1MetadataScopeSince(root, base);
 }
 export function phase7BBackupPromptFixtureFiles(root) {
-  return [...facts(root, BACKUP_PROMPT_BASE).paths, ...BACKUP_PROMPT_ADDED, BACKUP_PROMPT_PROOF];
+  return phase7BR1MetadataFixtureFiles(root);
 }
+
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
     const p = dir + "/" + e.name;
@@ -69,10 +68,10 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, BACKUP_PROMPT_BASE);
   const fail = id => violations.push("ui-phase7b-backup-prompts-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(BACKUP_PROMPT_PROOF));
@@ -85,10 +84,10 @@ function validate(root, override) {
     const allowed = [...scope, BACKUP_PROMPT_PROOF].sort();
     const expected = [...parent.paths, ...BACKUP_PROMPT_ADDED, BACKUP_PROMPT_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = ["src", "scripts", "docs/architecture"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !successor.addedPaths.includes(p) && !expected.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -119,13 +118,15 @@ function validate(root, override) {
     if (aggregate(p => parent.raw(p)) !== profiles.git
         || aggregate(p => readFileSync(join(workspace, p))) !== profiles[profile]) fail("runtime-package-bytes");
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: BACKUP_PROMPT_CHANGED,
-    addedPaths: [...BACKUP_PROMPT_ADDED, BACKUP_PROMPT_PROOF],
-    afterHashes: Object.fromEntries([...BACKUP_PROMPT_CHANGED, ...BACKUP_PROMPT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations: [...successor.violations, ...violations], changedPaths: [...new Set([...BACKUP_PROMPT_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...BACKUP_PROMPT_ADDED, BACKUP_PROMPT_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...BACKUP_PROMPT_CHANGED, ...BACKUP_PROMPT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => BACKUP_PROMPT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function uiPhase7BBackupPromptParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
+  const successor = uiPhase7BR1MetadataParentReader(root, override);
+  if (successor.violations.length) return { ...successor, violations: [...successor.violations, ...(successor.violations.includes("ui-phase7b-r1-metadata-runtime-package-bytes") ? ["ui-phase7b-backup-prompts-runtime-package-bytes"] : [])] };
+  if (override) return validate(root, override, successor);
   return cachedBoundary(root, "uiPhase7BBackupPromptParentReader", undefined,
-    () => validate(root, undefined), BACKUP_PROMPT_PROOF);
+    () => validate(root, undefined, successor), BACKUP_PROMPT_PROOF);
 }

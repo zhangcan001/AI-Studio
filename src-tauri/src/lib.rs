@@ -1,3 +1,104 @@
+#[cfg(all(feature = "native-acceptance-delay", not(debug_assertions)))]
+compile_error!("native acceptance latency is forbidden in release builds");
+#[cfg(any(test, feature = "native-acceptance-delay"))]
+mod native_acceptance {
+    //! Read-only, bounded actual IPC response delay for owned debug Native acceptance.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+    fn allowed(command: &str, milliseconds: u64) -> bool {
+        matches!(
+            command,
+            "product_creation_get"
+                | "product_creation_inputs_get"
+                | "product_run_get"
+                | "product_run_results_get"
+        ) && (1..=12000).contains(&milliseconds)
+    }
+    pub(crate) struct Probe {
+        command: &'static str,
+        context: String,
+        sequence: u64,
+        start: Instant,
+        delay: u64,
+    }
+    impl Probe {
+        pub(crate) fn begin(command: &'static str, project: &str, context: &str) -> Option<Self> {
+            let delay = std::env::var("AI_STUDIO_NATIVE_ACCEPTANCE_DELAY_MS")
+                .ok()?
+                .parse()
+                .ok()?;
+            // Opt-in is scoped to one exact project/context and an explicitly owned root.
+            let root = std::env::var("AI_STUDIO_DATA_ROOT").ok()?;
+            if !allowed(command, delay)
+                || std::env::var("AI_STUDIO_NATIVE_ACCEPTANCE_OWNED_ROOT")
+                    .ok()?
+                    .as_str()
+                    != root
+                || std::env::var("AI_STUDIO_NATIVE_ACCEPTANCE_PROJECT")
+                    .ok()?
+                    .as_str()
+                    != project
+                || std::env::var("AI_STUDIO_NATIVE_ACCEPTANCE_CONTEXT")
+                    .ok()?
+                    .as_str()
+                    != context
+            {
+                return None;
+            }
+            let probe = Self {
+                command,
+                context: context.to_owned(),
+                sequence: SEQUENCE.fetch_add(1, Ordering::Relaxed),
+                start: Instant::now(),
+                delay,
+            };
+            probe.log("request_start");
+            Some(probe)
+        }
+        fn log(&self, event: &str) {
+            eprintln!(
+                "native acceptance: {}",
+                serde_json::json!({
+                    "event": event, "command": self.command, "contextId": self.context,
+                    "requestId": self.sequence, "elapsedMs": self.start.elapsed().as_millis(),
+                    "utc": chrono::Utc::now().to_rfc3339(), "delayMs": self.delay
+                })
+            );
+        }
+        pub(crate) async fn finish(self) {
+            self.log("real_read_complete");
+            tokio::time::sleep(Duration::from_millis(self.delay)).await;
+            self.log("response_release");
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn only_read_only_getters_and_bounded_delay_are_accepted() {
+            for name in [
+                "product_creation_get",
+                "product_creation_inputs_get",
+                "product_run_get",
+                "product_run_results_get",
+            ] {
+                assert!(super::allowed(name, 8000));
+                assert!(!super::allowed(name, 0));
+                assert!(!super::allowed(name, 12001));
+            }
+            for name in [
+                "product_creation_generate",
+                "product_run_start",
+                "product_run_retry",
+                "product_creation_inputs_save",
+            ] {
+                assert!(!super::allowed(name, 8000));
+            }
+        }
+    }
+}
+
 mod app_state;
 pub mod application;
 mod commands;

@@ -898,6 +898,9 @@ struct DbBatch {
 struct DbBatchItem {
     id: String,
     batch_id: String,
+    project_id: Option<String>,
+    execution_type: Option<String>,
+    submission_idempotency_key: Option<String>,
     ordinal: i64,
     workflow_version_id: String,
     recipe_id: String,
@@ -1893,7 +1896,7 @@ async fn query_batch_items(
     let mut result = Vec::new();
     for batch in batches {
         let rows = sqlx::query_as::<_, DbBatchItem>(
-            "SELECT id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at FROM production_batch_items WHERE batch_id = ? ORDER BY ordinal",
+            "SELECT i.id, i.batch_id, i.ordinal, i.workflow_version_id, i.recipe_id, i.values_json, i.status, i.task_id, i.retry_of_item_id, i.error_code, i.error_message, i.created_at, i.updated_at, COALESCE(i.project_id,b.project_id) AS project_id, i.execution_type, i.submission_idempotency_key FROM production_batch_items i JOIN production_batches b ON b.id=i.batch_id WHERE i.batch_id = ? ORDER BY i.ordinal",
         )
         .bind(&batch.id)
         .fetch_all(&mut **transaction)
@@ -1903,6 +1906,18 @@ async fn query_batch_items(
             result.push(BackupBatchItem {
                 id: row.id,
                 batch_id: row.batch_id,
+                project_id: row.project_id,
+                execution_type: row
+                    .execution_type
+                    .map(|value| {
+                        serde_json::from_value(serde_json::json!(value)).map_err(|error| {
+                            RepositoryError::integrity(format!(
+                                "invalid queue execution type: {error}"
+                            ))
+                        })
+                    })
+                    .transpose()?,
+                submission_idempotency_key: row.submission_idempotency_key,
                 ordinal: row.ordinal,
                 workflow_version_id: row.workflow_version_id,
                 recipe_id: row.recipe_id,
@@ -3617,8 +3632,11 @@ async fn restore_rows_in_transaction(
         } else {
             Some("恢复时未自动重新提交生产队列项目。".to_owned())
         };
-        sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, error_code, error_message, created_at, updated_at, retry_of_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(item_id).bind(batch_id).bind(item.ordinal).bind(resolve_mapped_id(&workflow_version_id_map, &item.workflow_version_id)).bind(resolve_mapped_id(&workflow_version_id_map, &item.recipe_id)).bind(item.values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
+        let values = queue_metadata::restore_values(item, asset_ids, shot_ids)
+            .map_err(RepositoryError::integrity)?;
+        sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, error_code, error_message, created_at, updated_at, retry_of_item_id, project_id, execution_type, submission_idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(item_id).bind(batch_id).bind(item.ordinal).bind(resolve_mapped_id(&workflow_version_id_map, &item.workflow_version_id)).bind(resolve_mapped_id(&workflow_version_id_map, &item.recipe_id)).bind(values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
+            .bind(&project.id).bind(item.execution_type.map(|value| value.as_str())).bind(&item.submission_idempotency_key)
             .execute(&mut **transaction).await.map_err(|error| RepositoryError::database(error.to_string()))?;
     }
     for template in &document.production_run_templates {
