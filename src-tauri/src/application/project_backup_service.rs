@@ -7899,6 +7899,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn current_v21_video_only_prompt_export_inspects_and_restores_without_source_writes() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        let video_prompt = "Only the video stage was edited in this valid project.";
+        sqlx::query(
+            "INSERT INTO shot_stage_prompts
+             (shot_id, stage, prompt_text, prompt_entry_id, prompt_version_id, updated_at)
+             VALUES ('sht_current_v20', 'video', ?, NULL, NULL, ?)",
+        )
+        .bind(video_prompt)
+        .bind("2026-01-02T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let source_prompts: Vec<(String, String)> = sqlx::query_as(
+            "SELECT stage, prompt_text FROM shot_stage_prompts
+             WHERE shot_id = 'sht_current_v20' ORDER BY stage",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let task_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        service.export(&project_id, archive.clone()).await.unwrap();
+        let preview = service
+            .inspect(archive.clone())
+            .await
+            .expect("a valid video-only prompt project must inspect its own v21 export");
+        assert_eq!(super::BACKUP_VERSION, 21);
+        assert_eq!(preview.shots, 1);
+        let (manifest, mut invalid_document, _) = inspect_archive(&archive).unwrap();
+        invalid_document
+            .shot_stage_prompts
+            .retain(|prompt| prompt.stage == "video");
+        let error = super::validate_shot_document(&invalid_document, manifest.version)
+            .expect_err("archive inspection must still reject missing stage rows");
+        assert_eq!(error.code(), "BACKUP_INVALID");
+        assert_eq!(
+            serde_json::to_value(error).unwrap()["message"],
+            json!("v10 备份必须为每个镜头保存 image/video 阶段 Prompt")
+        );
+        assert_eq!(
+            sqlx::query_as::<_, (String, String)>(
+                "SELECT stage, prompt_text FROM shot_stage_prompts
+                 WHERE shot_id = 'sht_current_v20' ORDER BY stage",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+            source_prompts,
+            "export and inspection must not fill rows in the source database"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            task_count,
+            "export and inspection must not create generation tasks"
+        );
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert_eq!(restored.status, "COMPLETE");
+        let prompts: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT p.stage, p.prompt_text, p.prompt_entry_id, p.prompt_version_id
+             FROM shot_stage_prompts p JOIN shots s ON s.id = p.shot_id
+             WHERE s.project_id = ? ORDER BY p.stage",
+        )
+        .bind(&restored.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(prompts[0].0, "image");
+        assert!(prompts[0].1.starts_with("A quiet harbor at dawn"));
+        assert_eq!(
+            prompts[1],
+            ("video".to_owned(), video_prompt.to_owned(), None, None)
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_stage_prompts WHERE shot_id = 'sht_current_v20'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1,
+            "restoration must not rewrite the original project's prompt rows"
+        );
+    }
+
+    #[tokio::test]
     async fn current_v20_export_is_immediately_inspectable() {
         let directory = tempdir().unwrap();
         let (_pool, service, project_id, archive) =

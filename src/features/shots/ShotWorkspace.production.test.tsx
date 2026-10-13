@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -124,7 +124,7 @@ vi.mock("../production/MultiPackageProductionBoard", () => {
 });
 
 vi.mock("./ProjectStructureTree", () => ({
-  ProjectStructureTree: () => <div aria-label="项目结构" />,
+  ProjectStructureTree: ({ headerActions }: { headerActions?: ReactNode }) => <div aria-label="项目结构">{headerActions}</div>,
 }));
 
 vi.mock("./ProjectProductionPipeline", () => ({
@@ -472,6 +472,78 @@ describe("ShotWorkspace production package queue integration", () => {
 
     expect(screen.getByRole("status").textContent).toContain("准备并创建待启动批次");
     expect(screen.getByRole("status").textContent).toContain("明确点击“开始生产”");
+  });
+
+  it("keeps four real shots visible when recent assets fail integrity validation and blocks unresolved TSV writes", async () => {
+    const user = userEvent.setup();
+    const shots: ShotView[] = Array.from({ length: 4 }, (_, ordinal) => ({
+      ...configReadFailureShot,
+      id: `shot-${ordinal + 1}`,
+      ordinal,
+      name: `镜头 ${ordinal + 1}`,
+      stageConfigs: [{
+        stage: "video",
+        workflowVersionId: "wfv-test",
+        recipeId: "rcp-i2v",
+        scalarValues: {},
+        updatedAt: "",
+      }],
+    }));
+    const videoRecipe = {
+      workflowId: "wf-test",
+      workflowVersionId: "wfv-test",
+      recipeId: "rcp-i2v",
+      name: "I2V 测试配方",
+      category: "video" as const,
+      mode: "I2V",
+      persistentInputs: true,
+      fields: [{ key: "first_frame", type: "image" as const, label: "首帧", required: true }],
+    };
+    mocks.listShots.mockResolvedValue(shots);
+    mocks.listRecentAssets.mockRejectedValue(new Error("generated assets must have a source task"));
+
+    render(<ShotWorkspace projectId="project-1" catalog={[videoRecipe]} />);
+    await screen.findByText("4 / 4");
+    expect(screen.getByRole("alert").textContent).toContain("素材列表加载失败");
+    expect(screen.getByRole("alert").textContent).toContain("镜头列表已保留");
+
+    await user.click(screen.getByRole("button", { name: "更多结构操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "批量绑定素材" }));
+    await user.click(screen.getByRole("tab", { name: "表格文本" }));
+    await user.type(screen.getByRole("textbox", { name: "批量绑定表格内容" }), "1\tfirst_frame\tast_missing");
+    await user.click(screen.getByRole("button", { name: "检查" }));
+
+    const preview = await screen.findByRole("table", { name: "批量绑定预览" });
+    await waitFor(() => expect(preview.textContent).toContain("镜头 1"));
+    expect(preview.textContent).not.toContain("项目中找不到该镜头");
+    expect((screen.getByRole("button", { name: "确认写入" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.startProductionQueue).not.toHaveBeenCalled();
+  });
+
+  it("preserves Shot navigation when optional prompt hydration fails and clears degraded warning on refresh", async () => {
+    const user = userEvent.setup();
+    mocks.listShots.mockResolvedValue([configReadFailureShot]);
+    mocks.listPromptLibrary.mockRejectedValueOnce(new Error("prompt store unavailable"));
+
+    render(<ShotWorkspace projectId="project-1" catalog={[]} />);
+    await screen.findByText("1 / 1");
+    expect(screen.getByRole("alert").textContent).toContain("提示词库加载失败");
+
+    await user.click(screen.getByRole("button", { name: "更多结构操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "刷新" }));
+    await waitFor(() => expect(mocks.listShots).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByText("1 / 1")).toBeTruthy();
+    expect(mocks.startProductionQueue).not.toHaveBeenCalled();
+  });
+
+  it("still fails closed when the authoritative Shot list cannot load", async () => {
+    mocks.listShots.mockRejectedValue(new Error("shot list unavailable"));
+    render(<ShotWorkspace projectId="project-1" catalog={[]} />);
+    await screen.findByText("0 / 0");
+    expect(screen.getByText("0 / 0")).toBeTruthy();
+    expect(screen.queryByText("1 / 1")).toBeNull();
+    expect(mocks.startProductionQueue).not.toHaveBeenCalled();
   });
 
   it("fails closed with an explicit project workflow loading error", async () => {

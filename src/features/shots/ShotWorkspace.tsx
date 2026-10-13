@@ -336,6 +336,7 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [loadWarning, setLoadWarning] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [videoInputsReady, setVideoInputsReady] = useState<{owner: string; ready: boolean}>();
   const onVideoInputsReadyChange = useCallback((owner: string, ready: boolean) => {
@@ -525,8 +526,11 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
     const generation = ++reloadGeneration.current;
     setLoading(true);
     setError(undefined);
+    setLoadWarning(undefined);
     try {
-      const [nextShots, nextAssets, promptPage, nextAnchors, nextStructure, nextRunbook, nextPresets] = await Promise.all([
+      // A damaged asset must not make an independently loaded Shot list disappear.
+      // Keep the Shot query authoritative, while optional hydration fails closed.
+      const [shotsResult, assetsResult, promptsResult, anchorsResult, structureResult, runbookResult, presetsResult] = await Promise.allSettled([
         listShots(projectId),
         listRecentAssets(projectId, 80),
         listPromptLibrary(projectId, { kind: "prompt", limit: 100 }),
@@ -536,13 +540,19 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
         listBatchWorkflowPresets().catch(() => []),
       ]);
       if (generation !== reloadGeneration.current) return;
+      if (shotsResult.status === "rejected") throw shotsResult.reason;
+      const nextShots = shotsResult.value;
       setShots(nextShots);
-      setAssets(nextAssets);
-      setReferenceAnchors(nextAnchors);
-      setProductionStructure(nextStructure);
-      setProductionBatchRunbook(nextRunbook);
-      setBatchWorkflowPresets(nextPresets);
-      setPromptEntries(promptPage.items);
+      setAssets(assetsResult.status === "fulfilled" ? assetsResult.value : []);
+      setPromptEntries(promptsResult.status === "fulfilled" ? promptsResult.value.items : []);
+      setReferenceAnchors(anchorsResult.status === "fulfilled" ? anchorsResult.value : []);
+      setProductionStructure(structureResult.status === "fulfilled" ? structureResult.value : EMPTY_PRODUCTION_STRUCTURE(projectId));
+      setProductionBatchRunbook(runbookResult.status === "fulfilled" ? runbookResult.value : emptyRunbook(projectId));
+      setBatchWorkflowPresets(presetsResult.status === "fulfilled" ? presetsResult.value : []);
+      const warnings: string[] = [];
+      if (assetsResult.status === "rejected") warnings.push(`素材列表加载失败：${toUserMessage(assetsResult.reason)}`);
+      if (promptsResult.status === "rejected") warnings.push(`提示词库加载失败：${toUserMessage(promptsResult.reason)}`);
+      if (warnings.length) setLoadWarning(`${warnings.join("；")} 镜头列表已保留，但相关输入不可用，请先排查。`);
       reconcileSelectedShot(nextShots.map((shot) => shot.id));
     } catch (loadError: unknown) {
       if (generation !== reloadGeneration.current) return;
@@ -1390,6 +1400,7 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
 
   return (
     <section className="workspace-panel shot-workspace" aria-busy={busy} data-studio-mode={mode}>
+      {loadWarning && <p className="error-message" role="alert">{loadWarning}</p>}
       {mode === "creation" && bulkImportOpen && <ShotBulkImportPanel
         projectId={projectId}
         onImported={async () => { await reload(); setBulkImportOpen(false); }}

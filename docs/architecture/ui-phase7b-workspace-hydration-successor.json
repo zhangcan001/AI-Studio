@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE7B_WORKSPACE_HYDRATION",
+  "parentHead": "0b0bd802aa185f4bc76409808cdae31d65aad93d",
+  "planningParentHead": "0b0bd802aa185f4bc76409808cdae31d65aad93d",
+  "contracts": {
+    "historicalProofBytesUnchanged": true,
+    "runtimeBytesUnchanged": true,
+    "migrationUnchanged": true,
+    "backupUnchanged": true,
+    "singleQueue": true,
+    "shotQueryAuthoritative": true,
+    "ancillaryFailureVisible": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/boundary-validation-cache.mjs": {
+      "beforeHash": "acb8ea6ec53b8de314aef68b876ca90293a65665ff82681f2e95e24c413bb7cd",
+      "afterHash": "009b1fc27c76eecdb1011da1e86cf1d085fa8d126143ac22290f0842b9833d9b"
+    },
+    "scripts/testing/boundary-rpc-yield.mjs": {
+      "beforeHash": null,
+      "afterHash": "0965bee45bdfd13be6769cdf15dd41255cdea8763a898eb15bed47bca1141939"
+    },
+    "scripts/ui-phase7a-source-ready-successor-guard.mjs": {
+      "beforeHash": "f0f82a9a9ecc7ce61241c78657beab8f97dc11ef764f18a643d4befc67610c8e",
+      "afterHash": "887ef7c6a0073ed126bf77f284c00734b806682b0ebdc1aff6179d8e7de0e331"
+    },
+    "scripts/ui-phase7b-ref2va-empty-readiness-successor-guard.mjs": {
+      "beforeHash": "44ad587d21d9dc60f47d6b00de6121ebcfa3bbf727ff2bdae684f64998627617",
+      "afterHash": "a2ea89004d6f297f28cb18379627f7b051074c836ac2a8dd184cb3616db25e29"
+    },
+    "scripts/ui-phase7b-tsv-preview-successor-guard.mjs": {
+      "beforeHash": "f960d5468906c070df807868a1ebb696c3177fb115c90e56893d4ebed12a1e97",
+      "afterHash": "dcebb1ce3edb723921bf5e8ea1e0b0c6c4d89f71a759d39d3ccdf6399736c710"
+    },
+    "scripts/ui-phase7b-tsv-receipt-eligibility-successor-guard.d.mts": {
+      "beforeHash": null,
+      "afterHash": "7f6320a80bea89e26fb2b6828002a38bc02a2d4a2c900961038bda0c7562c7fe"
+    },
+    "scripts/ui-phase7b-tsv-receipt-eligibility-successor-guard.mjs": {
+      "beforeHash": "5256324b4415a72fe5209907301e9c119f39c9744bdde6be64ea20f8b1bdcd43",
+      "afterHash": "2059d5d37e0ac22e855f1e1c748937ff44674e51b4d09a5eff1514aca95112c4"
+    },
+    "scripts/ui-phase7b-workspace-hydration-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "2c0794b6654c7e41c113105cd56dbdaa019fa7004511175e01906fc967965f37"
+    },
+    "src/app/UiPhase6ALibrarySourceBoundary.test.ts": {
+      "beforeHash": "b5a9cf261e1676e7de39f481bc5cd272bebbf3b598a379f5a0532dc1e56e4b37",
+      "afterHash": "6e4070cd6772b1a8ed30e865da04d02b48e266ab194639be8e7549980c98ce8c"
+    },
+    "src/app/UiPhase7BWorkspaceHydrationBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "5d570ab3de9a7274e1b208857bee24d5d62a8530d9c0412bc04d33b8c084a77c"
+    },
+    "src/features/production/ProductionPackageWorkspace.test.tsx": {
+      "beforeHash": "838052b2c27e3ad8d72853affb3ec9d45f29dc538b1130dbe90b116fed5dcccd",
+      "afterHash": "e8154a6c3312c8a4725f2e0458dec3f1fcf095e8707c43cb81a277461c89dbe1"
+    },
+    "src/features/shots/ShotWorkspace.production.test.tsx": {
+      "beforeHash": "4f24844e686e76a09ace11f32aa49aac8b4db33cfee4905f6f8cd0b90d5ef5e1",
+      "afterHash": "36e24fa9bdf0f179594220a23381fe7ac609865c5cedf974e7fc5f5fdee72562"
+    },
+    "src/features/shots/ShotWorkspace.tsx": {
+      "beforeHash": "06c0d067ec22494cba08964ea6f585b8d6e085b3bb44ff38a5b8c85a71ec8353",
+      "afterHash": "6221c0cbfda68929f3b8f37895518a4a7f1d248da717157ba4a80b8ce2be4967"
+    },
+    "vite.config.ts": {
+      "beforeHash": "83d167cbe10500f69d0b2f4dc89447c7b5062fd7b8fcff5d6fad562eb66c6599",
+      "afterHash": "17893ee25ada4bf2710b8e26ab6ab6b9bcfb66fba89ab13c3a87c33035465f98"
+    }
+  }
+}

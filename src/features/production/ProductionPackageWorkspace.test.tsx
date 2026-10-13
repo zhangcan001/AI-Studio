@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +59,23 @@ afterEach(() => {
 });
 
 describe("ProductionPackageWorkspace", () => {
+  it("keeps inspection pending until its result is rendered and never auto-creates a batch", async () => {
+    let resolveInspection!: (result: ProductionPackageInspectionResult) => void;
+    inspectMock.mockImplementation(() => new Promise(resolve => { resolveInspection = resolve; }));
+    render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/deferred" />);
+
+    await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("region", { name: "生产包工作区" }).getAttribute("data-state")).toBe("INSPECTING");
+    expect(screen.queryByText("已选择 · 检查完成")).toBeNull();
+    expect(createMock).not.toHaveBeenCalled();
+
+    await act(async () => { resolveInspection(makeInspection(1, ["READY"])); });
+    expect(await screen.findByText("已选择 · 检查完成")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "生产包工作区" }).getAttribute("data-state")).toBe("READY");
+    expect((screen.getByRole("button", { name: "创建待启动批次并打开队列（1 项）" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
   it("starts EMPTY and automatically inspects a parent-provided folder", async () => {
     inspectMock.mockResolvedValue(makeInspection(1, ["READY"]));
     const { rerender } = render(<ProductionPackageWorkspace projectId="project-1" />);
@@ -70,6 +87,7 @@ describe("ProductionPackageWorkspace", () => {
     rerender(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledWith("project-1", "C:/packages/ep01"));
+    await screen.findByText("已选择 · 检查完成");
     expect(screen.getByRole("region", { name: "生产包工作区" }).getAttribute("data-state")).toBe("READY");
   });
 
@@ -79,6 +97,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/large" />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await screen.findByText("已选择 · 检查完成");
     await user.click(screen.getByText("查看 500 个镜头明细"));
     const table = screen.getByRole("table", { name: "生产包项目列表" });
     expect(within(table).getAllByRole("row")).toHaveLength(51);
@@ -124,11 +143,13 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await screen.findByText("已选择 · 检查完成");
     await user.click(screen.getByRole("checkbox", { name: "选择项目 item-002" }));
     expect(screen.getAllByText(/已选择 2 项（/).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "重新检查" }));
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(2));
+    await screen.findByText("已选择 · 检查完成");
     expect((screen.getByRole("checkbox", { name: "选择项目 item-001" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: "选择项目 item-002" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: "选择项目 item-003" }) as HTMLInputElement).checked).toBe(false);
@@ -142,6 +163,7 @@ describe("ProductionPackageWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "选择生产包文件夹" }));
     await waitFor(() => expect(inspectMock).toHaveBeenCalledWith("project-1", "C:/packages/picked"));
+    await screen.findByText("已选择 · 检查完成");
     expect(picker).toHaveBeenCalledTimes(1);
     const folderPathInput = screen.getByLabelText("生产包文件夹路径") as HTMLInputElement;
     expect(folderPathInput.readOnly).toBe(true);
@@ -154,6 +176,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath={fullPath} />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledWith("project-1", fullPath));
+    await screen.findByText("已选择 · 检查完成");
     const folderPathInput = screen.getByLabelText("生产包文件夹路径") as HTMLInputElement;
     expect(folderPathInput.value).toBe(fullPath);
     expect(folderPathInput.title).toBe(fullPath);
@@ -170,7 +193,9 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" onOpenProductionQueue={openQueue} />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
-    const createButton = screen.getByRole("button", { name: "创建待启动批次并打开队列（150 项）" }) as HTMLButtonElement;
+    await screen.findByText("已选择 · 检查完成");
+    // Calling inspect is not the same as its async result being rendered.
+    const createButton = await screen.findByRole("button", { name: "创建待启动批次并打开队列（150 项）" }) as HTMLButtonElement;
     await user.click(createButton);
     await waitFor(() => expect(createMock).toHaveBeenCalledWith(
       "inspection-150",
@@ -201,6 +226,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await screen.findByText("已选择 · 检查完成");
     await user.click(screen.getByRole("button", { name: /创建待启动批次并打开队列/ }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("媒体文件已变化");
@@ -208,6 +234,7 @@ describe("ProductionPackageWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "重新检查" }));
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(2));
+    await screen.findByText("已选择 · 检查完成");
   });
 
   it("shows structured package compatibility details instead of generic invalid input", async () => {
@@ -227,6 +254,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await screen.findByText("已选择 · 检查完成");
     await user.click(screen.getByRole("button", { name: /创建待启动批次并打开队列/ }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("工作流不兼容当前生产模式");
@@ -250,6 +278,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await screen.findByText("已选择 · 检查完成");
     await user.click(screen.getByText("查看每个项目的生产工作流配对（1）"));
     expect(screen.getByText("WorkflowVersion：wfv-video-default")).toBeTruthy();
     expect(screen.getByText("Recipe：rcp-video-default")).toBeTruthy();
@@ -267,6 +296,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" onOpenQueue={openQueue} />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await screen.findByText("已选择 · 检查完成");
     await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（4 项）" }));
     await waitFor(() => expect(screen.getByRole("region", { name: "生产包创建结果" })).toBeTruthy());
 
@@ -281,6 +311,7 @@ describe("ProductionPackageWorkspace", () => {
 
     await user.click(within(createdRegion).getByRole("button", { name: "重新检查剩余项目" }));
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(2));
+    await screen.findByText("已选择 · 检查完成");
     expect((screen.getByRole("checkbox", { name: "选择项目 item-001" }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByRole("checkbox", { name: "选择项目 item-002" }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByRole("checkbox", { name: "选择项目 item-003" }) as HTMLInputElement).checked).toBe(true);
@@ -294,6 +325,7 @@ describe("ProductionPackageWorkspace", () => {
     await waitFor(() => expect(dropState.subscribe).toHaveBeenCalledTimes(1));
     emitDropPaths(["D:\\AI漫剧\\EP01\\生产包"]);
     await waitFor(() => expect(inspectMock).toHaveBeenCalledWith("project-1", "D:\\AI漫剧\\EP01\\生产包"));
+    await screen.findByText("已选择 · 检查完成");
     expect(inspectMock).toHaveBeenCalledTimes(1);
 
     cleanup();
@@ -315,6 +347,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" onOpenQueue={openQueue} />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await screen.findByText("已选择 · 检查完成");
     await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（1 项）" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("生产批次已创建，但生产队列暂时无法打开");
@@ -339,6 +372,7 @@ describe("ProductionPackageWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "检查文件夹" }));
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await screen.findByText("已选择 · 检查完成");
     await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（1 项）" }));
     await screen.findByRole("region", { name: "生产包创建结果" });
     expect(screen.getByText("待启动批次已创建；父层未接入队列打开回调，尚未开始真实生产。")).toBeTruthy();

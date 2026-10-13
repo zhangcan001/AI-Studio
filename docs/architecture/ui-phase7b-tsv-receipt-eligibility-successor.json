@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE7B_NATIVE_TSV_RECEIPT_ELIGIBILITY",
+  "parentHead": "e7362dc4a68aaeb8e95092ed1154a1e54c7caf39",
+  "contracts": {
+    "historicalProofBytesUnchanged": true,
+    "runtimeBytesUnchanged": true,
+    "migrationUnchanged": true,
+    "backupUnchanged": true,
+    "tsvPreviewRequiresExternalImportReceipt": true,
+    "libraryGetExposesReceiptIdentity": true,
+    "confirmationFreshValidation": true,
+    "noSecondQueue": true,
+    "realNativeRetestRequired": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/ui-phase7b-tsv-preview-successor-guard.mjs": {
+      "beforeHash": "60404a78f702f933aa83a86083e407a75d2c35ad456b8062155e84035c6d9c02",
+      "afterHash": "f960d5468906c070df807868a1ebb696c3177fb115c90e56893d4ebed12a1e97"
+    },
+    "src/features/shots/ShotBatchAssetBindPanel.tsx": {
+      "beforeHash": "c7dc7fd1c629295ee091dcdbdd052e622f2d2244e69c0e82e5974741bd237eee",
+      "afterHash": "2d34ed24820849fd983f6ef7bdce14a5fca40de0d0c6d222378372bd561158c0"
+    },
+    "src/features/shots/ShotBatchAssetBindPanel.test.tsx": {
+      "beforeHash": "257a04cd78f0feee5349da72285d5820b18423fc66757324ccae4dd2326e47d9",
+      "afterHash": "6b75039361e77f9579750f6e67e45d70d6df1090a84596f1be30d5e7f9cb30c0"
+    },
+    "src-tauri/src/application/asset_query_service.rs": {
+      "beforeHash": "94f73f4647051482dcfb72ab6f69efbe26b3a175276ac13f265b2ce829881e15",
+      "afterHash": "c51afd5b00c7984ba654221ff49fbd84058e9efe4684433da03568a0f24afcad"
+    },
+    "src/types/asset.ts": {
+      "beforeHash": "62d6c295b19f9a856b050f114395aca2db0f86f175ec41d52e5302e089fd6e3d",
+      "afterHash": "ec295d31dc0b6f7658fa8e65daf15e1ee948653619b03701b4c6164059955bc2"
+    },
+    "scripts/ui-phase7b-tsv-receipt-eligibility-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "5256324b4415a72fe5209907301e9c119f39c9744bdde6be64ea20f8b1bdcd43"
+    },
+    "src/app/UiPhase7BTsvReceiptEligibilityBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "81713f9885600aed1589ff11b8bc9f46bce8fa9670392775d4373787060a6fbb"
+    }
+  }
+}

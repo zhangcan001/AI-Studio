@@ -2508,15 +2508,18 @@ fn materialize_legacy_shot_stage_prompts(
     shots: &[BackupShot],
     prompts: &mut Vec<BackupShotStagePrompt>,
 ) {
-    let persisted_shot_ids = prompts
+    let persisted_slots = prompts
         .iter()
-        .map(|prompt| prompt.shot_id.clone())
+        .map(|prompt| (prompt.shot_id.clone(), prompt.stage.clone()))
         .collect::<HashSet<_>>();
     for shot in shots {
-        if persisted_shot_ids.contains(&shot.id) {
-            continue;
-        }
         for stage in ["image", "video"] {
+            if persisted_slots.contains(&(shot.id.clone(), stage.to_owned())) {
+                continue;
+            }
+            // Stage prompts are lazily saved independently. Complete only the
+            // archive's legacy defaults, without writing the source database or
+            // copying another stage's edited text/provenance.
             prompts.push(BackupShotStagePrompt {
                 shot_id: shot.id.clone(),
                 stage: stage.to_owned(),

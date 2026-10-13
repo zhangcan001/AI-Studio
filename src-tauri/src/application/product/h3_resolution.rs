@@ -209,7 +209,13 @@ pub fn validate_resolved(
                 });
             }
         }
-        if audios > 0 && images + videos == 0 {
+        // The generic H3 reference node also powers legacy text-only T2V
+        // workflows. Only the exact approved REF2VA recipe requires reference
+        // media; retaining the audio-only denial for other reference graphs.
+        // Empty input drafts may save, but production admission must fail.
+        if images + videos == 0
+            && (audios > 0 || recipe.id == "rcp_minimax_h3_reference_video_quality_2_2_0")
+        {
             return Err(CompileError::InputRequired {
                 input: "reference_images_or_videos".into(),
             });
@@ -290,27 +296,55 @@ outputs:
         ]
         .into()
     }
+    fn reference_recipe() -> Recipe {
+        let mut reference = recipe();
+        reference.id = "rcp_minimax_h3_reference_video_quality_2_2_0".into();
+        reference
+    }
+    fn production_values(
+        class: &str,
+        duration: i64,
+        width: i64,
+        height: i64,
+    ) -> std::collections::BTreeMap<String, crate::domain::ResolvedInputValue> {
+        let mut values = resolved(duration, width, height);
+        if class == "MiniMaxH3ReferenceToVideo" {
+            values.insert(
+                "reference_videos".into(),
+                crate::domain::ResolvedInputValue::Videos(vec!["reference.mp4".into()]),
+            );
+        }
+        values
+    }
     #[test]
     fn duration_and_resolution_are_product_admission_not_ui_constraints() {
         for class in ["MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"] {
             for duration in [3, 4, 15, 16] {
                 assert_eq!(
-                    validate_resolved(workflow(class), &recipe(), &resolved(duration, 1344, 768))
-                        .is_ok(),
+                    validate_resolved(
+                        workflow(class),
+                        &recipe(),
+                        &production_values(class, duration, 1344, 768)
+                    )
+                    .is_ok(),
                     (4..=15).contains(&duration)
                 );
             }
             for (_, _, width, height) in H3_BASE_RESOLUTIONS {
-                assert!(
-                    validate_resolved(workflow(class), &recipe(), &resolved(4, width, height))
-                        .is_ok()
-                );
+                assert!(validate_resolved(
+                    workflow(class),
+                    &recipe(),
+                    &production_values(class, 4, width, height)
+                )
+                .is_ok());
             }
             for (width, height) in [(1280, 720), (1920, 1080), (2048, 2048), (32, 32)] {
-                assert!(
-                    validate_resolved(workflow(class), &recipe(), &resolved(4, width, height))
-                        .is_err()
-                );
+                assert!(validate_resolved(
+                    workflow(class),
+                    &recipe(),
+                    &production_values(class, 4, width, height)
+                )
+                .is_err());
             }
         }
         let mut forged = workflow("MiniMaxH3ImageToVideo");
@@ -328,6 +362,9 @@ outputs:
     fn mixed_references_keep_individual_and_combined_limits() {
         use crate::domain::ResolvedInputValue::{Audios, Images, Videos};
         for (images, videos, audios, ok) in [
+            (0, 0, 0, false),
+            (0, 1, 0, true),
+            (1, 0, 0, true),
             (9, 3, 0, true),
             (9, 0, 3, true),
             (9, 3, 1, false),
@@ -351,11 +388,51 @@ outputs:
                 Audios(vec!["audio".into(); audios]),
             );
             assert_eq!(
-                validate_resolved(workflow("MiniMaxH3ReferenceToVideo"), &recipe(), &values)
-                    .is_ok(),
+                validate_resolved(
+                    workflow("MiniMaxH3ReferenceToVideo"),
+                    &reference_recipe(),
+                    &values
+                )
+                .is_ok(),
                 ok
             );
         }
+    }
+    #[test]
+    fn empty_ref2va_draft_is_savable_but_never_production_ready() {
+        use crate::compiler::CompileError;
+        use crate::domain::ResolvedInputValue::{Audios, Images, Videos};
+        let missing = resolved(4, 1344, 768);
+        let check = |values: &std::collections::BTreeMap<_, _>| {
+            assert!(matches!(
+                validate_resolved(workflow("MiniMaxH3ReferenceToVideo"), &reference_recipe(), values),
+                Err(CompileError::InputRequired { input }) if input == "reference_images_or_videos"
+            ));
+        };
+        check(&missing);
+        let mut empty = missing.clone();
+        empty.insert("reference_images".into(), Images(vec![]));
+        empty.insert("reference_videos".into(), Videos(vec![]));
+        empty.insert("reference_audios".into(), Audios(vec![]));
+        check(&empty);
+        empty.insert("reference_audios".into(), Audios(vec!["audio.wav".into()]));
+        check(&empty);
+        // Zero-media T2V stays valid even when it reuses the H3 Reference node.
+        assert!(validate_resolved(workflow("MiniMaxH3ImageToVideo"), &recipe(), &missing).is_ok());
+        assert!(
+            validate_resolved(workflow("MiniMaxH3ReferenceToVideo"), &recipe(), &missing).is_ok()
+        );
+        empty.insert("reference_audios".into(), Audios(vec![]));
+        empty.insert(
+            "reference_videos".into(),
+            Videos(vec!["reference.mp4".into()]),
+        );
+        assert!(validate_resolved(
+            workflow("MiniMaxH3ReferenceToVideo"),
+            &reference_recipe(),
+            &empty
+        )
+        .is_ok());
     }
     #[test]
     fn reference_duration_checks_real_milliseconds_and_blocks_missing_metadata() {

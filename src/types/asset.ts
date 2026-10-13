@@ -15,6 +15,8 @@ export interface AssetView {
   /** Populated when a catalog query provides the latest version number. */
   currentVersionNumber?: number | null;
   sourceTaskId?: string;
+  /** True when library.get finds a project-scoped external import receipt matching media identity. */
+  hasExternalImportReceipt?: boolean;
   thumbnailAvailable?: boolean;
   isFavorite: boolean;
   tags: Array<{ id: string; name: string }>;

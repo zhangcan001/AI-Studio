@@ -7,20 +7,25 @@ import {tmpdir} from 'node:os';
 import {uiPhase6AParentReader,phase6AParentFacts,phase6AFixtureFiles,PHASE6A_MANIFEST,PHASE6A_PARENT,PHASE6A_EXISTING} from '../../scripts/ui-phase6a-library-source-successor-guard.mjs';
 import {uiPhase5JParentReader} from '../../scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs';
 import {m3LibraryParentReader} from '../../scripts/m3-library-findability-boundary-guard.mjs';
+import {uiPhase6BParentReader} from '../../scripts/ui-phase6b-library-shot-bind-successor-guard.mjs';
 
 it('wires ordinary Library SOURCE/GENERATED filters before pagination and blocks new image generation',()=>{
- const list=readFileSync('src-tauri/src/application/product/library_facade/list.rs','utf8');
+ // Validate the live successor chain first, then inspect Phase6A's own bytes.
+ // Later video-only policy legitimately tightened the historical Library jump.
+ const phase6A=uiPhase6BParentReader('.');
+ expect(phase6A.violations).toEqual([]);
+ const list=phase6A.read('src-tauri/src/application/product/library_facade/list.rs');
  expect(list).toContain('cursor.source_kind == source_kind');
  expect(list).toContain('match source_kind {');
  expect(list).toContain('AssetSourceFilter::Source');
- const controller=readFileSync('src/features/library/LibraryController.ts','utf8');
+ const controller=phase6A.read('src/features/library/LibraryController.ts');
  expect(controller).toContain('sourceKind,cursor,limit:30');
  expect(controller).toContain('!returnRoute && stage==="image"');
- const detail=readFileSync('src/features/library/LibraryDetail.tsx','utf8');
+ const detail=phase6A.read('src/features/library/LibraryDetail.tsx');
  expect(detail).not.toContain('用于图片创作');
  expect(detail).toContain('用于视频创作');
  expect(detail).toContain('历史图片可预览与审计');
- const page=readFileSync('src/features/library/LibraryPage.tsx','utf8');
+ const page=phase6A.read('src/features/library/LibraryPage.tsx');
  expect(page).toContain('素材来源');
 }, 90000);
 

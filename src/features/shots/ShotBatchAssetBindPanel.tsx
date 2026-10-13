@@ -29,12 +29,20 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
   const [matrix, setMatrix] = useState<MatrixDraft>({});
   const [sourceAssets, setSourceAssets] = useState<SourceAssetOption[]>([]);
   const [busy, setBusy] = useState(false);
+  const [checkingTsv, setCheckingTsv] = useState(false);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [previewLines, setPreviewLines] = useState<ReturnType<typeof resolveBatchBindRows>>();
   const lock = useRef(false);
+  const validationLock = useRef(false);
+  const validationVersion = useRef(0);
   const liveProject = useRef(projectId); liveProject.current = projectId;
+  useEffect(() => {
+    validationVersion.current += 1;
+    setPreviewLines(undefined);
+    return () => { validationVersion.current += 1; };
+  }, [projectId, shots, catalog]);
   const readyShots = useMemo(() => shotsReadyForBatchBind(shots, catalog), [shots, catalog]);
 
   useEffect(() => {
@@ -181,11 +189,54 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
     return rows;
   }
 
-  function checkTsv() {
+  /** Preview and confirmation use the same project-scoped authoritative Library lookup. */
+  async function validateTsvAssets(
+    assignments: ReturnType<typeof resolveBatchBindRows>,
+    version: number,
+  ): Promise<ReturnType<typeof resolveBatchBindRows> | undefined> {
+    const validated: ReturnType<typeof resolveBatchBindRows> = [];
+    for (const row of assignments) {
+      if (validationVersion.current !== version || liveProject.current !== projectId) return undefined;
+      const errors = [...row.errors];
+      if (!errors.length) {
+        try {
+          const detail = await productClient.library.get(projectId, { kind: "asset", id: row.assetId });
+          if (validationVersion.current !== version || liveProject.current !== projectId) return undefined;
+          if (detail.kind !== "asset" || detail.asset.id !== row.assetId) {
+            errors.push("素材不存在");
+          } else if (!assetAllowedForBindKey(row.inputKey, detail.asset.category, detail.asset.sourceTaskId)) {
+            errors.push(`${BATCH_BIND_KEY_LABELS[row.inputKey]}只接受匹配类型的外部导入素材`);
+          } else if (detail.asset.hasExternalImportReceipt !== true) {
+            errors.push("素材缺少有效的外部导入收据，不能写入正式输入");
+          }
+        } catch (value: unknown) {
+          if (validationVersion.current !== version || liveProject.current !== projectId) return undefined;
+          errors.push(normalizeProductError(value).message);
+        }
+      }
+      validated.push({ ...row, errors });
+    }
+    return validated;
+  }
+
+  async function checkTsv() {
+    if (lock.current || validationLock.current) return;
+    const version = ++validationVersion.current;
+    validationLock.current = true;
+    setCheckingTsv(true); setPreviewLines(undefined);
     setError(undefined); setNotice(undefined);
-    const parsed = parseBatchBindTable(content);
-    if (!parsed.length) { setPreviewLines([]); setError("没有可检查的绑定行。"); return; }
-    setPreviewLines(resolveBatchBindRows(parsed, shots, catalog));
+    try {
+      const parsed = parseBatchBindTable(content);
+      if (!parsed.length) {
+        if (validationVersion.current === version) { setPreviewLines([]); setError("没有可检查的绑定行。"); }
+        return;
+      }
+      const validated = await validateTsvAssets(resolveBatchBindRows(parsed, shots, catalog), version);
+      if (validated && validationVersion.current === version) setPreviewLines(validated);
+    } finally {
+      validationLock.current = false;
+      setCheckingTsv(false);
+    }
   }
 
   async function applyPlans(assignments: ReturnType<typeof matrixAssignments>) {
@@ -211,6 +262,9 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
           if (!assetAllowedForBindKey(assignment.inputKey, detail.asset.category, detail.asset.sourceTaskId)) {
             throw new Error(`镜头 ${plan.shotOrdinal} 的 ${BATCH_BIND_KEY_LABELS[assignment.inputKey]} 只接受外部导入素材。`);
           }
+          if (detail.asset.hasExternalImportReceipt !== true) {
+            throw new Error(`镜头 ${plan.shotOrdinal} 素材缺少有效的外部导入收据，不能写入正式输入。`);
+          }
           const merged = mergeShotBindings(inputs, assignment.inputKey, assignment.assetId);
           if (merged.error) throw new Error(merged.error);
           inputs = merged.inputs;
@@ -231,32 +285,36 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
 
   async function confirmMatrix() { await applyPlans(matrixAssignments()); }
   async function confirmTsv() {
-    if (!previewLines) { setError("请先检查表格内容。"); return; }
-    const enriched = [];
-    for (const row of previewLines) {
-      const errors = [...row.errors];
-      if (!errors.length) {
-        try {
-          const detail = await productClient.library.get(projectId, { kind: "asset", id: row.assetId });
-          if (detail.kind !== "asset") errors.push("素材不存在");
-          else if (!assetAllowedForBindKey(row.inputKey, detail.asset.category, detail.asset.sourceTaskId)) {
-            errors.push(`${BATCH_BIND_KEY_LABELS[row.inputKey]}只接受外部导入素材`);
-          }
-        } catch (value: unknown) { errors.push(normalizeProductError(value).message); }
-      }
-      enriched.push({ ...row, errors });
+    if (!previewLines || previewLines.length === 0 || previewLines.some((row) => row.errors.length)) {
+      setError("请先通过表格校验，修正所有错误行。"); return;
     }
-    setPreviewLines(enriched);
-    await applyPlans(enriched);
+    if (lock.current || validationLock.current) return;
+    const version = ++validationVersion.current;
+    validationLock.current = true;
+    setCheckingTsv(true);
+    try {
+      // A successful preview is never authority for writing: re-query immediately.
+      const enriched = await validateTsvAssets(previewLines, version);
+      if (!enriched || validationVersion.current !== version) return;
+      setPreviewLines(enriched);
+      if (enriched.some((row) => row.errors.length)) {
+        setError("素材已变更，确认写入被阻止；请重新检查错误行。");
+        return;
+      }
+      await applyPlans(enriched);
+    } finally {
+      validationLock.current = false;
+      setCheckingTsv(false);
+    }
   }
 
   const matrixDirtyCount = matrixAssignments().length;
   const matrixSlotTotal = readyShots.reduce((sum, entry) => sum + entry.slots.length, 0);
   const matrixFilledSlots = readyShots.reduce((sum, entry) => sum + rowFillStats(entry).filled, 0);
-  const tsvValid = !!previewLines && previewLines.length > 0 && previewLines.every((row) => row.errors.length === 0);
+  const tsvValid = !checkingTsv && !!previewLines && previewLines.length > 0 && previewLines.every((row) => row.errors.length === 0);
 
   function onPanelKeyDown(event: { ctrlKey: boolean; metaKey: boolean; key: string; preventDefault(): void }) {
-    if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter" || busy || loadingAssets) return;
+    if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter" || busy || checkingTsv || loadingAssets) return;
     if (mode === "matrix" && matrixDirtyCount > 0) {
       event.preventDefault();
       void confirmMatrix();
@@ -277,8 +335,8 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
         <button type="button" className="quiet-button" onClick={onCancel} disabled={busy}>关闭</button>
       </div>
       <div className="shot-batch-stage-tabs" role="tablist" aria-label="绑定方式">
-        <button type="button" role="tab" aria-selected={mode === "matrix"} className={mode === "matrix" ? "active" : ""} onClick={() => setMode("matrix")} disabled={busy}>镜头矩阵</button>
-        <button type="button" role="tab" aria-selected={mode === "tsv"} className={mode === "tsv" ? "active" : ""} onClick={() => setMode("tsv")} disabled={busy}>表格文本</button>
+        <button type="button" role="tab" aria-selected={mode === "matrix"} className={mode === "matrix" ? "active" : ""} onClick={() => { validationVersion.current += 1; setPreviewLines(undefined); setMode("matrix"); }} disabled={busy || checkingTsv}>镜头矩阵</button>
+        <button type="button" role="tab" aria-selected={mode === "tsv"} className={mode === "tsv" ? "active" : ""} onClick={() => { validationVersion.current += 1; setPreviewLines(undefined); setMode("tsv"); }} disabled={busy || checkingTsv}>表格文本</button>
       </div>
       {loadingAssets && <p className="shot-inline-note" role="status">正在加载外部导入素材…</p>}
       {!loadingAssets && !sourceAssets.length && <p className="empty-state" role="status">没有可用的外部导入素材。请先在资源库导入图片/视频/音频（来源：外部导入）。</p>}
@@ -348,12 +406,12 @@ export function ShotBatchAssetBindPanel({ projectId, shots, catalog, onBound, on
         <>
           <label>
             <span className="section-label">绑定表</span>
-            <textarea value={content} onChange={(event) => { setContent(event.target.value); setPreviewLines(undefined); setError(undefined); setNotice(undefined); }}
+            <textarea value={content} onChange={(event) => { validationVersion.current += 1; setContent(event.target.value); setPreviewLines(undefined); setError(undefined); setNotice(undefined); }}
               placeholder={"shot_ordinal\tinput_key\tasset_id\n1\tfirst_frame\tasset_xxx\n2\treference_images\tasset_yyy"}
               rows={8} aria-label="批量绑定表格内容" disabled={busy} />
           </label>
           <div className="shot-batch-selection-bar" aria-label="表格绑定操作">
-            <button type="button" className="quiet-button" onClick={checkTsv} disabled={busy}>检查</button>
+            <button type="button" className="quiet-button" onClick={() => void checkTsv()} disabled={busy || checkingTsv}>{checkingTsv ? "正在校验素材…" : "检查"}</button>
             <button type="button" className="shot-primary-action" onClick={() => void confirmTsv()} disabled={busy || !tsvValid} title="Ctrl/⌘+Enter">{busy ? "正在写入…" : "确认写入"}</button>
           </div>
           {previewLines && (
