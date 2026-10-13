@@ -94,7 +94,8 @@ pub struct CreateDirectGenerationBatchRequest {
     pub items: Vec<CreateDirectGenerationBatchItem>,
 }
 
-const DIRECT_GENERATION_CONTEXT_KEY: &str = "__ai_studio_direct_generation_context";
+pub(crate) const DIRECT_GENERATION_CONTEXT_KEY: &str = "__ai_studio_direct_generation_context";
+pub(crate) const RESTORED_EXECUTION_UNKNOWN: &str = "restoredExecutionUnknown";
 
 /// Identifies the producer of a persisted queue item.  New rows carry this
 /// explicitly; legacy rows without the field are interpreted from their old
@@ -1081,6 +1082,7 @@ impl ProductionQueueService {
         recipe_id: &str,
         values_json: &Value,
     ) -> Result<BTreeMap<String, GenerationInputValue>, ProductionQueueError> {
+        ensure_restored_execution_known(values_json)?;
         self.ensure_new_generation_allowed(workflow_version_id, recipe_id)
             .await?;
         let values =
@@ -3167,6 +3169,20 @@ pub(crate) fn freeze_random_seed_values(
         .collect()
 }
 
+pub(crate) fn ensure_restored_execution_known(value: &Value) -> Result<(), ProductionQueueError> {
+    if value
+        .get(DIRECT_GENERATION_CONTEXT_KEY)
+        .and_then(|context| context.get(RESTORED_EXECUTION_UNKNOWN))
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return Err(ProductionQueueError::InvalidState(
+            "restored item has unknown execution metadata; prepare a new batch explicitly instead of retrying historical input".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn generation_values_from_json(
     value: &Value,
 ) -> Result<BTreeMap<String, GenerationInputValue>, String> {
@@ -3406,6 +3422,19 @@ mod tests {
     use chrono::Utc;
     use serde_json::json;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn restored_unknown_execution_cannot_enter_queue_preparation() {
+        let historical = json!({ "__ai_studio_direct_generation_context": {
+            "executionType": "DIRECT", "restoredExecutionUnknown": true
+        }});
+        assert!(super::ensure_restored_execution_known(&historical).is_err());
+        assert!(super::ensure_restored_execution_known(&json!({})).is_ok());
+        assert!(super::ensure_restored_execution_known(&json!({
+            "__ai_studio_direct_generation_context": { "executionType": "DIRECT" }
+        }))
+        .is_ok());
+    }
 
     fn package_recipe(include_reference_audios: bool) -> Recipe {
         let mut inputs = BTreeMap::new();

@@ -84,3 +84,7 @@ wiremock = "0.6"
 [[example]]
 name = "phase12_query_profile"
 test = false
+
+[features]
+# Owned Native acceptance only; explicitly forbidden in release builds.
+native-acceptance-delay = []
