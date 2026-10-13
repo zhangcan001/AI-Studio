@@ -89,8 +89,8 @@ describe("LocalToolHub", () => {
     render(<LocalToolHub />);
 
     const detail = await screen.findByRole("region", { name: "工具详情" });
-    expect(within(detail).getByText("本地图像与视频工作流运行时")).toBeTruthy();
-    expect(within(detail).getByText("image_generation")).toBeTruthy();
+    expect(await within(detail).findByText("本地图像与视频工作流运行时")).toBeTruthy();
+    expect(await within(detail).findByText("image_generation")).toBeTruthy();
     expect(within(detail).getByText("观察版本历史")).toBeTruthy();
     expect(within(detail).getByText("健康状态")).toBeTruthy();
     expect(within(detail).getByText(/最近记录：/)).toBeTruthy();
