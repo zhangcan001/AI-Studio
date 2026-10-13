@@ -1,6 +1,7 @@
 // Phase 7B REF2VA admission repair: exact-base successor. Historical proofs stay frozen.
 import { createHash } from "node:crypto";
 import { uiPhase7BTsvParentReader } from "./ui-phase7b-tsv-preview-successor-guard.mjs";
+import { phase7BHydrationScopeSince } from "./ui-phase7b-workspace-hydration-successor-guard.mjs";
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
@@ -51,12 +52,7 @@ export function uiPhase7BParentReader(root, override = undefined) {
   try {
     const recorded = git(base, ["rev-parse", PHASE7B_BASE]).trim();
     if (recorded !== PHASE7B_BASE) fail("parent-identity");
-    const changed = git(base, ["diff", "--name-only", PHASE7B_BASE, "--"]).trim().split(/\r?\n/).filter(Boolean);
-    const untracked = git(base, ["ls-files", "--others", "--exclude-standard", "--"]).trim().split(/\r?\n/).filter(Boolean);
-    const actual = [...new Set([...changed, ...untracked].filter(p =>
-      p.startsWith("scripts/") || p.startsWith("src/") ||
-      p.startsWith("src-tauri/") || p.startsWith("docs/architecture/")
-    ))].sort();
+    const actual = phase7BHydrationScopeSince(base, PHASE7B_BASE);
     const accepted = [...new Set([...PHASE7B_ALLOWED, ...successor.changedPaths, ...successor.addedPaths])].sort();
     if (JSON.stringify(actual) !== JSON.stringify(accepted)) fail("unapproved-tree-change");
     for (const path of PHASE7B_CHANGED) {

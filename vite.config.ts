@@ -14,6 +14,7 @@ export default defineConfig(async () => ({
   // Keep forks + fileParallelism=false + maxWorkers=1 so each file gets a
   // fresh child_process/RPC session, sequenced one at a time.
   test: {
+    setupFiles: ["./scripts/testing/boundary-rpc-yield.mjs"],
     exclude: [...configDefaults.exclude, "**/.ai-bridge/**", "**/local-fixtures/**"],
     pool: "forks",
     fileParallelism: false,

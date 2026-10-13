@@ -2,6 +2,7 @@
 // Historical manifests, Runtime Package bytes, migrations and BACKUP_VERSION stay immutable.
 import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
 import { uiPhase7BParentReader } from './ui-phase7b-ref2va-empty-readiness-successor-guard.mjs';
+import { phase7BHydrationFixtureFiles } from './ui-phase7b-workspace-hydration-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -185,7 +186,7 @@ function files(root,dir) {
     return entry.isDirectory()?files(root,p):[p];
   }).sort();
 }
-export const phase7AFixtureFiles = root => [...new Set([...phase7AParentFacts(root).paths,...PHASE7A_FILES,...uiPhase7BParentReader(root).addedPaths])];
+export const phase7AFixtureFiles = root => [...new Set([...phase7AParentFacts(root).paths,...PHASE7A_FILES,...uiPhase7BParentReader(root).addedPaths,...phase7BHydrationFixtureFiles(root)])];
 function validate(root,override) {
   const successor=uiPhase7BParentReader(root);
   const violations=[...successor.violations],fail=name=>violations.push('ui-phase7a-source-ready-'+name);

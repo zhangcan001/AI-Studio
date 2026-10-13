@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { uiPhase7BTsvReceiptParentReader } from "./ui-phase7b-tsv-receipt-eligibility-successor-guard.mjs";
+import { phase7BHydrationScopeSince } from "./ui-phase7b-workspace-hydration-successor-guard.mjs";
 
 export const PHASE7B_TSV_BASE = "192d2358549f57400bbb06ca04c1e6a106969739";
 export const PHASE7B_TSV_PROOF = "docs/architecture/ui-phase7b-tsv-preview-successor.json";
@@ -44,11 +45,7 @@ export function uiPhase7BTsvParentReader(root, override = undefined) {
   try {
     if (git(workspace, ["rev-parse", PHASE7B_TSV_BASE]).trim() !== PHASE7B_TSV_BASE) fail("ancestor");
     const expected = [...new Set([...paths, PHASE7B_TSV_PROOF, ...tip.changedPaths, ...tip.addedPaths])].sort();
-    const touched = git(workspace, ["diff", "--name-only", PHASE7B_TSV_BASE, "--"]).trim().split(/\r?\n/).filter(Boolean);
-    const untracked = git(workspace, ["ls-files", "--others", "--exclude-standard", "--"]).trim().split(/\r?\n/).filter(Boolean);
-    const relevant = [...new Set([...touched, ...untracked].filter(p =>
-      p.startsWith("src/") || p.startsWith("src-tauri/") || p.startsWith("scripts/") || p.startsWith("docs/architecture/")
-    ))].sort();
+    const relevant = phase7BHydrationScopeSince(workspace, PHASE7B_TSV_BASE);
     if (JSON.stringify(relevant) !== JSON.stringify(expected)) fail("unapproved-source");
     for (const path of PHASE7B_TSV_CHANGED) {
       if (!existsSync(join(workspace, path)) || manifest.files[path]?.beforeHash !== sha(ancestor(workspace, path))

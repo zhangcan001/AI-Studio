@@ -26,6 +26,9 @@ function immutableObjectStore(root, env) {
     return realpathSync(objects);
   } catch { return resolve(root); } // Missing Git evidence must still reach Git and fail.
 }
+// Share immutable parent facts across owned fixtures using the same object store.
+// Git-layout environment overrides keep their existing root-scoped identity.
+export const immutableGitStoreIdentity = root => immutableObjectStore(root, process.env);
 export function immutableGit(command, args, options = {}) {
   let tree = 1;
   while (args[tree] === '-r' || args[tree] === '--name-only') tree++;
@@ -116,14 +119,27 @@ function identity(root) {
     }
   };
   for (const dir of ['src', 'src-tauri/src', 'src-tauri/tests', 'src-tauri/examples',
-    'src-tauri/migrations', 'src-tauri/runtime_packages', 'scripts', 'docs', '.github']) visit(dir);
+    'src-tauri/migrations', 'src-tauri/runtime_packages', 'src-tauri/capabilities',
+    'src-tauri/icons', 'scripts', 'docs', '.github']) visit(dir);
   for (const path of ['CONTEXT.md','README.md','package.json','pnpm-lock.yaml','vite.config.ts','src-tauri/Cargo.toml','src-tauri/Cargo.lock',
-    'src-tauri/tauri.conf.json','src-tauri/build.rs']) {
+    'src-tauri/tauri.conf.json','src-tauri/build.rs','src-tauri/.gitignore']) {
     if (existsSync(join(root,path))) {hash.update(path); hash.update(readFileSync(join(root,path)));}
   }
   // Publication acceptance depends on a mutable tag, not just source bytes.
   const dot = join(root,'.git');
   if (existsSync(dot)) {
+    // The hydration checkpoint covers Git source inventory too. Empty-index
+    // historical fixtures and illegal top-level Native additions must invalidate
+    // cached accepts without walking ignored target/ build output.
+    try {
+      hash.update(exec('git', ['ls-files','--cached','--others','--exclude-standard','--',
+        'src','src-tauri','scripts','docs/architecture'], {cwd:root, encoding:'utf8', stdio:'pipe'}));
+    } catch {
+      // Byte-cache fixtures may contain only a mutable tag, not a repository.
+      // Keep their identity distinct from a Git-backed checkout. This is NOT
+      // validation success: proof readers still require their immutable Git evidence.
+      hash.update('git-source-inventory-unavailable');
+    }
     let git = statSync(dot).isDirectory() ? dot : resolve(root, readFileSync(dot,'utf8').trim().replace(/^gitdir: /,''));
     if (existsSync(join(git,'commondir'))) git = resolve(git,readFileSync(join(git,'commondir'),'utf8').trim());
     for (const path of ['refs/tags/v2.1.0-personal','packed-refs']) {

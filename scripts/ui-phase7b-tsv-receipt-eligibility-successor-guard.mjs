@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { uiPhase7BWorkspaceHydrationParentReader, phase7BHydrationScopeSince } from "./ui-phase7b-workspace-hydration-successor-guard.mjs";
 
 export const PHASE7B_RECEIPT_BASE = "e7362dc4a68aaeb8e95092ed1154a1e54c7caf39";
 export const PHASE7B_RECEIPT_PROOF = "docs/architecture/ui-phase7b-tsv-receipt-eligibility-successor.json";
@@ -29,11 +30,12 @@ function ancestor(root, path) {
 
 export function uiPhase7BTsvReceiptParentReader(root, override = undefined) {
   const workspace = resolve(root);
-  const violations = [];
+  const tip = uiPhase7BWorkspaceHydrationParentReader(root, override);
+  const violations = [...tip.violations];
   const fail = id => violations.push("ui-phase7b-tsv-receipt-" + id);
   const paths = [...PHASE7B_RECEIPT_CHANGED, ...PHASE7B_RECEIPT_ADDED].sort();
   const current = path => canonical(override && Object.hasOwn(override, path)
-    ? override[path] : readFileSync(join(workspace, path), "utf8"));
+    ? override[path] : tip.read(path));
   let manifest;
   try { manifest = JSON.parse(current(PHASE7B_RECEIPT_PROOF)); }
   catch { fail("missing-proof"); }
@@ -43,12 +45,8 @@ export function uiPhase7BTsvReceiptParentReader(root, override = undefined) {
       || JSON.stringify(Object.keys(manifest.files ?? {}).sort()) !== JSON.stringify(paths)) fail("proof-contract");
   try {
     if (git(workspace, ["rev-parse", PHASE7B_RECEIPT_BASE]).trim() !== PHASE7B_RECEIPT_BASE) fail("ancestor");
-    const expected = [...paths, PHASE7B_RECEIPT_PROOF].sort();
-    const touched = git(workspace, ["diff", "--name-only", PHASE7B_RECEIPT_BASE, "--"]).trim().split(/\r?\n/).filter(Boolean);
-    const untracked = git(workspace, ["ls-files", "--others", "--exclude-standard", "--"]).trim().split(/\r?\n/).filter(Boolean);
-    const relevant = [...new Set([...touched, ...untracked].filter(p =>
-      p.startsWith("src/") || p.startsWith("src-tauri/") || p.startsWith("scripts/") || p.startsWith("docs/architecture/")
-    ))].sort();
+    const expected = [...new Set([...paths, PHASE7B_RECEIPT_PROOF, ...tip.changedPaths, ...tip.addedPaths])].sort();
+    const relevant = phase7BHydrationScopeSince(workspace, PHASE7B_RECEIPT_BASE);
     if (JSON.stringify(relevant) !== JSON.stringify(expected)) fail("unapproved-source");
     for (const path of PHASE7B_RECEIPT_CHANGED) {
       if (!existsSync(join(workspace, path)) || manifest.files[path]?.beforeHash !== sha(ancestor(workspace, path))
@@ -73,9 +71,9 @@ export function uiPhase7BTsvReceiptParentReader(root, override = undefined) {
   } catch (e) { fail("validation:" + String(e).slice(0, 120)); }
   return {
     violations,
-    changedPaths: PHASE7B_RECEIPT_CHANGED,
-    addedPaths: [...PHASE7B_RECEIPT_ADDED, PHASE7B_RECEIPT_PROOF],
-    afterHashes: Object.fromEntries(paths.map(path => [path, manifest?.files?.[path]?.afterHash ?? ""])),
+    changedPaths: [...new Set([...PHASE7B_RECEIPT_CHANGED, ...tip.changedPaths])].sort(),
+    addedPaths: [...new Set([...PHASE7B_RECEIPT_ADDED, PHASE7B_RECEIPT_PROOF, ...tip.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries(paths.map(path => [path, manifest?.files?.[path]?.afterHash ?? ""])), ...tip.afterHashes },
     read: path => PHASE7B_RECEIPT_CHANGED.includes(path) ? ancestor(workspace, path) : current(path),
   };
 }
