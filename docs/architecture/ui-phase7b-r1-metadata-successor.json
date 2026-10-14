@@ -29,7 +29,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "dab3a886920ba4e4aff68c09e3830941121339f524c14b8fa4e5af1e16ab4884"
+      "afterHash": "9d8c5295993f6e8757997ca4685a8ceb8c4bcc44c05f5df1a66f3d0d9811819b"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
@@ -41,7 +41,7 @@
     },
     "src-tauri/src/application/project_backup_service.rs": {
       "beforeHash": "1dfa4e6c5e1bf47c802e9ba51e965494ecff84d512281c6e81772a83fcf89b19",
-      "afterHash": "caba2d68c845908cf196382fc43732e62eaa3b5c05d602856511699f48882855"
+      "afterHash": "52e93e314f46f7f88b873fb4d0627edbfc865994e553bf900e107ad7a75d504d"
     },
     "src-tauri/src/commands/product.rs": {
       "beforeHash": "2306a3e249c2bd548aa9b468e64e15369a82f6ab1692860b0bc37233d537018b",
@@ -54,6 +54,10 @@
     "src-tauri/src/lib.rs": {
       "beforeHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77",
       "afterHash": "8e416699a8ab999887d282f336891169d2d7c910cc5544ebb1df90ee5f462516"
+    },
+    "src/features/tools/LocalToolHub.test.tsx": {
+      "beforeHash": "205b8c04c71274d0d9571f92b7d8ceacd2bb9c0357b57e9d3de9e2c39a52f435",
+      "afterHash": "251b34ace9c9efe11fdc08dcf8a7298f4b87c311c0109be91fc71ca3ccc475ec"
     }
   }
 }

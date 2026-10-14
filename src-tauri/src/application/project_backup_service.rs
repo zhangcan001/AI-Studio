@@ -86,10 +86,9 @@ pub(crate) mod queue_metadata {
                             .get("shotId")
                             .and_then(Value::as_str)
                             .is_some_and(|id| {
-                                !document
-                                    .shots
-                                    .iter()
-                                    .any(|shot| shot.id == id && shot.project_id == document.project.id)
+                                !document.shots.iter().any(|shot| {
+                                    shot.id == id && shot.project_id == document.project.id
+                                })
                             })
                     {
                         return Err(AppError::backup_invalid(
