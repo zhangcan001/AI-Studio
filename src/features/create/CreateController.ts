@@ -357,6 +357,8 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     selectShot: (shotId: string) => navigate({ ...route, shotId: shotId || undefined }),
     selectStage: (stage: "image" | "video") => navigate({ ...route, stage }),
     openRun: () => runRef && navigate({ kind: "runs", projectId: route.projectId, run: runRef }),
+    openRunsList: () => navigate({ kind: "runs", projectId: route.projectId }),
+    openStoryboard: () => navigate({ kind: "create", projectId: route.projectId, stage: "video" }),
     openAdvanced: (section: "batch" | "production" | "workflows") => {
       if (section === "workflows") useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });
       return navigate(section === "batch" ? { kind: "project-settings", projectId: route.projectId, section: "advanced-shots" } : section === "production" ? { kind: "runs", projectId: route.projectId, filter: "production" } : { kind: "system-settings", section: "advanced-workflows", returnTo: route });

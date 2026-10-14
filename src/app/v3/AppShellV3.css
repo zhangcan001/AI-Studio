@@ -1,9 +1,9 @@
 @import "../../styles/studioTokens.css";
 
-.v3-shell { --bg-primary:var(--studio-bg); --bg-secondary:var(--studio-surface-1); --border-color:var(--studio-border-strong); --text-secondary:var(--studio-text-secondary); display:grid; grid-template-columns:216px minmax(0,1fr); height:100vh; height:100dvh; min-height:0; overflow:hidden; font-family:var(--studio-font-family); color:var(--studio-text); background:var(--studio-bg); }
+.v3-shell { --bg-primary:var(--studio-bg); --bg-secondary:var(--studio-surface-1); --border-color:var(--studio-border-strong); --text-secondary:var(--studio-text-secondary); display:grid; grid-template-columns:80px minmax(0,1fr); height:100vh; height:100dvh; min-height:0; overflow:hidden; font-family:var(--studio-font-family); color:var(--studio-text); background:var(--studio-bg); }
 .v3-main h1 { font-size:var(--studio-font-title); line-height:1.25; }
 .v3-shell *, .v3-shell *::before, .v3-shell *::after { box-sizing:border-box; }
-.v3-shell[data-collapsed="true"] { grid-template-columns:72px minmax(0,1fr); }
+.v3-shell[data-collapsed="true"] { grid-template-columns:64px minmax(0,1fr); }
 .v3-sidebar { display:flex; flex-direction:column; gap:var(--studio-space-6); min-width:0; min-height:0; padding:var(--studio-space-4) var(--studio-space-3); background:var(--studio-surface-1); border-right:1px solid var(--studio-border); overflow:auto; }
 .v3-sidebar .v3-brand { display:flex; gap:var(--studio-space-3); align-items:center; border:0; padding:var(--studio-space-2) 0; background:transparent; text-align:left; }
 .v3-brand-mark { display:grid; place-items:center; flex:none; width:40px; height:40px; border-radius:var(--studio-radius-md); color:var(--studio-accent-hover); background:var(--studio-accent-soft); font-weight:700; }
@@ -70,3 +70,12 @@
 @media (max-width:1200px) { .v3-header, .v3-main { padding:var(--studio-space-4); } .v3-header { gap:var(--studio-space-3); } .v3-project-picker > span { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); } }
 @media (max-width:760px) { .v3-overview-grid { grid-template-columns:minmax(0,1fr); } .v3-next-action { flex-wrap:wrap; } .v3-breadcrumbs > span:first-child { max-width:120px; } .v3-project-picker select { width:140px; } .v3-main { padding:var(--studio-space-3); } .v3-header { gap:var(--studio-space-2); } }
 @media (prefers-reduced-motion:reduce) { .v3-shell *, .v3-shell *::before, .v3-shell *::after { transition:none; animation:none; scroll-behavior:auto; } }
+
+/* UI restore P1: ~80px icon rail with stacked labels (reference design). Routes and nav items unchanged. */
+.v3-sidebar { gap:var(--studio-space-4); padding:var(--studio-space-3) 6px; align-items:stretch; }
+.v3-sidebar .v3-brand { justify-content:center; }
+.v3-sidebar .v3-brand .v3-nav-label, .v3-project-context { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.v3-sidebar .v3-primary-nav button { flex-direction:column; justify-content:center; gap:4px; min-height:58px; padding:6px 2px; text-align:center; font-size:12px; border-radius:var(--studio-radius-md); }
+.v3-primary-nav button[aria-current="page"] { box-shadow:inset 3px 0 0 var(--studio-accent); }
+.v3-secondary button, .v3-secondary summary { font-size:11px; padding:4px; text-align:center; }
+.v3-collapse .v3-nav-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }

@@ -6,17 +6,35 @@ import { assetIds, fieldLabel, generatorLabel, mediaKind, mediaValue } from "./c
 import { CreateMediaPreview } from "./CreateMediaPreview";
 import { modeLabel } from "../../product/generatorPresentation";
 function textValue(value?: import("../../types/generation").DraftValue) { return value?.type === "string" ? value.value : ""; }
+const VIDEO_MODE_CARDS = [
+  { label: "文生视频", hint: "通过文字描述生成视频", icon: "Aa" },
+  { label: "图生视频", hint: "基于图片生成动态视频", icon: "▣" },
+  { label: "首尾帧", hint: "指定首尾帧生成过渡视频", icon: "◧" },
+  { label: "混合参考", hint: "结合多种参考生成视频", icon: "✣" },
+] as const;
 export function GeneratorPanel({ controller: c }: { controller: CreateController }) {
-  return <section aria-label="视频模式"><h2>视频模式</h2><label>选择生成器<select id="create-field-selectionRef" aria-label="选择生成器" value={c.selection} disabled={c.busy || c.videoInputs.busy} onChange={e => c.chooseGenerator(e.target.value)}>
+  const currentMode = c.generator ? modeLabel(c.generator) : undefined;
+  const pick = (label: string) => {
+    const options = c.generators.filter(item => item.mediaKind === "video" && modeLabel(item) === label);
+    const target = options.find(item => item.selectionRef === c.selection) ?? options.find(item => item.availability && item.recommended) ?? options.find(item => item.availability);
+    if (target && target.selectionRef !== c.selection) c.chooseGenerator(target.selectionRef);
+  };
+  return <section aria-label="视频模式" className="create-mode-section"><h2>生成设置</h2>
+    <div className="create-mode-cards" role="radiogroup" aria-label="视频模式卡片">{VIDEO_MODE_CARDS.map(card => {
+      const available = c.generators.some(item => item.mediaKind === "video" && item.availability && modeLabel(item) === card.label);
+      return <button key={card.label} type="button" role="radio" aria-checked={currentMode === card.label} className="create-mode-card" disabled={c.busy || c.videoInputs.busy || !available} title={available ? card.hint : "当前项目没有可用的此模式生成器"} onClick={() => pick(card.label)}>
+        <span aria-hidden="true" className="create-mode-icon">{card.icon}</span><strong>{card.label}</strong><small>{available ? card.hint : "暂无可用生成器"}</small></button>;
+    })}</div>
+    <label className="create-generator-select">生成器<select id="create-field-selectionRef" aria-label="选择生成器" value={c.selection} disabled={c.busy || c.videoInputs.busy} onChange={e => c.chooseGenerator(e.target.value)}>
     <option value="">请选择</option>{c.generators.map((item, index) => <option key={item.selectionRef} value={item.selectionRef} disabled={!item.availability}>{generatorLabel(item, index)}{!item.availability ? "（不可用）" : ""}</option>)}
-  </select></label>{c.generator && <span className="create-state-pill">{modeLabel(c.generator)}</span>}{c.generator?.availabilityReason && <p>{c.generator.availabilityReason}</p>}</section>;
+  </select></label>{c.generator?.availabilityReason && <p>{c.generator.availabilityReason}</p>}</section>;
 }
 export function PromptPanel({ controller: c }: { controller: CreateController }) {
   const [picker, setPicker] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (picker) dialog.current?.showModal(); }, [picker]);
   const fields = c.generator?.fields.filter(field => field.type === "textarea" && ["prompt", "negative_prompt"].includes(field.key)) ?? [];
-  return <section><h2>提示词</h2>{fields.map(field => <label key={field.key}>{fieldLabel(field)}<textarea id={`create-field-${field.key}`} aria-label={fieldLabel(field)} value={textValue(c.values[field.key])} onChange={e => c.setValue(field.key, { type: "string", value: e.target.value })} rows={field.key === "prompt" ? 5 : 2} /></label>)}
+  return <section className="create-prompt-section"><h2>提示词</h2>{fields.map(field => <label key={field.key}>{fieldLabel(field)}<textarea id={`create-field-${field.key}`} aria-label={fieldLabel(field)} value={textValue(c.values[field.key])} onChange={e => c.setValue(field.key, { type: "string", value: e.target.value })} rows={field.key === "prompt" ? 5 : 2} /><span className="create-char-count" aria-hidden="true">{textValue(c.values[field.key]).length} 字</span></label>)}
     {fields.some(field => field.key === "prompt") && <button type="button" onClick={() => setPicker(true)}>选择提示词</button>}
     {fields.some(field=>field.key==="prompt") && <button type="button" onClick={()=>c.openLibrary("prompts")}>在资源库查找更多提示词</button>}
     {picker && <dialog ref={dialog} className="create-picker" aria-label="选择提示词" onCancel={() => setPicker(false)}><h2>近期提示词</h2><p>此处显示当前项目最多20个近期提示词条目的最新版本。更早的提示词可在资源库中查找。</p>

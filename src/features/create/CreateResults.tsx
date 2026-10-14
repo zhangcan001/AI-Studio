@@ -3,6 +3,7 @@ import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import type { CreationAsset } from "../../product/types";
 import type { CreateController } from "./CreateController";
+import { modeLabel } from "../../product/generatorPresentation";
 import { candidateForStage, runLabels, type CreateRoute } from "./createModel";
 import { focusCreateInput, resolveCreateReadinessAction, type CreateReadinessAction } from "./createReadinessAction";
 export function RunStatusCard({ controller: c }: { controller: CreateController }) {
@@ -49,7 +50,9 @@ export function GenerateBar({ controller: c }: { controller: CreateController })
     }
   }
   const readyCopy = c.readinessState === "RUNTIME_OFFLINE" ? "运行环境暂时不可用" : c.readinessState === "READY" ? "可以入队生成" : c.readinessState === "NOT_READY" ? "请检查输入或运行环境" : "正在检查准备状态";
-  return <footer className="create-generate-bar"><div aria-live="polite"><strong>{readyCopy}</strong>
+  const num = (key: string) => { const v = c.values[key]; return v?.type === "integer" || v?.type === "number" ? v.value : undefined; };
+  const summary = [num("duration_seconds") && `${num("duration_seconds")} 秒`, num("width") && num("height") && `${num("width")} × ${num("height")}`, c.generator && modeLabel(c.generator)].filter(Boolean).join(" · ");
+  return <footer className="create-generate-bar" data-state={c.readinessState}><div aria-live="polite"><strong className="create-ready-state">{readyCopy}</strong>{summary && <span className="create-ready-summary">已设置 {summary}</span>}
     <small>单镜「生成视频」会写入生产队列并尝试启动；批量镜头请先绑定外部素材，再在生产队列点「开始生产」。准备 ≠ 启动。</small>
     {issues.map((issue, index) => {
       // Map known product codes to catalog copy; never collapse typed readiness codes to INTERNAL_ERROR.

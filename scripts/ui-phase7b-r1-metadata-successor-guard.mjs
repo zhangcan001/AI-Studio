@@ -17,10 +17,22 @@ export const R1_METADATA_CHANGED = [
   "src/features/tools/LocalToolHub.test.tsx",
   "src/app/FeatureLifecycle.test.tsx",
   "src/features/runs/RunsController.ts",
+  "src/app/FrontendConsolidation.test.tsx",
+  "src/app/NormalProductPages.tsx",
+  "src/app/v3/AppShellV3.css",
+  "src/features/create/CreateController.ts",
+  "src/features/create/CreateInputs.tsx",
+  "src/features/create/CreatePage.css",
+  "src/features/create/CreatePage.tsx",
+  "src/features/create/CreateResults.tsx",
+  "src/features/create/CreateVideoWorkspace.tsx",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
   "scripts/testing/ui-phase7b-r1-metadata.test.mjs",
+  "src/features/create/StoryboardWorkbench.test.tsx",
+  "src/features/create/StoryboardWorkbench.tsx",
+  "src/features/create/storyboardModel.ts",
 ].sort();
 export const R1_METADATA_CONTRACTS = {
   schemaChanged: false, backupFormatChanged: true, backupVersion: 21,
