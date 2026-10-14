@@ -270,3 +270,38 @@
 @media (max-width:760px) { .storyboard-body { display:block; overflow:auto; } .storyboard-card { grid-template-columns:1fr; } }
 
 .create-candidate-frame { display: block; width: 100%; height: 100%; object-fit: cover; background: #000; pointer-events: none; }
+
+/* Composer card (create input) */
+.create-composer { position:relative; margin:12px 0; background:#3a3935; border:1px solid #55534d; border-radius:22px; color:#f2f1ed; overflow:visible; }
+.composer-refs { display:flex; gap:8px; align-items:center; padding:12px 14px; border-bottom:1px solid #4d4b46; min-height:64px; flex-wrap:wrap; }
+.composer-ref { position:relative; }
+.composer-ref-thumb { width:56px; height:56px; padding:0; border-radius:12px; overflow:hidden; border:1px solid #5d5b55; background:#2b2a27; color:#ddd; position:relative; cursor:pointer; }
+.composer-ref-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.composer-ref-thumb small { position:absolute; left:0; right:0; bottom:0; font-size:10px; background:rgba(0,0,0,.55); }
+.composer-ref-remove { position:absolute; top:-6px; right:-6px; width:18px; height:18px; padding:0; border-radius:50%; border:0; background:#1f1e1c; color:#fff; font-size:12px; line-height:18px; display:none; }
+.composer-ref:hover .composer-ref-remove, .composer-ref-remove:focus { display:block; }
+.composer-hint { color:#a9a69e; }
+.composer-prompt { position:relative; padding:10px 16px 4px; }
+.composer-editor { min-height:44px; max-height:180px; overflow:auto; outline:none; white-space:pre-wrap; font-size:15px; font-weight:600; line-height:28px; }
+.composer-editor:empty::before { content:attr(data-placeholder); color:#8f8c85; font-weight:400; }
+.composer-chip { display:inline-flex; align-items:center; gap:4px; vertical-align:middle; margin:0 3px; padding:0 6px 0 0; height:24px; border-radius:6px; background:#4c4a45; font-size:13px; user-select:all; }
+.composer-chip img { width:24px; height:24px; object-fit:cover; border-radius:5px; }
+.composer-source { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; left:0; top:0; resize:none; }
+.composer-picker { position:absolute; left:14px; bottom:62px; z-index:20; display:flex; flex-direction:column; gap:2px; min-width:220px; max-height:260px; overflow:auto; padding:6px; border-radius:12px; background:#262523; border:1px solid #55534d; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.composer-picker button { display:flex; gap:8px; align-items:center; text-align:left; background:transparent; border:0; color:#eee; padding:6px 8px; border-radius:8px; }
+.composer-picker button:hover { background:#3a3935; }
+.composer-picker img { width:24px; height:24px; object-fit:cover; border-radius:4px; }
+.composer-toolbar { display:flex; align-items:center; gap:10px; padding:8px 12px 12px; }
+.composer-icon { width:40px; height:40px; border-radius:50%; border:0; background:transparent; color:#f2f1ed; font-size:24px; }
+.composer-segment { display:flex; align-items:center; gap:2px; padding:4px; border-radius:16px; background:#55534d; }
+.composer-segment button { border:0; border-radius:12px; padding:6px 12px; background:transparent; color:#cfccc4; }
+.composer-segment button[aria-pressed="true"] { background:#3a3935; color:#fff; font-weight:600; }
+.composer-segment button:disabled { opacity:.45; }
+.composer-segment select, .composer-pick select, .composer-pick input { background:transparent; border:0; color:#f2f1ed; font-weight:600; }
+.composer-pick input { width:56px; }
+.composer-segment select option, .composer-pick select option { color:#111; }
+.composer-pick { display:inline-flex; align-items:center; gap:4px; color:#f2f1ed; }
+.composer-spacer { flex:1; }
+.composer-save { border-radius:12px; }
+.composer-submit { width:48px; height:48px; border-radius:50%; border:0; background:#4ff3ff; color:#fff; font-size:22px; font-weight:700; cursor:pointer; }
+.composer-submit:disabled { background:#4b7e82; cursor:not-allowed; }

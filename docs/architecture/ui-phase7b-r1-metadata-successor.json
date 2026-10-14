@@ -29,7 +29,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "e8f9b2ad444d62c20c82948587979c68c743d4b6202bf2f9315c0c8cd06d7110"
+      "afterHash": "4705c9cf93ec32007d37aa513ebda2d2956d896321c027f1cdf93a6ee5db54bc"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
@@ -117,7 +117,7 @@
     },
     "src/features/create/CreateInputs.tsx": {
       "beforeHash": "2d66012f799ddaa1b7222323767b885840676acd77a3d43a306f17c653eeee3f",
-      "afterHash": "cdfbf586ac1acf3cf79686f88cb0eb617cb9de09c0cead46e4dc3fe1dfa9f622"
+      "afterHash": "a230f3140fa407f62e7bbde567bdb00465eb192e5e17430542c96417331b820f"
     },
     "src/features/create/CreateMediaPreview.tsx": {
       "beforeHash": "418f32f5d365c2ea9fc624124589b9f9b529a3a74e77e23d4f8d1164da5ba619",
@@ -125,11 +125,11 @@
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "29496b0ddb95bf8535c6605e64420c7f4cb997f22dbf341c3890e4d5149c751b"
+      "afterHash": "3607d3a7a55836a3506498b94a5f85e7e6a8007b8c3c4fc649b19766eb2af6c9"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea",
-      "afterHash": "4371ba0f8a5b373bd04b54cccd097249335fe564e71801408e8c20ec4c1b6b77"
+      "afterHash": "97b666fbf9d8016881498e4585a3d8bf2ae4f1a7640cb636c77eab0fc4a28183"
     },
     "src/features/create/CreateResults.tsx": {
       "beforeHash": "0626c17eaef1c80cba4d5c6732b88f6fc5a0e9095b028497ce3eebcadc551172",
@@ -174,6 +174,10 @@
     "src/features/tools/LocalToolHub.test.tsx": {
       "beforeHash": "205b8c04c71274d0d9571f92b7d8ceacd2bb9c0357b57e9d3de9e2c39a52f435",
       "afterHash": "251b34ace9c9efe11fdc08dcf8a7298f4b87c311c0109be91fc71ca3ccc475ec"
+    },
+    "src/features/create/CreateComposer.tsx": {
+      "beforeHash": null,
+      "afterHash": "558b4bdcdce40c15898283c3a95329b8b5122cd6dd5e1ef7a154ab6783dae4db"
     }
   }
 }
