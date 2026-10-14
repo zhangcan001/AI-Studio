@@ -125,7 +125,7 @@
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "3607d3a7a55836a3506498b94a5f85e7e6a8007b8c3c4fc649b19766eb2af6c9"
+      "afterHash": "79da1aecc0882e8444e906f65b5772843bbd396afddb4c2b2625f1e6658570d8"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea",

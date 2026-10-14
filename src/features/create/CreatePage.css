@@ -305,3 +305,18 @@
 .composer-save { border-radius:12px; }
 .composer-submit { width:48px; height:48px; border-radius:50%; border:0; background:#4ff3ff; color:#fff; font-size:22px; font-weight:700; cursor:pointer; }
 .composer-submit:disabled { background:#4b7e82; cursor:not-allowed; }
+
+/* Composer overrides: beat generic .create-page section/label/button rules; never shrink so the toolbar stays visible. */
+.create-page .create-composer { flex:none; padding:0; margin:12px 0 8px; background:#3a3935; border:1px solid #55534d; border-radius:22px; color:#f2f1ed; }
+.create-page .create-composer small.composer-hint { margin:0; color:#a9a69e; }
+.create-page .create-composer label.composer-pick { flex-direction:row; align-items:center; gap:4px; margin:0; }
+.create-page .create-composer .composer-pick select, .create-page .create-composer .composer-segment select { width:auto; padding:4px 2px; background:transparent; border:0; color:#f2f1ed; font-weight:600; }
+.create-page .create-composer .composer-pick input { width:56px; padding:4px; background:transparent; border:0; color:#f2f1ed; }
+.create-page .create-composer .composer-icon { width:40px; height:40px; padding:0; border-radius:50%; border:0; background:transparent; color:#f2f1ed; font-size:24px; }
+.create-page .create-composer .composer-segment button { padding:6px 12px; border:0; border-radius:12px; }
+.create-page .create-composer .composer-submit { width:48px; height:48px; min-width:0; padding:0; border-radius:50%; border:0; background:#4ff3ff; color:#fff; font-size:22px; }
+.create-page .create-composer .composer-submit:disabled { background:#4b7e82; opacity:1; }
+.create-page .create-composer .composer-ref-thumb { padding:0; }
+.create-page .create-composer .composer-ref-remove { padding:0; }
+.create-page .create-composer .composer-ref-thumb small { margin:0; }
+.create-page .create-composer .composer-picker button { padding:6px 8px; }
