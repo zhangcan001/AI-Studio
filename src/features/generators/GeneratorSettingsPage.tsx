@@ -29,13 +29,13 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
   const generation = useRef(0);
   const locked = useRef(false);
   async function refresh(token: number) {
-    const [overview, images, videos] = await Promise.all([
-      productClient.project.getOverview(projectId), productClient.creation.generatorsList(projectId, "image"), productClient.creation.generatorsList(projectId, "video"),
+    const [overview, videos] = await Promise.all([
+      productClient.project.getOverview(projectId), productClient.creation.generatorsList(projectId, "video"),
     ]);
     if (token !== generation.current) return;
     // No recommendation/name inference is a substitute for a persisted binding.
     if (!overview.generatorBindings) throw new Error("暂时无法读取生成器设置，请刷新。");
-    setBindings(overview.generatorBindings); setOptions([...images, ...videos]); setChoices({});
+    setBindings(overview.generatorBindings); setOptions(videos.filter(o => o.mediaKind === "video")); setChoices({});
   }
   useEffect(() => {
     const token = ++generation.current;
@@ -43,7 +43,9 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
     void refresh(token).catch(e => { if (token === generation.current) setError(normalizeProductError(e).message); }).finally(() => { if (token === generation.current) setLoading(false); });
     return () => { generation.current++; };
   }, [projectId]);
-  const slots = [{ stage: "IMAGE", mode: "DEFAULT", label: "默认图片生成器" }, { stage: "VIDEO", mode: "DEFAULT", label: "默认视频生成器" },
+  // Image generation is retired from the product: IMAGE bindings stay persisted
+  // for back-compat but are no longer offered as a normal project setting.
+  const slots = [{ stage: "VIDEO", mode: "DEFAULT", label: "默认视频生成器" },
     ...Array.from(new Set([...options.filter(o => o.mediaKind === "video").flatMap(bindingModes), ...bindings.filter(b => b.stage === "VIDEO").map(b => b.mode)]))
       .filter(mode => mode !== "DEFAULT").map(mode => ({ stage: "VIDEO", mode, label: `${bindingModeLabels[mode] ?? "历史视频模式"}生成器` }))];
   async function save(stage: string, mode: string, selectionRef: string) {
@@ -63,8 +65,9 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
     } finally { locked.current = false; if (token === generation.current) setBusy(false); }
   }
   return <section className="generator-settings" aria-label="项目生成器设置" aria-busy={loading || busy}>
-    <header><h1>生成器</h1><p>设置图片、视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p></header>
+    <header><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p></header>
     {loading && <p role="status">正在读取生成器…</p>}{error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {!loading && !error && !options.length && <p role="status" data-testid="no-video-generators">暂无可用的视频生成器。请在下方“高级”中打开高级工作流 Lab，导入并验证视频工作流后再回来选择。</p>}
     {!loading && slots.map(slot => {
       const key = `${slot.stage}:${slot.mode}`;
       const binding = bindings.find(b => b.stage === slot.stage && b.mode === slot.mode);

@@ -26,7 +26,7 @@ export function GeneratorPanel({ controller: c }: { controller: CreateController
         <span aria-hidden="true" className="create-mode-icon">{card.icon}</span><strong>{card.label}</strong><small>{available ? card.hint : "暂无可用生成器"}</small></button>;
     })}</div>
     <label className="create-generator-select">生成器<select id="create-field-selectionRef" aria-label="选择生成器" value={c.selection} disabled={c.busy || c.videoInputs.busy} onChange={e => c.chooseGenerator(e.target.value)}>
-    <option value="">请选择</option>{c.generators.map((item, index) => <option key={item.selectionRef} value={item.selectionRef} disabled={!item.availability}>{generatorLabel(item, index)}{!item.availability ? "（不可用）" : ""}</option>)}
+    <option value="">请选择</option>{c.generators.filter(item => item.mediaKind === "video" || item.selectionRef === c.selection).map((item, index) => <option key={item.selectionRef} value={item.selectionRef} disabled={!item.availability}>{generatorLabel(item, index)}{!item.availability ? "（不可用）" : ""}</option>)}
   </select></label>{c.generator?.availabilityReason && <p>{c.generator.availabilityReason}</p>}</section>;
 }
 export function PromptPanel({ controller: c }: { controller: CreateController }) {

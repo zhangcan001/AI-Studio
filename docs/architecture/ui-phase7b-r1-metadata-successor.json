@@ -29,7 +29,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "e6c4cef3e3fee94aa64d0539717d0101f7268a33b4d7e2e08535b5b4786c61e8"
+      "afterHash": "8e8546315f0006015b14dc6236c397d2553f74abe8b18c8be01c01ed7b1c1e59"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
@@ -77,7 +77,7 @@
     },
     "src/features/create/CreateInputs.tsx": {
       "beforeHash": "2d66012f799ddaa1b7222323767b885840676acd77a3d43a306f17c653eeee3f",
-      "afterHash": "f3a2bf85902188506efd6e38ea817e88a2dfd67f3baadb0a7f20c3b0d7fe4067"
+      "afterHash": "cdfbf586ac1acf3cf79686f88cb0eb617cb9de09c0cead46e4dc3fe1dfa9f622"
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
@@ -114,6 +114,14 @@
     "src/features/tools/LocalToolHub.test.tsx": {
       "beforeHash": "205b8c04c71274d0d9571f92b7d8ceacd2bb9c0357b57e9d3de9e2c39a52f435",
       "afterHash": "251b34ace9c9efe11fdc08dcf8a7298f4b87c311c0109be91fc71ca3ccc475ec"
+    },
+    "src/features/generators/GeneratorSettingsPage.test.tsx": {
+      "beforeHash": "02c6369578c603b48838e8144164cbff024dfcc74636719927afaf8cfe353b61",
+      "afterHash": "29c2c94b21ff2ef025db85e0ac1e1c8ce89850f954af847d5e197a484cf14406"
+    },
+    "src/features/generators/GeneratorSettingsPage.tsx": {
+      "beforeHash": "bc22aee331760b4dcbc1b135c037422c2ce6716370358aa66883e46dc18db3df",
+      "afterHash": "a1a470b159606a71b77041db9fe2b698ba6e66c7aa5b807bb4efc04f10892676"
     }
   }
 }

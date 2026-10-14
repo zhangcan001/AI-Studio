@@ -26,6 +26,8 @@ export const R1_METADATA_CHANGED = [
   "src/features/create/CreatePage.tsx",
   "src/features/create/CreateResults.tsx",
   "src/features/create/CreateVideoWorkspace.tsx",
+  "src/features/generators/GeneratorSettingsPage.test.tsx",
+  "src/features/generators/GeneratorSettingsPage.tsx",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
