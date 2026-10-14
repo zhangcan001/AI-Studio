@@ -192,13 +192,36 @@ impl ProductCreationFacade {
         prompts: &crate::application::prompt_library_service::PromptLibraryService,
         request: CreationSubmission,
     ) -> CreationReadiness {
+        self.readiness_get_with_runtime(queue, prompts, request, |_, _| async { Ok(()) })
+            .await
+    }
+
+    /// Readiness that also runs the same read-only runtime gate Start uses
+    /// (exact workflow version + recipe), so an unrunnable generator is
+    /// reported before a batch is saved.
+    pub async fn readiness_get_with_runtime<F, Fut>(
+        &self,
+        queue: &ProductionQueueService,
+        prompts: &crate::application::prompt_library_service::PromptLibraryService,
+        request: CreationSubmission,
+        runtime: F,
+    ) -> CreationReadiness
+    where
+        F: FnOnce(String, String) -> Fut,
+        Fut: Future<Output = Result<(), ProductError>>,
+    {
         let result = self.prepare_submission(queue, prompts, request).await;
         let error = match result {
             Err(error) => Some(error),
-            Ok(_) => match queue.admission_status().await {
+            Ok(prepared) => match queue.admission_status().await {
                 // A busy execution slot is not an input-readiness error: the
                 // authoritative Start admission will persist it as a wait request.
-                Ok(_) => None,
+                Ok(_) => runtime(
+                    prepared.item.workflow_version_id.clone(),
+                    prepared.item.recipe_id.clone(),
+                )
+                .await
+                .err(),
                 Err(error) => Some(ProductError::internal(error)),
             },
         };

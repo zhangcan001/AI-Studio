@@ -320,13 +320,34 @@ pub async fn product_creation_readiness_get(
     state: State<'_, AppState>,
     request: CreationSubmissionDto,
 ) -> Result<CreationReadiness, ProductError> {
+    let admission = state.production.admission.clone();
     Ok(creation(&state)
-        .readiness_get(
+        .readiness_get_with_runtime(
             &state.production.queue,
             &state.catalog.prompt_library,
             request.into_application()?,
+            move |workflow_version_id, recipe_id| async move {
+                admission
+                    .check_runtime_pair(&workflow_version_id, &recipe_id)
+                    .await
+                    .map_err(runtime_readiness_error)
+            },
         )
         .await)
+}
+
+/// Readiness surfaces the exact Start-gate rejection, so the button stays
+/// disabled with a reason instead of saving a batch that cannot start.
+fn runtime_readiness_error(
+    error: crate::application::production_start_admission_service::ProductionStartAdmissionError,
+) -> ProductError {
+    let mut result = ProductError::new(
+        "RUNTIME_BLOCKED",
+        "当前生成器暂时无法运行，请检查 ComfyUI 与生成器状态。",
+        None,
+    );
+    result.details.technical_details = Some(error.to_string());
+    result
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -359,12 +380,20 @@ pub async fn product_creation_generate(
                         Ok(CreationStartDisposition::Queued)
                     }
                     Err(error) => {
+                        let reason = error.to_string();
+                        tracing::warn!(%reason, %project_id, %batch_id, "creation start admission blocked");
+                        if let Err(store_error) = queue
+                            .record_blocked_start(&project_id, &batch_id, &reason)
+                            .await
+                        {
+                            tracing::error!(%store_error, %batch_id, "creation start block recording failed");
+                        }
                         let mut result = ProductError::new(
                             "RUNTIME_BLOCKED",
                             "生成任务已保存，但暂时无法启动。",
                             Some("OPEN_RUN"),
                         );
-                        result.details.technical_details = Some(error.to_string());
+                        result.details.technical_details = Some(reason);
                         Err(result)
                     }
                 }

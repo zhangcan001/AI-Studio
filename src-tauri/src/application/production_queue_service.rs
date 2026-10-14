@@ -338,6 +338,27 @@ impl ProductionQueueService {
         Ok(())
     }
 
+    /// Persist an immediate Start rejection as a BLOCKED start request so the
+    /// saved READY batch is projected with its reason instead of as queued.
+    /// BLOCKED requests are never retried automatically; a manual Start
+    /// re-runs full admission and clears the marker on success.
+    pub async fn record_blocked_start(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+        reason: &str,
+    ) -> Result<(), ProductionQueueError> {
+        let id = parse_batch_id(batch_id)?;
+        let now = self.clock.now();
+        self.repository
+            .enqueue_deferred_start(project_id, &id, now)
+            .await?;
+        self.repository
+            .block_deferred_start(project_id, &id, reason, now)
+            .await?;
+        Ok(())
+    }
+
     pub async fn has_deferred_starts(&self) -> Result<bool, ProductionQueueError> {
         Ok(!self.repository.list_deferred_starts().await?.is_empty())
     }

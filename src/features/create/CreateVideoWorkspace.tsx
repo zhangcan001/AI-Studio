@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { productClient } from "../../product/client";
 import type { ProductRun } from "../../product/types";
-import { runLabels } from "./createModel";
+import { queueRunLabel } from "./createModel";
 import type { CreateController } from "./CreateController";
 import type { CreateRoute } from "./createModel";
 import { CandidateThumbnail, CreateMediaPreview } from "./CreateMediaPreview";
@@ -84,6 +84,6 @@ function RunQueueCard({ controller: c, projectId }: { controller: CreateControll
   return <section className="create-run-queue" aria-label="运行队列"><header><h2>运行队列 <small>{runs?.length ?? 0}</small></h2><button type="button" className="create-link" onClick={() => c.openRunsList()}>全部任务</button></header>
     {failed ? <p className="create-muted">无法读取运行队列，可在运行页查看。</p> : !runs ? <p className="create-muted">正在读取…</p> : !runs.length ? <p className="create-muted">当前没有进行中的运行</p>
       : <ol>{runs.map(run => { const pct = run.progress.total ? Math.round(((run.progress.succeeded + run.progress.failed + run.progress.cancelled) / run.progress.total) * 100) : 0;
-        return <li key={`${run.ref.source}:${run.ref.id}`}><div><strong>{run.title}</strong><span>{runLabels[run.status]}</span></div><progress max={100} value={pct} aria-label={`${run.title}进度`} /><small>{pct}%</small></li>; })}</ol>}
+        return <li key={`${run.ref.source}:${run.ref.id}`}><div><strong>{run.title}</strong><span>{queueRunLabel(run)}</span></div><progress max={100} value={pct} aria-label={`${run.title}进度`} /><small>{pct}%</small>{run.status === "PAUSED" && run.errorSummary ? <small className="create-queue-blocked" role="status">{run.errorSummary}</small> : null}</li>; })}</ol>}
   </section>;
 }

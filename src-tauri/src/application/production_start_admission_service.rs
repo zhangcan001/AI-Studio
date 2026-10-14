@@ -279,6 +279,22 @@ impl ProductionStartAdmissionService {
         Ok(inspections)
     }
 
+    /// Read-only runtime readiness for one exact pair. It shares the Start
+    /// gate (ComfyUI status, lifecycle inspection, exact recipe capability)
+    /// but never refreshes capabilities and never mutates queue state.
+    pub async fn check_runtime_pair(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<(), ProductionStartAdmissionError> {
+        let pairs = vec![(workflow_version_id.to_owned(), recipe_id.to_owned())];
+        let (_, _, inspections) = self.collect_runtime_snapshot(&pairs, false).await?;
+        for inspection in &inspections {
+            evaluate_recipe_runtime_inspection(inspection)?;
+        }
+        Ok(())
+    }
+
     pub async fn start(
         &self,
         project_id: &str,

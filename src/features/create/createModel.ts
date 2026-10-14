@@ -45,4 +45,6 @@ function compatible(field: RecipeField, value: DraftValue) {
   return field.type === "seed" ? value.type === "seed_random" || value.type === "seed_fixed" : value.type === expected;
 }
 export const runLabels: Record<ProductRun["status"], string> = { QUEUED: "排队中", RUNNING: "运行中", PAUSED: "暂停", FAILED: "失败", PARTIAL: "部分完成", SUCCEEDED: "已完成", CANCELLED: "已取消" };
+/** A saved READY run whose Start was rejected is projected as PAUSED with a reason; never show it as queued. */
+export function queueRunLabel(run: Pick<ProductRun, "status" | "errorSummary">): string { return run.status === "PAUSED" && run.errorSummary ? "无法启动" : runLabels[run.status]; }
 export function candidateForStage(asset: CreationAsset, route: CreateRoute) { return asset.mediaKind === route.stage; }

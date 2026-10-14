@@ -3490,11 +3490,16 @@ impl WorkflowOnboardingService {
         output_roots: &[OutputRootSelection],
     ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
         let draft = runtime_check_draft(workflow_json)?;
+        // A Recipe that declares its outputs is checked exactly like the
+        // synchronous runtime path: only declared roots plus executable output
+        // nodes are validated, because ComfyUI prunes every other dangling
+        // non-output branch before execution.
         Ok(self
             .check_capability_for_workflow_with_dynamic_targets_and_roots(
                 &draft,
                 dynamic_binding_targets,
                 output_roots,
+                !output_roots.is_empty(),
             )
             .await
             .0)
@@ -4156,6 +4161,7 @@ impl WorkflowOnboardingService {
             draft,
             &BTreeSet::new(),
             &output_roots,
+            false,
         )
         .await
     }
@@ -4165,6 +4171,7 @@ impl WorkflowOnboardingService {
         draft: &WorkflowOnboardingDraft,
         dynamic_binding_targets: &BTreeSet<(String, String)>,
         output_roots: &[OutputRootSelection],
+        recipe_scoped: bool,
     ) -> (CapabilityCheckView, Option<Vec<WorkflowNodeView>>) {
         let Ok(workflow) = draft.normalized_workflow() else {
             return (draft.capability.clone(), None);
@@ -4175,12 +4182,13 @@ impl WorkflowOnboardingService {
                 let mut nodes = draft.nodes.clone();
                 enrich_nodes_with_schema(&mut nodes, &schema);
                 (
-                    evaluate_capability_with_schema_and_output_roots(
+                    evaluate_capability_for_scope(
                         workflow,
                         &nodes,
                         &schema,
                         dynamic_binding_targets,
                         output_roots,
+                        recipe_scoped,
                     ),
                     Some(nodes),
                 )
@@ -6339,6 +6347,36 @@ fn evaluate_capability_with_schema(
     )
 }
 
+/// Live (async) capability checks use the same evaluator as the synchronous
+/// runtime path when the caller is an exact Recipe, so Start admission and the
+/// generator list agree on which branches ComfyUI will actually execute.
+fn evaluate_capability_for_scope(
+    workflow: &WorkflowDocument,
+    nodes: &[WorkflowNodeView],
+    schema: &RecognitionSchemaContext,
+    dynamic_binding_targets: &BTreeSet<(String, String)>,
+    output_roots: &[OutputRootSelection],
+    recipe_scoped: bool,
+) -> CapabilityCheckView {
+    if recipe_scoped {
+        evaluate_runtime_recipe_capability(
+            workflow,
+            nodes,
+            schema,
+            dynamic_binding_targets,
+            output_roots,
+        )
+    } else {
+        evaluate_capability_with_schema_and_output_roots(
+            workflow,
+            nodes,
+            schema,
+            dynamic_binding_targets,
+            output_roots,
+        )
+    }
+}
+
 // Recognition retains all discovered roots for review. Execution, however,
 // collects the outputs declared by this exact Recipe. ComfyUI also validates
 // executable output nodes in the submitted prompt, even when not collected.
@@ -6454,6 +6492,50 @@ mod runtime_recipe_scope_tests {
             node_id: node.into(),
             output_type: kind.into(),
         }
+    }
+    /// Regression for a USER image-to-video package whose dangling
+    /// ImageScaleToTotalPixels -> GetImageSize branch (no output node) made
+    /// the live Start gate report PARTIALLY_SUPPORTED while ComfyUI would
+    /// prune that branch. The live scope must match the Recipe scope.
+    #[test]
+    fn live_recipe_scope_ignores_dangling_non_output_branch_like_sync_path() {
+        let workflow = WorkflowDocument::parse(serde_json::json!({
+            "1":{"class_type":"LoadImage","inputs":{"image":"fixture.png"}},
+            "2":{"class_type":"VideoGenerator","inputs":{"image":["1",0]}},
+            "3":{"class_type":"SaveVideo","inputs":{"video":["2",0]}},
+            "4":{"class_type":"ImageScaleToTotalPixels","inputs":{}},
+            "5":{"class_type":"GetImageSize","inputs":{"image":["4",0]}}
+        }))
+        .unwrap();
+        let schema = RecognitionSchemaContext::parse(&serde_json::json!({
+            "LoadImage":{"output":["IMAGE"],"input":{"required":{"image":["STRING",{}]}}},
+            "VideoGenerator":{"output":["VIDEO"],"input":{"required":{"image":["IMAGE",{}]}}},
+            "SaveVideo":{"output":["VIDEO"],"output_node":true,"input":{"required":{"video":["VIDEO",{}]}}},
+            "ImageScaleToTotalPixels":{"output":["IMAGE"],"input":{"required":{"image":["IMAGE",{}]}}},
+            "GetImageSize":{"output":["INT","INT","INT"],"input":{"required":{"image":["IMAGE",{}]}}}
+        }));
+        let nodes = inspect_workflow(&workflow).unwrap();
+        let roots = vec![root("3", "video")];
+        let none = BTreeSet::new();
+        let live = evaluate_capability_for_scope(&workflow, &nodes, &schema, &none, &roots, true);
+        let sync = evaluate_runtime_recipe_capability(&workflow, &nodes, &schema, &none, &roots);
+        assert_eq!(live.state, CapabilityState::Ready, "{:?}", live.issues);
+        assert_eq!(live.state, sync.state);
+        assert!(live.issues.is_empty());
+        // Recognition scope still reviews every discovered root.
+        let review =
+            evaluate_capability_for_scope(&workflow, &nodes, &schema, &none, &roots, false);
+        assert_ne!(review.state, CapabilityState::Ready);
+        // Undeclared/invalid recipe roots still fail closed in the live scope.
+        let bad = evaluate_capability_for_scope(
+            &workflow,
+            &nodes,
+            &schema,
+            &none,
+            &[root("5", "video")],
+            true,
+        );
+        assert_ne!(bad.state, CapabilityState::Ready);
     }
     #[test]
     fn unselected_invalid_image_branch_does_not_block_video_recipe() {

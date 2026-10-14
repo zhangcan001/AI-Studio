@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CreatePage } from "./CreatePage";
 import { CreateMediaPreview } from "./CreateMediaPreview";
+import { queueRunLabel } from "./createModel";
 import { StrictMode } from "react";
 import { useStudioStore } from "../../stores/studioStore";
 import type { CreationAsset, CreationContext, GeneratorOption, ProductRun } from "../../product/types";
@@ -134,4 +135,9 @@ it("Library return preserves unsaved persistent media only for the exact owner",
   fireEvent.click(screen.getByRole("button",{name:"在资源库查找更多提示词"}));expect(nav).toHaveBeenLastCalledWith({kind:"library",projectId:"owned",filter:"prompts"});page.unmount();
   const returned=render(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={nav}/>);await screen.findByLabelText("选择生成器");await waitFor(()=>expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"first"}));expect(await screen.findByText("输入尚未保存。")).toBeTruthy();expect(api.inputsSave).not.toHaveBeenCalled();expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(true);
   returned.rerender(<CreatePage route={{...route,projectId:"other",shotId:"two"}} runtime={{...runtime,devices:[]}} navigate={nav}/>);await waitFor(()=>expect(useStudioStore.getState().values.first_frame).toBeUndefined());
+});
+it("labels a saved run whose Start was rejected as 无法启动, never as queued", () => {
+  expect(queueRunLabel({ status: "PAUSED", errorSummary: "排队任务无法自动启动：RUNTIME_ADMISSION_CAPABILITY_UNKNOWN" })).toBe("无法启动");
+  expect(queueRunLabel({ status: "PAUSED", errorSummary: null })).toBe("暂停");
+  expect(queueRunLabel({ status: "QUEUED", errorSummary: null })).toBe("排队中");
 });

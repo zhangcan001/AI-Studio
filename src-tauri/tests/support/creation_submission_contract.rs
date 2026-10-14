@@ -504,3 +504,97 @@ async fn product_creation_submission_recent_prompt_choices_keep_exact_identity_a
         assert!(wire["promptVersionId"].is_string());
     }
 }
+
+/// A runtime-gate rejection is reported by readiness (button disabled with a
+/// reason), and an immediate Start rejection is persisted as BLOCKED so the
+/// saved READY batch is not projected as a fake queued run.
+#[tokio::test]
+async fn product_creation_runtime_gate_blocks_readiness_and_persists_start_rejection() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("runtime-gate.db"))
+        .await
+        .unwrap();
+    seed_database(&pool, dir.path()).await;
+    video_recipe(&pool).await;
+    let services = build_services(&pool, schema_comfy(), &dir.path().join("packages"));
+    let (facade, _) = creation_context_services(&pool);
+    let prompts = prompt_service(&pool);
+    let shot = facade.create_shot(PROJECT_ID).await.unwrap();
+    let asset = source_video(&pool, dir.path(), PROJECT_ID).await;
+    let values = BTreeMap::from([
+        ("prompt".into(), GenerationInputValue::Text("gate".into())),
+        (
+            "reference_video".into(),
+            GenerationInputValue::VideoAsset(asset),
+        ),
+    ]);
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let captured = seen.clone();
+    let blocked = facade
+        .readiness_get_with_runtime(
+            &services.queue,
+            &prompts,
+            request(&shot.id, values.clone(), "gate-ready"),
+            move |workflow_version_id, recipe_id| async move {
+                *captured.lock().unwrap() = Some((workflow_version_id, recipe_id));
+                let mut error = ProductError::new("RUNTIME_BLOCKED", "blocked", None);
+                error.details.technical_details =
+                    Some("RUNTIME_ADMISSION_CAPABILITY_UNKNOWN".into());
+                Err(error)
+            },
+        )
+        .await;
+    assert!(!blocked.ready);
+    assert_eq!(blocked.issues[0].code, "RUNTIME_BLOCKED");
+    let (workflow_version_id, recipe_id) =
+        seen.lock().unwrap().clone().expect("runtime gate called");
+    assert!(!workflow_version_id.is_empty() && !recipe_id.is_empty());
+    let passing = facade
+        .readiness_get_with_runtime(
+            &services.queue,
+            &prompts,
+            request(&shot.id, values.clone(), "gate-ok"),
+            |_, _| async { Ok(()) },
+        )
+        .await;
+    assert!(passing.ready, "{:?}", passing.issues);
+    for table in ["tasks", "batches", "items"] {
+        assert_eq!(count(&pool, table).await, 0);
+    }
+
+    let queue = services.queue.clone();
+    let accepted = facade
+        .generate(
+            &services.queue,
+            &prompts,
+            request(&shot.id, values, "gate-start"),
+            move |project_id, batch_id| async move {
+                queue
+                    .record_blocked_start(
+                        &project_id,
+                        &batch_id,
+                        "RUNTIME_ADMISSION_CAPABILITY_UNKNOWN: probe",
+                    )
+                    .await
+                    .unwrap();
+                Err(ProductError::new(
+                    "RUNTIME_BLOCKED",
+                    "blocked",
+                    Some("OPEN_RUN"),
+                ))
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.start_outcome, "FAILED_TO_START");
+    let state = services
+        .queue
+        .deferred_start_state(PROJECT_ID, &accepted.run_ref.id)
+        .await
+        .unwrap()
+        .expect("blocked start is persisted");
+    assert_eq!(state.0, "BLOCKED");
+    assert!(state.1.unwrap().contains("CAPABILITY_UNKNOWN"));
+    // BLOCKED requests are never auto-retried by the deferred runner.
+    assert!(!services.queue.has_deferred_starts().await.unwrap());
+}

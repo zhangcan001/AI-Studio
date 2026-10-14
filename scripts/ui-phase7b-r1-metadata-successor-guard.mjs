@@ -31,6 +31,11 @@ export const R1_METADATA_CHANGED = [
   "src-tauri/src/application/minimax_video_product_policy.rs",
   "src-tauri/src/application/workflow_registry_service.rs",
   "src/features/create/CreateVideoWorkspace.test.tsx",
+  "src-tauri/src/application/product/creation_facade/submission.rs",
+  "src-tauri/src/application/production_start_admission_service.rs",
+  "src-tauri/src/application/workflow_onboarding_service.rs",
+  "src-tauri/tests/support/creation_submission_contract.rs",
+  "src/features/create/createModel.ts",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
