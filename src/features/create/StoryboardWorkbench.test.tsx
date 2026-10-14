@@ -5,9 +5,9 @@ import type { CreationContext, ProductRun } from "../../product/types";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { get: api.get, createShot: api.createShot, generate: api.generate }, run: { get: api.runGet } } }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+const api = vi.hoisted(() => ({ get: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { get: api.get, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult }, run: { get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview } } }));
+afterEach(() => { cleanup(); vi.clearAllMocks(); window.localStorage.clear(); });
 
 const shots = [{ id: "s1", name: "镜头01", ordinal: 1 }, { id: "s2", name: "镜头02", ordinal: 2 }, { id: "s3", name: "镜头03", ordinal: 3 }];
 const run = (status: ProductRun["status"], succeeded: number, total: number) => ({ ref: { source: "production-run", id: `r-${status}` }, projectId: "p", title: "run", status, phase: "", createdAt: "", updatedAt: "", progress: { total, succeeded, failed: 0, cancelled: 0 }, recoverability: { retryItemIds: [], reviewRequired: 0 }, resultsSummary: [], errorSummary: null, preferredParent: null, availableActions: [] }) as ProductRun;
@@ -51,4 +51,52 @@ it("UI restore: status precedence keeps active runs ahead of selection", () => {
   expect(deriveStoryboardStatus(null, [], null)).toBe("TODO");
   expect(runPercent(run("RUNNING", 17, 25))).toBe(68);
   expect(runPercent(null)).toBeNull();
+});
+
+function reviewContext(shotId: string | null): CreationContext {
+  const base = context(shotId);
+  if (shotId !== "s2" || !base.selectedShot) return base;
+  return { ...base, candidates: [{ id: "v1", name: "v1", mediaKind: "video", selected: false }] };
+}
+
+it("UI restore: grid and list modes render distinct layouts and the choice persists", async () => {
+  api.get.mockImplementation(async (_p: string, shotId: string | null) => context(shotId));
+  api.runGet.mockResolvedValue(run("SUCCEEDED", 1, 1));
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  await screen.findByRole("article", { name: "镜头01" });
+  expect(document.querySelector('[data-view="grid"]')).toBeTruthy();
+  expect(screen.queryByRole("table")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "列表模式" }));
+  const table = screen.getByRole("table", { name: "镜头列表（列表模式）" });
+  expect(within(table).getAllByRole("columnheader").map(h => h.textContent)).toEqual(["缩略图", "镜头", "状态", "时长", "分辨率", "候选", "操作"]);
+  expect(within(table).getByRole("row", { name: "镜头01" })).toBeTruthy();
+  expect(screen.queryByRole("article")).toBeNull();
+  expect(window.localStorage.getItem("ai-studio.storyboard.view")).toBe("list");
+  cleanup();
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  expect(await screen.findByRole("table")).toBeTruthy();
+});
+
+it("UI restore: review panel approves, rejects with comment and selects via existing run/creation IPC", async () => {
+  api.get.mockImplementation(async (_p: string, shotId: string | null) => reviewContext(shotId));
+  api.runGet.mockResolvedValue(run("SUCCEEDED", 1, 1));
+  api.resultsGet.mockResolvedValue([{ assetId: "v1", name: "v1", mediaKind: "video", assetExists: true, availability: "available", reviewState: "PENDING", reviewRevision: 3, selectedShotIds: [], thumbnailBytes: null }]);
+  api.resultReview.mockResolvedValue({}); api.selectResult.mockResolvedValue({});
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  const card = await screen.findByRole("article", { name: "镜头02" });
+  expect(within(screen.getByRole("article", { name: "镜头03" })).queryByRole("button", { name: "审核" })).toBeNull();
+  fireEvent.click(within(card).getByRole("button", { name: "审核" }));
+  const dialog = await screen.findByRole("dialog", { name: "审核 镜头02" });
+  const item = await within(dialog).findByRole("listitem", { name: "候选 v1" });
+  expect((within(item).getByRole("button", { name: "退回" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(within(item).getByRole("button", { name: "通过" }));
+  await vi.waitFor(() => expect(api.resultReview).toHaveBeenCalledWith("p", { runRef: { source: "production-run", id: "r-SUCCEEDED" }, assetId: "v1", decision: "APPROVED", comment: "", expectedRevision: 3 }));
+  fireEvent.change(within(dialog).getByLabelText("审核说明"), { target: { value: "构图不对" } });
+  await vi.waitFor(() => expect((within(item).getByRole("button", { name: "退回" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(within(item).getByRole("button", { name: "退回" }));
+  await vi.waitFor(() => expect(api.resultReview).toHaveBeenLastCalledWith("p", expect.objectContaining({ decision: "REJECTED", comment: "构图不对" })));
+  await vi.waitFor(() => expect((within(item).getByRole("button", { name: "选为结果" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(within(item).getByRole("button", { name: "选为结果" }));
+  await vi.waitFor(() => expect(api.selectResult).toHaveBeenCalledWith("p", "s2", "video", "v1"));
+  expect(api.generate).not.toHaveBeenCalled();
 });

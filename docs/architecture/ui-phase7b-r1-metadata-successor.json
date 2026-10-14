@@ -81,7 +81,7 @@
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "f03122f9469dff4f7f7b89e65bab9d76a9f64ceb0736119b9cd34230ef33ea59"
+      "afterHash": "de32179185357bfa37ef123756336a6ee5704e7c3d257e05a6743b6e480ca585"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea",
@@ -97,11 +97,11 @@
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
-      "afterHash": "a838132ac13d514104a22fc4645fe8f7a56fa9e32d2766b1e0a63cf5371d2faf"
+      "afterHash": "9d121595fb2159236a578df1893b76adcceff2ed7854aa4e6886c15320c9e850"
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": null,
-      "afterHash": "c5dab5a979f0b43afc65d58d05f9dbb67dea5f061bfa845b2cee570577cf15b7"
+      "afterHash": "a34d0475d07d82f1730246df23e1d928480a7515ff8f95d6bf9bdea824b71b56"
     },
     "src/features/create/storyboardModel.ts": {
       "beforeHash": null,
