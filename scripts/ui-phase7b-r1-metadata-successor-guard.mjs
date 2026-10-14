@@ -28,6 +28,9 @@ export const R1_METADATA_CHANGED = [
   "src/features/create/CreateVideoWorkspace.tsx",
   "src/features/generators/GeneratorSettingsPage.test.tsx",
   "src/features/generators/GeneratorSettingsPage.tsx",
+  "src-tauri/src/application/minimax_video_product_policy.rs",
+  "src-tauri/src/application/workflow_registry_service.rs",
+  "src/features/create/CreateVideoWorkspace.test.tsx",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",

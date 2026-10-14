@@ -62,3 +62,12 @@ it("empty video catalog shows a clear empty state pointing to advanced workflows
   render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
   expect((await screen.findByTestId("no-video-generators")).textContent).toContain("高级工作流");
 });
+it("imported user video generators are selectable; stray image options never reach the video slot", async () => {
+  const user = { ...options[0], selectionRef: "user-i2v", name: "My I2V", mode: "image_to_video" };
+  const stray = { ...options[0], selectionRef: "stray-img", mode: "T2I", mediaKind: "image" as const };
+  api.list.mockImplementation(async (_project, stage) => stage === "video" ? [user, stray] : []);
+  render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+  const select = await screen.findByLabelText("默认视频生成器") as HTMLSelectElement;
+  const values = [...select.options].map(o => o.value);
+  expect(values).toContain("user-i2v"); expect(values).not.toContain("stray-img");
+});

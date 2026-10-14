@@ -1433,13 +1433,14 @@ impl WorkflowRegistryService {
         let Some(recipe) = version.recipes.iter().find(|r| r.recipe_id == recipe_id) else {
             return Ok(denied());
         };
-        if !registry
+        let Some(source_kind) = registry
             .get(&version.workflow_id)
             .await?
-            .is_some_and(|w| w.source_kind == "PRODUCT")
-        {
+            .map(|w| w.source_kind)
+            .filter(|kind| kind == "PRODUCT" || kind == "USER")
+        else {
             return Ok(denied());
-        }
+        };
         let records = artifacts
             .list_for_recipe(workflow_version_id, recipe_id)
             .await?;
@@ -1449,9 +1450,16 @@ impl WorkflowRegistryService {
         let Ok(package) = store.read_runtime(&artifact.package_name).await else {
             return Ok(denied());
         };
-        if crate::application::minimax_video_product_policy::authorizes(
-            &version, recipe, artifact, &package,
-        ) {
+        let authorized = if source_kind == "USER" {
+            crate::application::minimax_video_product_policy::authorizes_user_video(
+                &version, recipe, artifact, &package,
+            )
+        } else {
+            crate::application::minimax_video_product_policy::authorizes(
+                &version, recipe, artifact, &package,
+            )
+        };
+        if authorized {
             Ok(existing)
         } else {
             Ok(denied())

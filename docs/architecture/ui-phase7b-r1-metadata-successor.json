@@ -29,7 +29,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "8e8546315f0006015b14dc6236c397d2553f74abe8b18c8be01c01ed7b1c1e59"
+      "afterHash": "78aebc6f8620215879912a3b3b6180b8174d17f8533fb81687961237de9810b5"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
@@ -117,11 +117,23 @@
     },
     "src/features/generators/GeneratorSettingsPage.test.tsx": {
       "beforeHash": "02c6369578c603b48838e8144164cbff024dfcc74636719927afaf8cfe353b61",
-      "afterHash": "29c2c94b21ff2ef025db85e0ac1e1c8ce89850f954af847d5e197a484cf14406"
+      "afterHash": "a345c00ed157bfb24edd7105fe2df1f893b5d0b0f34346cc1b189cec7c9c5c8b"
     },
     "src/features/generators/GeneratorSettingsPage.tsx": {
       "beforeHash": "bc22aee331760b4dcbc1b135c037422c2ce6716370358aa66883e46dc18db3df",
       "afterHash": "a1a470b159606a71b77041db9fe2b698ba6e66c7aa5b807bb4efc04f10892676"
+    },
+    "src-tauri/src/application/minimax_video_product_policy.rs": {
+      "beforeHash": "b4ce6a495d756d2a7a24e4383f84d4916ffbd1878e0fd4bec58dbf37e79082d4",
+      "afterHash": "a1fafa273678148623417b0f65723de12fdeddfed889c5372dc08ecff8c620ee"
+    },
+    "src-tauri/src/application/workflow_registry_service.rs": {
+      "beforeHash": "44deac989cce2eae98b98ab9e04c69925aa0cfcb93a5d1b2c43af206b1aedd0a",
+      "afterHash": "788c88e147f1210544d018a331537afd8a4f001f47d8a980607cac4c0193e988"
+    },
+    "src/features/create/CreateVideoWorkspace.test.tsx": {
+      "beforeHash": "542f875656fc0502bebc3aa6c0834488fb63fc3a9822c744fbea3c90fa55deed",
+      "afterHash": "0ea5d42560f9886a93a9d0cc6ca76be8e8009aee9e743b319ebc21fb18950661"
     }
   }
 }

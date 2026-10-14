@@ -38,10 +38,10 @@ beforeEach(()=>{
   api.libraryGet.mockResolvedValue({kind:"asset",asset:{assetType:"image",mimeType:"image/png"}});api.imageGet.mockResolvedValue([1]);
   vi.stubGlobal("URL",{createObjectURL:vi.fn(()=>"blob:owned"),revokeObjectURL:vi.fn()});
 });
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();sessionStorage.clear();});
+afterEach(()=>{vi.useRealTimers();cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();sessionStorage.clear();});
 async function start() { const result=render(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={nav}/>);await screen.findByLabelText("选择生成器");await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(false));return result; }
 async function mode(ref:string) {fireEvent.change(screen.getByLabelText("选择生成器"),{target:{value:ref}});await waitFor(()=>expect(api.inputsGet).toHaveBeenLastCalledWith({projectId:"owned",shotId:"one",selectionRef:ref}));await waitFor(()=>expect(screen.getByRole("button",{name:"导入图片、视频或音频"}).hasAttribute("disabled")).toBe(false));}
-async function save() {fireEvent.click(screen.getByRole("button",{name:"保存视频输入"}));await waitFor(()=>expect(screen.queryByText("输入尚未保存。")).toBeNull());}
+async function save() {const saved=api.inputsSave.mock.calls.length;fireEvent.click(screen.getByRole("button",{name:"保存视频输入"}));await waitFor(()=>expect(api.inputsSave.mock.calls.length).toBeGreaterThan(saved));await waitFor(()=>expect(screen.queryByText("输入尚未保存。")).toBeNull());}
 async function readyToGenerate() {await screen.findByText("可以入队生成");await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(false));}
 it("T2V has no media requirement, uses submit-time authority and prevents double submission",async()=>{
   await start();expect(screen.getByText("T2V 无需图片输入。")).toBeTruthy();expect(screen.getByLabelText("视频预览")).toBeTruthy();expect(screen.queryByRole("video")).toBeNull();
@@ -63,9 +63,13 @@ it("REF2VA hands ordered mixed media, video-only and pure-audio cases to the sin
   fireEvent.change(screen.getByLabelText("参考视频"),{target:{value:"ref-video"}});fireEvent.change(screen.getByLabelText("参考视频"),{target:{value:"ref-video2"}});fireEvent.click(screen.getByRole("button",{name:"参考视频下移第1项"}));await save();
   await readyToGenerate();fireEvent.click(screen.getByRole("button",{name:"生成"}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));expect(api.generate.mock.calls[0][0].values.reference_videos).toEqual({type:"video_assets",assetIds:["ref-video2","ref-video"]});expect(api.generate.mock.calls[0][0].values.reference_images).toBeUndefined();
   fireEvent.change(screen.getByLabelText("参考图片"),{target:{value:"first"}});fireEvent.change(screen.getByLabelText("参考音频"),{target:{value:"ref-audio"}});await save();await readyToGenerate();fireEvent.click(screen.getByRole("button",{name:"生成"}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));expect(api.generate.mock.calls[1][0].values.reference_audios).toEqual({type:"audio_assets",assetIds:["ref-audio"]});
-  fireEvent.click(screen.getByRole("button",{name:"参考图片移除第1项"}));fireEvent.click(screen.getByRole("button",{name:"参考视频移除第1项"}));fireEvent.click(screen.getByRole("button",{name:"参考视频移除第1项"}));await save();
+  // Readiness is debounced (600ms); drive that timer explicitly instead of racing waitFor's 1s budget.
+  vi.useFakeTimers({shouldAdvanceTime:true});
   api.readinessGet.mockResolvedValue({ready:false,issues:[],fieldErrors:[],actions:[]});
+  fireEvent.click(screen.getByRole("button",{name:"参考图片移除第1项"}));fireEvent.click(screen.getByRole("button",{name:"参考视频移除第1项"}));fireEvent.click(screen.getByRole("button",{name:"参考视频移除第1项"}));await save();
+  await act(async()=>{await vi.advanceTimersByTimeAsync(600);});
   await waitFor(()=>expect(api.readinessGet.mock.calls[api.readinessGet.mock.calls.length-1]?.[0].values.reference_videos).toBeUndefined());
+  vi.useRealTimers();
   await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(true));
   expect(api.generate).toHaveBeenCalledTimes(2);
 });
