@@ -268,3 +268,5 @@
   .storyboard-tree { display:none; }
 }
 @media (max-width:760px) { .storyboard-body { display:block; overflow:auto; } .storyboard-card { grid-template-columns:1fr; } }
+
+.create-candidate-frame { display: block; width: 100%; height: 100%; object-fit: cover; background: #000; pointer-events: none; }

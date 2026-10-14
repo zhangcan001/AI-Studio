@@ -720,6 +720,13 @@ fn is_input_error(code: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn video_posters_are_returned_with_result_thumbnails() {
+        assert!(super::has_thumbnail_preview("image"));
+        assert!(super::has_thumbnail_preview("video"));
+        assert!(!super::has_thumbnail_preview("audio"));
+    }
+
     use super::*;
     #[test]
     fn product_run_completed_is_not_always_success() {

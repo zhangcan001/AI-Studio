@@ -245,7 +245,9 @@ impl ProductCreationFacade {
         // Bounded thumbnails only; failures never erase valid candidate metadata.
         for item in candidates
             .iter_mut()
-            .filter(|item| item.media_kind == "image")
+            .filter(|item| {
+                crate::application::product::run_facade::has_thumbnail_preview(&item.media_kind)
+            })
             .take(12)
         {
             if let Ok(binary) = assets.read_thumbnail(project_id, &item.id).await {

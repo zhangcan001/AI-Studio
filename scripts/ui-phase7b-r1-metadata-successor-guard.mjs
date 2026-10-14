@@ -36,6 +36,10 @@ export const R1_METADATA_CHANGED = [
   "src-tauri/src/application/workflow_onboarding_service.rs",
   "src-tauri/tests/support/creation_submission_contract.rs",
   "src/features/create/createModel.ts",
+  "src-tauri/src/application/product/creation_facade/context.rs",
+  "src-tauri/src/application/product/run_facade.rs",
+  "src-tauri/src/application/product/run_facade/detail.rs",
+  "src/features/create/CreateMediaPreview.tsx",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
@@ -43,6 +47,7 @@ export const R1_METADATA_ADDED = [
   "src/features/create/StoryboardWorkbench.test.tsx",
   "src/features/create/StoryboardWorkbench.tsx",
   "src/features/create/storyboardModel.ts",
+  "src/features/create/CandidateThumbnail.test.tsx",
 ].sort();
 export const R1_METADATA_CONTRACTS = {
   schemaChanged: false, backupFormatChanged: true, backupVersion: 21,

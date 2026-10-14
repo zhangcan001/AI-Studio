@@ -42,14 +42,14 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
       <section className="create-candidate-strip" aria-label="当前镜头候选"><header><h2>当前镜头候选 <small>{candidates.length} 个视频</small></h2><div><button type="button" disabled={c.busy} onClick={() => { void c.refresh(); setUnavailable(new Set()); setPreviewAttempt(n => n+1); }}>刷新结果</button><button type="button" aria-label="在资源库查看视频" onClick={() => c.openLibrary("videos")}>资源库</button></div></header>
         {c.run?.status === "FAILED" && <p>本次生成失败；已有候选和选用状态不会删除。</p>}
         {!candidates.length && <p>尚无此阶段的生成候选。</p>}
-        <div className="create-video-candidates">{candidates.map(asset => <button key={asset.id} type="button" className={`create-candidate-card ${current?.id === asset.id ? "previewing" : ""}`} aria-label={`预览${asset.name}`} aria-pressed={current?.id === asset.id} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} /><strong>{asset.name}</strong><span>{asset.selected ? "已选用" : "候选"}</span></button>)}</div>
+        <div className="create-video-candidates">{candidates.map(asset => <button key={asset.id} type="button" className={`create-candidate-card ${current?.id === asset.id ? "previewing" : ""}`} aria-label={`预览${asset.name}`} aria-pressed={current?.id === asset.id} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /><strong>{asset.name}</strong><span>{asset.selected ? "已选用" : "候选"}</span></button>)}</div>
         <small>切换仅预览 · 选用不等于审核 · 其他候选和历史运行保留</small>
       </section>
     </div>
     <aside className="create-run-inspector" aria-label="镜头与运行信息"><details open={inspectorOpen} onToggle={e => setInspectorOpen(e.currentTarget.open)}><summary>镜头与运行信息</summary>
       <ShotInfoCard controller={c} candidates={candidates} />
       <section className="create-recent" aria-label="最近生成"><header><h2>最近生成</h2><button type="button" className="create-link" onClick={() => c.openLibrary("videos")}>查看更多</button></header>
-        {candidates.length ? <div className="create-recent-grid">{candidates.slice(0, 3).map(asset => <button key={asset.id} type="button" aria-label={`最近生成${asset.name}`} className={current?.id === asset.id ? "previewing" : ""} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} /></button>)}</div> : <p className="create-muted">尚无生成结果</p>}
+        {candidates.length ? <div className="create-recent-grid">{candidates.slice(0, 3).map(asset => <button key={asset.id} type="button" aria-label={`最近生成${asset.name}`} className={current?.id === asset.id ? "previewing" : ""} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /></button>)}</div> : <p className="create-muted">尚无生成结果</p>}
       </section>
       <RunStatusCard controller={c} />
       <RunQueueCard controller={c} projectId={route.projectId} />

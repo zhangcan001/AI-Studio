@@ -6,7 +6,7 @@ import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { get: api.get, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult }, run: { get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview } } }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult }, run: { get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview } } }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); window.localStorage.clear(); });
 
 const shots = [{ id: "s1", name: "镜头01", ordinal: 1 }, { id: "s2", name: "镜头02", ordinal: 2 }, { id: "s3", name: "镜头03", ordinal: 3 }];

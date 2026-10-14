@@ -353,7 +353,11 @@ impl ProductRunFacade {
         }
         for item in results
             .iter_mut()
-            .filter(|item| item.media_kind.as_deref() == Some("image"))
+            .filter(|item| {
+                item.media_kind
+                    .as_deref()
+                    .is_some_and(has_thumbnail_preview)
+            })
             .take(12)
         {
             if let Ok(binary) = services
@@ -403,4 +407,10 @@ impl ProductRunFacade {
             .map_err(review_error)?;
         Ok(())
     }
+}
+
+/// Media kinds whose stored thumbnail (image preview or ffmpeg video poster) is
+/// returned with result/candidate summaries.
+pub fn has_thumbnail_preview(media_kind: &str) -> bool {
+    matches!(media_kind, "image" | "video")
 }

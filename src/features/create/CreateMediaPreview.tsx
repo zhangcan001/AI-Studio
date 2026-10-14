@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import type { CreationAsset } from "../../product/types";
 
@@ -45,12 +45,25 @@ export function CreateMediaPreview({ projectId, asset, onUnavailable }: {
     : <audio ref={media as React.RefObject<HTMLAudioElement>} aria-label={asset.name} controls preload="metadata" src={src} onError={unavailable} />;
 }
 
-export function CandidateThumbnail({ asset }: { asset: CreationAsset }) {
+/** Project scope for candidate thumbnails rendered deep inside list/grid trees. */
+export const ThumbnailProjectContext = createContext<string | null>(null);
+
+// Poster first (backend ffmpeg first frame); otherwise the real first frame of the
+// owned media stream, muted and paused. Never a fabricated image.
+export function CandidateThumbnail({ asset, projectId }: { asset: CreationAsset; projectId?: string }) {
+  const scope = useContext(ThumbnailProjectContext);
+  const owner = projectId ?? scope;
   const [url, setUrl] = useState<string>();
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!asset.thumbnailBytes?.length) { setUrl(undefined); return; }
     const next = URL.createObjectURL(new Blob([Uint8Array.from(asset.thumbnailBytes)], { type: "image/png" }));
     setUrl(next); return () => URL.revokeObjectURL(next);
   }, [asset.thumbnailBytes]);
-  return url ? <img src={url} alt={`${asset.name}缩略图`} /> : <span className="create-candidate-placeholder">视频 · 暂无缩略图</span>;
+  useEffect(() => { setFailed(false); }, [owner, asset.id]);
+  if (url) return <img src={url} alt={`${asset.name}缩略图`} />;
+  if (asset.mediaKind === "video" && owner && !failed) {
+    return <video className="create-candidate-frame" aria-label={`${asset.name}首帧`} src={productClient.creation.mediaUrl(owner, asset.id, "video")} preload="metadata" muted playsInline disablePictureInPicture onError={() => setFailed(true)} />;
+  }
+  return <span className="create-candidate-placeholder">{asset.mediaKind === "video" ? "视频 · 暂无缩略图" : "暂无缩略图"}</span>;
 }

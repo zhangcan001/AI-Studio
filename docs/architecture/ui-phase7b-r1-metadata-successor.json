@@ -29,19 +29,51 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "11dfc412b63dd06e16b78c0c60a858f7e834c3fbd5b3df39e71913c971aeb30b"
+      "afterHash": "e8f9b2ad444d62c20c82948587979c68c743d4b6202bf2f9315c0c8cd06d7110"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
       "afterHash": "0d9ec801780f7e2061f09d426311fd7590a6aac448f93523d745c44cd589da9e"
     },
+    "src-tauri/src/application/minimax_video_product_policy.rs": {
+      "beforeHash": "b4ce6a495d756d2a7a24e4383f84d4916ffbd1878e0fd4bec58dbf37e79082d4",
+      "afterHash": "a1fafa273678148623417b0f65723de12fdeddfed889c5372dc08ecff8c620ee"
+    },
+    "src-tauri/src/application/product/creation_facade/context.rs": {
+      "beforeHash": "861ab28ff2034aa923895b37d44fbb4ae03add43ab276aee6592425f9e41279f",
+      "afterHash": "efa30fe010dffd1b838acb63144cd1000f24f6022e36aa4238d016802d547df0"
+    },
+    "src-tauri/src/application/product/creation_facade/submission.rs": {
+      "beforeHash": "2f9220b2c9b5ebe005df3840fb39167dc16d907addb7d2c9fc3860d679e40235",
+      "afterHash": "24b7e40353ed7515c3cabed811dda2a4065b2df38e931d92565b4c44c612ecd8"
+    },
+    "src-tauri/src/application/product/run_facade.rs": {
+      "beforeHash": "f405ca669bc2445ee3b5c089903bf4b95500cb51edc68d394edb4363e5cc1c73",
+      "afterHash": "25eda1c6d3dabf5f81741205339d9a0607a1d8b70d6976499acac10e5639f18e"
+    },
+    "src-tauri/src/application/product/run_facade/detail.rs": {
+      "beforeHash": "9462827fc7b693cc0b97dba1b0b466627706913e4f04cbb8fec6014a998d794a",
+      "afterHash": "3de6fef9a7c50f7729dde681c203bc19929582363fe4be6fa5ffce6e9f845b3c"
+    },
     "src-tauri/src/application/production_queue_service.rs": {
       "beforeHash": "6ad0048238227803cae69d09707058fbf667307baf83b57bc8218e204629e3f3",
       "afterHash": "56691934f7f8ec9f4a231bf3de463717a02dfd6e2fbd06dec2df3d024cff87a5"
     },
+    "src-tauri/src/application/production_start_admission_service.rs": {
+      "beforeHash": "f0bc688748737050010034eb1e8b11be82f6a42582eb2be1a442bdb30e1bc8c2",
+      "afterHash": "728b86c81715f1f1020418cf2b36b1ef93fc34415f33027186d8a1127cf5699d"
+    },
     "src-tauri/src/application/project_backup_service.rs": {
       "beforeHash": "1dfa4e6c5e1bf47c802e9ba51e965494ecff84d512281c6e81772a83fcf89b19",
       "afterHash": "52e93e314f46f7f88b873fb4d0627edbfc865994e553bf900e107ad7a75d504d"
+    },
+    "src-tauri/src/application/workflow_onboarding_service.rs": {
+      "beforeHash": "8373fb44acafe880471b4bd490d4eab0949b08721af0fc55ceeeac8a142684d8",
+      "afterHash": "879fdcbef150944d7ef8b4a3a8d9cf3f72b366c08953114ce94614a009e82ca6"
+    },
+    "src-tauri/src/application/workflow_registry_service.rs": {
+      "beforeHash": "44deac989cce2eae98b98ab9e04c69925aa0cfcb93a5d1b2c43af206b1aedd0a",
+      "afterHash": "788c88e147f1210544d018a331537afd8a4f001f47d8a980607cac4c0193e988"
     },
     "src-tauri/src/commands/product.rs": {
       "beforeHash": "2306a3e249c2bd548aa9b468e64e15369a82f6ab1692860b0bc37233d537018b",
@@ -54,6 +86,10 @@
     "src-tauri/src/lib.rs": {
       "beforeHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77",
       "afterHash": "8e416699a8ab999887d282f336891169d2d7c910cc5544ebb1df90ee5f462516"
+    },
+    "src-tauri/tests/support/creation_submission_contract.rs": {
+      "beforeHash": "1b10b1c8524f6eea893161f936ff80968a98cbfb6fa96feee529cc2e60cac4ef",
+      "afterHash": "55395c0cdf91d2f91360d3fc4af8cf1efb9829e9b866635dfaedb10ae8d45a96"
     },
     "src/app/FeatureLifecycle.test.tsx": {
       "beforeHash": "5afce45fa6f54518608fae3310829b21020dfedc308794fa236a182e2b452fa2",
@@ -71,6 +107,10 @@
       "beforeHash": "c12fb4d2007eab82c57cea8dabfed001924a2a89a7d296a27e8644752c5912a3",
       "afterHash": "da4fb7f850c94c77c4b7934b50aadd86123099902d2c58007bf0bc72f21719c5"
     },
+    "src/features/create/CandidateThumbnail.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "6cdb6aa731c2d52023a1dafed783931750a1c7c52283132fcf01a37e10a2b7f8"
+    },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
       "afterHash": "adff08eabc5d54aa2fdc6aaf58c60902a44dbfe723ed3670b312bc9914b36ecd"
@@ -79,9 +119,13 @@
       "beforeHash": "2d66012f799ddaa1b7222323767b885840676acd77a3d43a306f17c653eeee3f",
       "afterHash": "cdfbf586ac1acf3cf79686f88cb0eb617cb9de09c0cead46e4dc3fe1dfa9f622"
     },
+    "src/features/create/CreateMediaPreview.tsx": {
+      "beforeHash": "418f32f5d365c2ea9fc624124589b9f9b529a3a74e77e23d4f8d1164da5ba619",
+      "afterHash": "2864415114daa4ff358964e7bac97f7f2605c4c4aba6bd8018297b065e161263"
+    },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "de32179185357bfa37ef123756336a6ee5704e7c3d257e05a6743b6e480ca585"
+      "afterHash": "29496b0ddb95bf8535c6605e64420c7f4cb997f22dbf341c3890e4d5149c751b"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea",
@@ -91,29 +135,29 @@
       "beforeHash": "0626c17eaef1c80cba4d5c6732b88f6fc5a0e9095b028497ce3eebcadc551172",
       "afterHash": "51912ee429d676a7ccdf7baced046ffa3e1497ec8a2f108bd348a865352dea26"
     },
+    "src/features/create/CreateVideoWorkspace.test.tsx": {
+      "beforeHash": "542f875656fc0502bebc3aa6c0834488fb63fc3a9822c744fbea3c90fa55deed",
+      "afterHash": "98038d34af831e235c9c50424cd5036c342bf1c2272b8194edc895705b24a6df"
+    },
     "src/features/create/CreateVideoWorkspace.tsx": {
       "beforeHash": "9e3727c37c12691dc67042a79496234847efa335d5ddca38ecc20b0d62a61779",
-      "afterHash": "954caf212a4cb93d0070b0623635f0f2cea4fe493e50fce32c821044addfaebe"
+      "afterHash": "7b3d39411ea327f15e8f2e6002b04097338363f117f0ca938f7c2543ccfda513"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
-      "afterHash": "9d121595fb2159236a578df1893b76adcceff2ed7854aa4e6886c15320c9e850"
+      "afterHash": "87dc63e039a7de6e86631b0107f05d2bc6b111c4692b221ed6d9baac4d8295d9"
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": null,
-      "afterHash": "a34d0475d07d82f1730246df23e1d928480a7515ff8f95d6bf9bdea824b71b56"
+      "afterHash": "868376b1da0981217e39ad6bd8f0315c36e9929abbb8a6c0c6876ed5a5080dec"
+    },
+    "src/features/create/createModel.ts": {
+      "beforeHash": "554200ecedfa8e20b088a9142f8c29d1765fd92c2f3d9b412af9e70fab01a96d",
+      "afterHash": "d6124bea68772ea0f2bd2ee22a58edddae67fd391a231321669ee63b948bb85e"
     },
     "src/features/create/storyboardModel.ts": {
       "beforeHash": null,
       "afterHash": "eae7ce4040b416663a27ef08ebc551f4c9ae0dae172ba02734cd4fa5232817eb"
-    },
-    "src/features/runs/RunsController.ts": {
-      "beforeHash": "82e7600c977ba16782e590e42ae4013640730ea54e23c14547a465dab73e6382",
-      "afterHash": "00e240ff1242c59eb63d3be534fd11346504fddd270befcf4dc2493add149b34"
-    },
-    "src/features/tools/LocalToolHub.test.tsx": {
-      "beforeHash": "205b8c04c71274d0d9571f92b7d8ceacd2bb9c0357b57e9d3de9e2c39a52f435",
-      "afterHash": "251b34ace9c9efe11fdc08dcf8a7298f4b87c311c0109be91fc71ca3ccc475ec"
     },
     "src/features/generators/GeneratorSettingsPage.test.tsx": {
       "beforeHash": "02c6369578c603b48838e8144164cbff024dfcc74636719927afaf8cfe353b61",
@@ -123,37 +167,13 @@
       "beforeHash": "bc22aee331760b4dcbc1b135c037422c2ce6716370358aa66883e46dc18db3df",
       "afterHash": "a1a470b159606a71b77041db9fe2b698ba6e66c7aa5b807bb4efc04f10892676"
     },
-    "src-tauri/src/application/minimax_video_product_policy.rs": {
-      "beforeHash": "b4ce6a495d756d2a7a24e4383f84d4916ffbd1878e0fd4bec58dbf37e79082d4",
-      "afterHash": "a1fafa273678148623417b0f65723de12fdeddfed889c5372dc08ecff8c620ee"
+    "src/features/runs/RunsController.ts": {
+      "beforeHash": "82e7600c977ba16782e590e42ae4013640730ea54e23c14547a465dab73e6382",
+      "afterHash": "00e240ff1242c59eb63d3be534fd11346504fddd270befcf4dc2493add149b34"
     },
-    "src-tauri/src/application/workflow_registry_service.rs": {
-      "beforeHash": "44deac989cce2eae98b98ab9e04c69925aa0cfcb93a5d1b2c43af206b1aedd0a",
-      "afterHash": "788c88e147f1210544d018a331537afd8a4f001f47d8a980607cac4c0193e988"
-    },
-    "src/features/create/CreateVideoWorkspace.test.tsx": {
-      "beforeHash": "542f875656fc0502bebc3aa6c0834488fb63fc3a9822c744fbea3c90fa55deed",
-      "afterHash": "ef9b688d319b123fb18e1ddaa4b20c94dd10ad38ca2900cccabbf46474825ae5"
-    },
-    "src-tauri/src/application/product/creation_facade/submission.rs": {
-      "beforeHash": "2f9220b2c9b5ebe005df3840fb39167dc16d907addb7d2c9fc3860d679e40235",
-      "afterHash": "24b7e40353ed7515c3cabed811dda2a4065b2df38e931d92565b4c44c612ecd8"
-    },
-    "src-tauri/src/application/production_start_admission_service.rs": {
-      "beforeHash": "f0bc688748737050010034eb1e8b11be82f6a42582eb2be1a442bdb30e1bc8c2",
-      "afterHash": "728b86c81715f1f1020418cf2b36b1ef93fc34415f33027186d8a1127cf5699d"
-    },
-    "src-tauri/src/application/workflow_onboarding_service.rs": {
-      "beforeHash": "8373fb44acafe880471b4bd490d4eab0949b08721af0fc55ceeeac8a142684d8",
-      "afterHash": "879fdcbef150944d7ef8b4a3a8d9cf3f72b366c08953114ce94614a009e82ca6"
-    },
-    "src-tauri/tests/support/creation_submission_contract.rs": {
-      "beforeHash": "1b10b1c8524f6eea893161f936ff80968a98cbfb6fa96feee529cc2e60cac4ef",
-      "afterHash": "55395c0cdf91d2f91360d3fc4af8cf1efb9829e9b866635dfaedb10ae8d45a96"
-    },
-    "src/features/create/createModel.ts": {
-      "beforeHash": "554200ecedfa8e20b088a9142f8c29d1765fd92c2f3d9b412af9e70fab01a96d",
-      "afterHash": "d6124bea68772ea0f2bd2ee22a58edddae67fd391a231321669ee63b948bb85e"
+    "src/features/tools/LocalToolHub.test.tsx": {
+      "beforeHash": "205b8c04c71274d0d9571f92b7d8ceacd2bb9c0357b57e9d3de9e2c39a52f435",
+      "afterHash": "251b34ace9c9efe11fdc08dcf8a7298f4b87c311c0109be91fc71ca3ccc475ec"
     }
   }
 }

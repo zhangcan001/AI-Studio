@@ -76,7 +76,7 @@ it("REF2VA hands ordered mixed media, video-only and pure-audio cases to the sin
 });
 it("one player, preview is not selection, explicit selection is not review, missing asset is honest",async()=>{
   candidates=[{id:"a",name:"候选A",mediaKind:"video",selected:false},{id:"b",name:"候选B",mediaKind:"video",selected:false}];const page=await start();
-  expect(document.querySelectorAll("video")).toHaveLength(1);fireEvent.click(screen.getByRole("button",{name:"预览候选B"}));expect(api.selectResult).not.toHaveBeenCalled();expect(document.querySelector("video")?.getAttribute("src")).toContain("owned/b");
+  expect(document.querySelectorAll("video:not(.create-candidate-frame)")).toHaveLength(1);fireEvent.click(screen.getByRole("button",{name:"预览候选B"}));expect(api.selectResult).not.toHaveBeenCalled();expect(document.querySelector("video:not(.create-candidate-frame)")?.getAttribute("src")).toContain("owned/b");
   fireEvent.click(screen.getByRole("button",{name:"选用此结果"}));await waitFor(()=>expect(api.selectResult).toHaveBeenCalledWith("owned","one","video","b"));expect(screen.getByText(/切换仅预览/)).toBeTruthy();expect(screen.getByRole("button",{name:"预览候选A"})).toBeTruthy();
   fireEvent.error(document.querySelector("video")!);expect(await screen.findByText(/媒体不可用或无法预览/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button",{name:"预览候选A"}));fireEvent.error(document.querySelector("video")!);fireEvent.click(screen.getByRole("button",{name:"预览候选B"}));expect(screen.getByRole("button",{name:"选用此结果"}).hasAttribute("disabled")).toBe(true);

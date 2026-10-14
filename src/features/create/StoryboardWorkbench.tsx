@@ -4,7 +4,7 @@ import { normalizeProductError } from "../../product/errors";
 import type { AppRoute } from "../../app/routes/types";
 import type { CreateRoute } from "./createModel";
 import type { RunResult } from "../../product/types";
-import { CandidateThumbnail } from "./CreateMediaPreview";
+import { CandidateThumbnail, ThumbnailProjectContext } from "./CreateMediaPreview";
 import { coverAsset, deriveStoryboardStatus, runPercent, shotDuration, shotResolution, storyboardStats, storyboardStatusLabels, videoCandidates, type StoryboardShot } from "./storyboardModel";
 import "./CreatePage.css";
 
@@ -79,7 +79,7 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
     catch (cause) { setError(normalizeProductError(cause).message); setBusy(false); }
   };
 
-  return <div className="storyboard-page" aria-label="分镜工作台">
+  return <ThumbnailProjectContext.Provider value={projectId}><div className="storyboard-page" aria-label="分镜工作台">
     <header className="storyboard-header">
       <div className="storyboard-title"><h1>分镜工作台</h1><p>将剧本拆解为多个镜头，逐镜生成并完成整段视频的制作。</p></div>
       <dl className="storyboard-stats" aria-label="镜头统计">
@@ -129,7 +129,7 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
       </aside>
     </div>}
     {reviewItem && <ReviewPanel projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} />}
-  </div>;
+  </div></ThumbnailProjectContext.Provider>;
 }
 
 export type StoryboardView = "grid" | "list";
