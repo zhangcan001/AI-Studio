@@ -54,6 +54,22 @@ it('phase11_runs coalesces only own-project invalidations and disposes listeners
   expect(api.runs.list).toHaveBeenCalledTimes(calls); expect(vi.getTimerCount()).toBe(0); expect(navigate).not.toHaveBeenCalled();
 });
 
+it('phase7b_runs slow detail IPC longer than the poll interval still commits instead of being superseded forever', async () => {
+  vi.useFakeTimers();
+  const run = { ref: { source: 'task', id: 'x' } } as ProductRun;
+  api.runs.get.mockImplementation(() => new Promise<ProductRun>(r => setTimeout(() => r(run), 6000)));
+  const navigate = vi.fn(); const route: RunsRoute = { kind: 'runs', projectId: 'a', run: { source: 'task', id: 'x' } };
+  const hook = renderHook(() => useRunsController({ route, navigate }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(api.runs.get).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(hook.result.current.detail).toBe(run); expect(hook.result.current.loading).toBe(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(api.runs.get.mock.calls.length).toBeLessThanOrEqual(2);
+  hook.unmount(); await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+  expect(api.runs.get.mock.calls.length).toBeLessThanOrEqual(2); expect(navigate).not.toHaveBeenCalled();
+});
+
 it('phase11_library abandons old projections and removes subscriptions on project switch and unmount', async () => {
   const old = deferred<LibraryList>(); api.library.list.mockImplementation((p: string) => p === 'a' ? old.promise : Promise.resolve(emptyLibrary));
   const navigate = vi.fn(); const route: LibraryRoute = { kind: 'library', projectId: 'a', resource: { kind: 'asset', id: 'old' } };

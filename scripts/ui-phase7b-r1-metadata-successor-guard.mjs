@@ -15,6 +15,8 @@ export const R1_METADATA_CHANGED = [
   "src-tauri/src/lib.rs",
   "src-tauri/src/commands/product.rs",
   "src/features/tools/LocalToolHub.test.tsx",
+  "src/app/FeatureLifecycle.test.tsx",
+  "src/features/runs/RunsController.ts",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",

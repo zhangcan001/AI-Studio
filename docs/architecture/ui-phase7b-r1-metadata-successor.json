@@ -29,7 +29,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "9d8c5295993f6e8757997ca4685a8ceb8c4bcc44c05f5df1a66f3d0d9811819b"
+      "afterHash": "65bb9b55ae67aa2e0c90b06d9b21314b068e2e5364ec853ceda3ed5c89cf80ff"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
@@ -54,6 +54,14 @@
     "src-tauri/src/lib.rs": {
       "beforeHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77",
       "afterHash": "8e416699a8ab999887d282f336891169d2d7c910cc5544ebb1df90ee5f462516"
+    },
+    "src/app/FeatureLifecycle.test.tsx": {
+      "beforeHash": "5afce45fa6f54518608fae3310829b21020dfedc308794fa236a182e2b452fa2",
+      "afterHash": "6da7abda76df2489896c49f7e7faf9f23b289d4e4cff6bffec12cbd60743ef3a"
+    },
+    "src/features/runs/RunsController.ts": {
+      "beforeHash": "82e7600c977ba16782e590e42ae4013640730ea54e23c14547a465dab73e6382",
+      "afterHash": "00e240ff1242c59eb63d3be534fd11346504fddd270befcf4dc2493add149b34"
     },
     "src/features/tools/LocalToolHub.test.tsx": {
       "beforeHash": "205b8c04c71274d0d9571f92b7d8ceacd2bb9c0357b57e9d3de9e2c39a52f435",

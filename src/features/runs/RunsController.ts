@@ -17,11 +17,14 @@ export function useRunsController({ route, navigate }: RunsProps) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const epoch = useRef(0); const actionLock = useRef(false);
+  // Single-flight per scope: a slow IPC round trip (> poll interval) must not be superseded forever by polls.
+  const inflight = useRef<number | undefined>(undefined); const queued = useRef(false); const rerun = useRef<(() => Promise<void>) | undefined>(undefined);
   const filter = filterFor(route);
   const scope = `${route.projectId}:${route.run?.source ?? ""}:${route.run?.id ?? ""}:${filter}`;
   const liveScope = useRef(scope); liveScope.current = scope;
   const refresh = useCallback(async () => {
-    const token = ++epoch.current;
+    if (inflight.current === epoch.current) { queued.current = true; return; }
+    const token = ++epoch.current; inflight.current = token; queued.current = false;
     try {
       // Product list is a recent projection only; never request or invent a mixed-history cursor.
       const page = await productClient.run.list(route.projectId, filter, null);
@@ -42,8 +45,14 @@ export function useRunsController({ route, navigate }: RunsProps) {
       }
       if (token === epoch.current) setError(undefined);
     } catch (error) { if (token === epoch.current) setError(normalizeProductError(error).message); }
-    finally { if (token === epoch.current) setLoading(false); }
+    finally {
+      if (token === epoch.current) {
+        setLoading(false); inflight.current = undefined;
+        if (queued.current) { queued.current = false; void rerun.current?.(); }
+      }
+    }
   }, [route.projectId, route.run?.source, route.run?.id, filter]);
+  rerun.current = refresh;
   useEffect(() => {
     setList(undefined); setDetail(undefined); setResults([]); setMissing(false); setError(undefined); setActionError(undefined); setLoading(true);
     void refresh();
