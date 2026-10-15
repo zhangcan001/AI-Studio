@@ -237,8 +237,15 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const canSubmit = !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY";
 
   if (!c.generator) return null;
-  return <section className="create-composer" aria-label="创作输入框" data-inputs={inputsState}>
+  return <div className="create-composer-wrap">
     <ReadinessStatus controller={c} />
+    {projectId && shotId && allEntities.length > 0 && <div className="composer-entity-strip" role="group" aria-label="镜头角色与场景">
+      {allEntities.map(entity => { const cover = entity.coverAssetId ? entityUrls[entity.coverAssetId] : undefined; const bound = isBound(entity.id);
+        return <button type="button" key={entity.id} className={"composer-entity" + (bound ? " bound" : "")} aria-pressed={bound} disabled={bindBusy || c.busy}
+          title={(bound ? "解除绑定 " : "绑定到镜头 ") + entity.name} onClick={() => toggleBound(entity.id)}>
+          {cover ? <img src={cover} alt="" /> : <span className="composer-entity-glyph">{entity.name.slice(0, 1)}</span>}<small>{entity.name}</small></button>; })}
+    </div>}
+    <section className="create-composer" aria-label="创作输入框" data-inputs={inputsState}>
     {vi.enabled && !mediaFields.length && <small className="composer-hint">T2V 无需图片输入。</small>}
     {vi.enabled && vi.dirty && !vi.busy && !pendingSave.current && <p role="status" className="composer-unsaved">输入尚未保存。<button type="button" onClick={() => void vi.save()}>保存输入</button></p>}
     {mediaFields.length > 0 && <div className="composer-refs" aria-label="参考素材">
@@ -264,12 +271,6 @@ export function CreateComposer({ controller: c }: { controller: CreateController
             </select></label>}
         </div>;
       })}
-    </div>}
-    {projectId && shotId && allEntities.length > 0 && <div className="composer-entity-strip" role="group" aria-label="镜头角色与场景">
-      {allEntities.map(entity => { const cover = entity.coverAssetId ? entityUrls[entity.coverAssetId] : undefined; const bound = isBound(entity.id);
-        return <button type="button" key={entity.id} className={"composer-entity" + (bound ? " bound" : "")} aria-pressed={bound} disabled={bindBusy || c.busy}
-          title={(bound ? "解除绑定 " : "绑定到镜头 ") + entity.name} onClick={() => toggleBound(entity.id)}>
-          {cover ? <img src={cover} alt="" /> : <span className="composer-entity-glyph">{entity.name.slice(0, 1)}</span>}<small>{entity.name}</small></button>; })}
     </div>}
     {promptField && <div className="composer-prompt">
       <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面"}
@@ -362,5 +363,5 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       <small>媒体输入修改后自动按当前 Recipe 保存；单镜「生成」写入生产队列并尝试启动，批量镜头请在生产队列点「开始生产」。</small>
     </details>
     {promptPicker && <PromptPickerDialog controller={c} onClose={() => setPromptPicker(false)} />}
-  </section>;
+  </section></div>;
 }

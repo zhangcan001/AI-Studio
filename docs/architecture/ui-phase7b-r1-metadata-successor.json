@@ -185,7 +185,7 @@
     },
     "src/features/create/CreateComposer.tsx": {
       "beforeHash": null,
-      "afterHash": "03df399bcb81c6b448683488452224743d6ebe31db78914254814fafddbe99de"
+      "afterHash": "a2496820fb766215ae12b5d6a726c359d86873f07422c2fe0cbec4ad786106b5"
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
@@ -205,7 +205,7 @@
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "2102b6e8fcaa900280680a7434a76fb6056277de6f3be328b444e1a00ceea136"
+      "afterHash": "f73c448882d6030fa1ca37e683a723f137612b5c0321fbe8a48b8a8f95425334"
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "3b5c199c11e638c54c184f6bce09c0d5acdafd168a231cd6b9cdae77d86b4e9e",
