@@ -4,6 +4,7 @@ import type { InputAsset, ShotVideoInputScope, VideoInputView, VideoInputAsset, 
 import type { RecipeViewModel } from "../../types/generation";
 import { normalizeProductError } from "../../product/errors";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
+import { ImageAssetPicker } from "../create/ImageAssetPicker";
 
 /** An OCC edit form for persisted bindings, not an alternate generation draft/executor. */
 export function ShotVideoInputsPanel({ scope, recipe, onSaved, onReadyChange }: { scope: ShotVideoInputScope; recipe: RecipeViewModel; onSaved?: () => void; onReadyChange?: (owner: string, ready: boolean) => void }) {
@@ -11,6 +12,7 @@ export function ShotVideoInputsPanel({ scope, recipe, onSaved, onReadyChange }: 
   const epoch = useRef(0); const lock = useRef(false); const selfWrite = useRef(false);
   const [set, setSet] = useState<VideoInputView | null>(null), [inputs, setInputs] = useState<VideoInputAsset[]>([]);
   const [assets, setAssets] = useState<InputAsset[]>([]), [busy, setBusy] = useState(true), [error, setError] = useState<string>(), [loaded, setLoaded] = useState(false);
+  const [imagePickKey, setImagePickKey] = useState<string | null>(null);
   const fields = recipe.fields.filter(f=>["image","images","video","videos","audio","audios"].includes(f.type));
   const selection = {projectId:scope.projectId,shotId:scope.shotId,selectionRef:recipe.selectionRef??""};
   const ordered = (items: VideoInputAsset[]) => JSON.stringify([...items].sort((a,b)=>a.inputKey.localeCompare(b.inputKey)||a.ordinal-b.ordinal));
@@ -57,8 +59,30 @@ export function ShotVideoInputsPanel({ scope, recipe, onSaved, onReadyChange }: 
   function replace(key: string, ids: string[]) {const max=slotMax[key]; if(max!==undefined && ids.length>max){setError(COMBINATION); return;} const next=[...inputs.filter(i=>i.inputKey!==key),...ids.map((assetId,ordinal)=>({inputKey:key as VideoInputKey,assetId,ordinal}))]; if(counts(next).images+counts(next).videos+counts(next).audios>12){setError(COMBINATION); return;} setInputs(next);}
   return <section aria-label="正式视频输入"><h3>正式视频输入</h3><p>按当前 Recipe 独立保存。导入不代表图片生成完成；生成仅使用已保存输入。</p>
     <fieldset disabled={busy||!loaded}>{fields.map(field=>{const ids=inputs.filter(i=>i.inputKey===field.key).sort((a,b)=>a.ordinal-b.ordinal).map(i=>i.assetId),plural=["images","videos","audios"].includes(field.type),kind=field.type.startsWith("image")?"image":field.type.startsWith("video")?"video":"audio";
-      return <label key={field.key}>{field.label}<select aria-label={field.label} value={plural?"":ids[0]??""} onChange={e=>replace(field.key,plural?[...ids,e.target.value].filter(Boolean):e.target.value?[e.target.value]:[])}><option value="">{plural?"添加素材":"未选择"}</option>{assets.filter(a=>a.mediaKind===kind&&(!plural||!ids.includes(a.id))).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
-      {plural&&<ol>{ids.map((id,index)=><li key={`${id}:${index}`}>{assets.find(a=>a.id===id)?.name??"素材需重新选择"}<button type="button" onClick={()=>replace(field.key,ids.filter((_,i)=>i!==index))}>移除</button>{index>0&&<button type="button" onClick={()=>{const next=[...ids];[next[index-1],next[index]]=[next[index],next[index-1]];replace(field.key,next);}}>上移</button>}</li>)}</ol>}</label>;})}
+      return <div key={field.key} className="shot-video-input-field"><span>{field.label}</span>
+        {kind==="image"?<button type="button" aria-label={field.label} disabled={busy||!loaded||(plural&&slotMax[field.key]!==undefined&&ids.length>=slotMax[field.key])} onClick={()=>setImagePickKey(field.key)}>{plural||!ids.length?"添加素材":"更换素材"}</button>
+        :<select aria-label={field.label} value={plural?"":ids[0]??""} onChange={e=>replace(field.key,plural?[...ids,e.target.value].filter(Boolean):e.target.value?[e.target.value]:[])}><option value="">{plural?"添加素材":"未选择"}</option>{assets.filter(a=>a.mediaKind===kind&&(!plural||!ids.includes(a.id))).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>}
+        {(plural||kind==="image")&&<ol>{ids.map((id,index)=><li key={`${id}:${index}`}>{assets.find(a=>a.id===id)?.name??"素材需重新选择"}<button type="button" onClick={()=>replace(field.key,ids.filter((_,i)=>i!==index))}>移除</button>{index>0&&<button type="button" onClick={()=>{const next=[...ids];[next[index-1],next[index]]=[next[index],next[index-1]];replace(field.key,next);}}>上移</button>}</li>)}</ol>}
+      </div>;})}
       {!fields.length&&<p>T2V 无需图片输入。</p>}<button type="button" onClick={()=>void save()}>保存视频输入</button><button type="button" onClick={()=>void importFiles(false)}>导入媒体素材</button><button type="button" onClick={()=>void importFiles(true)}>导入图片文件夹</button>
-    </fieldset><button type="button" disabled={busy} onClick={()=>void load()}>刷新输入</button>{dirty&&<p>输入尚未保存，保存后才能生成。</p>}{error&&<p role="alert">{error}</p>}</section>;
+    </fieldset><button type="button" disabled={busy} onClick={()=>void load()}>刷新输入</button>{dirty&&<p>输入尚未保存，保存后才能生成。</p>}{error&&<p role="alert">{error}</p>}
+    {imagePickKey && <ImageAssetPicker
+      projectId={scope.projectId}
+      open
+      title={`选择${fields.find(f=>f.key===imagePickKey)?.label ?? "图片"}`}
+      excludeIds={["images"].includes(fields.find(f=>f.key===imagePickKey)?.type ?? "") ? inputs.filter(i=>i.inputKey===imagePickKey).map(i=>i.assetId) : []}
+      localChoices={assets}
+      onSelect={id => {
+        const field = fields.find(f => f.key === imagePickKey);
+        if (!field) return;
+        const plural = ["images","videos","audios"].includes(field.type);
+        const ids = inputs.filter(i => i.inputKey === field.key).sort((a,b)=>a.ordinal-b.ordinal).map(i => i.assetId);
+        replace(field.key, plural ? [...ids.filter(x => x !== id), id] : [id]);
+        setImagePickKey(null);
+      }}
+      onClose={() => setImagePickKey(null)}
+      onImportFile={() => void importFiles(false)}
+      onImportFolder={() => void importFiles(true)}
+    />}
+  </section>;
 }

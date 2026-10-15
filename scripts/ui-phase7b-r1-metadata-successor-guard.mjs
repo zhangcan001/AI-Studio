@@ -49,6 +49,8 @@ export const R1_METADATA_CHANGED = [
   "src/features/library/LibraryPage.test.tsx",
   "src/features/runs/RunsController.ts",
   "src/features/tools/LocalToolHub.test.tsx",
+  "src/features/shots/ShotVideoInputsPanel.tsx",
+  "src/features/shots/ShotVideoInputsPanel.test.tsx",
 ].sort();
 export const R1_METADATA_ADDED = [
   "src/features/create/CreateMediaPreview.hooks.test.tsx",
@@ -61,6 +63,8 @@ export const R1_METADATA_ADDED = [
   "src/features/create/StoryboardWorkbench.tsx",
   "src/features/create/composerTestUtils.ts",
   "src/features/create/storyboardModel.ts",
+  "src/features/create/ImageAssetPicker.tsx",
+  "src/features/create/ImageAssetPicker.test.tsx",
 ].sort();
 export const R1_METADATA_CONTRACTS = {
   schemaChanged: false, backupFormatChanged: true, backupVersion: 21,

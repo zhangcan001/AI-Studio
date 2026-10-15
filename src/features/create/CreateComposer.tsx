@@ -4,6 +4,7 @@ import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, mediaKind, mediaValue } from "./createModel";
 import { modeLabel } from "../../product/generatorPresentation";
 import { AssetImageThumb, CandidateThumbnail, loadLibraryImageUrl, useMediaLightbox } from "./CreateMediaPreview";
+import { ImageAssetPicker } from "./ImageAssetPicker";
 import { ParamField, PromptPickerDialog, ReferencePanel, ResolutionPicker, presetAspectKey } from "./CreateInputs";
 import { ReadinessStatus } from "./CreateResults";
 import { useStudioStore } from "../../stores/studioStore";
@@ -77,6 +78,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const emitted = useRef<string | null>(null);
   const caret = useRef<Range | null>(null);
   const [picker, setPicker] = useState<"insert" | "add" | null>(null);
+  const [imagePick, setImagePick] = useState<{ field: RecipeField; title: string } | null>(null);
   const [promptPicker, setPromptPicker] = useState(false);
   const locked = c.busy || vi.busy || vi.loading || (vi.enabled && !vi.view);
   const targets = mediaFields.filter(f => capacity(f, assetIds(c.values[f.key])));
@@ -195,10 +197,11 @@ export function CreateComposer({ controller: c }: { controller: CreateController
               <button type="button" aria-label={`${label}下移第${ref.index + 1}项`} disabled={locked || ref.index === ids.length - 1} onClick={() => { const next = [...ids]; [next[ref.index], next[ref.index + 1]] = [next[ref.index + 1], next[ref.index]]; setField(field, next); }}>›</button></span>}
             {!ref.asset && <small role="status" className="composer-ref-missing">素材不可用，请重新选择</small>}
           </div>)}
-          <label className="composer-slot-add" title={`选择${label}`}><span>{plural(field) || !ids.length ? "+" : "⇄"} {label}{required ? "*" : ""}</span>
+          {kind === "image" && projectId ? <button type="button" id={`create-field-${field.key}`} className="composer-slot-add" aria-label={label} title={`选择${label}`} disabled={locked || (plural(field) && !capacity(field, ids))} onClick={() => setImagePick({ field, title: plural(field) || !ids.length ? `添加${label}` : `更换${label}` })}><span>{plural(field) || !ids.length ? "+" : "⇄"} {label}{required ? "*" : ""}</span></button>
+          : <label className="composer-slot-add" title={`选择${label}`}><span>{plural(field) || !ids.length ? "+" : "⇄"} {label}{required ? "*" : ""}</span>
             <select id={`create-field-${field.key}`} aria-label={label} value={plural(field) ? "" : ids[0] ?? ""} disabled={locked || (plural(field) && !capacity(field, ids))} onChange={e => { const id = e.target.value; if (plural(field)) { if (id) add(field, id); } else setField(field, id ? [id] : []); }}>
               <option value="">{plural(field) ? "添加素材" : "未选择"}</option>{choices.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select></label>
+            </select></label>}
         </div>;
       })}
     </div>}
@@ -212,6 +215,18 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     {picker === "insert" && <div className="composer-picker" role="listbox" aria-label="插入参考图">
       {images.map(ref => <button type="button" role="option" aria-selected="false" key={ref.n} onMouseDown={e => e.preventDefault()} onClick={() => insert(ref)} className="composer-picker-option">{url(ref) ? <img src={url(ref)} alt="" /> : <span className="composer-picker-glyph">{ref.n}</span>}<span>{ref.label}{ref.asset ? ` · ${ref.asset.name}` : ""}</span></button>)}
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button></div>}
+    {imagePick && projectId && <ImageAssetPicker
+      projectId={projectId}
+      open
+      title={imagePick.title}
+      excludeIds={plural(imagePick.field) ? assetIds(c.values[imagePick.field.key]) : []}
+      localChoices={allChoices}
+      onSelect={id => { if (plural(imagePick.field)) add(imagePick.field, id); else setField(imagePick.field, [id]); setImagePick(null); }}
+      onClose={() => setImagePick(null)}
+      onImportFile={vi.enabled ? () => void importInto(imagePick.field, false) : undefined}
+      onImportFolder={vi.enabled ? () => void importInto(imagePick.field, true) : undefined}
+      onOpenLibrary={() => c.openLibrary("images")}
+    />}
     {picker === "add" && target && <div className="composer-picker" role="dialog" aria-label="添加参考素材">
       {targets.length > 1 && <label className="composer-picker-target">添加到<select aria-label="添加到输入" value={target.key} onChange={e => setTargetKey(e.target.value)}>{targets.map(f => <option key={f.key} value={f.key}>{fieldLabel(f)}</option>)}</select></label>}
       {allChoices.filter(a => a.mediaKind === mediaKind(target) && !assetIds(c.values[target.key]).includes(a.id)).map(a => <button type="button" key={a.id} className="composer-picker-option" onClick={() => { add(target, a.id); setPicker(null); }}>{a.mediaKind === "image" && projectId ? <span aria-hidden="true"><AssetImageThumb projectId={projectId} assetId={a.id} name={a.name} size="md" interactive={false} /></span> : null}<span>{a.name}</span></button>)}
@@ -220,7 +235,11 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       <button type="button" onClick={() => { setPicker(null); c.openLibrary(mediaKind(target) === "image" ? "images" : mediaKind(target) === "video" ? "videos" : "audio"); }}>在资源库查找</button>
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button></div>}
     <div className="composer-toolbar">
-      <button type="button" className="composer-icon" aria-label="添加参考素材" title={target ? `添加到${fieldLabel(target)}` : mediaFields.length ? "输入已满" : "当前模式不需要参考素材"} disabled={!target || locked} onClick={() => setPicker(picker === "add" ? null : "add")}>+</button>
+      <button type="button" className="composer-icon" aria-label="添加参考素材" title={target ? `添加到${fieldLabel(target)}` : mediaFields.length ? "输入已满" : "当前模式不需要参考素材"} disabled={!target || locked} onClick={() => {
+        if (!target) return;
+        if (mediaKind(target) === "image" && projectId) setImagePick({ field: target, title: "添加参考素材" });
+        else setPicker(picker === "add" ? null : "add");
+      }}>+</button>
       <div className="composer-segment" role="group" aria-label="生成类型">
         <button type="button" aria-pressed="true">视频</button>
         <select aria-label="视频模式" value={currentMode ?? ""} disabled={c.busy || vi.busy} onChange={e => pickMode(e.target.value)}>

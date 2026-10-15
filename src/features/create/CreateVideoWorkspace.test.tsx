@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CreatePage } from "./CreatePage";
 import { CreateMediaPreview } from "./CreateMediaPreview";
@@ -10,7 +10,7 @@ import type { CreationAsset, CreationContext, GeneratorOption, ProductRun } from
 import type { VideoInputView } from "../../types/shotVideoInput";
 import { setPrompt } from "./composerTestUtils";
 const api = vi.hoisted(() => ({ get:vi.fn(),generatorsList:vi.fn(),inputsGet:vi.fn(),inputsSave:vi.fn(),assetsImport:vi.fn(),readinessGet:vi.fn(),generate:vi.fn(),selectResult:vi.fn(),runGet:vi.fn(),retry:vi.fn(),libraryGet:vi.fn(),imageGet:vi.fn(),mediaUrl:vi.fn() }));
-vi.mock("../../product/client",()=>({productClient:{creation:api,run:{get:api.runGet,retry:api.retry},library:{get:api.libraryGet,imageGet:api.imageGet}}}));
+vi.mock("../../product/client",()=>({productClient:{creation:api,run:{get:api.runGet,retry:api.retry},library:{get:api.libraryGet,imageGet:api.imageGet,list:vi.fn(async()=>({items:[],nextCursor:null})),tagsList:vi.fn(async()=>[])}}}));
 const route = {kind:"create",projectId:"owned",shotId:"one",stage:"video"} as const;
 const runtime = {status:"CONNECTED",endpoint:"http://fixture.invalid",devices:[],runtimeGeneration:1} as const;
 const prompt = {type:"textarea",key:"prompt",label:"Prompt",required:true,default:""} as const;
@@ -47,6 +47,12 @@ function composerInputs() { return screen.getByRole("region",{name:"创作输入
 /** Media edits autosave through the existing OCC inputsSave; wait until the composer reports the draft persisted. */
 async function save() {await waitFor(()=>expect(api.inputsSave).toHaveBeenCalled());await waitFor(()=>expect(composerInputs()).toBe("saved"));}
 async function readyToGenerate() {await screen.findByText("可以入队生成");await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(false));}
+async function pickImage(label:string, name:string) {
+  fireEvent.click(screen.getByLabelText(label));
+  fireEvent.click(within(await screen.findByRole("dialog")).getByRole("option",{name:new RegExp(name)}));
+}
+function clearImage(label:string) { fireEvent.click(screen.getByRole("button",{name:`${label}移除第1项`})); }
+
 it("T2V has no media requirement, uses submit-time authority and prevents double submission",async()=>{
   await start();expect(screen.getByText("T2V 无需图片输入。")).toBeTruthy();expect(screen.getByLabelText("视频预览")).toBeTruthy();expect(screen.queryByRole("video")).toBeNull();
   let finish!:(v:unknown)=>void;api.readinessGet.mockImplementationOnce(()=>new Promise(r=>{finish=r;}));fireEvent.click(screen.getByRole("button",{name:"生成"}));fireEvent.click(screen.getByRole("button",{name:"正在提交…"}));
@@ -55,10 +61,10 @@ it("T2V has no media requirement, uses submit-time authority and prevents double
 it("I2V missing-first is rejected by shared readiness; imported input is not historical generated image",async()=>{
   await start();await mode("opaque-1");expect(screen.queryByRole("option",{name:"历史生成图"})).toBeNull();
   api.readinessGet.mockResolvedValue({ready:false,issues:[{code:"INPUT_REQUIRED",details:{field:"first_frame",action:"EDIT_INPUT"}}],fieldErrors:[],actions:[]});fireEvent.click(screen.getByRole("button",{name:"生成"}));await waitFor(()=>expect(api.readinessGet).toHaveBeenCalled());expect(api.generate).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("首帧"),{target:{value:"first"}});expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"first"});await save();expect(api.selectResult).not.toHaveBeenCalled();
+  await pickImage("首帧","外部首帧");expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"first"});await save();expect(api.selectResult).not.toHaveBeenCalled();
 });
 it("FIRST_LAST stays independent and switching Recipe restores only its own saved slots",async()=>{
-  await start();await mode("opaque-2");fireEvent.change(screen.getByLabelText("首帧"),{target:{value:"first"}});expect(useStudioStore.getState().values.last_frame).toBeUndefined();fireEvent.change(screen.getByLabelText("尾帧"),{target:{value:"last"}});await save();
+  await start();await mode("opaque-2");await pickImage("首帧","外部首帧");expect(useStudioStore.getState().values.last_frame).toBeUndefined();await pickImage("尾帧","外部尾帧");await save();
   expect(api.inputsSave.mock.calls[0][0].inputs).toEqual([{inputKey:"first_frame",ordinal:0,assetId:"first"},{inputKey:"last_frame",ordinal:0,assetId:"last"}]);
   await mode("opaque-1");expect(useStudioStore.getState().values.first_frame).toBeUndefined();await mode("opaque-2");await waitFor(()=>expect(useStudioStore.getState().values.last_frame).toEqual({type:"image_asset",assetId:"last"}));
 });
@@ -66,7 +72,7 @@ it("REF2VA hands ordered mixed media, video-only and pure-audio cases to the sin
   await start();await mode("opaque-3");
   fireEvent.change(screen.getByLabelText("参考视频"),{target:{value:"ref-video"}});fireEvent.change(screen.getByLabelText("参考视频"),{target:{value:"ref-video2"}});fireEvent.click(screen.getByRole("button",{name:"参考视频下移第1项"}));await save();
   await readyToGenerate();fireEvent.click(screen.getByRole("button",{name:"生成"}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));expect(api.generate.mock.calls[0][0].values.reference_videos).toEqual({type:"video_assets",assetIds:["ref-video2","ref-video"]});expect(api.generate.mock.calls[0][0].values.reference_images).toBeUndefined();
-  fireEvent.change(screen.getByLabelText("参考图片"),{target:{value:"first"}});fireEvent.change(screen.getByLabelText("参考音频"),{target:{value:"ref-audio"}});await save();await readyToGenerate();fireEvent.click(screen.getByRole("button",{name:"生成"}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));expect(api.generate.mock.calls[1][0].values.reference_audios).toEqual({type:"audio_assets",assetIds:["ref-audio"]});
+  await pickImage("参考图片","外部首帧");fireEvent.change(screen.getByLabelText("参考音频"),{target:{value:"ref-audio"}});await save();await readyToGenerate();fireEvent.click(screen.getByRole("button",{name:"生成"}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));expect(api.generate.mock.calls[1][0].values.reference_audios).toEqual({type:"audio_assets",assetIds:["ref-audio"]});
   // Readiness is debounced (600ms); drive that timer explicitly instead of racing waitFor's 1s budget.
   vi.useFakeTimers({shouldAdvanceTime:true});
   api.readinessGet.mockResolvedValue({ready:false,issues:[],fieldErrors:[],actions:[]});
@@ -121,20 +127,20 @@ it("a saved media OCC revision replaces stale missing-input readiness without dr
     const complete=bindings.some(i=>i.inputKey==="first_frame") && bindings.some(i=>i.inputKey==="last_frame");
     return {ready:complete,issues:complete?[]:[{code:"INPUT_REQUIRED",details:{field:"first_frame",action:"EDIT_INPUT"}}],fieldErrors:[],actions:[]};
   });
-  fireEvent.change(screen.getByLabelText("首帧"),{target:{value:"first"}});
-  fireEvent.change(screen.getByLabelText("尾帧"),{target:{value:"last"}});
+  await pickImage("首帧","外部首帧");
+  await pickImage("尾帧","外部尾帧");
   await save();await waitFor(()=>expect(screen.getByText("可以入队生成")).toBeTruthy());
-  fireEvent.change(screen.getByLabelText("首帧"),{target:{value:""}});
+  clearImage("首帧");
   await save();await waitFor(()=>expect(screen.getByText("请检查输入或运行环境")).toBeTruthy());
   const before=api.readinessGet.mock.calls.length;
-  fireEvent.change(screen.getByLabelText("首帧"),{target:{value:"first"}});
+  await pickImage("首帧","外部首帧");
   await save();
   await waitFor(()=>expect(api.readinessGet.mock.calls.length).toBeGreaterThan(before));
   await waitFor(()=>expect(screen.getByText("可以入队生成")).toBeTruthy());
   expect(api.generate).not.toHaveBeenCalled();
 });
 it("Library return preserves unsaved persistent media only for the exact owner",async()=>{
-  const page=await start();await mode("opaque-1");fireEvent.change(screen.getByLabelText("首帧"),{target:{value:"first"}});
+  const page=await start();await mode("opaque-1");await pickImage("首帧","外部首帧");
   fireEvent.click(screen.getByRole("button",{name:"在资源库查找更多提示词"}));expect(nav).toHaveBeenLastCalledWith({kind:"library",projectId:"owned",filter:"prompts"});page.unmount();
   const returned=render(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={nav}/>);await screen.findByLabelText("选择生成器");await waitFor(()=>expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"first"}));expect(await screen.findByText("输入尚未保存。")).toBeTruthy();expect(api.inputsSave).not.toHaveBeenCalled();expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(true);
   returned.rerender(<CreatePage route={{...route,projectId:"other",shotId:"two"}} runtime={{...runtime,devices:[]}} navigate={nav}/>);await waitFor(()=>expect(useStudioStore.getState().values.first_frame).toBeUndefined());

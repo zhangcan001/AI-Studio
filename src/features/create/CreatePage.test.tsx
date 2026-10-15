@@ -12,7 +12,7 @@ import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAda
 import { resolveCreateReadinessAction, focusCreateInput } from "./createReadinessAction";
 import { promptText, setPrompt } from "./composerTestUtils";
 const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), libraryGet: vi.fn(), bindingSet: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, library: {get: api.libraryGet}, project: { generatorBindingSet: api.bindingSet } } }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, library: {get: api.libraryGet, imageGet: vi.fn(async () => [137, 80, 78, 71]), list: vi.fn(async () => ({ items: [], nextCursor: null, coverage: "complete-category", coverageMessage: "" })), tagsList: vi.fn(async () => [])}, project: { generatorBindingSet: api.bindingSet } } }));
 const prompt = { type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" } as const;
 const negative = { ...prompt, key: "negative_prompt", label: "Negative prompt", required: false };
 const params = [{ type: "integer", key: "width", label: "Width", required: true, default: 640, min: 64, max: 1920, step: 8 }, { type: "integer", key: "height", label: "Height", required: true, default: 480 }, { type: "integer", key: "duration_seconds", label: "Duration", required: true, default: 5, min: 1, max: 10 }, { type: "number", key: "cfg", label: "CFG", required: false, default: 1.5 }, { type: "seed", key: "seed", label: "Seed", defaultMode: "random" }] satisfies GeneratorOption["fields"];
@@ -24,6 +24,13 @@ let candidates: CreationAsset[];
 function context(stage: "image" | "video", shotId: string | null = "shot1"): CreationContext { return { projectId: "project", projectName: "Project", stage, shots: [{ id: "shot1", name: "镜头一", ordinal: 0 }, { id: "shot2", name: "镜头二", ordinal: 1 }], selectedShot: shotId ? { summary: { id: shotId, name: "镜头", ordinal: 0 }, prompt: `${stage} prompt`, selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null } : null, candidates: [...candidates], mediaInputs: inputs, promptChoices: [{ promptId: "prm-choice", promptVersionId: "prv-choice", name: "我的提示词", text: "chosen prompt", version: 2 }] }; }
 function run(status: ProductRun["status"] = "QUEUED", actions: string[] = []): ProductRun { return { ref: { source: "queue-batch", id: "run" }, projectId: "project", title: "run", status, phase: status, createdAt: "", updatedAt: "", progress: { total: 1, succeeded: status === "SUCCEEDED" ? 1 : 0, failed: status === "FAILED" ? 1 : 0, cancelled: 0 }, recoverability: { retryItemIds: ["old-item"], reviewRequired: 0 }, resultsSummary: [], errorSummary: null, preferredParent: null, availableActions: actions }; }
 const navigations = vi.fn(); const dirty = vi.fn();
+
+async function pickImage(label: string, name: string) {
+  fireEvent.click(screen.getByLabelText(label));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("option", { name: new RegExp(name) }));
+}
+
 const runtime = { status: "CONNECTED", endpoint: "http://fixture.invalid", devices: [], runtimeGeneration: 1 } as const;
 function Host({ initialStage = "video", initialShot = "shot1" }: { initialStage?: "image" | "video"; initialShot?: string }) {
   const [route, setRoute] = useState<AppRoute>({ kind: "create", projectId: "project", shotId: initialShot || undefined, stage: initialStage });
@@ -121,8 +128,8 @@ describe("M1-1 readiness actions", () => {
     const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
     fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "fl-opaque" } });
     setPrompt("Settings return draft");
-    fireEvent.change(screen.getByLabelText("首帧"), { target: { value: "img1" } });
-    fireEvent.change(screen.getByLabelText("尾帧"), { target: { value: "img2" } });
+    await pickImage("首帧", "首帧素材");
+    await pickImage("尾帧", "尾帧素材");
     fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "1280" } });
     await readyToGenerate();
     fireEvent.click(screen.getByRole("button", { name: "生成" }));
@@ -206,7 +213,7 @@ describe("Target12 media", () => {
   it("maps first/last by schema identity and video as draft-only input", async () => {
     render(<Host initialStage="video" />); await loaded();
     fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "fl-opaque" } });
-    fireEvent.change(screen.getByLabelText("首帧"), { target: { value: "img2" } }); fireEvent.change(screen.getByLabelText("尾帧"), { target: { value: "img1" } });
+    await pickImage("首帧", "尾帧素材"); await pickImage("尾帧", "首帧素材");
     expect(useStudioStore.getState().values.first_frame).toEqual({ type: "image_asset", assetId: "img2" }); expect(useStudioStore.getState().values.last_frame).toEqual({ type: "image_asset", assetId: "img1" });
     fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "ref-opaque" } }); fireEvent.change(screen.getByLabelText("参考视频"), { target: { value: "vid1" } });
     expect(within(screen.getByLabelText("参考视频")).queryByText("首帧素材")).toBeNull();

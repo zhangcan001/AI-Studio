@@ -9,7 +9,7 @@ import { promptEditor, promptText, setPrompt } from "./composerTestUtils";
 import { aspectOf, composerReferences, serializePrompt } from "./CreateComposer";
 
 const api = vi.hoisted(() => ({ get:vi.fn(),generatorsList:vi.fn(),inputsGet:vi.fn(),inputsSave:vi.fn(),assetsImport:vi.fn(),readinessGet:vi.fn(),generate:vi.fn(),selectResult:vi.fn(),runGet:vi.fn(),retry:vi.fn(),libraryGet:vi.fn(),imageGet:vi.fn(),mediaUrl:vi.fn() }));
-vi.mock("../../product/client",()=>({productClient:{creation:api,run:{get:api.runGet,retry:api.retry,list:vi.fn(async()=>({items:[]}))},library:{get:api.libraryGet,imageGet:api.imageGet}}}));
+vi.mock("../../product/client",()=>({productClient:{creation:api,run:{get:api.runGet,retry:api.retry,list:vi.fn(async()=>({items:[]}))},library:{get:api.libraryGet,imageGet:api.imageGet,list:vi.fn(async()=>({items:[],nextCursor:null})),tagsList:vi.fn(async()=>[])}}}));
 const route = {kind:"create",projectId:"owned",shotId:"one",stage:"video"} as const;
 const runtime = {status:"CONNECTED",endpoint:"http://fixture.invalid",devices:[],runtimeGeneration:1} as const;
 const prompt = {type:"textarea",key:"prompt",label:"Prompt",required:true,default:""} as const;
@@ -58,7 +58,7 @@ it("is the single input surface: no legacy prompt/media/parameter panels or seco
 it("+ adds a shot image into the generator input, persists it via OCC save and shows the Image N thumbnail; remove persists too",async()=>{
   await start("opaque-1");
   fireEvent.click(screen.getByRole("button",{name:"添加参考素材"}));
-  fireEvent.click(within(screen.getByRole("dialog",{name:"添加参考素材"})).getByRole("button",{name:"外部首帧"}));
+  fireEvent.click(within(screen.getByRole("dialog",{name:"添加参考素材"})).getByRole("option",{name:/外部首帧/}));
   await waitFor(()=>expect(persisted()).toEqual([{inputKey:"first_frame",ordinal:0,assetId:"first"}]));
   await waitFor(()=>expect(composer().getAttribute("data-inputs")).toBe("saved"));
   const thumb=screen.getByRole("button",{name:"插入 Image 1"});
@@ -83,7 +83,8 @@ it("import from computer binds the imported image into the chosen slot; library 
 });
 it("clicking a thumbnail or typing @ inserts Image N chips that submit as Image N text",async()=>{
   await start("opaque-2");
-  fireEvent.change(screen.getByLabelText("参考图片"),{target:{value:"first"}});fireEvent.change(screen.getByLabelText("参考图片"),{target:{value:"second"}});
+  fireEvent.click(screen.getByLabelText("参考图片"));fireEvent.click(within(screen.getByRole("dialog")).getByRole("option",{name:/外部首帧/}));
+  fireEvent.click(screen.getByLabelText("参考图片"));fireEvent.click(within(screen.getByRole("dialog")).getByRole("option",{name:/第二张/}));
   await waitFor(()=>expect(persisted()).toEqual([{inputKey:"reference_images",ordinal:0,assetId:"first"},{inputKey:"reference_images",ordinal:1,assetId:"second"}]));
   setPrompt("角色 ");
   fireEvent.click(screen.getByRole("button",{name:"插入 Image 1"}));
@@ -102,7 +103,7 @@ it("clicking a thumbnail or typing @ inserts Image N chips that submit as Image 
 });
 it("prompt edits round-trip through the draft and external prompt changes rebuild the editor with chips",async()=>{
   await start("opaque-2");
-  fireEvent.change(screen.getByLabelText("参考图片"),{target:{value:"first"}});
+  fireEvent.click(screen.getByLabelText("参考图片"));fireEvent.click(within(screen.getByRole("dialog")).getByRole("option",{name:/外部首帧/}));
   await waitFor(()=>expect(persisted()).toEqual([{inputKey:"reference_images",ordinal:0,assetId:"first"}]));
   setPrompt("hello");expect(useStudioStore.getState().values.prompt).toEqual({type:"string",value:"hello"});
   useStudioStore.getState().setValue("prompt",{type:"string",value:"Image 1 是角色1"});
