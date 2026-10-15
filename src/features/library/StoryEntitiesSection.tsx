@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { productClient } from "../../product/client";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
-import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
+import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 import { normalizeProductError } from "../../product/errors";
 
@@ -114,7 +114,7 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
     {!busy && !error && !items.length && <p className="library-empty">还没有{kind === "all" ? "角色 / 场景 / 物品" : KINDS.find(k => k.id === kind)?.label}。点击「新建」添加，封面和关联图片来自项目素材。</p>}
     <ul className="story-entities-list">
       {items.map(entity => <li key={entity.id} className="story-entity-card">
-        {entity.coverAssetId ? <EntityThumb projectId={projectId} assetId={entity.coverAssetId} name={entity.name} /> : <span className="story-entity-cover-empty">无封面</span>}
+        {entityAvatarAssetId(entity) ? <EntityThumb projectId={projectId} assetId={entityAvatarAssetId(entity)!} name={entity.name} /> : <span className="story-entity-cover-empty">无封面</span>}
         <div className="story-entity-body">
           <strong title={entity.name}>{entity.name}</strong>
           <span className={`story-entity-kind story-entity-kind-${entity.kind}`}>{KINDS.find(k => k.id === entity.kind)?.label}</span>
