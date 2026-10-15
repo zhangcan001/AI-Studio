@@ -320,3 +320,30 @@
 .create-page .create-composer .composer-ref-remove { padding:0; }
 .create-page .create-composer .composer-ref-thumb small { margin:0; }
 .create-page .create-composer .composer-picker button { padding:6px 8px; }
+
+/* Composer: single input surface (slots, status, advanced) */
+.create-page .create-composer .composer-status { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:10px 16px 0; font-size:13px; }
+.create-page .create-composer .composer-status p { margin:0; display:flex; gap:8px; align-items:center; }
+.create-page .create-composer .composer-status small { margin:0; }
+.composer-status[data-state="READY"] .create-ready-state { color:#4ff3ff; }
+.create-page .create-composer .composer-refs { gap:14px; align-items:flex-start; }
+.create-page .create-composer .composer-slot { display:flex; gap:8px; align-items:flex-start; }
+.create-page .create-composer .composer-slot-add { position:relative; width:56px; height:56px; margin:0; border:1px dashed #6d6a63; border-radius:12px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:11px; color:#cfccc4; cursor:pointer; }
+.create-page .create-composer .composer-slot-add span { pointer-events:none; padding:2px; line-height:1.2; }
+.create-page .create-composer .composer-slot-add select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; padding:0; }
+.create-page .create-composer .composer-ref-glyph { display:flex; width:100%; height:100%; align-items:center; justify-content:center; font-size:18px; }
+.create-page .create-composer .composer-ref-thumb video { width:100%; height:100%; object-fit:cover; }
+.create-page .create-composer .composer-ref-order { position:absolute; left:0; right:0; bottom:-18px; display:none; justify-content:space-between; }
+.composer-ref:hover .composer-ref-order { display:flex; }
+.create-page .create-composer .composer-ref-order button { padding:0 6px; font-size:12px; border-radius:6px; }
+.create-page .create-composer .composer-ref-missing { position:absolute; top:58px; left:0; width:120px; font-size:10px; margin:0; color:#ffb4a8; }
+.create-page .create-composer .composer-unsaved { margin:6px 16px 0; display:flex; gap:8px; align-items:center; color:#ffd479; font-size:13px; }
+.create-page .create-composer .composer-prompt { display:flex; flex-direction:column; }
+.create-page .create-composer .composer-count { align-self:flex-end; font-size:11px; color:#8f8c85; }
+.create-page .create-composer .composer-text { padding:6px 10px; border-radius:12px; border:0; background:transparent; color:#cfccc4; }
+.create-page .create-composer .composer-picker-target { flex-direction:row; align-items:center; gap:6px; margin:0 0 4px; font-size:12px; color:#cfccc4; }
+.create-page .create-composer .composer-picker-target select { width:auto; }
+.create-page .create-composer .composer-advanced { margin:0 16px 12px; padding:0; font-size:13px; }
+.create-page .create-composer .composer-advanced > summary { color:#a9a69e; }
+.create-page .create-composer .composer-advanced label { margin:6px 0; }
+.create-page .create-composer .composer-advanced details { background:transparent; border:0; }

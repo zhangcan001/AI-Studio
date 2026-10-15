@@ -8,6 +8,7 @@ import { StrictMode } from "react";
 import { useStudioStore } from "../../stores/studioStore";
 import type { CreationAsset, CreationContext, GeneratorOption, ProductRun } from "../../product/types";
 import type { VideoInputView } from "../../types/shotVideoInput";
+import { setPrompt } from "./composerTestUtils";
 const api = vi.hoisted(() => ({ get:vi.fn(),generatorsList:vi.fn(),inputsGet:vi.fn(),inputsSave:vi.fn(),assetsImport:vi.fn(),readinessGet:vi.fn(),generate:vi.fn(),selectResult:vi.fn(),runGet:vi.fn(),retry:vi.fn(),libraryGet:vi.fn(),imageGet:vi.fn(),mediaUrl:vi.fn() }));
 vi.mock("../../product/client",()=>({productClient:{creation:api,run:{get:api.runGet,retry:api.retry},library:{get:api.libraryGet,imageGet:api.imageGet}}}));
 const route = {kind:"create",projectId:"owned",shotId:"one",stage:"video"} as const;
@@ -41,8 +42,10 @@ beforeEach(()=>{
 });
 afterEach(()=>{vi.useRealTimers();cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();sessionStorage.clear();});
 async function start() { const result=render(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={nav}/>);await screen.findByLabelText("选择生成器");await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(false));return result; }
-async function mode(ref:string) {fireEvent.change(screen.getByLabelText("选择生成器"),{target:{value:ref}});await waitFor(()=>expect(api.inputsGet).toHaveBeenLastCalledWith({projectId:"owned",shotId:"one",selectionRef:ref}));await waitFor(()=>expect(screen.getByRole("button",{name:"导入图片、视频或音频"}).hasAttribute("disabled")).toBe(false));}
-async function save() {const saved=api.inputsSave.mock.calls.length;fireEvent.click(screen.getByRole("button",{name:"保存视频输入"}));await waitFor(()=>expect(api.inputsSave.mock.calls.length).toBeGreaterThan(saved));await waitFor(()=>expect(screen.queryByText("输入尚未保存。")).toBeNull());}
+async function mode(ref:string) {fireEvent.change(screen.getByLabelText("选择生成器"),{target:{value:ref}});await waitFor(()=>expect(api.inputsGet).toHaveBeenLastCalledWith({projectId:"owned",shotId:"one",selectionRef:ref}));await waitFor(()=>expect(composerInputs()).toBe("saved"));}
+function composerInputs() { return screen.getByRole("region",{name:"创作输入框"}).getAttribute("data-inputs"); }
+/** Media edits autosave through the existing OCC inputsSave; wait until the composer reports the draft persisted. */
+async function save() {await waitFor(()=>expect(api.inputsSave).toHaveBeenCalled());await waitFor(()=>expect(composerInputs()).toBe("saved"));}
 async function readyToGenerate() {await screen.findByText("可以入队生成");await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(false));}
 it("T2V has no media requirement, uses submit-time authority and prevents double submission",async()=>{
   await start();expect(screen.getByText("T2V 无需图片输入。")).toBeTruthy();expect(screen.getByLabelText("视频预览")).toBeTruthy();expect(screen.queryByRole("video")).toBeNull();
@@ -84,7 +87,7 @@ it("one player, preview is not selection, explicit selection is not review, miss
 });
 it("failed-to-start is not success, retry uses frozen RunRef despite draft edits",async()=>{
   api.generate.mockResolvedValue({accepted:true,runRef:run().ref,startOutcome:"FAILED_TO_START",startIssue:null});api.runGet.mockResolvedValue(run("FAILED",["RETRY"]));api.retry.mockResolvedValue(run());await start();fireEvent.click(screen.getByRole("button",{name:"生成"}));expect(await screen.findByText("已保存运行，启动失败")).toBeTruthy();
-  fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"edited draft"}});fireEvent.click(await screen.findByRole("button",{name:"重试原运行"}));await waitFor(()=>expect(api.retry).toHaveBeenCalledWith("owned",{ref:run().ref,selectedItemIds:["original"]}));expect(api.generate).toHaveBeenCalledTimes(1);fireEvent.click(screen.getByRole("button",{name:"查看运行详情"}));expect(nav).toHaveBeenLastCalledWith({kind:"runs",projectId:"owned",run:run().ref});
+  setPrompt("edited draft");fireEvent.click(await screen.findByRole("button",{name:"重试原运行"}));await waitFor(()=>expect(api.retry).toHaveBeenCalledWith("owned",{ref:run().ref,selectedItemIds:["original"]}));expect(api.generate).toHaveBeenCalledTimes(1);fireEvent.click(screen.getByRole("button",{name:"查看运行详情"}));expect(nav).toHaveBeenLastCalledWith({kind:"runs",projectId:"owned",run:run().ref});
 });
 it("image previews ignore late owner reads, revoke URLs, and video detaches on unmount",async()=>{
   let finish!:(bytes:number[])=>void;api.imageGet.mockImplementationOnce(()=>new Promise(r=>{finish=r;}));const asset={id:"first",name:"owned image",mediaKind:"image"} as const;

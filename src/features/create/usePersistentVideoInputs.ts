@@ -112,17 +112,19 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     }
   }
 
-  async function importAssets(folder: boolean) {
-    if (lock.current) return;
+  /** Returns the imported assets. Import itself never fills a slot; only an explicit caller (the composer's chosen slot) may bind them. */
+  async function importAssets(folder: boolean): Promise<VideoInputView["assets"]> {
+    if (lock.current) return [];
     const own = owner; const token = epoch.current; lock.current = true; setBusy(true); setError(undefined);
     try {
       const result = await productClient.creation.assetsImport(route.projectId, folder);
-      if (own !== currentOwner.current || token !== epoch.current) return;
+      if (own !== currentOwner.current || token !== epoch.current) return [];
       setImportReceipt(result.cancelled ? "已取消导入，未应用素材。" : `已导入 ${result.imported.length} 项；失败 ${result.failed.length} 项。请选择明确输入槽。`);
       setState(previous => previous?.owner === own ? { owner: own, view: { ...previous.view, assets: [...previous.view.assets, ...result.imported.filter(a => !previous.view.assets.some(b=>b.id===a.id))] } } : previous);
       if (result.failed.length) setError(result.failed.map(f=>`${f.displayName}：${f.error}`).join("；"));
       // Import never fills a slot, selects a result or creates a generation.
-    } catch (e) { if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message); }
+      return result.cancelled ? [] : result.imported;
+    } catch (e) { if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message); return []; }
     finally { if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); } }
   }
   return { enabled, loading, busy, error, importReceipt, view, dirty, save, bindAsset, refresh: load, importAssets, ready: !enabled || (!!view && !loading && !busy && !dirty && !error) };

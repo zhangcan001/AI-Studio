@@ -5,6 +5,7 @@ import { CreatePage } from "./CreatePage";
 import { useStudioStore } from "../../stores/studioStore";
 import type { CreationContext, CreationReadiness, GeneratorOption, ProductRun } from "../../product/types";
 import type { ComfyStatus } from "../../types/comfy";
+import { setPrompt } from "./composerTestUtils";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: () => "http://fixture.invalid/video" }, run: { get: api.runGet } } }));
@@ -57,7 +58,7 @@ describe("Create runtime readiness lifecycle", () => {
   it("checks the latest draft if it changes during post-run readiness", async () => {
     withActiveRun(); api.readinessGet.mockResolvedValue(blocked); await start();
     const old = deferred(), current = deferred(); api.readinessGet.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
-    await finishRun(); fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "new prompt" } }); await settle();
+    await finishRun(); setPrompt("new prompt"); await settle();
     await act(async () => { old.resolve(ready); }); expect(screen.queryByText("可以入队生成")).toBeNull();
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ values: expect.objectContaining({ prompt: { type: "string", value: "new prompt" } }) }));
     await act(async () => { current.resolve(blocked); }); expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();
@@ -140,7 +141,7 @@ describe("Create runtime readiness lifecycle", () => {
     const view = await start(); view.rerender(page({ ...online, status: "OFFLINE", runtimeGeneration: 2 }));
     const old = deferred(), current = deferred(); api.readinessGet.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
     view.rerender(page({ ...online, runtimeGeneration: 2 })); await settle();
-    fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "new prompt" } }); await settle();
+    setPrompt("new prompt"); await settle();
     await act(async () => { old.resolve(ready); }); expect(screen.queryByText("可以入队生成")).toBeNull();
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({ values: expect.objectContaining({ prompt: { type: "string", value: "new prompt" } }) }));
     await act(async () => { current.resolve(blocked); }); expect(screen.getByText("请检查输入或运行环境")).toBeTruthy();

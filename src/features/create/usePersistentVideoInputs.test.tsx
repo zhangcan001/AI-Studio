@@ -64,9 +64,9 @@ describe("persistent video input ownership",()=>{
     let finish!: (v:{imported:{id:string;name:string;mediaKind:"image"}[];failed:[];cancelled:false})=>void;
     api.assetsImport.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
     const {result,rerender}=renderHook(({r})=>usePersistentVideoInputs(r,generator,false),{initialProps:{r:route}}); await waitFor(()=>expect(result.current.ready).toBe(true));
-    let pending!:Promise<void>; act(()=>{pending=result.current.importAssets(true);});
+    let pending!:Promise<unknown>; act(()=>{pending=result.current.importAssets(true);});
     rerender({r:{...route,projectId:"p2",shotId:"shot2"}}); await waitFor(()=>expect(result.current.loading).toBe(false));
-    await act(async()=>{finish({imported:[{id:"old-import",name:"old",mediaKind:"image"}],failed:[],cancelled:false});await pending;});
+    await act(async()=>{finish({imported:[{id:"old-import",name:"old",mediaKind:"image"}],failed:[],cancelled:false});await expect(pending).resolves.toEqual([]);});
     expect(result.current.view?.assets).toEqual([]); expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.assetsImport).toHaveBeenCalledWith("p1",true);
     expect(result.current.busy).toBe(false);
   });

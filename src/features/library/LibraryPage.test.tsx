@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { minimaxVideoPhase2ParentReader } from "../../../scripts/minimax-video-phase2-successor-guard.mjs";
@@ -108,7 +108,7 @@ it("M2-2 non-recent Asset101 fetches exact id and changes only the explicitly ch
  fireEvent.click(screen.getByRole("button",{name:"应用到尾帧"}));
  expect(useStudioStore.getState().values.last_frame).toEqual({type:"image_asset",assetId:"asset101"});
  expect(useStudioStore.getState().values.first_frame).toBeUndefined();
- fireEvent.click(screen.getByRole("button",{name:"在资源库查找更多图片"})); view.unmount();
+ await waitFor(()=>expect(screen.getByRole("button",{name:"添加参考素材"}).hasAttribute("disabled")).toBe(false));fireEvent.click(screen.getByRole("button",{name:"添加参考素材"}));fireEvent.click(within(screen.getByRole("dialog",{name:"添加参考素材"})).getByRole("button",{name:"在资源库查找"})); view.unmount();
  render(<CreatePage route={create} navigate={vi.fn()}/>);
  await screen.findAllByRole("option",{name:"Old asset101"});
  expect((screen.getByLabelText("尾帧") as HTMLSelectElement).value).toBe("asset101");

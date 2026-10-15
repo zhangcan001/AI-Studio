@@ -10,6 +10,7 @@ import type { AppRoute } from "../../app/routes/types";
 import { normalCreate, mediaValue, modeLabel, draftFor } from "./createModel";
 import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
 import { resolveCreateReadinessAction, focusCreateInput } from "./createReadinessAction";
+import { promptText, setPrompt } from "./composerTestUtils";
 const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), libraryGet: vi.fn(), bindingSet: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, library: {get: api.libraryGet}, project: { generatorBindingSet: api.bindingSet } } }));
 const prompt = { type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" } as const;
@@ -118,7 +119,7 @@ describe("M1-1 readiness actions", () => {
     api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "FAILED_TO_START", startIssue: null });
     const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
     fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "fl-opaque" } });
-    fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "Settings return draft" } });
+    setPrompt("Settings return draft");
     fireEvent.change(screen.getByLabelText("首帧"), { target: { value: "img1" } });
     fireEvent.change(screen.getByLabelText("尾帧"), { target: { value: "img2" } });
     fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "1280" } });
@@ -138,7 +139,7 @@ describe("M1-1 readiness actions", () => {
     expect(useStudioStore.getState().values).toEqual(draft);
     expect(useStudioStore.getState().draftDirty).toBe(true);
     expect((screen.getByLabelText("选择生成器") as HTMLSelectElement).value).toBe("fl-opaque");
-    expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("Settings return draft");
+    expect(promptText()).toBe("Settings return draft");
     await screen.findByText("已保存运行，启动失败");
     fireEvent.click(screen.getByRole("button", { name: "查看运行详情" }));
     expect(navigate).toHaveBeenLastCalledWith({ kind: "runs", projectId: "project", run: { source: "queue-batch", id: "run" } });
@@ -155,7 +156,7 @@ describe("M1-1 readiness actions", () => {
     api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
     view.rerender(<CreatePage runtime={{ ...runtime, devices: [] }} route={{ ...a, projectId: "other" }} navigate={navigations} />);
     await loaded(); await screen.findByText("可以入队生成");
-    fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "B draft" } });
+    setPrompt("B draft");
     await act(async () => { if (outcome === "resolve") resolve(blocked("OPEN_RUNTIME_SETTINGS")); else reject({ code: "ASSET_UNAVAILABLE" }); });
     expect(screen.queryByRole("button", { name: "检查运行环境" })).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -173,7 +174,7 @@ describe("Target11 controller", () => {
   it("preserves the video draft through historical image access without exposing new image generation", async () => {
     const video = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
     const view = render(<CreatePage route={video} runtime={{ ...runtime, devices: [] }} navigate={navigations} onDirtyChange={dirty} />); await loaded();
-    fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "video edit" } });
+    setPrompt("video edit");
     view.rerender(<CreatePage route={{ ...video, stage: "image" }} navigate={navigations} />);
     await screen.findByRole("heading", { name: "历史图片" });
     expect(screen.queryByLabelText("选择生成器")).toBeNull();
@@ -182,7 +183,7 @@ describe("Target11 controller", () => {
     fireEvent.click(screen.getByRole("button", { name: "视频创作" }));
     expect(navigations).toHaveBeenLastCalledWith({ ...video, surface: undefined });
     view.rerender(<CreatePage route={video} runtime={{ ...runtime, devices: [] }} navigate={navigations} onDirtyChange={dirty} />); await loaded();
-    await waitFor(() => expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("video edit"));
+    await waitFor(() => expect(promptText()).toBe("video edit"));
     expect(navigations.mock.calls.every(([r]) => r.kind === "create" && r.shotId === "shot1")).toBe(true); expect(dirty).toHaveBeenCalledWith(true);
     fireEvent.change(screen.getByLabelText("镜头"), { target: { value: "shot2" } }); await loaded(); expect(navigations).toHaveBeenLastCalledWith(expect.objectContaining({ shotId: "shot2", kind: "create" }));
   });
@@ -224,7 +225,7 @@ describe("Target13 inputs", () => {
   it("edits prompts, uses inline library, and presents friendly schema controls", async () => {
     render(<Host />); await loaded(); expect(screen.queryByLabelText("负向提示词")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "选择提示词" })); fireEvent.click(screen.getByRole("button", { name: "我的提示词 · 版本 2" }));
-    expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("chosen prompt");
+    expect(promptText()).toBe("chosen prompt");
     expect(screen.queryByText(/wfl_/)).toBeNull(); expect(api.bindingSet).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("宽度"), { target: { value: "1280" } }); expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1280 });
     expect(screen.queryByRole("button", { name: "图片" })).toBeNull();
@@ -276,13 +277,13 @@ it("phase6_target4 canonical Lab routes and legacy deep links preserve Create dr
   const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
   const navigate = vi.fn();
   const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
-  fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "Lab return draft" } });
+  setPrompt("Lab return draft");
   fireEvent.click(screen.getByRole("button", { name: "工作流 / Benchmark" }));
   expect(navigate).toHaveBeenCalledWith({ kind: "system-settings", section: "advanced-workflows", returnTo: route });
   view.unmount();
   expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "Lab return draft" });
   render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
-  expect((screen.getByLabelText("提示词") as HTMLTextAreaElement).value).toBe("Lab return draft");
+  expect(promptText()).toBe("Lab return draft");
   expect(api.generate).not.toHaveBeenCalled(); expect(api.bindingSet).not.toHaveBeenCalled();
   expect(toLegacyLocation({kind:"project-settings",projectId:"project",section:"generators"}).workspace).toBe("projects");
   expect(toLegacyLocation({kind:"project-settings",projectId:"project",section:"advanced-workflows"}).workspace).toBe("workflows");
@@ -302,9 +303,9 @@ describe("M2-2 precise library reuse", () => {
     fireEvent.click(screen.getByRole("button", {name:"生成"}));
     await waitFor(()=>expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({promptId:"prm-choice",promptVersionId:"prv-choice"})));
     expect(api.readinessGet).toHaveBeenLastCalledWith(expect.objectContaining({promptId:"prm-choice",promptVersionId:"prv-choice"}));
-    fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"chosen prompt!"}});
+    setPrompt("chosen prompt!");
     expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
-    fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"chosen prompt"}});
+    setPrompt("chosen prompt");
     await readyToGenerate();
     fireEvent.click(screen.getByRole("button", {name:"生成"}));
     await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
@@ -317,7 +318,7 @@ describe("M2-2 precise library reuse", () => {
     fireEvent.change(screen.getByLabelText("宽度"),{target:{value:"1280"}});
     fireEvent.click(screen.getByRole("button",{name:"选择提示词"}));
     fireEvent.click(screen.getByRole("button",{name:"我的提示词 · 版本 2"}));
-    fireEvent.click(screen.getByRole("button",{name:"在资源库查找更多图片"}));
+    fireEvent.click(screen.getByRole("button",{name:"添加参考素材"}));fireEvent.click(within(screen.getByRole("dialog",{name:"添加参考素材"})).getByRole("button",{name:"在资源库查找"}));
     expect(navigate).toHaveBeenLastCalledWith({kind:"library",projectId:"project",filter:"images"});
     expect(useStudioStore.getState().creationLabReturn?.route).toEqual(route);
     const draft=useStudioStore.getState().values; view.unmount();
@@ -339,7 +340,7 @@ describe("M2-2 precise library reuse", () => {
     await waitFor(()=>expect(api.libraryGet).toHaveBeenCalled());
     api.get.mockImplementation((_p,shot,stage)=>Promise.resolve({...context(stage,shot),projectId:"other"}));
     view.rerender(<CreatePage runtime={{ ...runtime, devices: [] }} route={{...route,projectId:"other"}} navigate={navigations}/>); await loaded();
-    fireEvent.change(screen.getByLabelText("提示词"),{target:{value:"B draft"}});
+    setPrompt("B draft");
     await act(async()=>finish({kind:"asset",asset:{id:"old101",name:"old101",projectId:"project",assetType:"image"}}));
     expect(useStudioStore.getState().values.prompt).toEqual({type:"string",value:"B draft"});
     expect(useStudioStore.getState().pendingLibraryIntent).toBeUndefined();
