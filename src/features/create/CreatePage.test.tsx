@@ -42,7 +42,7 @@ beforeEach(() => {
   URL.createObjectURL = vi.fn(() => "blob:fixture"); URL.revokeObjectURL = vi.fn();
 });
 describe("H3 native resolution presets", () => {
-  const native = [{ id: "landscape", label: "16:9 横屏", width: 1344, height: 768 }, { id: "portrait", label: "9:16 竖屏", width: 768, height: 1344 }];
+  const native = [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }];
   it("uses backend evidence rather than a generator name and updates both dimensions atomically", async () => {
     api.generatorsList.mockResolvedValue([{ ...videos[0], name: "Renamed generator", resolutionPresets: native }]);
     render(<Host initialStage="video" />); await loaded();
@@ -53,7 +53,8 @@ describe("H3 native resolution presets", () => {
       expect(document.activeElement).toBe(screen.getByLabelText("视频分辨率"));
     }
     expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1344 });
-    fireEvent.change(screen.getByLabelText("视频分辨率"), { target: { value: "portrait" } });
+    // Aspect control switches ratio; resolution control lists megapixel options within the current aspect.
+    fireEvent.change(screen.getByLabelText("画面比例"), { target: { value: "9:16" } });
     expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 768 });
     expect(useStudioStore.getState().values.height).toEqual({ type: "integer", value: 1344 });
     expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "video prompt" });

@@ -32,3 +32,6 @@ local-fixtures/*
 
 # Local ChatGPT/CodexPro coordination state
 .ai-bridge/
+
+# Ephemeral Codex probe checkouts (must not enter inventory)
+.codex-*-probe-*/

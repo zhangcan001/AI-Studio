@@ -1,6 +1,13 @@
 //! Local H3-Base presets, not the hosted H3-Regenerate-2K pipeline.
 //! Sources: https://huggingface.co/MiniMaxAI/MiniMax-H3
 //! https://docs.comfy.org/tutorials/video/minimax/minimax-h3-native
+//!
+//! Resolution ladder is a megapixel series. 16:9 sizes are the product table
+//! below (each side a multiple of 32). 9:16 swaps width/height. For 1:1, 4:3,
+//! and 3:4 the same megapixel target is used with:
+//!   w = align32(sqrt(mp * 1_000_000 * rw / rh))
+//!   h = align32(w * rh / rw)
+//! where align32 rounds to the nearest multiple of 32 (minimum 32).
 use crate::application::workflow_graph_analysis::WorkflowGraph;
 use crate::application::workflow_semantic_graph::ActiveDependencyGraph;
 use crate::domain::{InputDefinition, Recipe, WorkflowDocument};
@@ -58,18 +65,109 @@ pub fn active_h3_kind(workflow: Value, recipe: &Recipe) -> Option<String> {
     }
 }
 
-pub const H3_BASE_RESOLUTIONS: [(&str, &str, i64, i64); 5] = [
-    ("landscape", "16:9 横屏", 1344, 768),
-    ("portrait", "9:16 竖屏", 768, 1344),
-    ("square", "1:1 方形", 768, 768),
-    ("landscape-4-3", "4:3 横屏", 1024, 768),
-    ("portrait-3-4", "3:4 竖屏", 768, 1024),
+/// 16:9 megapixel ladder (aligned to 32). Labels use the MP tag as shown in UI.
+const H3_MP_16X9: [(&str, f64, i64, i64); 14] = [
+    ("0.2", 0.2, 608, 352),
+    ("0.3", 0.3, 736, 416),
+    ("0.4", 0.4, 864, 480),
+    ("0.5", 0.5, 960, 544),
+    ("0.6", 0.6, 1056, 608),
+    ("0.7", 0.7, 1152, 640),
+    ("0.8", 0.8, 1216, 672),
+    ("0.9", 0.9, 1280, 736),
+    ("0.98", 0.98, 1344, 768),
+    ("1.0", 1.0, 1376, 768),
+    ("1.2", 1.2, 1504, 832),
+    ("1.5", 1.5, 1664, 928),
+    ("1.8", 1.8, 1824, 1024),
+    ("2.0", 2.0, 1920, 1088),
 ];
 
+const H3_ASPECTS: [(&str, i64, i64); 5] = [
+    ("16:9", 16, 9),
+    ("9:16", 9, 16),
+    ("1:1", 1, 1),
+    ("4:3", 4, 3),
+    ("3:4", 3, 4),
+];
+
+fn align32(v: f64) -> i64 {
+    let rounded = (v / 32.0).round() as i64 * 32;
+    rounded.max(32)
+}
+
+/// Same megapixel target for non-16:9 aspects; see module docs for the formula.
+fn dims_for_mp(mp: f64, rw: i64, rh: i64) -> (i64, i64) {
+    if rw == 16 && rh == 9 {
+        return H3_MP_16X9
+            .iter()
+            .find(|(_, m, _, _)| (*m - mp).abs() < 1e-9)
+            .map(|(_, _, w, h)| (*w, *h))
+            .unwrap_or((1344, 768));
+    }
+    if rw == 9 && rh == 16 {
+        let (w, h) = dims_for_mp(mp, 16, 9);
+        return (h, w);
+    }
+    let target = mp * 1_000_000.0;
+    let w = align32((target * rw as f64 / rh as f64).sqrt());
+    let h = align32(w as f64 * rh as f64 / rw as f64);
+    (w, h)
+}
+
+fn mp_id_tag(tag: &str) -> String {
+    tag.replace('.', "_")
+}
+
+/// Owned preset rows used by product UI and admission.
+pub fn h3_base_presets() -> Vec<VideoResolutionPreset> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut push = |aspect: &str, tag: &str, w: i64, h: i64| {
+        if !(w % 32 == 0 && h % 32 == 0 && w > 0 && h > 0) {
+            return;
+        }
+        if !seen.insert((w, h)) {
+            return;
+        }
+        out.push(VideoResolutionPreset {
+            id: format!("mp-{}-{}", mp_id_tag(tag), aspect.replace(':', "x")),
+            label: format!("{tag}MP · {w}×{h}"),
+            width: w,
+            height: h,
+        });
+    };
+    push("16:9", "0.98", 1344, 768);
+    for (aspect, rw, rh) in H3_ASPECTS {
+        for (tag, mp, _, _) in H3_MP_16X9 {
+            if aspect == "16:9" && tag == "0.98" {
+                continue;
+            }
+            let (w, h) = dims_for_mp(mp, rw, rh);
+            push(aspect, tag, w, h);
+        }
+    }
+    out
+}
+
+/// Legacy name kept for tests that iterate approved (w,h) pairs.
+pub fn h3_base_resolutions() -> Vec<(i64, i64)> {
+    h3_base_presets()
+        .into_iter()
+        .map(|p| (p.width, p.height))
+        .collect()
+}
+
 pub fn is_supported_h3_base_resolution(width: i64, height: i64) -> bool {
-    H3_BASE_RESOLUTIONS
-        .iter()
-        .any(|(_, _, w, h)| (*w, *h) == (width, height))
+    // Multiple-of-32 is mandatory for the H3 canvas; membership in the MP table
+    // is the product allow-list (2K regenerate stays a separate pipeline).
+    width % 32 == 0
+        && height % 32 == 0
+        && width > 0
+        && height > 0
+        && h3_base_presets()
+            .iter()
+            .any(|p| p.width == width && p.height == height)
 }
 
 pub fn presets_for(workflow: Value, recipe: &Recipe) -> Vec<VideoResolutionPreset> {
@@ -85,19 +183,9 @@ pub fn presets_for(workflow: Value, recipe: &Recipe) -> Vec<VideoResolutionPrese
     }) {
         return Vec::new();
     }
-    // 16:9 follows ComfyUI's documented native 1344x768 canvas. The other
-    // common ratios derive from MiniMax's default short edge (768), aligned32.
-    H3_BASE_RESOLUTIONS
+    h3_base_presets()
         .into_iter()
-        .filter(|(_, _, width, height)| {
-            allows(recipe, "width", *width) && allows(recipe, "height", *height)
-        })
-        .map(|(id, label, width, height)| VideoResolutionPreset {
-            id: id.into(),
-            label: label.into(),
-            width,
-            height,
-        })
+        .filter(|p| allows(recipe, "width", p.width) && allows(recipe, "height", p.height))
         .collect()
 }
 
@@ -330,7 +418,7 @@ outputs:
                     (4..=15).contains(&duration)
                 );
             }
-            for (_, _, width, height) in H3_BASE_RESOLUTIONS {
+            for (width, height) in h3_base_resolutions() {
                 assert!(validate_resolved(
                     workflow(class),
                     &recipe(),
@@ -357,6 +445,22 @@ outputs:
             &resolved(3, 32, 32)
         )
         .is_ok());
+    }
+    #[test]
+    fn megapixel_ladder_is_multiple_of_32_and_defaults_to_0_98() {
+        let presets = h3_base_presets();
+        assert_eq!((presets[0].width, presets[0].height), (1344, 768));
+        assert!(presets[0].label.starts_with("0.98MP"));
+        assert!(presets
+            .iter()
+            .all(|p| p.width % 32 == 0 && p.height % 32 == 0));
+        assert!(is_supported_h3_base_resolution(1344, 768));
+        assert!(is_supported_h3_base_resolution(1920, 1088));
+        assert!(is_supported_h3_base_resolution(768, 1344));
+        assert!(!is_supported_h3_base_resolution(1920, 1080));
+        assert!(!is_supported_h3_base_resolution(1280, 720));
+        // 33 is not a multiple of 32.
+        assert!(!is_supported_h3_base_resolution(33, 33));
     }
     #[test]
     fn mixed_references_keep_individual_and_combined_limits() {
@@ -454,7 +558,7 @@ outputs:
     fn h3_native_presets_follow_node_evidence_and_recipe_constraints() {
         let mut recipe = recipe();
         let presets = presets_for(workflow("MiniMaxH3ImageToVideo"), &recipe);
-        assert_eq!(presets.len(), 5);
+        assert!(presets.len() >= 14);
         assert_eq!((presets[0].width, presets[0].height), (1344, 768));
         assert!(presets
             .iter()
@@ -463,10 +567,9 @@ outputs:
         if let Some(InputDefinition::Integer { max, .. }) = recipe.inputs.get_mut("width") {
             *max = Some(1024);
         }
-        assert_eq!(
-            presets_for(workflow("MiniMaxH3ReferenceToVideo"), &recipe).len(),
-            4
-        );
+        let capped = presets_for(workflow("MiniMaxH3ReferenceToVideo"), &recipe);
+        assert!(!capped.is_empty());
+        assert!(capped.iter().all(|p| p.width <= 1024));
         if let Some(InputDefinition::Integer { min, .. }) = recipe.inputs.get_mut("width") {
             *min = Some(33);
         }

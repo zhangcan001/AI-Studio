@@ -16,8 +16,7 @@ export interface ComposerReference { n: number; label: string; field: RecipeFiel
 const TOKEN = /Image (\d+)/g;
 const AUTOSAVE_MS = 250;
 const KIND_PREFIX: Record<Kind, string> = { image: "Image", video: "Video", audio: "Audio" };
-/** Local H3-Base canvas (768 short edge, multiple of 32); mirrors src-tauri h3_resolution.rs. 2K needs a separate regenerate pass. */
-const H3_BASE = [[1344, 768], [768, 1344], [768, 768], [1024, 768], [768, 1024]] as const;
+/** Resolution presets come from backend h3_resolution.rs (megapixel ladder, multiple of 32). */
 
 export function composerReferences(fields: RecipeField[], values: CreateController["values"], choices: Asset[]): ComposerReference[] {
   const out: ComposerReference[] = []; const counters: Record<Kind, number> = { image: 0, video: 0, audio: 0 };
@@ -156,13 +155,17 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     if (next && next.selectionRef !== c.selection) c.chooseGenerator(next.selectionRef);
   };
   const presets = c.generator?.resolutionPresets ?? [];
-  const h3 = presets.filter(p => H3_BASE.some(([w, h]) => w === p.width && h === p.height));
-  const pickerPresets = h3.length ? h3 : presets;
+  const pickerPresets = presets;
   const w = c.values.width, h = c.values.height;
   const current = presets.find(p => w?.type === "integer" && h?.type === "integer" && p.width === w.value && p.height === h.value);
   const aspects = [...new Set(pickerPresets.map(p => aspectOf(p.width, p.height)))];
   const aspect = current ? aspectOf(current.width, current.height) : undefined;
-  const chooseAspect = (a: string) => { const best = pickerPresets.find(p => aspectOf(p.width, p.height) === a); if (best) c.chooseResolution(best.id); };
+  const chooseAspect = (a: string) => {
+    const curArea = current ? current.width * current.height : 1344 * 768;
+    const candidates = pickerPresets.filter(p => aspectOf(p.width, p.height) === a);
+    const best = [...candidates].sort((x, y) => Math.abs(x.width * x.height - curArea) - Math.abs(y.width * y.height - curArea))[0];
+    if (best) c.chooseResolution(best.id);
+  };
   const durationField = fields.find(f => f.key === "duration_seconds" && (f.type === "integer" || f.type === "number"));
   const advancedFields = fields.filter(f => ["integer", "number", "seed"].includes(f.type) && f.key !== "duration_seconds" && !(presets.length && ["width", "height"].includes(f.key)));
   const canSubmit = !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY";

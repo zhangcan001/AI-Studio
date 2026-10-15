@@ -53,8 +53,11 @@ export function ParamField({ field, controller: c }: { field: RecipeField; contr
     return <label key={field.key}>{fieldLabel(field)}<input id={`create-field-${field.key}`} aria-label={fieldLabel(field)} type="number" min={field.min} max={field.max} step={field.step ?? (field.type === "integer" ? 1 : "any")} value={value && (value.type === "integer" || value.type === "number") ? value.value : ""} onChange={e => { if (e.target.value === "") c.removeValue(field.key); else c.setValue(field.key, { type: field.type, value: Number(e.target.value) }); }} /></label>;
 }
 type ResolutionPreset = NonNullable<NonNullable<CreateController["generator"]>["resolutionPresets"]>[number];
-/** 视频分辨率 picker over the backend's fixed H3-Base presets (768 short edge); writes width/height atomically via chooseResolution. */
+/** 视频分辨率 picker over the backend H3 megapixel presets; writes width/height atomically via chooseResolution. */
 export function ResolutionPicker({ controller: c, presets, current }: { controller: CreateController; presets: ResolutionPreset[]; current?: ResolutionPreset }) {
-  const list = current && !presets.includes(current) ? [current, ...presets] : presets;
-  return <label className="composer-pick" title="分辨率">▣<select id="create-field-resolution" aria-label="视频分辨率" value={current?.id ?? ""} disabled={c.busy} onChange={e => c.chooseResolution(e.target.value)}>{!current && <option value="" disabled>自定义</option>}{list.map(p => <option key={p.id} value={p.id}>{Math.min(p.width, p.height)}p · {p.width}×{p.height}</option>)}</select></label>;
+  // Show megapixel options for the current aspect; the separate aspect control switches ratio.
+  const scoped = current ? presets.filter(p => Math.abs(p.width / p.height - current.width / current.height) < 0.03) : presets;
+  const base = scoped.length ? scoped : presets;
+  const list = current && !base.some(p => p.id === current.id) ? [current, ...base] : base;
+  return <label className="composer-pick" title="分辨率">▣<select id="create-field-resolution" aria-label="视频分辨率" value={current?.id ?? ""} disabled={c.busy} onChange={e => c.chooseResolution(e.target.value)}>{!current && <option value="" disabled>自定义</option>}{list.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label>;
 }

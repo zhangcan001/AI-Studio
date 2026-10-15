@@ -11,6 +11,7 @@ export const R1_METADATA_CHANGED = [
   "src-tauri/Cargo.toml",
   "src-tauri/src/application/minimax_video_product_policy.rs",
   "src-tauri/src/application/product/creation_facade/context.rs",
+  "src-tauri/src/application/product/h3_resolution.rs",
   "src-tauri/src/application/product/creation_facade/submission.rs",
   "src-tauri/src/application/product/run_facade.rs",
   "src-tauri/src/application/product/run_facade/detail.rs",
