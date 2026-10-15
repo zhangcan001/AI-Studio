@@ -146,3 +146,23 @@ it("renders additional required textarea fields from USER recipes", async () => 
   await start();
   expect(screen.getByLabelText("Scene")).toBeTruthy();
 });
+
+it("D5: a late reference thumbnail patches the chip image in place and keeps the prompt caret",async()=>{
+ let finish:any;
+ assets.push({id:'caret-fresh-source',name:'Caret source',mediaKind:'image'});
+ saved.set('opaque-2',{selectionRef:'opaque-2',token:{instanceId:'receipt',revision:1},inputs:[{inputKey:'reference_images',ordinal:0,assetId:'caret-fresh-source'}],assets});
+ api.imageGet.mockImplementation((_p:string,ref:{id:string})=>ref.id==='caret-fresh-source'?new Promise(resolve=>{finish=resolve;}):Promise.resolve([137,80,78,71]));
+ await start('opaque-2');
+ await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ setPrompt('hello world');
+ const editor=promptEditor();editor.focus();
+ const text=editor.firstChild!;
+ const range=document.createRange();range.setStart(text,5);range.collapse(true);
+ const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);
+ fireEvent.mouseUp(editor);
+ finish([137,80,78,71]);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'插入 Image 1'}).querySelector('img')).not.toBeNull());
+ expect(editor.firstChild).toBe(text);
+ expect(selection.anchorNode).toBe(text);
+ expect(selection.anchorOffset).toBe(5);
+});

@@ -82,7 +82,10 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const targets = mediaFields.filter(f => capacity(f, assetIds(c.values[f.key])));
   const [targetKey, setTargetKey] = useState<string>();
   const target = targets.find(f => f.key === targetKey) ?? targets[0];
-  const imageKey = images.map(r => `${r.n}:${r.assetId}:${imgUrls[r.assetId] ? 1 : 0}`).join("|") + `@${projectId ?? ""}`;
+  // Structure only: a late thumbnail must not rebuild the editor (it would drop the caret / IME state).
+  const imageKey = images.map(r => `${r.n}:${r.assetId}`).join("|") + `@${projectId ?? ""}`;
+  const urlKey = images.map(r => imgUrls[r.assetId] ?? "").join("|");
+  const composing = useRef(false);
   const imageIds = images.map(r => r.assetId).join("|");
   useEffect(() => {
     if (!projectId) return; let alive = true;
@@ -107,9 +110,19 @@ export function CreateComposer({ controller: c }: { controller: CreateController
 
   useLayoutEffect(() => {
     const root = editor.current; if (!root) return;
-    if (emitted.current === prompt && root.dataset.refs === imageKey) return;
+    if (emitted.current === prompt && root.dataset.refs === imageKey) {
+      // Thumbnail arrival only: patch the chip images in place; text nodes and the selection stay untouched.
+      root.querySelectorAll<HTMLElement>(".composer-chip").forEach(chip => {
+        const ref = images.find(r => String(r.n) === chip.dataset.ref); const u = ref ? url(ref) : undefined;
+        if (!u) return; const img = chip.querySelector("img");
+        if (!img) { const el = document.createElement("img"); el.src = u; el.alt = ""; chip.prepend(el); }
+        else if (img.getAttribute("src") !== u) img.src = u;
+      });
+      return;
+    }
+    if (composing.current) return; // never rebuild mid IME composition; compositionend re-emits
     build(root, prompt, images, url); root.dataset.refs = imageKey; emitted.current = prompt;
-  }, [prompt, imageKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [prompt, imageKey, urlKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const emit = () => { const root = editor.current; if (!root || !promptField) return; const next = serializePrompt(root); emitted.current = next; c.setValue("prompt", { type: "string", value: next }); };
   const saveCaret = () => { const sel = window.getSelection(); if (sel?.rangeCount && editor.current?.contains(sel.anchorNode)) caret.current = sel.getRangeAt(0).cloneRange(); };
@@ -191,7 +204,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     </div>}
     {promptField && <div className="composer-prompt">
       <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面"}
-        onInput={emit} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={saveCaret}
+        onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={saveCaret}
         onKeyDown={e => { if (e.key === "@" && images.length) { e.preventDefault(); saveCaret(); setPicker("insert"); } else if (e.key === "Escape") setPicker(null); }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />
       <span className="composer-count" aria-hidden="true">{prompt.length} 字</span>
