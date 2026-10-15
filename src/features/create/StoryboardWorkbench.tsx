@@ -1,4 +1,5 @@
 import { ShotEntityChips } from "./ShotEntityChips";
+import { StoryboardShotRows } from "./StoryboardShotRows";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
@@ -97,6 +98,13 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
     } catch (cause) { if (mounted.current && scope.current === projectId) { setError(normalizeProductError(cause).message); setBusy(false); } }
   };
 
+  // Row view: a new shot is appended (no insert-at-position backend) and the list stays in place.
+  const appendShot = async () => {
+    setBusy(true);
+    try { await productClient.creation.createShot(projectId); if (mounted.current && scope.current === projectId) { setBusy(false); void load(); } }
+    catch (cause) { if (mounted.current && scope.current === projectId) { setError(normalizeProductError(cause).message); setBusy(false); } }
+  };
+
   return <MediaLightboxScope><ThumbnailProjectContext.Provider value={projectId}><div className="storyboard-page" aria-label="分镜工作台">
     <header className="storyboard-header">
       <div className="storyboard-title"><h1>分镜工作台</h1><p>将剧本拆解为多个镜头，逐镜生成并完成整段视频的制作。</p></div>
@@ -124,11 +132,13 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
       </aside>
       <main className="storyboard-panel storyboard-list" aria-label="镜头列表">
         <header><h2>镜头列表 <small>({stats.total})</small></h2><div className="storyboard-toggle" role="group" aria-label="视图模式">
+          <button type="button" aria-pressed={view === "shots"} onClick={() => setView("shots")}>分镜模式</button>
           <button type="button" aria-pressed={view === "list"} onClick={() => setView("list")}>列表模式</button>
           <button type="button" aria-pressed={view === "grid"} onClick={() => setView("grid")}>宫格模式</button>
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
         {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy} onClick={() => void createShot()}>创建第一个镜头</button></div>
+          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} busy={busy} onOpen={openShot} onCreate={() => void appendShot()} onChanged={() => void load()} onQueue={() => void navigate({ kind: "runs", projectId })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>
@@ -150,9 +160,9 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
   </div></ThumbnailProjectContext.Provider></MediaLightboxScope>;
 }
 
-export type StoryboardView = "grid" | "list";
+export type StoryboardView = "shots" | "grid" | "list";
 const VIEW_KEY = "ai-studio.storyboard.view";
-function readView(): StoryboardView { try { return window.localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid"; } catch { return "grid"; } }
+function readView(): StoryboardView { try { const v = window.localStorage.getItem(VIEW_KEY); return v === "list" || v === "grid" ? v : "shots"; } catch { return "shots"; } }
 /** Review needs a real run with results; never offered for shots without candidates. */
 export function canReview(item: StoryboardShot) { return Boolean(item.run && item.candidates.length && !item.error); }
 const reviewLabels: Record<string, string> = { PENDING: "待审核", APPROVED: "已通过", REJECTED: "已退回" };

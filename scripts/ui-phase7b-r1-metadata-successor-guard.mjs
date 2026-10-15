@@ -78,6 +78,8 @@ export const R1_METADATA_ADDED = [
   "src/features/create/CreateComposer.tsx",
   "src/features/create/CreateMediaPreview.hooks.test.tsx",
   "src/features/create/ShotEntityChips.tsx",
+  "src/features/create/StoryboardShotRows.test.tsx",
+  "src/features/create/StoryboardShotRows.tsx",
   "src/features/create/StoryboardWorkbench.test.tsx",
   "src/features/create/StoryboardWorkbench.tsx",
   "src/features/create/composerTestUtils.ts",

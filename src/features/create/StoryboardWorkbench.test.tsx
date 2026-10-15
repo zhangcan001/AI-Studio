@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { invalidateRuns } from "../../product/runInvalidation";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi, beforeEach } from "vitest";
 import type { CreationContext, ProductRun } from "../../product/types";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
@@ -9,6 +9,8 @@ import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
 const api = vi.hoisted(() => ({ get: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview } } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
+// Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
+beforeEach(() => { window.localStorage.setItem("ai-studio.storyboard.view", "grid"); });
 
 const shots = [{ id: "s1", name: "镜头01", ordinal: 1 }, { id: "s2", name: "镜头02", ordinal: 2 }, { id: "s3", name: "镜头03", ordinal: 3 }];
 const run = (status: ProductRun["status"], succeeded: number, total: number) => ({ ref: { source: "production-run", id: `r-${status}` }, projectId: "p", title: "run", status, phase: "", createdAt: "", updatedAt: "", progress: { total, succeeded, failed: 0, cancelled: 0 }, recoverability: { retryItemIds: [], reviewRequired: 0 }, resultsSummary: [], errorSummary: null, preferredParent: null, availableActions: [] }) as ProductRun;
@@ -151,4 +153,19 @@ it("D4: a late createShot reply never navigates after the workbench unmounted", 
   await act(async () => { resolve({ id: "s-new" }); });
   expect(api.createShot).toHaveBeenCalledTimes(1);
   expect(navigate).not.toHaveBeenCalled();
+});
+
+it("defaults to the shot-row editing view with search, status filters and task queue entry", async () => {
+  window.localStorage.clear();
+  api.get.mockImplementation(async (_p: string, shotId: string | null) => context(shotId));
+  api.runGet.mockResolvedValue(run("SUCCEEDED", 1, 1));
+  const navigate = vi.fn();
+  render(<StoryboardWorkbench route={route} navigate={navigate} />);
+  const rows = await screen.findByRole("region", { name: "分镜编辑" });
+  expect(within(rows).getByRole("article", { name: /镜头01/ })).toBeTruthy();
+  expect(within(rows).getByLabelText("搜索分镜")).toBeTruthy();
+  expect(within(rows).getByRole("group", { name: "状态筛选" })).toBeTruthy();
+  fireEvent.click(within(rows).getByRole("button", { name: "任务队列" }));
+  expect(navigate).toHaveBeenCalledWith({ kind: "runs", projectId: route.projectId });
+  expect(screen.getByRole("button", { name: "分镜模式" }).getAttribute("aria-pressed")).toBe("true");
 });

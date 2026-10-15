@@ -29,7 +29,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "e22e1387256ade5d69467de51dc12273ae58a7dc953a04625f745f08d4feb6c3"
+      "afterHash": "e26988663916c8908f146505f73c4ce2a4946ae4f78974a660b863c78772a86a"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
@@ -205,7 +205,7 @@
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "7088f70b06bce3efbd99d6156587853303a81c28f995d3a23d30e8eb3b3f5ef6"
+      "afterHash": "2102b6e8fcaa900280680a7434a76fb6056277de6f3be328b444e1a00ceea136"
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "3b5c199c11e638c54c184f6bce09c0d5acdafd168a231cd6b9cdae77d86b4e9e",
@@ -235,13 +235,21 @@
       "beforeHash": null,
       "afterHash": "22dc1dbb590072cc45d5fa309e78b0e84890043ecfd5773ab98bab18d0516fbb"
     },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "58a2b60781e43f7af6a31652490f30ad07e4f6e195a4b740a795fb3502bad256"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": null,
+      "afterHash": "d975ffbd15a5985427e9a510afcbb1a1e2bbb97dcd1bf017f5e179ae92862e0f"
+    },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
-      "afterHash": "c7ab133b5491cc7fd569a7b65f624154a3503e5a29d90518fa1566c90ab444a1"
+      "afterHash": "b1f1758b2b8b954ebdc9c19eb9351e1ef9a8c39db6bd8dd987ce11536a445d6f"
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": null,
-      "afterHash": "75e66dc1610921835881e9190cd2557902114ee6328dd29a9353153851e032de"
+      "afterHash": "025d1a5067e91b67b9eb07b2eaae0167ea23f37d18ef66fce7a9efcc475440f6"
     },
     "src/features/create/composerTestUtils.ts": {
       "beforeHash": null,
