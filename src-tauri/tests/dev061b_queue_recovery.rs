@@ -918,12 +918,18 @@ async fn count(pool: &SqlitePool, table: &str) -> i64 {
         .expect("count query should work")
 }
 
+// Polling budget for the positive wait helpers below: 600 x 50ms = 30s.
+// The previous 8s budget flaked on loaded Windows CI runners (a batch item was
+// still DISPATCHING when the wait expired); helpers return as soon as the
+// expected state is observed, so a larger budget does not slow passing tests.
+const WAIT_POLL_ATTEMPTS: usize = 600;
+
 async fn wait_for_item_status(
     pool: &SqlitePool,
     item_id: &str,
     expected: ProductionBatchItemStatus,
 ) {
-    for _ in 0..160 {
+    for _ in 0..WAIT_POLL_ATTEMPTS {
         let status = sqlx::query_scalar::<_, String>(
             "SELECT status FROM production_batch_items WHERE id = ?",
         )
@@ -951,7 +957,7 @@ async fn wait_for_item_status(
 }
 
 async fn wait_for_batch_status(pool: &SqlitePool, batch_id: &str, expected: ProductionBatchStatus) {
-    for _ in 0..160 {
+    for _ in 0..WAIT_POLL_ATTEMPTS {
         let status =
             sqlx::query_scalar::<_, String>("SELECT status FROM production_batches WHERE id = ?")
                 .bind(batch_id)
@@ -984,7 +990,7 @@ async fn wait_for_batch_status(pool: &SqlitePool, batch_id: &str, expected: Prod
 }
 
 async fn wait_for_event(pool: &SqlitePool, event_type: &str) {
-    for _ in 0..160 {
+    for _ in 0..WAIT_POLL_ATTEMPTS {
         let events =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM task_events WHERE event_type = ?")
                 .bind(event_type)
