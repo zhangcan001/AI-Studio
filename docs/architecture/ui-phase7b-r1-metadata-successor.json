@@ -29,7 +29,7 @@
     },
     "src-tauri/src/app_state.rs": {
       "beforeHash": "af0085a8bd178e8a35cff0632fe4e245bfd56fac3376a04e6283a5a636e58d02",
-      "afterHash": "ddc06e15612bb613963e148404e0e1f458a8c4fad3b0c3fa6e7bfcbc02ed2f38"
+      "afterHash": "4d24c7dded003a397b028d558f2b75359f36ffd70316a9f194a2becdb74fa5b4"
     },
     "src-tauri/src/application/minimax_video_product_policy.rs": {
       "beforeHash": "b4ce6a495d756d2a7a24e4383f84d4916ffbd1878e0fd4bec58dbf37e79082d4",
@@ -37,7 +37,7 @@
     },
     "src-tauri/src/application/mod.rs": {
       "beforeHash": "072ca1aebdc77629dde4d4f7759eb4c2d35fcf9c96e6f2b739a0956833dc848f",
-      "afterHash": "751ed842902edb4994bcfbd75d9b79d4a479c9ba9cec08228982e58f7c928768"
+      "afterHash": "9a8a1661823e60cc530507b724232b89c7a1678fc561a17746f1139d005b91a9"
     },
     "src-tauri/src/application/ports/mod.rs": {
       "beforeHash": "570a408201a00bcdd1fcfb7024faf1d7fb21e609a854776a0d1e15dacc63ab3d",
@@ -93,15 +93,15 @@
     },
     "src-tauri/src/commands/product.rs": {
       "beforeHash": "2306a3e249c2bd548aa9b468e64e15369a82f6ab1692860b0bc37233d537018b",
-      "afterHash": "991f7cbbfe541fe5a12b477bdffb3311a1e64b061b460e7242b3804f213d1a35"
+      "afterHash": "56dc17c84bfd9a9e092a7593d027c3e8ab5d258727c5cce3861cd35baf9155b4"
     },
     "src-tauri/src/domain/mod.rs": {
       "beforeHash": "b8f95432759b87fc83c53a0c14350a41037bf8055a098aafaca761693deeaf4a",
-      "afterHash": "7ebfdeea199c9d0efdf2392e7fe17be0df71018422788cd0b7e4ed2c0b246377"
+      "afterHash": "55e27d096cabb293fb5f43ecb01c46b80afb51d0e489c59239b8c76051f6b238"
     },
     "src-tauri/src/infrastructure/database/pool.rs": {
       "beforeHash": "5631aa4b921a18b9dd2cd272a6aa77bcacca8b9c2ef365243482d6e2b4df4a1d",
-      "afterHash": "b9d0e6b5e8fc20a22edb7331bbb584de088147a82fa20fde0caae27e37033174"
+      "afterHash": "4d41977f7e9bbf7abaf1b062a307156638df15a2ae47fe9a81500b208c7d7bc9"
     },
     "src-tauri/src/infrastructure/database/repositories/mod.rs": {
       "beforeHash": "3f13ee1f09fb2c223421479070544a70862eee4fadcee2ba14cb91c21559360c",
@@ -117,7 +117,7 @@
     },
     "src-tauri/src/lib.rs": {
       "beforeHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77",
-      "afterHash": "76b919b4a2ea330c88137d16eca18069ae4b2a79343c050173c2e9e010a3ef3b"
+      "afterHash": "fa50884d9954d74f3de517c6428539c3e01ce94d7715bb0e9f19d1864e29c886"
     },
     "src-tauri/tests/dev061b_queue_recovery.rs": {
       "beforeHash": "4529b2bf3080703cc6cc6c202df83e726d32fa14edfd504a8911ec61032bdaf7",
@@ -157,11 +157,11 @@
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "2a70fdeead9a3d332e902a036b1c1f9ccab47fdd1c5481fa934f54d607365bd3"
+      "afterHash": "f5b356242c6da95a7e6f3c67ca62ca4e2c48c015be88f8b915f109d709137197"
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "3b5c199c11e638c54c184f6bce09c0d5acdafd168a231cd6b9cdae77d86b4e9e",
-      "afterHash": "bbf652b33d06a34e31ccb7da4abc92de319578ca310ca74c35538688ffc0e656"
+      "afterHash": "1e2dad61f5126e387d7efde91b7f51be4db427d6a5366f938583ea556b940563"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea",
@@ -177,7 +177,7 @@
     },
     "src/features/create/CreateVideoWorkspace.test.tsx": {
       "beforeHash": "542f875656fc0502bebc3aa6c0834488fb63fc3a9822c744fbea3c90fa55deed",
-      "afterHash": "858317824be4690b0047abf0bc69d2086cebd7b450de3356681aa15c40adfb88"
+      "afterHash": "18c43e7b5ce5ef679ea36abe383b24530f62f7e176fad3b46bdab1a464fea3c2"
     },
     "src/features/create/CreateVideoWorkspace.tsx": {
       "beforeHash": "9e3727c37c12691dc67042a79496234847efa335d5ddca38ecc20b0d62a61779",
@@ -233,11 +233,11 @@
     },
     "src/product/client.ts": {
       "beforeHash": "66f3090ad55f6e7eb100851606e6baa85c59abf357ad9a15250f7e4da534e4db",
-      "afterHash": "05e846344d7951a16946b2e0518996a57f304e43d88c4705ba483d37b8eb8b72"
+      "afterHash": "4078434762efe7be6d4d3d74ff7dca9c255642cfe9e2bfe3c3bb77777f50eb72"
     },
     "src/product/transport.ts": {
       "beforeHash": "4e391fe2f1bc3ebc5f31e9b4ee61d4a88e7c271306258a5c3311f07a73a76a73",
-      "afterHash": "1b7c6ef14cad47c36debbf362ea2049a4c8b482f03f8f305d84d403271cc4c86"
+      "afterHash": "5e1e4a0762866012850e843552c5eff189efd9a482eafa97696885bb408f78d5"
     },
     "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
       "beforeHash": null,
@@ -245,23 +245,27 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "0e305940ca3373e11edef9b311893f9c11569e63a3246fa30bc2eaf9796bcfd8"
+      "afterHash": "7199e0df87c642ba963cbfb9846c953f50a32e81b80f4494cef22c7a50867fc4"
     },
     "src-tauri/migrations/045_story_entities.sql": {
       "beforeHash": null,
       "afterHash": "17a496ac57ff948889cb002a8ecb82e364bde18c7d48f9fce7bb41cb2eea51b5"
     },
+    "src-tauri/migrations/046_shot_story_entity_bindings.sql": {
+      "beforeHash": null,
+      "afterHash": "48f737f7b36f15afd923ff302a81d224a3597ff5cef65d57e7fa3b480fa9313c"
+    },
     "src-tauri/src/application/ports/story_entity_repository.rs": {
       "beforeHash": null,
-      "afterHash": "a872657f636eccfedaf8e0111b7b8ddeba4843082912de7db70a8fa943d3d24d"
+      "afterHash": "8df8886bf2ebda6e0701373e8942a385295e57e5f8517fd8ca98e4adf19cec5b"
     },
     "src-tauri/src/application/story_entity_service.rs": {
       "beforeHash": null,
-      "afterHash": "c3466931635f819bb53515d11287da20b4fc4134eb69994c979549bd7825646f"
+      "afterHash": "01b63dc5f63625ead2bf7c9c44bc1f6f5b21eadca73e85d4c510f2e2bb494a15"
     },
     "src-tauri/src/commands/story_entities.rs": {
       "beforeHash": null,
-      "afterHash": "7e11977df2b31fc13ea2751bb975a51db8c027fef7c7f75c7b8f683cbe96942b"
+      "afterHash": "61cfa12e03e13b23e9f758071ec703bac2a185ed05f767a33187e4cfb65ca356"
     },
     "src-tauri/src/domain/story_entity.rs": {
       "beforeHash": null,
@@ -269,7 +273,7 @@
     },
     "src-tauri/src/infrastructure/database/repositories/story_entity.rs": {
       "beforeHash": null,
-      "afterHash": "03f7ffc411ba2f057befe1d1e8ff6b7556a556ae4a063b8179a9a6a09cef072a"
+      "afterHash": "973ad29cb494c73280fcb73d3e5fc119cd38ffcf1840b363de4734d4f12497fd"
     },
     "src/components/ImageAssetPicker.test.tsx": {
       "beforeHash": null,
@@ -285,15 +289,19 @@
     },
     "src/features/create/CreateComposer.test.tsx": {
       "beforeHash": null,
-      "afterHash": "2e8330c27d9183ce6c3dd2aefb784d98bbf4287d3cf8b39a202cd92b49f166ec"
+      "afterHash": "6bfbe48ef181d3e32e08b8f942f6a74720ffcabc6144f584b9b3458c9a35903d"
     },
     "src/features/create/CreateComposer.tsx": {
       "beforeHash": null,
-      "afterHash": "b2ccd3686cadb255521972d72bed8fc7059b30183b963db0035193ac486a96d4"
+      "afterHash": "8fb3b4f0f13bf625e41a6e73b07f21f6b9ee1463a282ae982e9e78fc2459cb95"
     },
     "src/features/create/CreateMediaPreview.hooks.test.tsx": {
       "beforeHash": null,
       "afterHash": "82cd3a5727b06fba7a7b458d282a7730032e898e566440f171db31eea29f919e"
+    },
+    "src/features/create/ShotEntityChips.tsx": {
+      "beforeHash": null,
+      "afterHash": "22dc1dbb590072cc45d5fa309e78b0e84890043ecfd5773ab98bab18d0516fbb"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
@@ -301,7 +309,7 @@
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": null,
-      "afterHash": "64f70f561872ac5b1787c561be5030a60a22d7488f137c2284ca7155304ea6c6"
+      "afterHash": "75e66dc1610921835881e9190cd2557902114ee6328dd29a9353153851e032de"
     },
     "src/features/create/composerTestUtils.ts": {
       "beforeHash": null,

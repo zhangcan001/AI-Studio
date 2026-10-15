@@ -24,4 +24,15 @@ pub trait StoryEntityRepository: Send + Sync {
         input: StoryEntityUpsert,
     ) -> Result<StoryEntity, RepositoryError>;
     async fn delete(&self, project_id: &str, id: &str) -> Result<(), RepositoryError>;
+    async fn list_for_shot(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+    ) -> Result<Vec<StoryEntity>, RepositoryError>;
+    async fn replace_shot_bindings(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+        entity_ids: &[String],
+    ) -> Result<Vec<StoryEntity>, RepositoryError>;
 }

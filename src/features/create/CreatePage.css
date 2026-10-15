@@ -399,3 +399,10 @@
 .image-asset-picker-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .composer-slot-add { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:10px; border:1px dashed #465064; background:transparent; color:#cfccc4; cursor:pointer; }
 .composer-slot-add:disabled { opacity:.5; cursor:not-allowed; }
+
+
+.shot-entity-chips { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; }
+.shot-entity-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 6px 2px 2px; border-radius:999px; border:1px solid #465064; background:#1a2230; color:#e8e6e0; font-size:12px; }
+.shot-entity-chip img, .shot-entity-chip-glyph { width:22px; height:22px; border-radius:50%; object-fit:cover; display:grid; place-items:center; background:#0b1018; }
+.shot-entity-bind { font-size:12px; }
+.composer-chip[data-entity] { background:#243044; }

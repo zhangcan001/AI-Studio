@@ -9,7 +9,7 @@ import { promptEditor, promptText, setPrompt } from "./composerTestUtils";
 import { aspectOf, composerReferences, serializePrompt } from "./CreateComposer";
 
 const api = vi.hoisted(() => ({ get:vi.fn(),generatorsList:vi.fn(),inputsGet:vi.fn(),inputsSave:vi.fn(),assetsImport:vi.fn(),readinessGet:vi.fn(),generate:vi.fn(),selectResult:vi.fn(),runGet:vi.fn(),retry:vi.fn(),libraryGet:vi.fn(),imageGet:vi.fn(),mediaUrl:vi.fn() }));
-vi.mock("../../product/client",()=>({productClient:{creation:api,run:{get:api.runGet,retry:api.retry,list:vi.fn(async()=>({items:[]}))},library:{get:api.libraryGet,imageGet:api.imageGet,list:vi.fn(async()=>({items:[],nextCursor:null})),tagsList:vi.fn(async()=>[])}}}));
+vi.mock("../../product/client",()=>({productClient:{storyEntities:{list:vi.fn(async()=>[]),listForShot:vi.fn(async()=>[]),bindShot:vi.fn(async()=>[]),create:vi.fn(),update:vi.fn(),delete:vi.fn(),get:vi.fn()},creation:api,run:{get:api.runGet,retry:api.retry,list:vi.fn(async()=>({items:[]}))},library:{get:api.libraryGet,imageGet:api.imageGet,list:vi.fn(async()=>({items:[],nextCursor:null})),tagsList:vi.fn(async()=>[])}}}));
 const route = {kind:"create",projectId:"owned",shotId:"one",stage:"video"} as const;
 const runtime = {status:"CONNECTED",endpoint:"http://fixture.invalid",devices:[],runtimeGeneration:1} as const;
 const prompt = {type:"textarea",key:"prompt",label:"Prompt",required:true,default:""} as const;

@@ -64,6 +64,8 @@ export const R1_METADATA_CHANGED = [
   "src-tauri/src/infrastructure/database/pool.rs",
 ].sort();
 export const R1_METADATA_ADDED = [
+  "src/features/create/ShotEntityChips.tsx",
+  "src-tauri/migrations/046_shot_story_entity_bindings.sql",
   "src/features/library/StoryEntitiesSection.tsx",
   "src/types/storyEntity.ts",
   "src-tauri/src/commands/story_entities.rs",

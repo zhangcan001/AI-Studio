@@ -5,7 +5,7 @@ use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 pub struct SqliteStoryEntityRepository {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl SqliteStoryEntityRepository {
@@ -266,5 +266,78 @@ impl StoryEntityRepository for SqliteStoryEntityRepository {
             });
         }
         Ok(())
+    }
+
+    async fn list_for_shot(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+    ) -> Result<Vec<StoryEntity>, RepositoryError> {
+        let rows = sqlx::query(
+            "SELECT e.id FROM shot_story_entity_bindings b
+             JOIN story_entities e ON e.id = b.entity_id
+             WHERE b.project_id = ? AND b.shot_id = ?
+             ORDER BY b.ordinal ASC, e.id ASC",
+        )
+        .bind(project_id)
+        .bind(shot_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Database {
+            message: e.to_string(),
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let id: String = row.get("id");
+            if let Some(entity) = self.get(project_id, &id).await? {
+                out.push(entity);
+            }
+        }
+        Ok(out)
+    }
+
+    async fn replace_shot_bindings(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+        entity_ids: &[String],
+    ) -> Result<Vec<StoryEntity>, RepositoryError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| RepositoryError::Database {
+                message: e.to_string(),
+            })?;
+        sqlx::query("DELETE FROM shot_story_entity_bindings WHERE project_id = ? AND shot_id = ?")
+            .bind(project_id)
+            .bind(shot_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| RepositoryError::Database {
+                message: e.to_string(),
+            })?;
+        for (ordinal, entity_id) in entity_ids.iter().enumerate() {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query(
+                "INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&id)
+            .bind(project_id)
+            .bind(shot_id)
+            .bind(entity_id)
+            .bind(ordinal as i64)
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| RepositoryError::Database { message: e.to_string() })?;
+        }
+        tx.commit().await.map_err(|e| RepositoryError::Database {
+            message: e.to_string(),
+        })?;
+        self.list_for_shot(project_id, shot_id).await
     }
 }

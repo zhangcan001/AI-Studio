@@ -94,3 +94,34 @@ pub async fn product_story_entity_delete(
 ) -> Result<(), AppError> {
     state.shots.story_entities.delete(&project_id, &id).await
 }
+
+pub async fn product_story_entity_list_for_shot(
+    state: State<'_, AppState>,
+    project_id: String,
+    shot_id: String,
+) -> Result<Vec<StoryEntity>, AppError> {
+    state
+        .shots
+        .story_entities
+        .list_for_shot(&project_id, &shot_id)
+        .await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryEntityShotBindRequest {
+    pub project_id: String,
+    pub shot_id: String,
+    pub entity_ids: Vec<String>,
+}
+
+pub async fn product_story_entity_bind_shot(
+    state: State<'_, AppState>,
+    request: StoryEntityShotBindRequest,
+) -> Result<Vec<StoryEntity>, AppError> {
+    state
+        .shots
+        .story_entities
+        .replace_shot_bindings(&request.project_id, &request.shot_id, request.entity_ids)
+        .await
+}

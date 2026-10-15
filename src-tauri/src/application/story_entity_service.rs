@@ -56,6 +56,29 @@ impl StoryEntityService {
     pub async fn delete(&self, project_id: &str, id: &str) -> Result<(), AppError> {
         self.repo.delete(project_id, id).await.map_err(map_repo)
     }
+
+    pub async fn list_for_shot(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+    ) -> Result<Vec<StoryEntity>, AppError> {
+        self.repo
+            .list_for_shot(project_id, shot_id)
+            .await
+            .map_err(map_repo)
+    }
+
+    pub async fn replace_shot_bindings(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+        entity_ids: Vec<String>,
+    ) -> Result<Vec<StoryEntity>, AppError> {
+        self.repo
+            .replace_shot_bindings(project_id, shot_id, &entity_ids)
+            .await
+            .map_err(map_repo)
+    }
 }
 
 fn map_repo(error: RepositoryError) -> AppError {

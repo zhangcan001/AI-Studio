@@ -1,3 +1,4 @@
+import { ShotEntityChips } from "./ShotEntityChips";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
@@ -226,6 +227,7 @@ function StatusBadge({ item, compact }: { item: StoryboardShot; compact?: boolea
   return <span className={`storyboard-badge ${item.status.toLowerCase()}${compact ? " compact" : ""}`}>{item.error ? "读取失败" : storyboardStatusLabels[item.status]}{percent !== null && !compact ? ` ${percent}%` : ""}</span>;
 }
 function ShotCard({ item, selected, onSelect, onOpen, onRun, onReview }: { item: StoryboardShot; selected: boolean; onSelect: () => void; onOpen: () => void; onRun: () => void; onReview: () => void }) {
+  const projectId = useContext(ThumbnailProjectContext);
   const prompt = item.shot?.prompt.trim();
   return <article className={`storyboard-card${selected ? " selected" : ""}`} aria-label={item.name} onClick={onSelect}>
     <Cover item={item} />
@@ -233,6 +235,7 @@ function ShotCard({ item, selected, onSelect, onOpen, onRun, onReview }: { item:
       <header><strong>{item.name}</strong><StatusBadge item={item} /></header>
       <p className={prompt ? "" : "muted"}>{prompt || "尚未填写提示词"}</p>
       <ul className="storyboard-tags"><li>{shotDuration(item.shot)}</li><li>{shotResolution(item.shot)}</li><li>{item.candidates.length} 个候选</li></ul>
+      {projectId && <ShotEntityChips projectId={projectId} shotId={item.id} />}
       {item.error && <small role="status">{item.error}</small>}
       <div className="storyboard-card-actions" onClick={e => e.stopPropagation()}>
         {canReview(item) && <button type="button" onClick={onReview}>审核</button>}
@@ -253,6 +256,7 @@ function ShotDetail({ item }: { item: StoryboardShot }) {
       <div><dt>时长</dt><dd>{shotDuration(item.shot)}</dd></div>
       <div><dt>分辨率</dt><dd>{shotResolution(item.shot)}</dd></div>
       <div><dt>提示词摘要</dt><dd>{item.shot?.prompt.trim() || "尚未填写"}</dd></div>
+      <div><dt>角色与场景</dt><dd>{projectId && <ShotEntityChips projectId={projectId} shotId={item.id} editable />}</dd></div>
       <div><dt>参考素材</dt><dd>{refs.length ? <div className="storyboard-ref-thumbs" aria-label="参考素材缩略图">{projectId && refs.map(id => <AssetImageThumb key={id} projectId={projectId} assetId={id} name={`参考 ${id.slice(0, 8)}`} size="lg" />)}<small>{refs.length} 张</small></div> : "0 张"}</dd></div>
       <div><dt>生成候选</dt><dd>{item.candidates.length} 个</dd></div>
       {item.run && <div><dt>最近运行</dt><dd>{item.run.title} · {item.run.progress.succeeded}/{item.run.progress.total}</dd></div>}

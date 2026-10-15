@@ -732,3 +732,21 @@ pub async fn product_story_entity_delete(
 ) -> Result<(), crate::error::AppError> {
     crate::commands::story_entities::product_story_entity_delete(state, project_id, id).await
 }
+
+#[tauri::command]
+pub async fn product_story_entity_list_for_shot(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    project_id: String,
+    shot_id: String,
+) -> Result<Vec<crate::domain::story_entity::StoryEntity>, crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_list_for_shot(state, project_id, shot_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn product_story_entity_bind_shot(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    request: crate::commands::story_entities::StoryEntityShotBindRequest,
+) -> Result<Vec<crate::domain::story_entity::StoryEntity>, crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_bind_shot(state, request).await
+}

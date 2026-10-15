@@ -1487,6 +1487,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::product::product_story_entity_create,
             commands::product::product_story_entity_update,
             commands::product::product_story_entity_delete,
+            commands::product::product_story_entity_list_for_shot,
+            commands::product::product_story_entity_bind_shot,
             commands::consistency_assets::consistency_profile_get,
             commands::consistency_assets::character_profile_create,
             commands::consistency_assets::character_profile_update,

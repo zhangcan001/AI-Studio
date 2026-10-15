@@ -8,6 +8,8 @@ import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 import { ParamField, PromptPickerDialog, ReferencePanel, ResolutionPicker, presetAspectKey } from "./CreateInputs";
 import { ReadinessStatus } from "./CreateResults";
 import { useStudioStore } from "../../stores/studioStore";
+import { productClient } from "../../product/client";
+import type { StoryEntity } from "../../types/storyEntity";
 
 type Kind = "image" | "video" | "audio";
 type Asset = { id: string; name: string; mediaKind: string; thumbnailBytes?: number[] | null };
@@ -34,6 +36,13 @@ function chipNode(ref: ComposerReference, url?: string) {
   chip.className = "composer-chip"; chip.contentEditable = "false"; chip.dataset.ref = String(ref.n);
   if (url) { const img = document.createElement("img"); img.src = url; img.alt = ""; chip.appendChild(img); }
   const label = document.createElement("span"); label.textContent = ref.label; chip.appendChild(label);
+  return chip;
+}
+function entityChipNode(entity: StoryEntity, url?: string) {
+  const chip = document.createElement("span");
+  chip.className = "composer-chip"; chip.contentEditable = "false"; chip.dataset.entity = entity.id; chip.dataset.entityName = entity.name;
+  if (url) { const img = document.createElement("img"); img.src = url; img.alt = ""; chip.appendChild(img); }
+  const label = document.createElement("span"); label.textContent = `@${entity.name}`; chip.appendChild(label);
   return chip;
 }
 function build(root: HTMLElement, value: string, images: ComposerReference[], url: (r: ComposerReference) => string | undefined) {
@@ -79,6 +88,9 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const caret = useRef<Range | null>(null);
   const [picker, setPicker] = useState<"insert" | "add" | null>(null);
   const [imagePick, setImagePick] = useState<{ field: RecipeField; title: string } | null>(null);
+  const [entities, setEntities] = useState<StoryEntity[]>([]);
+  const [entityPicker, setEntityPicker] = useState(false);
+  const [entityUrls, setEntityUrls] = useState<Record<string, string>>({});
   const [promptPicker, setPromptPicker] = useState(false);
   const locked = c.busy || vi.busy || vi.loading || (vi.enabled && !vi.view);
   const targets = mediaFields.filter(f => capacity(f, assetIds(c.values[f.key])));
@@ -94,6 +106,28 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     for (const id of new Set(imageIds.split("|").filter(Boolean))) void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setImgUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
     return () => { alive = false; };
   }, [projectId, imageIds]);
+
+  useEffect(() => {
+    if (!projectId || !c.context?.selectedShot?.summary.id) { setEntities([]); return; }
+    const shotId = c.context.selectedShot.summary.id;
+    const listForShot = productClient.storyEntities?.listForShot;
+    if (typeof listForShot !== "function") { setEntities([]); return; }
+    let alive = true;
+    void listForShot(projectId, shotId).then(list => { if (alive) setEntities(list); }).catch(() => { if (alive) setEntities([]); });
+    return () => { alive = false; };
+  }, [projectId, c.context?.selectedShot?.summary.id]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let alive = true;
+    for (const entity of entities) {
+      const id = entity.coverAssetId;
+      if (!id || entityUrls[id]) continue;
+      void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setEntityUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
+    }
+    return () => { alive = false; };
+  }, [projectId, entities.map(e => e.coverAssetId).join("|")]);
+
 
   // Media edits persist through the existing OCC save (no separate "save inputs" step). A failed save is not retried until the draft changes.
   const inputsKey = JSON.stringify(mediaFields.map(f => [f.key, assetIds(c.values[f.key])]));
@@ -208,7 +242,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     {promptField && <div className="composer-prompt">
       <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面"}
         onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={saveCaret}
-        onKeyDown={e => { if (e.key === "@" && images.length) { e.preventDefault(); saveCaret(); setPicker("insert"); } else if (e.key === "Escape") setPicker(null); }}
+        onKeyDown={e => { if (e.key === "@") { e.preventDefault(); saveCaret(); if (entities.length) setEntityPicker(true); else if (images.length) setPicker("insert"); } else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); } }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />
       <span className="composer-count" aria-hidden="true">{prompt.length} 字</span>
     </div>}
@@ -234,6 +268,18 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       {vi.enabled && mediaKind(target) === "image" && <button type="button" onClick={() => void importInto(target, true)}>导入图片文件夹…</button>}
       <button type="button" onClick={() => { setPicker(null); c.openLibrary(mediaKind(target) === "image" ? "images" : mediaKind(target) === "video" ? "videos" : "audio"); }}>在资源库查找</button>
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button></div>}
+    {entityPicker && <div className="composer-picker" role="listbox" aria-label="插入角色与场景">
+      {entities.map(entity => <button type="button" role="option" aria-selected="false" key={entity.id} onMouseDown={e => e.preventDefault()} onClick={() => {
+        const root = editor.current; if (!root || !promptField) return;
+        const cover = entity.coverAssetId ? entityUrls[entity.coverAssetId] : undefined;
+        const chip = entityChipNode(entity, cover); const space = document.createTextNode(" ");
+        const range = caret.current && root.contains(caret.current.startContainer) ? caret.current : null;
+        if (range) { range.deleteContents(); range.insertNode(space); range.insertNode(chip); } else root.append(chip, space);
+        root.focus(); const sel = window.getSelection(); const r = document.createRange(); r.setStartAfter(space); r.collapse(true); if (sel) { sel.removeAllRanges(); sel.addRange(r); } caret.current = r.cloneRange();
+        setEntityPicker(false); emit();
+      }} className="composer-picker-option">{entity.coverAssetId && entityUrls[entity.coverAssetId] ? <img src={entityUrls[entity.coverAssetId]} alt="" /> : <span className="composer-picker-glyph">@</span>}<span>@{entity.name}</span></button>)}
+      {images.length > 0 && <button type="button" onClick={() => { setEntityPicker(false); setPicker("insert"); }}>插入 Image N…</button>}
+      <button type="button" className="composer-picker-close" onClick={() => setEntityPicker(false)}>关闭</button></div>}
     <div className="composer-toolbar">
       <button type="button" className="composer-icon" aria-label="添加参考素材" title={target ? `添加到${fieldLabel(target)}` : mediaFields.length ? "输入已满" : "当前模式不需要参考素材"} disabled={!target || locked} onClick={() => {
         if (!target) return;
@@ -252,7 +298,21 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       {presets.length > 0 && <ResolutionPicker controller={c} presets={pickerPresets} current={current} />}
       {durationField && <label className="composer-pick" title="时长">◷<input id="create-field-duration_seconds" aria-label={fieldLabel(durationField)} type="number" min={"min" in durationField ? durationField.min : undefined} max={"max" in durationField ? durationField.max : undefined} step={("step" in durationField && durationField.step) || (durationField.type === "integer" ? 1 : "any")} disabled={c.busy} value={(() => { const v = c.values.duration_seconds; return v?.type === "integer" || v?.type === "number" ? v.value : ""; })()} onChange={e => e.target.value === "" ? c.removeValue("duration_seconds") : c.setValue("duration_seconds", { type: durationField.type as "integer", value: Number(e.target.value) })} />s</label>}
       {aspects.length > 0 && <label className="composer-pick" title="画面比例">▭<select aria-label="画面比例" value={aspect ?? ""} disabled={c.busy} onChange={e => chooseAspect(e.target.value)}>{!aspect && <option value="" disabled>比例</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>}
-      <button type="button" className="composer-submit" aria-label={c.busy ? "正在提交…" : "生成"} title={canSubmit ? "写入生产队列并生成" : "请先完成准备检查"} disabled={!canSubmit} onClick={() => void c.generate()}>↑</button>
+      <button type="button" className="composer-submit" aria-label={c.busy ? "正在提交…" : "生成"} title={canSubmit ? "写入生产队列并生成" : "请先完成准备检查"} disabled={!canSubmit} onClick={() => void (async () => {
+        const covers = entities.map(e => e.coverAssetId).filter((id): id is string => Boolean(id));
+        if (covers.length) {
+          const imageField = mediaFields.find(f => mediaKind(f) === "image");
+          if (imageField) {
+            const existing = assetIds(c.values[imageField.key]);
+            const merged = [...existing];
+            for (const id of covers) if (!merged.includes(id)) merged.push(id);
+            const max = plural(imageField) && "maxItems" in imageField && imageField.maxItems ? imageField.maxItems : plural(imageField) ? Number.POSITIVE_INFINITY : 1;
+            setField(imageField, merged.slice(0, max === Number.POSITIVE_INFINITY ? merged.length : max));
+            if (vi.enabled) await vi.save();
+          }
+        }
+        await c.generate();
+      })()}>↑</button>
     </div>
     <details className="composer-advanced"><summary>高级设置</summary>
       {negativeField && <label>{fieldLabel(negativeField)}<textarea id="create-field-negative_prompt" aria-label={fieldLabel(negativeField)} rows={2} value={c.values.negative_prompt?.type === "string" ? c.values.negative_prompt.value : ""} onChange={e => c.setValue("negative_prompt", { type: "string", value: e.target.value })} /></label>}
