@@ -19,13 +19,29 @@
     "nativeDelayDebugOnly": true
   },
   "files": {
+    "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "b3a83193b412c1f9a69f45dffaee4aa419582669ee94fc00b6425a6015bfc982"
+    },
     "scripts/ui-phase7b-backup-prompt-successor-guard.mjs": {
       "beforeHash": "3ffffc11d3a12c331a8f9634ac1f09e3d665fdec640eab0e69a114f012d25e32",
       "afterHash": "4fa20b6eeb77b4306b3bbe84061bd26dc758f2cebc79f46e27c406911650a02a"
     },
+    "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "b7c0f8a354a69dd8c89e4b39187c985fa69b9fed99036524c7243c705eef3889"
+    },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
       "afterHash": "0d9ec801780f7e2061f09d426311fd7590a6aac448f93523d745c44cd589da9e"
+    },
+    "src-tauri/migrations/045_story_entities.sql": {
+      "beforeHash": null,
+      "afterHash": "17a496ac57ff948889cb002a8ecb82e364bde18c7d48f9fce7bb41cb2eea51b5"
+    },
+    "src-tauri/migrations/046_shot_story_entity_bindings.sql": {
+      "beforeHash": null,
+      "afterHash": "48f737f7b36f15afd923ff302a81d224a3597ff5cef65d57e7fa3b480fa9313c"
     },
     "src-tauri/src/app_state.rs": {
       "beforeHash": "af0085a8bd178e8a35cff0632fe4e245bfd56fac3376a04e6283a5a636e58d02",
@@ -46,6 +62,10 @@
     "src-tauri/src/application/ports/production_queue_repository.rs": {
       "beforeHash": "83e072fe6d131be36fb5734aaee4e258d30931d0ff891bece176f451b08f563d",
       "afterHash": "65f858a834e363bc9102c96d6a7e47f3096c0fab2d10c0f3f81df79b0a2a6c6e"
+    },
+    "src-tauri/src/application/ports/story_entity_repository.rs": {
+      "beforeHash": null,
+      "afterHash": "8df8886bf2ebda6e0701373e8942a385295e57e5f8517fd8ca98e4adf19cec5b"
     },
     "src-tauri/src/application/product/creation_facade/context.rs": {
       "beforeHash": "861ab28ff2034aa923895b37d44fbb4ae03add43ab276aee6592425f9e41279f",
@@ -79,6 +99,10 @@
       "beforeHash": "1dfa4e6c5e1bf47c802e9ba51e965494ecff84d512281c6e81772a83fcf89b19",
       "afterHash": "3e7ae396f3a054becffdd441e3068b609324691831117df9511fadca8e7b5cc8"
     },
+    "src-tauri/src/application/story_entity_service.rs": {
+      "beforeHash": null,
+      "afterHash": "01b63dc5f63625ead2bf7c9c44bc1f6f5b21eadca73e85d4c510f2e2bb494a15"
+    },
     "src-tauri/src/application/workflow_onboarding_service.rs": {
       "beforeHash": "8373fb44acafe880471b4bd490d4eab0949b08721af0fc55ceeeac8a142684d8",
       "afterHash": "879fdcbef150944d7ef8b4a3a8d9cf3f72b366c08953114ce94614a009e82ca6"
@@ -95,9 +119,21 @@
       "beforeHash": "2306a3e249c2bd548aa9b468e64e15369a82f6ab1692860b0bc37233d537018b",
       "afterHash": "56dc17c84bfd9a9e092a7593d027c3e8ab5d258727c5cce3861cd35baf9155b4"
     },
+    "src-tauri/src/commands/story_entities.rs": {
+      "beforeHash": null,
+      "afterHash": "61cfa12e03e13b23e9f758071ec703bac2a185ed05f767a33187e4cfb65ca356"
+    },
     "src-tauri/src/domain/mod.rs": {
       "beforeHash": "b8f95432759b87fc83c53a0c14350a41037bf8055a098aafaca761693deeaf4a",
       "afterHash": "55e27d096cabb293fb5f43ecb01c46b80afb51d0e489c59239b8c76051f6b238"
+    },
+    "src-tauri/src/domain/story_entity.rs": {
+      "beforeHash": null,
+      "afterHash": "f511df9565c1de72d1449bcfd756b7dd710e4d8d8a7a85627643cb54387c539d"
+    },
+    "src-tauri/src/infrastructure/database/dev048_consistency_e2e.rs": {
+      "beforeHash": "a75c1c0d973010c433efc4bd9c91f795003146aaa9332392c063def312dc442a",
+      "afterHash": "7a7c83d99dc90481ceb8cccaf2adfb99cf0b25906b1fcfba8f0b731dd9a860ad"
     },
     "src-tauri/src/infrastructure/database/pool.rs": {
       "beforeHash": "5631aa4b921a18b9dd2cd272a6aa77bcacca8b9c2ef365243482d6e2b4df4a1d",
@@ -114,6 +150,14 @@
     "src-tauri/src/infrastructure/database/repositories/project_backup.rs": {
       "beforeHash": "e2f643cd68b54857cfe526fcb658063109beb699023464b8c4d5fc3b08c2d86d",
       "afterHash": "cef498a40b843d9c3801736a003a35b7f6abb31008ddfaac2ac884743a020330"
+    },
+    "src-tauri/src/infrastructure/database/repositories/shot_video_input/tests.rs": {
+      "beforeHash": "8eb862dde00ace91fc395dd1d9b9df318f63a7dcbf6c8a30c60b24a685787b98",
+      "afterHash": "3e980d42ba3fb58fa62867d4110fbc97d28d5b473ecd506ae21fc3efe993ee91"
+    },
+    "src-tauri/src/infrastructure/database/repositories/story_entity.rs": {
+      "beforeHash": null,
+      "afterHash": "973ad29cb494c73280fcb73d3e5fc119cd38ffcf1840b363de4734d4f12497fd"
     },
     "src-tauri/src/lib.rs": {
       "beforeHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77",
@@ -143,6 +187,26 @@
       "beforeHash": "c12fb4d2007eab82c57cea8dabfed001924a2a89a7d296a27e8644752c5912a3",
       "afterHash": "da4fb7f850c94c77c4b7934b50aadd86123099902d2c58007bf0bc72f21719c5"
     },
+    "src/components/ImageAssetPicker.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "16c8f63975b3852b2f56916b9dec652a2d695893fc6324130bfdc76806caff28"
+    },
+    "src/components/ImageAssetPicker.tsx": {
+      "beforeHash": null,
+      "afterHash": "57cb1af79482f422dd23ff8643958597ff4ffa4742542019c7c2f87a9a7954fc"
+    },
+    "src/features/create/CandidateThumbnail.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "fecee030858cbceef0e27fd667c142d0ce3f25bf9c343bc5a3a6f8a1363b601c"
+    },
+    "src/features/create/CreateComposer.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "6bfbe48ef181d3e32e08b8f942f6a74720ffcabc6144f584b9b3458c9a35903d"
+    },
+    "src/features/create/CreateComposer.tsx": {
+      "beforeHash": null,
+      "afterHash": "8fb3b4f0f13bf625e41a6e73b07f21f6b9ee1463a282ae982e9e78fc2459cb95"
+    },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
       "afterHash": "adff08eabc5d54aa2fdc6aaf58c60902a44dbfe723ed3670b312bc9914b36ecd"
@@ -150,6 +214,10 @@
     "src/features/create/CreateInputs.tsx": {
       "beforeHash": "2d66012f799ddaa1b7222323767b885840676acd77a3d43a306f17c653eeee3f",
       "afterHash": "bc441a0d1500042ae289ad6690e33019147e5ac4f79b6ef2ef6ebefe9d5145a7"
+    },
+    "src/features/create/CreateMediaPreview.hooks.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "82cd3a5727b06fba7a7b458d282a7730032e898e566440f171db31eea29f919e"
     },
     "src/features/create/CreateMediaPreview.tsx": {
       "beforeHash": "418f32f5d365c2ea9fc624124589b9f9b529a3a74e77e23d4f8d1164da5ba619",
@@ -183,9 +251,29 @@
       "beforeHash": "9e3727c37c12691dc67042a79496234847efa335d5ddca38ecc20b0d62a61779",
       "afterHash": "260f07e2333ec71cc230edda35710180940f51ccb0170bf6bf0954bad108d531"
     },
+    "src/features/create/ShotEntityChips.tsx": {
+      "beforeHash": null,
+      "afterHash": "22dc1dbb590072cc45d5fa309e78b0e84890043ecfd5773ab98bab18d0516fbb"
+    },
+    "src/features/create/StoryboardWorkbench.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "c7ab133b5491cc7fd569a7b65f624154a3503e5a29d90518fa1566c90ab444a1"
+    },
+    "src/features/create/StoryboardWorkbench.tsx": {
+      "beforeHash": null,
+      "afterHash": "75e66dc1610921835881e9190cd2557902114ee6328dd29a9353153851e032de"
+    },
+    "src/features/create/composerTestUtils.ts": {
+      "beforeHash": null,
+      "afterHash": "7ddbb14fe3bd0a41c303361140c4edf387a0cc947b8644cd9ab649e41f908139"
+    },
     "src/features/create/createModel.ts": {
       "beforeHash": "554200ecedfa8e20b088a9142f8c29d1765fd92c2f3d9b412af9e70fab01a96d",
       "afterHash": "d6124bea68772ea0f2bd2ee22a58edddae67fd391a231321669ee63b948bb85e"
+    },
+    "src/features/create/storyboardModel.ts": {
+      "beforeHash": null,
+      "afterHash": "eae7ce4040b416663a27ef08ebc551f4c9ae0dae172ba02734cd4fa5232817eb"
     },
     "src/features/create/usePersistentVideoInputs.test.tsx": {
       "beforeHash": "0be43b80f29130d45f8eded51fdbe9a20d36fb7880e854ae9a6eec17248ddfd5",
@@ -203,13 +291,13 @@
       "beforeHash": "bc22aee331760b4dcbc1b135c037422c2ce6716370358aa66883e46dc18db3df",
       "afterHash": "a1a470b159606a71b77041db9fe2b698ba6e66c7aa5b807bb4efc04f10892676"
     },
-    "src/features/library/LibraryPage.css": {
-      "beforeHash": "af0309c568fee509764e52f2146a093db2d24d57a95ffda8f269645de8848537",
-      "afterHash": "b93c1f89f9859ca88864705067cf5cf1f60804c0f81bd8692ed6002bde9be05e"
-    },
     "src/features/library/LibraryFindability.test.tsx": {
       "beforeHash": "076e5c9319d10fd99d9ff78c243500cb7db61f6cce7ec05aacbab2041a2e0858",
       "afterHash": "83bc66a706d9b588b08abab4e4d39597426098c183e84ba7ca39f6db466a73ac"
+    },
+    "src/features/library/LibraryPage.css": {
+      "beforeHash": "af0309c568fee509764e52f2146a093db2d24d57a95ffda8f269645de8848537",
+      "afterHash": "b93c1f89f9859ca88864705067cf5cf1f60804c0f81bd8692ed6002bde9be05e"
     },
     "src/features/library/LibraryPage.test.tsx": {
       "beforeHash": "659387fbb240030ba227dd927234df9e25424facfe9cdaa7ebcf8760bd8f2bd2",
@@ -218,6 +306,10 @@
     "src/features/library/LibraryPage.tsx": {
       "beforeHash": "8f5dbcf4f825a969a3889074651abb15069ea5f8134db23179a04676f6b30395",
       "afterHash": "365b344b0c9271bb296981e0947612f82825e9c45ead9d3ca45d5ff0342f2a02"
+    },
+    "src/features/library/StoryEntitiesSection.tsx": {
+      "beforeHash": null,
+      "afterHash": "6e43ffc6a92bec7e4c2b6410f7a710360f0611e28bd37faeba651d02fdd1a098"
     },
     "src/features/runs/RunsController.ts": {
       "beforeHash": "82e7600c977ba16782e590e42ae4013640730ea54e23c14547a465dab73e6382",
@@ -242,90 +334,6 @@
     "src/product/transport.ts": {
       "beforeHash": "4e391fe2f1bc3ebc5f31e9b4ee61d4a88e7c271306258a5c3311f07a73a76a73",
       "afterHash": "5e1e4a0762866012850e843552c5eff189efd9a482eafa97696885bb408f78d5"
-    },
-    "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
-      "beforeHash": null,
-      "afterHash": "b3a83193b412c1f9a69f45dffaee4aa419582669ee94fc00b6425a6015bfc982"
-    },
-    "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
-      "beforeHash": null,
-      "afterHash": "b06be9682c7191f04f380cfd8afa5c1e507af5292bcb092e8f402e8a78f5202f"
-    },
-    "src-tauri/migrations/045_story_entities.sql": {
-      "beforeHash": null,
-      "afterHash": "17a496ac57ff948889cb002a8ecb82e364bde18c7d48f9fce7bb41cb2eea51b5"
-    },
-    "src-tauri/migrations/046_shot_story_entity_bindings.sql": {
-      "beforeHash": null,
-      "afterHash": "48f737f7b36f15afd923ff302a81d224a3597ff5cef65d57e7fa3b480fa9313c"
-    },
-    "src-tauri/src/application/ports/story_entity_repository.rs": {
-      "beforeHash": null,
-      "afterHash": "8df8886bf2ebda6e0701373e8942a385295e57e5f8517fd8ca98e4adf19cec5b"
-    },
-    "src-tauri/src/application/story_entity_service.rs": {
-      "beforeHash": null,
-      "afterHash": "01b63dc5f63625ead2bf7c9c44bc1f6f5b21eadca73e85d4c510f2e2bb494a15"
-    },
-    "src-tauri/src/commands/story_entities.rs": {
-      "beforeHash": null,
-      "afterHash": "61cfa12e03e13b23e9f758071ec703bac2a185ed05f767a33187e4cfb65ca356"
-    },
-    "src-tauri/src/domain/story_entity.rs": {
-      "beforeHash": null,
-      "afterHash": "f511df9565c1de72d1449bcfd756b7dd710e4d8d8a7a85627643cb54387c539d"
-    },
-    "src-tauri/src/infrastructure/database/repositories/story_entity.rs": {
-      "beforeHash": null,
-      "afterHash": "973ad29cb494c73280fcb73d3e5fc119cd38ffcf1840b363de4734d4f12497fd"
-    },
-    "src/components/ImageAssetPicker.test.tsx": {
-      "beforeHash": null,
-      "afterHash": "16c8f63975b3852b2f56916b9dec652a2d695893fc6324130bfdc76806caff28"
-    },
-    "src/components/ImageAssetPicker.tsx": {
-      "beforeHash": null,
-      "afterHash": "57cb1af79482f422dd23ff8643958597ff4ffa4742542019c7c2f87a9a7954fc"
-    },
-    "src/features/create/CandidateThumbnail.test.tsx": {
-      "beforeHash": null,
-      "afterHash": "fecee030858cbceef0e27fd667c142d0ce3f25bf9c343bc5a3a6f8a1363b601c"
-    },
-    "src/features/create/CreateComposer.test.tsx": {
-      "beforeHash": null,
-      "afterHash": "6bfbe48ef181d3e32e08b8f942f6a74720ffcabc6144f584b9b3458c9a35903d"
-    },
-    "src/features/create/CreateComposer.tsx": {
-      "beforeHash": null,
-      "afterHash": "8fb3b4f0f13bf625e41a6e73b07f21f6b9ee1463a282ae982e9e78fc2459cb95"
-    },
-    "src/features/create/CreateMediaPreview.hooks.test.tsx": {
-      "beforeHash": null,
-      "afterHash": "82cd3a5727b06fba7a7b458d282a7730032e898e566440f171db31eea29f919e"
-    },
-    "src/features/create/ShotEntityChips.tsx": {
-      "beforeHash": null,
-      "afterHash": "22dc1dbb590072cc45d5fa309e78b0e84890043ecfd5773ab98bab18d0516fbb"
-    },
-    "src/features/create/StoryboardWorkbench.test.tsx": {
-      "beforeHash": null,
-      "afterHash": "c7ab133b5491cc7fd569a7b65f624154a3503e5a29d90518fa1566c90ab444a1"
-    },
-    "src/features/create/StoryboardWorkbench.tsx": {
-      "beforeHash": null,
-      "afterHash": "75e66dc1610921835881e9190cd2557902114ee6328dd29a9353153851e032de"
-    },
-    "src/features/create/composerTestUtils.ts": {
-      "beforeHash": null,
-      "afterHash": "7ddbb14fe3bd0a41c303361140c4edf387a0cc947b8644cd9ab649e41f908139"
-    },
-    "src/features/create/storyboardModel.ts": {
-      "beforeHash": null,
-      "afterHash": "eae7ce4040b416663a27ef08ebc551f4c9ae0dae172ba02734cd4fa5232817eb"
-    },
-    "src/features/library/StoryEntitiesSection.tsx": {
-      "beforeHash": null,
-      "afterHash": "6e43ffc6a92bec7e4c2b6410f7a710360f0611e28bd37faeba651d02fdd1a098"
     },
     "src/types/storyEntity.ts": {
       "beforeHash": null,

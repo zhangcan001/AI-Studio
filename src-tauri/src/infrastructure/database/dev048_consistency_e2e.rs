@@ -297,9 +297,12 @@ async fn remove_022_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
 }
 
 async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
-    // The current schema is applied by initialize(). Replaying 024..044 in
+    // The current schema is applied by initialize(). Replaying 024..046 in
     // this isolated fixture must first drop the later objects and indexes.
     for statement in [
+        "DROP TABLE IF EXISTS shot_story_entity_bindings",
+        "DROP TABLE IF EXISTS story_entity_images",
+        "DROP TABLE IF EXISTS story_entities",
         "DROP TABLE IF EXISTS production_deferred_starts",
         "DROP TABLE IF EXISTS shot_video_input_assets",
         "DROP TABLE IF EXISTS shot_video_input_sets",
@@ -636,7 +639,7 @@ async fn dev048_fresh_migration_001_to_044_keeps_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        44
+        46
     );
     let required_tables = [
         "profile_revisions",
@@ -702,7 +705,7 @@ async fn dev048_021_to_043_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        44
+        46
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -770,7 +773,7 @@ async fn dev052_existing_023_to_043_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        44
+        46
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1604,7 +1607,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 44)
+            .is_some_and(|version| version <= 46)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"2.1.0-personal\""));
