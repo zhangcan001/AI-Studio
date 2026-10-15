@@ -10,6 +10,13 @@ const KINDS: { id: StoryEntityKind; label: string }[] = [
   { id: "prop", label: "物品" },
 ];
 
+/** Keep the backend reason (e.g. duplicate name) visible instead of only the generic category message. */
+function entityError(cause: unknown): string {
+  const normalized = normalizeProductError(cause).message;
+  const raw = typeof cause === "object" && cause && "message" in cause ? String((cause as { message: unknown }).message ?? "") : "";
+  return raw && raw !== normalized && !normalized.includes(raw) ? `${normalized}（${raw}）` : normalized;
+}
+
 function EntityThumb({ projectId, assetId, name }: { projectId: string; assetId: string; name: string }) {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
@@ -48,7 +55,7 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
       const list = await productClient.storyEntities.list(projectId, kind === "all" ? null : kind);
       setItems(list as StoryEntity[]);
     } catch (cause) {
-      setError(normalizeProductError(cause).message);
+      setError(entityError(cause));
     } finally { setBusy(false); }
   }, [projectId, kind]);
 
@@ -75,7 +82,7 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
       setEditing(null); setCreating(false);
       await reload();
     } catch (cause) {
-      setError(normalizeProductError(cause).message); setBusy(false);
+      setError(entityError(cause)); setBusy(false);
     }
   }
 
@@ -86,7 +93,7 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
       await productClient.storyEntities.delete(projectId, entity.id);
       await reload();
     } catch (cause) {
-      setError(normalizeProductError(cause).message); setBusy(false);
+      setError(entityError(cause)); setBusy(false);
     }
   }
 
@@ -95,21 +102,23 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
   return <section className="story-entities-section" aria-label="角色与场景">
     <header className="story-entities-header">
       <h2>角色与场景</h2>
-      <button type="button" onClick={openCreate} disabled={busy}>新建</button>
+      <div className="story-entities-tabs" role="tablist" aria-label="实体类型">
+        <button type="button" role="tab" aria-selected={kind === "all"} onClick={() => setKind("all")}>全部</button>
+        {KINDS.map(k => <button key={k.id} type="button" role="tab" aria-selected={kind === k.id} onClick={() => setKind(k.id)}>{k.label}</button>)}
+      </div>
+      <button type="button" className="primary" onClick={openCreate} disabled={busy}>新建</button>
     </header>
-    <div className="story-entities-tabs" role="tablist" aria-label="实体类型">
-      <button type="button" role="tab" aria-selected={kind === "all"} onClick={() => setKind("all")}>全部</button>
-      {KINDS.map(k => <button key={k.id} type="button" role="tab" aria-selected={kind === k.id} onClick={() => setKind(k.id)}>{k.label}</button>)}
-    </div>
     {error && <p role="alert">{error}</p>}
     {busy && !items.length && <p role="status">加载中…</p>}
+    {!busy && !error && !items.length && <p className="library-empty">还没有{kind === "all" ? "角色 / 场景 / 物品" : KINDS.find(k => k.id === kind)?.label}。点击「新建」添加，封面和关联图片来自项目素材。</p>}
     <ul className="story-entities-list">
       {items.map(entity => <li key={entity.id} className="story-entity-card">
         {entity.coverAssetId ? <EntityThumb projectId={projectId} assetId={entity.coverAssetId} name={entity.name} /> : <span className="story-entity-cover-empty">无封面</span>}
-        <div>
-          <strong>{entity.name}</strong>
-          <small>{KINDS.find(k => k.id === entity.kind)?.label} · {entity.imageAssetIds.length} 张图</small>
-          {entity.description && <p>{entity.description}</p>}
+        <div className="story-entity-body">
+          <strong title={entity.name}>{entity.name}</strong>
+          <span className={`story-entity-kind story-entity-kind-${entity.kind}`}>{KINDS.find(k => k.id === entity.kind)?.label}</span>
+          <small>{entity.imageAssetIds.length} 张图</small>
+          {entity.description && <p title={entity.description}>{entity.description}</p>}
         </div>
         <div className="story-entity-actions">
           <button type="button" onClick={() => openEdit(entity)}>编辑</button>
@@ -118,6 +127,7 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
       </li>)}
     </ul>
     {formOpen && <div className="story-entity-editor" role="dialog" aria-label={editing ? "编辑实体" : "新建实体"}>
+      <h3>{editing ? `编辑「${editing.name}」` : "新建角色 / 场景 / 物品"}</h3>
       <label>类型<select aria-label="实体类型" value={draftKind} disabled={Boolean(editing)} onChange={e => setDraftKind(e.target.value as StoryEntityKind)}>{KINDS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}</select></label>
       <label>名称<input aria-label="实体名称" value={draftName} onChange={e => setDraftName(e.target.value)} /></label>
       <label>描述<textarea aria-label="实体描述" value={draftDesc} onChange={e => setDraftDesc(e.target.value)} rows={3} /></label>
