@@ -55,7 +55,8 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
              execution_started_at, execution_finished_at, collection_finished_at,
              prompt_id, queue_number, progress_mode, progress_current, progress_total,
              current_node_id, error_code, error_message, raw_error_json, created_at,
-             queued_at, started_at, finished_at FROM tasks WHERE project_id = ? ORDER BY created_at, id",
+             queued_at, started_at, finished_at, submission_idempotency_key, submission_attempt,
+             parent_task_id FROM tasks WHERE project_id = ? ORDER BY created_at, id",
         )
         .bind(project_id)
         .fetch_all(&mut *transaction)
@@ -630,6 +631,9 @@ struct DbProject {
 #[derive(FromRow)]
 struct DbTask {
     id: String,
+    submission_idempotency_key: Option<String>,
+    submission_attempt: Option<i64>,
+    parent_task_id: Option<String>,
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
@@ -674,6 +678,9 @@ impl TryFrom<DbTask> for BackupTask {
     fn try_from(task: DbTask) -> Result<Self, Self::Error> {
         Ok(Self {
             id: task.id,
+            submission_idempotency_key: task.submission_idempotency_key,
+            submission_attempt: task.submission_attempt,
+            parent_task_id: task.parent_task_id,
             workflow_id: task.workflow_id,
             workflow_version_id: task.workflow_version_id,
             recipe_id: task.recipe_id,
@@ -3084,7 +3091,8 @@ async fn restore_rows_in_transaction(
                 runtime_profile = ?, concurrency_class = ?,
                 prepare_started_at = ?, prepared_at = ?, submitted_at = ?,
                 execution_started_at = ?, execution_finished_at = ?,
-                collection_finished_at = ?
+                collection_finished_at = ?,
+                submission_idempotency_key = ?, submission_attempt = ?
              WHERE id = ?",
         )
         .bind(&task.generation_execution_id)
@@ -3097,10 +3105,28 @@ async fn restore_rows_in_transaction(
         .bind(&task.execution_started_at)
         .bind(&task.execution_finished_at)
         .bind(&task.collection_finished_at)
+        .bind(&task.submission_idempotency_key)
+        .bind(task.submission_attempt)
         .bind(new_task_id)
         .execute(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
+    }
+    for task in &document.tasks {
+        // Parent lineage is remapped only through the restore plan; a parent
+        // outside the archive stays NULL instead of a cross-project ID.
+        let (Some(new_task_id), Some(parent)) = (
+            task_ids.get(&task.id),
+            task.parent_task_id.as_ref().and_then(|id| task_ids.get(id)),
+        ) else {
+            continue;
+        };
+        sqlx::query("UPDATE tasks SET parent_task_id = ? WHERE id = ?")
+            .bind(parent)
+            .bind(new_task_id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?;
     }
     for event in &document.task_events {
         let Some(task_id) = task_ids.get(&event.task_id) else {
@@ -3632,8 +3658,9 @@ async fn restore_rows_in_transaction(
         } else {
             Some("恢复时未自动重新提交生产队列项目。".to_owned())
         };
-        let values = queue_metadata::restore_values(item, asset_ids, shot_ids)
-            .map_err(RepositoryError::integrity)?;
+        let values =
+            queue_metadata::restore_values(item, asset_ids, shot_ids, task_ids, prompt_version_ids)
+                .map_err(RepositoryError::integrity)?;
         sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, error_code, error_message, created_at, updated_at, retry_of_item_id, project_id, execution_type, submission_idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(item_id).bind(batch_id).bind(item.ordinal).bind(resolve_mapped_id(&workflow_version_id_map, &item.workflow_version_id)).bind(resolve_mapped_id(&workflow_version_id_map, &item.recipe_id)).bind(values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
             .bind(&project.id).bind(item.execution_type.map(|value| value.as_str())).bind(&item.submission_idempotency_key)

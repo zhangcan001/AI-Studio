@@ -123,6 +123,8 @@ pub(crate) mod queue_metadata {
         item: &BackupBatchItem,
         assets: &HashMap<String, String>,
         shots: &HashMap<String, String>,
+        tasks: &HashMap<String, String>,
+        prompt_versions: &HashMap<String, String>,
     ) -> Result<Value, String> {
         let mut values = item.values.clone();
         let object = values
@@ -171,6 +173,35 @@ pub(crate) mod queue_metadata {
                 .and_then(|id| shots.get(id))
             {
                 context.insert("shotId".to_owned(), Value::String(shot.clone()));
+            }
+            // Formal runtime references to restored rows. The archived ID is
+            // kept separately as frozen audit evidence; an unmapped reference
+            // is never kept executable and fails the item closed.
+            let mut unmapped = false;
+            for (key, archived_key, map) in [
+                ("parentTaskId", "archivedParentTaskId", tasks),
+                (
+                    "promptVersionId",
+                    "archivedPromptVersionId",
+                    prompt_versions,
+                ),
+            ] {
+                let Some(old) = context.get(key).and_then(Value::as_str).map(str::to_owned) else {
+                    continue;
+                };
+                context.insert(archived_key.to_owned(), Value::String(old.clone()));
+                match map.get(&old) {
+                    Some(new_id) => {
+                        context.insert(key.to_owned(), Value::String(new_id.clone()));
+                    }
+                    None => {
+                        context.remove(key);
+                        unmapped = true;
+                    }
+                }
+            }
+            if unmapped {
+                context.insert(RESTORED_EXECUTION_UNKNOWN.to_owned(), Value::Bool(true));
             }
             if item.execution_type.is_none() {
                 // No type inference from names, keys or recipe shape. This is a
@@ -1823,6 +1854,12 @@ fn remap_consistency_scope_id(
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BackupTask {
     pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) submission_idempotency_key: Option<String>,
+    #[serde(default)]
+    pub(crate) submission_attempt: Option<i64>,
+    #[serde(default)]
+    pub(crate) parent_task_id: Option<String>,
     pub(crate) workflow_id: String,
     pub(crate) workflow_version_id: String,
     pub(crate) recipe_id: String,
@@ -7625,6 +7662,9 @@ mod tests {
             incomplete_tasks_excluded: 0,
             tasks: vec![BackupTask {
                 id: task_id.clone(),
+                submission_idempotency_key: None,
+                submission_attempt: None,
+                parent_task_id: None,
                 workflow_id: "workflow-1".to_owned(),
                 workflow_version_id: "workflow-version-1".to_owned(),
                 recipe_id: "recipe-1".to_owned(),
@@ -8349,6 +8389,87 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn v21_task_retry_identity_and_context_refs_remap_through_restore_plan() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        sqlx::query("UPDATE tasks SET submission_idempotency_key='parent-key', submission_attempt=1 WHERE id='tsk_current_v20'")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id, status, progress_mode, created_at, finished_at, submission_idempotency_key, submission_attempt, parent_task_id) VALUES ('tsk_child_v21', ?, 'workflow-1', 'workflow-version-1', 'recipe-1', 'FAILED', 'indeterminate', '2026-01-01T00:03:00Z', '2026-01-01T00:04:00Z', 'child-key', 2, 'tsk_current_v20')")
+            .bind(&project_id).execute(&pool).await.unwrap();
+        let values = json!({
+            "__ai_studio_direct_generation_context": {
+                "shotId":"sht_current_v20", "stage":"image", "executionType":"DIRECT",
+                "submissionIdempotencyKey":"direct-source-key",
+                "parentTaskId":"tsk_current_v20", "promptVersionId":"prv_foreign_project"
+            }
+        });
+        sqlx::query("UPDATE production_batch_items SET project_id = ?, execution_type = 'DIRECT', submission_idempotency_key = 'direct-source-key', values_json = ? WHERE id = 'pbi_current_v20'")
+            .bind(&project_id).bind(values.to_string()).execute(&pool).await.unwrap();
+        service.export(&project_id, archive.clone()).await.unwrap();
+        let preview = service.inspect(archive.clone()).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let rows: Vec<(String, Option<String>, Option<i64>, Option<String>)> = sqlx::query_as(
+            "SELECT id, submission_idempotency_key, submission_attempt, parent_task_id FROM tasks WHERE project_id=? ORDER BY created_at",
+        )
+        .bind(&restored.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        let (parent, child) = (&rows[0], &rows[1]);
+        assert_ne!(parent.0, "tsk_current_v20");
+        assert_eq!(parent.1.as_deref(), Some("parent-key"));
+        assert_eq!(parent.2, Some(1));
+        assert_eq!(parent.3, None);
+        assert_eq!(child.1.as_deref(), Some("child-key"));
+        assert_eq!(child.2, Some(2));
+        assert_eq!(
+            child.3.as_deref(),
+            Some(parent.0.as_str()),
+            "parent remapped via plan"
+        );
+        let values_json: String = sqlx::query_scalar("SELECT i.values_json FROM production_batch_items i JOIN production_batches b ON b.id=i.batch_id WHERE b.project_id=? AND i.execution_type='DIRECT'")
+            .bind(&restored.id).fetch_one(&pool).await.unwrap();
+        let context: serde_json::Value = serde_json::from_str(&values_json).unwrap();
+        let context = &context["__ai_studio_direct_generation_context"];
+        assert_eq!(context["parentTaskId"], json!(parent.0));
+        assert_eq!(context["archivedParentTaskId"], "tsk_current_v20");
+        assert!(
+            context.get("promptVersionId").is_none(),
+            "unmapped ref not executable"
+        );
+        assert_eq!(context["archivedPromptVersionId"], "prv_foreign_project");
+        assert_eq!(context["restoredExecutionUnknown"], true);
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn v21_legacy_task_without_retry_identity_deserializes_as_null() {
+        let mut value = serde_json::to_value(terminal_backup_task(
+            "tsk_old",
+            None,
+            "2026-01-01T00:00:00Z",
+        ))
+        .unwrap();
+        for key in [
+            "submissionIdempotencyKey",
+            "submissionAttempt",
+            "parentTaskId",
+        ] {
+            value.as_object_mut().unwrap().remove(key);
+        }
+        let task: BackupTask = serde_json::from_value(value).unwrap();
+        assert!(task.submission_idempotency_key.is_none());
+        assert!(task.submission_attempt.is_none());
+        assert!(task.parent_task_id.is_none());
     }
 
     #[tokio::test]
@@ -9801,6 +9922,9 @@ mod tests {
     fn terminal_backup_task(id: &str, prompt_id: Option<&str>, timestamp: &str) -> BackupTask {
         BackupTask {
             id: id.to_owned(),
+            submission_idempotency_key: None,
+            submission_attempt: None,
+            parent_task_id: None,
             workflow_id: "workflow-1".to_owned(),
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
@@ -10147,6 +10271,9 @@ mod tests {
         document.assets = vec![asset_a.clone(), asset_b.clone()];
         document.tasks = vec![BackupTask {
             id: "tsk_src".to_owned(),
+            submission_idempotency_key: None,
+            submission_attempt: None,
+            parent_task_id: None,
             workflow_id: "workflow-1".to_owned(),
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
