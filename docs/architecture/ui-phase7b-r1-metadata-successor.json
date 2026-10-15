@@ -77,7 +77,7 @@
     },
     "src-tauri/src/application/project_backup_service.rs": {
       "beforeHash": "1dfa4e6c5e1bf47c802e9ba51e965494ecff84d512281c6e81772a83fcf89b19",
-      "afterHash": "065c9d18a89e790d76f98268872f09f456dfc38b7d5835b234dd0cd9dc2fef50"
+      "afterHash": "3e7ae396f3a054becffdd441e3068b609324691831117df9511fadca8e7b5cc8"
     },
     "src-tauri/src/application/workflow_onboarding_service.rs": {
       "beforeHash": "8373fb44acafe880471b4bd490d4eab0949b08721af0fc55ceeeac8a142684d8",
@@ -113,7 +113,7 @@
     },
     "src-tauri/src/infrastructure/database/repositories/project_backup.rs": {
       "beforeHash": "e2f643cd68b54857cfe526fcb658063109beb699023464b8c4d5fc3b08c2d86d",
-      "afterHash": "5a28875255f3b0c4ccb9d9eb680f5b149d0c115fece0dd8680e9c762638f85bc"
+      "afterHash": "cef498a40b843d9c3801736a003a35b7f6abb31008ddfaac2ac884743a020330"
     },
     "src-tauri/src/lib.rs": {
       "beforeHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77",
