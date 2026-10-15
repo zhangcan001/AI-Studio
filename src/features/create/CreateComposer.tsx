@@ -28,9 +28,19 @@ export function composerReferences(fields: RecipeField[], values: CreateControll
   return out;
 }
 function gcd(a: number, b: number): number { return b ? gcd(b, a % b) : a; }
-export function aspectOf(w: number, h: number) { const g = gcd(w, h) || 1; const r = `${w / g}:${h / g}`; const known = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]; if (known.includes(r)) return r; const q = w / h; return known.find(k => { const [a, b] = k.split(":").map(Number); return Math.abs(a / b - q) < 0.02; }) ?? r; }
-function mediaUrl(projectId: string | undefined, id: string, kind: Kind) {
-  try { const fn = productClient.creation.mediaUrl as unknown; return projectId && typeof fn === "function" ? (fn as (p: string, a: string, k: string) => string)(projectId, id, kind) : undefined; } catch { return undefined; }
+export function aspectOf(w: number, h: number) { const g = gcd(w, h) || 1; const r = `${w / g}:${h / g}`; const known = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]; if (known.includes(r)) return r; const q = w / h; return known.find(k => { const [a, b] = k.split(":").map(Number); return Math.abs(a / b - q) < 0.03; }) ?? r; }
+const imageCache = new Map<string, Promise<string | undefined>>();
+/** Image inputs are read through the existing library image IPC (the media protocol only serves video/audio). Cached per project+asset. */
+function loadImage(projectId: string, assetId: string) {
+  const key = `${projectId}:${assetId}`;
+  let hit = imageCache.get(key);
+  if (!hit) {
+    hit = Promise.resolve().then(() => productClient.library.imageGet(projectId, { kind: "asset", id: assetId }))
+      .then(bytes => URL.createObjectURL(new Blob([Uint8Array.from(bytes as number[])], { type: "image/png" })))
+      .catch(() => { imageCache.delete(key); return undefined; });
+    imageCache.set(key, hit);
+  }
+  return hit;
 }
 function chipNode(ref: ComposerReference, url?: string) {
   const chip = document.createElement("span");
@@ -73,7 +83,8 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const allChoices: Asset[] = (vi.enabled ? vi.view?.assets : c.context?.mediaInputs) ?? [];
   const refs = composerReferences(fields, c.values, allChoices);
   const images = refs.filter(r => r.kind === "image");
-  const url = (r: ComposerReference) => r.kind === "image" ? mediaUrl(projectId, r.assetId, "image") : undefined;
+  const [imgUrls, setImgUrls] = useState<Record<string, string>>({});
+  const url = (r: ComposerReference) => r.kind === "image" ? imgUrls[r.assetId] : undefined;
   const prompt = c.values.prompt?.type === "string" ? c.values.prompt.value : "";
   const editor = useRef<HTMLDivElement>(null);
   const emitted = useRef<string | null>(null);
@@ -84,7 +95,13 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const targets = mediaFields.filter(f => capacity(f, assetIds(c.values[f.key])));
   const [targetKey, setTargetKey] = useState<string>();
   const target = targets.find(f => f.key === targetKey) ?? targets[0];
-  const imageKey = images.map(r => `${r.n}:${r.assetId}`).join("|") + `@${projectId ?? ""}`;
+  const imageKey = images.map(r => `${r.n}:${r.assetId}:${imgUrls[r.assetId] ? 1 : 0}`).join("|") + `@${projectId ?? ""}`;
+  const imageIds = images.map(r => r.assetId).join("|");
+  useEffect(() => {
+    if (!projectId) return; let alive = true;
+    for (const id of new Set(imageIds.split("|").filter(Boolean))) void loadImage(projectId, id).then(u => { if (alive && u) setImgUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
+    return () => { alive = false; };
+  }, [projectId, imageIds]);
 
   // Media edits persist through the existing OCC save (no separate "save inputs" step). A failed save is not retried until the draft changes.
   const inputsKey = JSON.stringify(mediaFields.map(f => [f.key, assetIds(c.values[f.key])]));
@@ -190,7 +207,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button></div>}
     {picker === "add" && target && <div className="composer-picker" role="dialog" aria-label="添加参考素材">
       {targets.length > 1 && <label className="composer-picker-target">添加到<select aria-label="添加到输入" value={target.key} onChange={e => setTargetKey(e.target.value)}>{targets.map(f => <option key={f.key} value={f.key}>{fieldLabel(f)}</option>)}</select></label>}
-      {allChoices.filter(a => a.mediaKind === mediaKind(target) && !assetIds(c.values[target.key]).includes(a.id)).map(a => <button type="button" key={a.id} onClick={() => { add(target, a.id); setPicker(null); }}>{a.mediaKind === "image" && mediaUrl(projectId, a.id, "image") && <img src={mediaUrl(projectId, a.id, "image")} alt="" />}{a.name}</button>)}
+      {allChoices.filter(a => a.mediaKind === mediaKind(target) && !assetIds(c.values[target.key]).includes(a.id)).map(a => <button type="button" key={a.id} onClick={() => { add(target, a.id); setPicker(null); }}>{a.name}</button>)}
       {vi.enabled && <button type="button" onClick={() => void importInto(target, false)}>从电脑导入…</button>}
       {vi.enabled && mediaKind(target) === "image" && <button type="button" onClick={() => void importInto(target, true)}>导入图片文件夹…</button>}
       <button type="button" onClick={() => { setPicker(null); c.openLibrary(mediaKind(target) === "image" ? "images" : mediaKind(target) === "video" ? "videos" : "audio"); }}>在资源库查找</button>

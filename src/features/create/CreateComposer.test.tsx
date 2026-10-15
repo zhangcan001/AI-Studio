@@ -6,7 +6,7 @@ import { useStudioStore } from "../../stores/studioStore";
 import type { CreationContext, GeneratorOption } from "../../product/types";
 import type { VideoInputView } from "../../types/shotVideoInput";
 import { promptEditor, promptText, setPrompt } from "./composerTestUtils";
-import { composerReferences, serializePrompt } from "./CreateComposer";
+import { aspectOf, composerReferences, serializePrompt } from "./CreateComposer";
 
 const api = vi.hoisted(() => ({ get:vi.fn(),generatorsList:vi.fn(),inputsGet:vi.fn(),inputsSave:vi.fn(),assetsImport:vi.fn(),readinessGet:vi.fn(),generate:vi.fn(),selectResult:vi.fn(),runGet:vi.fn(),retry:vi.fn(),libraryGet:vi.fn(),imageGet:vi.fn(),mediaUrl:vi.fn() }));
 vi.mock("../../product/client",()=>({productClient:{creation:api,run:{get:api.runGet,retry:api.retry,list:vi.fn(async()=>({items:[]}))},library:{get:api.libraryGet,imageGet:api.imageGet}}}));
@@ -34,7 +34,8 @@ beforeEach(()=>{
   api.assetsImport.mockResolvedValue({imported:[],failed:[],cancelled:false});api.readinessGet.mockResolvedValue({ready:true,issues:[],fieldErrors:[],actions:[]});
   api.generate.mockResolvedValue({accepted:true,runRef:{source:"queue-batch",id:"r1"},startOutcome:"QUEUED",startIssue:null});
   api.runGet.mockResolvedValue({ref:{source:"queue-batch",id:"r1"},projectId:"owned",title:"run",status:"QUEUED",phase:"QUEUED",createdAt:"",updatedAt:"",progress:{total:1,succeeded:0,failed:0,cancelled:0},recoverability:{retryItemIds:[],reviewRequired:0},resultsSummary:[],errorSummary:null,preferredParent:null,availableActions:[]});
-  api.mediaUrl.mockImplementation((p,id)=>`http://fixture.invalid/${p}/${id}`);
+  api.mediaUrl.mockImplementation((p,id)=>`http://fixture.invalid/${p}/${id}`);api.imageGet.mockResolvedValue([137,80,78,71]);
+  (URL as unknown as {createObjectURL:()=>string}).createObjectURL=()=>"blob:img";
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const composer = () => screen.getByRole("region",{name:"创作输入框"});
@@ -61,7 +62,8 @@ it("+ adds a shot image into the generator input, persists it via OCC save and s
   await waitFor(()=>expect(persisted()).toEqual([{inputKey:"first_frame",ordinal:0,assetId:"first"}]));
   await waitFor(()=>expect(composer().getAttribute("data-inputs")).toBe("saved"));
   const thumb=screen.getByRole("button",{name:"插入 Image 1"});
-  expect(thumb.querySelector("img")?.getAttribute("src")).toBe("http://fixture.invalid/owned/first");
+  await waitFor(()=>expect(thumb.querySelector("img")?.getAttribute("src")).toBe("blob:img"));
+  expect(api.imageGet).toHaveBeenCalledWith("owned",{kind:"asset",id:"first"});
   expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"first"});
   fireEvent.click(screen.getByRole("button",{name:"首帧移除第1项"}));
   await waitFor(()=>expect(persisted()).toEqual([]));
@@ -136,4 +138,5 @@ it("numbers images in submit order and serializes chips back to text",()=>{
   expect(refs.map(r=>r.label)).toEqual(["Image 1","Image 2","Image 3"]);
   const root=document.createElement("div");root.append("x ");const chip=document.createElement("span");chip.dataset.ref="2";chip.textContent="ignored";root.append(chip," y");
   expect(serializePrompt(root)).toBe("x Image 2 y");
+  expect([aspectOf(1344,768),aspectOf(768,1344),aspectOf(1024,768),aspectOf(768,768)]).toEqual(["16:9","9:16","4:3","1:1"]);
 });

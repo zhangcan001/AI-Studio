@@ -117,7 +117,7 @@
     },
     "src/features/create/CreateComposer.tsx": {
       "beforeHash": null,
-      "afterHash": "344a8077ec15bdf3567703142a971f5f15c80d4a255532b4544ef11f104f387e"
+      "afterHash": "eb051f042c94fb2300935bc20bd67c0fc8994eeda3996f233c8c4ec5d79eeef8"
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
@@ -185,7 +185,7 @@
     },
     "src/features/create/CreateComposer.test.tsx": {
       "beforeHash": null,
-      "afterHash": "2dba53c03d812e581374c868af947d84b2ac68c9ec32477d249857df1e6cb22e"
+      "afterHash": "607d2fd3dc5bacb78ad8ce430e4cb6c0ac4057e7ec95039f81289529ef824c34"
     },
     "src/features/create/composerTestUtils.ts": {
       "beforeHash": null,
