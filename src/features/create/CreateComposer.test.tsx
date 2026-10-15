@@ -7,6 +7,8 @@ import type { CreationContext, GeneratorOption } from "../../product/types";
 import type { VideoInputView } from "../../types/shotVideoInput";
 import { promptEditor, promptText, setPrompt } from "./composerTestUtils";
 import { aspectOf, composerReferences, serializePrompt } from "./CreateComposer";
+import { productClient } from "../../product/client";
+import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 
 const api = vi.hoisted(() => ({ get:vi.fn(),generatorsList:vi.fn(),inputsGet:vi.fn(),inputsSave:vi.fn(),assetsImport:vi.fn(),readinessGet:vi.fn(),generate:vi.fn(),selectResult:vi.fn(),runGet:vi.fn(),retry:vi.fn(),libraryGet:vi.fn(),imageGet:vi.fn(),mediaUrl:vi.fn() }));
 vi.mock("../../product/client",()=>({productClient:{storyEntities:{list:vi.fn(async()=>[]),listForShot:vi.fn(async()=>[]),bindShot:vi.fn(async()=>[]),create:vi.fn(),update:vi.fn(),delete:vi.fn(),get:vi.fn()},creation:api,run:{get:api.runGet,retry:api.retry,list:vi.fn(async()=>({items:[]}))},library:{get:api.libraryGet,imageGet:api.imageGet,list:vi.fn(async()=>({items:[],nextCursor:null})),tagsList:vi.fn(async()=>[])}}}));
@@ -166,4 +168,22 @@ it("D5: a late reference thumbnail patches the chip image in place and keeps the
  expect(editor.firstChild).toBe(text);
  expect(selection.anchorNode).toBe(text);
  expect(selection.anchorOffset).toBe(5);
+});
+
+it("lists all project story entities (not only bound), refetches after a Library save and binds one-click to the shot",async()=>{
+  const se=productClient.storyEntities as unknown as Record<string,ReturnType<typeof vi.fn>>;
+  const hero={id:"e1",projectId:"owned",kind:"character",name:"阿离",description:"",coverAssetId:null,imageAssetIds:[],createdAt:"",updatedAt:""};
+  const fresh={...hero,id:"e2",kind:"scene",name:"雨巷"};
+  let all=[hero];se.list.mockImplementation(async()=>all);se.listForShot.mockResolvedValue([]);se.bindShot.mockImplementation(async(_p:string,_s:string,ids:string[])=>all.filter(e=>ids.includes(e.id)));
+  await start("opaque-1");
+  const strip=await screen.findByRole("group",{name:"镜头角色与场景"});
+  expect(within(strip).getByRole("button",{name:/阿离/}).getAttribute("aria-pressed")).toBe("false");
+  all=[hero,fresh];window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
+  await within(strip).findByRole("button",{name:/雨巷/});
+  fireEvent.click(within(strip).getByRole("button",{name:/雨巷/}));
+  await waitFor(()=>expect(se.bindShot).toHaveBeenCalledWith("owned","one",["e2"]));
+  await waitFor(()=>expect(within(strip).getByRole("button",{name:/雨巷/}).getAttribute("aria-pressed")).toBe("true"));
+  fireEvent.keyDown(promptEditor(),{key:"@"});
+  const pick=await screen.findByRole("listbox",{name:"插入角色与场景"});
+  expect(within(pick).getAllByRole("option").map(o=>o.textContent?.replace(/^@/,""))).toEqual(["@阿离","@雨巷"]);
 });

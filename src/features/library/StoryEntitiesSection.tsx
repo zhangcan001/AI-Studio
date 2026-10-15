@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { productClient } from "../../product/client";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
+import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 import { normalizeProductError } from "../../product/errors";
 
@@ -80,7 +81,7 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
       if (editing) await productClient.storyEntities.update({ projectId, id: editing.id, ...payload });
       else await productClient.storyEntities.create({ projectId, kind: draftKind, ...payload });
       setEditing(null); setCreating(false);
-      await reload();
+      await reload(); window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
     } catch (cause) {
       setError(entityError(cause)); setBusy(false);
     }
@@ -91,7 +92,7 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
     setBusy(true);
     try {
       await productClient.storyEntities.delete(projectId, entity.id);
-      await reload();
+      await reload(); window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
     } catch (cause) {
       setError(entityError(cause)); setBusy(false);
     }

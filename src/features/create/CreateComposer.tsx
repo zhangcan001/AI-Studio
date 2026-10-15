@@ -10,6 +10,7 @@ import { ReadinessStatus } from "./CreateResults";
 import { useStudioStore } from "../../stores/studioStore";
 import { productClient } from "../../product/client";
 import type { StoryEntity } from "../../types/storyEntity";
+import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 
 type Kind = "image" | "video" | "audio";
 type Asset = { id: string; name: string; mediaKind: string; thumbnailBytes?: number[] | null };
@@ -89,6 +90,9 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const [picker, setPicker] = useState<"insert" | "add" | null>(null);
   const [imagePick, setImagePick] = useState<{ field: RecipeField; title: string } | null>(null);
   const [entities, setEntities] = useState<StoryEntity[]>([]);
+  const [allEntities, setAllEntities] = useState<StoryEntity[]>([]);
+  const [entityRev, setEntityRev] = useState(0);
+  const [bindBusy, setBindBusy] = useState(false);
   const [entityPicker, setEntityPicker] = useState(false);
   const [entityUrls, setEntityUrls] = useState<Record<string, string>>({});
   const [promptPicker, setPromptPicker] = useState(false);
@@ -113,20 +117,42 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     const listForShot = productClient.storyEntities?.listForShot;
     if (typeof listForShot !== "function") { setEntities([]); return; }
     let alive = true;
-    void listForShot(projectId, shotId).then(list => { if (alive) setEntities(list); }).catch(() => { if (alive) setEntities([]); });
+    void Promise.resolve(listForShot(projectId, shotId)).then(list => { if (alive) setEntities(list ?? []); }).catch(() => { if (alive) setEntities([]); });
     return () => { alive = false; };
-  }, [projectId, c.context?.selectedShot?.summary.id]);
+  }, [projectId, c.context?.selectedShot?.summary.id, entityRev]);
+
+  // All project entities (not only bound ones); refetched when the Library saves one or the window regains focus.
+  useEffect(() => {
+    const bump = () => setEntityRev(v => v + 1);
+    window.addEventListener(STORY_ENTITIES_CHANGED, bump); window.addEventListener("focus", bump);
+    return () => { window.removeEventListener(STORY_ENTITIES_CHANGED, bump); window.removeEventListener("focus", bump); };
+  }, []);
+  useEffect(() => {
+    const list = productClient.storyEntities?.list;
+    if (!projectId || typeof list !== "function") { setAllEntities([]); return; }
+    let alive = true;
+    void Promise.resolve(list(projectId, null)).then(next => next ?? []).then(next => { if (alive) setAllEntities(next); }).catch(() => { if (alive) setAllEntities([]); });
+    return () => { alive = false; };
+  }, [projectId, entityRev]);
+  const shotId = c.context?.selectedShot?.summary.id;
+  async function setBound(ids: string[]) {
+    if (!projectId || !shotId || bindBusy) return;
+    setBindBusy(true);
+    try { setEntities((await productClient.storyEntities.bindShot(projectId, shotId, ids)) ?? []); } catch { /* keep current binding */ } finally { setBindBusy(false); }
+  }
+  const isBound = (id: string) => entities.some(e => e.id === id);
+  const toggleBound = (id: string) => void setBound(isBound(id) ? entities.filter(e => e.id !== id).map(e => e.id) : [...entities.map(e => e.id), id]);
 
   useEffect(() => {
     if (!projectId) return;
     let alive = true;
-    for (const entity of entities) {
+    for (const entity of [...entities, ...allEntities]) {
       const id = entity.coverAssetId;
       if (!id || entityUrls[id]) continue;
       void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setEntityUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
     }
     return () => { alive = false; };
-  }, [projectId, entities.map(e => e.coverAssetId).join("|")]);
+  }, [projectId, [...entities, ...allEntities].map(e => e.coverAssetId).join("|")]);
 
 
   // Media edits persist through the existing OCC save (no separate "save inputs" step). A failed save is not retried until the draft changes.
@@ -239,10 +265,16 @@ export function CreateComposer({ controller: c }: { controller: CreateController
         </div>;
       })}
     </div>}
+    {projectId && shotId && allEntities.length > 0 && <div className="composer-entity-strip" role="group" aria-label="镜头角色与场景">
+      {allEntities.map(entity => { const cover = entity.coverAssetId ? entityUrls[entity.coverAssetId] : undefined; const bound = isBound(entity.id);
+        return <button type="button" key={entity.id} className={"composer-entity" + (bound ? " bound" : "")} aria-pressed={bound} disabled={bindBusy || c.busy}
+          title={(bound ? "解除绑定 " : "绑定到镜头 ") + entity.name} onClick={() => toggleBound(entity.id)}>
+          {cover ? <img src={cover} alt="" /> : <span className="composer-entity-glyph">{entity.name.slice(0, 1)}</span>}<small>{entity.name}</small></button>; })}
+    </div>}
     {promptField && <div className="composer-prompt">
       <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面"}
         onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={saveCaret}
-        onKeyDown={e => { if (e.key === "@") { e.preventDefault(); saveCaret(); if (entities.length) setEntityPicker(true); else if (images.length) setPicker("insert"); } else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); } }}
+        onKeyDown={e => { if (e.key === "@") { e.preventDefault(); saveCaret(); if (allEntities.length) setEntityPicker(true); else if (images.length) setPicker("insert"); } else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); } }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />
       <span className="composer-count" aria-hidden="true">{prompt.length} 字</span>
     </div>}
@@ -269,14 +301,14 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       <button type="button" onClick={() => { setPicker(null); c.openLibrary(mediaKind(target) === "image" ? "images" : mediaKind(target) === "video" ? "videos" : "audio"); }}>在资源库查找</button>
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button></div>}
     {entityPicker && <div className="composer-picker" role="listbox" aria-label="插入角色与场景">
-      {entities.map(entity => <button type="button" role="option" aria-selected="false" key={entity.id} onMouseDown={e => e.preventDefault()} onClick={() => {
+      {allEntities.map(entity => <button type="button" role="option" aria-selected={isBound(entity.id)} key={entity.id} onMouseDown={e => e.preventDefault()} onClick={() => {
         const root = editor.current; if (!root || !promptField) return;
         const cover = entity.coverAssetId ? entityUrls[entity.coverAssetId] : undefined;
         const chip = entityChipNode(entity, cover); const space = document.createTextNode(" ");
         const range = caret.current && root.contains(caret.current.startContainer) ? caret.current : null;
         if (range) { range.deleteContents(); range.insertNode(space); range.insertNode(chip); } else root.append(chip, space);
         root.focus(); const sel = window.getSelection(); const r = document.createRange(); r.setStartAfter(space); r.collapse(true); if (sel) { sel.removeAllRanges(); sel.addRange(r); } caret.current = r.cloneRange();
-        setEntityPicker(false); emit();
+        setEntityPicker(false); emit(); if (shotId && !isBound(entity.id)) toggleBound(entity.id);
       }} className="composer-picker-option">{entity.coverAssetId && entityUrls[entity.coverAssetId] ? <img src={entityUrls[entity.coverAssetId]} alt="" /> : <span className="composer-picker-glyph">@</span>}<span>@{entity.name}</span></button>)}
       {images.length > 0 && <button type="button" onClick={() => { setEntityPicker(false); setPicker("insert"); }}>插入 Image N…</button>}
       <button type="button" className="composer-picker-close" onClick={() => setEntityPicker(false)}>关闭</button></div>}
