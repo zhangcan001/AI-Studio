@@ -41,3 +41,4 @@
 .story-entity-image-chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;flex:1 1 100%}.story-entity-image-chips .story-entity-thumb{width:100%;height:auto;aspect-ratio:1/1}
 .story-entity-image-chip{position:relative}.library-page .story-entity-image-chip button{position:absolute;top:3px;right:3px;padding:0 6px;line-height:20px;background:rgba(0,0,0,.65)}
 .story-entity-editor footer{display:flex;gap:8px;margin-top:auto;padding-top:8px}
+.library-merged-tabs{display:flex;gap:6px;margin-bottom:8px}.library-merged-tabs button[aria-selected=true]{border-color:#4f8bf0;color:#cfe0ff}

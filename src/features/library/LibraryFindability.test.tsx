@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {act,cleanup,fireEvent,render,renderHook,screen,waitFor} from "@testing-library/react";
+import {act,cleanup,fireEvent,render,renderHook,screen,waitFor,within} from "@testing-library/react";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {LibraryPage} from "./LibraryPage";
 import {useLibraryController} from "./LibraryController";
@@ -76,4 +76,16 @@ it("sourceKind change clears cursor stack and pending generated responses cannot
  expect(view.result.current.sourceKind).toBe("source");
  expect(view.result.current.list?.items[0].title).toBe("source-only");
  expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({sourceKind:"source",cursor:null}));
+});
+
+it("merges the legacy 角色/场景/道具/风格 category into one 角色与场景 entry and keeps legacy profiles reachable",async()=>{
+  const navigate=vi.fn();render(<LibraryPage route={{kind:"library",projectId:"a",filter:"profiles"}} navigate={navigate}/>);await screen.findByText("first");
+  const nav=screen.getByRole("navigation",{name:"资源分类"});
+  expect(within(nav).queryByRole("button",{name:/角色 \/ 场景 \/ 道具 \/ 风格/})).toBeNull();
+  const merged=within(nav).getAllByRole("button",{name:/角色与场景/});expect(merged).toHaveLength(1);expect(merged[0].getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("tab",{name:"旧设定 · 风格"}).getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(screen.getByRole("tab",{name:"故事实体"}));
+  expect(await screen.findByRole("tab",{name:"故事实体",selected:true})).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab",{name:"旧设定 · 风格"}));
+  expect(navigate).toHaveBeenCalledWith({kind:"library",projectId:"a",filter:"profiles"});
 });

@@ -273,11 +273,11 @@
     },
     "src/features/library/LibraryFindability.test.tsx": {
       "beforeHash": "076e5c9319d10fd99d9ff78c243500cb7db61f6cce7ec05aacbab2041a2e0858",
-      "afterHash": "83bc66a706d9b588b08abab4e4d39597426098c183e84ba7ca39f6db466a73ac"
+      "afterHash": "f1306e5d89ea6e95ffd7f83b40649021a7b26c5d1ec7fdc9b6ff69883d4587d8"
     },
     "src/features/library/LibraryPage.css": {
       "beforeHash": "af0309c568fee509764e52f2146a093db2d24d57a95ffda8f269645de8848537",
-      "afterHash": "4183ef663f16f054bd28c1209cac1f1a568cf5e06ede065712bbd9426b2fc851"
+      "afterHash": "603da47dc2e2fb9534815836a5e9f55c377bb387e4543b2a76412d687366b890"
     },
     "src/features/library/LibraryPage.test.tsx": {
       "beforeHash": "659387fbb240030ba227dd927234df9e25424facfe9cdaa7ebcf8760bd8f2bd2",
@@ -285,7 +285,7 @@
     },
     "src/features/library/LibraryPage.tsx": {
       "beforeHash": "8f5dbcf4f825a969a3889074651abb15069ea5f8134db23179a04676f6b30395",
-      "afterHash": "dfef870afb0e914c1c293afccdc071217cf08e1f3e997b1f8263ff90ed69ef4b"
+      "afterHash": "1aef2d7ff0936e87cd2987d4de4880c362c2c640e335ac615609b9ee3f3facbb"
     },
     "src/features/library/StoryEntitiesSection.test.tsx": {
       "beforeHash": null,
