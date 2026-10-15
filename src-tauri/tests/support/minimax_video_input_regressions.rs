@@ -483,7 +483,7 @@ async fn phase5b_formal_mixed_batch_freezes_four_modes_reuses_and_preserves_orde
             .fetch_one(&f.pool)
             .await
             .unwrap(),
-        44
+        46
     );
     assert!(sqlx::query("PRAGMA foreign_key_check")
         .fetch_all(&f.pool)
@@ -1457,7 +1457,7 @@ async fn phase5c_four_mode_selection_review_occ_and_cold_sqlite_persistence_are_
             .fetch_one(&cold)
             .await
             .unwrap(),
-        44
+        46
     );
     assert!(sqlx::query("PRAGMA foreign_key_check")
         .fetch_all(&cold)

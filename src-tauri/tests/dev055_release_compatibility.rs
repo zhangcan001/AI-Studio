@@ -900,8 +900,24 @@ async fn remove_migration_043_schema(pool: &SqlitePool) {
 }
 
 async fn remove_migration_035_schema(pool: &SqlitePool) {
-    // Fixture reconstruction must remove 044 schema as well as its ledger row;
-    // otherwise replaying migration 044 would recreate an already existing table.
+    // Fixture reconstruction must remove 044-046 schema as well as ledger rows;
+    // otherwise replaying those migrations would recreate already existing tables.
+    for statement in [
+        "DROP TABLE IF EXISTS shot_story_entity_bindings",
+        "DROP INDEX IF EXISTS idx_shot_story_entity_bindings_project_shot",
+        "DROP TABLE IF EXISTS story_entity_images",
+        "DROP INDEX IF EXISTS idx_story_entity_images_asset",
+        "DROP INDEX IF EXISTS idx_story_entities_project_kind_updated",
+        "DROP INDEX IF EXISTS uq_story_entities_project_kind_name",
+        "DROP TABLE IF EXISTS story_entities",
+    ] {
+        sqlx::query(statement)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("045/046 object should be removable before replay ({statement}): {error}")
+            });
+    }
     sqlx::query("DROP TABLE IF EXISTS production_deferred_starts")
         .execute(pool)
         .await
@@ -1304,10 +1320,12 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 44);
+    assert_eq!(max_migration(pool).await, 46);
     assert_eq!(migration_marker_count(pool, 42).await, 1);
     assert_eq!(migration_marker_count(pool, 43).await, 1);
     assert_eq!(migration_marker_count(pool, 44).await, 1);
+    assert_eq!(migration_marker_count(pool, 45).await, 1);
+    assert_eq!(migration_marker_count(pool, 46).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1472,10 +1490,18 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 async fn dev055_migration_matrix_reaches_044() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(44));
+    assert_eq!(versions.last().copied(), Some(46));
     assert!(
         versions.contains(&43),
         "historical migration 043 must remain present"
+    );
+    assert!(
+        versions.contains(&45),
+        "story entity migration 045 must remain present"
+    );
+    assert!(
+        versions.contains(&46),
+        "shot entity binding migration 046 must remain present"
     );
     assert!(
         versions.contains(&42),
