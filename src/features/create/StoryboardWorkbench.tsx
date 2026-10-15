@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
+import { subscribeRunInvalidation } from "../../product/runInvalidation";
 import type { AppRoute } from "../../app/routes/types";
 import type { CreateRoute } from "./createModel";
 import type { RunResult } from "../../product/types";
@@ -31,12 +32,20 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
   const [selectedId, setSelectedId] = useState<string>();
   const epoch = useRef(0);
   const inFlight = useRef(false);
+  const [queueActive, setQueueActive] = useState(false);
+  const mounted = useRef(true);
   const projectId = route.projectId;
+  const scope = useRef(projectId);
+  scope.current = projectId;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const load = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true; const token = ++epoch.current; setBusy(true);
     try {
+      // Formal Queue/Run read model: a waiting item may have no Task yet, so
+      // shot.recentRun alone cannot tell us whether a refresh is still needed.
+      const activeRuns = Promise.resolve().then(() => productClient.run.list(projectId, "active", null)).catch(() => null);
       const base = await productClient.creation.get(projectId, null, "video");
       const summaries = [...base.shots].sort((a, b) => a.ordinal - b.ordinal);
       const bounded = summaries.slice(0, STORYBOARD_MAX_DETAIL_SHOTS);
@@ -54,7 +63,9 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
         }
       };
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, bounded.length) }, worker));
+      const active = await activeRuns;
       if (token !== epoch.current) return;
+      setQueueActive(Boolean(active?.items?.length));
       setItems(result); setTruncated(Math.max(0, summaries.length - bounded.length)); setError(undefined);
     } catch (cause) { if (token === epoch.current) setError(normalizeProductError(cause).message); }
     finally { inFlight.current = false; if (token === epoch.current) setBusy(false); }
@@ -62,11 +73,12 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
 
   useEffect(() => { void load(); return () => { epoch.current++; inFlight.current = false; }; }, [load]);
   const anyGenerating = items?.some(item => item.status === "GENERATING") ?? false;
+  useEffect(() => subscribeRunInvalidation(changed => { if (changed === projectId) void load(); }), [projectId, load]);
   useEffect(() => {
-    if (!anyGenerating) return;
+    if (!anyGenerating && !queueActive) return;
     const timer = window.setInterval(() => void load(), POLL_MS);
     return () => window.clearInterval(timer);
-  }, [anyGenerating, load]);
+  }, [anyGenerating, queueActive, load]);
 
   const stats = useMemo(() => storyboardStats(items ?? []), [items]);
   const selected = items?.find(item => item.id === selectedId) ?? items?.[0];
@@ -75,8 +87,13 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
   const openRun = (item: StoryboardShot) => item.run && navigate({ kind: "runs", projectId, run: item.run.ref });
   const createShot = async () => {
     setBusy(true);
-    try { const shot = await productClient.creation.createShot(projectId); openShot(shot.id); }
-    catch (cause) { setError(normalizeProductError(cause).message); setBusy(false); }
+    try {
+      const shot = await productClient.creation.createShot(projectId);
+      // The authorised creation completes in the background, but a late reply
+      // must not pull a user who already left (or switched project) back.
+      if (!mounted.current || scope.current !== projectId) return;
+      openShot(shot.id);
+    } catch (cause) { if (mounted.current && scope.current === projectId) { setError(normalizeProductError(cause).message); setBusy(false); } }
   };
 
   return <MediaLightboxScope><ThumbnailProjectContext.Provider value={projectId}><div className="storyboard-page" aria-label="分镜工作台">
