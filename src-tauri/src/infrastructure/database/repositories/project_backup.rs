@@ -246,6 +246,9 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
         let reference_set_items = query_reference_set_items(&mut transaction, project_id).await?;
         let shot_profile_bindings =
             query_shot_profile_bindings(&mut transaction, project_id).await?;
+        let story_entities = query_story_entities(&mut transaction, project_id).await?;
+        let shot_story_entity_bindings =
+            query_shot_story_entity_bindings(&mut transaction, project_id).await?;
         let shot_reference_set_bindings =
             query_shot_reference_set_bindings(&mut transaction, project_id).await?;
         let scope_profile_bindings =
@@ -478,6 +481,8 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             reference_sets,
             reference_set_items,
             shot_profile_bindings,
+            story_entities,
+            shot_story_entity_bindings,
             shot_reference_set_bindings,
             scope_profile_bindings,
             scope_reference_set_bindings,
@@ -2755,6 +2760,89 @@ async fn query_reference_set_items(
     .map_err(|error| RepositoryError::database(error.to_string()))
 }
 
+async fn query_story_entities(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<crate::application::project_backup_service::BackupStoryEntity>, RepositoryError> {
+    let rows = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+        ),
+    >(
+        "SELECT id, kind, name, description, cover_asset_id, created_at, updated_at
+         FROM story_entities WHERE project_id = ? ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| RepositoryError::database(error.to_string()))?;
+    let mut entities = Vec::with_capacity(rows.len());
+    for (id, kind, name, description, cover_asset_id, created_at, updated_at) in rows {
+        let image_asset_ids = sqlx::query_scalar::<_, String>(
+            "SELECT asset_id FROM story_entity_images WHERE entity_id = ? ORDER BY ordinal",
+        )
+        .bind(&id)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+        entities.push(
+            crate::application::project_backup_service::BackupStoryEntity {
+                id,
+                kind,
+                name,
+                description,
+                cover_asset_id,
+                image_asset_ids,
+                created_at,
+                updated_at,
+            },
+        );
+    }
+    Ok(entities)
+}
+
+async fn query_shot_story_entity_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<
+    Vec<crate::application::project_backup_service::BackupShotStoryEntityBinding>,
+    RepositoryError,
+> {
+    let rows = sqlx::query_as::<_, (String, String, String, i64, String, String)>(
+        "SELECT b.id, b.shot_id, b.entity_id, b.ordinal, b.created_at, b.updated_at
+         FROM shot_story_entity_bindings b
+         JOIN shots s ON s.id = b.shot_id AND s.project_id = b.project_id
+         JOIN story_entities e ON e.id = b.entity_id AND e.project_id = b.project_id
+         WHERE b.project_id = ? ORDER BY b.shot_id, b.ordinal, b.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| RepositoryError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, shot_id, entity_id, ordinal, created_at, updated_at)| {
+                crate::application::project_backup_service::BackupShotStoryEntityBinding {
+                    id,
+                    shot_id,
+                    entity_id,
+                    ordinal,
+                    created_at,
+                    updated_at,
+                }
+            },
+        )
+        .collect())
+}
+
 async fn query_shot_profile_bindings(
     transaction: &mut Transaction<'_, Sqlite>,
     project_id: &str,
@@ -4274,6 +4362,69 @@ async fn restore_rows_in_transaction(
         .bind(item_id)
         .bind(&snapshot.snapshot_json)
         .bind(&snapshot.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+    }
+    // Story entities (045/046): fresh IDs, owned by the restored project only.
+    // Asset/shot references go through the restore plan maps; an unmapped
+    // cover becomes NULL and unmapped images/bindings are dropped.
+    let mut story_entity_ids = HashMap::new();
+    for entity in &document.story_entities {
+        let entity_id = format!("ent_{}", Uuid::new_v4().simple());
+        story_entity_ids.insert(entity.id.clone(), entity_id.clone());
+        sqlx::query(
+            "INSERT INTO story_entities (id, project_id, kind, name, description, cover_asset_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&entity_id)
+        .bind(&project.id)
+        .bind(&entity.kind)
+        .bind(&entity.name)
+        .bind(&entity.description)
+        .bind(entity.cover_asset_id.as_ref().and_then(|id| asset_ids.get(id)))
+        .bind(&entity.created_at)
+        .bind(&entity.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+        let mut ordinal = 0_i64;
+        for asset in entity
+            .image_asset_ids
+            .iter()
+            .filter_map(|id| asset_ids.get(id))
+        {
+            sqlx::query(
+                "INSERT OR IGNORE INTO story_entity_images (entity_id, asset_id, ordinal, created_at) VALUES (?, ?, ?, ?)",
+            )
+            .bind(&entity_id)
+            .bind(asset)
+            .bind(ordinal)
+            .bind(&entity.created_at)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?;
+            ordinal += 1;
+        }
+    }
+    for binding in &document.shot_story_entity_bindings {
+        let (Some(shot_id), Some(entity_id)) = (
+            shot_ids.get(&binding.shot_id),
+            story_entity_ids.get(&binding.entity_id),
+        ) else {
+            continue;
+        };
+        sqlx::query(
+            "INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(format!("seb_{}", Uuid::new_v4().simple()))
+        .bind(&project.id)
+        .bind(shot_id)
+        .bind(entity_id)
+        .bind(binding.ordinal)
+        .bind(&binding.created_at)
+        .bind(&binding.updated_at)
         .execute(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;

@@ -1227,6 +1227,11 @@ pub struct BackupDocument {
     pub(crate) reference_set_items: Vec<BackupReferenceSetItem>,
     #[serde(default)]
     pub(crate) shot_profile_bindings: Vec<BackupShotProfileBinding>,
+    /// Additive (migration 045/046). Older archives omit these and restore empty sets.
+    #[serde(default)]
+    pub(crate) story_entities: Vec<BackupStoryEntity>,
+    #[serde(default)]
+    pub(crate) shot_story_entity_bindings: Vec<BackupShotStoryEntityBinding>,
     #[serde(default)]
     pub(crate) shot_reference_set_bindings: Vec<BackupShotReferenceSetBinding>,
     #[serde(default)]
@@ -1448,6 +1453,33 @@ pub(crate) struct BackupReferenceSetItem {
     pub(crate) role: Option<String>,
     pub(crate) is_primary: i64,
     pub(crate) created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupStoryEntity {
+    pub(crate) id: String,
+    pub(crate) kind: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) description: String,
+    #[serde(default)]
+    pub(crate) cover_asset_id: Option<String>,
+    #[serde(default)]
+    pub(crate) image_asset_ids: Vec<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupShotStoryEntityBinding {
+    pub(crate) id: String,
+    pub(crate) shot_id: String,
+    pub(crate) entity_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -5807,6 +5839,8 @@ mod tests {
             reference_sets: Vec::new(),
             reference_set_items: Vec::new(),
             shot_profile_bindings: Vec::new(),
+            story_entities: Vec::new(),
+            shot_story_entity_bindings: Vec::new(),
             shot_reference_set_bindings: Vec::new(),
             scope_profile_bindings: Vec::new(),
             scope_reference_set_bindings: Vec::new(),
@@ -7809,6 +7843,8 @@ mod tests {
             reference_sets: Vec::new(),
             reference_set_items: Vec::new(),
             shot_profile_bindings: Vec::new(),
+            story_entities: Vec::new(),
+            shot_story_entity_bindings: Vec::new(),
             shot_reference_set_bindings: Vec::new(),
             scope_profile_bindings: Vec::new(),
             scope_reference_set_bindings: Vec::new(),
@@ -7999,6 +8035,8 @@ mod tests {
             reference_sets: Vec::new(),
             reference_set_items: Vec::new(),
             shot_profile_bindings: Vec::new(),
+            story_entities: Vec::new(),
+            shot_story_entity_bindings: Vec::new(),
             shot_reference_set_bindings: Vec::new(),
             scope_profile_bindings: Vec::new(),
             scope_reference_set_bindings: Vec::new(),
@@ -8389,6 +8427,81 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn v21_story_entities_and_shot_bindings_roundtrip_with_remapped_refs() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        sqlx::query("INSERT INTO story_entities (id, project_id, kind, name, description, cover_asset_id, created_at, updated_at) VALUES ('ent_src', ?, 'character', '苏蔓', 'lead', 'ast_current_v20', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+            .bind(&project_id).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO story_entity_images (entity_id, asset_id, ordinal, created_at) VALUES ('ent_src', 'ast_current_v20', 0, '2026-01-01T00:00:00Z')")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at) VALUES ('seb_src', ?, 'sht_current_v20', 'ent_src', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+            .bind(&project_id).execute(&pool).await.unwrap();
+        service.export(&project_id, archive.clone()).await.unwrap();
+        let preview = service.inspect(archive.clone()).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let (entity_id, name, cover): (String, String, Option<String>) = sqlx::query_as(
+            "SELECT id, name, cover_asset_id FROM story_entities WHERE project_id=?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(entity_id, "ent_src");
+        assert_eq!(name, "苏蔓");
+        let cover = cover.expect("cover remapped");
+        assert_ne!(cover, "ast_current_v20");
+        let owner: String = sqlx::query_scalar("SELECT project_id FROM assets WHERE id=?")
+            .bind(&cover)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owner, restored.id);
+        let image: String =
+            sqlx::query_scalar("SELECT asset_id FROM story_entity_images WHERE entity_id=?")
+                .bind(&entity_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(image, cover);
+        let (shot, entity): (String, String) = sqlx::query_as(
+            "SELECT b.shot_id, b.entity_id FROM shot_story_entity_bindings b JOIN shots s ON s.id=b.shot_id WHERE b.project_id=? AND s.project_id=?",
+        )
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(shot, "sht_current_v20");
+        assert_eq!(entity, entity_id);
+        let source: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM shot_story_entity_bindings WHERE project_id=?",
+        )
+        .bind(&project_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(source, 1, "source rows untouched");
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let legacy = directory.path().join("legacy-no-story-entities.zip");
+        rewrite_v21_queue_document(&archive, &legacy, |project| {
+            let object = project.as_object_mut().unwrap();
+            object.remove("storyEntities");
+            object.remove("shotStoryEntityBindings");
+        });
+        let preview = service.inspect(legacy).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM story_entities WHERE project_id=?) + (SELECT COUNT(*) FROM shot_story_entity_bindings WHERE project_id=?)")
+            .bind(&restored.id).bind(&restored.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 0, "older archives restore empty story entity sets");
     }
 
     #[tokio::test]
