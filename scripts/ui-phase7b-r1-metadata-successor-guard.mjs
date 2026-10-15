@@ -22,6 +22,7 @@ export const R1_METADATA_CHANGED = [
   "src-tauri/src/commands/product.rs",
   "src-tauri/src/infrastructure/database/repositories/project_backup.rs",
   "src-tauri/src/lib.rs",
+  "src-tauri/tests/dev061b_queue_recovery.rs",
   "src-tauri/tests/support/creation_submission_contract.rs",
   "src/app/FeatureLifecycle.test.tsx",
   "src/app/FrontendConsolidation.test.tsx",
