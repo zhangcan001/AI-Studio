@@ -7,6 +7,8 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./bound
 export const R1_METADATA_BASE = "0c3be97a88d5458fc16851bfa19dc10172007886";
 export const R1_METADATA_PROOF = "docs/architecture/ui-phase7b-r1-metadata-successor.json";
 export const R1_METADATA_CHANGED = [
+  "src-tauri/src/infrastructure/database/repositories/production_queue.rs",
+  "src-tauri/src/application/ports/production_queue_repository.rs",
   "scripts/ui-phase7b-backup-prompt-successor-guard.mjs",
   "src-tauri/Cargo.toml",
   "src-tauri/src/application/minimax_video_product_policy.rs",
@@ -49,6 +51,7 @@ export const R1_METADATA_CHANGED = [
   "src/features/tools/LocalToolHub.test.tsx",
 ].sort();
 export const R1_METADATA_ADDED = [
+  "src/features/create/CreateMediaPreview.hooks.test.tsx",
   "scripts/testing/ui-phase7b-r1-metadata.test.mjs",
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
   "src/features/create/CandidateThumbnail.test.tsx",

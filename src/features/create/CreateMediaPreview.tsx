@@ -2,36 +2,94 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { productClient } from "../../product/client";
 import type { CreationAsset } from "../../product/types";
 
-const imageCache = new Map<string, Promise<string | undefined>>();
+const IMAGE_CACHE_CAP = 32;
+type ImageCacheEntry = { promise: Promise<string | undefined>; url?: string; refs: number };
+const imageCache = new Map<string, ImageCacheEntry>();
+const imageCacheOrder: string[] = [];
 
-/** Shared library imageGet → object URL (same path as composer / cdbd060). Cached per project+asset. */
+function touchImageCache(key: string) {
+  const at = imageCacheOrder.indexOf(key);
+  if (at >= 0) imageCacheOrder.splice(at, 1);
+  imageCacheOrder.push(key);
+}
+
+function evictImageCache() {
+  while (imageCacheOrder.length > IMAGE_CACHE_CAP) {
+    const oldest = imageCacheOrder.shift();
+    if (!oldest) break;
+    const entry = imageCache.get(oldest);
+    if (!entry) continue;
+    if (entry.refs > 0) { imageCacheOrder.push(oldest); break; }
+    if (entry.url) URL.revokeObjectURL(entry.url);
+    imageCache.delete(oldest);
+  }
+}
+
+/** Shared library imageGet → object URL. LRU-capped; blob URLs revoke on eviction when unreferenced. */
 export function loadLibraryImageUrl(projectId: string, assetId: string) {
   const key = `${projectId}:${assetId}`;
   let hit = imageCache.get(key);
   if (!hit) {
-    hit = Promise.resolve()
-      .then(() => productClient.library.imageGet(projectId, { kind: "asset", id: assetId }))
-      .then(bytes => URL.createObjectURL(new Blob([Uint8Array.from(bytes as number[])], { type: "image/png" })))
-      .catch(() => { imageCache.delete(key); return undefined; });
-    imageCache.set(key, hit);
+    const entry: ImageCacheEntry = {
+      refs: 0,
+      promise: Promise.resolve()
+        .then(() => productClient.library.imageGet(projectId, { kind: "asset", id: assetId }))
+        .then(bytes => {
+          const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes as number[])], { type: "image/png" }));
+          const live = imageCache.get(key);
+          if (live) live.url = url;
+          return url;
+        })
+        .catch(() => {
+          const live = imageCache.get(key);
+          if (live?.url) URL.revokeObjectURL(live.url);
+          imageCache.delete(key);
+          const at = imageCacheOrder.indexOf(key);
+          if (at >= 0) imageCacheOrder.splice(at, 1);
+          return undefined;
+        }),
+    };
+    imageCache.set(key, entry);
+    touchImageCache(key);
+    evictImageCache();
+    hit = entry;
+  } else {
+    touchImageCache(key);
   }
-  return hit;
+  return hit.promise;
 }
 
+export function retainLibraryImage(projectId: string, assetId: string) {
+  // Ensure the cache entry exists before taking a ref so eviction cannot drop in-flight loads.
+  void loadLibraryImageUrl(projectId, assetId);
+  const key = `${projectId}:${assetId}`;
+  const entry = imageCache.get(key);
+  if (entry) entry.refs += 1;
+  return () => {
+    const live = imageCache.get(key);
+    if (!live) return;
+    live.refs = Math.max(0, live.refs - 1);
+    if (live.refs === 0) evictImageCache();
+  };
+}
+
+/** Clears immediately on identity change; ignores late responses for a previous asset. */
 export function useLibraryImageUrl(projectId: string | null | undefined, assetId: string | null | undefined) {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
-    if (!projectId || !assetId) { setUrl(undefined); return; }
+    setUrl(undefined);
+    if (!projectId || !assetId) return;
     let alive = true;
+    const release = retainLibraryImage(projectId, assetId);
     void loadLibraryImageUrl(projectId, assetId).then(u => { if (alive) setUrl(u); });
-    return () => { alive = false; };
+    return () => { alive = false; release(); };
   }, [projectId, assetId]);
   return url;
 }
 
 type LightboxTarget =
   | { kind: "video" | "audio"; projectId: string; asset: Pick<CreationAsset, "id" | "name" | "mediaKind"> }
-  | { kind: "image"; projectId: string; assetId: string; name: string; url?: string };
+  | { kind: "image"; projectId: string; assetId: string; name: string };
 
 const LightboxContext = createContext<{ open: (t: LightboxTarget) => void } | null>(null);
 
@@ -51,7 +109,7 @@ export function useMediaLightbox() {
 /** Full-size preview: video/audio via existing media URL; images via library imageGet. */
 function MediaLightbox({ target, onClose }: { target: LightboxTarget; onClose: () => void }) {
   const imageUrl = useLibraryImageUrl(target.kind === "image" ? target.projectId : null, target.kind === "image" ? target.assetId : null);
-  const shown = target.kind === "image" ? (target.url ?? imageUrl) : undefined;
+  const shown = target.kind === "image" ? imageUrl : undefined;
   return <div className="media-lightbox-backdrop" role="presentation" onClick={onClose}>
     <section role="dialog" aria-modal="true" aria-label={target.kind === "image" ? `预览 ${target.name}` : `播放 ${target.asset.name}`} className="media-lightbox" onClick={e => e.stopPropagation()}>
       <header><strong>{target.kind === "image" ? target.name : target.asset.name}</strong><button type="button" onClick={onClose}>关闭</button></header>
@@ -112,7 +170,7 @@ export const ThumbnailProjectContext = createContext<string | null>(null);
 
 // Poster first (backend ffmpeg first frame); otherwise the real first frame of the
 // owned media stream, muted and paused. Click opens the real playable stream.
-export function CandidateThumbnail({ asset, projectId, playable = true }: { asset: CreationAsset; projectId?: string; playable?: boolean }) {
+export function CandidateThumbnail({ asset, projectId, playable = false }: { asset: CreationAsset; projectId?: string; playable?: boolean }) {
   const scope = useContext(ThumbnailProjectContext);
   const owner = projectId ?? scope;
   const lightbox = useMediaLightbox();
@@ -148,7 +206,7 @@ export function AssetImageThumb({ projectId, assetId, name, size = "md", classNa
   const lightbox = useMediaLightbox();
   const open = (e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
-    lightbox?.open({ kind: "image", projectId, assetId, name, url });
+    lightbox?.open({ kind: "image", projectId, assetId, name });
   };
   if (!url) return <span className={`asset-image-thumb size-${size} pending ${className ?? ""}`} title={name} aria-label={name}>{name.slice(0, 1)}</span>;
   if (!interactive) return <span className={`asset-image-thumb size-${size} ${className ?? ""}`} title={name}><img src={url} alt={`${name}缩略图`} /></span>;

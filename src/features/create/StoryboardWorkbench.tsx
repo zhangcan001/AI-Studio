@@ -123,7 +123,7 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
           {selected ? <ShotDetail item={selected} /> : <p className="storyboard-empty-note">选择一个镜头查看详情。</p>}
         </section>
         <section className="storyboard-panel storyboard-sequence" aria-label="镜头序列"><header><h2>镜头序列 <small>{stats.total}</small></h2></header>
-          <ol>{items.map((item, index) => <li key={item.id}>{index > 0 && <span aria-hidden="true" className="storyboard-arrow">→</span>}<button type="button" aria-label={`选择${item.name}`} aria-current={selected?.id === item.id ? "true" : undefined} onClick={() => setSelectedId(item.id)}><Cover item={item} /><StatusBadge item={item} compact /></button></li>)}</ol>
+          <ol>{items.map((item, index) => <li key={item.id}>{index > 0 && <span aria-hidden="true" className="storyboard-arrow">→</span>}<button type="button" aria-label={`选择${item.name}`} aria-current={selected?.id === item.id ? "true" : undefined} onClick={() => setSelectedId(item.id)}><Cover item={item} playable={false} /><StatusBadge item={item} compact /></button></li>)}</ol>
           {!items.length && <p className="storyboard-empty-note">暂无镜头序列。</p>}
         </section>
       </aside>
@@ -170,7 +170,7 @@ function ReviewPanel({ projectId, item, onClose, onChanged }: { projectId: strin
           const chosen = r.selectedShotIds.includes(item.id) || item.shot?.selectedResultId === r.assetId;
           const pending = r.reviewState === "PENDING" && r.reviewRevision !== null && r.assetExists;
           return <li key={r.assetId} aria-label={`候选 ${r.name}`}>
-            <div className="storyboard-cover">{asset ? <CandidateThumbnail asset={asset} /> : <span className="storyboard-cover-empty">{r.assetExists ? "无缩略图" : "素材不存在"}</span>}</div>
+            <div className="storyboard-cover">{asset ? <CandidateThumbnail asset={asset} playable /> : <span className="storyboard-cover-empty">{r.assetExists ? "无缩略图" : "素材不存在"}</span>}</div>
             <div><strong>{r.name}</strong><small>{r.reviewState ? reviewLabels[r.reviewState] ?? "审核状态未知" : "无审核记录"}{chosen ? " · 已选为结果" : ""}</small></div>
             <div className="storyboard-card-actions">
               {pending && <button type="button" disabled={busy} onClick={() => void review(r, "APPROVED")}>通过</button>}
@@ -198,9 +198,9 @@ function ShotRow({ item, selected, onSelect, onOpen, onReview }: { item: Storybo
   </div>;
 }
 
-function Cover({ item }: { item: StoryboardShot }) {
+function Cover({ item, playable = true }: { item: StoryboardShot; playable?: boolean }) {
   const asset = coverAsset(item); const percent = item.status === "GENERATING" ? runPercent(item.run) : null;
-  return <div className="storyboard-cover">{asset ? <CandidateThumbnail asset={asset} /> : <span className="storyboard-cover-empty">暂无结果</span>}
+  return <div className="storyboard-cover">{asset ? <CandidateThumbnail asset={asset} playable={playable} /> : <span className="storyboard-cover-empty">暂无结果</span>}
     {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} aria-label={`进度 ${percent}%`}>{percent}%</span>}
   </div>;
 }
@@ -240,6 +240,6 @@ function ShotDetail({ item }: { item: StoryboardShot }) {
       <div><dt>生成候选</dt><dd>{item.candidates.length} 个</dd></div>
       {item.run && <div><dt>最近运行</dt><dd>{item.run.title} · {item.run.progress.succeeded}/{item.run.progress.total}</dd></div>}
     </dl>
-    <div className="storyboard-detail-result"><span>当前结果</span>{cover ? <CandidateThumbnail asset={cover} /> : <p className="storyboard-empty-note">尚无生成结果</p>}</div>
+    <div className="storyboard-detail-result"><span>当前结果</span>{cover ? <CandidateThumbnail asset={cover} playable /> : <p className="storyboard-empty-note">尚无生成结果</p>}</div>
   </div>;
 }

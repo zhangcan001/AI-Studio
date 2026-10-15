@@ -140,3 +140,9 @@ it("numbers images in submit order and serializes chips back to text",()=>{
   expect(serializePrompt(root)).toBe("x Image 2 y");
   expect([aspectOf(1344,768),aspectOf(768,1344),aspectOf(1024,768),aspectOf(768,768)]).toEqual(["16:9","9:16","4:3","1:1"]);
 });
+it("renders additional required textarea fields from USER recipes", async () => {
+  const custom = options.map((o, i) => i === 0 ? { ...o, fields: [...o.fields, { type: "textarea", key: "scene_description", label: "Scene", required: true, default: "" }] } : o);
+  api.generatorsList.mockResolvedValue(custom);
+  await start();
+  expect(screen.getByLabelText("Scene")).toBeTruthy();
+});

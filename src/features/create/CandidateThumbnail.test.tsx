@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AssetImageThumb, CandidateThumbnail, MediaLightboxScope, ThumbnailProjectContext } from "./CreateMediaPreview";
 
@@ -15,13 +15,13 @@ const video = { id: "v1", name: "镜头01", mediaKind: "video" as const, selecte
 
 it("uses the backend poster bytes when present", () => {
   URL.createObjectURL = vi.fn(() => "blob:poster"); URL.revokeObjectURL = vi.fn();
-  render(<MediaLightboxScope><CandidateThumbnail projectId="p" asset={{ ...video, thumbnailBytes: [1, 2] }} /></MediaLightboxScope>);
+  render(<MediaLightboxScope><CandidateThumbnail projectId="p" asset={{ ...video, thumbnailBytes: [1, 2] }} playable /></MediaLightboxScope>);
   expect(screen.getByRole("img").getAttribute("src")).toBe("blob:poster");
   expect(document.querySelector("video.create-candidate-frame")).toBeNull();
 });
 
 it("falls back to the real first frame of the owned video stream, muted and paused", () => {
-  render(<MediaLightboxScope><ThumbnailProjectContext.Provider value="p"><CandidateThumbnail asset={{ ...video, thumbnailBytes: null }} /></ThumbnailProjectContext.Provider></MediaLightboxScope>);
+  render(<MediaLightboxScope><ThumbnailProjectContext.Provider value="p"><CandidateThumbnail asset={{ ...video, thumbnailBytes: null }} playable /></ThumbnailProjectContext.Provider></MediaLightboxScope>);
   const node = document.querySelector("video.create-candidate-frame") as HTMLVideoElement;
   expect(node.getAttribute("src")).toBe("media://p/v1/video");
   expect(node.getAttribute("preload")).toBe("metadata");
@@ -37,7 +37,7 @@ it("shows an honest placeholder without a project scope", () => {
 });
 
 it("opens a playable lightbox with controls when the video thumb is clicked", () => {
-  render(<MediaLightboxScope><CandidateThumbnail projectId="p" asset={{ ...video, thumbnailBytes: [1, 2] }} /></MediaLightboxScope>);
+  render(<MediaLightboxScope><CandidateThumbnail projectId="p" asset={{ ...video, thumbnailBytes: [1, 2] }} playable /></MediaLightboxScope>);
   URL.createObjectURL = vi.fn(() => "blob:poster");
   fireEvent.click(screen.getByRole("button", { name: "播放 镜头01" }));
   const dialog = screen.getByRole("dialog", { name: "播放 镜头01" });
@@ -53,5 +53,6 @@ it("loads reference image thumbs through library imageGet and opens an enlarge p
   expect(imageGet).toHaveBeenCalledWith("p", { kind: "asset", id: "img1" });
   expect(btn.querySelector("img")!.getAttribute("src")).toBe("blob:img");
   fireEvent.click(btn);
-  expect(screen.getByRole("dialog", { name: "预览 首帧" }).querySelector("img")!.getAttribute("src")).toBe("blob:img");
+  const dialog = screen.getByRole("dialog", { name: "预览 首帧" });
+  await waitFor(() => expect(dialog.querySelector("img")?.getAttribute("src")).toBe("blob:img"));
 });

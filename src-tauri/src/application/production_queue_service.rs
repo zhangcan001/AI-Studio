@@ -350,11 +350,9 @@ impl ProductionQueueService {
     ) -> Result<(), ProductionQueueError> {
         let id = parse_batch_id(batch_id)?;
         let now = self.clock.now();
+        // One atomic write as BLOCKED — never insert WAITING then UPDATE.
         self.repository
-            .enqueue_deferred_start(project_id, &id, now)
-            .await?;
-        self.repository
-            .block_deferred_start(project_id, &id, reason, now)
+            .enqueue_blocked_deferred_start(project_id, &id, reason, now)
             .await?;
         Ok(())
     }

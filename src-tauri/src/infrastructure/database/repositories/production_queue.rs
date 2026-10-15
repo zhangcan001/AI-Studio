@@ -220,6 +220,39 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         Ok(())
     }
 
+    async fn enqueue_blocked_deferred_start(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        reason: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError> {
+        let detail = reason.chars().take(2000).collect::<String>();
+        // Single statement: insert BLOCKED or upgrade any existing row to BLOCKED.
+        // Never commits WAITING, so a crash cannot expose an auto-retriable request.
+        sqlx::query(
+            "INSERT INTO production_deferred_starts
+             (batch_id, project_id, state, last_error, requested_at, updated_at)
+             SELECT id, project_id, 'BLOCKED', ?, ?, ?
+             FROM production_batches
+             WHERE id = ? AND project_id = ? AND status = 'READY' AND archived_at IS NULL
+             ON CONFLICT(batch_id) DO UPDATE SET
+               state = 'BLOCKED',
+               last_error = excluded.last_error,
+               updated_at = excluded.updated_at
+             WHERE production_deferred_starts.project_id = excluded.project_id",
+        )
+        .bind(&detail)
+        .bind(format_datetime(at))
+        .bind(format_datetime(at))
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
     async fn insert(
         &self,
         batch: &ProductionBatch,
@@ -2191,6 +2224,59 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn enqueue_blocked_deferred_start_never_lists_as_waiting() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("blocked-starter.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+             VALUES ('blocked-owner', 'B', NULL, 'C:/blocked-owner', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let batch = ProductionBatchId::new();
+        sqlx::query(
+            "INSERT INTO production_batches
+             (id, project_id, name, status, continue_on_failure, created_at, updated_at)
+             VALUES (?, 'blocked-owner', 'blocked-test', 'READY', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(batch.as_str())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let repo = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc::now();
+        repo.enqueue_blocked_deferred_start(
+            "blocked-owner",
+            &batch,
+            "admission denied: runtime offline",
+            now,
+        )
+        .await
+        .unwrap();
+        // Simulate process exit after the single write: reopen and drain.
+        let restarted = SqliteProductionQueueRepository::new(pool.clone());
+        assert!(
+            restarted.list_deferred_starts().await.unwrap().is_empty(),
+            "BLOCKED must never appear in the WAITING drain list"
+        );
+        assert_eq!(
+            restarted
+                .deferred_start_state("blocked-owner", &batch)
+                .await
+                .unwrap()
+                .unwrap(),
+            (
+                "BLOCKED".to_owned(),
+                Some("admission denied: runtime offline".to_owned())
+            )
+        );
         pool.close().await;
     }
 

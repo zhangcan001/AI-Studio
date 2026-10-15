@@ -58,9 +58,15 @@ export function ParamField({ field, controller: c }: { field: RecipeField; contr
 }
 type ResolutionPreset = NonNullable<NonNullable<CreateController["generator"]>["resolutionPresets"]>[number];
 /** 视频分辨率 picker over the backend H3 megapixel presets; writes width/height atomically via chooseResolution. */
+/** Prefer backend preset id suffix (mp-*-16x9) over guessed pixel ratios after align32. */
+export function presetAspectKey(preset: Pick<ResolutionPreset, "id" | "width" | "height">) {
+  const m = /-(\d+)x(\d+)$/.exec(preset.id);
+  return m ? `${m[1]}:${m[2]}` : undefined;
+}
 export function ResolutionPicker({ controller: c, presets, current }: { controller: CreateController; presets: ResolutionPreset[]; current?: ResolutionPreset }) {
-  // Show megapixel options for the current aspect; the separate aspect control switches ratio.
-  const scoped = current ? presets.filter(p => Math.abs(p.width / p.height - current.width / current.height) < 0.03) : presets;
+  // Show megapixel options for the current nominal aspect from the preset table.
+  const currentKey = current ? presetAspectKey(current) : undefined;
+  const scoped = currentKey ? presets.filter(p => presetAspectKey(p) === currentKey) : presets;
   const base = scoped.length ? scoped : presets;
   const list = current && !base.some(p => p.id === current.id) ? [current, ...base] : base;
   return <label className="composer-pick" title="分辨率">▣<select id="create-field-resolution" aria-label="视频分辨率" value={current?.id ?? ""} disabled={c.busy} onChange={e => c.chooseResolution(e.target.value)}>{!current && <option value="" disabled>自定义</option>}{list.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label>;

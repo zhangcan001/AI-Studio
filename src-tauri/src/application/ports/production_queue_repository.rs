@@ -87,6 +87,20 @@ pub trait ProductionQueueRepository: Send + Sync {
         ))
     }
 
+    /// Persist a rejected Start as BLOCKED in one write. Never leaves a WAITING
+    /// row that cold-start drainers would auto-retry.
+    async fn enqueue_blocked_deferred_start(
+        &self,
+        _project_id: &str,
+        _batch_id: &ProductionBatchId,
+        _reason: &str,
+        _at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError> {
+        Err(RepositoryError::integrity(
+            "deferred admission not implemented",
+        ))
+    }
+
     async fn insert(
         &self,
         batch: &ProductionBatch,

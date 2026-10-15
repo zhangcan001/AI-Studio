@@ -4,7 +4,7 @@ import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, mediaKind, mediaValue } from "./createModel";
 import { modeLabel } from "../../product/generatorPresentation";
 import { AssetImageThumb, CandidateThumbnail, loadLibraryImageUrl, useMediaLightbox } from "./CreateMediaPreview";
-import { ParamField, PromptPickerDialog, ReferencePanel, ResolutionPicker } from "./CreateInputs";
+import { ParamField, PromptPickerDialog, ReferencePanel, ResolutionPicker, presetAspectKey } from "./CreateInputs";
 import { ReadinessStatus } from "./CreateResults";
 import { useStudioStore } from "../../stores/studioStore";
 
@@ -146,16 +146,19 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const pickerPresets = presets;
   const w = c.values.width, h = c.values.height;
   const current = presets.find(p => w?.type === "integer" && h?.type === "integer" && p.width === w.value && p.height === h.value);
-  const aspects = [...new Set(pickerPresets.map(p => aspectOf(p.width, p.height)))];
-  const aspect = current ? aspectOf(current.width, current.height) : undefined;
+  const aspectOfPreset = (p: { id: string; width: number; height: number }) => presetAspectKey(p) ?? aspectOf(p.width, p.height);
+  const aspects = [...new Set(pickerPresets.map(aspectOfPreset))];
+  const aspect = current ? aspectOfPreset(current) : undefined;
   const chooseAspect = (a: string) => {
     const curArea = current ? current.width * current.height : 1344 * 768;
-    const candidates = pickerPresets.filter(p => aspectOf(p.width, p.height) === a);
+    const candidates = pickerPresets.filter(p => aspectOfPreset(p) === a);
     const best = [...candidates].sort((x, y) => Math.abs(x.width * x.height - curArea) - Math.abs(y.width * y.height - curArea))[0];
     if (best) c.chooseResolution(best.id);
   };
   const durationField = fields.find(f => f.key === "duration_seconds" && (f.type === "integer" || f.type === "number"));
   const advancedFields = fields.filter(f => ["integer", "number", "seed"].includes(f.type) && f.key !== "duration_seconds" && !(presets.length && ["width", "height"].includes(f.key)));
+  // USER recipes may declare additional text fields; never drop required/visible ones.
+  const extraTextFields = fields.filter(f => f.type === "textarea" && f.key !== "prompt" && f.key !== "negative_prompt");
   const canSubmit = !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY";
 
   if (!c.generator) return null;
@@ -170,7 +173,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
         const required = "required" in field && field.required;
         return <div key={field.key} className="composer-slot" aria-label={`${label}输入`}>
           {refs.filter(r => r.fieldKey === field.key).map(ref => <div key={ref.assetId} className="composer-ref" data-kind={ref.kind}>
-            <button type="button" className="composer-ref-thumb" title={`${ref.kind === "image" ? `插入 ${ref.label}（Alt+点击放大）` : ref.label} · ${ref.asset?.name ?? "素材不可用"}`} aria-label={ref.kind === "image" ? `插入 ${ref.label}` : `${ref.label} ${ref.asset?.name ?? ""}`} disabled={ref.kind !== "image" || !promptField} onMouseDown={e => e.preventDefault()} onClick={e => { if ((e.altKey || e.metaKey) && projectId && ref.kind === "image") lightbox?.open({ kind: "image", projectId, assetId: ref.assetId, name: ref.asset?.name ?? ref.label, url: url(ref) }); else insert(ref); }}>
+            <button type="button" className="composer-ref-thumb" title={`${ref.kind === "image" ? `插入 ${ref.label}（Alt+点击放大）` : ref.label} · ${ref.asset?.name ?? "素材不可用"}`} aria-label={ref.kind === "image" ? `插入 ${ref.label}` : `${ref.label} ${ref.asset?.name ?? ""}`} disabled={ref.kind !== "image" || !promptField} onMouseDown={e => e.preventDefault()} onClick={e => { if ((e.altKey || e.metaKey) && projectId && ref.kind === "image") lightbox?.open({ kind: "image", projectId, assetId: ref.assetId, name: ref.asset?.name ?? ref.label }); else insert(ref); }}>
               {ref.kind === "image" && url(ref) ? <img src={url(ref)} alt={`${ref.asset?.name ?? ref.label}缩略图`} /> : ref.kind === "video" && ref.asset?.thumbnailBytes?.length ? <CandidateThumbnail asset={{ ...ref.asset, mediaKind: "video", selected: false }} projectId={projectId} /> : <span className="composer-ref-glyph">{ref.kind === "audio" ? "♪" : ref.kind === "video" ? "▶" : ref.n}</span>}
               <small>{ref.label}</small></button>
             <button type="button" className="composer-ref-remove" aria-label={`${label}移除第${ref.index + 1}项`} disabled={locked} onClick={() => setField(field, ids.filter(id => id !== ref.assetId))}>×</button>
@@ -221,6 +224,11 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     </div>
     <details className="composer-advanced"><summary>高级设置</summary>
       {negativeField && <label>{fieldLabel(negativeField)}<textarea id="create-field-negative_prompt" aria-label={fieldLabel(negativeField)} rows={2} value={c.values.negative_prompt?.type === "string" ? c.values.negative_prompt.value : ""} onChange={e => c.setValue("negative_prompt", { type: "string", value: e.target.value })} /></label>}
+      {extraTextFields.map(field => {
+        const v = c.values[field.key];
+        const text = v?.type === "string" ? v.value : "";
+        return <label key={field.key}>{fieldLabel(field)}<textarea id={`create-field-${field.key}`} aria-label={fieldLabel(field)} rows={2} value={text} onChange={e => c.setValue(field.key, { type: "string", value: e.target.value })} /></label>;
+      })}
       {advancedFields.length > 0 && <div className="create-parameters">{advancedFields.map(field => <ParamField key={field.key} field={field} controller={c} />)}</div>}
       {promptField && <button type="button" onClick={() => c.openLibrary("prompts")}>在资源库查找更多提示词</button>}
       {vi.enabled && <button type="button" disabled={c.busy || vi.busy} onClick={() => void vi.refresh()}>刷新已保存输入</button>}
