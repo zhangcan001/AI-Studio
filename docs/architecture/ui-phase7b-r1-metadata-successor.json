@@ -73,7 +73,7 @@
     },
     "src-tauri/src/application/project_backup_service.rs": {
       "beforeHash": "1dfa4e6c5e1bf47c802e9ba51e965494ecff84d512281c6e81772a83fcf89b19",
-      "afterHash": "52e93e314f46f7f88b873fb4d0627edbfc865994e553bf900e107ad7a75d504d"
+      "afterHash": "065c9d18a89e790d76f98268872f09f456dfc38b7d5835b234dd0cd9dc2fef50"
     },
     "src-tauri/src/application/workflow_onboarding_service.rs": {
       "beforeHash": "8373fb44acafe880471b4bd490d4eab0949b08721af0fc55ceeeac8a142684d8",
@@ -93,7 +93,7 @@
     },
     "src-tauri/src/infrastructure/database/repositories/project_backup.rs": {
       "beforeHash": "e2f643cd68b54857cfe526fcb658063109beb699023464b8c4d5fc3b08c2d86d",
-      "afterHash": "203c0354ab5c8ea04f3c96b8197eaab9608675004400dc8422dc7aa0d4ac8e2d"
+      "afterHash": "5a28875255f3b0c4ccb9d9eb680f5b149d0c115fece0dd8680e9c762638f85bc"
     },
     "src-tauri/src/lib.rs": {
       "beforeHash": "689d98298181ec0af2e0f7c4a78f31326b9e2475277686c7dd7b00b65844ec77",
@@ -129,11 +129,11 @@
     },
     "src/features/create/CreateComposer.test.tsx": {
       "beforeHash": null,
-      "afterHash": "6c7dba72b4016282d580ffb7bc25c4ee9cb8ceb26b24a2d0194078d6f6209015"
+      "afterHash": "eb0e9ca4048e1790b7d046e3740802461290d9f37a17d4c48bb2b6921f8cee8c"
     },
     "src/features/create/CreateComposer.tsx": {
       "beforeHash": null,
-      "afterHash": "873b831f5bf48c444c2c01de8f1fc7641e7bebe784ba22b4629aa05a8d4e5d73"
+      "afterHash": "6c461d5fcea638b384b7f3c0b92b1c72583513f51b6db00ee30e3310ce970f87"
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
@@ -181,11 +181,11 @@
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
-      "afterHash": "87dc63e039a7de6e86631b0107f05d2bc6b111c4692b221ed6d9baac4d8295d9"
+      "afterHash": "c7ab133b5491cc7fd569a7b65f624154a3503e5a29d90518fa1566c90ab444a1"
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": null,
-      "afterHash": "e580f7f24a8381ab83956d75076af309cb936c5272cb7f97209b83250c4d48ff"
+      "afterHash": "64f70f561872ac5b1787c561be5030a60a22d7488f137c2284ca7155304ea6c6"
     },
     "src/features/create/composerTestUtils.ts": {
       "beforeHash": null,
