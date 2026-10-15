@@ -186,6 +186,7 @@ use application::{
     shot_readiness_service::ShotReadinessService,
     shot_service::ShotService,
     source_asset_import_service::SourceAssetImportService,
+    story_entity_service::StoryEntityService,
     task_cancellation_service::TaskCancellationService,
     task_execution_registry::TaskExecutionRegistry,
     task_history_service::TaskHistoryService,
@@ -371,6 +372,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 ));
             let consistency_profile_repository: Arc<dyn application::ports::ConsistencyProfileRepository> =
                 Arc::new(infrastructure::database::SqliteConsistencyProfileRepository::new(
+                    database_pool.clone(),
+                ));
+            let story_entity_repository: Arc<dyn application::ports::StoryEntityRepository> =
+                Arc::new(infrastructure::database::repositories::story_entity::SqliteStoryEntityRepository::new(
                     database_pool.clone(),
                 ));
             let reference_set_repository: Arc<dyn application::ports::ReferenceSetRepository> =
@@ -725,6 +730,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_repository.clone(),
                 clock.clone(),
             ));
+    let story_entity_service = Arc::new(StoryEntityService::new(story_entity_repository.clone()));
             let reference_set_service = Arc::new(ReferenceSetService::new(
                 reference_set_repository.clone(),
                 consistency_profile_repository.clone(),
@@ -1080,6 +1086,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     reference_anchor: reference_anchor_service,
                     reference_set: reference_set_service,
                     consistency_profile: consistency_profile_service,
+            story_entities: story_entity_service,
                     consistency_scope_binding: consistency_scope_binding_service,
                     consistency_binding: shot_consistency_binding_service,
                 },
@@ -1475,6 +1482,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::reference_anchor::reference_anchor_update,
             commands::reference_anchor::reference_anchor_delete,
             commands::consistency_assets::consistency_profile_list,
+            commands::product::product_story_entity_list,
+            commands::product::product_story_entity_get,
+            commands::product::product_story_entity_create,
+            commands::product::product_story_entity_update,
+            commands::product::product_story_entity_delete,
             commands::consistency_assets::consistency_profile_get,
             commands::consistency_assets::character_profile_create,
             commands::consistency_assets::character_profile_update,

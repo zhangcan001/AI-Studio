@@ -22,6 +22,7 @@ pub mod reference_anchor;
 pub mod shot;
 pub mod shot_context;
 pub mod shot_readiness;
+pub mod story_entity;
 pub mod task;
 pub mod tool;
 pub mod workflow;

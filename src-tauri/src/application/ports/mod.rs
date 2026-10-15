@@ -201,3 +201,5 @@ pub mod workflow_draft_store;
 
 pub mod workflow_file_store;
 pub use workflow_file_store::WorkflowFileStore;
+pub mod story_entity_repository;
+pub use story_entity_repository::StoryEntityRepository;

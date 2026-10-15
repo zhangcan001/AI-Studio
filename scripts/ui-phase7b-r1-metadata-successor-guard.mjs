@@ -7,6 +7,16 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./bound
 export const R1_METADATA_BASE = "0c3be97a88d5458fc16851bfa19dc10172007886";
 export const R1_METADATA_PROOF = "docs/architecture/ui-phase7b-r1-metadata-successor.json";
 export const R1_METADATA_CHANGED = [
+  "src/features/library/LibraryPage.css",
+  "src/features/library/LibraryPage.tsx",
+  "src/product/transport.ts",
+  "src/product/client.ts",
+  "src-tauri/src/commands/mod.rs",
+  "src-tauri/src/infrastructure/database/repositories/mod.rs",
+  "src-tauri/src/application/ports/mod.rs",
+  "src-tauri/src/application/mod.rs",
+  "src-tauri/src/domain/mod.rs",
+  "src-tauri/src/app_state.rs",
   "src-tauri/src/infrastructure/database/repositories/production_queue.rs",
   "src-tauri/src/application/ports/production_queue_repository.rs",
   "scripts/ui-phase7b-backup-prompt-successor-guard.mjs",
@@ -51,8 +61,16 @@ export const R1_METADATA_CHANGED = [
   "src/features/tools/LocalToolHub.test.tsx",
   "src/features/shots/ShotVideoInputsPanel.tsx",
   "src/features/shots/ShotVideoInputsPanel.test.tsx",
+  "src-tauri/src/infrastructure/database/pool.rs",
 ].sort();
 export const R1_METADATA_ADDED = [
+  "src/features/library/StoryEntitiesSection.tsx",
+  "src/types/storyEntity.ts",
+  "src-tauri/src/commands/story_entities.rs",
+  "src-tauri/src/infrastructure/database/repositories/story_entity.rs",
+  "src-tauri/src/application/story_entity_service.rs",
+  "src-tauri/src/application/ports/story_entity_repository.rs",
+  "src-tauri/src/domain/story_entity.rs",
   "src/features/create/CreateMediaPreview.hooks.test.tsx",
   "scripts/testing/ui-phase7b-r1-metadata.test.mjs",
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
@@ -65,9 +83,10 @@ export const R1_METADATA_ADDED = [
   "src/features/create/storyboardModel.ts",
   "src/components/ImageAssetPicker.tsx",
   "src/components/ImageAssetPicker.test.tsx",
+  "src-tauri/migrations/045_story_entities.sql",
 ].sort();
 export const R1_METADATA_CONTRACTS = {
-  schemaChanged: false, backupFormatChanged: true, backupVersion: 21,
+  schemaChanged: true, backupFormatChanged: true, backupVersion: 21,
   optionalExecutionMetadata: true, legacyUnknownNonExecutable: true,
   restoredOwnerRemapped: true, typedMediaRemapped: true,
   sourceDatabaseNotWritten: true, historicalProofBytesUnchanged: true,

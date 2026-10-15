@@ -97,3 +97,4 @@ pub fn get_app_status(state: State<'_, AppState>) -> Result<AppStatus, AppError>
     })
 }
 pub mod product;
+pub mod story_entities;

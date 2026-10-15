@@ -9,6 +9,11 @@ interface ProductCommands {
   product_creation_inputs_get: { args: { selection: import("../types/shotVideoInput").VideoInputSelection }; result: import("../types/shotVideoInput").VideoInputView };
   product_creation_inputs_save: { args: { request: import("../types/shotVideoInput").VideoInputSave }; result: import("../types/shotVideoInput").VideoInputView };
   product_creation_assets_import: { args: { projectId: string; folder: boolean }; result: import("../types/shotVideoInput").SourceInputImport };
+    product_story_entity_list: { args: { projectId: string; kind: import("../types/storyEntity").StoryEntityKind | null }; result: import("../types/storyEntity").StoryEntity[] };
+  product_story_entity_get: { args: { projectId: string; id: string }; result: import("../types/storyEntity").StoryEntity };
+  product_story_entity_create: { args: { request: { projectId: string; kind: string; name: string; description: string; coverAssetId: string | null; imageAssetIds: string[] } }; result: import("../types/storyEntity").StoryEntity };
+  product_story_entity_update: { args: { request: { projectId: string; id: string; name: string; description: string; coverAssetId: string | null; imageAssetIds: string[] } }; result: import("../types/storyEntity").StoryEntity };
+  product_story_entity_delete: { args: { projectId: string; id: string }; result: void };
   product_library_tags_list: { args: { projectId: string }; result: import("./libraryTypes").LibraryTag[] };
   product_library_image_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: number[] };
   product_library_media_verify: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").MediaIntegrityReport };

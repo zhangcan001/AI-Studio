@@ -2,6 +2,23 @@ import { productRequest, productMediaUrl } from "./transport";
 import type { CreationSubmission, CreationShotUpdate, GeneratorBindingSetRequest, RunRef, RunRetryRequest, RunListFilter } from "./types";
 
 export const productClient = {
+  storyEntities: {
+    list: (projectId: string, kind: import("../types/storyEntity").StoryEntityKind | null = null) =>
+      productRequest("product_story_entity_list", { projectId, kind }),
+    get: (projectId: string, id: string) =>
+      productRequest("product_story_entity_get", { projectId, id }),
+    create: (request: { projectId: string; kind: import("../types/storyEntity").StoryEntityKind } & import("../types/storyEntity").StoryEntityUpsert) =>
+      productRequest("product_story_entity_create", { request: {
+        projectId: request.projectId, kind: request.kind, name: request.name, description: request.description,
+        coverAssetId: request.coverAssetId ?? null, imageAssetIds: request.imageAssetIds,
+      }}),
+    update: (request: { projectId: string; id: string } & import("../types/storyEntity").StoryEntityUpsert) =>
+      productRequest("product_story_entity_update", { request: {
+        projectId: request.projectId, id: request.id, name: request.name, description: request.description,
+        coverAssetId: request.coverAssetId ?? null, imageAssetIds: request.imageAssetIds,
+      }}),
+    delete: (projectId: string, id: string) => productRequest("product_story_entity_delete", { projectId, id }),
+  },
   library: {
     mediaVerify: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_media_verify", { projectId, resource }),
     tagsList: (projectId: string) => productRequest("product_library_tags_list", { projectId }),

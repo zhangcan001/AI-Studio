@@ -689,3 +689,46 @@ pub async fn product_run_cancel(
         .cancel(&project_id, run_ref, &state.tasks.cancellation)
         .await
 }
+
+#[tauri::command]
+pub async fn product_story_entity_list(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    project_id: String,
+    kind: Option<String>,
+) -> Result<Vec<crate::domain::story_entity::StoryEntity>, crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_list(state, project_id, kind).await
+}
+
+#[tauri::command]
+pub async fn product_story_entity_get(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    project_id: String,
+    id: String,
+) -> Result<crate::domain::story_entity::StoryEntity, crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_get(state, project_id, id).await
+}
+
+#[tauri::command]
+pub async fn product_story_entity_create(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    request: crate::commands::story_entities::StoryEntityCreateRequest,
+) -> Result<crate::domain::story_entity::StoryEntity, crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_create(state, request).await
+}
+
+#[tauri::command]
+pub async fn product_story_entity_update(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    request: crate::commands::story_entities::StoryEntityUpdateRequest,
+) -> Result<crate::domain::story_entity::StoryEntity, crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_update(state, request).await
+}
+
+#[tauri::command]
+pub async fn product_story_entity_delete(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    project_id: String,
+    id: String,
+) -> Result<(), crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_delete(state, project_id, id).await
+}

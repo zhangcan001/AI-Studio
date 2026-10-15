@@ -49,6 +49,7 @@ use crate::application::shot_context_resolver::ShotContextResolver;
 use crate::application::shot_readiness_service::ShotReadinessService;
 use crate::application::shot_service::ShotService;
 use crate::application::source_asset_import_service::SourceAssetImportService;
+use crate::application::story_entity_service::StoryEntityService;
 use crate::application::task_cancellation_service::TaskCancellationService;
 use crate::application::task_history_service::TaskHistoryService;
 use crate::application::task_query_service::TaskQueryService;
@@ -119,6 +120,7 @@ pub struct ShotServices {
     pub reference_anchor: Arc<ReferenceAnchorService>,
     pub reference_set: Arc<ReferenceSetService>,
     pub consistency_profile: Arc<ConsistencyProfileService>,
+    pub story_entities: Arc<StoryEntityService>,
     pub consistency_scope_binding: Arc<ConsistencyScopeBindingService>,
     pub consistency_binding: Arc<ShotConsistencyBindingService>,
 }

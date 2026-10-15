@@ -233,3 +233,5 @@ pub(crate) mod test_support {
         .expect("recipe fixture should insert");
     }
 }
+
+pub mod story_entity;

@@ -82,6 +82,7 @@ pub mod shot_service;
 pub mod shot_video_input_service;
 pub(crate) mod shot_workflow_compatibility;
 pub mod source_asset_import_service;
+pub mod story_entity_service;
 pub mod task_cancellation_service;
 pub mod task_execution_registry;
 pub mod task_history_service;
