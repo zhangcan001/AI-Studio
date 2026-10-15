@@ -4,7 +4,7 @@ import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {LibraryPage} from "./LibraryPage";
 import {useLibraryController} from "./LibraryController";
 const api=vi.hoisted(()=>({list:vi.fn(),tagsList:vi.fn()}));
-vi.mock("../../product/client",()=>({productClient:{library:api}}));
+vi.mock("../../product/client",()=>({productClient:{library:api,storyEntities:{list:async()=>[]}}}));
 const tags=[{id:"tag-a",projectId:"a",name:"A tag",createdAt:"date",updatedAt:"date"},{id:"tag-b",projectId:"a",name:"B tag",createdAt:"date",updatedAt:"date"}];
 const page=(title:string,nextCursor:unknown=null)=>({items:[{resourceRef:{kind:"asset",id:title},title,subtype:"image",createdAt:"2026-10-01",updatedAt:"2026-10-01",thumbnailAvailable:false}],nextCursor,coverage:"keyset-page",coverageMessage:"当前分类数据库分页结果。"});
 const drain=async()=>{await act(async()=>{for(let i=0;i<30;i++)await Promise.resolve();});};

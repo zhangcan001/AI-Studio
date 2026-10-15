@@ -13,7 +13,7 @@ import { useStudioStore } from "../../stores/studioStore";
 import type { LibraryDetail, LibraryList, LibraryCreateIntent } from "../../product/libraryTypes";
 import type { CreationContext, GeneratorOption } from "../../product/types";
 const api=vi.hoisted(()=>({tagsList:vi.fn(),list:vi.fn(),get:vi.fn(),relationsGet:vi.fn(),versionsGet:vi.fn(),imageGet:vi.fn(),useInCreation:vi.fn(),deletionInspect:vi.fn(),delete:vi.fn(),resourceEdit:vi.fn(),creationGet:vi.fn(),generatorsList:vi.fn(),readinessGet:vi.fn(),generate:vi.fn()}));
-vi.mock("../../product/client",()=>({productClient:{library:{...api,mediaUrl:()=>"http://fixture.invalid/media"},creation:{get:api.creationGet,generatorsList:api.generatorsList,readinessGet:api.readinessGet,generate:api.generate},run:{}}}));
+vi.mock("../../product/client",()=>({productClient:{storyEntities:{list:async()=>[]},library:{...api,mediaUrl:()=>"http://fixture.invalid/media"},creation:{get:api.creationGet,generatorsList:api.generatorsList,readinessGet:api.readinessGet,generate:api.generate},run:{}}}));
 const resource={kind:"prompt",id:"prompt-a"} as const;
 const route={kind:"library",projectId:"project-a",filter:"prompts",resource} as const;
 const version={id:"version-a",promptId:"prompt-a",version:1,text:"原始正文",modelVersionId:null,createdAt:"2026-10-02"};
@@ -102,16 +102,17 @@ it("M2-2 non-recent Asset101 fetches exact id and changes only the explicitly ch
  useStudioStore.getState().setPendingLibraryIntent({kind:"asset",projectId:"project-a",assetId:"asset101",mediaKind:"image"});
  const create={kind:"create",projectId:"project-a",shotId:"shot-a",stage:"video"} as const;
  const view=render(<CreatePage route={create} navigate={vi.fn()}/>);
- await screen.findAllByRole("option",{name:"Old asset101"});
- expect(api.get).toHaveBeenCalledWith("project-a",{kind:"asset",id:"asset101"});
+ // The composer now uses the thumbnail picker dialog (no inline <option>s); the exact-id fetch and explicit slot buttons are the contract.
+ await waitFor(()=>expect(api.get).toHaveBeenCalledWith("project-a",{kind:"asset",id:"asset101"}));
+ await screen.findByRole("button",{name:"应用到尾帧"});
  expect(useStudioStore.getState().values.first_frame).toBeUndefined();
  fireEvent.click(screen.getByRole("button",{name:"应用到尾帧"}));
  expect(useStudioStore.getState().values.last_frame).toEqual({type:"image_asset",assetId:"asset101"});
  expect(useStudioStore.getState().values.first_frame).toBeUndefined();
  await waitFor(()=>expect(screen.getByRole("button",{name:"添加参考素材"}).hasAttribute("disabled")).toBe(false));fireEvent.click(screen.getByRole("button",{name:"添加参考素材"}));fireEvent.click(within(screen.getByRole("dialog",{name:"添加参考素材"})).getByRole("button",{name:"在资源库查找"})); view.unmount();
  render(<CreatePage route={create} navigate={vi.fn()}/>);
- await screen.findAllByRole("option",{name:"Old asset101"});
- expect((screen.getByLabelText("尾帧") as HTMLSelectElement).value).toBe("asset101");
+ await screen.findByLabelText("选择生成器");
+ await waitFor(()=>expect(useStudioStore.getState().values.last_frame).toEqual({type:"image_asset",assetId:"asset101"}));
  expect(api.generate).not.toHaveBeenCalled();
 });
 it("M2-2 invalid return project falls back to explicit standalone choice, audio retains playback without Create CTA",async()=>{

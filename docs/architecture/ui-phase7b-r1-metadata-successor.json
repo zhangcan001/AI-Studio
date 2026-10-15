@@ -207,9 +207,13 @@
       "beforeHash": "af0309c568fee509764e52f2146a093db2d24d57a95ffda8f269645de8848537",
       "afterHash": "b93c1f89f9859ca88864705067cf5cf1f60804c0f81bd8692ed6002bde9be05e"
     },
+    "src/features/library/LibraryFindability.test.tsx": {
+      "beforeHash": "076e5c9319d10fd99d9ff78c243500cb7db61f6cce7ec05aacbab2041a2e0858",
+      "afterHash": "83bc66a706d9b588b08abab4e4d39597426098c183e84ba7ca39f6db466a73ac"
+    },
     "src/features/library/LibraryPage.test.tsx": {
       "beforeHash": "659387fbb240030ba227dd927234df9e25424facfe9cdaa7ebcf8760bd8f2bd2",
-      "afterHash": "4c890349a9bf4d3817d6de08ae3d828b94f1bcf9388db63e8fe10f46b34ca645"
+      "afterHash": "0e725ce437c0caa26afb51220c296e44de436503c02e4c9eeeb9a2bca5b5a4bc"
     },
     "src/features/library/LibraryPage.tsx": {
       "beforeHash": "8f5dbcf4f825a969a3889074651abb15069ea5f8134db23179a04676f6b30395",
@@ -245,7 +249,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "7199e0df87c642ba963cbfb9846c953f50a32e81b80f4494cef22c7a50867fc4"
+      "afterHash": "b06be9682c7191f04f380cfd8afa5c1e507af5292bcb092e8f402e8a78f5202f"
     },
     "src-tauri/migrations/045_story_entities.sql": {
       "beforeHash": null,
