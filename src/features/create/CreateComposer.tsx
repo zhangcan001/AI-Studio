@@ -10,7 +10,7 @@ import { ReadinessStatus } from "./CreateResults";
 import { useStudioStore } from "../../stores/studioStore";
 import { productClient } from "../../product/client";
 import type { StoryEntity } from "../../types/storyEntity";
-import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
+import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 
 type Kind = "image" | "video" | "audio";
 type Asset = { id: string; name: string; mediaKind: string; thumbnailBytes?: number[] | null };
@@ -147,12 +147,12 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     if (!projectId) return;
     let alive = true;
     for (const entity of [...entities, ...allEntities]) {
-      const id = entity.coverAssetId;
+      const id = entityAvatarAssetId(entity);
       if (!id || entityUrls[id]) continue;
       void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setEntityUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
     }
     return () => { alive = false; };
-  }, [projectId, [...entities, ...allEntities].map(e => e.coverAssetId).join("|")]);
+  }, [projectId, [...entities, ...allEntities].map(e => entityAvatarAssetId(e) ?? "").join("|")]);
 
 
   // Media edits persist through the existing OCC save (no separate "save inputs" step). A failed save is not retried until the draft changes.
@@ -240,9 +240,9 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   return <div className="create-composer-wrap">
     <ReadinessStatus controller={c} />
     {projectId && shotId && allEntities.length > 0 && <div className="composer-entity-strip" role="group" aria-label="镜头角色与场景">
-      {allEntities.map(entity => { const cover = entity.coverAssetId ? entityUrls[entity.coverAssetId] : undefined; const bound = isBound(entity.id);
+      {allEntities.map(entity => { const aid = entityAvatarAssetId(entity); const cover = aid ? entityUrls[aid] : undefined; const bound = isBound(entity.id);
         return <button type="button" key={entity.id} className={"composer-entity" + (bound ? " bound" : "")} aria-pressed={bound} disabled={bindBusy || c.busy}
-          title={(bound ? "解除绑定 " : "绑定到镜头 ") + entity.name} onClick={() => toggleBound(entity.id)}>
+          title={(bound ? "解除绑定 " : "绑定到镜头 ") + entity.name} aria-label={(bound ? "解除绑定 " : "绑定 ") + entity.name} onClick={() => toggleBound(entity.id)}>
           {cover ? <img src={cover} alt="" /> : <span className="composer-entity-glyph">{entity.name.slice(0, 1)}</span>}<small>{entity.name}</small></button>; })}
     </div>}
     <section className="create-composer" aria-label="创作输入框" data-inputs={inputsState}>
@@ -304,13 +304,13 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     {entityPicker && <div className="composer-picker" role="listbox" aria-label="插入角色与场景">
       {allEntities.map(entity => <button type="button" role="option" aria-selected={isBound(entity.id)} key={entity.id} onMouseDown={e => e.preventDefault()} onClick={() => {
         const root = editor.current; if (!root || !promptField) return;
-        const cover = entity.coverAssetId ? entityUrls[entity.coverAssetId] : undefined;
+        const aid = entityAvatarAssetId(entity); const cover = aid ? entityUrls[aid] : undefined;
         const chip = entityChipNode(entity, cover); const space = document.createTextNode(" ");
         const range = caret.current && root.contains(caret.current.startContainer) ? caret.current : null;
         if (range) { range.deleteContents(); range.insertNode(space); range.insertNode(chip); } else root.append(chip, space);
         root.focus(); const sel = window.getSelection(); const r = document.createRange(); r.setStartAfter(space); r.collapse(true); if (sel) { sel.removeAllRanges(); sel.addRange(r); } caret.current = r.cloneRange();
         setEntityPicker(false); emit(); if (shotId && !isBound(entity.id)) toggleBound(entity.id);
-      }} className="composer-picker-option">{entity.coverAssetId && entityUrls[entity.coverAssetId] ? <img src={entityUrls[entity.coverAssetId]} alt="" /> : <span className="composer-picker-glyph">@</span>}<span>@{entity.name}</span></button>)}
+      }} className="composer-picker-option">{(() => { const aid = entityAvatarAssetId(entity); const u = aid ? entityUrls[aid] : undefined; return u ? <img src={u} alt="" /> : <span className="composer-picker-glyph">@</span>; })()}<span>@{entity.name}</span></button>)}
       {images.length > 0 && <button type="button" onClick={() => { setEntityPicker(false); setPicker("insert"); }}>插入 Image N…</button>}
       <button type="button" className="composer-picker-close" onClick={() => setEntityPicker(false)}>关闭</button></div>}
     <div className="composer-toolbar">
@@ -332,7 +332,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       {durationField && <label className="composer-pick" title="时长">◷<input id="create-field-duration_seconds" aria-label={fieldLabel(durationField)} type="number" min={"min" in durationField ? durationField.min : undefined} max={"max" in durationField ? durationField.max : undefined} step={("step" in durationField && durationField.step) || (durationField.type === "integer" ? 1 : "any")} disabled={c.busy} value={(() => { const v = c.values.duration_seconds; return v?.type === "integer" || v?.type === "number" ? v.value : ""; })()} onChange={e => e.target.value === "" ? c.removeValue("duration_seconds") : c.setValue("duration_seconds", { type: durationField.type as "integer", value: Number(e.target.value) })} />s</label>}
       {aspects.length > 0 && <label className="composer-pick" title="画面比例">▭<select aria-label="画面比例" value={aspect ?? ""} disabled={c.busy} onChange={e => chooseAspect(e.target.value)}>{!aspect && <option value="" disabled>比例</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>}
       <button type="button" className="composer-submit" aria-label={c.busy ? "正在提交…" : "生成"} title={canSubmit ? "写入生产队列并生成" : "请先完成准备检查"} disabled={!canSubmit} onClick={() => void (async () => {
-        const covers = entities.map(e => e.coverAssetId).filter((id): id is string => Boolean(id));
+        const covers = entities.map(e => entityAvatarAssetId(e)).filter((id): id is string => Boolean(id));
         if (covers.length) {
           const imageField = mediaFields.find(f => mediaKind(f) === "image");
           if (imageField) {

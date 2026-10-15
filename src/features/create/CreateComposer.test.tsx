@@ -187,3 +187,16 @@ it("lists all project story entities (not only bound), refetches after a Library
   const pick=await screen.findByRole("listbox",{name:"插入角色与场景"});
   expect(within(pick).getAllByRole("option").map(o=>o.textContent?.replace(/^@/,""))).toEqual(["@阿离","@雨巷"]);
 });
+
+it("entities without a cover use their first linked image as avatar in the strip and @ picker (live data: cover null, one image)",async()=>{
+  const se=productClient.storyEntities as unknown as Record<string,ReturnType<typeof vi.fn>>;
+  const e={id:"e1",projectId:"owned",kind:"character",name:"11",description:"",coverAssetId:null,imageAssetIds:["ast_img"],createdAt:"",updatedAt:""};
+  se.list.mockResolvedValue([e]);se.listForShot.mockResolvedValue([]);se.bindShot.mockResolvedValue([e]);
+  await start("opaque-1");
+  const strip=await screen.findByRole("group",{name:"镜头角色与场景"});
+  await waitFor(()=>expect(within(strip).getByRole("button",{name:"绑定 11"}).querySelector("img")).toBeTruthy());
+  expect(api.imageGet).toHaveBeenCalledWith("owned",expect.objectContaining({id:"ast_img"}));
+  fireEvent.keyDown(promptEditor(),{key:"@"});
+  const pick=await screen.findByRole("listbox",{name:"插入角色与场景"});
+  expect(within(pick).getByRole("option").querySelector("img")).toBeTruthy();
+});

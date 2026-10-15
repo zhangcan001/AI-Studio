@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
-import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
+import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { CandidateThumbnail, loadLibraryImageUrl } from "./CreateMediaPreview";
 import "./CreatePage.css";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
@@ -65,10 +65,10 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
 
 function useEntityCovers(projectId: string, entities: StoryEntity[]) {
   const [urls, setUrls] = useState<Record<string, string>>({});
-  const key = entities.map(e => e.coverAssetId ?? "").join("|");
+  const key = entities.map(e => entityAvatarAssetId(e) ?? "").join("|");
   useEffect(() => {
     let alive = true;
-    for (const id of new Set(entities.map(e => e.coverAssetId).filter((v): v is string => Boolean(v)))) {
+    for (const id of new Set(entities.map(e => entityAvatarAssetId(e)).filter((v): v is string => Boolean(v)))) {
       if (urls[id]) continue;
       void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
     }
@@ -124,7 +124,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, onOpen, onCreate, 
   const cover = coverAsset(item);
   const percent = item.status === "GENERATING" ? runPercent(item.run) : null;
   const byKind = useMemo(() => Object.fromEntries(KINDS.map(k => [k, bound.filter(e => e.kind === k)])) as Record<StoryEntityKind, StoryEntity[]>, [bound]);
-  const chips = (list: StoryEntity[]) => list.length ? list.map(e => <span key={e.id} className="shot-row-inline-chip"><Avatar entity={e} url={e.coverAssetId ? urls[e.coverAssetId] : undefined} />{e.name}</span>) : <span className="muted">未绑定</span>;
+  const chips = (list: StoryEntity[]) => list.length ? list.map(e => <span key={e.id} className="shot-row-inline-chip"><Avatar entity={e} url={(entityAvatarAssetId(e) && urls[entityAvatarAssetId(e)!]) || undefined} />{e.name}</span>) : <span className="muted">未绑定</span>;
   const content = renderPrompt(prompt, entities, urls);
   return <article className="shot-row-card" aria-label={`分镜 ${item.ordinal + 1} ${item.name}`} data-status={item.status}>
     <div className="shot-row-index">{item.ordinal + 1}</div>
@@ -183,7 +183,7 @@ function renderPrompt(text: string, entities: StoryEntity[], urls: Record<string
     if (at < 0) { out.push(rest); break; }
     out.push(rest.slice(0, at));
     const hit = names.find(e => rest.startsWith(`@${e.name}`, at));
-    if (hit) { out.push(<span key={key++} className="shot-row-inline-chip"><Avatar entity={hit} url={hit.coverAssetId ? urls[hit.coverAssetId] : undefined} />{hit.name}</span>); rest = rest.slice(at + 1 + hit.name.length); }
+    if (hit) { out.push(<span key={key++} className="shot-row-inline-chip"><Avatar entity={hit} url={(entityAvatarAssetId(hit) && urls[entityAvatarAssetId(hit)!]) || undefined} />{hit.name}</span>); rest = rest.slice(at + 1 + hit.name.length); }
     else { out.push("@"); rest = rest.slice(at + 1); }
   }
   return <>{out}</>;

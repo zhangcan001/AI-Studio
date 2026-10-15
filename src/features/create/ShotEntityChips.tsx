@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { productClient } from "../../product/client";
 import type { StoryEntity } from "../../types/storyEntity";
+import { entityAvatarAssetId } from "../../types/storyEntity";
 
 const KIND_LABEL: Record<string, string> = { character: "角色", scene: "场景", prop: "物品" };
 
@@ -23,8 +24,8 @@ export function ShotEntityChips({ projectId, shotId, editable = false }: { proje
   useEffect(() => {
     let alive = true;
     const created: string[] = [];
-    for (const entity of entities) {
-      const id = entity.coverAssetId;
+    for (const entity of [...entities, ...all]) {
+      const id = entityAvatarAssetId(entity);
       if (!id || urls[id]) continue;
       void productClient.library.imageGet(projectId, { kind: "asset", id }).then(bytes => {
         if (!alive) return;
@@ -34,7 +35,7 @@ export function ShotEntityChips({ projectId, shotId, editable = false }: { proje
       }).catch(() => undefined);
     }
     return () => { alive = false; created.forEach(u => URL.revokeObjectURL(u)); };
-  }, [projectId, entities.map(e => e.coverAssetId).join("|")]);
+  }, [projectId, [...entities, ...all].map(e => entityAvatarAssetId(e) ?? "").join("|")]);
 
   async function toggle(entityId: string) {
     if (!editable || busy) return;
@@ -51,7 +52,7 @@ export function ShotEntityChips({ projectId, shotId, editable = false }: { proje
   if (!entities.length && !editable) return null;
   return <div className="shot-entity-chips" aria-label="绑定角色与场景">
     {entities.map(entity => {
-      const cover = entity.coverAssetId;
+      const cover = entityAvatarAssetId(entity);
       return <button key={entity.id} type="button" className="shot-entity-chip" title={`${KIND_LABEL[entity.kind] ?? entity.kind} · ${entity.name}`}
         disabled={!editable || busy} onClick={() => void toggle(entity.id)}>
         {cover && urls[cover] ? <img src={urls[cover]} alt="" /> : <span className="shot-entity-chip-glyph">{entity.name.slice(0, 1)}</span>}
