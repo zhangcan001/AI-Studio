@@ -3,8 +3,7 @@ import type { RecipeField } from "../../types/generation";
 import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, mediaKind, mediaValue } from "./createModel";
 import { modeLabel } from "../../product/generatorPresentation";
-import { productClient } from "../../product/client";
-import { CandidateThumbnail } from "./CreateMediaPreview";
+import { AssetImageThumb, CandidateThumbnail, loadLibraryImageUrl, useMediaLightbox } from "./CreateMediaPreview";
 import { ParamField, PromptPickerDialog, ReferencePanel, ResolutionPicker } from "./CreateInputs";
 import { ReadinessStatus } from "./CreateResults";
 import { useStudioStore } from "../../stores/studioStore";
@@ -28,19 +27,7 @@ export function composerReferences(fields: RecipeField[], values: CreateControll
 }
 function gcd(a: number, b: number): number { return b ? gcd(b, a % b) : a; }
 export function aspectOf(w: number, h: number) { const g = gcd(w, h) || 1; const r = `${w / g}:${h / g}`; const known = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]; if (known.includes(r)) return r; const q = w / h; return known.find(k => { const [a, b] = k.split(":").map(Number); return Math.abs(a / b - q) < 0.03; }) ?? r; }
-const imageCache = new Map<string, Promise<string | undefined>>();
-/** Image inputs are read through the existing library image IPC (the media protocol only serves video/audio). Cached per project+asset. */
-function loadImage(projectId: string, assetId: string) {
-  const key = `${projectId}:${assetId}`;
-  let hit = imageCache.get(key);
-  if (!hit) {
-    hit = Promise.resolve().then(() => productClient.library.imageGet(projectId, { kind: "asset", id: assetId }))
-      .then(bytes => URL.createObjectURL(new Blob([Uint8Array.from(bytes as number[])], { type: "image/png" })))
-      .catch(() => { imageCache.delete(key); return undefined; });
-    imageCache.set(key, hit);
-  }
-  return hit;
-}
+/** Image thumbs use loadLibraryImageUrl (library imageGet). */
 function chipNode(ref: ComposerReference, url?: string) {
   const chip = document.createElement("span");
   chip.className = "composer-chip"; chip.contentEditable = "false"; chip.dataset.ref = String(ref.n);
@@ -75,6 +62,7 @@ function capacity(field: RecipeField, ids: string[]) { return ["images", "videos
  *  It edits the existing draft, persists media through the existing OCC save, and submits through the existing generate path. */
 export function CreateComposer({ controller: c }: { controller: CreateController }) {
   const vi = c.videoInputs; const projectId = c.context?.projectId;
+  const lightbox = useMediaLightbox();
   const fields = c.generator?.fields ?? [];
   const promptField = fields.find(f => f.type === "textarea" && f.key === "prompt");
   const negativeField = fields.find(f => f.type === "textarea" && f.key === "negative_prompt");
@@ -98,7 +86,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const imageIds = images.map(r => r.assetId).join("|");
   useEffect(() => {
     if (!projectId) return; let alive = true;
-    for (const id of new Set(imageIds.split("|").filter(Boolean))) void loadImage(projectId, id).then(u => { if (alive && u) setImgUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
+    for (const id of new Set(imageIds.split("|").filter(Boolean))) void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setImgUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
     return () => { alive = false; };
   }, [projectId, imageIds]);
 
@@ -182,7 +170,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
         const required = "required" in field && field.required;
         return <div key={field.key} className="composer-slot" aria-label={`${label}输入`}>
           {refs.filter(r => r.fieldKey === field.key).map(ref => <div key={ref.assetId} className="composer-ref" data-kind={ref.kind}>
-            <button type="button" className="composer-ref-thumb" title={`${ref.kind === "image" ? `插入 ${ref.label}` : ref.label} · ${ref.asset?.name ?? "素材不可用"}`} aria-label={ref.kind === "image" ? `插入 ${ref.label}` : `${ref.label} ${ref.asset?.name ?? ""}`} disabled={ref.kind !== "image" || !promptField} onMouseDown={e => e.preventDefault()} onClick={() => insert(ref)}>
+            <button type="button" className="composer-ref-thumb" title={`${ref.kind === "image" ? `插入 ${ref.label}（Alt+点击放大）` : ref.label} · ${ref.asset?.name ?? "素材不可用"}`} aria-label={ref.kind === "image" ? `插入 ${ref.label}` : `${ref.label} ${ref.asset?.name ?? ""}`} disabled={ref.kind !== "image" || !promptField} onMouseDown={e => e.preventDefault()} onClick={e => { if ((e.altKey || e.metaKey) && projectId && ref.kind === "image") lightbox?.open({ kind: "image", projectId, assetId: ref.assetId, name: ref.asset?.name ?? ref.label, url: url(ref) }); else insert(ref); }}>
               {ref.kind === "image" && url(ref) ? <img src={url(ref)} alt={`${ref.asset?.name ?? ref.label}缩略图`} /> : ref.kind === "video" && ref.asset?.thumbnailBytes?.length ? <CandidateThumbnail asset={{ ...ref.asset, mediaKind: "video", selected: false }} projectId={projectId} /> : <span className="composer-ref-glyph">{ref.kind === "audio" ? "♪" : ref.kind === "video" ? "▶" : ref.n}</span>}
               <small>{ref.label}</small></button>
             <button type="button" className="composer-ref-remove" aria-label={`${label}移除第${ref.index + 1}项`} disabled={locked} onClick={() => setField(field, ids.filter(id => id !== ref.assetId))}>×</button>
@@ -206,11 +194,11 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       <span className="composer-count" aria-hidden="true">{prompt.length} 字</span>
     </div>}
     {picker === "insert" && <div className="composer-picker" role="listbox" aria-label="插入参考图">
-      {images.map(ref => <button type="button" role="option" aria-selected="false" key={ref.n} onMouseDown={e => e.preventDefault()} onClick={() => insert(ref)}>{url(ref) && <img src={url(ref)} alt="" />}{ref.label}{ref.asset ? ` · ${ref.asset.name}` : ""}</button>)}
+      {images.map(ref => <button type="button" role="option" aria-selected="false" key={ref.n} onMouseDown={e => e.preventDefault()} onClick={() => insert(ref)} className="composer-picker-option">{url(ref) ? <img src={url(ref)} alt="" /> : <span className="composer-picker-glyph">{ref.n}</span>}<span>{ref.label}{ref.asset ? ` · ${ref.asset.name}` : ""}</span></button>)}
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button></div>}
     {picker === "add" && target && <div className="composer-picker" role="dialog" aria-label="添加参考素材">
       {targets.length > 1 && <label className="composer-picker-target">添加到<select aria-label="添加到输入" value={target.key} onChange={e => setTargetKey(e.target.value)}>{targets.map(f => <option key={f.key} value={f.key}>{fieldLabel(f)}</option>)}</select></label>}
-      {allChoices.filter(a => a.mediaKind === mediaKind(target) && !assetIds(c.values[target.key]).includes(a.id)).map(a => <button type="button" key={a.id} onClick={() => { add(target, a.id); setPicker(null); }}>{a.name}</button>)}
+      {allChoices.filter(a => a.mediaKind === mediaKind(target) && !assetIds(c.values[target.key]).includes(a.id)).map(a => <button type="button" key={a.id} className="composer-picker-option" onClick={() => { add(target, a.id); setPicker(null); }}>{a.mediaKind === "image" && projectId ? <span aria-hidden="true"><AssetImageThumb projectId={projectId} assetId={a.id} name={a.name} size="md" interactive={false} /></span> : null}<span>{a.name}</span></button>)}
       {vi.enabled && <button type="button" onClick={() => void importInto(target, false)}>从电脑导入…</button>}
       {vi.enabled && mediaKind(target) === "image" && <button type="button" onClick={() => void importInto(target, true)}>导入图片文件夹…</button>}
       <button type="button" onClick={() => { setPicker(null); c.openLibrary(mediaKind(target) === "image" ? "images" : mediaKind(target) === "video" ? "videos" : "audio"); }}>在资源库查找</button>

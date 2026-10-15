@@ -4,7 +4,7 @@ import type { ProductRun } from "../../product/types";
 import { queueRunLabel } from "./createModel";
 import type { CreateController } from "./CreateController";
 import type { CreateRoute } from "./createModel";
-import { CandidateThumbnail, CreateMediaPreview } from "./CreateMediaPreview";
+import { AssetImageThumb, CandidateThumbnail, CreateMediaPreview } from "./CreateMediaPreview";
 import { RunStatusCard } from "./CreateResults";
 import { modeLabel } from "../../product/generatorPresentation";
 
@@ -67,7 +67,7 @@ function ShotInfoCard({ controller: c, candidates }: { controller: CreateControl
       <div><dt>镜头时长</dt><dd>{duration ? `${duration} 秒` : "未设置"}</dd></div>
       <div><dt>画面尺寸</dt><dd>{w && h ? `${w} × ${h}` : "未设置"}</dd></div>
       <div><dt>生成模式</dt><dd>{c.generator ? `MiniMax 视频 · ${modeLabel(c.generator)}` : "未选择模式"}</dd></div>
-      <div><dt>参考素材</dt><dd>{shot?.referenceAssetIds.length ?? 0} 张</dd></div>
+      <div><dt>参考素材</dt><dd>{shot?.referenceAssetIds.length ? <div className="storyboard-ref-thumbs" aria-label="参考素材缩略图">{shot.referenceAssetIds.map(id => <AssetImageThumb key={id} projectId={c.context!.projectId} assetId={id} name={`参考 ${id.slice(0, 8)}`} size="lg" />)}<small>{shot.referenceAssetIds.length} 张</small></div> : "0 张"}</dd></div>
       <div><dt>生成候选</dt><dd>{candidates.length} 个</dd></div>
     </dl><small>当前 Recipe 的草稿与原运行快照独立。</small></section>;
 }

@@ -117,7 +117,7 @@
     },
     "src/features/create/CandidateThumbnail.test.tsx": {
       "beforeHash": null,
-      "afterHash": "6cdb6aa731c2d52023a1dafed783931750a1c7c52283132fcf01a37e10a2b7f8"
+      "afterHash": "a3558a9a356c5ee47d4169dc71c67998e7c2dfbb8ccc0e0f9abe416d569fe824"
     },
     "src/features/create/CreateComposer.test.tsx": {
       "beforeHash": null,
@@ -125,7 +125,7 @@
     },
     "src/features/create/CreateComposer.tsx": {
       "beforeHash": null,
-      "afterHash": "3c1dd44ef67a41c5e49fadb95d53cefa2d07506cd5d39a3799484ff025c63f29"
+      "afterHash": "6315962061334e65e4bd7cc50125e24657816891e04911b9ff74b91be97b9f81"
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
@@ -133,15 +133,15 @@
     },
     "src/features/create/CreateInputs.tsx": {
       "beforeHash": "2d66012f799ddaa1b7222323767b885840676acd77a3d43a306f17c653eeee3f",
-      "afterHash": "c8d3b07c1a463a1de907dc9058b17ed4d0151426a00b319273cf5953abf6bf85"
+      "afterHash": "e69aae53245134a51540351fa98d2b69c8d18bad45534913871238993b840e2d"
     },
     "src/features/create/CreateMediaPreview.tsx": {
       "beforeHash": "418f32f5d365c2ea9fc624124589b9f9b529a3a74e77e23d4f8d1164da5ba619",
-      "afterHash": "2864415114daa4ff358964e7bac97f7f2605c4c4aba6bd8018297b065e161263"
+      "afterHash": "bf1abdb8ed23412921c06c2af9c3b08cf781868e3135aacebc96e37465acbf59"
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "abffd4f661db016efecb64421d172d774859e4ae1f2e899cbb9868e7cd2ba044"
+      "afterHash": "dbbf389fdf2f6578fd726e428c2dc0ff6d89831e6e3a3481a5bed9a718345eb1"
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "3b5c199c11e638c54c184f6bce09c0d5acdafd168a231cd6b9cdae77d86b4e9e",
@@ -149,7 +149,7 @@
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea",
-      "afterHash": "cc294ce1999631afe0e3609b7dafe8eba1aaf2b859ffc0a2905ce727ffd98f84"
+      "afterHash": "7711c494c0d3de8e2fa6547c4fc6d587f8b34cc0e205dcb46238c571e4565229"
     },
     "src/features/create/CreateReadinessLifecycle.test.tsx": {
       "beforeHash": "693d65b522e4dc8726c0f403156262b0d1279ea8cf3b850f8ae6c1f89c19e86c",
@@ -157,7 +157,7 @@
     },
     "src/features/create/CreateResults.tsx": {
       "beforeHash": "0626c17eaef1c80cba4d5c6732b88f6fc5a0e9095b028497ce3eebcadc551172",
-      "afterHash": "7c496c43c4d09233e9991051c0ca37f0425295ceda06057c6f279dfadc392ced"
+      "afterHash": "b764d027f518b16426fbf60afe61d48a14af92c5ec832cb25208e09d064c54ec"
     },
     "src/features/create/CreateVideoWorkspace.test.tsx": {
       "beforeHash": "542f875656fc0502bebc3aa6c0834488fb63fc3a9822c744fbea3c90fa55deed",
@@ -165,7 +165,7 @@
     },
     "src/features/create/CreateVideoWorkspace.tsx": {
       "beforeHash": "9e3727c37c12691dc67042a79496234847efa335d5ddca38ecc20b0d62a61779",
-      "afterHash": "7b3d39411ea327f15e8f2e6002b04097338363f117f0ca938f7c2543ccfda513"
+      "afterHash": "260f07e2333ec71cc230edda35710180940f51ccb0170bf6bf0954bad108d531"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
@@ -173,7 +173,7 @@
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": null,
-      "afterHash": "868376b1da0981217e39ad6bd8f0315c36e9929abbb8a6c0c6876ed5a5080dec"
+      "afterHash": "c7f8511e4ff15e4b1d3165e4010fdbd48629c7b207c586c019be40bca87e318a"
     },
     "src/features/create/composerTestUtils.ts": {
       "beforeHash": null,

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import type { AppRoute } from "../../app/routes/types";
 import type { CreateRoute } from "./createModel";
 import type { RunResult } from "../../product/types";
-import { CandidateThumbnail, ThumbnailProjectContext } from "./CreateMediaPreview";
+import { AssetImageThumb, CandidateThumbnail, MediaLightboxScope, ThumbnailProjectContext } from "./CreateMediaPreview";
 import { coverAsset, deriveStoryboardStatus, runPercent, shotDuration, shotResolution, storyboardStats, storyboardStatusLabels, videoCandidates, type StoryboardShot } from "./storyboardModel";
 import "./CreatePage.css";
 
@@ -79,7 +79,7 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
     catch (cause) { setError(normalizeProductError(cause).message); setBusy(false); }
   };
 
-  return <ThumbnailProjectContext.Provider value={projectId}><div className="storyboard-page" aria-label="分镜工作台">
+  return <MediaLightboxScope><ThumbnailProjectContext.Provider value={projectId}><div className="storyboard-page" aria-label="分镜工作台">
     <header className="storyboard-header">
       <div className="storyboard-title"><h1>分镜工作台</h1><p>将剧本拆解为多个镜头，逐镜生成并完成整段视频的制作。</p></div>
       <dl className="storyboard-stats" aria-label="镜头统计">
@@ -129,7 +129,7 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
       </aside>
     </div>}
     {reviewItem && <ReviewPanel projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} />}
-  </div></ThumbnailProjectContext.Provider>;
+  </div></ThumbnailProjectContext.Provider></MediaLightboxScope>;
 }
 
 export type StoryboardView = "grid" | "list";
@@ -228,13 +228,15 @@ function ShotCard({ item, selected, onSelect, onOpen, onRun, onReview }: { item:
 }
 function ShotDetail({ item }: { item: StoryboardShot }) {
   const cover = coverAsset(item);
+  const projectId = useContext(ThumbnailProjectContext);
+  const refs = item.shot?.referenceAssetIds ?? [];
   return <div className="storyboard-detail-body">
     <div className="storyboard-detail-head"><Cover item={item} /><div><strong>{item.name}</strong><StatusBadge item={item} /></div></div>
     <dl>
       <div><dt>时长</dt><dd>{shotDuration(item.shot)}</dd></div>
       <div><dt>分辨率</dt><dd>{shotResolution(item.shot)}</dd></div>
       <div><dt>提示词摘要</dt><dd>{item.shot?.prompt.trim() || "尚未填写"}</dd></div>
-      <div><dt>参考素材</dt><dd>{item.shot?.referenceAssetIds.length ?? 0} 张</dd></div>
+      <div><dt>参考素材</dt><dd>{refs.length ? <div className="storyboard-ref-thumbs" aria-label="参考素材缩略图">{projectId && refs.map(id => <AssetImageThumb key={id} projectId={projectId} assetId={id} name={`参考 ${id.slice(0, 8)}`} size="lg" />)}<small>{refs.length} 张</small></div> : "0 张"}</dd></div>
       <div><dt>生成候选</dt><dd>{item.candidates.length} 个</dd></div>
       {item.run && <div><dt>最近运行</dt><dd>{item.run.title} · {item.run.progress.succeeded}/{item.run.progress.total}</dd></div>}
     </dl>

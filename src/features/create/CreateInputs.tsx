@@ -3,6 +3,7 @@ import type { CreationContext } from "../../product/types";
 import type { RecipeField } from "../../types/generation";
 import type { CreateController } from "./CreateController";
 import { fieldLabel, generatorLabel } from "./createModel";
+import { AssetImageThumb } from "./CreateMediaPreview";
 import { modeLabel } from "../../product/generatorPresentation";
 const VIDEO_MODE_CARDS = [
   { label: "文生视频", hint: "通过文字描述生成视频", icon: "Aa" },
@@ -42,7 +43,10 @@ export function ReferencePanel({ context, save, busy }: { context: CreationConte
   const [ids, setIds] = useState(current);
   useEffect(() => { setIds(current); }, [context]);
   return <details><summary>镜头长期参考图</summary><p>仅保存图片；不会替代明确的首帧、尾帧或视频输入。</p>
-    {context.mediaInputs.filter(asset => asset.mediaKind === "image").map(asset => <label className="create-reference" key={asset.id}><input type="checkbox" checked={ids.includes(asset.id)} onChange={e => setIds(e.target.checked ? [...ids, asset.id] : ids.filter(id => id !== asset.id))} />{asset.name}</label>)}
+    <div className="create-reference-grid">{context.mediaInputs.filter(asset => asset.mediaKind === "image").map(asset => <label className="create-reference" key={asset.id}>
+      <span aria-hidden="true"><AssetImageThumb projectId={context.projectId} assetId={asset.id} name={asset.name} size="lg" interactive={false} /></span>
+      <span className="create-reference-meta"><input type="checkbox" aria-label={asset.name} checked={ids.includes(asset.id)} onChange={e => setIds(e.target.checked ? [...ids, asset.id] : ids.filter(id => id !== asset.id))} />{asset.name}</span>
+    </label>)}</div>
     <button type="button" disabled={busy} onClick={() => save(ids)}>保存长期参考图</button></details>;
 }
 /** One numeric/seed parameter control bound to the draft (moved from the old parameter panel). */

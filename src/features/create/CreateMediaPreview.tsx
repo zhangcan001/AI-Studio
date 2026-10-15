@@ -1,6 +1,68 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { productClient } from "../../product/client";
 import type { CreationAsset } from "../../product/types";
+
+const imageCache = new Map<string, Promise<string | undefined>>();
+
+/** Shared library imageGet → object URL (same path as composer / cdbd060). Cached per project+asset. */
+export function loadLibraryImageUrl(projectId: string, assetId: string) {
+  const key = `${projectId}:${assetId}`;
+  let hit = imageCache.get(key);
+  if (!hit) {
+    hit = Promise.resolve()
+      .then(() => productClient.library.imageGet(projectId, { kind: "asset", id: assetId }))
+      .then(bytes => URL.createObjectURL(new Blob([Uint8Array.from(bytes as number[])], { type: "image/png" })))
+      .catch(() => { imageCache.delete(key); return undefined; });
+    imageCache.set(key, hit);
+  }
+  return hit;
+}
+
+export function useLibraryImageUrl(projectId: string | null | undefined, assetId: string | null | undefined) {
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    if (!projectId || !assetId) { setUrl(undefined); return; }
+    let alive = true;
+    void loadLibraryImageUrl(projectId, assetId).then(u => { if (alive) setUrl(u); });
+    return () => { alive = false; };
+  }, [projectId, assetId]);
+  return url;
+}
+
+type LightboxTarget =
+  | { kind: "video" | "audio"; projectId: string; asset: Pick<CreationAsset, "id" | "name" | "mediaKind"> }
+  | { kind: "image"; projectId: string; assetId: string; name: string; url?: string };
+
+const LightboxContext = createContext<{ open: (t: LightboxTarget) => void } | null>(null);
+
+export function MediaLightboxScope({ children }: { children: ReactNode }) {
+  const [target, setTarget] = useState<LightboxTarget>();
+  const open = useCallback((t: LightboxTarget) => setTarget(t), []);
+  return <LightboxContext.Provider value={{ open }}>
+    {children}
+    {target && <MediaLightbox target={target} onClose={() => setTarget(undefined)} />}
+  </LightboxContext.Provider>;
+}
+
+export function useMediaLightbox() {
+  return useContext(LightboxContext);
+}
+
+/** Full-size preview: video/audio via existing media URL; images via library imageGet. */
+function MediaLightbox({ target, onClose }: { target: LightboxTarget; onClose: () => void }) {
+  const imageUrl = useLibraryImageUrl(target.kind === "image" ? target.projectId : null, target.kind === "image" ? target.assetId : null);
+  const shown = target.kind === "image" ? (target.url ?? imageUrl) : undefined;
+  return <div className="media-lightbox-backdrop" role="presentation" onClick={onClose}>
+    <section role="dialog" aria-modal="true" aria-label={target.kind === "image" ? `预览 ${target.name}` : `播放 ${target.asset.name}`} className="media-lightbox" onClick={e => e.stopPropagation()}>
+      <header><strong>{target.kind === "image" ? target.name : target.asset.name}</strong><button type="button" onClick={onClose}>关闭</button></header>
+      <div className="media-lightbox-body">
+        {target.kind === "image"
+          ? (shown ? <img src={shown} alt={target.name} /> : <p role="status">正在读取图片…</p>)
+          : <CreateMediaPreview projectId={target.projectId} asset={target.asset} />}
+      </div>
+    </section>
+  </div>;
+}
 
 // Presentation only: explicit project asset identities, never paths or global scans.
 export function CreateMediaPreview({ projectId, asset, onUnavailable }: {
@@ -49,10 +111,11 @@ export function CreateMediaPreview({ projectId, asset, onUnavailable }: {
 export const ThumbnailProjectContext = createContext<string | null>(null);
 
 // Poster first (backend ffmpeg first frame); otherwise the real first frame of the
-// owned media stream, muted and paused. Never a fabricated image.
-export function CandidateThumbnail({ asset, projectId }: { asset: CreationAsset; projectId?: string }) {
+// owned media stream, muted and paused. Click opens the real playable stream.
+export function CandidateThumbnail({ asset, projectId, playable = true }: { asset: CreationAsset; projectId?: string; playable?: boolean }) {
   const scope = useContext(ThumbnailProjectContext);
   const owner = projectId ?? scope;
+  const lightbox = useMediaLightbox();
   const [url, setUrl] = useState<string>();
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -61,9 +124,35 @@ export function CandidateThumbnail({ asset, projectId }: { asset: CreationAsset;
     setUrl(next); return () => URL.revokeObjectURL(next);
   }, [asset.thumbnailBytes]);
   useEffect(() => { setFailed(false); }, [owner, asset.id]);
-  if (url) return <img src={url} alt={`${asset.name}缩略图`} />;
-  if (asset.mediaKind === "video" && owner && !failed) {
-    return <video className="create-candidate-frame" aria-label={`${asset.name}首帧`} src={productClient.creation.mediaUrl(owner, asset.id, "video")} preload="metadata" muted playsInline disablePictureInPicture onError={() => setFailed(true)} />;
+  const open = (e: MouseEvent) => {
+    if (!playable || !owner || asset.mediaKind !== "video" || !lightbox) return;
+    e.stopPropagation();
+    lightbox.open({ kind: "video", projectId: owner, asset: { id: asset.id, name: asset.name, mediaKind: "video" } });
+  };
+  const frame = url
+    ? <img src={url} alt={`${asset.name}缩略图`} />
+    : asset.mediaKind === "video" && owner && !failed
+      ? <video className="create-candidate-frame" aria-label={`${asset.name}首帧`} src={productClient.creation.mediaUrl(owner, asset.id, "video")} preload="metadata" muted playsInline disablePictureInPicture onError={() => setFailed(true)} />
+      : <span className="create-candidate-placeholder">{asset.mediaKind === "video" ? "视频 · 暂无缩略图" : "暂无缩略图"}</span>;
+  if (playable && owner && asset.mediaKind === "video" && lightbox) {
+    return <button type="button" className="media-thumb-play" aria-label={`播放 ${asset.name}`} title="播放视频" onClick={open}>{frame}<span className="media-thumb-play-badge" aria-hidden="true">▶</span></button>;
   }
-  return <span className="create-candidate-placeholder">{asset.mediaKind === "video" ? "视频 · 暂无缩略图" : "暂无缩略图"}</span>;
+  return frame;
+}
+
+/** Image reference thumb via library imageGet; click opens enlarged preview (unless interactive=false). */
+export function AssetImageThumb({ projectId, assetId, name, size = "md", className, interactive = true }: {
+  projectId: string; assetId: string; name: string; size?: "chip" | "md" | "lg"; className?: string; interactive?: boolean;
+}) {
+  const url = useLibraryImageUrl(projectId, assetId);
+  const lightbox = useMediaLightbox();
+  const open = (e: MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    lightbox?.open({ kind: "image", projectId, assetId, name, url });
+  };
+  if (!url) return <span className={`asset-image-thumb size-${size} pending ${className ?? ""}`} title={name} aria-label={name}>{name.slice(0, 1)}</span>;
+  if (!interactive) return <span className={`asset-image-thumb size-${size} ${className ?? ""}`} title={name}><img src={url} alt={`${name}缩略图`} /></span>;
+  return <button type="button" className={`asset-image-thumb size-${size} ${className ?? ""}`} title={`查看 ${name}`} aria-label={`查看 ${name}`} onClick={open}>
+    <img src={url} alt={`${name}缩略图`} />
+  </button>;
 }

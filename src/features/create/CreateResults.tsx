@@ -4,6 +4,7 @@ import { normalizeProductError } from "../../product/errors";
 import type { CreationAsset } from "../../product/types";
 import type { CreateController } from "./CreateController";
 import { modeLabel } from "../../product/generatorPresentation";
+import { useLibraryImageUrl } from "./CreateMediaPreview";
 import { candidateForStage, runLabels, type CreateRoute } from "./createModel";
 import { focusCreateInput, resolveCreateReadinessAction, type CreateReadinessAction } from "./createReadinessAction";
 export function RunStatusCard({ controller: c }: { controller: CreateController }) {
@@ -19,6 +20,7 @@ export function RunStatusCard({ controller: c }: { controller: CreateController 
   </section>;
 }
 function AssetPreview({ asset, projectId }: { asset: CreationAsset; projectId: string }) {
+  const imageUrl = useLibraryImageUrl(asset.mediaKind === "image" ? projectId : null, asset.mediaKind === "image" ? asset.id : null);
   const [thumbnail, setThumbnail] = useState<string>();
   useEffect(() => {
     if (!asset.thumbnailBytes?.length) { setThumbnail(undefined); return; }
@@ -26,7 +28,8 @@ function AssetPreview({ asset, projectId }: { asset: CreationAsset; projectId: s
     setThumbnail(url); return () => URL.revokeObjectURL(url);
   }, [asset.thumbnailBytes]);
   if (asset.mediaKind === "video") return <video aria-label={asset.name} controls preload="metadata" src={productClient.creation.mediaUrl(projectId, asset.id, "video")} />;
-  return thumbnail ? <img src={thumbnail} alt={asset.name} /> : <div className="create-preview-placeholder">{asset.name}</div>;
+  const src = imageUrl ?? thumbnail;
+  return src ? <img src={src} alt={asset.name} /> : <div className="create-preview-placeholder">{asset.name}</div>;
 }
 export function CandidatePanel({ controller: c, route }: { controller: CreateController; route: CreateRoute }) {
   const candidates = c.context?.candidates.filter(asset => candidateForStage(asset, route)) ?? [];
