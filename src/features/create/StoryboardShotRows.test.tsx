@@ -42,12 +42,11 @@ it("binds/unbinds entities, renames via updateShot, deletes with confirm and gen
   const p = props();
   render(<StoryboardShotRows {...p} items={[shot("a", 0)]} />);
   const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
-  const bound = within(row).getByLabelText("已绑定角色与场景");
-  await within(bound).findByTitle("解除绑定 角色 · 阿离");
-  fireEvent.click(within(row).getByRole("button", { name: "+" }));
-  fireEvent.click(within(within(row).getByLabelText("可绑定角色与场景")).getByLabelText(/雨巷/));
+  const list = within(row).getByLabelText("项目角色与场景");
+  await within(list).findByTitle("解除绑定 角色 · 阿离");
+  fireEvent.click(within(list).getByTitle("绑定 场景 · 雨巷"));
   await waitFor(() => expect(api.bindShot).toHaveBeenCalledWith("p", "a", ["e1", "e2"]));
-  fireEvent.click(await within(bound).findByTitle("解除绑定 角色 · 阿离"));
+  fireEvent.click(await within(list).findByTitle("解除绑定 角色 · 阿离"));
   await waitFor(() => expect(api.bindShot).toHaveBeenLastCalledWith("p", "a", ["e2"]));
   const nameInput = within(row).getByLabelText("镜头1 名称");
   fireEvent.change(nameInput, { target: { value: "开场" } }); fireEvent.blur(nameInput);

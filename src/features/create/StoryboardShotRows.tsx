@@ -93,7 +93,6 @@ function ShotRowCard({ projectId, item, entities, urls, busy, onOpen, onCreate, 
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
-  const [binding, setBinding] = useState(false);
   useEffect(() => { setPrompt(item.shot?.prompt ?? ""); }, [item.shot?.prompt]);
   useEffect(() => { setName(item.name); }, [item.name]);
   const reloadBound = useCallback(() => {
@@ -138,9 +137,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, onOpen, onCreate, 
     </div>
     <div className="shot-row-actions">
       <button type="button" className="primary" disabled={disabled || !selectionRef} title={selectionRef ? "写入生产队列并生成" : "请先在详情中选择生成器"} onClick={generate}>生成视频</button>
-      <ul className="shot-row-entities" aria-label="已绑定角色与场景">{bound.map(e => <li key={e.id}><button type="button" disabled={disabled} title={`解除绑定 ${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={e.coverAssetId ? urls[e.coverAssetId] : undefined} /><small>{e.name}</small></button></li>)}</ul>
-      <button type="button" className="shot-row-bind" aria-expanded={binding} disabled={disabled || !entities.length} title={entities.length ? "绑定项目角色与场景" : "素材库中还没有角色与场景"} onClick={() => setBinding(v => !v)}>+</button>
-      {binding && <ul className="shot-row-bind-list" aria-label="可绑定角色与场景">{entities.map(e => <li key={e.id}><label><input type="checkbox" checked={bound.some(b => b.id === e.id)} disabled={disabled} onChange={() => toggle(e.id)} />{KIND_LABEL[e.kind]} · {e.name}</label></li>)}</ul>}
+      <ul className="shot-row-entities" aria-label="项目角色与场景">{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={disabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">素材库中还没有角色与场景</li>}</ul>
     </div>
     <div className="shot-row-prompt">
       <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词..." value={prompt} disabled={disabled} onChange={e => setPrompt(e.target.value)} title="提示词随「生成视频」一起提交" />

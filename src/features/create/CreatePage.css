@@ -495,3 +495,5 @@
 .v3-shell .create-composer-wrap .composer-advanced { margin:0 18px 10px; }.v3-shell .create-composer-wrap button.composer-icon, .v3-shell .create-composer-wrap button.composer-submit { min-height:0; padding:0; }
 .create-composer-wrap .composer-pick + .composer-pick { margin-left:10px; }
 .v3-shell .create-composer-wrap button.composer-submit:disabled { background:#24485a; color:#7aa6b4; box-shadow:none; }
+
+.shot-row-entities button.bound{outline:2px solid #4f8bf0;background:rgba(79,139,240,.12)}
