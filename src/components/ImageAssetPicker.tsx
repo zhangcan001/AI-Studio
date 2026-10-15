@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { productClient } from "../../product/client";
-import type { LibraryItem, LibraryTag } from "../../product/libraryTypes";
-import { AssetImageThumb } from "./CreateMediaPreview";
+import { productClient } from "../product/client";
+import type { LibraryItem, LibraryTag } from "../product/libraryTypes";
+import { AssetImageThumb } from "../features/create/CreateMediaPreview";
 
 export type ImagePickTab = "all" | "character" | "scene" | "prop" | "untagged";
 const TABS: { id: ImagePickTab; label: string; tagHints: string[] }[] = [

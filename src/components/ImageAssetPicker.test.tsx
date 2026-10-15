@@ -8,7 +8,7 @@ const api = vi.hoisted(() => ({
   tagsList: vi.fn(),
   imageGet: vi.fn(),
 }));
-vi.mock("../../product/client", () => ({ productClient: { library: api } }));
+vi.mock("../product/client", () => ({ productClient: { library: api } }));
 
 beforeEach(() => {
   vi.resetAllMocks();

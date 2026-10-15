@@ -63,8 +63,8 @@ export const R1_METADATA_ADDED = [
   "src/features/create/StoryboardWorkbench.tsx",
   "src/features/create/composerTestUtils.ts",
   "src/features/create/storyboardModel.ts",
-  "src/features/create/ImageAssetPicker.tsx",
-  "src/features/create/ImageAssetPicker.test.tsx",
+  "src/components/ImageAssetPicker.tsx",
+  "src/components/ImageAssetPicker.test.tsx",
 ].sort();
 export const R1_METADATA_CONTRACTS = {
   schemaChanged: false, backupFormatChanged: true, backupVersion: 21,

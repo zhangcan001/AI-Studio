@@ -4,7 +4,7 @@ import type { InputAsset, ShotVideoInputScope, VideoInputView, VideoInputAsset, 
 import type { RecipeViewModel } from "../../types/generation";
 import { normalizeProductError } from "../../product/errors";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
-import { ImageAssetPicker } from "../create/ImageAssetPicker";
+import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 
 /** An OCC edit form for persisted bindings, not an alternate generation draft/executor. */
 export function ShotVideoInputsPanel({ scope, recipe, onSaved, onReadyChange }: { scope: ShotVideoInputScope; recipe: RecipeViewModel; onSaved?: () => void; onReadyChange?: (owner: string, ready: boolean) => void }) {

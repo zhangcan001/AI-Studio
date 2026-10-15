@@ -189,7 +189,7 @@
     },
     "src/features/shots/ShotVideoInputsPanel.tsx": {
       "beforeHash": "afc507ffbb53090048ac2681b711a4602e865a975427958f4984a6bd4c42aa78",
-      "afterHash": "c53d3a307f5aa8fb7db1e24401a454b6c56778702ad9fcad9fed5fd55f0df6f5"
+      "afterHash": "af656ea3118d629dc51bc97900c40ea4be73de381d4f57952afcaa3d07893fd5"
     },
     "src/features/tools/LocalToolHub.test.tsx": {
       "beforeHash": "205b8c04c71274d0d9571f92b7d8ceacd2bb9c0357b57e9d3de9e2c39a52f435",
@@ -201,7 +201,15 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "8c9f1e4ef06e89ca899d7db2b639107e0b2d012a083e08c129803d632e81ae10"
+      "afterHash": "718fd6120c9c39a876c245b532cc0496412c067619a6342502cd4e7b912a0050"
+    },
+    "src/components/ImageAssetPicker.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "16c8f63975b3852b2f56916b9dec652a2d695893fc6324130bfdc76806caff28"
+    },
+    "src/components/ImageAssetPicker.tsx": {
+      "beforeHash": null,
+      "afterHash": "57cb1af79482f422dd23ff8643958597ff4ffa4742542019c7c2f87a9a7954fc"
     },
     "src/features/create/CandidateThumbnail.test.tsx": {
       "beforeHash": null,
@@ -213,19 +221,11 @@
     },
     "src/features/create/CreateComposer.tsx": {
       "beforeHash": null,
-      "afterHash": "a256d5842cd1e719e6c838f37e772c1b6eba72f41e0cc068eed314bc9d5a68db"
+      "afterHash": "b2ccd3686cadb255521972d72bed8fc7059b30183b963db0035193ac486a96d4"
     },
     "src/features/create/CreateMediaPreview.hooks.test.tsx": {
       "beforeHash": null,
       "afterHash": "82cd3a5727b06fba7a7b458d282a7730032e898e566440f171db31eea29f919e"
-    },
-    "src/features/create/ImageAssetPicker.test.tsx": {
-      "beforeHash": null,
-      "afterHash": "e2fc542d858d36e75de236096ac99b6673cc79d3c509fe189674acb2f09119cd"
-    },
-    "src/features/create/ImageAssetPicker.tsx": {
-      "beforeHash": null,
-      "afterHash": "95f9de9649b199016814be70505e6b466eff39eed66787e21fb57830bce70f0e"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,

@@ -4,7 +4,7 @@ import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, mediaKind, mediaValue } from "./createModel";
 import { modeLabel } from "../../product/generatorPresentation";
 import { AssetImageThumb, CandidateThumbnail, loadLibraryImageUrl, useMediaLightbox } from "./CreateMediaPreview";
-import { ImageAssetPicker } from "./ImageAssetPicker";
+import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 import { ParamField, PromptPickerDialog, ReferencePanel, ResolutionPicker, presetAspectKey } from "./CreateInputs";
 import { ReadinessStatus } from "./CreateResults";
 import { useStudioStore } from "../../stores/studioStore";
