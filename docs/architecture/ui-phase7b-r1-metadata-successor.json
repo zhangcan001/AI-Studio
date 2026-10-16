@@ -281,11 +281,11 @@
     },
     "src/features/create/StoryboardShotRows.test.tsx": {
       "beforeHash": null,
-      "afterHash": "d71003208b4426969edc8988432481b96cdde5ec5ce55383df9e0c3bcf0f7a0c"
+      "afterHash": "67afab9b1d8ed4750dcc104fa4457acfa8d591c194fb872bfe9d848013b644dd"
     },
     "src/features/create/StoryboardShotRows.tsx": {
       "beforeHash": null,
-      "afterHash": "0c972bd8069c785d651951679786a9f9579f06013158b7a1085dcfbc00888f45"
+      "afterHash": "806e781ebb5b543836978cb0e0dce27e7e1a4cbde3ed742aef1e6f430b6f6d24"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,

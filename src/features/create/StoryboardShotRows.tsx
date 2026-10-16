@@ -71,10 +71,20 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       <button type="button" onClick={onQueue}>任务队列</button>
     </div>
     {visible.map(item => <ShotRowCard key={item.id} projectId={projectId} item={item} entities={entities} urls={urls} busy={busy}
-      generator={generators.find(g => g.selectionRef === item.shot?.selectionRef)}
+      generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} />)}
     {!visible.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
   </section>;
+}
+
+/**
+ * The shot's own generator; for a shot without a saved stage config, the same
+ * default the create page picks (recommended+available, then available), so
+ * duration/aspect can be set inline and the first save creates the stage config.
+ */
+export function rowGenerator(generators: GeneratorOption[], selectionRef: string | null) {
+  if (selectionRef) return generators.find(g => g.selectionRef === selectionRef);
+  return generators.find(g => g.recommended && g.availability) ?? generators.find(g => g.availability) ?? generators.find(g => g.recommended) ?? generators[0];
 }
 
 function useEntityCovers(projectId: string, entities: StoryEntity[]) {
@@ -162,7 +172,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
   const selectionRef = item.shot?.selectionRef ?? null;
   const current = useMemo(() => scalarValues(item.shot?.values), [item.shot?.values]);
   const [undo, setUndo] = useState<{ values?: Scalars; boundIds?: string[] }>();
-  const save = (patch: { prompt?: string; values?: Scalars }) => productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", ...patch, ...(patch.values ? { selectionRef: selectionRef ?? undefined } : {}) });
+  const save = (patch: { prompt?: string; values?: Scalars }) => productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", ...patch, ...(patch.values ? { selectionRef: selectionRef ?? generator?.selectionRef } : {}) });
   const preview = useMemo(() => recognize(prompt, entities, bound, generator, current), [prompt, entities, bound, generator, current]);
   /** Saves the prompt and applies recognized fields; the note lists exactly what was filled, with undo. */
   const savePrompt = () => {
@@ -172,7 +182,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     if (!promptChanged && !r.values && !r.addEntityIds.length) return;
     void run(async () => {
       const before = { values: r.values ? current : undefined, boundIds: r.addEntityIds.length ? bound.map(e => e.id) : undefined };
-      await save({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && selectionRef ? { values: r.values } : {}) });
+      await save({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && generator ? { values: r.values } : {}) });
       if (r.addEntityIds.length) setBound((await productClient.storyEntities.bindShot(projectId, item.id, [...bound.map(e => e.id), ...r.addEntityIds])) ?? []);
       const applied = r.labels.filter(l => !l.includes("（"));
       if (applied.length) { setUndo(before); setNote(`已识别并填入：${applied.join(" · ")}`); } else { setUndo(undefined); setNote("提示词已保存"); }
@@ -180,7 +190,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     });
   };
   const undoRecognized = () => undo && void run(async () => {
-    if (undo.values && selectionRef) await save({ values: undo.values });
+    if (undo.values && generator) await save({ values: undo.values });
     if (undo.boundIds) setBound((await productClient.storyEntities.bindShot(projectId, item.id, undo.boundIds)) ?? []);
     setUndo(undefined); setNote("已撤销自动填入"); onChanged();
   });
@@ -203,7 +213,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     const n = Number(duration); if (!Number.isFinite(n) || n === prev) { setDuration(prev === undefined ? "" : String(prev)); return; }
     saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value: durationField.type === "integer" ? Math.round(n) : n } });
   };
-  const noGen = !selectionRef ? "请先在详情中选择生成器" : undefined;
+  const noGen = !generator ? "请先在详情中选择生成器" : undefined;
   const generate = () => selectionRef && item.shot && void run(async () => {
     const values = { ...item.shot!.values, prompt: { type: "string" as const, value: prompt } };
     const base = { projectId, shotId: item.id, stage: "video" as const, selectionRef, values };

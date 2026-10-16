@@ -125,7 +125,17 @@ it("edits duration, aspect and resolution inline through updateShot; Ctrl+Enter 
   expect(await within(row).findByText("提示词已保存")).toBeTruthy();
 });
 
-it("shows read-only duration/aspect without a selected generator and never sends values", async () => {
+it("uses the default generator for a shot without stage config so the first inline edit creates it", async () => {
+  render(<StoryboardShotRows {...props()} items={[shot("c", 0, null)]} />);
+  const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
+  fireEvent.change(await within(row).findByLabelText("镜头1 画幅"), { target: { value: "9:16" } });
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", { shotId: "c", name: "镜头1", stage: "video", selectionRef: "sel",
+    values: { duration_seconds: { type: "integer", value: 5 }, width: { type: "integer", value: 768 }, height: { type: "integer", value: 1344 } } }));
+  expect(within(row).getByRole("button", { name: "生成视频" }).hasAttribute("disabled")).toBe(true);
+});
+
+it("shows read-only duration/aspect when no generator exists and never sends values", async () => {
+  api.generatorsList.mockResolvedValue([]);
   render(<StoryboardShotRows {...props()} items={[shot("b", 0, null)]} />);
   const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
   await waitFor(() => expect(api.generatorsList).toHaveBeenCalled());
