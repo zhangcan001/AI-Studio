@@ -14,19 +14,19 @@ function touchImageCache(key: string) {
 }
 
 function evictImageCache() {
-  while (imageCacheOrder.length > IMAGE_CACHE_CAP) {
-    const oldest = imageCacheOrder.shift();
-    if (!oldest) break;
+  for (const oldest of [...imageCacheOrder]) {
+    if (imageCache.size <= IMAGE_CACHE_CAP) break;
     const entry = imageCache.get(oldest);
     if (!entry) continue;
-    if (entry.refs > 0) { imageCacheOrder.push(oldest); break; }
+    if (entry.refs > 0) continue;
     if (entry.url) URL.revokeObjectURL(entry.url);
     imageCache.delete(oldest);
+    imageCacheOrder.splice(imageCacheOrder.indexOf(oldest), 1);
   }
 }
 
 /** Shared library imageGet → object URL. LRU-capped; blob URLs revoke on eviction when unreferenced. */
-export function loadLibraryImageUrl(projectId: string, assetId: string) {
+function libraryImageEntry(projectId: string, assetId: string) {
   const key = `${projectId}:${assetId}`;
   let hit = imageCache.get(key);
   if (!hit) {
@@ -36,13 +36,13 @@ export function loadLibraryImageUrl(projectId: string, assetId: string) {
         .then(() => productClient.library.imageGet(projectId, { kind: "asset", id: assetId }))
         .then(bytes => {
           const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes as number[])], { type: "image/png" }));
-          const live = imageCache.get(key);
-          if (live) live.url = url;
+          if (imageCache.get(key) !== entry) { URL.revokeObjectURL(url); return undefined; }
+          entry.url = url;
           return url;
         })
         .catch(() => {
-          const live = imageCache.get(key);
-          if (live?.url) URL.revokeObjectURL(live.url);
+          if (imageCache.get(key) !== entry) return undefined;
+          if (entry.url) URL.revokeObjectURL(entry.url);
           imageCache.delete(key);
           const at = imageCacheOrder.indexOf(key);
           if (at >= 0) imageCacheOrder.splice(at, 1);
@@ -51,25 +51,30 @@ export function loadLibraryImageUrl(projectId: string, assetId: string) {
     };
     imageCache.set(key, entry);
     touchImageCache(key);
-    evictImageCache();
     hit = entry;
   } else {
     touchImageCache(key);
   }
-  return hit.promise;
+  return hit;
+}
+
+export function loadLibraryImageUrl(projectId: string, assetId: string) {
+  const entry = libraryImageEntry(projectId, assetId);
+  evictImageCache();
+  return entry.promise;
 }
 
 export function retainLibraryImage(projectId: string, assetId: string) {
-  // Ensure the cache entry exists before taking a ref so eviction cannot drop in-flight loads.
-  void loadLibraryImageUrl(projectId, assetId);
-  const key = `${projectId}:${assetId}`;
-  const entry = imageCache.get(key);
-  if (entry) entry.refs += 1;
+  // Pin before eviction, including when every older entry is already pinned.
+  const entry = libraryImageEntry(projectId, assetId);
+  entry.refs += 1;
+  evictImageCache();
+  let released = false;
   return () => {
-    const live = imageCache.get(key);
-    if (!live) return;
-    live.refs = Math.max(0, live.refs - 1);
-    if (live.refs === 0) evictImageCache();
+    if (released) return;
+    released = true;
+    entry.refs -= 1;
+    if (entry.refs === 0) evictImageCache();
   };
 }
 

@@ -3,7 +3,8 @@ import type { RecipeField } from "../../types/generation";
 import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, mediaKind, mediaValue } from "./createModel";
 import { modeLabel } from "../../product/generatorPresentation";
-import { AssetImageThumb, CandidateThumbnail, loadLibraryImageUrl, useMediaLightbox } from "./CreateMediaPreview";
+import { AssetImageThumb, CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage, useMediaLightbox } from "./CreateMediaPreview";
+import { useShotEntityBindings } from "./ShotEntityChips";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 import { ParamField, PromptPickerDialog, ReferencePanel, ResolutionPicker, presetAspectKey } from "./CreateInputs";
 import { ReadinessStatus } from "./CreateResults";
@@ -89,10 +90,8 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const caret = useRef<Range | null>(null);
   const [picker, setPicker] = useState<"insert" | "add" | null>(null);
   const [imagePick, setImagePick] = useState<{ field: RecipeField; title: string } | null>(null);
-  const [entities, setEntities] = useState<StoryEntity[]>([]);
   const [allEntities, setAllEntities] = useState<StoryEntity[]>([]);
   const [entityRev, setEntityRev] = useState(0);
-  const [bindBusy, setBindBusy] = useState(false);
   const [entityPicker, setEntityPicker] = useState(false);
   const [entityUrls, setEntityUrls] = useState<Record<string, string>>({});
   const [promptPicker, setPromptPicker] = useState(false);
@@ -107,19 +106,12 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const imageIds = images.map(r => r.assetId).join("|");
   useEffect(() => {
     if (!projectId) return; let alive = true;
-    for (const id of new Set(imageIds.split("|").filter(Boolean))) void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setImgUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
-    return () => { alive = false; };
+    const ids = [...new Set(imageIds.split("|").filter(Boolean))];
+    const release = ids.map(id => retainLibraryImage(projectId, id));
+    setImgUrls({});
+    for (const id of ids) void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setImgUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
+    return () => { alive = false; release.forEach(fn => fn()); };
   }, [projectId, imageIds]);
-
-  useEffect(() => {
-    if (!projectId || !c.context?.selectedShot?.summary.id) { setEntities([]); return; }
-    const shotId = c.context.selectedShot.summary.id;
-    const listForShot = productClient.storyEntities?.listForShot;
-    if (typeof listForShot !== "function") { setEntities([]); return; }
-    let alive = true;
-    void Promise.resolve(listForShot(projectId, shotId)).then(list => { if (alive) setEntities(list ?? []); }).catch(() => { if (alive) setEntities([]); });
-    return () => { alive = false; };
-  }, [projectId, c.context?.selectedShot?.summary.id, entityRev]);
 
   // All project entities (not only bound ones); refetched when the Library saves one or the window regains focus.
   useEffect(() => {
@@ -135,23 +127,21 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     return () => { alive = false; };
   }, [projectId, entityRev]);
   const shotId = c.context?.selectedShot?.summary.id;
-  async function setBound(ids: string[]) {
-    if (!projectId || !shotId || bindBusy) return;
-    setBindBusy(true);
-    try { setEntities((await productClient.storyEntities.bindShot(projectId, shotId, ids)) ?? []); } catch { /* keep current binding */ } finally { setBindBusy(false); }
-  }
+  const binding = useShotEntityBindings(projectId, shotId, entityRev);
+  const { entities, busy: bindBusy } = binding;
   const isBound = (id: string) => entities.some(e => e.id === id);
-  const toggleBound = (id: string) => void setBound(isBound(id) ? entities.filter(e => e.id !== id).map(e => e.id) : [...entities.map(e => e.id), id]);
+  const toggleBound = (id: string) => void binding.replace(isBound(id) ? entities.filter(e => e.id !== id).map(e => e.id) : [...entities.map(e => e.id), id]);
 
   useEffect(() => {
     if (!projectId) return;
     let alive = true;
-    for (const entity of [...entities, ...allEntities]) {
-      const id = entityAvatarAssetId(entity);
-      if (!id || entityUrls[id]) continue;
+    const ids = [...new Set([...entities, ...allEntities].map(entityAvatarAssetId).filter((id): id is string => Boolean(id)))];
+    const release = ids.map(id => retainLibraryImage(projectId, id));
+    setEntityUrls({});
+    for (const id of ids) {
       void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setEntityUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
     }
-    return () => { alive = false; };
+    return () => { alive = false; release.forEach(fn => fn()); };
   }, [projectId, [...entities, ...allEntities].map(e => entityAvatarAssetId(e) ?? "").join("|")]);
 
 
@@ -241,10 +231,11 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     <ReadinessStatus controller={c} />
     {projectId && shotId && allEntities.length > 0 && <div className="composer-entity-strip" role="group" aria-label="镜头角色与场景">
       {allEntities.map(entity => { const aid = entityAvatarAssetId(entity); const cover = aid ? entityUrls[aid] : undefined; const bound = isBound(entity.id);
-        return <button type="button" key={entity.id} className={"composer-entity" + (bound ? " bound" : "")} aria-pressed={bound} disabled={bindBusy || c.busy}
+        return <button type="button" key={entity.id} className={"composer-entity" + (bound ? " bound" : "")} aria-pressed={bound} disabled={bindBusy || c.busy || !binding.ready}
           title={(bound ? "解除绑定 " : "绑定到镜头 ") + entity.name} aria-label={(bound ? "解除绑定 " : "绑定 ") + entity.name} onClick={() => toggleBound(entity.id)}>
           {cover ? <img src={cover} alt="" /> : <span className="composer-entity-glyph">{entity.name.slice(0, 1)}</span>}<small>{entity.name}</small></button>; })}
     </div>}
+    {binding.error && allEntities.length > 0 && <p role="alert">{binding.error}<button type="button" disabled={bindBusy} onClick={binding.reload}>重试读取绑定</button></p>}
     <section className="create-composer" aria-label="创作输入框" data-inputs={inputsState}>
     {vi.enabled && !mediaFields.length && <small className="composer-hint">T2V 无需图片输入。</small>}
     {vi.enabled && vi.dirty && !vi.busy && !pendingSave.current && <p role="status" className="composer-unsaved">输入尚未保存。<button type="button" onClick={() => void vi.save()}>保存输入</button></p>}
@@ -302,7 +293,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       <button type="button" onClick={() => { setPicker(null); c.openLibrary(mediaKind(target) === "image" ? "images" : mediaKind(target) === "video" ? "videos" : "audio"); }}>在资源库查找</button>
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button></div>}
     {entityPicker && <div className="composer-picker" role="listbox" aria-label="插入角色与场景">
-      {allEntities.map(entity => <button type="button" role="option" aria-selected={isBound(entity.id)} key={entity.id} onMouseDown={e => e.preventDefault()} onClick={() => {
+      {allEntities.map(entity => <button type="button" role="option" aria-selected={isBound(entity.id)} key={entity.id} disabled={!binding.ready || bindBusy || locked} onMouseDown={e => e.preventDefault()} onClick={() => {
         const root = editor.current; if (!root || !promptField) return;
         const aid = entityAvatarAssetId(entity); const cover = aid ? entityUrls[aid] : undefined;
         const chip = entityChipNode(entity, cover); const space = document.createTextNode(" ");
@@ -331,21 +322,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       {presets.length > 0 && <ResolutionPicker controller={c} presets={pickerPresets} current={current} />}
       {durationField && <label className="composer-pick" title="时长">◷<input id="create-field-duration_seconds" aria-label={fieldLabel(durationField)} type="number" min={"min" in durationField ? durationField.min : undefined} max={"max" in durationField ? durationField.max : undefined} step={("step" in durationField && durationField.step) || (durationField.type === "integer" ? 1 : "any")} disabled={c.busy} value={(() => { const v = c.values.duration_seconds; return v?.type === "integer" || v?.type === "number" ? v.value : ""; })()} onChange={e => e.target.value === "" ? c.removeValue("duration_seconds") : c.setValue("duration_seconds", { type: durationField.type as "integer", value: Number(e.target.value) })} />s</label>}
       {aspects.length > 0 && <label className="composer-pick" title="画面比例">▭<select aria-label="画面比例" value={aspect ?? ""} disabled={c.busy} onChange={e => chooseAspect(e.target.value)}>{!aspect && <option value="" disabled>比例</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>}
-      <button type="button" className="composer-submit" aria-label={c.busy ? "正在提交…" : "生成"} title={canSubmit ? "写入生产队列并生成" : "请先完成准备检查"} disabled={!canSubmit} onClick={() => void (async () => {
-        const covers = entities.map(e => entityAvatarAssetId(e)).filter((id): id is string => Boolean(id));
-        if (covers.length) {
-          const imageField = mediaFields.find(f => mediaKind(f) === "image");
-          if (imageField) {
-            const existing = assetIds(c.values[imageField.key]);
-            const merged = [...existing];
-            for (const id of covers) if (!merged.includes(id)) merged.push(id);
-            const max = plural(imageField) && "maxItems" in imageField && imageField.maxItems ? imageField.maxItems : plural(imageField) ? Number.POSITIVE_INFINITY : 1;
-            setField(imageField, merged.slice(0, max === Number.POSITIVE_INFINITY ? merged.length : max));
-            if (vi.enabled) await vi.save();
-          }
-        }
-        await c.generate();
-      })()}>↑</button>
+      <button type="button" className="composer-submit" aria-label={c.busy ? "正在提交…" : "生成"} title={canSubmit ? "写入生产队列并生成" : "请先完成准备检查"} disabled={!canSubmit} onClick={() => void c.generate()}>↑</button>
     </div>
     <details className="composer-advanced"><summary>高级设置</summary>
       {negativeField && <label>{fieldLabel(negativeField)}<textarea id="create-field-negative_prompt" aria-label={fieldLabel(negativeField)} rows={2} value={c.values.negative_prompt?.type === "string" ? c.values.negative_prompt.value : ""} onChange={e => c.setValue("negative_prompt", { type: "string", value: e.target.value })} /></label>}

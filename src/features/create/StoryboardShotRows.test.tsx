@@ -217,6 +217,7 @@ it("shows read-only duration/aspect when no generator exists and never sends val
   await waitFor(() => expect(api.generatorsList).toHaveBeenCalled());
   expect(within(row).queryByLabelText("镜头1 画幅")).toBeNull();
   const box = within(row).getByLabelText("镜头1 提示词");
+  await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
   fireEvent.change(box, { target: { value: "竖屏 6秒" } }); fireEvent.blur(box);
   await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", { shotId: "b", name: "镜头1", stage: "video", prompt: "竖屏 6秒" }));
 });

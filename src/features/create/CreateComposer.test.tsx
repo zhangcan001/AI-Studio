@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CreatePage } from "./CreatePage";
 import { useStudioStore } from "../../stores/studioStore";
@@ -9,6 +9,8 @@ import { promptEditor, promptText, setPrompt } from "./composerTestUtils";
 import { aspectOf, composerReferences, serializePrompt } from "./CreateComposer";
 import { productClient } from "../../product/client";
 import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
+import { ShotEntityChips } from "./ShotEntityChips";
+import type { StoryEntity } from "../../types/storyEntity";
 
 const api = vi.hoisted(() => ({ get:vi.fn(),generatorsList:vi.fn(),inputsGet:vi.fn(),inputsSave:vi.fn(),assetsImport:vi.fn(),readinessGet:vi.fn(),generate:vi.fn(),selectResult:vi.fn(),runGet:vi.fn(),retry:vi.fn(),libraryGet:vi.fn(),imageGet:vi.fn(),mediaUrl:vi.fn() }));
 vi.mock("../../product/client",()=>({productClient:{storyEntities:{list:vi.fn(async()=>[]),listForShot:vi.fn(async()=>[]),bindShot:vi.fn(async()=>[]),create:vi.fn(),update:vi.fn(),delete:vi.fn(),get:vi.fn()},creation:api,run:{get:api.runGet,retry:api.retry,list:vi.fn(async()=>({items:[]}))},library:{get:api.libraryGet,imageGet:api.imageGet,list:vi.fn(async()=>({items:[],nextCursor:null})),tagsList:vi.fn(async()=>[])}}}));
@@ -47,6 +49,107 @@ async function start(ref?:string) {
   await waitFor(()=>expect(composer().getAttribute("data-inputs")).toBe("saved"));
 }
 const persisted = () => api.inputsSave.mock.calls[api.inputsSave.mock.calls.length-1]?.[0].inputs;
+function pending<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
+const auditHero: StoryEntity = { id: "hero", projectId: "owned", kind: "character", name: "审计角色", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
+const auditScene: StoryEntity = { ...auditHero, id: "scene", kind: "scene", name: "审计场景" };
+
+it("audit: Generate never guesses a media slot or injects entity covers into saved inputs", async () => {
+  const hero = { ...auditHero, coverAssetId: "entity-cover" };
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([hero]);
+  vi.mocked(productClient.storyEntities.listForShot).mockResolvedValue([hero]);
+  saved.set("opaque-2", { selectionRef: "opaque-2", token: null, inputs: [], assets: [{ id: "explicit-audit-frame", name: "外部首帧", mediaKind: "image" }] });
+  await start("opaque-2");
+  fireEvent.click(screen.getByLabelText("参考图片"));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("option", { name: /外部首帧/ }));
+  await waitFor(() => expect(persisted()).toEqual([{ inputKey: "reference_images", ordinal: 0, assetId: "explicit-audit-frame" }]));
+  await ready();
+  const before = api.inputsSave.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "生成" }));
+  expect(useStudioStore.getState().values.reference_images).toEqual({ type: "image_assets", assetIds: ["explicit-audit-frame"] });
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+  expect(api.inputsSave).toHaveBeenCalledTimes(before);
+  expect(api.generate.mock.calls[0][0].values.reference_images).toEqual({ type: "image_assets", assetIds: ["explicit-audit-frame"] });
+});
+
+it("fails closed on a binding read error and permits replacement only after retry", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([auditHero, auditScene]);
+  vi.mocked(productClient.storyEntities.listForShot).mockRejectedValueOnce(new Error("binding read unavailable")).mockResolvedValue([auditHero]);
+  vi.mocked(productClient.storyEntities.bindShot).mockResolvedValue([auditHero, auditScene]);
+  render(<ShotEntityChips projectId="owned" shotId="read-error" editable />);
+  await screen.findByRole("alert");
+  const add = await screen.findByRole("checkbox", { name: "场景 · 审计场景" });
+  expect(add.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(add);
+  expect(productClient.storyEntities.bindShot).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "重试读取绑定" }));
+  await waitFor(() => expect(add.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(add);
+  await waitFor(() => expect(productClient.storyEntities.bindShot).toHaveBeenCalledWith("owned", "read-error", ["hero", "scene"]));
+});
+
+it("audit: composer cannot replace unknown initial entity bindings", async () => {
+  const initial = pending<StoryEntity[]>();
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([auditHero, auditScene]);
+  vi.mocked(productClient.storyEntities.listForShot).mockReturnValue(initial.promise);
+  vi.mocked(productClient.storyEntities.bindShot).mockResolvedValue([auditHero, auditScene]);
+  await start();
+  const add = await screen.findByRole("button", { name: "绑定 审计场景" });
+  expect(add.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(add); expect(productClient.storyEntities.bindShot).not.toHaveBeenCalled();
+  await act(async () => { initial.resolve([auditHero]); });
+  await waitFor(() => expect(add.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(add);
+  await waitFor(() => expect(productClient.storyEntities.bindShot).toHaveBeenCalledWith("owned", "one", ["hero", "scene"]));
+});
+
+it("audit: a late binding write cannot replace the next Shot's entity state", async () => {
+  const write = pending<StoryEntity[]>();
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([auditHero, auditScene]);
+  vi.mocked(productClient.storyEntities.listForShot).mockImplementation(async (_p, s) => s === "two" ? [auditScene] : [auditHero]);
+  vi.mocked(productClient.storyEntities.bindShot).mockReturnValue(write.promise);
+  api.get.mockImplementation((p, s) => { const ctx = context(p); ctx.shots = [{ id: "one", name: "one", ordinal: 0 }, { id: "two", name: "two", ordinal: 1 }]; ctx.selectedShot!.summary = ctx.shots[s === "two" ? 1 : 0]; return Promise.resolve(ctx); });
+  const view = render(<CreatePage route={route} runtime={{ ...runtime, devices: [] }} navigate={nav} />);
+  const add = await screen.findByRole("button", { name: "绑定 审计场景" });
+  await waitFor(() => expect(screen.getByRole("button", { name: "解除绑定 审计角色" })).toBeTruthy());
+  fireEvent.click(add);
+  await waitFor(() => expect(productClient.storyEntities.bindShot).toHaveBeenCalled());
+  view.rerender(<CreatePage route={{ ...route, shotId: "two" }} runtime={{ ...runtime, devices: [] }} navigate={nav} />);
+  await waitFor(() => expect(productClient.storyEntities.listForShot).toHaveBeenCalledWith("owned", "two"));
+  await screen.findByRole("button", { name: "解除绑定 审计场景" });
+  await act(async () => { write.resolve([auditHero, auditScene]); });
+  expect(screen.getByRole("button", { name: "绑定 审计角色" }).getAttribute("aria-pressed")).toBe("false");
+});
+
+it("audit: editing detail chips never revokes an avatar that is still displayed", async () => {
+  const hero = { ...auditHero, coverAssetId: "detail-avatar" };
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([hero, auditScene]);
+  vi.mocked(productClient.storyEntities.listForShot).mockResolvedValue([hero]);
+  vi.mocked(productClient.storyEntities.bindShot).mockResolvedValue([hero, auditScene]);
+  let count = 0; URL.createObjectURL = vi.fn(() => `blob:detail-${++count}`); URL.revokeObjectURL = vi.fn();
+  render(<ShotEntityChips projectId="owned" shotId="one" editable />);
+  const button = await screen.findByRole("button", { name: "审计角色" });
+  await waitFor(() => expect(button.querySelector("img")).toBeTruthy());
+  const displayed = button.querySelector("img")!.src;
+  fireEvent.click(screen.getByRole("checkbox", { name: "场景 · 审计场景" }));
+  await waitFor(() => expect(productClient.storyEntities.bindShot).toHaveBeenCalled());
+  await screen.findByTitle("场景 · 审计场景");
+  expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(displayed);
+});
+
+it("audit: detail chips ignore a late write after switching Shot props", async () => {
+  const write = pending<StoryEntity[]>();
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([auditHero, auditScene]);
+  vi.mocked(productClient.storyEntities.listForShot).mockImplementation(async (_p, id) => id === "two" ? [auditScene] : [auditHero]);
+  vi.mocked(productClient.storyEntities.bindShot).mockReturnValue(write.promise);
+  const view = render(<ShotEntityChips projectId="owned" shotId="one" editable />);
+  await screen.findByTitle("角色 · 审计角色");
+  fireEvent.click(screen.getByRole("checkbox", { name: "场景 · 审计场景" }));
+  await waitFor(() => expect(productClient.storyEntities.bindShot).toHaveBeenCalled());
+  view.rerender(<ShotEntityChips projectId="owned" shotId="two" editable />);
+  await screen.findByTitle("场景 · 审计场景");
+  await act(async () => { write.resolve([auditHero, auditScene]); });
+  expect(screen.queryByTitle("角色 · 审计角色")).toBeNull();
+});
 async function ready() { await screen.findByText("可以入队生成"); await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(false)); }
 
 it("is the single input surface: no legacy prompt/media/parameter panels or second generate button",async()=>{

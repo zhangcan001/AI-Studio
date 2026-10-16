@@ -3,7 +3,7 @@ import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
-import { CandidateThumbnail, loadLibraryImageUrl } from "./CreateMediaPreview";
+import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage } from "./CreateMediaPreview";
 import "./CreatePage.css";
 import type { GeneratorOption } from "../../product/types";
 import type { DraftValue } from "../../types/generation";
@@ -92,11 +92,13 @@ function useEntityCovers(projectId: string, entities: StoryEntity[]) {
   const key = entities.map(e => entityAvatarAssetId(e) ?? "").join("|");
   useEffect(() => {
     let alive = true;
-    for (const id of new Set(entities.map(e => entityAvatarAssetId(e)).filter((v): v is string => Boolean(v)))) {
-      if (urls[id]) continue;
+    const ids = [...new Set(entities.map(e => entityAvatarAssetId(e)).filter((v): v is string => Boolean(v)))];
+    const release = ids.map(id => retainLibraryImage(projectId, id));
+    setUrls({});
+    for (const id of ids) {
       void loadLibraryImageUrl(projectId, id).then(u => { if (alive && u) setUrls(m => m[id] === u ? m : { ...m, [id]: u }); });
     }
-    return () => { alive = false; };
+    return () => { alive = false; release.forEach(fn => fn()); };
   }, [projectId, key]);
   return urls;
 }

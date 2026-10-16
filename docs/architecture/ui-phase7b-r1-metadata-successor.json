@@ -225,11 +225,11 @@
     },
     "src/components/ImageAssetPicker.test.tsx": {
       "beforeHash": null,
-      "afterHash": "16c8f63975b3852b2f56916b9dec652a2d695893fc6324130bfdc76806caff28"
+      "afterHash": "83e25400194e4d822871e2648c1ee02e1211c7bc4df0b3af2df41ebd1c61168d"
     },
     "src/components/ImageAssetPicker.tsx": {
       "beforeHash": null,
-      "afterHash": "57cb1af79482f422dd23ff8643958597ff4ffa4742542019c7c2f87a9a7954fc"
+      "afterHash": "b11bc5feaf4a052f1754a7f15c4baa09e89ff71312d5c8e4db95485d52bffddf"
     },
     "src/features/create/CandidateThumbnail.test.tsx": {
       "beforeHash": null,
@@ -237,11 +237,11 @@
     },
     "src/features/create/CreateComposer.test.tsx": {
       "beforeHash": null,
-      "afterHash": "c7cd56c474ed6fc3cc98639b921b3263ab5d907888313ddcecca8a0e50f132eb"
+      "afterHash": "c8cbd11188310b5b8d7ccef1a1b9a6d4a9508ee8220bc81c7d75402a7eee8f59"
     },
     "src/features/create/CreateComposer.tsx": {
       "beforeHash": null,
-      "afterHash": "e457873aadf7eb228074ba20cee342eb69aa234da56712887a55b58d1c85c115"
+      "afterHash": "3b3c26fc5babf54301124a82d731f0b531d7c1e1faa13c8337ae324ac133fe83"
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
@@ -253,11 +253,11 @@
     },
     "src/features/create/CreateMediaPreview.hooks.test.tsx": {
       "beforeHash": null,
-      "afterHash": "82cd3a5727b06fba7a7b458d282a7730032e898e566440f171db31eea29f919e"
+      "afterHash": "87b15a5d8e1bd87ce6d960bf4319fee4e410273e9efb65aaf3f78318d8e39add"
     },
     "src/features/create/CreateMediaPreview.tsx": {
       "beforeHash": "418f32f5d365c2ea9fc624124589b9f9b529a3a74e77e23d4f8d1164da5ba619",
-      "afterHash": "d8603a67e2efff22e3e59ca28bed2e428957393b79d50610dcefea4080ece495"
+      "afterHash": "23ad551f09423159acab0c2b2bced4785f667fde8a17b41760aae63b06b4b86e"
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
@@ -289,15 +289,15 @@
     },
     "src/features/create/ShotEntityChips.tsx": {
       "beforeHash": null,
-      "afterHash": "b864149ab0aced9d5679c6bb23758b7e6e13c4759f1d5afe5ca55a0bc075774d"
+      "afterHash": "1dd793a43ee6489b6c7634534bde8ff2a6b4c38bf307824f75dabe7554e9dba8"
     },
     "src/features/create/StoryboardShotRows.test.tsx": {
       "beforeHash": null,
-      "afterHash": "df52d1d622fdfb8de8a7b9803dd20a065cdf60af6c52b5be96698e784a084d90"
+      "afterHash": "3667be5f6bc51d5c157d2080912f0cf1137104acecca3f7ad34a9488e3666764"
     },
     "src/features/create/StoryboardShotRows.tsx": {
       "beforeHash": null,
-      "afterHash": "751851ad6514fd0c24d5358838f79f1f5347898f39a480439c354077cdfc0b2f"
+      "afterHash": "898fc5a7d48635daba70777b3dbba5564c6a10bbdc3f676cf3639c9cc8ec6068"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,

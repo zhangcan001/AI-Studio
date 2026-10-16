@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { productClient } from "../product/client";
-import type { LibraryItem, LibraryTag } from "../product/libraryTypes";
+import type { LibraryCursor, LibraryItem, LibraryQuery, LibraryTag } from "../product/libraryTypes";
 import { AssetImageThumb } from "../features/create/CreateMediaPreview";
 
 export type ImagePickTab = "all" | "character" | "scene" | "prop" | "untagged";
@@ -41,6 +41,14 @@ export function ImageAssetPicker({
   const [tags, setTags] = useState<LibraryTag[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [nextCursor, setNextCursor] = useState<LibraryCursor | null>(null);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [loadedScope, setLoadedScope] = useState<string>();
+  const scope = JSON.stringify([projectId, open, tab, keyword.trim()]);
+  const activeScope = useRef(scope); activeScope.current = scope;
+  const epoch = useRef(0);
+  const pageLock = useRef<object | null>(null);
+  const currentQuery = useRef<LibraryQuery | undefined>(undefined);
 
   useEffect(() => {
     if (!open) return;
@@ -48,6 +56,10 @@ export function ImageAssetPicker({
   }, [open, projectId]);
 
   useEffect(() => {
+    const token = ++epoch.current;
+    const current = () => activeScope.current === scope && token === epoch.current;
+    setLoadedScope(undefined); setItems([]); setTags([]); setNextCursor(null); setMoreBusy(false);
+    pageLock.current = null; currentQuery.current = undefined;
     if (!open) return;
     let alive = true;
     setBusy(true); setError(undefined);
@@ -57,39 +69,67 @@ export function ImageAssetPicker({
     void (typeof tagsFn === "function" ? tagsFn(projectId) : Promise.resolve([] as LibraryTag[]))
       .catch(() => [] as LibraryTag[])
       .then(async tagList => {
-      if (!alive) return;
+      if (!alive || !current()) return;
       setTags(tagList);
       const tagId = (tab === "character" || tab === "scene" || tab === "prop")
         ? (tagList.find(tag => matchesHints(tag.name, hints))?.id ?? null)
         : null;
       try {
         if (typeof listFn !== "function") {
-          if (alive) { setItems([]); setBusy(false); }
+          if (alive && current()) { setItems([]); setLoadedScope(scope); setBusy(false); }
           return;
         }
-        const page = await listFn(projectId, {
+        const query: LibraryQuery = {
           category: "images", keyword: keyword.trim() || null, favoriteOnly: null,
           tagId, sourceKind: null, cursor: null, limit: 100,
-        });
-        if (!alive) return;
+        };
+        currentQuery.current = query;
+        const page = await listFn(projectId, query);
+        if (!alive || !current()) return;
         setItems(page.items.filter(i => i.resourceRef.kind === "asset"));
+        setNextCursor(page.nextCursor ?? null); setLoadedScope(scope);
       } catch (cause) {
-        if (alive) {
-          setItems([]);
+        if (alive && current()) {
+          setItems([]); setLoadedScope(scope);
           setError(cause instanceof Error ? cause.message : "无法读取图片素材");
         }
       } finally {
-        if (alive) setBusy(false);
+        if (alive && current()) setBusy(false);
       }
     });
-    return () => { alive = false; };
-  }, [open, projectId, tab, keyword]);
+    return () => { alive = false; ++epoch.current; };
+  }, [open, projectId, tab, keyword, scope]);
+
+  async function loadMore() {
+    if (loadedScope !== scope || !nextCursor || !currentQuery.current || pageLock.current) return;
+    const operation = {}, token = epoch.current, cursor = nextCursor;
+    const query = { ...currentQuery.current, cursor };
+    const current = () => activeScope.current === scope && token === epoch.current;
+    pageLock.current = operation; setMoreBusy(true); setError(undefined);
+    try {
+      const page = await productClient.library.list(projectId, query);
+      if (!current()) return;
+      setItems(previous => {
+        const ids = new Set(previous.map(item => item.resourceRef.id));
+        return [...previous, ...page.items.filter(item => {
+          if (item.resourceRef.kind !== "asset" || ids.has(item.resourceRef.id)) return false;
+          ids.add(item.resourceRef.id); return true;
+        })];
+      });
+      setNextCursor(page.nextCursor ?? null);
+    } catch (cause) {
+      if (current()) setError(cause instanceof Error ? cause.message : "无法读取下一页图片");
+    } finally {
+      if (pageLock.current === operation) pageLock.current = null;
+      if (current()) setMoreBusy(false);
+    }
+  }
 
   const entityHints = useMemo(() => TABS.filter(t => t.tagHints.length).flatMap(t => t.tagHints), []);
 
   const libraryRows = useMemo(() => {
     const exclude = new Set(excludeIds);
-    let rows = items.filter(i => i.resourceRef.kind === "asset" && !exclude.has(i.resourceRef.id));
+    let rows = loadedScope === scope ? items.filter(i => i.resourceRef.kind === "asset" && !exclude.has(i.resourceRef.id)) : [];
     // When tag filter is unavailable, fall back to title/subtype heuristics for entity tabs.
     if (tab === "character" || tab === "scene" || tab === "prop") {
       const hints = TABS.find(x => x.id === tab)!.tagHints;
@@ -99,7 +139,7 @@ export function ImageAssetPicker({
       rows = rows.filter(i => !matchesHints(i.title, entityHints) && !matchesHints(i.subtype, entityHints));
     }
     return rows;
-  }, [items, excludeIds, tab, tags, entityHints]);
+  }, [items, excludeIds, tab, tags, entityHints, loadedScope, scope]);
 
   const localRows = useMemo(() => {
     const q = keyword.trim().toLowerCase();
@@ -107,6 +147,7 @@ export function ImageAssetPicker({
     const libIds = new Set(
       items.filter(i => i.resourceRef.kind === "asset").map(i => (i.resourceRef.kind === "asset" ? i.resourceRef.id : "")),
     );
+    // These choices belong to the current caller, not to an earlier Library response.
     let rows = localChoices.filter(a => a.mediaKind === "image" && !exclude.has(a.id) && !libIds.has(a.id));
     if (q) rows = rows.filter(a => a.name.toLowerCase().includes(q));
     if (tab === "character" || tab === "scene" || tab === "prop") {
@@ -116,7 +157,7 @@ export function ImageAssetPicker({
       rows = rows.filter(a => !matchesHints(a.name, entityHints));
     }
     return rows;
-  }, [localChoices, keyword, excludeIds, items, tab, entityHints]);
+  }, [localChoices, keyword, excludeIds, items, tab, entityHints, loadedScope, scope]);
 
   if (!open) return null;
   return <div className="image-asset-picker-backdrop" role="presentation" onClick={onClose}>
@@ -145,6 +186,7 @@ export function ImageAssetPicker({
         })}
       </div>
       <footer className="image-asset-picker-actions">
+        {loadedScope === scope && nextCursor && <button type="button" disabled={moreBusy} onClick={() => void loadMore()}>{moreBusy ? "正在加载更多…" : "加载更多图片"}</button>}
         {onImportFile && <button type="button" onClick={() => { onClose(); onImportFile(); }}>从电脑导入…</button>}
         {onImportFolder && <button type="button" onClick={() => { onClose(); onImportFolder(); }}>导入图片文件夹…</button>}
         {onOpenLibrary && <button type="button" onClick={() => { onClose(); onOpenLibrary(); }}>在资源库查找</button>}
