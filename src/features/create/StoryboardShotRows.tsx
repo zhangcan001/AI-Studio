@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
@@ -70,7 +70,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       </div>
       <button type="button" onClick={onQueue}>任务队列</button>
     </div>
-    {visible.map(item => <ShotRowCard key={item.id} projectId={projectId} item={item} entities={entities} urls={urls} busy={busy}
+    {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={entities} urls={urls} busy={busy}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} />)}
     {!visible.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
@@ -152,21 +152,43 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
+  const scopeEpoch = useRef(0);
+  const bindingEpoch = useRef(0);
+  const [bindingsReady, setBindingsReady] = useState(false);
+  useEffect(() => () => { ++scopeEpoch.current; }, [projectId, item.id]);
   useEffect(() => { setPrompt(item.shot?.prompt ?? ""); }, [item.shot?.prompt]);
   useEffect(() => { setName(item.name); }, [item.name]);
-  const reloadBound = useCallback(() => {
+  useEffect(() => {
+    const token = ++bindingEpoch.current;
+    setBindingsReady(false);
     const listForShot = productClient.storyEntities?.listForShot;
-    if (typeof listForShot !== "function") return;
-    void Promise.resolve(listForShot(projectId, item.id)).then(next => setBound(next ?? [])).catch(() => setBound([]));
-  }, [projectId, item.id]);
-  useEffect(() => { reloadBound(); }, [reloadBound, entities]);
+    if (typeof listForShot === "function") {
+      void Promise.resolve().then(() => listForShot(projectId, item.id)).then(next => {
+        if (token !== bindingEpoch.current) return;
+        setBound(next ?? []); setBindingsReady(true);
+      }).catch(cause => { if (token === bindingEpoch.current) setError(normalizeProductError(cause).message); });
+    }
+    return () => { ++bindingEpoch.current; };
+  }, [projectId, item.id, entities]);
   const disabled = busy || working;
+  const bindingsDisabled = disabled || !bindingsReady;
   const run = async (fn: () => Promise<unknown>) => {
+    const token = scopeEpoch.current;
     setWorking(true); setError(undefined); setNote(undefined);
-    try { await fn(); } catch (cause) { setError(normalizeProductError(cause).message); } finally { setWorking(false); }
+    try { await fn(); } catch (cause) { if (token === scopeEpoch.current) setError(normalizeProductError(cause).message); } finally { if (token === scopeEpoch.current) setWorking(false); }
   };
-  const bind = (ids: string[]) => run(async () => { setBound((await productClient.storyEntities.bindShot(projectId, item.id, ids)) ?? []); });
-  const toggle = (id: string) => void bind(bound.some(e => e.id === id) ? bound.filter(e => e.id !== id).map(e => e.id) : [...bound.map(e => e.id), id]);
+  const replaceBindings = async (ids: string[]) => {
+    const scope = scopeEpoch.current;
+    ++bindingEpoch.current;
+    const next = await productClient.storyEntities.bindShot(projectId, item.id, ids);
+    if (scope !== scopeEpoch.current) return;
+    ++bindingEpoch.current; // A read started before this write completed is stale too.
+    setBound(next ?? []); setBindingsReady(true);
+  };
+  const toggle = (id: string) => {
+    if (bindingsDisabled) return;
+    void run(() => replaceBindings(bound.some(e => e.id === id) ? bound.filter(e => e.id !== id).map(e => e.id) : [...bound.map(e => e.id), id]));
+  };
   const saveName = () => { const next = name.trim(); if (!next || next === item.name) { setName(item.name); return; } void run(async () => { await productClient.creation.updateShot(projectId, { shotId: item.id, name: next }); onChanged(); }); };
   const remove = () => { if (!window.confirm(`删除分镜「${item.name}」？此操作不可撤销。`)) return; void run(async () => { await productClient.creation.deleteShot(projectId, item.id); onChanged(); }); };
   const selectionRef = item.shot?.selectionRef ?? null;
@@ -176,6 +198,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
   const preview = useMemo(() => recognize(prompt, entities, bound, generator, current), [prompt, entities, bound, generator, current]);
   /** Saves the prompt and applies recognized fields; the note lists exactly what was filled, with undo. */
   const savePrompt = () => {
+    if (bindingsDisabled) return;
     const text = prompt.trim();
     const promptChanged = text !== (item.shot?.prompt ?? "").trim();
     const r = recognize(text, entities, bound, generator, current);
@@ -183,18 +206,18 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     void run(async () => {
       const before = { values: r.values ? current : undefined, boundIds: r.addEntityIds.length ? bound.map(e => e.id) : undefined };
       await save({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && generator ? { values: r.values } : {}) });
-      if (r.addEntityIds.length) setBound((await productClient.storyEntities.bindShot(projectId, item.id, [...bound.map(e => e.id), ...r.addEntityIds])) ?? []);
+      if (r.addEntityIds.length) await replaceBindings([...bound.map(e => e.id), ...r.addEntityIds]);
       const applied = r.labels.filter(l => !l.includes("（"));
       if (applied.length) { setUndo(before); setNote(`已识别并填入：${applied.join(" · ")}`); } else { setUndo(undefined); setNote("提示词已保存"); }
       onChanged();
     });
   };
-  const undoRecognized = () => undo && void run(async () => {
+  const undoRecognized = () => undo && !bindingsDisabled && void run(async () => {
     if (undo.values && generator) await save({ values: undo.values });
-    if (undo.boundIds) setBound((await productClient.storyEntities.bindShot(projectId, item.id, undo.boundIds)) ?? []);
+    if (undo.boundIds) await replaceBindings(undo.boundIds);
     setUndo(undefined); setNote("已撤销自动填入"); onChanged();
   });
-  const saveValues = (next: Scalars) => void run(async () => { await save({ values: next }); onChanged(); });
+  const saveValues = (next: Scalars, afterSave?: () => void) => void run(async () => { await save({ values: next }); afterSave?.(); onChanged(); });
   const durationField = generator?.fields.find(f => f.key === "duration_seconds" && (f.type === "integer" || f.type === "number"));
   const presets = generator?.resolutionPresets ?? [];
   const curW = numberOf(current.width), curH = numberOf(current.height);
@@ -204,22 +227,37 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
   const sizeList = currentAspect ? presets.filter(p => aspectKey(p) === currentAspect) : presets;
   const choosePreset = (p?: ResolutionPresetLike) => p && saveValues({ ...current, width: { type: "integer", value: p.width }, height: { type: "integer", value: p.height } });
   const chooseAspect = (a: string) => choosePreset(resolvePreset({ aspect: a }, presets, curW && curH ? { width: curW, height: curH } : undefined));
-  const [duration, setDuration] = useState<string>("");
-  useEffect(() => { const v = numberOf(current.duration_seconds); setDuration(v === undefined ? "" : String(v)); }, [current.duration_seconds]);
+  const savedDuration = numberOf(current.duration_seconds);
+  const [duration, setDuration] = useState<string>(() => savedDuration === undefined ? "" : String(savedDuration));
+  const durationDirty = useRef(false);
+  const durationScope = `${projectId}:${item.id}:${selectionRef ?? ""}`;
+  const previousDurationScope = useRef(durationScope);
+  useEffect(() => {
+    if (previousDurationScope.current !== durationScope) { durationDirty.current = false; previousDurationScope.current = durationScope; }
+    if (!durationDirty.current) setDuration(savedDuration === undefined ? "" : String(savedDuration));
+  }, [savedDuration, durationScope]);
   const saveDuration = () => {
     if (!durationField) return;
     const prev = numberOf(current.duration_seconds);
-    if (duration === "" ) { if (prev !== undefined) { const { duration_seconds: _, ...rest } = current; saveValues(rest); } return; }
-    const n = Number(duration); if (!Number.isFinite(n) || n === prev) { setDuration(prev === undefined ? "" : String(prev)); return; }
-    saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value: durationField.type === "integer" ? Math.round(n) : n } });
+    if (duration === "" ) { if (prev !== undefined) { const { duration_seconds: _, ...rest } = current; saveValues(rest, () => { durationDirty.current = false; }); } else durationDirty.current = false; return; }
+    const n = Number(duration); if (!Number.isFinite(n) || n === prev) { durationDirty.current = false; setDuration(prev === undefined ? "" : String(prev)); return; }
+    const value = durationField.type === "integer" ? Math.round(n) : n;
+    saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; setDuration(String(value)); });
   };
   const noGen = !generator ? "请先在详情中选择生成器" : undefined;
+  const generationDraft = JSON.stringify([projectId, item.id, selectionRef, prompt, item.shot?.values]);
+  const latestGenerationDraft = useRef(generationDraft);
+  latestGenerationDraft.current = generationDraft;
   const generate = () => selectionRef && item.shot && void run(async () => {
+    const token = scopeEpoch.current;
+    const isCurrent = () => token === scopeEpoch.current && generationDraft === latestGenerationDraft.current;
     const values = { ...item.shot!.values, prompt: { type: "string" as const, value: prompt } };
     const base = { projectId, shotId: item.id, stage: "video" as const, selectionRef, values };
     const readiness = await productClient.creation.readinessGet({ ...base, submissionIdempotencyKey: "readiness-only" });
+    if (!isCurrent()) return;
     if (!readiness.ready) { setError(readiness.issues.map(i => i.message).join("；") || "尚未就绪，请在详情中完成设置"); return; }
     const ack = await productClient.creation.generate({ ...base, submissionIdempotencyKey: newKey() });
+    if (!isCurrent()) return; // Accepted Queue work remains owned by the backend.
     setNote(ack.accepted ? "已写入生产队列" : "未被接受");
     onChanged();
   });
@@ -240,10 +278,10 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     </div>
     <div className="shot-row-actions">
       <button type="button" className="primary" disabled={disabled || !selectionRef} title={selectionRef ? "写入生产队列并生成" : "请先在详情中选择生成器"} onClick={generate}>生成视频</button>
-      <ul className="shot-row-entities" aria-label="项目角色与场景">{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={disabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">素材库中还没有角色与场景</li>}</ul>
+      <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">素材库中还没有角色与场景</li>}</ul>
     </div>
     <div className="shot-row-prompt">
-      <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 竖屏 / 720p / @角色名，自动识别）" value={prompt} disabled={disabled}
+      <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 竖屏 / 720p / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
         onChange={e => setPrompt(e.target.value)} onBlur={savePrompt} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       <dl className="shot-row-structured" aria-label="分镜描述">
@@ -257,13 +295,13 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
       </dl>
       <div className="shot-row-toolbar"><button type="button" onClick={onOpen}>编辑</button><button type="button" onClick={onOpen}>详情</button></div>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
-      {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={disabled} onClick={undoRecognized}>撤销</button>}</p>}
+      {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
     </div>
     <div className="shot-row-fields">
       <label><span>镜号</span><output>{item.ordinal + 1}</output></label>
       <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => setName(e.target.value)} onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
       {durationField
-        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={"max" in durationField ? durationField.max : undefined} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => setDuration(e.target.value)} onBlur={saveDuration} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
+        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={"max" in durationField ? durationField.max : undefined} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => { durationDirty.current = true; setDuration(e.target.value); }} onBlur={saveDuration} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
         : <label><span>时长</span><output title={noGen ?? "当前生成器没有时长参数"}>{shotDuration(item.shot)}</output></label>}
       {presets.length > 0
         ? <><label><span>画幅</span><select aria-label={`${item.name} 画幅`} value={currentAspect ?? ""} disabled={disabled} onChange={e => chooseAspect(e.target.value)}>{!currentAspect && <option value="" disabled>未设置</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>

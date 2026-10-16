@@ -141,7 +141,7 @@
     },
     "src-tauri/src/infrastructure/database/repositories/mod.rs": {
       "beforeHash": "3f13ee1f09fb2c223421479070544a70862eee4fadcee2ba14cb91c21559360c",
-      "afterHash": "51587f227c35ec79f5564c4c69a8a74d7c6950af30322bb8bc45d0b1838d6f9e"
+      "afterHash": "4e79461cb357ceac211fb965450d44da461946b42fbb3025dfe9151768dac9c9"
     },
     "src-tauri/src/infrastructure/database/repositories/production_queue.rs": {
       "beforeHash": "35cf746dcdf675927a934ac49f6ef8e7c6edb9f79536fa4bcd58591171956653",
@@ -185,7 +185,7 @@
     },
     "src-tauri/tests/product_library_contract.rs": {
       "beforeHash": "ba2da5ff71dd9abec45d595b9f91e64711785c426886968245de0b47c2248ae1",
-      "afterHash": "a11c1b32cc2959f6a170b2055007ddda5123932c68fe1e0f08198491a272b7a5"
+      "afterHash": "1a35ab569017a2fb9fe7a585e570c1379c7e29cd64319714789af0448ca67ace"
     },
     "src-tauri/tests/project_database_fixture.rs": {
       "beforeHash": "8ed42e145395ebebc84575f9d5538c5fba7b01044d74d49cb555d561c56da686",
@@ -293,11 +293,11 @@
     },
     "src/features/create/StoryboardShotRows.test.tsx": {
       "beforeHash": null,
-      "afterHash": "67afab9b1d8ed4750dcc104fa4457acfa8d591c194fb872bfe9d848013b644dd"
+      "afterHash": "df52d1d622fdfb8de8a7b9803dd20a065cdf60af6c52b5be96698e784a084d90"
     },
     "src/features/create/StoryboardShotRows.tsx": {
       "beforeHash": null,
-      "afterHash": "806e781ebb5b543836978cb0e0dce27e7e1a4cbde3ed742aef1e6f430b6f6d24"
+      "afterHash": "751851ad6514fd0c24d5358838f79f1f5347898f39a480439c354077cdfc0b2f"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
@@ -361,11 +361,11 @@
     },
     "src/features/library/StoryEntitiesSection.test.tsx": {
       "beforeHash": null,
-      "afterHash": "bcd910d0092f1543f9bcef04a9c05ee45ffdbd05935485d3ad6998d0654b140d"
+      "afterHash": "49cc3e245bb95a8de9b2001d2278d5a35e05651da7a83e2043ba18c6233de18f"
     },
     "src/features/library/StoryEntitiesSection.tsx": {
       "beforeHash": null,
-      "afterHash": "b4ba8b536e6e6ee3c8cde4fc77aeed40cfdf5ebc2aff9b665f09ef88b2c2636d"
+      "afterHash": "f6e6b70a42d000579fdb8056700e0fbfc0a289ec52b7aa8fc2b2c674e1af4831"
     },
     "src/features/runs/RunsController.ts": {
       "beforeHash": "82e7600c977ba16782e590e42ae4013640730ea54e23c14547a465dab73e6382",

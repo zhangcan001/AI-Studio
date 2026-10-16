@@ -1,4 +1,280 @@
 //! Phase 5 targets 1, 2 and 8: real project-scoped authorities and typed reads.
+// Story-entity regressions exercise the real application service and SQLite repository.
+mod story_entity_contract {
+    use super::project_database::ProjectDatabase;
+    use ai_studio_lib::application::story_entity_service::StoryEntityService;
+    use ai_studio_lib::domain::story_entity::{StoryEntityKind, StoryEntityUpsert};
+    use ai_studio_lib::infrastructure::database::{
+        initialize, repositories::story_entity::SqliteStoryEntityRepository,
+    };
+    use std::sync::Arc;
+
+    async fn fixture() -> (ProjectDatabase, StoryEntityService) {
+        let db = ProjectDatabase::new("story-entities.db").await;
+        for project in ["prj_a", "prj_b"] {
+            sqlx::query("INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, '2026-01-01', '2026-01-01')")
+                .bind(project).bind(project).bind(db.path().to_string_lossy().as_ref())
+                .execute(&db.pool).await.unwrap();
+        }
+        for (id, project, kind) in [
+            ("img_a", "prj_a", "image"),
+            ("img_a2", "prj_a", "image"),
+            ("img_b", "prj_b", "image"),
+            ("vid_a", "prj_a", "video"),
+            ("aud_a", "prj_a", "audio"),
+        ] {
+            sqlx::query("INSERT INTO assets (id, project_id, type, name, storage_path, sha256, created_at, updated_at) VALUES (?, ?, ?, ?, 'owned-fixture-only', 'hash', '2026-01-01', '2026-01-01')")
+                .bind(id).bind(project).bind(kind).bind(id).execute(&db.pool).await.unwrap();
+        }
+        for (id, project) in [("sht_a", "prj_a"), ("sht_b", "prj_b")] {
+            sqlx::query("INSERT INTO shots (id, project_id, ordinal, name, prompt_text, created_at, updated_at) VALUES (?, ?, 0, ?, '', '2026-01-01', '2026-01-01')")
+                .bind(id).bind(project).bind(id).execute(&db.pool).await.unwrap();
+        }
+        let service =
+            StoryEntityService::new(Arc::new(SqliteStoryEntityRepository::new(db.pool.clone())));
+        (db, service)
+    }
+
+    fn input(name: &str, cover: Option<&str>, images: &[&str]) -> StoryEntityUpsert {
+        StoryEntityUpsert {
+            name: name.into(),
+            description: "owned test".into(),
+            cover_asset_id: cover.map(str::to_owned),
+            image_asset_ids: images.iter().map(|id| (*id).into()).collect(),
+        }
+    }
+
+    async fn bindings(db: &ProjectDatabase) -> Vec<(String, String, String, i64)> {
+        sqlx::query_as("SELECT project_id, shot_id, entity_id, ordinal FROM shot_story_entity_bindings ORDER BY project_id, shot_id, ordinal")
+            .fetch_all(&db.pool).await.unwrap()
+    }
+
+    async fn close_pool(pool: &sqlx::SqlitePool) {
+        if pool.is_closed() {
+            return;
+        }
+        // Hold every permit so no pooled return task can own an unobserved
+        // SQLite worker. Closing each lease awaits that worker on Windows.
+        let mut connections = Vec::new();
+        for _ in 0..pool.options().get_max_connections() {
+            connections.push(pool.acquire().await.unwrap());
+        }
+        for connection in connections {
+            connection.close().await.unwrap();
+        }
+        pool.close().await;
+    }
+
+    async fn close(db: ProjectDatabase) {
+        close_pool(&db.pool).await;
+        db.close().await;
+    }
+
+    #[tokio::test]
+    async fn owned_images_and_binding_order_survive_database_reopen_without_tasks() {
+        let (db, service) = fixture().await;
+        let a = service
+            .create(
+                "prj_a",
+                StoryEntityKind::Character,
+                input("hero", Some("img_a"), &["img_a2", "img_a"]),
+            )
+            .await
+            .unwrap();
+        let b = service
+            .create("prj_a", StoryEntityKind::Scene, input("scene", None, &[]))
+            .await
+            .unwrap();
+        let result = service
+            .replace_shot_bindings("prj_a", "sht_a", vec![b.id.clone(), a.id.clone()])
+            .await
+            .unwrap();
+        assert_eq!(
+            result.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            vec![&b.id, &a.id]
+        );
+        assert_eq!(a.image_asset_ids, vec!["img_a2", "img_a"]);
+        close_pool(&db.pool).await;
+        let reopened = initialize(&db.database_path()).await.unwrap();
+        let service =
+            StoryEntityService::new(Arc::new(SqliteStoryEntityRepository::new(reopened.clone())));
+        let saved = service.get("prj_a", &a.id).await.unwrap();
+        assert_eq!(saved.cover_asset_id.as_deref(), Some("img_a"));
+        assert_eq!(saved.image_asset_ids, a.image_asset_ids);
+        assert_eq!(
+            service.list_for_shot("prj_a", "sht_a").await.unwrap().len(),
+            2
+        );
+        let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&reopened)
+            .await
+            .unwrap();
+        let batches: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM production_batches")
+            .fetch_one(&reopened)
+            .await
+            .unwrap();
+        assert_eq!((tasks, batches), (0, 0));
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&reopened)
+            .await
+            .unwrap()
+            .is_empty());
+        close_pool(&reopened).await;
+        close(db).await;
+    }
+
+    #[tokio::test]
+    async fn create_rejects_foreign_missing_non_image_and_duplicate_assets_atomically() {
+        let (db, service) = fixture().await;
+        for bad in ["img_b", "vid_a", "aud_a", "missing"] {
+            for value in [
+                input("bad", Some(bad), &[]),
+                input("bad", None, &["img_a", bad]),
+            ] {
+                assert!(service
+                    .create("prj_a", StoryEntityKind::Character, value)
+                    .await
+                    .is_err());
+            }
+        }
+        assert!(service
+            .create(
+                "prj_a",
+                StoryEntityKind::Character,
+                input("bad", None, &["img_a", "img_a"])
+            )
+            .await
+            .is_err());
+        let rows: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM story_entities) + (SELECT COUNT(*) FROM story_entity_images)")
+            .fetch_one(&db.pool).await.unwrap();
+        assert_eq!(rows, 0, "invalid creates must leave no partial rows");
+        close(db).await;
+    }
+
+    #[tokio::test]
+    async fn rejected_update_preserves_name_cover_and_ordered_images() {
+        let (db, service) = fixture().await;
+        let original = service
+            .create(
+                "prj_a",
+                StoryEntityKind::Character,
+                input("original", Some("img_a"), &["img_a", "img_a2"]),
+            )
+            .await
+            .unwrap();
+        for bad in ["img_b", "vid_a", "aud_a", "missing"] {
+            for value in [
+                input("changed", Some(bad), &["img_a2"]),
+                input("changed", Some("img_a2"), &["img_a2", bad]),
+            ] {
+                assert!(service.update("prj_a", &original.id, value).await.is_err());
+                let after = service.get("prj_a", &original.id).await.unwrap();
+                assert_eq!(
+                    serde_json::to_value(&after).unwrap(),
+                    serde_json::to_value(&original).unwrap()
+                );
+            }
+        }
+        assert!(service
+            .update("prj_b", &original.id, input("foreign", None, &[]))
+            .await
+            .is_err());
+        assert_eq!(
+            service.get("prj_a", &original.id).await.unwrap().name,
+            "original"
+        );
+        close(db).await;
+    }
+
+    #[tokio::test]
+    async fn rejected_binding_replacements_preserve_both_projects_and_validate_empty_lists() {
+        let (db, service) = fixture().await;
+        let a = service
+            .create("prj_a", StoryEntityKind::Character, input("A", None, &[]))
+            .await
+            .unwrap();
+        let b = service
+            .create("prj_b", StoryEntityKind::Character, input("B", None, &[]))
+            .await
+            .unwrap();
+        service
+            .replace_shot_bindings("prj_a", "sht_a", vec![a.id.clone()])
+            .await
+            .unwrap();
+        service
+            .replace_shot_bindings("prj_b", "sht_b", vec![b.id.clone()])
+            .await
+            .unwrap();
+        let before = bindings(&db).await;
+        for (shot, ids) in [
+            ("sht_b", vec![a.id.clone()]),
+            ("sht_b", vec![]),
+            ("missing", vec![]),
+            ("sht_a", vec![b.id.clone()]),
+            ("sht_a", vec!["missing".into()]),
+            ("sht_a", vec![a.id.clone(), a.id.clone()]),
+        ] {
+            assert!(service
+                .replace_shot_bindings("prj_a", shot, ids)
+                .await
+                .is_err());
+            assert_eq!(bindings(&db).await, before);
+        }
+        service
+            .replace_shot_bindings("prj_a", "sht_a", vec![])
+            .await
+            .unwrap();
+        assert!(service
+            .list_for_shot("prj_a", "sht_a")
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            service.list_for_shot("prj_b", "sht_b").await.unwrap()[0].id,
+            b.id
+        );
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&db.pool)
+            .await
+            .unwrap()
+            .is_empty());
+        close(db).await;
+    }
+
+    #[tokio::test]
+    async fn reads_do_not_expose_legacy_cross_project_binding_rows() {
+        let (db, service) = fixture().await;
+        let a = service
+            .create("prj_a", StoryEntityKind::Character, input("A", None, &[]))
+            .await
+            .unwrap();
+        let b = service
+            .create("prj_b", StoryEntityKind::Character, input("B", None, &[]))
+            .await
+            .unwrap();
+        // Explicitly corrupt only this owned negative fixture, not product data.
+        for (id, shot, entity) in [("bad_shot", "sht_b", a.id), ("bad_entity", "sht_a", b.id)] {
+            sqlx::query("INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at) VALUES (?, 'prj_a', ?, ?, 0, '2026-01-01', '2026-01-01')")
+                .bind(id).bind(shot).bind(entity).execute(&db.pool).await.unwrap();
+        }
+        assert!(service
+            .list_for_shot("prj_a", "sht_a")
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(service
+            .list_for_shot("prj_a", "sht_b")
+            .await
+            .unwrap()
+            .is_empty());
+        let retained: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shot_story_entity_bindings")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(retained, 2, "reads must not silently rewrite history");
+        close(db).await;
+    }
+}
 #[path = "support/library_findability_contract.rs"]
 mod library_findability_contract;
 #[path = "support/library_scale_baseline.rs"]

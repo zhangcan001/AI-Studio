@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
@@ -49,18 +49,31 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
   const [draftImages, setDraftImages] = useState<string[]>([]);
   const [picking, setPicking] = useState<"cover" | "images" | null>(null);
   const [creating, setCreating] = useState(false);
+  const mounted = useRef(false);
+  const requestEpoch = useRef(0);
+  const scope = `${projectId}:${kind}`;
+  const latestScope = useRef(scope);
+  latestScope.current = scope;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; ++requestEpoch.current; };
+  }, []);
 
   const reload = useCallback(async () => {
+    if (!mounted.current || latestScope.current !== scope) return;
+    const token = ++requestEpoch.current;
+    const isCurrent = () => mounted.current && latestScope.current === scope && token === requestEpoch.current;
     setBusy(true); setError(undefined);
+    setItems([]);
     try {
       const list = await productClient.storyEntities.list(projectId, kind === "all" ? null : kind);
-      setItems(list as StoryEntity[]);
+      if (isCurrent()) setItems(list as StoryEntity[]);
     } catch (cause) {
-      setError(entityError(cause));
-    } finally { setBusy(false); }
-  }, [projectId, kind]);
+      if (isCurrent()) setError(entityError(cause));
+    } finally { if (isCurrent()) setBusy(false); }
+  }, [projectId, kind, scope]);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => { void reload(); return () => { ++requestEpoch.current; }; }, [reload]);
 
   function openCreate() {
     setCreating(true); setEditing(null);
@@ -80,10 +93,12 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
       const payload = { name: draftName, description: draftDesc, coverAssetId: draftCover, imageAssetIds: draftImages };
       if (editing) await productClient.storyEntities.update({ projectId, id: editing.id, ...payload });
       else await productClient.storyEntities.create({ projectId, kind: draftKind, ...payload });
+      window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
+      if (!mounted.current || latestScope.current !== scope) return;
       setEditing(null); setCreating(false);
-      await reload(); window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
+      await reload();
     } catch (cause) {
-      setError(entityError(cause)); setBusy(false);
+      if (mounted.current && latestScope.current === scope) { setError(entityError(cause)); setBusy(false); }
     }
   }
 
@@ -92,9 +107,11 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
     setBusy(true);
     try {
       await productClient.storyEntities.delete(projectId, entity.id);
-      await reload(); window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
+      window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
+      if (!mounted.current || latestScope.current !== scope) return;
+      await reload();
     } catch (cause) {
-      setError(entityError(cause)); setBusy(false);
+      if (mounted.current && latestScope.current === scope) { setError(entityError(cause)); setBusy(false); }
     }
   }
 

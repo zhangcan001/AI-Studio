@@ -251,6 +251,37 @@ pub mod story_entity {
             Self { pool }
         }
 
+        async fn validate_images(
+            tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+            project_id: &str,
+            input: &StoryEntityUpsert,
+        ) -> Result<(), RepositoryError> {
+            let mut unique = std::collections::HashSet::new();
+            if input.image_asset_ids.iter().any(|id| !unique.insert(id)) {
+                return Err(RepositoryError::integrity("关联图片不能重复"));
+            }
+            for id in input
+                .cover_asset_id
+                .iter()
+                .chain(input.image_asset_ids.iter())
+            {
+                let found: i64 = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ? AND project_id = ? AND type = 'image')",
+                )
+                .bind(id)
+                .bind(project_id)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|error| RepositoryError::database(error.to_string()))?;
+                if found == 0 {
+                    return Err(RepositoryError::integrity(
+                        "图片素材不存在、不是图片或不属于当前项目",
+                    ));
+                }
+            }
+            Ok(())
+        }
+
         async fn load_images(&self, entity_id: &str) -> Result<Vec<String>, RepositoryError> {
             let rows = sqlx::query(
                 "SELECT asset_id FROM story_entity_images WHERE entity_id = ? ORDER BY ordinal ASC, asset_id ASC",
@@ -395,6 +426,7 @@ pub mod story_entity {
                 .map_err(|e| RepositoryError::Database {
                     message: e.to_string(),
                 })?;
+            Self::validate_images(&mut tx, project_id, &input).await?;
             sqlx::query(
                 "INSERT INTO story_entities (id, project_id, kind, name, description, cover_asset_id, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -449,6 +481,7 @@ pub mod story_entity {
                 .map_err(|e| RepositoryError::Database {
                     message: e.to_string(),
                 })?;
+            Self::validate_images(&mut tx, project_id, &input).await?;
             let result = sqlx::query(
                 "UPDATE story_entities SET name = ?, description = ?, cover_asset_id = ?, updated_at = ?
                  WHERE project_id = ? AND id = ?",
@@ -513,7 +546,8 @@ pub mod story_entity {
         ) -> Result<Vec<StoryEntity>, RepositoryError> {
             let rows = sqlx::query(
                 "SELECT e.id FROM shot_story_entity_bindings b
-                 JOIN story_entities e ON e.id = b.entity_id
+                 JOIN shots s ON s.id = b.shot_id AND s.project_id = b.project_id
+                 JOIN story_entities e ON e.id = b.entity_id AND e.project_id = b.project_id
                  WHERE b.project_id = ? AND b.shot_id = ?
                  ORDER BY b.ordinal ASC, e.id ASC",
             )
@@ -548,6 +582,36 @@ pub mod story_entity {
                 .map_err(|e| RepositoryError::Database {
                     message: e.to_string(),
                 })?;
+            // Validate the complete replacement in this transaction, even when
+            // clearing it. Independent FKs do not prove shared project ownership.
+            let shot_exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM shots WHERE id = ? AND project_id = ?)",
+            )
+            .bind(shot_id)
+            .bind(project_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?;
+            if shot_exists == 0 {
+                return Err(RepositoryError::integrity("镜头不存在或不属于当前项目"));
+            }
+            let mut unique = std::collections::HashSet::new();
+            for entity_id in entity_ids {
+                if !unique.insert(entity_id) {
+                    return Err(RepositoryError::integrity("实体绑定不能重复"));
+                }
+                let found: i64 = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM story_entities WHERE id = ? AND project_id = ?)",
+                )
+                .bind(entity_id)
+                .bind(project_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|error| RepositoryError::database(error.to_string()))?;
+                if found == 0 {
+                    return Err(RepositoryError::integrity("实体不存在或不属于当前项目"));
+                }
+            }
             sqlx::query(
                 "DELETE FROM shot_story_entity_bindings WHERE project_id = ? AND shot_id = ?",
             )

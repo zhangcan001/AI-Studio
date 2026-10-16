@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StoryboardShotRows } from "./StoryboardShotRows";
 import type { StoryboardShot } from "./storyboardModel";
@@ -27,6 +27,82 @@ beforeEach(() => {
   api.updateShot.mockResolvedValue({}); api.deleteShot.mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(yes => { resolve = yes; });
+  return { promise, resolve };
+}
+
+it("does not replace saved bindings until the complete initial read succeeds", async () => {
+  const initial = deferred<(typeof hero | typeof lane)[]>();
+  api.listForShot.mockReturnValue(initial.promise);
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const add = await screen.findByTitle("绑定 场景 · 雨巷");
+  expect(add.hasAttribute("disabled")).toBe(true);
+  expect(screen.getByLabelText("镜头1 提示词").hasAttribute("disabled")).toBe(true);
+  fireEvent.click(add);
+  expect(api.bindShot).not.toHaveBeenCalled();
+  await act(async () => { initial.resolve([hero]); });
+  await waitFor(() => expect(add.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(add);
+  await waitFor(() => expect(api.bindShot).toHaveBeenCalledWith("p", "a", ["e1", "e2"]));
+});
+
+it("fails closed when saved bindings cannot be read", async () => {
+  api.listForShot.mockRejectedValue(new Error("binding read failed"));
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const add = await screen.findByTitle("绑定 场景 · 雨巷");
+  await screen.findByRole("alert");
+  expect(add.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(add);
+  expect(api.bindShot).not.toHaveBeenCalled();
+});
+
+it("ignores a superseded binding read instead of removing newer binding state", async () => {
+  const old = deferred<(typeof hero | typeof lane)[]>();
+  api.listForShot.mockReturnValueOnce(old.promise).mockResolvedValue([hero, lane]);
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  await waitFor(() => expect(api.listForShot.mock.calls.length).toBeGreaterThanOrEqual(2));
+  await screen.findByTitle("解除绑定 场景 · 雨巷");
+  await act(async () => { old.resolve([]); });
+  expect(screen.getByTitle("解除绑定 场景 · 雨巷")).toBeTruthy();
+  fireEvent.click(screen.getByTitle("解除绑定 角色 · 阿离"));
+  await waitFor(() => expect(api.bindShot).toHaveBeenCalledWith("p", "a", ["e2"]));
+});
+
+it.each(["unmount", "project", "draft"])("does not submit late READY after a %s change", async change => {
+  const pending = deferred<{ ready: boolean; issues: []; fieldErrors: []; actions: [] }>();
+  api.readinessGet.mockReturnValueOnce(pending.promise);
+  const p = props();
+  const view = render(<StoryboardShotRows {...p} items={[shot("a", 0)]} />);
+  fireEvent.click(await screen.findByRole("button", { name: "生成视频" }));
+  await waitFor(() => expect(api.readinessGet).toHaveBeenCalledTimes(1));
+  if (change === "unmount") view.unmount();
+  else if (change === "project") view.rerender(<StoryboardShotRows {...p} projectId="other" items={[shot("a", 0)]} />);
+  else { const next = shot("a", 0); next.shot!.values = { duration_seconds: { type: "integer", value: 8 } }; view.rerender(<StoryboardShotRows {...p} items={[next]} />); }
+  await act(async () => { pending.resolve({ ready: true, issues: [], fieldErrors: [], actions: [] }); });
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("preserves dirty duration across same-value and changed-value refreshes, then resumes syncing after save", async () => {
+  const p = props(); const view = render(<StoryboardShotRows {...p} items={[shot("a", 0)]} />);
+  const input = await screen.findByLabelText("镜头1 时长（秒）") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "7" } });
+  view.rerender(<StoryboardShotRows {...p} items={[shot("a", 0)]} />);
+  expect(input.value).toBe("7");
+  const refreshed = shot("a", 0); refreshed.shot!.values = { duration_seconds: { type: "integer", value: 8 } };
+  view.rerender(<StoryboardShotRows {...p} items={[refreshed]} />);
+  expect(input.value).toBe("7");
+  expect(api.updateShot).not.toHaveBeenCalled();
+  fireEvent.blur(input);
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", expect.objectContaining({ values: { duration_seconds: { type: "integer", value: 7 } } })));
+  await screen.findByRole("button", { name: "生成视频" });
+  await waitFor(() => expect(screen.getByLabelText("镜头1 时长（秒）").hasAttribute("disabled")).toBe(false));
+  const saved = shot("a", 0); saved.shot!.values = { duration_seconds: { type: "integer", value: 9 } };
+  view.rerender(<StoryboardShotRows {...p} items={[saved]} />);
+  expect(input.value).toBe("9");
+});
 
 it("renders real shot rows with structured description, inline @entity chips and search/status filter", async () => {
   render(<StoryboardShotRows {...props()} items={[shot("a", 0), { ...shot("b", 1), status: "COMPLETED", name: "收尾" }]} />);
