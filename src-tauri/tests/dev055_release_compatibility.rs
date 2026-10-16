@@ -8,6 +8,8 @@
 //! real export with the historical format version changed; they are not
 //! JSON-only success fixtures.
 
+#[path = "support/migration_head.rs"]
+mod migration_head;
 use ai_studio_lib::application::project_backup_service::ProjectBackupService;
 use ai_studio_lib::application::project_manifest_service::ProjectManifestService;
 use ai_studio_lib::infrastructure::database::SqliteProjectManifestRepository;
@@ -1320,7 +1322,10 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 46);
+    assert_eq!(
+        max_migration(pool).await,
+        migration_head::latest_migration_version()
+    );
     assert_eq!(migration_marker_count(pool, 42).await, 1);
     assert_eq!(migration_marker_count(pool, 43).await, 1);
     assert_eq!(migration_marker_count(pool, 44).await, 1);
@@ -1490,7 +1495,13 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 async fn dev055_migration_matrix_reaches_044() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(46));
+    assert_eq!(
+        versions.last().copied(),
+        Some(
+            u64::try_from(migration_head::latest_migration_version())
+                .expect("non-negative migration version")
+        )
+    );
     assert!(
         versions.contains(&43),
         "historical migration 043 must remain present"

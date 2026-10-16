@@ -1,3 +1,5 @@
+#[path = "support/migration_head.rs"]
+mod migration_head;
 #[path = "support/project_database.rs"]
 mod project_database;
 
@@ -25,7 +27,7 @@ async fn phase11_project_database_isolated_resources_survive_reopen_and_clean_te
         .fetch_one(&mut *first_connection)
         .await
         .unwrap();
-    assert_eq!(max_version, 46);
+    assert_eq!(max_version, migration_head::latest_migration_version());
     first_connection.close().await.unwrap();
     second_connection.close().await.unwrap();
     first.pool.close().await;

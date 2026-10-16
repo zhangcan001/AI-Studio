@@ -7,6 +7,8 @@ mod library_scale_baseline;
 mod library_thumbnail_contract;
 #[path = "support/media_integrity_contract.rs"]
 mod media_integrity_contract;
+#[path = "support/migration_head.rs"]
+mod migration_head;
 #[path = "support/project_database.rs"]
 mod project_database;
 use ai_studio_lib::application::{
@@ -1222,7 +1224,7 @@ async fn phase5_target8_typed_detail_preserves_versions_config_and_member_roles(
         .fetch_one(&f.pool)
         .await
         .unwrap();
-    assert_eq!(max, 46);
+    assert_eq!(max, migration_head::latest_migration_version());
 }
 
 #[tokio::test]

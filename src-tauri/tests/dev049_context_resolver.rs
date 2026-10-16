@@ -2,6 +2,8 @@
 
 // The application module is not yet re-exported by the library crate. Keep
 // this test-local bridge until Main wires the finalized B APIs publicly.
+#[path = "support/migration_head.rs"]
+mod migration_head;
 mod domain {
     pub use ai_studio_lib::domain::*;
 }
@@ -166,7 +168,7 @@ async fn dev049_fresh_001_to_025_creates_only_the_scope_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        46
+        migration_head::latest_migration_version()
     );
     for table in [
         "consistency_scope_profile_bindings",
@@ -202,7 +204,7 @@ async fn dev049_022_to_025_preserves_022_rows_and_leaves_scope_tables_empty() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        46
+        migration_head::latest_migration_version()
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = 'dev049-project'",)

@@ -497,7 +497,7 @@ async fn migration_043_and_044_upgrade_v42_without_inventing_inputs_or_receipts(
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        46
+        crate::infrastructure::database::pool::latest_migration_version_for_tests()
     );
     upgraded.close().await;
 }

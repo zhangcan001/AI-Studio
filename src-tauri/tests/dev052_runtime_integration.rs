@@ -6,6 +6,8 @@
 //! preparation admission path are real; no GPU or external ComfyUI process is
 //! needed.
 
+#[path = "support/migration_head.rs"]
+mod migration_head;
 use ai_studio_lib::application::{
     comfy_preflight_service::ComfyPreflightService,
     comfy_service::{ComfyRuntime, ComfyService},
@@ -2892,7 +2894,7 @@ async fn runtime_database_is_fresh_migrated_through_044() {
             .fetch_one(&harness.pool)
             .await
             .unwrap(),
-        46
+        migration_head::latest_migration_version()
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")

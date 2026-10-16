@@ -53,6 +53,25 @@ async fn configure_pragmas(pool: &SqlitePool) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Test-only: highest numeric prefix among `migrations/NNN_*.sql`, so schema-head
+/// assertions follow new migrations without hand-editing every pin.
+#[cfg(test)]
+pub(crate) fn latest_migration_version_for_tests() -> i64 {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+    std::fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+        .filter_map(|entry| {
+            let name = entry.ok()?.file_name().into_string().ok()?;
+            if !name.ends_with(".sql") {
+                return None;
+            }
+            let digits: String = name.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse::<i64>().ok()
+        })
+        .max()
+        .expect("at least one numbered migration")
+}
+
 #[cfg(test)]
 mod tests {
     use super::initialize;
@@ -107,7 +126,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            46
+            crate::infrastructure::database::pool::latest_migration_version_for_tests()
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -411,7 +430,7 @@ mod tests {
                 .fetch_one(&upgraded)
                 .await
                 .expect("latest migration should be readable"),
-            46
+            crate::infrastructure::database::pool::latest_migration_version_for_tests()
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>(

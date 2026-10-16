@@ -5,6 +5,8 @@
 //! prompt, or needs a GPU.  The fixture exercises the persisted production
 //! structure contract independently from the production execution pipeline.
 
+#[path = "support/migration_head.rs"]
+mod migration_head;
 use ai_studio_lib::initialize;
 use sqlx::{Row, SqlitePool};
 use tempfile::tempdir;
@@ -406,7 +408,7 @@ async fn dev035_migration_020_to_021_fresh_and_reopen_are_compatible() {
             .fetch_one(&pool)
             .await
             .expect("DEV035 migration version should be readable"),
-        46
+        migration_head::latest_migration_version()
     );
     assert_eq!(production_table_count(&pool).await, 4);
     assert_eq!(
@@ -439,7 +441,7 @@ async fn dev035_migration_020_to_021_fresh_and_reopen_are_compatible() {
             .fetch_one(&upgraded)
             .await
             .expect("DEV035 upgraded migration version should be readable"),
-        46
+        migration_head::latest_migration_version()
     );
     // Replaying migration 021 must restore its historical row, even though
     // initialize() also retains the newer schema head (046, story entities).

@@ -1,4 +1,6 @@
 //! Phase2 media authority regressions; reuses owned real Registry/SQLite fixture.
+#[path = "migration_head.rs"]
+mod migration_head;
 use super::*;
 use ai_studio_lib::application::{
     comfy_preflight_service::ComfyPreflightService,
@@ -483,7 +485,7 @@ async fn phase5b_formal_mixed_batch_freezes_four_modes_reuses_and_preserves_orde
             .fetch_one(&f.pool)
             .await
             .unwrap(),
-        46
+        migration_head::latest_migration_version()
     );
     assert!(sqlx::query("PRAGMA foreign_key_check")
         .fetch_all(&f.pool)
@@ -1457,7 +1459,7 @@ async fn phase5c_four_mode_selection_review_occ_and_cold_sqlite_persistence_are_
             .fetch_one(&cold)
             .await
             .unwrap(),
-        46
+        migration_head::latest_migration_version()
     );
     assert!(sqlx::query("PRAGMA foreign_key_check")
         .fetch_all(&cold)

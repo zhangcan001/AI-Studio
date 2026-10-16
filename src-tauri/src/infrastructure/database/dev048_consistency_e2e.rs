@@ -639,7 +639,7 @@ async fn dev048_fresh_migration_001_to_044_keeps_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        46
+        crate::infrastructure::database::pool::latest_migration_version_for_tests()
     );
     let required_tables = [
         "profile_revisions",
@@ -705,7 +705,7 @@ async fn dev048_021_to_043_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        46
+        crate::infrastructure::database::pool::latest_migration_version_for_tests()
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -773,7 +773,7 @@ async fn dev052_existing_023_to_043_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        46
+        crate::infrastructure::database::pool::latest_migration_version_for_tests()
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
