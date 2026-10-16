@@ -12,6 +12,7 @@ import { useStudioStore } from "../../stores/studioStore";
 import { productClient } from "../../product/client";
 import type { StoryEntity } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
+import { parseShotPrompt, resolvePromptSettings } from "./shotPromptParser";
 
 type Kind = "image" | "video" | "audio";
 type Asset = { id: string; name: string; mediaKind: string; thumbnailBytes?: number[] | null };
@@ -87,6 +88,9 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const prompt = c.values.prompt?.type === "string" ? c.values.prompt.value : "";
   const editor = useRef<HTMLDivElement>(null);
   const emitted = useRef<string | null>(null);
+  const editScope = JSON.stringify([projectId, c.context?.selectedShot?.summary.id, c.selection]);
+  const promptEdit = useRef<{ before: string; after: string; scope: string } | null>(null);
+  const [recognitionNote, setRecognitionNote] = useState<string>();
   const caret = useRef<Range | null>(null);
   const [picker, setPicker] = useState<"insert" | "add" | null>(null);
   const [imagePick, setImagePick] = useState<{ field: RecipeField; title: string } | null>(null);
@@ -176,7 +180,29 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     build(root, prompt, images, url); root.dataset.refs = imageKey; emitted.current = prompt;
   }, [prompt, imageKey, urlKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const emit = () => { const root = editor.current; if (!root || !promptField) return; const next = serializePrompt(root); emitted.current = next; c.setValue("prompt", { type: "string", value: next }); };
+  const emit = () => {
+    const root = editor.current; if (!root || !promptField) return;
+    const next = serializePrompt(root);
+    if (next !== prompt) { promptEdit.current = { before: promptEdit.current?.scope === editScope ? promptEdit.current.before : prompt, after: next, scope: editScope }; setRecognitionNote(undefined); }
+    emitted.current = next; c.setValue("prompt", { type: "string", value: next });
+  };
+  const applyPromptSettings = () => {
+    const edit = promptEdit.current;
+    promptEdit.current = null;
+    if (!edit || composing.current || c.busy || edit.scope !== editScope || edit.after !== prompt) return;
+    const before = parseShotPrompt(edit.before), after = parseShotPrompt(edit.after);
+    // Rewording a prompt must not undo parameters the user explicitly picked afterwards.
+    const changed = { ...after,
+      durationSeconds: before.durationSeconds !== after.durationSeconds ? after.durationSeconds : undefined,
+      aspect: before.aspect !== after.aspect ? after.aspect : undefined,
+      resolution: JSON.stringify(before.resolution) !== JSON.stringify(after.resolution) ? after.resolution : undefined,
+    };
+    const settings = resolvePromptSettings(changed, c.generator, c.values);
+    const labels: string[] = [];
+    if (settings.duration) { c.setValue("duration_seconds", settings.duration); labels.push(`时长 ${settings.duration.value} 秒`); }
+    if (settings.preset) { c.chooseResolution(settings.preset.id); labels.push(`画幅 ${presetAspectKey(settings.preset) ?? aspectOf(settings.preset.width, settings.preset.height)} · ${settings.preset.width}×${settings.preset.height}`); }
+    if (labels.length) setRecognitionNote(`已同步生成参数：${labels.join(" · ")}`);
+  };
   const saveCaret = () => { const sel = window.getSelection(); if (sel?.rangeCount && editor.current?.contains(sel.anchorNode)) caret.current = sel.getRangeAt(0).cloneRange(); };
   const insert = (ref: ComposerReference) => {
     const root = editor.current; if (!root || !promptField) return;
@@ -225,6 +251,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   // USER recipes may declare additional text fields; never drop required/visible ones.
   const extraTextFields = fields.filter(f => f.type === "textarea" && f.key !== "prompt" && f.key !== "negative_prompt");
   const canSubmit = !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY";
+  const promptWarnings = resolvePromptSettings(parseShotPrompt(prompt), c.generator, c.values).warnings;
 
   if (!c.generator) return null;
   return <div className="create-composer-wrap">
@@ -265,11 +292,13 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     </div>}
     {promptField && <div className="composer-prompt">
       <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面"}
-        onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={saveCaret}
+        onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={() => { saveCaret(); applyPromptSettings(); }}
         onKeyDown={e => { if (e.key === "@") { e.preventDefault(); saveCaret(); if (allEntities.length) setEntityPicker(true); else if (images.length) setPicker("insert"); } else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); } }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />
       <span className="composer-count" aria-hidden="true">{prompt.length} 字</span>
     </div>}
+    {promptWarnings.length > 0 && <p role="status" aria-label="提示词识别提示">{promptWarnings.join(" ")}</p>}
+    {recognitionNote && <p role="status">{recognitionNote}</p>}
     {picker === "insert" && <div className="composer-picker" role="listbox" aria-label="插入参考图">
       {images.map(ref => <button type="button" role="option" aria-selected="false" key={ref.n} onMouseDown={e => e.preventDefault()} onClick={() => insert(ref)} className="composer-picker-option">{url(ref) ? <img src={url(ref)} alt="" /> : <span className="composer-picker-glyph">{ref.n}</span>}<span>{ref.label}{ref.asset ? ` · ${ref.asset.name}` : ""}</span></button>)}
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button></div>}

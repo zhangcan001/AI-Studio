@@ -221,3 +221,30 @@ it("shows read-only duration/aspect when no generator exists and never sends val
   fireEvent.change(box, { target: { value: "竖屏 6秒" } }); fireEvent.blur(box);
   await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", { shotId: "b", name: "镜头1", stage: "video", prompt: "竖屏 6秒" }));
 });
+
+it("explains an incomplete width-only setting instead of silently ignoring it", async () => {
+  render(<StoryboardShotRows {...props()} items={[shot("width-only", 0)]} />);
+  const box = await screen.findByLabelText("镜头1 提示词");
+  await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(box, { target: { value: "画幅1920" } });
+  expect(screen.getByRole("status", { name: "提示词识别提示" }).textContent).toContain("画幅/分辨率信息不完整");
+  fireEvent.blur(box);
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", { shotId: "width-only", name: "镜头1", stage: "video", prompt: "画幅1920" }));
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["画幅：9:16", 768, 1344],
+  ["画幅９：１６", 768, 1344],
+  ["分辨率1920×1080", 1344, 768],
+])("writes %s as actual supported Recipe dimensions without generation", async (text, width, height) => {
+  render(<StoryboardShotRows {...props()} items={[shot("explicit-size", 0)]} />);
+  const box = await screen.findByLabelText("镜头1 提示词");
+  await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(box, { target: { value: text } }); fireEvent.blur(box);
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", expect.objectContaining({
+    shotId: "explicit-size", prompt: text, selectionRef: "sel",
+    values: expect.objectContaining({ width: { type: "integer", value: width }, height: { type: "integer", value: height } }),
+  })));
+  expect(api.generate).not.toHaveBeenCalled();
+});

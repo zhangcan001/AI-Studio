@@ -7,7 +7,7 @@ import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage } from "./C
 import "./CreatePage.css";
 import type { GeneratorOption } from "../../product/types";
 import type { DraftValue } from "../../types/generation";
-import { parseShotPrompt, resolvePreset, type ParsedShotPrompt, type ResolutionPresetLike } from "./shotPromptParser";
+import { parseShotPrompt, resolvePreset, resolvePromptSettings, type ParsedShotPrompt, type ResolutionPresetLike } from "./shotPromptParser";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品" };
@@ -118,30 +118,27 @@ function scalarValues(values: Record<string, DraftValue> | undefined): Scalars {
 function numberOf(v: DraftValue | undefined) { return v?.type === "integer" || v?.type === "number" ? v.value : undefined; }
 function aspectKey(p: ResolutionPresetLike) { const m = /-(\d+)x(\d+)$/.exec(p.id); return m ? `${m[1]}:${m[2]}` : `${p.width}:${p.height}`; }
 
-interface Recognized { parsed: ParsedShotPrompt; values?: Scalars; addEntityIds: string[]; labels: string[] }
+interface Recognized { parsed: ParsedShotPrompt; values?: Scalars; addEntityIds: string[]; labels: string[]; warnings: string[] }
 
 /** Turns parser output into concrete writes for this shot + generator; labels describe them. */
 function recognize(text: string, entities: StoryEntity[], bound: StoryEntity[], generator: GeneratorOption | undefined, current: Scalars): Recognized {
   const parsed = parseShotPrompt(text, entities);
   const labels: string[] = [];
   let values: Scalars | undefined;
-  const durationField = generator?.fields.find(f => f.key === "duration_seconds");
+  const settings = resolvePromptSettings(parsed, generator, current);
   if (parsed.durationSeconds !== undefined) {
-    if (durationField && (durationField.type === "integer" || durationField.type === "number")) {
-      const min = "min" in durationField && typeof durationField.min === "number" ? durationField.min : undefined;
-      const max = "max" in durationField && typeof durationField.max === "number" ? durationField.max : undefined;
-      const sec = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed.durationSeconds));
-      if (numberOf(current.duration_seconds) !== sec) { values = { ...(values ?? current), duration_seconds: { type: durationField.type as "integer", value: sec } }; labels.push(`时长 ${sec} 秒`); }
+    if (settings.duration) {
+      if (numberOf(current.duration_seconds) !== settings.duration.value) { values = { ...(values ?? current), duration_seconds: settings.duration }; labels.push(`时长 ${settings.duration.value} 秒`); }
     } else labels.push(`时长 ${parsed.durationSeconds} 秒（当前生成器无此参数）`);
   }
   const w = numberOf(current.width), h = numberOf(current.height);
-  const preset = resolvePreset(parsed, generator?.resolutionPresets ?? [], w && h ? { width: w, height: h } : undefined);
+  const preset = settings.preset;
   if (preset && (preset.width !== w || preset.height !== h)) { values = { ...(values ?? current), width: { type: "integer", value: preset.width }, height: { type: "integer", value: preset.height } }; labels.push(`画幅 ${aspectKey(preset)} · ${preset.width}×${preset.height}`); }
   else if ((parsed.aspect || parsed.resolution) && !generator?.resolutionPresets?.length) labels.push("画幅/分辨率（请先在详情中选择生成器）");
   const addEntityIds = parsed.entityIds.filter(id => !bound.some(b => b.id === id));
   for (const id of addEntityIds) { const e = entities.find(x => x.id === id); if (e) labels.push(`${KIND_LABEL[e.kind]} @${e.name}`); }
   if (parsed.shotNumber !== undefined) labels.push(`镜号 ${parsed.shotNumber}（仅识别，顺序不变）`);
-  return { parsed, values, addEntityIds, labels };
+  return { parsed, values, addEntityIds, labels, warnings: settings.warnings };
 }
 
 function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen, onCreate, onChanged }: {
@@ -286,6 +283,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
       <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 竖屏 / 720p / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
         onChange={e => setPrompt(e.target.value)} onBlur={savePrompt} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
+      {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
       <dl className="shot-row-structured" aria-label="分镜描述">
         <div><dt>镜号</dt><dd>{item.ordinal + 1}</dd></div>
         <div><dt>时长</dt><dd>{shotDuration(item.shot)}</dd></div>

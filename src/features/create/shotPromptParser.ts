@@ -4,6 +4,7 @@
  * and shot number. The prompt text itself is never rewritten.
  */
 import type { StoryEntity } from "../../types/storyEntity";
+import type { DraftValue, RecipeField } from "../../types/generation";
 
 export type ParsedResolution = { kind: "lines"; lines: number } | { kind: "size"; width: number; height: number };
 export interface ParsedShotPrompt {
@@ -12,6 +13,7 @@ export interface ParsedShotPrompt {
   resolution?: ParsedResolution;
   entityIds: string[];
   shotNumber?: number;
+  warnings?: string[];
 }
 export interface ResolutionPresetLike { id: string; label?: string; width: number; height: number }
 
@@ -51,6 +53,9 @@ export function parseShotPrompt(text: string, entities: readonly StoryEntity[] =
   else if (lines) out.resolution = { kind: "lines", lines: Number(lines[1]) };
   else if (/(?<![a-z\d])(2k)(?![a-z])/i.test(src)) out.resolution = { kind: "lines", lines: 1440 };
   else if (/(?<![a-z\d])(4k)(?![a-z])/i.test(src)) out.resolution = { kind: "lines", lines: 2160 };
+  if (!out.resolution && /(?:画幅|分辨率|尺寸)\s*[:：]?\s*\d{3,4}(?!\d)/.test(src)) {
+    out.warnings = ["画幅/分辨率信息不完整：请填写 16:9、9:16 等比例，或 1920×1080 等完整尺寸；单个数字不会自动填入。"];
+  }
   // Shot number: "镜头3", "镜号 3", "第3镜", "第三个镜头".
   const shot = [...src.matchAll(new RegExp(`(?:镜头|镜号|分镜)\\s*[:：#]?\\s*${NUM}|第\\s*${NUM}\\s*(?:个)?(?:镜头|镜|分镜)`, "g"))].pop();
   if (shot) { const n = toNumber(shot[1] ?? shot[2]); if (n !== undefined && Number.isInteger(n) && n > 0) out.shotNumber = n; }
@@ -95,4 +100,24 @@ export function resolvePreset(parsed: Pick<ParsedShotPrompt, "aspect" | "resolut
   else if (current) target = current.width * current.height;
   else target = 1280 * 720;
   return [...pool].sort((a, b) => Math.abs(a.width * a.height - target) - Math.abs(b.width * b.height - target))[0];
+}
+
+/** Project only explicit numeric settings onto the selected Recipe's real constraints. */
+export function resolvePromptSettings(parsed: ParsedShotPrompt, generator: { fields: readonly RecipeField[]; resolutionPresets?: readonly ResolutionPresetLike[] } | undefined, current: Record<string, DraftValue>) {
+  const warnings = [...(parsed.warnings ?? [])];
+  let duration: { type: "integer" | "number"; value: number } | undefined;
+  if (parsed.durationSeconds !== undefined) {
+    const field = generator?.fields.find(f => f.key === "duration_seconds");
+    if (field && (field.type === "integer" || field.type === "number")) {
+      duration = { type: field.type, value: Math.min(field.max ?? Infinity, Math.max(field.min ?? -Infinity, parsed.durationSeconds)) };
+    } else warnings.push("当前生成器没有时长参数，未自动填入。");
+  }
+  const width = current.width, height = current.height;
+  const size = (width?.type === "integer" || width?.type === "number") && (height?.type === "integer" || height?.type === "number") ? { width: width.value, height: height.value } : undefined;
+  const presets = generator?.resolutionPresets ?? [];
+  const preset = resolvePreset(parsed, presets, size);
+  if ((parsed.aspect || parsed.resolution) && !preset) {
+    warnings.push(presets.length ? "当前生成器没有匹配的画幅/分辨率预设，未自动填入；请从可用预设中选择。" : "请先选择支持画幅/分辨率预设的生成器，未自动填入。");
+  }
+  return { duration, preset, warnings };
 }

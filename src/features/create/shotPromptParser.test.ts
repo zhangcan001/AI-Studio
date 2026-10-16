@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseShotPrompt, resolvePreset } from "./shotPromptParser";
+import { parseShotPrompt, resolvePreset, resolvePromptSettings } from "./shotPromptParser";
 import type { StoryEntity } from "../../types/storyEntity";
 
 const ent = (id: string, name: string, kind: StoryEntity["kind"]) => ({ id, name, kind } as StoryEntity);
@@ -47,6 +47,14 @@ describe("parseShotPrompt", () => {
     const p = parseShotPrompt("3 个人站在路口");
     expect(p).toEqual({ entityIds: [] });
   });
+  it("reports incomplete dimensions without guessing a missing height or aspect", () => {
+    const parsed = parseShotPrompt("画幅1920");
+    expect(parsed.aspect).toBeUndefined();
+    expect(parsed.resolution).toBeUndefined();
+    expect(parsed.warnings).toEqual([expect.stringContaining("画幅/分辨率信息不完整")]);
+    expect(parseShotPrompt("画幅1920×1080").warnings).toBeUndefined();
+    expect(parseShotPrompt("分辨率1080p").warnings).toBeUndefined();
+  });
 });
 
 describe("resolvePreset", () => {
@@ -65,5 +73,21 @@ describe("resolvePreset", () => {
   it("returns nothing without presets or without input", () => {
     expect(resolvePreset({ aspect: "16:9" }, [])).toBeUndefined();
     expect(resolvePreset({}, presets)).toBeUndefined();
+  });
+});
+
+describe("resolvePromptSettings", () => {
+  it("uses selected Recipe bounds and presets, never creates arbitrary dimensions", () => {
+    const generator = { fields: [{ type: "integer", key: "duration_seconds", label: "duration", required: true, min: 4, max: 10 }] as const, resolutionPresets: presets };
+    const settings = resolvePromptSettings(parseShotPrompt("时长20秒 9:16 1080p"), generator, {});
+    expect(settings.duration).toEqual({ type: "integer", value: 10 });
+    expect(settings.preset?.id).toBe("mp-2_09-9x16");
+    expect(settings.warnings).toEqual([]);
+  });
+  it("explains unsupported settings and leaves missing Recipe fields untouched", () => {
+    const settings = resolvePromptSettings(parseShotPrompt("21:9 5秒"), { fields: [], resolutionPresets: presets }, {});
+    expect(settings.duration).toBeUndefined();
+    expect(settings.preset).toBeUndefined();
+    expect(settings.warnings).toEqual([expect.stringContaining("没有时长参数"), expect.stringContaining("没有匹配的画幅")]);
   });
 });

@@ -49,6 +49,42 @@ async function start(ref?:string) {
   await waitFor(()=>expect(composer().getAttribute("data-inputs")).toBe("saved"));
 }
 const persisted = () => api.inputsSave.mock.calls[api.inputsSave.mock.calls.length-1]?.[0].inputs;
+it("applies recognized aspect and duration from the composer prompt without generating", async () => {
+  await start("opaque-0");
+  setPrompt("画幅：9:16，时长8秒，角色走过街道");
+  fireEvent.blur(promptEditor());
+  await waitFor(() => expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 768 }));
+  expect(useStudioStore.getState().values.height).toEqual({ type: "integer", value: 1344 });
+  expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 8 });
+  expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "画幅：9:16，时长8秒，角色走过街道" });
+  expect(api.generate).not.toHaveBeenCalled();
+});
+it("keeps manual parameter overrides when unrelated prompt wording changes", async () => {
+  await start("opaque-0");
+  setPrompt("９：１６，８秒，街道"); fireEvent.blur(promptEditor());
+  await waitFor(() => expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 768 }));
+  fireEvent.change(screen.getByLabelText("时长（秒）"), { target: { value: "6" } });
+  fireEvent.change(screen.getByLabelText("画面比例"), { target: { value: "16:9" } });
+  setPrompt("９：１６，８秒，街道上的灯光"); fireEvent.blur(promptEditor());
+  expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1344 });
+  expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 6 });
+  expect(api.generate).not.toHaveBeenCalled();
+});
+it("warns about width-only syntax and does not guess an aspect", async () => {
+  await start("opaque-0");
+  setPrompt("画幅1920"); fireEvent.blur(promptEditor());
+  expect(screen.getByRole("status", { name: "提示词识别提示" }).textContent).toContain("信息不完整");
+  expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1344 });
+  expect(useStudioStore.getState().values.height).toEqual({ type: "integer", value: 768 });
+  expect(api.generate).not.toHaveBeenCalled();
+});
+it("does not interpret programmatic prompt restoration as an explicit edit", async () => {
+  await start("opaque-0");
+  act(() => useStudioStore.getState().setValue("prompt", { type: "string", value: "9:16 8秒" }));
+  fireEvent.blur(promptEditor());
+  expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1344 });
+  expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 5 });
+});
 function pending<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 const auditHero: StoryEntity = { id: "hero", projectId: "owned", kind: "character", name: "审计角色", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
 const auditScene: StoryEntity = { ...auditHero, id: "scene", kind: "scene", name: "审计场景" };
