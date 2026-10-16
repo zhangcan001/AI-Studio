@@ -18,7 +18,10 @@ jobs:
   rust:
     name: Rust source checks
     runs-on: windows-latest
-    timeout-minutes: 40
+    # Cold run 38843129757 took 32m26s (check 3m57s, test build 8m47s,
+    # test execution 18m46s); runs 38767542286/38826401805 hit the old
+    # 40-minute budget mid-suite. Bound cold runs plus cache packing to 60m.
+    timeout-minutes: 60
     env:
       AI_STUDIO_LIVE_COMFY: "0"
     steps:
@@ -35,8 +38,12 @@ jobs:
         uses: Swatinem/rust-cache@v2.9.2
         with:
           workspaces: "./src-tauri -> target"
-          # Restore only: post-job packing must not consume the validation budget.
-          save-if: "false"
+          # Restore-only never seeded a cache (38843129757: "No cache found").
+          # Only trusted master pushes write; PRs/tags/manual runs restore only.
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+          # Preserve the earlier post-cache timeout fix: do not pack large
+          # Windows target artifacts. Cache registry dependencies only.
+          cache-targets: "false"
 
       - name: Rust format check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
@@ -89,7 +96,9 @@ jobs:
         run: >-
           pnpm test --maxWorkers=1 --shard=${{ matrix.shard }}/3
           --exclude src/app/**/*Boundary*.test.ts
+          --exclude src/app/**/*Boundary*.test.tsx
           --exclude scripts/testing/**/*[Bb]oundary*.test.ts
+          --exclude scripts/testing/**/*[Bb]oundary*.test.tsx
           --exclude scripts/testing/immutable-git-cache.test.ts
           --exclude scripts/testing/release-boundary.test.ts
 
@@ -107,10 +116,14 @@ jobs:
         run: pnpm exec vite build
 
   frontend_boundary_tests:
-    name: Frontend Boundary probes
+    name: Frontend Boundary probes (${{ matrix.shard }}/3)
     runs-on: windows-latest
-    # Dedicated job: one file per forks worker, sequenced. Avoids the
-    # single long-lived RPC session that produced onTaskUpdate ELIFECYCLE.
+    # Separate VMs may run in parallel; each VM runs one Vitest process/file
+    # at a time. Explicit discovery avoids literal CLI globs omitting tests.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     timeout-minutes: 90
     env:
       NODE_OPTIONS: --max-old-space-size=8192
@@ -135,12 +148,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Boundary and successor-guard probes
-        run: >-
-          pnpm test --maxWorkers=1
-          src/app/**/*Boundary*.test.ts
-          scripts/testing/**/*[Bb]oundary*.test.ts
-          scripts/testing/immutable-git-cache.test.ts
-          scripts/testing/release-boundary.test.ts
+        run: pnpm test:boundary --shard=${{ matrix.shard }}/3
 
   frontend:
     name: Frontend source checks

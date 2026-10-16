@@ -1,20 +1,37 @@
 #!/usr/bin/env node
 // Dedicated Boundary runner matching CI intent:
-// - Expand src/app/*Boundary*.test.ts explicitly (Linux-safe).
+// - Expand app + script Boundary files explicitly (Windows/Linux-safe).
 // - Run ONE vitest process per file with maxWorkers=1 so a tinypool
 //   ERR_IPC_CHANNEL_CLOSED teardown after a long chain cannot fail the job
 //   after green assertions (Phase5J per-file worker pattern).
 import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
-
-const files = readdirSync('src/app')
-  .filter((name) => /Boundary\.test\.tsx?$/.test(name))
-  .map((name) => join('src/app', name))
-  .sort();
-if (!files.length) {
-  console.error('No Boundary test files found under src/app');
+const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+  const path = `${dir}/${entry.name}`;
+  if (entry.isSymbolicLink()) throw Error(`Symbolic test path: ${path}`);
+  return entry.isDirectory() ? walk(path) : [path];
+});
+const inventory = [
+  ...walk('src/app').filter(path => /Boundary.*\.test\.tsx?$/.test(path)),
+  ...walk('scripts/testing').filter(path => /[Bb]oundary.*\.test\.tsx?$/.test(path)
+    || path === 'scripts/testing/immutable-git-cache.test.ts'),
+].sort();
+const args = process.argv.slice(2);
+const shards = args.filter(arg => arg.startsWith('--shard='));
+const shard = /^(\d+)\/(\d+)$/.exec(shards[0]?.slice('--shard='.length) ?? '1/1');
+if (shards.length > 1 || args.some(arg => arg !== '--list' && !arg.startsWith('--shard='))
+    || !shard || Number(shard[1]) < 1 || Number(shard[1]) > Number(shard[2])) {
+  console.error('Usage: run-boundary-tests.mjs [--list] [--shard=index/count]');
   process.exit(1);
+}
+const files = inventory.filter((_, index) => index % Number(shard[2]) === Number(shard[1]) - 1);
+if (!files.length) {
+  console.error('No Boundary test files found for this shard');
+  process.exit(1);
+}
+if (args.includes('--list')) {
+  console.log(JSON.stringify(files));
+  process.exit(0);
 }
 
 let failed = 0;

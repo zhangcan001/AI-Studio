@@ -7,6 +7,9 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./bound
 export const R1_METADATA_BASE = "0c3be97a88d5458fc16851bfa19dc10172007886";
 export const R1_METADATA_PROOF = "docs/architecture/ui-phase7b-r1-metadata-successor.json";
 export const R1_METADATA_CHANGED = [
+  ".github/workflows/ci.yml",
+  "scripts/run-boundary-tests.mjs",
+  "scripts/testing/boundary-rpc-yield.mjs",
   "scripts/ui-phase7b-backup-prompt-successor-guard.mjs",
   "src-tauri/Cargo.toml",
   "src-tauri/src/app_state.rs",
@@ -111,7 +114,7 @@ export const R1_METADATA_CONTRACTS = {
 };
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");
-const relevant = p => p === "vite.config.ts" || /^(src\/|src-tauri\/|scripts\/|docs\/architecture\/)/.test(p);
+const relevant = p => p === "vite.config.ts" || /^(\.github\/workflows\/|src\/|src-tauri\/|scripts\/|docs\/architecture\/)/.test(p);
 const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const factsCache = new Map();
 function facts(root, base) {
@@ -174,7 +177,7 @@ function validate(root, override) {
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
       .trim().split(/\r?\n/).filter(relevant);
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
-    const actualFiles = ["src", "scripts", "docs/architecture"].flatMap(d => files(workspace, d));
+    const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture"].flatMap(d => files(workspace, d));
     if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));

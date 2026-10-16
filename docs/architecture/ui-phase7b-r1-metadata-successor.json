@@ -19,9 +19,21 @@
     "nativeDelayDebugOnly": true
   },
   "files": {
+    ".github/workflows/ci.yml": {
+      "beforeHash": "175f58f2f40d4edfc8e9d246884fcd8a061fb83752ef278d8ada2179a2292f9b",
+      "afterHash": "85f973977829bd31f7233e64a30be031067cd050aac6ea2383ac8840e4199c11"
+    },
+    "scripts/run-boundary-tests.mjs": {
+      "beforeHash": "96382470c6d6f1bbb11a9d8a6ce2093975efda15f0fabcee39fc79343317dced",
+      "afterHash": "b99a76720f055fbe226a9fa89c49fdb4ea06ff2c5530dc0a2ac96eec6795f3a6"
+    },
+    "scripts/testing/boundary-rpc-yield.mjs": {
+      "beforeHash": "0965bee45bdfd13be6769cdf15dd41255cdea8763a898eb15bed47bca1141939",
+      "afterHash": "f2450e9797b732b00fe1ac5c1be293a2934c38343d5d3926b9683fe9b1b97b78"
+    },
     "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
       "beforeHash": null,
-      "afterHash": "b3a83193b412c1f9a69f45dffaee4aa419582669ee94fc00b6425a6015bfc982"
+      "afterHash": "608db8bc4b6649b7e7c5bed9ef556ee3ab2ab08496e285e6dc4e0bd776d868d0"
     },
     "scripts/ui-phase7b-backup-prompt-successor-guard.mjs": {
       "beforeHash": "3ffffc11d3a12c331a8f9634ac1f09e3d665fdec640eab0e69a114f012d25e32",
@@ -29,7 +41,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "90ab76147f0bf2005e6f79098bc4e51b17920fc1424fe31304b9b77f06ce5bd1"
+      "afterHash": "45b535b8d220a574575b2dfaa6c2a47f112a3158f3027b433b19f71d2d8157f6"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
