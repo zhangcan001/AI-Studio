@@ -497,3 +497,8 @@
 .v3-shell .create-composer-wrap button.composer-submit:disabled { background:#24485a; color:#7aa6b4; box-shadow:none; }
 
 .shot-row-entities button.bound{outline:2px solid #4f8bf0;background:rgba(79,139,240,.12)}
+.shot-row-fields label:has(> small){grid-template-columns:40px 1fr auto}
+.shot-row-fields input[type=number],.shot-row-fields select{min-width:0;width:100%;background:#151c2b;color:inherit;border:1px solid #2a3550;border-radius:6px;padding:3px 6px;font:inherit}
+.shot-row-fields label small{color:#8a96ad}
+.shot-row-recognized{margin:4px 0 0;font-size:12px;color:#7fd8e6}
+.shot-row-undo{margin-left:8px;padding:0 8px;font-size:12px}

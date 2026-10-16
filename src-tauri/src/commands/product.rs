@@ -2,7 +2,7 @@ use crate::{
     app_state::AppState,
     application::product::{
         creation_facade::{
-            CreationAccepted, CreationContext, CreationReadiness, CreationShot,
+            CreationAccepted, CreationContext, CreationReadiness, CreationShot, CreationShotFields,
             CreationShotSummary, CreationShotUpdate, CreationStartDisposition, CreationSubmission,
             GeneratorOption, ProductCreationFacade,
         },
@@ -477,9 +477,76 @@ pub async fn product_creation_shot_create(
 pub async fn product_creation_shot_update(
     state: State<'_, AppState>,
     project_id: String,
-    request: CreationShotUpdate,
+    request: CreationShotUpdateDto,
 ) -> Result<CreationShotSummary, ProductError> {
-    creation(&state).update_shot(&project_id, request).await
+    let facade = creation(&state);
+    let (update, fields) = request.into_parts()?;
+    let summary = facade.update_shot(&project_id, update).await?;
+    if let Some(fields) = fields {
+        facade.save_shot_fields(&project_id, fields).await?;
+    }
+    Ok(summary)
+}
+
+/// Name edit plus optional inline row fields (stage prompt, generator values).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreationShotUpdateDto {
+    shot_id: String,
+    name: String,
+    #[serde(default)]
+    stage: Option<String>,
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    selection_ref: Option<String>,
+    #[serde(default)]
+    values: Option<std::collections::BTreeMap<String, super::generation::InputValueDto>>,
+}
+
+impl CreationShotUpdateDto {
+    fn into_parts(self) -> Result<(CreationShotUpdate, Option<CreationShotFields>), ProductError> {
+        let update = CreationShotUpdate {
+            shot_id: self.shot_id.clone(),
+            name: self.name,
+        };
+        if self.prompt.is_none() && self.values.is_none() {
+            return Ok((update, None));
+        }
+        let values = match self.values {
+            None => None,
+            Some(values) => Some(
+                values
+                    .into_iter()
+                    .map(|(key, value)| {
+                        value
+                            .into_application(&key)
+                            .map(|value| (key.clone(), value))
+                            .map_err(|error| {
+                                let mut result = ProductError::new(
+                                    "INVALID_INPUT",
+                                    "输入格式无效。",
+                                    Some("EDIT_INPUT"),
+                                );
+                                result.details.field = Some(key.clone());
+                                result.details.technical_details = Some(error.to_string());
+                                result
+                            })
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
+        };
+        Ok((
+            update,
+            Some(CreationShotFields {
+                shot_id: self.shot_id,
+                stage: self.stage.unwrap_or_else(|| "video".to_owned()),
+                prompt: self.prompt,
+                selection_ref: self.selection_ref,
+                values,
+            }),
+        ))
+    }
 }
 
 #[tauri::command(rename_all = "camelCase")]

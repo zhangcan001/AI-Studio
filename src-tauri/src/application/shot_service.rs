@@ -355,6 +355,41 @@ impl ShotService {
         self.get(&request.project_id, &request.shot_id).await
     }
 
+    /// Row-editor prompt write for one stage. The text is user-edited, so prompt
+    /// provenance is cleared; the stage prompt row is inserted when absent.
+    pub async fn set_stage_prompt(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+        stage: ShotStage,
+        prompt_text: &str,
+    ) -> Result<ShotView, ShotServiceError> {
+        validate_project(project_id)?;
+        self.repository
+            .find(project_id, shot_id)
+            .await?
+            .ok_or_else(|| ShotServiceError::NotFound(shot_id.to_owned()))?;
+        let prompt_text =
+            canonical_prompt_text(prompt_text).map_err(ShotServiceError::InvalidInput)?;
+        let repository = self.stage_prompt_repository.as_ref().ok_or_else(|| {
+            ShotServiceError::InvalidInput("当前环境不支持保存阶段提示词".to_owned())
+        })?;
+        repository
+            .update_stage_prompts_atomic(
+                project_id,
+                &[ShotStagePromptRecord {
+                    shot_id: shot_id.to_owned(),
+                    stage,
+                    prompt_text,
+                    prompt_entry_id: None,
+                    prompt_version_id: None,
+                    updated_at: self.clock.now(),
+                }],
+            )
+            .await?;
+        self.get(project_id, shot_id).await
+    }
+
     pub async fn replace_references(
         &self,
         project_id: &str,

@@ -2,18 +2,19 @@
 use super::ProductCreationFacade;
 use crate::application::{
     asset_query_service::{AssetQueryError, AssetQueryService, AssetSummaryView},
+    generation_input_preparer::GenerationInputValue,
     product::{
         error::ProductError,
         run_facade::{RunRef, RunSource},
         selection_ref::ExactGeneratorSelection,
     },
     project_command_center_service::ProjectCommandCenterService,
-    shot_service::{ShotServiceError, ShotUpdateRequest, ShotView},
+    shot_service::{ShotServiceError, ShotStageConfigRequest, ShotUpdateRequest, ShotView},
 };
 use crate::domain::ShotStage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +76,18 @@ pub struct CreationPromptChoice {
 pub struct CreationShotUpdate {
     pub shot_id: String,
     pub name: String,
+}
+
+/// Inline shot-row edits: stage prompt and/or generator scalar values
+/// (duration, width/height...). Values persist through ShotService::set_stage_config,
+/// which validates them against the selected recipe.
+#[derive(Debug)]
+pub struct CreationShotFields {
+    pub shot_id: String,
+    pub stage: String,
+    pub prompt: Option<String>,
+    pub selection_ref: Option<String>,
+    pub values: Option<BTreeMap<String, GenerationInputValue>>,
 }
 
 fn stage(value: &str) -> Result<ShotStage, ProductError> {
@@ -356,6 +369,66 @@ impl ProductCreationFacade {
             .await
             .map(|shot| summary(&shot))
             .map_err(shot_error)
+    }
+
+    pub async fn save_shot_fields(
+        &self,
+        project_id: &str,
+        fields: CreationShotFields,
+    ) -> Result<CreationShot, ProductError> {
+        let stage = stage(&fields.stage)?;
+        self.bindings
+            .get(project_id)
+            .await
+            .map_err(ProductError::binding)?;
+        self.shots
+            .get(project_id, &fields.shot_id)
+            .await
+            .map_err(shot_error)?;
+        if let Some(prompt) = fields.prompt.as_deref() {
+            self.shots
+                .set_stage_prompt(project_id, &fields.shot_id, stage, prompt)
+                .await
+                .map_err(shot_error)?;
+        }
+        if let Some(values) = fields.values {
+            let selection_ref = fields.selection_ref.as_deref().ok_or_else(|| {
+                ProductError::new(
+                    "INVALID_INPUT",
+                    "请先选择生成器，再设置时长或分辨率。",
+                    Some("EDIT_INPUT"),
+                )
+            })?;
+            let selection = ExactGeneratorSelection::decode(selection_ref)?;
+            if !self
+                .bindings
+                .is_workflow_available_for_recipe(
+                    &selection.workflow_version_id,
+                    &selection.recipe_id,
+                )
+                .await
+                .map_err(ProductError::binding)?
+            {
+                return Err(ProductError::invalid_selection());
+            }
+            self.shots
+                .set_stage_config(ShotStageConfigRequest {
+                    project_id: project_id.to_owned(),
+                    shot_id: fields.shot_id.clone(),
+                    stage,
+                    workflow_version_id: selection.workflow_version_id,
+                    recipe_id: selection.recipe_id,
+                    values,
+                })
+                .await
+                .map_err(shot_error)?;
+        }
+        let shot = self
+            .shots
+            .get(project_id, &fields.shot_id)
+            .await
+            .map_err(shot_error)?;
+        project_shot(&shot, stage)
     }
 
     pub async fn delete_shot(&self, project_id: &str, shot_id: &str) -> Result<(), ProductError> {

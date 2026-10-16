@@ -22,6 +22,7 @@ export const R1_METADATA_CHANGED = [
   "src-tauri/src/application/production_queue_service.rs",
   "src-tauri/src/application/production_start_admission_service.rs",
   "src-tauri/src/application/project_backup_service.rs",
+  "src-tauri/src/application/shot_service.rs",
   "src-tauri/src/application/workflow_onboarding_service.rs",
   "src-tauri/src/application/workflow_registry_service.rs",
   "src-tauri/src/commands/mod.rs",
@@ -42,6 +43,7 @@ export const R1_METADATA_CHANGED = [
   "src-tauri/tests/dev061b_queue_recovery.rs",
   "src-tauri/tests/product_library_contract.rs",
   "src-tauri/tests/project_database_fixture.rs",
+  "src-tauri/tests/support/creation_context_contract.rs",
   "src-tauri/tests/support/creation_submission_contract.rs",
   "src-tauri/tests/support/minimax_video_input_regressions.rs",
   "src/app/FeatureLifecycle.test.tsx",
@@ -73,6 +75,7 @@ export const R1_METADATA_CHANGED = [
   "src/features/tools/LocalToolHub.test.tsx",
   "src/product/client.ts",
   "src/product/transport.ts",
+  "src/product/types.ts",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/testing/ui-phase7b-r1-metadata.test.mjs",
@@ -92,6 +95,8 @@ export const R1_METADATA_ADDED = [
   "src/features/create/StoryboardWorkbench.test.tsx",
   "src/features/create/StoryboardWorkbench.tsx",
   "src/features/create/composerTestUtils.ts",
+  "src/features/create/shotPromptParser.test.ts",
+  "src/features/create/shotPromptParser.ts",
   "src/features/create/storyboardModel.ts",
   "src/features/library/StoryEntitiesSection.test.tsx",
   "src/features/library/StoryEntitiesSection.tsx",

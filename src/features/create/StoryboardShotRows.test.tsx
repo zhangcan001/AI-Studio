@@ -4,9 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StoryboardShotRows } from "./StoryboardShotRows";
 import type { StoryboardShot } from "./storyboardModel";
 
-const api = vi.hoisted(() => ({ updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn() }));
+const api = vi.hoisted(() => ({ updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: {
-  creation: { updateShot: api.updateShot, deleteShot: api.deleteShot, readinessGet: api.readinessGet, generate: api.generate, selectResult: api.selectResult, mediaUrl: (p: string, id: string) => `media://${p}/${id}` },
+  creation: { updateShot: api.updateShot, deleteShot: api.deleteShot, readinessGet: api.readinessGet, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, mediaUrl: (p: string, id: string) => `media://${p}/${id}` },
   storyEntities: { list: api.list, listForShot: api.listForShot, bindShot: api.bindShot },
   library: { imageGet: vi.fn(async () => [1]), thumbnailGet: vi.fn(async () => null) },
 } }));
@@ -14,12 +14,16 @@ const hero = { id: "e1", projectId: "p", kind: "character", name: "阿离", desc
 const lane = { ...hero, id: "e2", kind: "scene", name: "雨巷" } as const;
 const shot = (id: string, ordinal: number, selectionRef: string | null = "sel"): StoryboardShot => ({ id, name: `镜头${ordinal + 1}`, ordinal, status: "TODO", candidates: [], run: null,
   shot: { summary: { id, name: `镜头${ordinal + 1}`, ordinal }, prompt: "@阿离 走进 @雨巷", selectionRef, values: { duration_seconds: { type: "integer", value: 5 } }, referenceAssetIds: [], selectedResultId: null, recentRun: null } });
+const generator = { selectionRef: "sel", name: "H3", version: "1", mode: "t2v", mediaKind: "video", availability: true, availabilityReason: null, recommended: true,
+  fields: [{ key: "duration_seconds", type: "integer", label: "时长", required: false, min: 1, max: 10 }],
+  resolutionPresets: [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }, { id: "mp-2_09-9x16", label: "2.09MP · 1088×1920", width: 1088, height: 1920 }] };
 const props = () => ({ projectId: "p", busy: false, onOpen: vi.fn(), onCreate: vi.fn(), onChanged: vi.fn(), onQueue: vi.fn() });
 beforeEach(() => {
   api.list.mockResolvedValue([hero, lane]); api.listForShot.mockResolvedValue([hero]);
   api.bindShot.mockImplementation(async (_p: string, _s: string, ids: string[]) => [hero, lane].filter(e => ids.includes(e.id)));
   api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
   api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "r" }, startOutcome: "QUEUED", startIssue: null });
+  api.generatorsList.mockResolvedValue([generator]);
   api.updateShot.mockResolvedValue({}); api.deleteShot.mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
@@ -77,4 +81,56 @@ it("blocks generation when readiness fails and when no generator is selected", a
   expect(api.generate).not.toHaveBeenCalled();
   const second = screen.getByRole("article", { name: "分镜 2 镜头2" });
   expect(within(second).getByRole("button", { name: "生成视频" }).hasAttribute("disabled")).toBe(true);
+});
+
+it("saves the prompt on blur and auto-fills recognized duration, aspect/resolution and entity bindings with undo", async () => {
+  const p = props();
+  render(<StoryboardShotRows {...p} items={[shot("a", 0)]} />);
+  const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
+  await within(row).findByLabelText("镜头1 画幅");
+  await within(within(row).getByLabelText("项目角色与场景")).findByTitle("解除绑定 角色 · 阿离");
+  const box = within(row).getByLabelText("镜头1 提示词");
+  fireEvent.change(box, { target: { value: "阿离 走进 雨巷 8秒 竖屏 720p" } });
+  expect(within(row).getByLabelText("识别结果").textContent).toContain("时长 8 秒");
+  expect(within(row).getByLabelText("识别结果").textContent).toContain("画幅 9:16 · 768×1344");
+  expect(within(row).getByLabelText("识别结果").textContent).toContain("场景 @雨巷");
+  fireEvent.blur(box);
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", { shotId: "a", name: "镜头1", stage: "video", prompt: "阿离 走进 雨巷 8秒 竖屏 720p", selectionRef: "sel",
+    values: { duration_seconds: { type: "integer", value: 8 }, width: { type: "integer", value: 768 }, height: { type: "integer", value: 1344 } } }));
+  await waitFor(() => expect(api.bindShot).toHaveBeenCalledWith("p", "a", ["e1", "e2"]));
+  const status = (await within(row).findByText(/已识别并填入/)).closest("p")!;
+  expect(status.textContent).toContain("已识别并填入：时长 8 秒 · 画幅 9:16 · 768×1344 · 场景 @雨巷");
+  expect(p.onChanged).toHaveBeenCalled();
+  fireEvent.click(within(status).getByRole("button", { name: "撤销" }));
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", { shotId: "a", name: "镜头1", stage: "video", selectionRef: "sel", values: { duration_seconds: { type: "integer", value: 5 } } }));
+  await waitFor(() => expect(api.bindShot).toHaveBeenLastCalledWith("p", "a", ["e1"]));
+  await within(row).findByText("已撤销自动填入");
+});
+
+it("edits duration, aspect and resolution inline through updateShot; Ctrl+Enter saves the prompt", async () => {
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
+  const duration = await within(row).findByLabelText("镜头1 时长（秒）");
+  expect((duration as HTMLInputElement).value).toBe("5");
+  fireEvent.change(duration, { target: { value: "7" } }); fireEvent.blur(duration);
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", { shotId: "a", name: "镜头1", stage: "video", selectionRef: "sel", values: { duration_seconds: { type: "integer", value: 7 } } }));
+  fireEvent.change(within(row).getByLabelText("镜头1 画幅"), { target: { value: "16:9" } });
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", expect.objectContaining({ values: { duration_seconds: { type: "integer", value: 5 }, width: { type: "integer", value: 1344 }, height: { type: "integer", value: 768 } } })));
+  fireEvent.change(within(row).getByLabelText("镜头1 分辨率"), { target: { value: "mp-2_09-9x16" } });
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", expect.objectContaining({ values: expect.objectContaining({ width: { type: "integer", value: 1088 }, height: { type: "integer", value: 1920 } }) })));
+  const box = within(row).getByLabelText("镜头1 提示词");
+  fireEvent.change(box, { target: { value: "只改文字" } });
+  fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", { shotId: "a", name: "镜头1", stage: "video", prompt: "只改文字" }));
+  expect(await within(row).findByText("提示词已保存")).toBeTruthy();
+});
+
+it("shows read-only duration/aspect without a selected generator and never sends values", async () => {
+  render(<StoryboardShotRows {...props()} items={[shot("b", 0, null)]} />);
+  const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
+  await waitFor(() => expect(api.generatorsList).toHaveBeenCalled());
+  expect(within(row).queryByLabelText("镜头1 画幅")).toBeNull();
+  const box = within(row).getByLabelText("镜头1 提示词");
+  fireEvent.change(box, { target: { value: "竖屏 6秒" } }); fireEvent.blur(box);
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", { shotId: "b", name: "镜头1", stage: "video", prompt: "竖屏 6秒" }));
 });

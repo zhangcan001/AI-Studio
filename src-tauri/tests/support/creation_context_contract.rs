@@ -389,3 +389,60 @@ async fn product_creation_context_select_second_preserves_candidates_and_task_hi
         task.status
     );
 }
+
+#[tokio::test]
+async fn product_creation_shot_fields_save_stage_prompt_and_require_generator_for_values() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("fields.db")).await.unwrap();
+    seed_database(&pool, dir.path()).await;
+    let (facade, assets) = creation_context_services(&pool);
+    let center = command_center(&pool);
+    let shot = facade.create_shot(PROJECT_ID).await.unwrap();
+    let saved = facade
+        .save_shot_fields(
+            PROJECT_ID,
+            CreationShotFields {
+                shot_id: shot.id.clone(),
+                stage: "video".into(),
+                prompt: Some("  雨夜街头 5秒 16:9  ".into()),
+                selection_ref: None,
+                values: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(saved.prompt, "雨夜街头 5秒 16:9");
+    let video = facade
+        .get(&center, &assets, PROJECT_ID, Some(&shot.id), "video")
+        .await
+        .unwrap();
+    assert_eq!(video.selected_shot.unwrap().prompt, "雨夜街头 5秒 16:9");
+    let missing_generator = facade
+        .save_shot_fields(
+            PROJECT_ID,
+            CreationShotFields {
+                shot_id: shot.id.clone(),
+                stage: "video".into(),
+                prompt: None,
+                selection_ref: None,
+                values: Some(Default::default()),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(missing_generator.code, "INVALID_INPUT");
+    assert!(facade
+        .save_shot_fields(
+            "prj_11111111-1111-4111-8111-111111111111",
+            CreationShotFields {
+                shot_id: shot.id.clone(),
+                stage: "video".into(),
+                prompt: Some("x".into()),
+                selection_ref: None,
+                values: None,
+            },
+        )
+        .await
+        .is_err());
+    assert_eq!(count(&pool, "tasks").await, 0);
+}

@@ -5,6 +5,9 @@ import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { CandidateThumbnail, loadLibraryImageUrl } from "./CreateMediaPreview";
 import "./CreatePage.css";
+import type { GeneratorOption } from "../../product/types";
+import type { DraftValue } from "../../types/generation";
+import { parseShotPrompt, resolvePreset, type ParsedShotPrompt, type ResolutionPresetLike } from "./shotPromptParser";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品" };
@@ -25,7 +28,9 @@ interface RowsProps {
  * Shot-row editing view. Every write uses an existing formal path:
  * name → creation.updateShot, delete → creation.deleteShot, entity binding →
  * storyEntities.bindShot, result → creation.selectResult, generation →
- * creation.readinessGet + creation.generate (Production Queue).
+ * creation.readinessGet + creation.generate (Production Queue). Inline prompt,
+ * duration and aspect/resolution persist through creation.updateShot (stage
+ * prompt + generator scalar values validated by the selected recipe).
  */
 export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue }: RowsProps) {
   const [query, setQuery] = useState("");
@@ -45,6 +50,14 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     return () => { alive = false; };
   }, [projectId, rev]);
   const urls = useEntityCovers(projectId, entities);
+  const [generators, setGenerators] = useState<GeneratorOption[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const list = productClient.creation?.generatorsList;
+    if (typeof list !== "function") return;
+    void Promise.resolve(list(projectId, "video", null)).then(next => { if (alive) setGenerators(next ?? []); }).catch(() => { if (alive) setGenerators([]); });
+    return () => { alive = false; };
+  }, [projectId]);
   const q = query.trim().toLowerCase();
   const visible = items.filter(item => (filter === "ALL" || item.status === filter)
     && (!q || item.name.toLowerCase().includes(q) || (item.shot?.prompt ?? "").toLowerCase().includes(q)));
@@ -58,6 +71,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       <button type="button" onClick={onQueue}>任务队列</button>
     </div>
     {visible.map(item => <ShotRowCard key={item.id} projectId={projectId} item={item} entities={entities} urls={urls} busy={busy}
+      generator={generators.find(g => g.selectionRef === item.shot?.selectionRef)}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} />)}
     {!visible.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
   </section>;
@@ -83,8 +97,43 @@ function Avatar({ entity, url }: { entity: StoryEntity; url?: string }) {
 
 function newKey() { try { return crypto.randomUUID(); } catch { return `sb-${Date.now()}-${Math.random().toString(36).slice(2)}`; } }
 
-function ShotRowCard({ projectId, item, entities, urls, busy, onOpen, onCreate, onChanged }: {
-  projectId: string; item: StoryboardShot; entities: StoryEntity[]; urls: Record<string, string>; busy: boolean;
+type Scalars = Record<string, DraftValue>;
+const SCALAR_TYPES = new Set(["integer", "number", "seed_random", "seed_fixed"]);
+/** Only generator scalars are persisted in stage configs; prompt/assets are owned elsewhere. */
+function scalarValues(values: Record<string, DraftValue> | undefined): Scalars {
+  return Object.fromEntries(Object.entries(values ?? {}).filter(([, v]) => SCALAR_TYPES.has(v.type)));
+}
+function numberOf(v: DraftValue | undefined) { return v?.type === "integer" || v?.type === "number" ? v.value : undefined; }
+function aspectKey(p: ResolutionPresetLike) { const m = /-(\d+)x(\d+)$/.exec(p.id); return m ? `${m[1]}:${m[2]}` : `${p.width}:${p.height}`; }
+
+interface Recognized { parsed: ParsedShotPrompt; values?: Scalars; addEntityIds: string[]; labels: string[] }
+
+/** Turns parser output into concrete writes for this shot + generator; labels describe them. */
+function recognize(text: string, entities: StoryEntity[], bound: StoryEntity[], generator: GeneratorOption | undefined, current: Scalars): Recognized {
+  const parsed = parseShotPrompt(text, entities);
+  const labels: string[] = [];
+  let values: Scalars | undefined;
+  const durationField = generator?.fields.find(f => f.key === "duration_seconds");
+  if (parsed.durationSeconds !== undefined) {
+    if (durationField && (durationField.type === "integer" || durationField.type === "number")) {
+      const min = "min" in durationField && typeof durationField.min === "number" ? durationField.min : undefined;
+      const max = "max" in durationField && typeof durationField.max === "number" ? durationField.max : undefined;
+      const sec = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed.durationSeconds));
+      if (numberOf(current.duration_seconds) !== sec) { values = { ...(values ?? current), duration_seconds: { type: durationField.type as "integer", value: sec } }; labels.push(`时长 ${sec} 秒`); }
+    } else labels.push(`时长 ${parsed.durationSeconds} 秒（当前生成器无此参数）`);
+  }
+  const w = numberOf(current.width), h = numberOf(current.height);
+  const preset = resolvePreset(parsed, generator?.resolutionPresets ?? [], w && h ? { width: w, height: h } : undefined);
+  if (preset && (preset.width !== w || preset.height !== h)) { values = { ...(values ?? current), width: { type: "integer", value: preset.width }, height: { type: "integer", value: preset.height } }; labels.push(`画幅 ${aspectKey(preset)} · ${preset.width}×${preset.height}`); }
+  else if ((parsed.aspect || parsed.resolution) && !generator?.resolutionPresets?.length) labels.push("画幅/分辨率（请先在详情中选择生成器）");
+  const addEntityIds = parsed.entityIds.filter(id => !bound.some(b => b.id === id));
+  for (const id of addEntityIds) { const e = entities.find(x => x.id === id); if (e) labels.push(`${KIND_LABEL[e.kind]} @${e.name}`); }
+  if (parsed.shotNumber !== undefined) labels.push(`镜号 ${parsed.shotNumber}（仅识别，顺序不变）`);
+  return { parsed, values, addEntityIds, labels };
+}
+
+function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen, onCreate, onChanged }: {
+  projectId: string; item: StoryboardShot; entities: StoryEntity[]; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption;
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
 }) {
   const [bound, setBound] = useState<StoryEntity[]>([]);
@@ -111,6 +160,50 @@ function ShotRowCard({ projectId, item, entities, urls, busy, onOpen, onCreate, 
   const saveName = () => { const next = name.trim(); if (!next || next === item.name) { setName(item.name); return; } void run(async () => { await productClient.creation.updateShot(projectId, { shotId: item.id, name: next }); onChanged(); }); };
   const remove = () => { if (!window.confirm(`删除分镜「${item.name}」？此操作不可撤销。`)) return; void run(async () => { await productClient.creation.deleteShot(projectId, item.id); onChanged(); }); };
   const selectionRef = item.shot?.selectionRef ?? null;
+  const current = useMemo(() => scalarValues(item.shot?.values), [item.shot?.values]);
+  const [undo, setUndo] = useState<{ values?: Scalars; boundIds?: string[] }>();
+  const save = (patch: { prompt?: string; values?: Scalars }) => productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", ...patch, ...(patch.values ? { selectionRef: selectionRef ?? undefined } : {}) });
+  const preview = useMemo(() => recognize(prompt, entities, bound, generator, current), [prompt, entities, bound, generator, current]);
+  /** Saves the prompt and applies recognized fields; the note lists exactly what was filled, with undo. */
+  const savePrompt = () => {
+    const text = prompt.trim();
+    const promptChanged = text !== (item.shot?.prompt ?? "").trim();
+    const r = recognize(text, entities, bound, generator, current);
+    if (!promptChanged && !r.values && !r.addEntityIds.length) return;
+    void run(async () => {
+      const before = { values: r.values ? current : undefined, boundIds: r.addEntityIds.length ? bound.map(e => e.id) : undefined };
+      await save({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && selectionRef ? { values: r.values } : {}) });
+      if (r.addEntityIds.length) setBound((await productClient.storyEntities.bindShot(projectId, item.id, [...bound.map(e => e.id), ...r.addEntityIds])) ?? []);
+      const applied = r.labels.filter(l => !l.includes("（"));
+      if (applied.length) { setUndo(before); setNote(`已识别并填入：${applied.join(" · ")}`); } else { setUndo(undefined); setNote("提示词已保存"); }
+      onChanged();
+    });
+  };
+  const undoRecognized = () => undo && void run(async () => {
+    if (undo.values && selectionRef) await save({ values: undo.values });
+    if (undo.boundIds) setBound((await productClient.storyEntities.bindShot(projectId, item.id, undo.boundIds)) ?? []);
+    setUndo(undefined); setNote("已撤销自动填入"); onChanged();
+  });
+  const saveValues = (next: Scalars) => void run(async () => { await save({ values: next }); onChanged(); });
+  const durationField = generator?.fields.find(f => f.key === "duration_seconds" && (f.type === "integer" || f.type === "number"));
+  const presets = generator?.resolutionPresets ?? [];
+  const curW = numberOf(current.width), curH = numberOf(current.height);
+  const currentPreset = presets.find(p => p.width === curW && p.height === curH);
+  const aspects = [...new Set(presets.map(aspectKey))];
+  const currentAspect = currentPreset ? aspectKey(currentPreset) : undefined;
+  const sizeList = currentAspect ? presets.filter(p => aspectKey(p) === currentAspect) : presets;
+  const choosePreset = (p?: ResolutionPresetLike) => p && saveValues({ ...current, width: { type: "integer", value: p.width }, height: { type: "integer", value: p.height } });
+  const chooseAspect = (a: string) => choosePreset(resolvePreset({ aspect: a }, presets, curW && curH ? { width: curW, height: curH } : undefined));
+  const [duration, setDuration] = useState<string>("");
+  useEffect(() => { const v = numberOf(current.duration_seconds); setDuration(v === undefined ? "" : String(v)); }, [current.duration_seconds]);
+  const saveDuration = () => {
+    if (!durationField) return;
+    const prev = numberOf(current.duration_seconds);
+    if (duration === "" ) { if (prev !== undefined) { const { duration_seconds: _, ...rest } = current; saveValues(rest); } return; }
+    const n = Number(duration); if (!Number.isFinite(n) || n === prev) { setDuration(prev === undefined ? "" : String(prev)); return; }
+    saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value: durationField.type === "integer" ? Math.round(n) : n } });
+  };
+  const noGen = !selectionRef ? "请先在详情中选择生成器" : undefined;
   const generate = () => selectionRef && item.shot && void run(async () => {
     const values = { ...item.shot!.values, prompt: { type: "string" as const, value: prompt } };
     const base = { projectId, shotId: item.id, stage: "video" as const, selectionRef, values };
@@ -140,7 +233,9 @@ function ShotRowCard({ projectId, item, entities, urls, busy, onOpen, onCreate, 
       <ul className="shot-row-entities" aria-label="项目角色与场景">{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={disabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">素材库中还没有角色与场景</li>}</ul>
     </div>
     <div className="shot-row-prompt">
-      <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词..." value={prompt} disabled={disabled} onChange={e => setPrompt(e.target.value)} title="提示词随「生成视频」一起提交" />
+      <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 竖屏 / 720p / @角色名，自动识别）" value={prompt} disabled={disabled}
+        onChange={e => setPrompt(e.target.value)} onBlur={savePrompt} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
+      {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       <dl className="shot-row-structured" aria-label="分镜描述">
         <div><dt>镜号</dt><dd>{item.ordinal + 1}</dd></div>
         <div><dt>时长</dt><dd>{shotDuration(item.shot)}</dd></div>
@@ -152,13 +247,18 @@ function ShotRowCard({ projectId, item, entities, urls, busy, onOpen, onCreate, 
       </dl>
       <div className="shot-row-toolbar"><button type="button" onClick={onOpen}>编辑</button><button type="button" onClick={onOpen}>详情</button></div>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
-      {note && <p role="status">{note}</p>}
+      {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={disabled} onClick={undoRecognized}>撤销</button>}</p>}
     </div>
     <div className="shot-row-fields">
       <label><span>镜号</span><output>{item.ordinal + 1}</output></label>
       <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => setName(e.target.value)} onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
-      <label><span>时长</span><output title="在详情中修改">{shotDuration(item.shot)}</output></label>
-      <label><span>画幅</span><output title="在详情中修改">{shotResolution(item.shot)}</output></label>
+      {durationField
+        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={"max" in durationField ? durationField.max : undefined} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => setDuration(e.target.value)} onBlur={saveDuration} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
+        : <label><span>时长</span><output title={noGen ?? "当前生成器没有时长参数"}>{shotDuration(item.shot)}</output></label>}
+      {presets.length > 0
+        ? <><label><span>画幅</span><select aria-label={`${item.name} 画幅`} value={currentAspect ?? ""} disabled={disabled} onChange={e => chooseAspect(e.target.value)}>{!currentAspect && <option value="" disabled>未设置</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
+          <label><span>分辨率</span><select aria-label={`${item.name} 分辨率`} value={currentPreset?.id ?? ""} disabled={disabled} onChange={e => choosePreset(presets.find(p => p.id === e.target.value))}>{!currentPreset && <option value="" disabled>{curW && curH ? `${curW}×${curH}` : "未设置"}</option>}{sizeList.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label></>
+        : <label><span>画幅</span><output title={noGen ?? "当前生成器没有分辨率预设"}>{shotResolution(item.shot)}</output></label>}
       {KINDS.map(kind => <label key={kind}><span>{KIND_LABEL[kind]}</span><output>{byKind[kind].map(e => `@${e.name}`).join("、") || "—"}</output></label>)}
       <div className="shot-row-field-actions">
         <button type="button" className="success" disabled={disabled} title="新分镜追加到末尾" onClick={onCreate}>新建分镜</button>

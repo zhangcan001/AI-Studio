@@ -78,7 +78,8 @@ export interface CreationContext {
 }
 export interface CreationPromptChoice { promptId: string; promptVersionId: string; name: string; version: number; text: string }
 export interface CreationPromptProvenance { promptId: string; promptVersionId: string }
-export interface CreationShotUpdate { shotId: string; name: string }
+/** Name edit; optional inline row fields persist the stage prompt and generator scalar values. */
+export interface CreationShotUpdate { shotId: string; name: string; stage?: "image" | "video"; prompt?: string; selectionRef?: string; values?: Record<string, import("../types/generation").DraftValue> }
 export interface CreationSubmission {
   promptId?: string;
   promptVersionId?: string;
