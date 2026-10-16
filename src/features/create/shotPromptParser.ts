@@ -6,7 +6,7 @@
 import type { StoryEntity } from "../../types/storyEntity";
 import type { DraftValue, RecipeField } from "../../types/generation";
 
-export type ParsedResolution = { kind: "lines"; lines: number } | { kind: "size"; width: number; height: number };
+export type ParsedResolution = { kind: "lines"; lines: number } | { kind: "size"; width: number; height: number } | { kind: "pixels"; pixels: number };
 export interface ParsedShotPrompt {
   durationSeconds?: number;
   aspect?: string;
@@ -34,6 +34,23 @@ function toNumber(raw: string): number | undefined {
 
 const NUM = "(\\d+(?:\\.\\d+)?|[零一二两三四五六七八九十]{1,3})";
 
+/** ComfyUI ResolutionSelector uses MP * 1024^2; explicit Chinese pixel counts are decimal. */
+function pixelBudget(src: string) {
+  const number = "([+-]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?|\\.\\d+))";
+  const units = new RegExp(`(?<![\\w.+-])${number}\\s*(megapixels?|mp|百万像素|兆像素|万像素|像素|pixels?)(?![\\w])`, "gi");
+  const named = new RegExp(`(?:总像素|像素数)\\s*[:=]?\\s*${number}\\s*(百万|万)?(?![\\dA-Za-z.]|百万|万)`, "gi");
+  const matches = [
+    ...[...src.matchAll(units)].map(m => ({ index: m.index, value: Number(m[1].replace(/,/g, "")), scale: /^(mp|megapixels?)$/i.test(m[2]) ? 1024 ** 2 : /百万|兆/.test(m[2]) ? 1_000_000 : /万/.test(m[2]) ? 10_000 : 1 })),
+    ...[...src.matchAll(named)].map(m => ({ index: m.index, value: Number(m[1].replace(/,/g, "")), scale: m[2] === "百万" ? 1_000_000 : m[2] === "万" ? 10_000 : 1 })),
+  ].sort((a, b) => a.index - b.index);
+  const last = matches[matches.length - 1];
+  if (!last) return undefined;
+  const pixels = Math.round(last.value * last.scale);
+  return Number.isSafeInteger(pixels) && pixels > 0
+    ? { resolution: { kind: "pixels" as const, pixels } }
+    : { warning: "总像素必须是正数且在可精确表示的范围内，未自动填入。" };
+}
+
 export function parseShotPrompt(text: string, entities: readonly StoryEntity[] = []): ParsedShotPrompt {
   const out: ParsedShotPrompt = { entityIds: [] };
   const src = text.normalize("NFKC");
@@ -49,12 +66,17 @@ export function parseShotPrompt(text: string, entities: readonly StoryEntity[] =
   // Resolution: "1344x768" / "1344×768" / "1344*768", or "720p"/"1080p"/"4k".
   const size = [...src.matchAll(/(?<!\d)(\d{3,4})\s*[x×*]\s*(\d{3,4})(?!\d)/gi)].pop();
   const lines = [...src.matchAll(/(?<!\d)(480|540|720|1080|1440|2160)\s*p(?![a-z])/gi)].pop();
+  const pixels = pixelBudget(src);
   if (size) out.resolution = { kind: "size", width: Number(size[1]), height: Number(size[2]) };
+  else if (pixels) {
+    out.resolution = pixels.resolution;
+    if (pixels.warning) out.warnings = [pixels.warning];
+  }
   else if (lines) out.resolution = { kind: "lines", lines: Number(lines[1]) };
   else if (/(?<![a-z\d])(2k)(?![a-z])/i.test(src)) out.resolution = { kind: "lines", lines: 1440 };
   else if (/(?<![a-z\d])(4k)(?![a-z])/i.test(src)) out.resolution = { kind: "lines", lines: 2160 };
   if (!out.resolution && /(?:画幅|分辨率|尺寸)\s*[:：]?\s*\d{3,4}(?!\d)/.test(src)) {
-    out.warnings = ["画幅/分辨率信息不完整：请填写 16:9、9:16 等比例，或 1920×1080 等完整尺寸；单个数字不会自动填入。"];
+    out.warnings = ["画幅/分辨率信息不完整：请填写 16:9、9:16 等比例、完整尺寸，或 0.5MP、50万像素等总像素；单个数字不会自动填入。"];
   }
   // Shot number: "镜头3", "镜号 3", "第3镜", "第三个镜头".
   const shot = [...src.matchAll(new RegExp(`(?:镜头|镜号|分镜)\\s*[:：#]?\\s*${NUM}|第\\s*${NUM}\\s*(?:个)?(?:镜头|镜|分镜)`, "g"))].pop();
@@ -91,11 +113,16 @@ export function resolvePreset(parsed: Pick<ParsedShotPrompt, "aspect" | "resolut
     const exact = presets.find(p => p.width === res.width && p.height === res.height);
     if (exact) return exact;
   }
-  const aspect = parsed.aspect ?? (res?.kind === "size" ? aspectOfSize(res.width, res.height) : undefined) ?? (current ? aspectOfSize(current.width, current.height) : undefined) ?? "16:9";
+  const saved = current ? presets.find(p => p.width === current.width && p.height === current.height) : undefined;
+  const aspect = parsed.aspect ?? (res?.kind === "size" ? aspectOfSize(res.width, res.height) : undefined) ?? (saved ? presetAspect(saved) : undefined) ?? (current ? aspectOfSize(current.width, current.height) : undefined) ?? "16:9";
   const pool = presets.filter(p => presetAspect(p) === aspect);
   if (!pool.length) return undefined;
   let target: number;
   if (res?.kind === "size") target = res.width * res.height;
+  else if (res?.kind === "pixels") {
+    if (!Number.isSafeInteger(res.pixels) || res.pixels <= 0) return undefined;
+    target = res.pixels;
+  }
   else if (res?.kind === "lines") target = res.lines * res.lines * 16 / 9;
   else if (current) target = current.width * current.height;
   else target = 1280 * 720;

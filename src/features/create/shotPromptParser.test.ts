@@ -12,6 +12,26 @@ const presets = [
 ];
 
 describe("parseShotPrompt", () => {
+  it.each([
+    ["总像素0.5MP", 524288], ["0.98mp", 1027604], ["０．５ＭＰ", 524288],
+    ["50万像素", 500000], ["总像素：500000", 500000], ["总像素50万", 500000],
+    ["0.5百万像素", 500000], ["1,000,000像素", 1000000],
+    ["16:9，0.5MP", 524288], ["总像素500000，16:9", 500000],
+  ])("recognizes explicit total pixels in %s without confusing Comfy MP and decimal pixels", (text, pixels) => {
+    expect(parseShotPrompt(text).resolution).toEqual({ kind: "pixels", pixels });
+  });
+  it.each(["画幅1920", "500MB", "预算50万", "12.5MP4"])("does not guess a pixel budget from %s", text => {
+    expect(parseShotPrompt(text).resolution).toBeUndefined();
+  });
+  it.each(["0MP", "-0.5MP", "999999999999999999999像素"])("rejects invalid pixel budgets %s", text => {
+    expect(parseShotPrompt(text).resolution).toBeUndefined();
+    expect(parseShotPrompt(text).warnings?.join(" ")).toContain("总像素");
+  });
+  it("uses the last explicit total and retains the existing full-dimension priority", () => {
+    expect(parseShotPrompt("0.5MP，总像素100万").resolution).toEqual({ kind: "pixels", pixels: 1000000 });
+    expect(parseShotPrompt("总像素100万，0.98MP").resolution).toEqual({ kind: "pixels", pixels: 1027604 });
+    expect(parseShotPrompt("总像素0.5MP，1344×768").resolution).toEqual({ kind: "size", width: 1344, height: 768 });
+  });
   it("recognizes duration in several spellings", () => {
     expect(parseShotPrompt("雨夜街头 5秒").durationSeconds).toBe(5);
     expect(parseShotPrompt("时长：8 秒钟").durationSeconds).toBe(8);
@@ -58,6 +78,17 @@ describe("parseShotPrompt", () => {
 });
 
 describe("resolvePreset", () => {
+  it("maps a total-pixel target through approved presets while retaining the saved aspect", () => {
+    expect(resolvePreset(parseShotPrompt("0.98MP"), presets)?.id).toBe("mp-0_98-16x9");
+    expect(resolvePreset(parseShotPrompt("0.98MP"), presets, { width: 1088, height: 1920 })?.id).toBe("mp-0_98-9x16");
+    expect(resolvePreset(parseShotPrompt("总像素100万"), presets, { width: 992, height: 992 })?.id).toBe("mp-0_98-1x1");
+    expect(resolvePreset(parseShotPrompt("0.98MP 21:9"), presets)).toBeUndefined();
+  });
+  it("preserves the backend nominal aspect even when aligned pixels drift beyond the old tolerance", () => {
+    const aligned = [...presets, { id: "mp-0_5-4x3", width: 832, height: 640 }];
+    expect(resolvePreset(parseShotPrompt("0.5MP"), aligned, { width: 832, height: 640 })?.id).toBe("mp-0_5-4x3");
+    expect(resolvePreset(parseShotPrompt("0.5MP"), [])).toBeUndefined();
+  });
   it("maps 720p/1080p onto the megapixel ladder at the requested aspect", () => {
     expect(resolvePreset({ resolution: { kind: "lines", lines: 720 } }, presets)?.id).toBe("mp-0_98-16x9");
     expect(resolvePreset({ aspect: "9:16", resolution: { kind: "lines", lines: 1080 } }, presets)?.id).toBe("mp-2_09-9x16");

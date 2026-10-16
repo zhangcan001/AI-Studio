@@ -59,6 +59,18 @@ it("applies recognized aspect and duration from the composer prompt without gene
   expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "画幅：9:16，时长8秒，角色走过街道" });
   expect(api.generate).not.toHaveBeenCalled();
 });
+it("applies a Comfy MP target through the existing draft without media or generation side effects", async () => {
+  api.generatorsList.mockResolvedValue(options.map(option => option.selectionRef === "opaque-0" ? { ...option, resolutionPresets: [
+    ...presets, { id: "mp-0_5-16x9", label: "0.5MP · 960×544", width: 960, height: 544 },
+  ] } : option));
+  await start("opaque-0");
+  setPrompt("16:9，总像素0.5MP"); fireEvent.blur(promptEditor());
+  await waitFor(() => expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 960 }));
+  expect(useStudioStore.getState().values.height).toEqual({ type: "integer", value: 544 });
+  expect(screen.getByText(/已同步生成参数/).textContent).toContain("522240 像素");
+  expect(api.generate).not.toHaveBeenCalled();
+  expect(api.inputsSave).not.toHaveBeenCalled();
+});
 it("keeps manual parameter overrides when unrelated prompt wording changes", async () => {
   await start("opaque-0");
   setPrompt("９：１６，８秒，街道"); fireEvent.blur(promptEditor());

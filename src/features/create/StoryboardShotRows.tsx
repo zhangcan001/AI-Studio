@@ -133,7 +133,7 @@ function recognize(text: string, entities: StoryEntity[], bound: StoryEntity[], 
   }
   const w = numberOf(current.width), h = numberOf(current.height);
   const preset = settings.preset;
-  if (preset && (preset.width !== w || preset.height !== h)) { values = { ...(values ?? current), width: { type: "integer", value: preset.width }, height: { type: "integer", value: preset.height } }; labels.push(`画幅 ${aspectKey(preset)} · ${preset.width}×${preset.height}`); }
+  if (preset && (preset.width !== w || preset.height !== h)) { values = { ...(values ?? current), width: { type: "integer", value: preset.width }, height: { type: "integer", value: preset.height } }; labels.push(`画幅 ${aspectKey(preset)} · ${preset.width}×${preset.height}${parsed.resolution?.kind === "pixels" ? ` · ${preset.width * preset.height} 像素` : ""}`); }
   else if ((parsed.aspect || parsed.resolution) && !generator?.resolutionPresets?.length) labels.push("画幅/分辨率（请先在详情中选择生成器）");
   const addEntityIds = parsed.entityIds.filter(id => !bound.some(b => b.id === id));
   for (const id of addEntityIds) { const e = entities.find(x => x.id === id); if (e) labels.push(`${KIND_LABEL[e.kind]} @${e.name}`); }
@@ -280,7 +280,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
       <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">素材库中还没有角色与场景</li>}</ul>
     </div>
     <div className="shot-row-prompt">
-      <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 竖屏 / 720p / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
+      <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 0.98MP / 50万像素 / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
         onChange={e => setPrompt(e.target.value)} onBlur={savePrompt} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}

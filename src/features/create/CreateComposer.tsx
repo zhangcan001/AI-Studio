@@ -200,7 +200,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     const settings = resolvePromptSettings(changed, c.generator, c.values);
     const labels: string[] = [];
     if (settings.duration) { c.setValue("duration_seconds", settings.duration); labels.push(`时长 ${settings.duration.value} 秒`); }
-    if (settings.preset) { c.chooseResolution(settings.preset.id); labels.push(`画幅 ${presetAspectKey(settings.preset) ?? aspectOf(settings.preset.width, settings.preset.height)} · ${settings.preset.width}×${settings.preset.height}`); }
+    if (settings.preset) { c.chooseResolution(settings.preset.id); labels.push(`画幅 ${presetAspectKey(settings.preset) ?? aspectOf(settings.preset.width, settings.preset.height)} · ${settings.preset.width}×${settings.preset.height}${changed.resolution?.kind === "pixels" ? ` · ${settings.preset.width * settings.preset.height} 像素` : ""}`); }
     if (labels.length) setRecognitionNote(`已同步生成参数：${labels.join(" · ")}`);
   };
   const saveCaret = () => { const sel = window.getSelection(); if (sel?.rangeCount && editor.current?.contains(sel.anchorNode)) caret.current = sel.getRangeAt(0).cloneRange(); };
@@ -291,7 +291,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       })}
     </div>}
     {promptField && <div className="composer-prompt">
-      <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面"}
+      <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} title="总像素可写0.5MP、0.98MP、50万像素或总像素500000；MP按ComfyUI的1024×1024约定，实际尺寸按当前预设匹配。" data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面；可写0.98MP / 50万像素"}
         onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={() => { saveCaret(); applyPromptSettings(); }}
         onKeyDown={e => { if (e.key === "@") { e.preventDefault(); saveCaret(); if (allEntities.length) setEntityPicker(true); else if (images.length) setPicker("insert"); } else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); } }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />

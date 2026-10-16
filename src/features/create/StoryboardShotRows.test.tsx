@@ -233,6 +233,21 @@ it("explains an incomplete width-only setting instead of silently ignoring it", 
   expect(api.generate).not.toHaveBeenCalled();
 });
 
+it.each(["0.5MP", "50万像素", "总像素500000"])("saves %s as approved dimensions, not a width or a new GPU task", async text => {
+  api.generatorsList.mockResolvedValue([{ ...generator, resolutionPresets: [...generator.resolutionPresets,
+    { id: "mp-0_5-16x9", label: "0.5MP · 960×544", width: 960, height: 544 },
+  ] }]);
+  render(<StoryboardShotRows {...props()} items={[shot("pixels", 0)]} />);
+  const box = await screen.findByLabelText("镜头1 提示词");
+  await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(box, { target: { value: text } }); fireEvent.blur(box);
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", expect.objectContaining({
+    shotId: "pixels", prompt: text, selectionRef: "sel", values: expect.objectContaining({ width: { type: "integer", value: 960 }, height: { type: "integer", value: 544 } }),
+  })));
+  expect((await screen.findByText(/已识别并填入/)).textContent).toContain("522240 像素");
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
 it.each([
   ["画幅：9:16", 768, 1344],
   ["画幅９：１６", 768, 1344],
