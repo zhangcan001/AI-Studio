@@ -19,7 +19,7 @@ import type { GeneratorOption } from "../product/types";
 const api=vi.hoisted(()=>({ listRecentTasks:vi.fn(),reconcileActiveTasks:vi.fn(),listConsistencyProfiles:vi.fn(),listReferenceSets:vi.fn(),listCostumeVariants:vi.fn(),getShotConsistencyBinding:vi.fn(),getConsistencyScopeBinding:vi.fn(),getShotContextDraft:vi.fn(),replaceShotConsistencyBinding:vi.fn(),replaceConsistencyScopeBinding:vi.fn() }));
 vi.mock("../services/tauriClient",()=>api);
 vi.mock("../features/create/CreatePage",()=>({CreatePage:({onDirtyChange}:{onDirtyChange:(dirty:boolean)=>void})=><button onClick={()=>onDirtyChange(true)}>create-owned-draft</button>}));
-vi.mock("../features/create/StoryboardWorkbench",()=>({StoryboardWorkbench:()=> <p>storyboard-workbench</p>}));
+vi.mock("../features/create/StoryboardWorkbench",()=>({StoryboardWorkbench:({onDirtyChange}:{onDirtyChange:(dirty:boolean)=>void})=> <button onClick={()=>onDirtyChange(true)}>storyboard-workbench</button>}));
 vi.mock("../features/runs/RunsPage",()=>({RunsPage:()=> <p>normal-runs</p>}));
 vi.mock("../features/library/LibraryPage",()=>({LibraryPage:()=> <p>normal-library</p>}));
 const reportError=vi.fn();
@@ -84,9 +84,9 @@ it('phase10_target6 delegates shot and scope bindings without changing command p
 it('phase10_target7 preserves normal route composition draft handoff and explicit Advanced opt-in',async()=>{
   const project={id:'a'} as ProjectView,dirty=vi.fn(),navigate=vi.fn();let route:AppRoute={kind:'create',projectId:'a',stage:'video'};
   const view=(r:AppRoute)=><Suspense fallback={<p>loading</p>}><NormalProductPages project={project} route={r} navigate={navigate} onDirtyChange={dirty}/></Suspense>;
-  // UI restore: the storyboard workbench is the daily entry; a chosen shot opens the single-shot Create page.
+  // Exact Shot links stay in the same workbench and retain the application's draft guard.
   const h=render(view(route));expect(await screen.findByText('storyboard-workbench')).toBeTruthy();expect(screen.queryByText('create-owned-draft')).toBeNull();
-  h.rerender(view({...route,shotId:'s1'}));fireEvent.click(await screen.findByText('create-owned-draft'));expect(dirty).toHaveBeenCalledWith(true);expect(screen.queryByText('storyboard-workbench')).toBeNull();
+  h.rerender(view({...route,shotId:'s1'}));fireEvent.click(await screen.findByText('storyboard-workbench'));expect(dirty).toHaveBeenCalledWith(true);expect(screen.queryByText('create-owned-draft')).toBeNull();
   h.rerender(view({...route,surface:'batch'}));expect(screen.queryByText('create-owned-draft')).toBeNull();expect(screen.queryByText('storyboard-workbench')).toBeNull();
   h.rerender(view({...route,stage:'image',surface:'batch'}));expect(await screen.findByText('create-owned-draft')).toBeTruthy();expect(screen.queryByText('storyboard-workbench')).toBeNull();
   route={kind:'runs',projectId:'a'};h.rerender(view(route));expect(await screen.findByText('normal-runs')).toBeTruthy();

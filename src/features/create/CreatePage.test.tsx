@@ -4,6 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { CreatePage } from "./CreatePage";
+import { StoryboardWorkbench } from "./StoryboardWorkbench";
+import { RunsPage } from "../runs/RunsPage";
 import { useStudioStore } from "../../stores/studioStore";
 import type { CreationAccepted, CreationContext, GeneratorOption, ProductRun, CreationAsset } from "../../product/types";
 import type { AppRoute } from "../../app/routes/types";
@@ -11,8 +13,8 @@ import { normalCreate, mediaValue, modeLabel, draftFor } from "./createModel";
 import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
 import { resolveCreateReadinessAction, focusCreateInput } from "./createReadinessAction";
 import { promptText, setPrompt } from "./composerTestUtils";
-const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), libraryGet: vi.fn(), bindingSet: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: {storyEntities:{list:vi.fn(async()=>[]),listForShot:vi.fn(async()=>[]),bindShot:vi.fn(async()=>[]),create:vi.fn(),update:vi.fn(),delete:vi.fn(),get:vi.fn()}, creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry }, library: {get: api.libraryGet, imageGet: vi.fn(async () => [137, 80, 78, 71]), list: vi.fn(async () => ({ items: [], nextCursor: null, coverage: "complete-category", coverageMessage: "" })), tagsList: vi.fn(async () => [])}, project: { generatorBindingSet: api.bindingSet } } }));
+const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), libraryGet: vi.fn(), bindingSet: vi.fn(), runList: vi.fn(), resultsGet: vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: {storyEntities:{list:vi.fn(async()=>[]),listForShot:vi.fn(async()=>[]),bindShot:vi.fn(async()=>[]),create:vi.fn(),update:vi.fn(),delete:vi.fn(),get:vi.fn()}, creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry, list: api.runList, resultsGet: api.resultsGet }, library: {get: api.libraryGet, imageGet: vi.fn(async () => [137, 80, 78, 71]), list: vi.fn(async () => ({ items: [], nextCursor: null, coverage: "complete-category", coverageMessage: "" })), tagsList: vi.fn(async () => [])}, project: { generatorBindingSet: api.bindingSet } } }));
 const prompt = { type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" } as const;
 const negative = { ...prompt, key: "negative_prompt", label: "Negative prompt", required: false };
 const params = [{ type: "integer", key: "width", label: "Width", required: true, default: 640, min: 64, max: 1920, step: 8 }, { type: "integer", key: "height", label: "Height", required: true, default: 480 }, { type: "integer", key: "duration_seconds", label: "Duration", required: true, default: 5, min: 1, max: 10 }, { type: "number", key: "cfg", label: "CFG", required: false, default: 1.5 }, { type: "seed", key: "seed", label: "Seed", defaultMode: "random" }] satisfies GeneratorOption["fields"];
@@ -44,6 +46,7 @@ beforeEach(() => {
   api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
   api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "STARTED", startIssue: null });
   api.runGet.mockResolvedValue(run()); api.retry.mockResolvedValue(run("RUNNING")); api.createShot.mockResolvedValue({ id: "shot1", name: "镜头一", ordinal: 0 });
+  api.runList.mockResolvedValue({ items: [], nextCursor: null, coverage: "" }); api.resultsGet.mockResolvedValue([]);
   api.referencesSet.mockResolvedValue(undefined); api.selectResult.mockImplementation(async (_p: string, _s: string, _stage: string, id: string) => { candidates = candidates.map(item => ({ ...item, selected: item.id === id })); });
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   URL.createObjectURL = vi.fn(() => "blob:fixture"); URL.revokeObjectURL = vi.fn();
@@ -539,4 +542,84 @@ it.each(["STARTED", "QUEUED", "FAILED_TO_START", "ALREADY_ACCEPTED"] as const)("
   fireEvent.click(screen.getByRole("button", { name: "生成" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2));
   expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(first);
+});
+
+function WorkbenchHost({ denyNavigation = false }: { denyNavigation?: boolean }) {
+  const [route, setRoute] = useState<AppRoute>({ kind: 'create', projectId: 'project', stage: 'video', shotId: 'shot1' });
+  if (route.kind !== 'create') return <p>离开工作台</p>;
+  return <StoryboardWorkbench route={route} runtime={{ ...runtime, devices: [] }} onDirtyChange={dirty} navigate={next => { navigations(next); if (denyNavigation) return false; setRoute(next); return true; }} renderRuns={(runRoute, navigate) => <RunsPage route={runRoute} navigate={navigate} />} />;
+}
+
+describe('single-page storyboard creation', () => {
+  it('edits and generates through the existing Create controller without leaving the workbench', async () => {
+    render(<WorkbenchHost />);
+    await screen.findByRole('region', { name: '镜头操作' });
+    const editor = await screen.findByRole('region', { name: '镜头内联创作' });
+    await within(editor).findByRole('textbox', { name: '提示词' });
+    expect(screen.queryByRole('button', { name: '← 分镜工作台' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: '镜头一 提示词' })).toBeNull(); // no competing row writer
+    setPrompt('本页直接编辑');
+    await waitFor(() => expect(dirty).toHaveBeenCalledWith(true));
+    await readyToGenerate();
+    fireEvent.click(within(editor).getByRole('button', { name: '生成' }));
+    await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+    expect(api.generate.mock.calls[0][0]).toMatchObject({ projectId: 'project', shotId: 'shot1', selectionRef: 't2v-opaque', values: { prompt: { type: 'string', value: '本页直接编辑' } } });
+    expect(screen.getByLabelText('分镜工作台')).toBeTruthy();
+    expect(navigations).not.toHaveBeenCalled();
+  });
+
+  it('opens queue and run details in-page while preserving the current Studio draft', async () => {
+    api.runList.mockResolvedValue({ items: [run('SUCCEEDED')], nextCursor: null, coverage: '' });
+    render(<WorkbenchHost />);
+    await screen.findByRole('textbox', { name: '提示词' });
+    setPrompt('保留的草稿');
+    fireEvent.click(screen.getByRole('button', { name: '任务队列与运行记录' }));
+    const panel = await screen.findByRole('dialog', { name: '任务队列与运行记录' });
+    fireEvent.click(await within(panel).findByRole('button', { name: /run.*已完成/ }));
+    await waitFor(() => expect(api.runGet).toHaveBeenCalledWith('project', { source: 'queue-batch', id: 'run' }));
+    expect(useStudioStore.getState().values.prompt).toEqual({ type: 'string', value: '保留的草稿' });
+    fireEvent.click(within(panel).getByRole('button', { name: '返回镜头操作' }));
+    expect(promptText()).toBe('保留的草稿');
+    expect(navigations).not.toHaveBeenCalled();
+    expect(api.generate).not.toHaveBeenCalled();
+    expect(api.selectResult).not.toHaveBeenCalled();
+  });
+
+  it('changes shots through canonical guarded navigation rather than a second local owner', async () => {
+    render(<WorkbenchHost />);
+    await screen.findByRole('textbox', { name: '提示词' });
+    fireEvent.click(screen.getByRole('button', { name: '操作镜头二' }));
+    await waitFor(() => expect(navigations).toHaveBeenCalledWith({ kind: 'create', projectId: 'project', stage: 'video', shotId: 'shot2' }));
+    await waitFor(() => expect(api.generatorsList).toHaveBeenCalledWith('project', 'video', 'shot2'));
+    expect(screen.getByLabelText('分镜工作台')).toBeTruthy();
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+});
+
+it('single-page storyboard creation ignores a late prior-Shot refresh after an in-place switch', async () => {
+  render(<WorkbenchHost />);
+  await screen.findByRole('textbox', { name: '提示词' });
+  await screen.findByRole('button', { name: '操作镜头二' });
+  let resolve!: (value: CreationContext) => void;
+  const pending = new Promise<CreationContext>(r => { resolve = r; });
+  api.get.mockImplementation((_p: string, shot: string | null, stage: 'image' | 'video') => shot === 'shot1' ? pending : Promise.resolve({ ...context(stage, shot), selectedShot: { ...context(stage, shot).selectedShot!, prompt: '镜头二正式输入' } }));
+  fireEvent.click(screen.getByRole('button', { name: '刷新结果' }));
+  fireEvent.click(screen.getByRole('button', { name: '操作镜头二' }));
+  await waitFor(() => expect(promptText()).toBe('镜头二正式输入'));
+  await act(async () => { resolve(context('video', 'shot1')); });
+  expect(promptText()).toBe('镜头二正式输入');
+  expect(screen.getByRole('button', { name: '操作镜头二' }).getAttribute('aria-current')).toBe('true');
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('single-page storyboard creation preserves the current draft when canonical navigation is refused', async () => {
+  render(<WorkbenchHost denyNavigation />);
+  await screen.findByRole('textbox', { name: '提示词' });
+  await screen.findByRole('button', { name: '操作镜头二' });
+  setPrompt('不能丢弃的草稿');
+  fireEvent.click(screen.getByRole('button', { name: '操作镜头二' }));
+  expect(navigations).toHaveBeenCalledWith(expect.objectContaining({ shotId: 'shot2' }));
+  expect(promptText()).toBe('不能丢弃的草稿');
+  expect(screen.getByRole('button', { name: '操作镜头一' }).getAttribute('aria-current')).toBe('true');
+  expect(api.generate).not.toHaveBeenCalled();
 });

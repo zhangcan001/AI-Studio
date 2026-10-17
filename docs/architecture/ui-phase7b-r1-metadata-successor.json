@@ -213,11 +213,11 @@
     },
     "src/app/FrontendConsolidation.test.tsx": {
       "beforeHash": "19866510cef5c517e7a8b914c390a25c023902c6c634fb43e877dbfb4fbf4bb3",
-      "afterHash": "be04dc3f0dace45119994bc4ae5ec132df6e9c8f33b8a402f222504a6fa05972"
+      "afterHash": "5a1800c48db0a0bba8517adcafe136dfcf98c3bbca1671738555d5e9cc60e60e"
     },
     "src/app/NormalProductPages.tsx": {
       "beforeHash": "66fe55c7df881d2db6cc0c249f13b366b144384d0750e97d54863766ef4a124e",
-      "afterHash": "1544aabf1779ab04f6dc3b569f04fc9fc1d4a9b550bd081bda9b07efae46e676"
+      "afterHash": "23bf473ef0fa2d371e8ef1ad911fefc0949acb221ff39949dc2d01d802d5a0c4"
     },
     "src/app/v3/AppShellV3.css": {
       "beforeHash": "c12fb4d2007eab82c57cea8dabfed001924a2a89a7d296a27e8644752c5912a3",
@@ -261,15 +261,15 @@
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "edda8d2a62255b39f89b3593cd46c2a6bf9aaac19260f159c2d492b819cfb7a3"
+      "afterHash": "f1a7808d8feda0389fd1acd037ea568ff4750bc60da2f29d91757896080306b5"
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "3b5c199c11e638c54c184f6bce09c0d5acdafd168a231cd6b9cdae77d86b4e9e",
-      "afterHash": "129f0252427cd94bdea7b272b8b0ae774c106d8cad031eab504b59270f2440d5"
+      "afterHash": "0a284ab280b07b2742c15dfc73ec8aa7ff8cb1c83b56048a54716f3a7ed96c5a"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea",
-      "afterHash": "7711c494c0d3de8e2fa6547c4fc6d587f8b34cc0e205dcb46238c571e4565229"
+      "afterHash": "40ba3bb82ea6a241304c9eefcbf7157e187d7ad2941e6b11ebabe46d6c828b94"
     },
     "src/features/create/CreateReadinessLifecycle.test.tsx": {
       "beforeHash": "693d65b522e4dc8726c0f403156262b0d1279ea8cf3b850f8ae6c1f89c19e86c",
@@ -301,11 +301,11 @@
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
-      "afterHash": "b1f1758b2b8b954ebdc9c19eb9351e1ef9a8c39db6bd8dd987ce11536a445d6f"
+      "afterHash": "ca5cdf70bf2696a442e9c4e0e6bd4224711bd49f54912c5141c98ac78b735987"
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": null,
-      "afterHash": "025d1a5067e91b67b9eb07b2eaae0167ea23f37d18ef66fce7a9efcc475440f6"
+      "afterHash": "5dc54c3c9272a8c5a5b25d835e2cec85acec5aa4a6559183b712a23d80c4b790"
     },
     "src/features/create/composerTestUtils.ts": {
       "beforeHash": null,

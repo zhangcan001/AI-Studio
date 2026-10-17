@@ -1,29 +1,34 @@
 import { ShotEntityChips } from "./ShotEntityChips";
 import { StoryboardShotRows } from "./StoryboardShotRows";
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import { subscribeRunInvalidation } from "../../product/runInvalidation";
 import type { AppRoute } from "../../app/routes/types";
-import type { CreateRoute } from "./createModel";
 import type { RunResult } from "../../product/types";
 import { AssetImageThumb, CandidateThumbnail, MediaLightboxScope, ThumbnailProjectContext } from "./CreateMediaPreview";
 import { coverAsset, deriveStoryboardStatus, runPercent, shotDuration, shotResolution, storyboardStats, storyboardStatusLabels, videoCandidates, type StoryboardShot } from "./storyboardModel";
 import "./CreatePage.css";
+import { CreatePage } from "./CreatePage";
+import type { CreateProps } from "./CreateController";
+import { useStudioStore } from "../../stores/studioStore";
 
 /** Bounded per-shot reads keep the workbench responsive on large projects. */
 export const STORYBOARD_MAX_DETAIL_SHOTS = 60;
 const CONCURRENCY = 4;
 const POLL_MS = 8000;
 
-interface Props { route: CreateRoute; navigate: (route: AppRoute) => unknown }
+interface Props extends CreateProps {
+  // Cross-feature composition belongs to the app, not the Create feature.
+  renderRuns?: (route: Extract<AppRoute, { kind: "runs" }>, navigate: CreateProps["navigate"]) => ReactNode;
+}
 
 /**
  * Storyboard workbench: the primary daily creation surface. It only reads the
- * product facade (creation context + run status); every generation still goes
- * through the single-shot page or the Production Queue.
+ * product facade (creation context + run status). The embedded Create controller
+ * retains Studio Store ownership and submits only through the Production Queue.
  */
-export function StoryboardWorkbench({ route, navigate }: Props) {
+export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, renderRuns }: Props) {
   const [items, setItems] = useState<StoryboardShot[]>();
   const [truncated, setTruncated] = useState(0);
   const [error, setError] = useState<string>();
@@ -32,6 +37,10 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
   const setView = (next: StoryboardView) => { setViewState(next); try { window.localStorage.setItem(VIEW_KEY, next); } catch { /* storage unavailable */ } };
   const [reviewId, setReviewId] = useState<string>();
   const [selectedId, setSelectedId] = useState<string>();
+  const [runRoute, setRunRoute] = useState<Extract<AppRoute, { kind: "runs" }>>();
+  const [shotQuery, setShotQuery] = useState("");
+  const libraryIntent = useStudioStore(state => state.pendingLibraryIntent);
+  const editing = Boolean(route.shotId || libraryIntent);
   const epoch = useRef(0);
   const inFlight = useRef(false);
   const [queueActive, setQueueActive] = useState(false);
@@ -83,10 +92,17 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
   }, [anyGenerating, queueActive, load]);
 
   const stats = useMemo(() => storyboardStats(items ?? []), [items]);
-  const selected = items?.find(item => item.id === selectedId) ?? items?.[0];
+  const selected = items?.find(item => item.id === (route.shotId ?? selectedId)) ?? items?.[0];
   const reviewItem = items?.find(item => item.id === reviewId);
   const openShot = (shotId: string) => navigate({ kind: "create", projectId, stage: "video", shotId });
-  const openRun = (item: StoryboardShot) => item.run && navigate({ kind: "runs", projectId, run: item.run.ref });
+  const openRun = (item: StoryboardShot) => item.run && setRunRoute({ kind: "runs", projectId, run: item.run.ref });
+  const navigateInline = async (next: AppRoute) => {
+    if (next.kind === "runs" && next.projectId === projectId) { setRunRoute(next); return true; }
+    // All scope changes still go through the application's existing draft guard.
+    const result = await navigate(next);
+    if (result !== false && mounted.current && scope.current === projectId) setRunRoute(undefined);
+    return result;
+  };
   const createShot = async () => {
     setBusy(true);
     try {
@@ -115,12 +131,29 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
         <div data-tone="muted"><dt>待制作</dt><dd>{stats.todo}</dd></div>
       </dl>
       <div className="storyboard-header-actions">
+        <button type="button" onClick={() => setRunRoute({ kind: "runs", projectId })}>任务队列与运行记录</button>
         <button type="button" onClick={() => void navigate({ kind: "project-settings", projectId, section: "advanced-production" })}>导入分镜脚本</button>
         <button type="button" className="primary" title="前往批量镜头，由生产队列统一执行" onClick={() => void navigate({ kind: "project-settings", projectId, section: "advanced-shots" })}>批量生成待制作镜头</button>
       </div>
     </header>
     {error && <p role="alert" className="storyboard-error">{error}</p>}
-    {!items ? <p role="status" className="storyboard-loading">正在读取分镜…</p> : <div className="storyboard-body">
+    {editing ? <div className="storyboard-editing-body">
+      <aside className="storyboard-panel storyboard-shot-nav" aria-label="镜头切换">
+        <header><h2>镜头列表</h2><button type="button" onClick={() => void navigate({ kind: "create", projectId, stage: "video" })}>展开分镜列表</button></header>
+        <input type="search" aria-label="搜索操作镜头" placeholder="搜索镜头" value={shotQuery} onChange={e => setShotQuery(e.target.value)} />
+        {!items && <p role="status">正在读取分镜…</p>}
+        <ol>{items?.filter(item => !shotQuery.trim() || `${item.name} ${item.shot?.prompt ?? ""}`.toLowerCase().includes(shotQuery.trim().toLowerCase())).map(item => <li key={item.id}>
+          <button type="button" aria-label={`操作${item.name}`} aria-current={route.shotId === item.id ? "true" : undefined} onClick={() => openShot(item.id)}>
+            <Cover item={item} playable={false} /><span><strong>{item.name}</strong><small>{shotDuration(item.shot)} · {shotResolution(item.shot)}</small><StatusBadge item={item} compact /></span>
+          </button>
+        </li>)}</ol>
+        {truncated > 0 && <small>这里只展开前 {STORYBOARD_MAX_DETAIL_SHOTS} 个镜头；全部镜头可从右侧“镜头”选择器访问。</small>}
+      </aside>
+      <section className="storyboard-inline-editor" aria-label="镜头操作">
+        <header><span>提示词 · 参数 · 素材 · 生成 · 候选</span>{route.shotId && selected?.id === route.shotId && canReview(selected) && <button type="button" onClick={() => setReviewId(selected.id)}>人工审核</button>}</header>
+        <section className="storyboard-inline-create" aria-label="镜头内联创作"><CreatePage route={route} runtime={runtime} navigate={navigateInline} onDirtyChange={onDirtyChange} embedded onContextChange={load} /></section>
+      </section>
+    </div> : !items ? <p role="status" className="storyboard-loading">正在读取分镜…</p> : <div className="storyboard-body">
       <aside className="storyboard-panel storyboard-tree" aria-label="剧集与场景">
         <header><h2>剧集与场景</h2><button type="button" disabled={busy} onClick={() => void createShot()}>+ 新建镜头</button></header>
         <div className="storyboard-tree-group"><span>全部镜头</span><span className="storyboard-count">{stats.total + truncated}</span></div>
@@ -138,7 +171,7 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
         {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy} onClick={() => void createShot()}>创建第一个镜头</button></div>
-          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} busy={busy} onOpen={openShot} onCreate={() => void appendShot()} onChanged={() => void load()} onQueue={() => void navigate({ kind: "runs", projectId })} />
+          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} busy={busy} onOpen={openShot} onCreate={() => void appendShot()} onChanged={() => void load()} onQueue={() => setRunRoute({ kind: "runs", projectId })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>
@@ -147,7 +180,7 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
         {truncated > 0 && <small className="storyboard-truncated">另有 {truncated} 个镜头未在此展开，可在批量镜头中管理。</small>}
       </main>
       <aside className="storyboard-side" aria-label="镜头详情与序列">
-        <section className="storyboard-panel storyboard-detail" aria-label="镜头详情"><header><h2>镜头详情</h2>{selected && <span className="storyboard-detail-actions">{canReview(selected) && <button type="button" onClick={() => setReviewId(selected.id)}>审核</button>}<button type="button" onClick={() => openShot(selected.id)}>进入创作</button></span>}</header>
+        <section className="storyboard-panel storyboard-detail" aria-label="镜头详情"><header><h2>镜头详情</h2>{selected && <span className="storyboard-detail-actions">{canReview(selected) && <button type="button" onClick={() => setReviewId(selected.id)}>审核</button>}<button type="button" onClick={() => openShot(selected.id)}>设置与生成</button></span>}</header>
           {selected ? <ShotDetail item={selected} /> : <p className="storyboard-empty-note">选择一个镜头查看详情。</p>}
         </section>
         <section className="storyboard-panel storyboard-sequence" aria-label="镜头序列"><header><h2>镜头序列 <small>{stats.total}</small></h2></header>
@@ -156,8 +189,19 @@ export function StoryboardWorkbench({ route, navigate }: Props) {
         </section>
       </aside>
     </div>}
-    {reviewItem && <ReviewPanel projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} />}
+    {reviewItem && <ReviewPanel key={`${projectId}:${reviewItem.id}:${reviewItem.run?.ref.id}`} projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} />}
+    {runRoute && <WorkbenchRuns route={runRoute} navigate={navigateInline} renderRuns={renderRuns} onClose={() => setRunRoute(undefined)} />}
   </div></ThumbnailProjectContext.Provider></MediaLightboxScope>;
+}
+
+/** Native dialog supplies focus trapping/Escape without unmounting the Create draft. */
+function WorkbenchRuns({ route, navigate, renderRuns, onClose }: { route: Extract<AppRoute, { kind: "runs" }>; navigate: Props["navigate"]; renderRuns: Props["renderRuns"]; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { dialog.current?.showModal(); }, []);
+  return <dialog ref={dialog} className="storyboard-runs-dialog" aria-label="任务队列与运行记录" onCancel={onClose}>
+    <header><strong>任务队列与运行记录</strong><button type="button" onClick={onClose}>返回镜头操作</button></header>
+    {renderRuns ? renderRuns(route, navigate) : <p role="alert">运行面板不可用。</p>}
+  </dialog>;
 }
 
 export type StoryboardView = "shots" | "grid" | "list";

@@ -10,7 +10,11 @@ const api = vi.hoisted(() => ({ get: vi.fn(), createShot: vi.fn(), runGet: vi.fn
 vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview } } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
 // Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
-beforeEach(() => { window.localStorage.setItem("ai-studio.storyboard.view", "grid"); });
+beforeEach(() => {
+  window.localStorage.setItem("ai-studio.storyboard.view", "grid");
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  api.runList.mockResolvedValue({ items: [], nextCursor: null, coverage: "" });
+});
 
 const shots = [{ id: "s1", name: "镜头01", ordinal: 1 }, { id: "s2", name: "镜头02", ordinal: 2 }, { id: "s3", name: "镜头03", ordinal: 3 }];
 const run = (status: ProductRun["status"], succeeded: number, total: number) => ({ ref: { source: "production-run", id: `r-${status}` }, projectId: "p", title: "run", status, phase: "", createdAt: "", updatedAt: "", progress: { total, succeeded, failed: 0, cancelled: 0 }, recoverability: { retryItemIds: [], reviewRequired: 0 }, resultsSummary: [], errorSummary: null, preferredParent: null, availableActions: [] }) as ProductRun;
@@ -166,6 +170,7 @@ it("defaults to the shot-row editing view with search, status filters and task q
   expect(within(rows).getByLabelText("搜索分镜")).toBeTruthy();
   expect(within(rows).getByRole("group", { name: "状态筛选" })).toBeTruthy();
   fireEvent.click(within(rows).getByRole("button", { name: "任务队列" }));
-  expect(navigate).toHaveBeenCalledWith({ kind: "runs", projectId: route.projectId });
+  expect(await screen.findByRole("dialog", { name: "任务队列与运行记录" })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "分镜模式" }).getAttribute("aria-pressed")).toBe("true");
 });
