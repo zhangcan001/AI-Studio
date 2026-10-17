@@ -245,6 +245,8 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
   };
   const noGen = !generator ? "请先在详情中选择生成器" : undefined;
   const generationDraft = JSON.stringify([projectId, item.id, selectionRef, prompt, item.shot?.values]);
+  const generationAttempt = useRef<{ draft: string; key: string } | null>(null);
+  if (generationAttempt.current?.draft !== generationDraft) generationAttempt.current = null;
   const latestGenerationDraft = useRef(generationDraft);
   latestGenerationDraft.current = generationDraft;
   const generate = () => selectionRef && item.shot && void run(async () => {
@@ -255,7 +257,12 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     const readiness = await productClient.creation.readinessGet({ ...base, submissionIdempotencyKey: "readiness-only" });
     if (!isCurrent()) return;
     if (!readiness.ready) { setError(readiness.issues.map(i => i.message).join("；") || "尚未就绪，请在详情中完成设置"); return; }
-    const ack = await productClient.creation.generate({ ...base, submissionIdempotencyKey: newKey() });
+    const attempt = generationAttempt.current ?? { draft: generationDraft, key: newKey() };
+    generationAttempt.current = attempt;
+    const ack = await productClient.creation.generate({ ...base, submissionIdempotencyKey: attempt.key });
+    // Unknown transport outcomes retain the attempt. A confirmed acceptance
+    // ends it, so an explicit subsequent generation can use a fresh key.
+    if (ack.accepted && generationAttempt.current === attempt) generationAttempt.current = null;
     if (!isCurrent()) return; // Accepted Queue work remains owned by the backend.
     setNote(ack.accepted ? "已写入生产队列" : "未被接受");
     onChanged();

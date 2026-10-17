@@ -121,3 +121,87 @@ describe("formal video input invalidation", () => {
     expect(api.inputsGet).toHaveBeenCalledTimes(2);
   });
 });
+
+it('keeps dirty media and its original OCC token when background refresh finds an external revision', async () => {
+  const h=renderHook(()=>usePersistentVideoInputs(route,generator,false));
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  act(()=>useStudioStore.getState().setValue('first_frame',{type:'image_asset',assetId:'my-unsaved'}));
+  api.inputsGet.mockResolvedValueOnce(view('exact-a',7));
+  await act(async()=>{invalidateVideoInputs('p1');});
+  await waitFor(()=>expect(h.result.current.error).toContain('镜头输入已被更新'));
+  expect(h.result.current.view?.token?.revision).toBe(1);
+  expect(useStudioStore.getState().values.first_frame).toEqual({type:'image_asset',assetId:'my-unsaved'});
+  expect(h.result.current.ready).toBe(false);
+});
+
+it('coalesces repeated invalidation until a successful save finishes, then releases the lock and reads once', async () => {
+  const h=renderHook(()=>usePersistentVideoInputs(route,generator,false));
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  act(()=>useStudioStore.getState().setValue('first_frame',{type:'image_asset',assetId:'saved-new'}));
+  let resolve!:(v:VideoInputView)=>void;
+  api.inputsSave.mockReturnValueOnce(new Promise<VideoInputView>(r=>resolve=r));
+  let saving!:Promise<void>; act(()=>{saving=h.result.current.save();});
+  await act(async()=>{invalidateVideoInputs('p1');invalidateVideoInputs('p1');invalidateVideoInputs('p1');});
+  expect(api.inputsGet).toHaveBeenCalledTimes(1);
+  const committed={...view('exact-a',2),inputs:[{inputKey:'first_frame' as const,ordinal:0,assetId:'saved-new'},{inputKey:'last_frame' as const,ordinal:0,assetId:'exact-a-last'}]};
+  api.inputsGet.mockResolvedValueOnce(committed);
+  await act(async()=>{resolve(committed);await saving;});
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  expect(api.inputsGet).toHaveBeenCalledTimes(2);
+  expect(h.result.current.busy).toBe(false);
+  expect(h.result.current.view?.token?.revision).toBe(2);
+  expect(useStudioStore.getState().values.first_frame).toEqual({type:'image_asset',assetId:'saved-new'});
+});
+
+it('a failed save plus queued external refresh keeps the draft and stale OCC token without stranding busy', async () => {
+  const h=renderHook(()=>usePersistentVideoInputs(route,generator,false));
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  act(()=>useStudioStore.getState().setValue('last_frame',{type:'image_asset',assetId:'keep-this'}));
+  let reject!:(e:unknown)=>void;
+  api.inputsSave.mockReturnValueOnce(new Promise((_,r)=>reject=r));
+  let saving!:Promise<void>;act(()=>{saving=h.result.current.save();});
+  act(()=>invalidateVideoInputs('p1'));
+  api.inputsGet.mockResolvedValueOnce(view('exact-a',3));
+  await act(async()=>{reject({code:'SHOT_VIDEO_INPUT_CONFLICT'});await saving;});
+  await waitFor(()=>expect(h.result.current.loading).toBe(false));
+  expect(h.result.current.busy).toBe(false);
+  expect(h.result.current.view?.token?.revision).toBe(1);
+  expect(h.result.current.error).toContain('镜头输入已被更新');
+  expect(useStudioStore.getState().values.last_frame).toEqual({type:'image_asset',assetId:'keep-this'});
+});
+
+it('a late old-owner write cannot release a new-owner write lock or replace its inputs', async () => {
+  const h=renderHook(({r})=>usePersistentVideoInputs(r,generator,false),{initialProps:{r:route}});
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  let oldResolve!:(v:VideoInputView)=>void,newResolve!:(v:VideoInputView)=>void;
+  api.inputsSave.mockReturnValueOnce(new Promise<VideoInputView>(r=>oldResolve=r)).mockReturnValueOnce(new Promise<VideoInputView>(r=>newResolve=r));
+  act(()=>useStudioStore.getState().setValue('first_frame',{type:'image_asset',assetId:'old-edit'}));
+  let oldWrite!:Promise<void>,newWrite!:Promise<void>;act(()=>{oldWrite=h.result.current.save();});
+  h.rerender({r:{...route,projectId:'p2',shotId:'shot2'}});
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  act(()=>useStudioStore.getState().setValue('first_frame',{type:'image_asset',assetId:'new-edit'}));
+  act(()=>{newWrite=h.result.current.save();});
+  await act(async()=>{oldResolve(view('exact-a',9));await oldWrite;});
+  expect(h.result.current.busy).toBe(true);
+  expect(useStudioStore.getState().values.first_frame).toEqual({type:'image_asset',assetId:'new-edit'});
+  await act(async()=>{newResolve({...view('exact-a',2),inputs:[{inputKey:'first_frame',ordinal:0,assetId:'new-edit'},{inputKey:'last_frame',ordinal:0,assetId:'exact-a-last'}]});await newWrite;});
+  expect(h.result.current.busy).toBe(false);
+  expect(h.result.current.view?.token?.revision).toBe(2);
+});
+
+it('background invalidation during exact-slot bind releases the write lock and preserves the committed siblings', async () => {
+  const h=renderHook(()=>usePersistentVideoInputs(route,generator,false));
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  let resolve!:(v:VideoInputView)=>void;
+  api.inputsSave.mockReturnValueOnce(new Promise<VideoInputView>(r=>resolve=r));
+  let binding!:Promise<boolean>; act(()=>{binding=h.result.current.bindAsset('first_frame','bound-first');});
+  act(()=>invalidateVideoInputs('p1'));
+  expect(api.inputsGet).toHaveBeenCalledTimes(1);
+  const committed={...view('exact-a',2),inputs:[{inputKey:'first_frame' as const,ordinal:0,assetId:'bound-first'},{inputKey:'last_frame' as const,ordinal:0,assetId:'exact-a-last'}]};
+  api.inputsGet.mockResolvedValueOnce(committed);
+  await act(async()=>{resolve(committed);await expect(binding).resolves.toBe(true);});
+  await waitFor(()=>expect(h.result.current.ready).toBe(true));
+  expect(h.result.current.busy).toBe(false);
+  expect(useStudioStore.getState().values.first_frame).toEqual({type:'image_asset',assetId:'bound-first'});
+  expect(useStudioStore.getState().values.last_frame).toEqual({type:'image_asset',assetId:'exact-a-last'});
+});

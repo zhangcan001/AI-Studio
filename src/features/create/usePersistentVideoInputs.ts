@@ -18,8 +18,10 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
   const owner = JSON.stringify([route.projectId, route.shotId, generator?.selectionRef]);
   const currentOwner = useRef(owner); currentOwner.current = owner;
   const epoch = useRef(0); const lock = useRef(false); const selfWrite = useRef(false);
+  const readEpoch = useRef(0), pendingRefresh = useRef(false);
   const values = useStudioStore(state => state.values);
   const [state, setState] = useState<{ owner: string; view: VideoInputView }>();
+  const liveState = useRef(state); liveState.current = state;
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<string>();
   const [importReceipt, setImportReceipt] = useState<string>();
   const selection = { projectId: route.projectId, shotId: route.shotId ?? "", selectionRef: generator?.selectionRef ?? "" };
@@ -28,6 +30,12 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
   const inputs: VideoInputAsset[] = fields.flatMap(field => assetIds(values[field.key]).map((assetId, ordinal) => ({ inputKey: field.key as VideoInputKey, ordinal, assetId })));
   const ordered = (bindings: VideoInputAsset[]) => JSON.stringify([...bindings].sort((a,b) => a.inputKey.localeCompare(b.inputKey) || a.ordinal-b.ordinal));
   const dirty = enabled && !!view && ordered(inputs) !== ordered(view.inputs);
+  const currentBindings = () => fields.flatMap(field => assetIds(useStudioStore.getState().values[field.key])
+    .map((assetId, ordinal) => ({ inputKey: field.key as VideoInputKey, ordinal, assetId })));
+  function acceptView(own: string, next: VideoInputView) {
+    const accepted = { owner: own, view: next };
+    liveState.current = accepted; setState(accepted);
+  }
 
   function draftFromBindings(bindings: VideoInputAsset[]) {
     const store = useStudioStore.getState();
@@ -39,13 +47,25 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     store.loadCreationDraft(merged, store.draftDirty, store.creationPromptProvenance);
   }
 
-  async function load(restore = false) {
+  async function load(restore = false, background = false) {
     if (!enabled || pageLoading) return;
-    const token = ++epoch.current; const own = owner; setLoading(true); setError(undefined);
+    if (lock.current) { pendingRefresh.current = true; return; }
+    const token = epoch.current, read = ++readEpoch.current; const own = owner;
+    setLoading(true); if (!background) setError(undefined);
     try {
       const next = await productClient.creation.inputsGet(selection);
-      if (own !== currentOwner.current || token !== epoch.current) return;
+      if (own !== currentOwner.current || token !== epoch.current || read !== readEpoch.current) return;
       const store = useStudioStore.getState();
+      const previous = liveState.current?.owner === own ? liveState.current.view : undefined;
+      // A delayed same-instance read cannot roll back acknowledged OCC evidence.
+      if (background && previous?.token && next.token?.instanceId === previous.token.instanceId
+        && next.token.revision < previous.token.revision) return;
+      if (background && previous && ordered(currentBindings()) !== ordered(previous.inputs)) {
+        // Do not silently rebase a dirty draft onto someone else's fresh token.
+        if (JSON.stringify(next.token) !== JSON.stringify(previous.token) || ordered(next.inputs) !== ordered(previous.inputs))
+          setError(normalizeProductError({ code: "SHOT_VIDEO_INPUT_CONFLICT" }).message);
+        return;
+      }
       // Media lives in Studio Store's draft; persisted bindings alone are production authority.
       const merged = Object.fromEntries(Object.entries(store.values).filter(([,v]) => !("assetId" in v || "assetIds" in v)));
       for (const field of fields) {
@@ -55,27 +75,40 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
         if (ids.length) merged[field.key] = mediaValue(field, ids);
       }
       store.loadCreationDraft(merged, store.draftDirty, store.creationPromptProvenance);
-      setState({ owner: own, view: next });
-    } catch (e) { if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message); }
-    finally { if (own === currentOwner.current && token === epoch.current) setLoading(false); }
+      acceptView(own, next);
+    } catch (e) { if (own === currentOwner.current && token === epoch.current && read === readEpoch.current) setError(normalizeProductError(e).message); }
+    finally { if (own === currentOwner.current && token === epoch.current && read === readEpoch.current) setLoading(false); }
   }
-  useEffect(() => { lock.current = false; setBusy(false); setState(undefined); setError(undefined); setImportReceipt(undefined); setLoading(enabled); void load(true); return () => { ++epoch.current; }; }, [owner, enabled, pageLoading]);
+  useEffect(() => {
+    ++epoch.current; ++readEpoch.current; pendingRefresh.current = false;
+    lock.current = false; setBusy(false); liveState.current = undefined; setState(undefined);
+    setError(undefined); setImportReceipt(undefined); setLoading(enabled); void load(true);
+    return () => { ++epoch.current; ++readEpoch.current; };
+  }, [owner, enabled, pageLoading]);
   useEffect(() => {
     if (!enabled) return;
     return subscribeVideoInputInvalidation((projectId) => {
       if (projectId !== route.projectId || selfWrite.current) return;
-      void load(false);
+      void load(false, true);
     });
   }, [enabled, route.projectId, owner]);
 
+  function beginWrite() { ++readEpoch.current; lock.current = true; setLoading(false); setBusy(true); setError(undefined); }
+  function finishWrite(own: string, token: number) {
+    // Read generations must never control release of a write-owned lock.
+    if (own !== currentOwner.current || token !== epoch.current) return;
+    lock.current = false; setBusy(false);
+    if (pendingRefresh.current) { pendingRefresh.current = false; void load(false, true); }
+  }
+
   async function save() {
     if (!enabled || !view || loading || lock.current) return;
-    const own = owner; const token = epoch.current; lock.current = true; setBusy(true); setError(undefined);
+    const own = owner; const token = epoch.current; beginWrite();
     try {
       const next = await productClient.creation.inputsSave({ selection, expected: view.token, inputs });
-      if (own === currentOwner.current && token === epoch.current) { setState({ owner: own, view: next }); selfWrite.current = true; try { invalidateVideoInputs(route.projectId); } finally { selfWrite.current = false; } }
+      if (own === currentOwner.current && token === epoch.current) { acceptView(own, next); selfWrite.current = true; try { invalidateVideoInputs(route.projectId); } finally { selfWrite.current = false; } }
     } catch (e) { if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message); }
-    finally { if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); } }
+    finally { finishWrite(own, token); }
   }
 
   /** Persist one Library/reuse asset into an exact inputKey (+ ordinal) via OCC save. Does not create Task/Run.
@@ -84,7 +117,7 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     if (!enabled || !view || loading || lock.current || !generator) return false;
     const field = fields.find(f => f.key === inputKey);
     if (!field || mediaKind(field) == null) return false;
-    const own = owner; const token = epoch.current; lock.current = true; setBusy(true); setError(undefined);
+    const own = owner; const token = epoch.current; beginWrite();
     try {
       // Draft `inputs` is authority for sibling keys; view.token still guards OCC.
       const others = inputs.filter(i => i.inputKey !== inputKey);
@@ -100,7 +133,7 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
       const nextInputs = [...others, ...nextKey];
       const next = await productClient.creation.inputsSave({ selection, expected: view.token, inputs: nextInputs });
       if (own !== currentOwner.current || token !== epoch.current) return false;
-      setState({ owner: own, view: next });
+      acceptView(own, next);
       draftFromBindings(next.inputs);
       selfWrite.current = true; try { invalidateVideoInputs(route.projectId); } finally { selfWrite.current = false; }
       return true;
@@ -108,24 +141,25 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
       if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message);
       return false;
     } finally {
-      if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); }
+      finishWrite(own, token);
     }
   }
 
   /** Returns the imported assets. Import itself never fills a slot; only an explicit caller (the composer's chosen slot) may bind them. */
   async function importAssets(folder: boolean): Promise<VideoInputView["assets"]> {
-    if (lock.current) return [];
-    const own = owner; const token = epoch.current; lock.current = true; setBusy(true); setError(undefined);
+    if (lock.current || loading) return [];
+    const own = owner; const token = epoch.current; beginWrite();
     try {
       const result = await productClient.creation.assetsImport(route.projectId, folder);
       if (own !== currentOwner.current || token !== epoch.current) return [];
       setImportReceipt(result.cancelled ? "已取消导入，未应用素材。" : `已导入 ${result.imported.length} 项；失败 ${result.failed.length} 项。请选择明确输入槽。`);
-      setState(previous => previous?.owner === own ? { owner: own, view: { ...previous.view, assets: [...previous.view.assets, ...result.imported.filter(a => !previous.view.assets.some(b=>b.id===a.id))] } } : previous);
+      const previous = liveState.current;
+      if (previous?.owner === own) acceptView(own, { ...previous.view, assets: [...previous.view.assets, ...result.imported.filter(a => !previous.view.assets.some(b=>b.id===a.id))] });
       if (result.failed.length) setError(result.failed.map(f=>`${f.displayName}：${f.error}`).join("；"));
       // Import never fills a slot, selects a result or creates a generation.
       return result.cancelled ? [] : result.imported;
     } catch (e) { if (own === currentOwner.current && token === epoch.current) setError(normalizeProductError(e).message); return []; }
-    finally { if (own === currentOwner.current && token === epoch.current) { lock.current = false; setBusy(false); } }
+    finally { finishWrite(own, token); }
   }
   return { enabled, loading, busy, error, importReceipt, view, dirty, save, bindAsset, refresh: load, importAssets, ready: !enabled || (!!view && !loading && !busy && !dirty && !error) };
 }

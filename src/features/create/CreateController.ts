@@ -29,6 +29,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const values = useStudioStore(state => state.values);
   const dirty = useStudioStore(state => state.draftDirty);
   const provenance = useStudioStore(state => state.creationPromptProvenance);
+  const pendingRunIntent = useStudioStore(state => state.pendingRunIntent);
   const [context, setContext] = useState<CreationContext>();
   const [generators, setGenerators] = useState<GeneratorOption[]>([]);
   const [selection, setSelection] = useState("");
@@ -87,7 +88,9 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
         if (cancelled || token !== epoch.current) return;
         const saved = labReturn ? { selection: labReturn.selectionRef, values: labReturn.values, dirty: labReturn.dirty, runRef: labReturn.runRef, accepted: labReturn.accepted, provenance: labReturn.provenance } : snapshots.current.get(key);
         const intent = useStudioStore.getState().pendingRunIntent;
-        const reuse = intent?.projectId === route.projectId && intent.stage === route.stage ? intent : undefined;
+        // Legacy workflow-lab handoff initializes with the route. Targeted Runs
+        // intents are consumed separately, including same-Shot in-place reuse.
+        const reuse = intent && !intent.target && intent.projectId === route.projectId && intent.stage === route.stage ? intent : undefined;
         const lastUsedRef = !reuse && !saved ? readLastGenerator(route.projectId, route.stage) : undefined;
         const selected = reuse ? options.find(item => item.selectionRef === reuse.selectionRef) : saved ? options.find(item => item.selectionRef === saved.selection) : options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? (lastUsedRef ? options.find(item => item.selectionRef === lastUsedRef && item.availability) : undefined) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
         if ((reuse || saved) && !selected) setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
@@ -107,6 +110,24 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       if (initialized) snapshots.current.set(key, { ...live.current, values: store.values, dirty: store.draftDirty, provenance: store.creationPromptProvenance });
     };
   }, [key]); // Canonical route is the only Shot/stage owner.
+  useEffect(() => {
+    const intent = pendingRunIntent;
+    const shot = context?.selectedShot;
+    if (!intent?.target?.approved || loading || !shot || shot.summary.id !== route.shotId || !route.shotId
+      || intent.projectId !== route.projectId || intent.stage !== route.stage
+      || (intent.target.shotId !== null && intent.target.shotId !== route.shotId)) return;
+    const option = generators.find(item => item.selectionRef === intent.selectionRef && item.availability);
+    if (!option) {
+      setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
+    } else {
+      const next = draftFor(option, shot, intent.values);
+      attempt.current = null; setAccepted(null); setError(undefined); setSelection(option.selectionRef);
+      setRestoredDraft({ key, selection: option.selectionRef, values: next });
+      writeLastGenerator(route.projectId, route.stage, option.selectionRef);
+      useStudioStore.getState().loadCreationDraft(next, true);
+    }
+    if (useStudioStore.getState().pendingRunIntent === intent) useStudioStore.getState().setPendingRunIntent(undefined);
+  }, [pendingRunIntent, loading, context, generators, key]);
   useEffect(() => { onDirtyChange?.(dirty || [...snapshots.current.entries()].some(([scope, item]) => scope !== key && item.dirty)); }, [dirty, key, loading, onDirtyChange]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => () => { onDirtyChange?.(false); const store = useStudioStore.getState(); if (!store.creationLabReturn) store.loadCreationDraft({}); }, [onDirtyChange]);

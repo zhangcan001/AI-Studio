@@ -88,6 +88,20 @@ it("validates the backup correction before projecting the frozen 0c3 backup chec
   expect(view.read(path)).toEqual(execFileSync("git", ["show", R1_METADATA_BASE + ":" + path], { encoding: "utf8" }));
 }, 120000);
 
+it("projects the explicitly scoped Studio Store and protects its new storyboard regressions", () => {
+  const store = "src/stores/studioStore.ts", tests = "src/features/create/StoryboardSafety.test.tsx";
+  const proof = JSON.parse(readFileSync(R1_METADATA_PROOF, "utf8"));
+  const view = uiPhase7BR1MetadataParentReader(".");
+  expect(view.violations).toEqual([]);
+  expect(proof.files[store].beforeHash).toMatch(/^[a-f0-9]{64}$/);
+  expect(proof.files[tests].beforeHash).toBeNull();
+  expect(view.read(store)).toEqual(execFileSync("git", ["show", R1_METADATA_BASE + ":" + store], { encoding: "utf8" }));
+  expect(uiPhase7BR1MetadataParentReader(".", { [store]: readFileSync(store, "utf8") + "\n// undeclared draft state\n" }).violations)
+    .toContain("ui-phase7b-r1-metadata-changed:" + store);
+  expect(uiPhase7BR1MetadataParentReader(".", { [tests]: readFileSync(tests, "utf8") + "\n// undeclared regression edit\n" }).violations)
+    .toContain("ui-phase7b-r1-metadata-added:" + tests);
+}, 120000);
+
 it("rejects forged identity/hashes, protected reader edits and undeclared changes", () => {
   const proof = JSON.parse(readFileSync(R1_METADATA_PROOF, "utf8"));
   const repository = "src-tauri/src/infrastructure/database/repositories/project_backup.rs";

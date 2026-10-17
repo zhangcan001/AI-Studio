@@ -17,6 +17,8 @@ export function useRunsController({ route, navigate }: RunsProps) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const epoch = useRef(0); const actionLock = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // Single-flight per scope: a slow IPC round trip (> poll interval) must not be superseded forever by polls.
   const inflight = useRef<number | undefined>(undefined); const queued = useRef(false); const rerun = useRef<(() => Promise<void>) | undefined>(undefined);
   const filter = filterFor(route);
@@ -82,11 +84,28 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!input.selectionRef) return;
     // Video-only product: reuse never opens the legacy image/studio stage.
     const video = await productClient.creation.generatorsList(route.projectId, "video");
-    if (scope !== liveScope.current) return;
+    if (!mounted.current || scope !== liveScope.current) return;
     const option = video.find(option => option.selectionRef === input.selectionRef);
-    if (!option || option.mediaKind !== "video") throw { code: "GENERATOR_UNAVAILABLE" };
-    useStudioStore.getState().setPendingRunIntent({ projectId: route.projectId, stage: "video", selectionRef: input.selectionRef, values: input.values });
-    navigate({ kind: "create", projectId: route.projectId, stage: "video", shotId: detail?.detail?.sources.find(source => source.stage === "video")?.id });
+    if (!option || option.mediaKind !== "video" || !option.availability) throw { code: "GENERATOR_UNAVAILABLE" };
+    const sources = detail?.detail?.sources.filter(source => source.stage === "video") ?? [];
+    // RunInput has no per-input Shot locator. Mixed batches must ask for a
+    // target instead of guessing that every input belongs to the first source.
+    const shotId = sources.length === 1 ? sources[0].id : null;
+    const requestId = crypto.randomUUID();
+    const store = useStudioStore.getState();
+    store.setPendingRunIntent({ projectId: route.projectId, stage: "video", selectionRef: input.selectionRef, values: input.values,
+      target: { shotId, requestId, approved: false } });
+    let approved = false;
+    try {
+      approved = await navigate({ kind: "create", projectId: route.projectId, stage: "video", shotId: shotId ?? undefined }) !== false;
+    } finally {
+      // Never clear/approve a newer operation, including a different Run chosen
+      // while a navigation confirmation was pending.
+      const pending = useStudioStore.getState().pendingRunIntent;
+      if (pending?.target?.requestId === requestId) {
+        useStudioStore.getState().setPendingRunIntent(approved ? { ...pending, target: { ...pending.target, approved: true } } : undefined);
+      }
+    }
   });
   const review = (result: RunResult, decision: "APPROVED" | "REJECTED", comment = "") => mutate(async () => {
     if (!detail || result.reviewRevision === null) return;

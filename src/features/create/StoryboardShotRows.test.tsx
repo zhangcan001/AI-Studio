@@ -277,3 +277,26 @@ it.each([
   })));
   expect(api.generate).not.toHaveBeenCalled();
 });
+
+it('row generation renews the key only after acceptance or changed inputs, not unknown IPC outcomes', async () => {
+  render(<StoryboardShotRows {...props()} items={[shot('keys',0)]}/>);
+  const button=await screen.findByRole('button',{name:'生成视频'});
+  fireEvent.click(button);
+  await screen.findByText('已写入生产队列');
+  fireEvent.click(button);
+  await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+  const [first,second]=api.generate.mock.calls.map(c=>c[0].submissionIdempotencyKey);
+  expect(first).not.toBe(second);
+});
+
+it('row generation changes the attempt key when the actual draft changes after an unknown outcome', async () => {
+  api.generate.mockRejectedValueOnce({code:'INTERNAL_ERROR'});
+  const p=props(); const item=shot('changing',0);
+  const h=render(<StoryboardShotRows {...p} items={[item]}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'生成视频'}));
+  await screen.findByRole('alert');
+  h.rerender(<StoryboardShotRows {...p} items={[{...item,shot:{...item.shot!,values:{duration_seconds:{type:'integer',value:6}}}}]}/>);
+  fireEvent.click(screen.getByRole('button',{name:'生成视频'}));
+  await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+  expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});

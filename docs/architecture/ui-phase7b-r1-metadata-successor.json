@@ -33,7 +33,7 @@
     },
     "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
       "beforeHash": null,
-      "afterHash": "608db8bc4b6649b7e7c5bed9ef556ee3ab2ab08496e285e6dc4e0bd776d868d0"
+      "afterHash": "c53c37f91826b145057c8d94caa2f97c39edac55221b60529ca82ea4d41c17e4"
     },
     "scripts/ui-phase7b-backup-prompt-successor-guard.mjs": {
       "beforeHash": "3ffffc11d3a12c331a8f9634ac1f09e3d665fdec640eab0e69a114f012d25e32",
@@ -41,7 +41,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "45b535b8d220a574575b2dfaa6c2a47f112a3158f3027b433b19f71d2d8157f6"
+      "afterHash": "524a12ca9def8c0f3eb809e3ad3bce3b3cadf0ed97bff0271adb3975df7728ba"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
@@ -245,7 +245,7 @@
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
-      "afterHash": "3c175c3e8cb6e2b7aeca1d6abfa33d930288605d9d9fbef71db1993f7b397d38"
+      "afterHash": "d99b6eb8495b4435b657ff91c80f943e033952f245ff578d43bbac4a975ce4b7"
     },
     "src/features/create/CreateInputs.tsx": {
       "beforeHash": "2d66012f799ddaa1b7222323767b885840676acd77a3d43a306f17c653eeee3f",
@@ -293,11 +293,11 @@
     },
     "src/features/create/StoryboardShotRows.test.tsx": {
       "beforeHash": null,
-      "afterHash": "fde3516d6045eff5ec494041251755adf4675abf2d77ec0ac1dc60fd8bdae91a"
+      "afterHash": "604bea04d71c0a7efbe67dc64155625c12529293d72190d9fa7b4ec85ea7a996"
     },
     "src/features/create/StoryboardShotRows.tsx": {
       "beforeHash": null,
-      "afterHash": "38f7b3584d4359929b8f75b62dfc50defa497e4ce75280879ced289e163d390f"
+      "afterHash": "2a6a949d990eca1e9ecb3048e212ad2943febbfd844a7d5f9175f2e59953ccf9"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
@@ -305,7 +305,7 @@
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": null,
-      "afterHash": "5dc54c3c9272a8c5a5b25d835e2cec85acec5aa4a6559183b712a23d80c4b790"
+      "afterHash": "4106bfba3fd5c3ca227526221e562593592a18feaecf3e696681bf050acd3083"
     },
     "src/features/create/composerTestUtils.ts": {
       "beforeHash": null,
@@ -329,11 +329,11 @@
     },
     "src/features/create/usePersistentVideoInputs.test.tsx": {
       "beforeHash": "0be43b80f29130d45f8eded51fdbe9a20d36fb7880e854ae9a6eec17248ddfd5",
-      "afterHash": "c9e7315a10c57808770cb1a20a390d1317466779ce2af9c7436b7dc72c7a18d6"
+      "afterHash": "f8559e7958c227b555d75ca656c1dfa3567f4857350a611d9988a955fe8c6f28"
     },
     "src/features/create/usePersistentVideoInputs.ts": {
       "beforeHash": "96f40f05d714e17f52608bbf447981fbbde89a662b1c5abeb40852531dff488b",
-      "afterHash": "13b331cd688960d038364374c36bac529c0164a2cbfc385c11ae6b22fed8bc39"
+      "afterHash": "0181478c6806faf2f629917136bbcb9d27aa41e3603c1011e4742916a40b0b27"
     },
     "src/features/generators/GeneratorSettingsPage.test.tsx": {
       "beforeHash": "02c6369578c603b48838e8144164cbff024dfcc74636719927afaf8cfe353b61",
@@ -369,7 +369,7 @@
     },
     "src/features/runs/RunsController.ts": {
       "beforeHash": "82e7600c977ba16782e590e42ae4013640730ea54e23c14547a465dab73e6382",
-      "afterHash": "00e240ff1242c59eb63d3be534fd11346504fddd270befcf4dc2493add149b34"
+      "afterHash": "936c5328dba0c9347dc35261c87b1851d2b4e5391845f67b4c3090596f7acbef"
     },
     "src/features/shots/ShotVideoInputsPanel.test.tsx": {
       "beforeHash": "530c1bc3a939144daaebbfd7bc27709b518d600da4ab8f967f1ea71908bcaf49",
@@ -398,6 +398,14 @@
     "src/types/storyEntity.ts": {
       "beforeHash": null,
       "afterHash": "1bc14dc93060ad36efa16666fccb326d99cbd72b78b711e76e0074430a21149e"
+    },
+    "src/features/create/StoryboardSafety.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "b3591481c9fa5dadd48a1c6c281ae781e41f5314ad2321d2cdddb0df11531d39"
+    },
+    "src/stores/studioStore.ts": {
+      "beforeHash": "179545b395bcfd6c9a6a2e53d55b34cd414fee925dc4be3783e06b1193614aee",
+      "afterHash": "8c547da688bcaf4da27e6eb0fb40bdb241b2872a2d8bcc770e97a392dddcacee"
     }
   }
 }

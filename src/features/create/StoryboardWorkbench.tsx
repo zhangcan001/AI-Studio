@@ -33,6 +33,8 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const [truncated, setTruncated] = useState(0);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const createInFlight = useRef(false);
   const [view, setViewState] = useState<StoryboardView>(() => readView());
   const setView = (next: StoryboardView) => { setViewState(next); try { window.localStorage.setItem(VIEW_KEY, next); } catch { /* storage unavailable */ } };
   const [reviewId, setReviewId] = useState<string>();
@@ -40,7 +42,9 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const [runRoute, setRunRoute] = useState<Extract<AppRoute, { kind: "runs" }>>();
   const [shotQuery, setShotQuery] = useState("");
   const libraryIntent = useStudioStore(state => state.pendingLibraryIntent);
-  const editing = Boolean(route.shotId || libraryIntent);
+  const runIntent = useStudioStore(state => state.pendingRunIntent);
+  const matchingRunIntent = runIntent?.projectId === route.projectId && runIntent.stage === route.stage;
+  const editing = Boolean(route.shotId || libraryIntent || matchingRunIntent);
   const epoch = useRef(0);
   const inFlight = useRef(false);
   const [queueActive, setQueueActive] = useState(false);
@@ -98,38 +102,42 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const openRun = (item: StoryboardShot) => item.run && setRunRoute({ kind: "runs", projectId, run: item.run.ref });
   const navigateInline = async (next: AppRoute) => {
     if (next.kind === "runs" && next.projectId === projectId) { setRunRoute(next); return true; }
+    const store = useStudioStore.getState();
+    const intent = store.pendingRunIntent;
+    // Same-Shot replacement does not trigger the router's leave-scope guard.
+    // Use the existing explicit-discard convention before approving that reuse.
+    if (next.kind === "create" && next.projectId === projectId && next.shotId === route.shotId && next.stage === route.stage
+      && intent?.target?.approved === false && store.draftDirty
+      && !window.confirm("当前镜头有未保存的草稿。用历史运行输入替换该草稿？此操作不会启动生成。")) return false;
     // All scope changes still go through the application's existing draft guard.
     const result = await navigate(next);
     if (result !== false && mounted.current && scope.current === projectId) setRunRoute(undefined);
     return result;
   };
-  const createShot = async () => {
-    setBusy(true);
+  const createShot = async (open = true) => {
+    if (createInFlight.current) return;
+    createInFlight.current = true; setCreating(true);
     try {
       const shot = await productClient.creation.createShot(projectId);
       // The authorised creation completes in the background, but a late reply
       // must not pull a user who already left (or switched project) back.
       if (!mounted.current || scope.current !== projectId) return;
-      openShot(shot.id);
-    } catch (cause) { if (mounted.current && scope.current === projectId) { setError(normalizeProductError(cause).message); setBusy(false); } }
-  };
-
-  // Row view: a new shot is appended (no insert-at-position backend) and the list stays in place.
-  const appendShot = async () => {
-    setBusy(true);
-    try { await productClient.creation.createShot(projectId); if (mounted.current && scope.current === projectId) { setBusy(false); void load(); } }
-    catch (cause) { if (mounted.current && scope.current === projectId) { setError(normalizeProductError(cause).message); setBusy(false); } }
+      if (open) await openShot(shot.id);
+      if (mounted.current && scope.current === projectId) void load();
+    } catch (cause) { if (mounted.current && scope.current === projectId) setError(normalizeProductError(cause).message); }
+    finally { createInFlight.current = false; if (mounted.current && scope.current === projectId) setCreating(false); }
   };
 
   return <MediaLightboxScope><ThumbnailProjectContext.Provider value={projectId}><div className="storyboard-page" aria-label="分镜工作台">
     <header className="storyboard-header">
       <div className="storyboard-title"><h1>分镜工作台</h1><p>将剧本拆解为多个镜头，逐镜生成并完成整段视频的制作。</p></div>
       <dl className="storyboard-stats" aria-label="镜头统计">
-        <div><dt>镜头总数</dt><dd>{stats.total}</dd></div>
+        <div><dt>镜头总数</dt><dd>{stats.total + truncated}</dd></div>
         <div data-tone="success"><dt>已完成</dt><dd>{stats.completed}</dd></div>
         <div data-tone="info"><dt>生成中</dt><dd>{stats.generating}</dd></div>
         <div data-tone="muted"><dt>待制作</dt><dd>{stats.todo}</dd></div>
       </dl>
+      {truncated > 0 && <small role="note">状态统计仅覆盖已加载的 {stats.total} 个镜头。</small>}
       <div className="storyboard-header-actions">
         <button type="button" onClick={() => setRunRoute({ kind: "runs", projectId })}>任务队列与运行记录</button>
         <button type="button" onClick={() => void navigate({ kind: "project-settings", projectId, section: "advanced-production" })}>导入分镜脚本</button>
@@ -151,11 +159,12 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       </aside>
       <section className="storyboard-inline-editor" aria-label="镜头操作">
         <header><span>提示词 · 参数 · 素材 · 生成 · 候选</span>{route.shotId && selected?.id === route.shotId && canReview(selected) && <button type="button" onClick={() => setReviewId(selected.id)}>人工审核</button>}</header>
+        {matchingRunIntent && !route.shotId && <p role="note">请选择目标镜头；历史输入只载入该镜头的未保存草稿，不会自动保存或生成。</p>}
         <section className="storyboard-inline-create" aria-label="镜头内联创作"><CreatePage route={route} runtime={runtime} navigate={navigateInline} onDirtyChange={onDirtyChange} embedded onContextChange={load} /></section>
       </section>
     </div> : !items ? <p role="status" className="storyboard-loading">正在读取分镜…</p> : <div className="storyboard-body">
       <aside className="storyboard-panel storyboard-tree" aria-label="剧集与场景">
-        <header><h2>剧集与场景</h2><button type="button" disabled={busy} onClick={() => void createShot()}>+ 新建镜头</button></header>
+        <header><h2>剧集与场景</h2><button type="button" disabled={busy || creating} onClick={() => void createShot()}>+ 新建镜头</button></header>
         <div className="storyboard-tree-group"><span>全部镜头</span><span className="storyboard-count">{stats.total + truncated}</span></div>
         <ol className="storyboard-tree-shots">{items.map(item => <li key={item.id}><button type="button" aria-current={selected?.id === item.id ? "true" : undefined} onClick={() => setSelectedId(item.id)}>
           <span className="storyboard-tree-name"><strong>{item.name}</strong><small>{shotDuration(item.shot)}</small></span><StatusBadge item={item} compact />
@@ -170,8 +179,8 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <button type="button" aria-pressed={view === "grid"} onClick={() => setView("grid")}>宫格模式</button>
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
-        {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy} onClick={() => void createShot()}>创建第一个镜头</button></div>
-          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} busy={busy} onOpen={openShot} onCreate={() => void appendShot()} onChanged={() => void load()} onQueue={() => setRunRoute({ kind: "runs", projectId })} />
+        {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
+          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onQueue={() => setRunRoute({ kind: "runs", projectId })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>

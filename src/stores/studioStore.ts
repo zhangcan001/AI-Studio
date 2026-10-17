@@ -14,7 +14,10 @@ interface StudioState {
   setCreationLabReturn: (intent: StudioState["creationLabReturn"]) => void;
   pendingLibraryIntent?: import("../product/libraryTypes").LibraryCreateIntent;
   setPendingLibraryIntent: (intent: StudioState["pendingLibraryIntent"]) => void;
-  pendingRunIntent?: { projectId: string; selectionRef: string; stage: "image" | "video"; values: GenerationValues };
+  pendingRunIntent?: { projectId: string; selectionRef: string; stage: "image" | "video"; values: GenerationValues;
+    // Run reuse is staged until guarded navigation succeeds. Missing target is
+    // retained only for the existing workflow-lab handoff, not new Runs reuse.
+    target?: { shotId: string | null; requestId: string; approved: boolean } };
   setPendingRunIntent: (intent: StudioState["pendingRunIntent"]) => void;
   selectedWorkflow?: RecipeViewModel;
   selectedModelVersionId?: string;

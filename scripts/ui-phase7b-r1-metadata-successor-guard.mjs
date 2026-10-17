@@ -79,6 +79,7 @@ export const R1_METADATA_CHANGED = [
   "src/product/client.ts",
   "src/product/transport.ts",
   "src/product/types.ts",
+  "src/stores/studioStore.ts",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/testing/ui-phase7b-r1-metadata.test.mjs",
@@ -93,6 +94,7 @@ export const R1_METADATA_ADDED = [
   "src/features/create/CreateComposer.tsx",
   "src/features/create/CreateMediaPreview.hooks.test.tsx",
   "src/features/create/ShotEntityChips.tsx",
+  "src/features/create/StoryboardSafety.test.tsx",
   "src/features/create/StoryboardShotRows.test.tsx",
   "src/features/create/StoryboardShotRows.tsx",
   "src/features/create/StoryboardWorkbench.test.tsx",
