@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { StoryboardShotRows } from "./StoryboardShotRows";
 import type { StoryboardShot } from "./storyboardModel";
 
@@ -33,6 +34,19 @@ function deferred<T>() {
   const promise = new Promise<T>(yes => { resolve = yes; });
   return { promise, resolve };
 }
+
+it("keeps narrow panel rows usable and enables wide columns by container width, not window width", () => {
+  // CSS contract only: real Native geometry is verified separately, not simulated by jsdom.
+  const css = readFileSync("src/features/create/CreatePage.css", "utf8").replace(/\s+/g, "");
+  expect(/\.storyboard-shot-rows\{[^}]*container:shot-rows\/inline-size/.test(css), "panel-scoped size container").toBe(true);
+  expect(/\.shot-row-card\{[^}]*grid-template-columns:32pxminmax\(0,1fr\)110px/.test(css), "usable narrow fallback").toBe(true);
+  for (const part of ["prompt", "fields"]) {
+    expect(new RegExp(`\\.shot-row-${part}\\{[^}]*grid-column:2/-1`).test(css), `${part} spans the narrow row`).toBe(true);
+  }
+  expect(css.includes("@containershot-rows(min-width:900px){.shot-row-card{"), "wide columns require enough panel width").toBe(true);
+  expect(css.includes(".shot-row-prompt,.shot-row-fields{grid-column:auto}"), "restore wide placement").toBe(true);
+  expect(/@media[^{}]*\{\.shot-row-card\{/.test(css), "no viewport-only row breakpoint").toBe(false);
+});
 
 it("does not replace saved bindings until the complete initial read succeeds", async () => {
   const initial = deferred<(typeof hero | typeof lane)[]>();
