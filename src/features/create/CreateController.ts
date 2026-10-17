@@ -336,10 +336,14 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (!mounted.current || token !== epoch.current || !matchesDraft(draft)) return;
     setReadinessCheck({ result: ready, draft }); if (!ready.ready || draft.runtimeStatus !== "CONNECTED") return;
     const ack = await productClient.creation.generate(request);
-    if (!mounted.current || token !== epoch.current || !matchesDraft(draft)) return;
-    setAccepted(ack); setRunRef(ack.runRef); setRun(undefined);
+    if (!mounted.current || token !== epoch.current || draft.key !== currentDraft.current.key) return;
+    // A committed run belongs to this scope even if runtime/input evidence changed
+    // in flight. Keep its locator without accepting or overwriting a newer draft.
+    const unchanged = matchesDraft(draft);
+    setAccepted(unchanged ? ack : null); setRunRef(ack.runRef); setRun(undefined);
     // Runs must see the new batch immediately; Library thrash waits for task://updated assets.
     invalidateRuns(route.projectId, { library: false });
+    if (!unchanged) return;
     useStudioStore.getState().loadCreationDraft(request.values, false, request.promptId && request.promptVersionId ? {promptId:request.promptId,promptVersionId:request.promptVersionId} : undefined);
   }); }
   const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); if (token === epoch.current) navigate({ ...route, shotId: shot.id }); });

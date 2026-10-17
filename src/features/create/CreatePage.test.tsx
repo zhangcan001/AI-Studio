@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { CreatePage } from "./CreatePage";
 import { useStudioStore } from "../../stores/studioStore";
-import type { CreationContext, GeneratorOption, ProductRun, CreationAsset } from "../../product/types";
+import type { CreationAccepted, CreationContext, GeneratorOption, ProductRun, CreationAsset } from "../../product/types";
 import type { AppRoute } from "../../app/routes/types";
 import { normalCreate, mediaValue, modeLabel, draftFor } from "./createModel";
 import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
@@ -241,11 +241,148 @@ describe("Target13 inputs", () => {
   });
 });
 describe("Target14 run", () => {
+  it("retains the committed RunRef when runtime evidence changes while the generation receipt is in flight", async () => {
+    let acknowledge!: (value: CreationAccepted) => void;
+    api.generate.mockImplementationOnce(() => new Promise<CreationAccepted>(resolve => { acknowledge = resolve; }));
+    api.runGet.mockResolvedValue(run("RUNNING"));
+    const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
+    const view = render(<CreatePage route={route} runtime={{ ...runtime, devices: [] }} navigate={navigations} />);
+    await loaded(); setPrompt("keep the current draft"); await readyToGenerate();
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+    view.rerender(<CreatePage route={route} runtime={{ ...runtime, devices: [], runtimeGeneration: 2 }} navigate={navigations} />);
+    await act(async () => acknowledge({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "STARTED", startIssue: null }));
+    await waitFor(() => expect(api.runGet).toHaveBeenCalledWith("project", { source: "queue-batch", id: "run" }));
+    expect(promptText()).toBe("keep the current draft");
+    expect(useStudioStore.getState().draftDirty).toBe(true);
+    expect(screen.getByRole("button", { name: "查看运行详情" })).toBeTruthy();
+    expect(api.generate).toHaveBeenCalledTimes(1);
+  });
+  it("shows the running task in the empty video preview instead of waiting for generation", async () => {
+    api.runGet.mockResolvedValue(run("RUNNING"));
+    render(<Host />); await loaded(); await readyToGenerate();
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    await waitFor(() => expect(api.runGet).toHaveBeenCalled());
+    const preview = within(screen.getByRole("region", { name: "视频预览" }));
+    expect(await preview.findByText("生成中")).toBeTruthy();
+    expect(preview.queryByText("等待生成")).toBeNull();
+    expect(preview.queryByRole("progressbar")).toBeNull();
+    expect(api.generate).toHaveBeenCalledTimes(1);
+    expect(api.retry).not.toHaveBeenCalled(); expect(api.selectResult).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["QUEUED", "排队中"], ["RUNNING", "生成中"], ["PAUSED", "暂停"],
+    ["FAILED", "失败"], ["SUCCEEDED", "已完成"], ["PARTIAL", "部分完成"], ["CANCELLED", "已取消"],
+  ] as const)("projects the actual %s run into the preview without submitting or inventing progress", async (status, label) => {
+    api.get.mockImplementation((_p, shot, stage) => {
+      const next = context(stage, shot);
+      if (next.selectedShot) next.selectedShot.recentRun = { source: "queue-batch", id: "run" };
+      return Promise.resolve(next);
+    });
+    api.runGet.mockResolvedValue(run(status));
+    render(<Host />); await loaded();
+    const preview = within(screen.getByRole("region", { name: "视频预览" }));
+    expect(await preview.findByText(label)).toBeTruthy();
+    expect(preview.queryByText("等待生成")).toBeNull();
+    expect(preview.queryByRole("progressbar")).toBeNull();
+    expect(api.generate).not.toHaveBeenCalled(); expect(api.retry).not.toHaveBeenCalled(); expect(api.selectResult).not.toHaveBeenCalled();
+  });
+  it("does not infer GPU execution from a receipt while the authoritative run read is pending", async () => {
+    api.runGet.mockImplementationOnce(() => new Promise<ProductRun>(() => {}));
+    render(<Host />); await loaded(); await readyToGenerate();
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    const preview = within(screen.getByRole("region", { name: "视频预览" }));
+    expect(await preview.findByText("已提交，正在读取运行状态")).toBeTruthy();
+    expect(preview.queryByText("生成中")).toBeNull(); expect(preview.queryByText("已完成")).toBeNull();
+    expect(api.generate).toHaveBeenCalledTimes(1);
+  });
+  it("shows a persisted RunRef as loading rather than idle before its first read resolves", async () => {
+    api.get.mockImplementation((_p, shot, stage) => {
+      const next = context(stage, shot);
+      if (next.selectedShot) next.selectedShot.recentRun = { source: "queue-batch", id: "run" };
+      return Promise.resolve(next);
+    });
+    api.runGet.mockImplementationOnce(() => new Promise<ProductRun>(() => {}));
+    render(<Host />); await loaded();
+    const preview = within(screen.getByRole("region", { name: "视频预览" }));
+    expect(await preview.findByText("正在读取运行状态")).toBeTruthy();
+    expect(preview.queryByText("等待生成")).toBeNull(); expect(preview.queryByText("生成中")).toBeNull();
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("updates the running preview to a completed candidate through the existing poll without selecting it", async () => {
+    api.runGet.mockResolvedValueOnce(run("RUNNING")).mockImplementationOnce(async () => {
+      candidates = [{ id: "new-video", name: "新生成视频", mediaKind: "video", selected: false }];
+      return run("SUCCEEDED");
+    });
+    render(<Host />); await loaded(); await readyToGenerate();
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    const preview = within(screen.getByRole("region", { name: "视频预览" }));
+    expect(await preview.findByText("生成中")).toBeTruthy();
+    expect(await preview.findByText("新生成视频", {}, { timeout: 3000 })).toBeTruthy();
+    expect(preview.getByText("候选预览")).toBeTruthy();
+    expect(preview.getByRole("status", { name: "视频生成状态" }).textContent).toBe("已完成");
+    expect(api.generate).toHaveBeenCalledTimes(1); expect(api.selectResult).not.toHaveBeenCalled(); expect(api.retry).not.toHaveBeenCalled();
+  });
+  it("still rejects stale runtime evidence before the formal generation submission", async () => {
+    let finish!: (value: { ready: true; issues: []; fieldErrors: []; actions: [] }) => void;
+    const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
+    const view = render(<CreatePage route={route} runtime={{ ...runtime, devices: [] }} navigate={navigations} />);
+    await loaded(); await readyToGenerate();
+    api.readinessGet.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    view.rerender(<CreatePage route={route} runtime={{ ...runtime, devices: [], runtimeGeneration: 2 }} navigate={navigations} />);
+    await act(async () => finish({ ready: true, issues: [], fieldErrors: [], actions: [] }));
+    expect(api.generate).not.toHaveBeenCalled(); expect(api.runGet).not.toHaveBeenCalled();
+  });
+  it("keeps an existing selected video visible while a newer run is generating", async () => {
+    candidates = [{ id: "older", name: "原选用视频", mediaKind: "video", selected: true }];
+    api.runGet.mockResolvedValue(run("RUNNING"));
+    render(<Host />); await loaded(); await readyToGenerate();
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    const preview = within(screen.getByRole("region", { name: "视频预览" }));
+    expect(await preview.findByText("生成中")).toBeTruthy();
+    expect(preview.getByText("已选用结果")).toBeTruthy();
+    expect(preview.getByText("原选用视频")).toBeTruthy();
+    expect(preview.getByRole("button", { name: "选用此结果" }).hasAttribute("disabled")).toBe(true);
+    expect(api.selectResult).not.toHaveBeenCalled(); expect(api.retry).not.toHaveBeenCalled();
+  });
+  it.each(["shot", "project"] as const)("ignores an old run read after switching %s", async change => {
+    let finish!: (value: ProductRun) => void;
+    api.runGet.mockImplementationOnce(() => new Promise<ProductRun>(resolve => { finish = resolve; }));
+    api.get.mockImplementation((projectId, shot, stage) => {
+      const next = { ...context(stage, shot), projectId };
+      if (next.selectedShot && projectId === "project" && shot === "shot1") next.selectedShot.recentRun = { source: "queue-batch", id: "run" };
+      return Promise.resolve(next);
+    });
+    const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
+    const view = render(<CreatePage route={route} runtime={{ ...runtime, devices: [] }} navigate={navigations} />);
+    await loaded(); await waitFor(() => expect(api.runGet).toHaveBeenCalledTimes(1));
+    const nextRoute = { ...route, projectId: change === "project" ? "other" : "project", shotId: change === "shot" ? "shot2" : "shot1" };
+    view.rerender(<CreatePage route={nextRoute} runtime={{ ...runtime, devices: [] }} navigate={navigations} />); await loaded();
+    await act(async () => finish(run("RUNNING")));
+    const preview = within(screen.getByRole("region", { name: "视频预览" }));
+    expect(preview.getByText("等待生成")).toBeTruthy(); expect(preview.queryByText("生成中")).toBeNull();
+    expect(api.generate).not.toHaveBeenCalled(); expect(api.retry).not.toHaveBeenCalled();
+  });
+  it("does not apply an accepted receipt to a different project", async () => {
+    let acknowledge!: (value: CreationAccepted) => void;
+    api.generate.mockImplementationOnce(() => new Promise<CreationAccepted>(resolve => { acknowledge = resolve; }));
+    api.get.mockImplementation((projectId, shot, stage) => Promise.resolve({ ...context(stage, shot), projectId }));
+    const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
+    const view = render(<CreatePage route={route} runtime={{ ...runtime, devices: [] }} navigate={navigations} />);
+    await loaded(); await readyToGenerate(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+    view.rerender(<CreatePage route={{ ...route, projectId: "other" }} runtime={{ ...runtime, devices: [] }} navigate={navigations} />); await loaded();
+    await act(async () => acknowledge({ accepted: true, runRef: { source: "queue-batch", id: "old-run" }, startOutcome: "STARTED", startIssue: null }));
+    expect(api.runGet).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("region", { name: "视频预览" })).getByText("等待生成")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "查看运行详情" })).toBeNull();
+  });
   it("preserves failed-start RunRef and accepted is not success", async () => {
     api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "FAILED_TO_START", startIssue: { code: "RUNTIME_BLOCKED" } });
     render(<Host />); await loaded(); await readyToGenerate(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
     expect(await screen.findByText("已保存运行，启动失败")).toBeTruthy(); expect(screen.queryByText("已完成")).toBeNull();
-    expect(await screen.findByText("排队中")).toBeTruthy(); fireEvent.click(screen.getByRole("button", { name: "查看运行详情" }));
+    expect(await within(screen.getByRole("region", { name: "本次运行" })).findByText("排队中")).toBeTruthy(); fireEvent.click(screen.getByRole("button", { name: "查看运行详情" }));
     expect(navigations).toHaveBeenLastCalledWith({ kind: "runs", projectId: "project", run: { source: "queue-batch", id: "run" } });
   });
   it("field errors focus input, and retry only uses ProductRun actions/snapshot locator", async () => {

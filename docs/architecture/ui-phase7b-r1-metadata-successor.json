@@ -245,7 +245,7 @@
     },
     "src/features/create/CreateController.ts": {
       "beforeHash": "76c31241b2cf67881f03c60664964aae0d4b5fe275f6865a756db910892501d6",
-      "afterHash": "adff08eabc5d54aa2fdc6aaf58c60902a44dbfe723ed3670b312bc9914b36ecd"
+      "afterHash": "3c175c3e8cb6e2b7aeca1d6abfa33d930288605d9d9fbef71db1993f7b397d38"
     },
     "src/features/create/CreateInputs.tsx": {
       "beforeHash": "2d66012f799ddaa1b7222323767b885840676acd77a3d43a306f17c653eeee3f",
@@ -265,7 +265,7 @@
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "3b5c199c11e638c54c184f6bce09c0d5acdafd168a231cd6b9cdae77d86b4e9e",
-      "afterHash": "1e2dad61f5126e387d7efde91b7f51be4db427d6a5366f938583ea556b940563"
+      "afterHash": "129f0252427cd94bdea7b272b8b0ae774c106d8cad031eab504b59270f2440d5"
     },
     "src/features/create/CreatePage.tsx": {
       "beforeHash": "fa5315cffe9f801865298e4d0be12ad903987122f31fe22562a38a77b48951ea",
@@ -285,7 +285,7 @@
     },
     "src/features/create/CreateVideoWorkspace.tsx": {
       "beforeHash": "9e3727c37c12691dc67042a79496234847efa335d5ddca38ecc20b0d62a61779",
-      "afterHash": "260f07e2333ec71cc230edda35710180940f51ccb0170bf6bf0954bad108d531"
+      "afterHash": "4d8b3400378d17d9dfef11c0e6c1ce5241beffc57dc54430a228df8082aa65a2"
     },
     "src/features/create/ShotEntityChips.tsx": {
       "beforeHash": null,
