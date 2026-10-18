@@ -19,7 +19,7 @@ function matchesHints(text: string, hints: string[]) {
   return hints.some(h => lower.includes(h.toLowerCase()));
 }
 
-/** Thumbnail-grid image picker (~112px tiles): library imageGet thumbs + local choices, search, entity tabs, import. */
+/** Large-image picker: library imageGet previews + local choices, search, entity tabs, import. */
 export function ImageAssetPicker({
   projectId, open, title = "选择图片素材", excludeIds = [], localChoices = [],
   onSelect, onClose, onImportFile, onImportFolder, onOpenLibrary,

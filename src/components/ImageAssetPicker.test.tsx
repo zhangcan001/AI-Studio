@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ImageAssetPicker } from "./ImageAssetPicker";
+import { readFileSync } from "node:fs";
 
 const api = vi.hoisted(() => ({
   list: vi.fn(),
@@ -26,6 +27,20 @@ beforeEach(() => {
   api.imageGet.mockResolvedValue([137, 80, 78, 71]);
 });
 afterEach(() => cleanup());
+
+it("keeps the shared picker large enough to inspect complete images without cropping", () => {
+  const css = readFileSync("src/features/create/CreatePage.css", "utf8");
+  const rule = (selector: string) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .find(match => match[1].trim() === selector)?.[2] ?? "";
+  const panelWidth = Number(/width:\s*min\((\d+)px/.exec(rule(".image-asset-picker"))?.[1]);
+  const imageHeight = Number(/height:\s*(\d+)px/.exec(rule(".image-asset-tile .asset-image-thumb"))?.[1]);
+  expect(panelWidth).toBeGreaterThanOrEqual(1000);
+  expect(imageHeight).toBeGreaterThanOrEqual(200);
+  expect(rule(".image-asset-tile .asset-image-thumb")).toMatch(/width:\s*100%/);
+  expect(rule(".image-asset-tile .asset-image-thumb img")).toMatch(/object-fit:\s*contain/);
+  expect(rule(".image-asset-picker-grid")).toMatch(/grid-auto-rows:\s*max-content/);
+  expect(rule(".image-asset-tile-name")).not.toMatch(/max-width:\s*112px/);
+});
 
 it("audit: consumes the official next cursor instead of silently hiding later images", async () => {
   const cursor = { projectId: "p1", category: "images", keyword: null, position: { id: "a100", createdAt: "2026-01-01" } };

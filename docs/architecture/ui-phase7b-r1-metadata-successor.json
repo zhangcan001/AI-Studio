@@ -225,11 +225,11 @@
     },
     "src/components/ImageAssetPicker.test.tsx": {
       "beforeHash": null,
-      "afterHash": "83e25400194e4d822871e2648c1ee02e1211c7bc4df0b3af2df41ebd1c61168d"
+      "afterHash": "2a956568d2a1805bb8efd57c539a4ac6d5c6ccec3f9e0e66d908e13837dd6dbb"
     },
     "src/components/ImageAssetPicker.tsx": {
       "beforeHash": null,
-      "afterHash": "b11bc5feaf4a052f1754a7f15c4baa09e89ff71312d5c8e4db95485d52bffddf"
+      "afterHash": "166c7ac725d6323529402d497f382be43739dc8e5c4b6148ca653eea943872c0"
     },
     "src/features/create/CandidateThumbnail.test.tsx": {
       "beforeHash": null,
@@ -261,7 +261,7 @@
     },
     "src/features/create/CreatePage.css": {
       "beforeHash": "e7d407942769d6ceb72656ea4c18654b29859cbffb715b009f9c2bcea7de3f46",
-      "afterHash": "f1a7808d8feda0389fd1acd037ea568ff4750bc60da2f29d91757896080306b5"
+      "afterHash": "b8392394218dd0bc58e457fb1ff2b9d7e057d3b436c21f4c7c0d1d3d15e9e65b"
     },
     "src/features/create/CreatePage.test.tsx": {
       "beforeHash": "3b5c199c11e638c54c184f6bce09c0d5acdafd168a231cd6b9cdae77d86b4e9e",
