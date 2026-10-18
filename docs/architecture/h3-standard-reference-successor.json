@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "H3_STANDARD_REFERENCE",
+  "parentHead": "5dd2cb247ff9bbe10be7a2bf42016c7f3a2d0472",
+  "planningParentHead": "5dd2cb247ff9bbe10be7a2bf42016c7f3a2d0472",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "historicalRuntimeBytesUnchanged": true,
+    "additiveRuntimePackage": true,
+    "standardSteps": 20,
+    "turboExposed": false,
+    "maxReferenceImages": 2,
+    "singleQueue": true,
+    "gpuExecuted": false,
+    "entityRoleRetention": true
+  },
+  "files": {
+    "scripts/h3-standard-reference-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "ab7902e1ef4070dc1395f2c9f6c3ca7eacf4411656a4229bc80f615cbdee0115"
+    },
+    "scripts/testing/h3-standard-reference.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "6378caf3c52950027320d6f28313edd747da3cb8fb838a220383a0c68fdd42a4"
+    },
+    "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
+      "beforeHash": "329a6e3633cff3a6ca3e06c4b770337f3fb1944f03e70309758d820e4d067d59",
+      "afterHash": "275cf2fd6de0866defd7b1d719e46ac4342a18b6f508b204e539861a57c6cb51"
+    },
+    "src-tauri/src/application/builtin_runtime_packages.rs": {
+      "beforeHash": "6ef5ba5512e83039165d9051a86d8afafa62c01e70f0204c6a9965cac7f43be8",
+      "afterHash": "0c6bb5499ceb59290320d5bbe7739b38254ef684ddd5e22468add82f8cebd917"
+    },
+    "src-tauri/src/application/minimax_video_product_policy.rs": {
+      "beforeHash": "a1fafa273678148623417b0f65723de12fdeddfed889c5372dc08ecff8c620ee",
+      "afterHash": "e9f711c19898e4340435c1b17bd0333b223b5e88a489aa27016dd1dc7506ee60"
+    },
+    "src-tauri/src/application/product_runtime_scope.rs": {
+      "beforeHash": "ae9737f83fbb49d77c0462a215d76a72b4b736084165331c3d2df1cb0fac44ae",
+      "afterHash": "14b9bbc6e2eda106dfb7b9189b00106c1204a2c05751187d3b299b036a09a3e3"
+    },
+    "src-tauri/src/application/scheduler.rs": {
+      "beforeHash": "546fd57257621d44812ae51883ec563dd53c6a2701a4989b8c8fda7747ab12b2",
+      "afterHash": "b93b9fa7338f47bcb8ce684718047dca628330118c77789cceff3ab55c2b2b35"
+    },
+    "src-tauri/src/application/shot_video_input_service.rs": {
+      "beforeHash": "eb25702e4031396ff187a39175fa5a53d8890b98193dfccc52d496aa4bad92ed",
+      "afterHash": "2e0fe451762e902ef9ce95924b39149a08c70edcfbea937856b86366db8d84c3"
+    },
+    "src-tauri/tests/dev082_unified_workflow_library.rs": {
+      "beforeHash": "93dc12c6e528a70a8b4d3ee0a99b40814315061528305ecd726457257b73cda1",
+      "afterHash": "3e1ed13433ec7f0fff898de088aebb21f61da6470f374405cb6541cae8c1c225"
+    },
+    "src-tauri/tests/support/minimax_video_input_regressions.rs": {
+      "beforeHash": "6881a955aeef9a30e67d2dec1e01e61fa68aa9a9c7afbe876f9006218d719f84",
+      "afterHash": "22a52e822853610df4a986069d87b9dc6981f5e848d9311ec9cba71c0093c4b7"
+    },
+    "src-tauri/tests/support/minimax_video_policy_regressions.rs": {
+      "beforeHash": "98950d11d744147dedb4d8fd95a35010b137eeb7f5113b440195aeb6a6e5d879",
+      "afterHash": "9c5b8cc9e4a9d4ca72c735389e909ba6ceeadff37c43b5b2d0b6d0f804741589"
+    },
+    "src/app/MiniMaxVideoPhase2Boundary.test.ts": {
+      "beforeHash": "7c11aefe4c5466b33c0d869f31402879b3210c271cabee37e29c1d542a4a6d57",
+      "afterHash": "5e2e3130f650b512289d7f9d610788efcba36cdb8fb404f2a17954d1806fb6a5"
+    },
+    "src/features/generators/H3StandardReferenceCatalog.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "7004e13a7a0e1e007e46640ee29d0f38f874f505dc6e3d497b2ad8a687ae0fca"
+    },
+    "src/features/runtime/productRuntimeScope.test.ts": {
+      "beforeHash": "b4ec4866bdd6caa7a11f79e6de807e6c489aa74dbdd603807d51e02f15608e38",
+      "afterHash": "a30d8cc76f433cce3564ae40c2058794955eebe591d6e8143bdb6f6a91fbadbb"
+    },
+    "src/features/runtime/productRuntimeScope.ts": {
+      "beforeHash": "f572ebfac26670f3f938667bfb3bc402908de913733d44f06048909556276c70",
+      "afterHash": "1e306129875743c0b4d0b29dc4c1467858f2d483363dceefe733767587588d9e"
+    },
+    "src/features/runtime/projectWorkflowPreflight.test.ts": {
+      "beforeHash": "c88f14eb8e5dd56407232399b3d480df85f837a765e99ff87c43a4b029c36e8b",
+      "afterHash": "8e7e3b90d9cdc24103ffbc1ba92d69131be4433f0de4c802dbfe708f970f7cf0"
+    }
+  }
+}

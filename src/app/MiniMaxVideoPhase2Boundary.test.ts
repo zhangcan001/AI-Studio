@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
+import { STANDARD_REFERENCE_RUNTIME } from '../../scripts/h3-standard-reference-successor-guard.mjs';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -51,7 +52,13 @@ it('selects raw-byte baselines explicitly and never accepts the other representa
       mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
       // Only an owned fixture is materialized from literal Git blobs. The real
       // workspace and immutable package files are never normalized or written.
-      if(p.startsWith('src-tauri/runtime_packages/'))writeFileSync(join(root,p),facts.raw(p));
+      if(p.startsWith('src-tauri/runtime_packages/')) {
+        if (STANDARD_REFERENCE_RUNTIME.includes(p)) {
+          // Additive package did not exist in Phase1. Its checkpoint fixes LF
+          // raw bytes in both profiles; copy only those explicitly owned paths.
+          expect(readFileSync(p).toString('utf8').includes('\r\n')).toBe(false);
+        } else writeFileSync(join(root,p),facts.raw(p));
+      }
     }
     env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE='git';
     expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);

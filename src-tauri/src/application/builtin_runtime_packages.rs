@@ -25,7 +25,470 @@ struct BuiltinPackageIdentity {
     directory: &'static str,
 }
 
+const STANDARD_REFERENCE_MANIFEST: &str = r####"schema_version: 1
+id: wfl_minimax_h3_reference_standard
+name: MiniMax H3 全能参考 · 标准20步（双图）
+workflow_version: 1.0.0
+recipe_version: 1.0.0
+category: video
+mode: ref2va
+"####;
+
+const STANDARD_REFERENCE_RECIPE: &str = r####"schema_version: 1
+id: rcp_minimax_h3_reference_standard_1_0_0
+name: MiniMax H3 全能参考 · 标准20步（双图）
+workflow:
+  file: workflow_api.json
+inputs:
+  duration_seconds:
+    type: integer
+    label: Duration (seconds)
+    required: true
+    default: 4
+    min: 4
+    max: 15
+    step: 1
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  reference_images:
+    type: images
+    label: Reference images (Picture 1 / Picture 2)
+    required: true
+    min_items: 1
+    max_items: 2
+  width:
+    type: integer
+    label: Width
+    required: true
+    default: 864
+    min: 32
+    max: 2048
+    step: 32
+  height:
+    type: integer
+    label: Height
+    required: true
+    default: 480
+    min: 32
+    max: 2048
+    step: 32
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 0
+    max: 1125899906842624
+bindings:
+  - source: duration_seconds
+    target:
+      node: "132"
+      input: value
+  - source: prompt
+    target:
+      node: "138"
+      input: value
+  - source: reference_images
+    item: 0
+    target:
+      node: "137"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_0
+  - source: reference_images
+    item: 1
+    target:
+      node: "139"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_1
+  - source: width
+    target:
+      node: "136"
+      input: width
+  - source: height
+    target:
+      node: "136"
+      input: height
+  - source: seed
+    target:
+      node: "129"
+      input: noise_seed
+outputs:
+  - id: generated_video
+    type: video
+    node: "92"
+    required: true
+"####;
+
+const STANDARD_REFERENCE_WORKFLOW: &str = r####"{
+  "92": {
+    "inputs": {
+      "filename_prefix": "video/MiniMax_H3",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto",
+      "video": [
+        "130",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "115": {
+    "inputs": {
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 0.4,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Resolution Selector (Size)"
+    }
+  },
+  "119": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "120": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "121": {
+    "inputs": {
+      "samples": [
+        "125",
+        0
+      ],
+      "vae": [
+        "120",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码（音频）"
+    }
+  },
+  "122": {
+    "inputs": {
+      "samples": [
+        "125",
+        0
+      ],
+      "vae": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "123": {
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "124": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": [
+        "143",
+        0
+      ],
+      "denoise": 1,
+      "model": [
+        "127",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "125": {
+    "inputs": {
+      "noise": [
+        "129",
+        0
+      ],
+      "guider": [
+        "126",
+        0
+      ],
+      "sampler": [
+        "123",
+        0
+      ],
+      "sigmas": [
+        "124",
+        0
+      ],
+      "latent_image": [
+        "136",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "126": {
+    "inputs": {
+      "model": [
+        "148",
+        0
+      ],
+      "conditioning": [
+        "136",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基本引导器"
+    }
+  },
+  "127": {
+    "inputs": {
+      "unet_name": "minmaxh3\\minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "128": {
+    "inputs": {
+      "clip_name": "minmaxh3\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "129": {
+    "inputs": {
+      "noise_seed": 667827762049783
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "130": {
+    "inputs": {
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB",
+      "codec": "none",
+      "images": [
+        "161",
+        0
+      ],
+      "audio": [
+        "162",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "131": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "132",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "数学表达式"
+    }
+  },
+  "132": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (Duration)"
+    }
+  },
+  "136": {
+    "inputs": {
+      "prompt": [
+        "138",
+        0
+      ],
+      "width": [
+        "115",
+        0
+      ],
+      "height": [
+        "115",
+        1
+      ],
+      "length": [
+        "131",
+        1
+      ],
+      "ref_image_size": "match",
+      "clip": [
+        "128",
+        0
+      ],
+      "vae": [
+        "119",
+        0
+      ],
+      "audio_vae": [
+        "120",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "137",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "139",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 参考转视频"
+    }
+  },
+  "137": {
+    "inputs": {
+      "image": "__AI_STUDIO_OPTIONAL__.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "138": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Input Text (Prompt)"
+    }
+  },
+  "139": {
+    "inputs": {
+      "image": "__AI_STUDIO_OPTIONAL__.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "143": {
+    "inputs": {
+      "value": 20
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (Full)"
+    }
+  },
+  "148": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "127",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "160": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "round(a * 24)",
+      "values.a": [
+        "132",
+        0
+      ]
+    }
+  },
+  "161": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "122",
+        0
+      ],
+      "batch_index": 0,
+      "length": [
+        "160",
+        1
+      ]
+    }
+  },
+  "162": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "121",
+        0
+      ],
+      "start_index": 0.0,
+      "duration": [
+        "132",
+        0
+      ]
+    }
+  }
+}
+"####;
+
 const PACKAGES: &[BuiltinPackage] = &[
+    BuiltinPackage {
+        directory: "minimax_h3_reference_standard_1_0_0",
+        manifest: STANDARD_REFERENCE_MANIFEST,
+        recipe: STANDARD_REFERENCE_RECIPE,
+        workflow: STANDARD_REFERENCE_WORKFLOW,
+    },
     #[cfg(test)]
     BuiltinPackage {
         directory: "minimax_h3_fl2va_compatible_1_0_0",
@@ -474,6 +937,258 @@ mod tests {
     use crate::domain::WorkflowDocument;
     use tempfile::tempdir;
 
+    fn standard_reference() -> &'static super::BuiltinPackage {
+        PACKAGES
+            .iter()
+            .find(|p| p.directory == "minimax_h3_reference_standard_1_0_0")
+            .unwrap()
+    }
+
+    #[test]
+    fn standard_reference_preserves_twenty_step_models_and_sage_without_turbo() {
+        let p = standard_reference();
+        let graph: serde_json::Value = serde_json::from_str(p.workflow).unwrap();
+        assert!(active_package(p));
+        assert_eq!(graph["143"]["inputs"]["value"], 20);
+        assert_eq!(
+            graph["124"]["inputs"]["steps"],
+            serde_json::json!(["143", 0])
+        );
+        assert_eq!(graph["123"]["inputs"]["sampler_name"], "res_multistep");
+        assert_eq!(graph["124"]["inputs"]["scheduler"], "simple");
+        assert_eq!(graph["148"]["class_type"], "PathchSageAttentionKJ");
+        assert_eq!(graph["148"]["inputs"]["sage_attention"], "auto");
+        assert_eq!(graph["148"]["inputs"]["allow_compile"], false);
+        assert_eq!(
+            graph["148"]["inputs"]["model"],
+            serde_json::json!(["127", 0])
+        );
+        assert_eq!(
+            graph["126"]["inputs"]["model"],
+            serde_json::json!(["148", 0])
+        );
+        assert_eq!(
+            graph["127"]["inputs"]["unet_name"],
+            r"minmaxh3\minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"
+        );
+        assert_eq!(
+            graph["128"]["inputs"]["clip_name"],
+            r"minmaxh3\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+        );
+        for id in ["141", "142", "144", "145", "146"] {
+            assert!(graph.get(id).is_none());
+        }
+        assert!(!p.workflow.contains("turbo"));
+        assert!(!p.workflow.contains("Krea2-202608"));
+        assert!(!p.workflow.contains("AnimateDiff_00029"));
+        assert_eq!(graph["138"]["inputs"]["value"], "");
+        assert!(!p.recipe.contains("reference_videos:"));
+        assert!(!p.recipe.contains("reference_audios:"));
+    }
+
+    #[test]
+    fn standard_reference_compiles_actual_ordered_images_prompt_canvas_and_seed() {
+        use crate::domain::{CompileRequest, InputValue};
+        let p = standard_reference();
+        let recipe = RecipeParser::parse(p.recipe).unwrap();
+        let workflow = WorkflowDocument::parse(serde_json::from_str(p.workflow).unwrap()).unwrap();
+        let classified = crate::application::shot_workflow_compatibility::classify_shot_recipe(
+            crate::domain::ShotStage::Video,
+            "wfl_minimax_h3_reference_standard",
+            &recipe,
+        )
+        .unwrap();
+        assert!(matches!(
+            classified.input_mode,
+            crate::application::shot_workflow_compatibility::ShotVideoInputMode::ReferenceImages {
+                max_items: 2,
+                ..
+            }
+        ));
+        for images in [
+            vec!["character.png"],
+            vec!["character.png", "scene.png"],
+            vec!["scene.png", "character.png"],
+        ] {
+            let values = [
+                (
+                    "prompt".into(),
+                    InputValue::String("Alice（<Picture 1>）在场景（<Picture 2>）中跳舞".into()),
+                ),
+                (
+                    "reference_images".into(),
+                    InputValue::Images(images.iter().map(|s| s.to_string()).collect()),
+                ),
+                ("duration_seconds".into(), InputValue::Integer(6)),
+                ("width".into(), InputValue::Integer(480)),
+                ("height".into(), InputValue::Integer(864)),
+                (
+                    "seed".into(),
+                    InputValue::Seed(crate::domain::SeedValue::Fixed(42)),
+                ),
+            ]
+            .into();
+            let compiled = crate::application::product::h3_resolution::compile_checked(
+                &crate::compiler::WorkflowCompiler,
+                &workflow,
+                &recipe,
+                &CompileRequest::new(values),
+            )
+            .unwrap();
+            let g = compiled.workflow;
+            assert_eq!(g["137"]["inputs"]["image"], images[0]);
+            if images.len() == 2 {
+                assert_eq!(g["139"]["inputs"]["image"], images[1]);
+                assert_eq!(
+                    g["136"]["inputs"]["ref_images.ref_image_1"],
+                    serde_json::json!(["139", 0])
+                );
+            } else {
+                assert!(g["136"]["inputs"].get("ref_images.ref_image_1").is_none());
+            }
+            assert_eq!(
+                g["138"]["inputs"]["value"],
+                "Alice（<Picture 1>）在场景（<Picture 2>）中跳舞"
+            );
+            assert_eq!(g["136"]["inputs"]["prompt"], serde_json::json!(["138", 0]));
+            assert_eq!(g["136"]["inputs"]["width"], 480);
+            assert_eq!(g["136"]["inputs"]["height"], 864);
+            assert_eq!(g["132"]["inputs"]["value"], 6);
+            assert_eq!(g["129"]["inputs"]["noise_seed"], 42);
+            assert_eq!(g["130"]["inputs"]["images"], serde_json::json!(["161", 0]));
+            assert_eq!(g["130"]["inputs"]["audio"], serde_json::json!(["162", 0]));
+            assert_eq!(g["161"]["inputs"]["length"], serde_json::json!(["160", 1]));
+            assert_eq!(g["160"]["inputs"]["expression"], "round(a * 24)");
+            assert_eq!(
+                g["162"]["inputs"]["duration"],
+                serde_json::json!(["132", 0])
+            );
+            assert_eq!(recipe.outputs[0].node, "92");
+        }
+        for (duration, images, ok) in [
+            (4, vec![], false),
+            (3, vec!["a.png"], false),
+            (16, vec!["a.png"], false),
+            (4, vec!["a.png", "b.png", "c.png"], false),
+            (4, vec!["a.png"], true),
+            (15, vec!["a.png", "b.png"], true),
+        ] {
+            let request = CompileRequest::new(
+                [
+                    ("prompt".into(), InputValue::String("test".into())),
+                    ("duration_seconds".into(), InputValue::Integer(duration)),
+                    (
+                        "reference_images".into(),
+                        InputValue::Images(images.into_iter().map(String::from).collect()),
+                    ),
+                ]
+                .into(),
+            );
+            assert_eq!(
+                crate::application::product::h3_resolution::compile_checked(
+                    &crate::compiler::WorkflowCompiler,
+                    &workflow,
+                    &recipe,
+                    &request
+                )
+                .is_ok(),
+                ok
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn standard_reference_syncs_exact_pair_idempotently_without_production_tasks() {
+        use crate::application::ports::{
+            WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository,
+        };
+        use crate::application::workflow_library_service::WorkflowLibraryService;
+        use crate::infrastructure::database::{
+            initialize, SqliteWorkflowLibraryRepository, SqliteWorkflowRuntimeArtifactRepository,
+            SqliteWorkflowRuntimeRepository,
+        };
+        use crate::infrastructure::filesystem::FileSystemWorkflowLibrarySource;
+        use crate::infrastructure::time::SystemClock;
+        use std::sync::Arc;
+        let dir = tempdir().unwrap();
+        let library = dir.path().join("library");
+        ensure_installed(&library).unwrap();
+        let pool = initialize(&dir.path().join("owned.sqlite")).await.unwrap();
+        let service = WorkflowLibraryService::new(
+            Arc::new(FileSystemWorkflowLibrarySource::new(library)),
+            Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
+            Arc::new(SystemClock),
+        );
+        let first = service.sync().await.unwrap();
+        assert_eq!(first.invalid, 0, "{:?}", first.errors);
+        assert_eq!(first.inserted, 5);
+        let second = service.sync().await.unwrap();
+        assert_eq!(second.reused, 5);
+        assert_eq!(second.inserted, 0);
+        let versions = SqliteWorkflowRuntimeRepository::new(pool.clone())
+            .list_versions_for_workflow("wfl_minimax_h3_reference_standard")
+            .await
+            .unwrap();
+        assert_eq!(versions.len(), 1);
+        let version = &versions[0];
+        assert_eq!(version.recipes.len(), 1);
+        let recipe = &version.recipes[0];
+        let artifact = SqliteWorkflowRuntimeArtifactRepository::new(pool.clone())
+            .find_exact(
+                &version.workflow_version_id,
+                &recipe.recipe_id,
+                standard_reference().directory,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let live = super::embedded_package(standard_reference().directory).unwrap();
+        assert!(
+            crate::application::minimax_video_product_policy::authorizes(
+                version, recipe, &artifact, &live
+            )
+        );
+        for table in [
+            "tasks",
+            "production_batches",
+            "production_batch_items",
+            "production_deferred_starts",
+        ] {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(
+                count, 0,
+                "registering a package must not start production: {table}"
+            );
+        }
+        let violations = sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert!(violations.is_empty());
+        pool.close().await;
+    }
+
+    #[test]
+    fn standard_reference_installs_additively_and_never_overwrites_user_package() {
+        let dir = tempdir().unwrap();
+        ensure_installed(dir.path()).unwrap();
+        let package = dir.path().join(standard_reference().directory);
+        assert_eq!(
+            std::fs::read(package.join("workflow_api.json")).unwrap(),
+            standard_reference().workflow.as_bytes()
+        );
+        std::fs::write(package.join("recipe.yaml"), "owned user edits").unwrap();
+        assert!(ensure_installed(dir.path()).is_err());
+        assert_eq!(
+            std::fs::read_to_string(package.join("recipe.yaml")).unwrap(),
+            "owned user edits"
+        );
+        assert_eq!(audit_installed(dir.path()).len(), 1);
+    }
+
     #[tokio::test]
     async fn h3_default_upgrade_is_exact_preserves_history_and_respects_user_lifecycle() {
         use crate::application::ports::{WorkflowLibraryRepository, WorkflowPackageRecord};
@@ -707,8 +1422,8 @@ mod tests {
         ensure_installed(directory.path()).unwrap();
         let installed = std::fs::read_dir(directory.path()).unwrap().count();
         assert_eq!(
-            installed, 4,
-            "only four authorized video modes install by default"
+            installed, 5,
+            "four quality modes plus the approved standard dual-image package install"
         );
         assert!(!directory
             .path()

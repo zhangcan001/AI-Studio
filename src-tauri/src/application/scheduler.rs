@@ -101,7 +101,9 @@ pub fn classify_generation(
         | MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID
         | MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID => ExecutionProfile::H3Quality,
         MINIMAX_H3_WORKFLOW_ID => ExecutionProfile::H3Ref2vaFast,
-        MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID => ExecutionProfile::H3Ref2vaQuality,
+        MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID | "wfl_minimax_h3_reference_standard" => {
+            ExecutionProfile::H3Ref2vaQuality
+        }
         _ => ExecutionProfile::Unknown,
     }
 }
@@ -145,6 +147,22 @@ mod tests {
             bindings: Vec::new(),
             outputs: Vec::new(),
         }
+    }
+
+    #[test]
+    fn standard_reference_is_gpu_heavy_and_strictly_serial() {
+        let result =
+            scheduler_decision(&definition("wfl_minimax_h3_reference_standard"), &recipe());
+        assert_eq!(result.profile, ExecutionProfile::H3Ref2vaQuality);
+        assert_eq!(result.concurrency_class, ConcurrencyClass::GpuHeavySerial);
+        assert_eq!(result.max_concurrent, 1);
+        assert_eq!(
+            classify_generation(
+                &definition("wfl_minimax_h3_reference_standard_fake"),
+                &recipe()
+            ),
+            ExecutionProfile::Unknown
+        );
     }
 
     #[test]

@@ -425,14 +425,21 @@ pub(crate) fn media_values(
 
 /// Longest explicit name wins; duplicate names fail closed instead of guessing.
 /// Keep all non-reference text unchanged and index only the actual reference_images.
+/// Entity names are UI aliases, not visual descriptions; role-specific retention
+/// instructions anchor the model to the pictures rather than the alias wording.
 fn compile_entity_prompt(
     prompt: &str,
     project_id: &str,
     entities: &[crate::domain::story_entity::StoryEntity],
     references: &[AssetId],
 ) -> Result<String, ShotVideoInputError> {
+    use crate::domain::story_entity::StoryEntityKind;
+
     let mut rest = prompt;
     let mut output = String::new();
+    let mut subjects = Vec::new();
+    let mut definitions = Vec::new();
+    let mut retention = Vec::new();
     while let Some(at) = rest.find('@') {
         output.push_str(&rest[..at]);
         rest = &rest[at + 1..];
@@ -474,11 +481,46 @@ fn compile_entity_prompt(
             })?;
         let ordinal = references.iter().position(|id| id.as_str() == asset_id)
             .ok_or_else(|| invalid(format!("ENTITY_REFERENCE_NOT_APPLIED: @{} 的图片尚未加入当前 Recipe 的正式参考图，请点击应用角色与场景参考图", entity.name)))?;
-        output.push_str(&format!("{}（<Picture {}>）", entity.name, ordinal + 1));
+        let subject = match subjects.iter().position(|id| *id == &entity.id) {
+            Some(index) => index + 1,
+            None => {
+                subjects.push(&entity.id);
+                let subject = subjects.len();
+                let (role, features) = match entity.kind {
+                    StoryEntityKind::Character => (
+                        "character",
+                        "facial features, hairstyle, clothing and overall appearance",
+                    ),
+                    StoryEntityKind::Scene => (
+                        "environment",
+                        "spatial layout, architecture, terrain and environmental structure",
+                    ),
+                    StoryEntityKind::Prop => ("object", "shape, materials and distinctive details"),
+                };
+                definitions.push(format!(
+                    "<Subject {subject}> is the {role} shown in <Picture {}>.",
+                    ordinal + 1
+                ));
+                retention.push(format!(
+                    "<Subject {subject}>: fully_preserved - retain {features} from <Picture {}>, except changes explicitly requested in detailed_description.",
+                    ordinal + 1
+                ));
+                subject
+            }
+        };
+        output.push_str(&format!("<Subject {subject}>"));
         rest = &rest[entity.name.len()..];
     }
     output.push_str(rest);
-    Ok(output)
+    if subjects.is_empty() {
+        return Ok(output);
+    }
+    // Ref2VA section order follows the official H3 prompt-writing convention.
+    // Do not invent camera, motion, dialogue or music absent from the user text.
+    Ok(format!(
+        "subject_definitions:\n{}\n\nsummary:\nUse the referenced subjects for the requested video. Pictures define appearance and environment; follow the actions and camera directions below.\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment reference as the character reference.\n\ndetailed_description:\n{output}\n\noverall_soundscape:\nFollow any sound directions in detailed_description.\n\nnon_diegetic_music:\nFollow any music directions in detailed_description.",
+        definitions.join("\n"), retention.join("\n")
+    ))
 }
 
 pub(crate) fn merge_media_inputs(
@@ -541,6 +583,68 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn entity_prompt_retains_character_appearance_and_scene_structure_by_actual_picture() {
+        use crate::domain::{
+            story_entity::{StoryEntity, StoryEntityKind},
+            AssetId,
+        };
+        let entity = |id: &str, name: &str, kind, image: &str| StoryEntity {
+            id: id.into(),
+            project_id: "prj_owned".into(),
+            kind,
+            name: name.into(),
+            description: String::new(),
+            cover_asset_id: Some(image.into()),
+            image_asset_ids: vec![image.into()],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let entities = [
+            entity("hero", "角色", StoryEntityKind::Character, "ast_hero"),
+            entity("scene", "太空", StoryEntityKind::Scene, "ast_scene"),
+            entity("unused", "未引用", StoryEntityKind::Character, "ast_unused"),
+        ];
+        let refs = ["ast_scene", "ast_hero"].map(|id| AssetId::parse(id).unwrap());
+        let text = super::compile_entity_prompt(
+            "@角色在@太空中飞翔，镜头推进；@角色说：\"向前！\"，5秒",
+            "prj_owned",
+            &entities,
+            &refs,
+        )
+        .unwrap();
+        assert!(text.contains("<Subject 1> is the character shown in <Picture 2>."));
+        assert!(text.contains("<Subject 2> is the environment shown in <Picture 1>."));
+        assert!(text.contains(
+            "facial features, hairstyle, clothing and overall appearance from <Picture 2>"
+        ));
+        assert!(text.contains(
+            "spatial layout, architecture, terrain and environmental structure from <Picture 1>"
+        ));
+        assert!(text.contains("detailed_description:\n<Subject 1>在<Subject 2>中飞翔，镜头推进；<Subject 1>说：\"向前！\"，5秒"));
+        assert_eq!(text.matches("is the character shown").count(), 1);
+        assert!(!text.contains("太空"));
+        assert!(!text.contains("未引用"));
+        assert!(!text.contains("<Picture 3>"));
+        assert_eq!(
+            super::compile_entity_prompt(&text, "prj_owned", &entities, &refs).unwrap(),
+            text
+        );
+        let sections = [
+            "subject_definitions:",
+            "summary:",
+            "retention_analysis:",
+            "detailed_description:",
+            "overall_soundscape:",
+            "non_diegetic_music:",
+        ];
+        let positions: Vec<_> = sections
+            .iter()
+            .map(|section| text.find(section).unwrap())
+            .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
     fn entity_prompt_uses_actual_order_and_rejects_unknown_ambiguous_or_unapplied_images() {
         use crate::domain::{story_entity::StoryEntity, AssetId};
         let entity = |name: &str, image: Option<&str>| StoryEntity {
@@ -556,19 +660,21 @@ mod tests {
         };
         let hero = entity("小明", Some("ast_hero"));
         let mother = entity("小明妈妈", Some("ast_mother"));
-        let scene = entity("太空", Some("ast_scene"));
+        let mut scene = entity("太空", Some("ast_scene"));
+        scene.kind = crate::domain::story_entity::StoryEntityKind::Scene;
         let refs = ["ast_scene", "ast_mother", "ast_hero"].map(|id| AssetId::parse(id).unwrap());
         let compile = |text: &str, all: &[StoryEntity]| {
             super::compile_entity_prompt(text, "prj_owned", all, &refs)
         };
-        assert_eq!(
-            compile(
-                "@小明妈妈在@太空中飞翔，5秒，@小明妈妈",
-                &[hero.clone(), mother, scene]
-            )
-            .unwrap(),
-            "小明妈妈（<Picture 2>）在太空（<Picture 1>）中飞翔，5秒，小明妈妈（<Picture 2>）"
-        );
+        let compiled = compile(
+            "@小明妈妈在@太空中飞翔，5秒，@小明妈妈",
+            &[hero.clone(), mother, scene],
+        )
+        .unwrap();
+        assert!(compiled.contains("<Subject 1> is the character shown in <Picture 2>."));
+        assert!(compiled.contains("<Subject 2> is the environment shown in <Picture 1>."));
+        assert!(compiled
+            .contains("detailed_description:\n<Subject 1>在<Subject 2>中飞翔，5秒，<Subject 1>"));
         assert_eq!(
             compile("小明飞翔，0.98mp", &[hero.clone()]).unwrap(),
             "小明飞翔，0.98mp"
@@ -596,6 +702,70 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("UNKNOWN"));
+    }
+
+    #[test]
+    fn entity_prompt_keeps_roles_independent_when_sharing_a_picture() {
+        use crate::domain::{
+            story_entity::{StoryEntity, StoryEntityKind},
+            AssetId,
+        };
+        let entity = |id: &str, kind| StoryEntity {
+            id: id.into(),
+            project_id: "prj_owned".into(),
+            kind,
+            name: id.into(),
+            description: String::new(),
+            cover_asset_id: Some("ast_shared".into()),
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let entities = [
+            entity("人物", StoryEntityKind::Character),
+            entity("场景", StoryEntityKind::Scene),
+            entity("道具", StoryEntityKind::Prop),
+        ];
+        let refs = [AssetId::parse("ast_shared").unwrap()];
+        for (name, role, features) in [
+            ("人物", "character", "facial features, hairstyle, clothing"),
+            (
+                "场景",
+                "environment",
+                "spatial layout, architecture, terrain",
+            ),
+            ("道具", "object", "shape, materials and distinctive details"),
+        ] {
+            let compiled = super::compile_entity_prompt(
+                &format!("@{name}，按要求变为红色"),
+                "prj_owned",
+                &entities,
+                &refs,
+            )
+            .unwrap();
+            assert!(compiled.contains(&format!("<Subject 1> is the {role} shown in <Picture 1>.")));
+            assert!(compiled.contains(features));
+            assert!(
+                compiled.contains("except changes explicitly requested in detailed_description")
+            );
+            assert!(compiled.contains("detailed_description:\n<Subject 1>，按要求变为红色"));
+            assert!(!compiled.contains("<Subject 2>"));
+        }
+        let compiled =
+            super::compile_entity_prompt("@人物走入@场景拿起@道具", "prj_owned", &entities, &refs)
+                .unwrap();
+        for (subject, role) in [(1, "character"), (2, "environment"), (3, "object")] {
+            assert!(compiled.contains(&format!(
+                "<Subject {subject}> is the {role} shown in <Picture 1>."
+            )));
+        }
+        assert!(
+            compiled.contains("detailed_description:\n<Subject 1>走入<Subject 2>拿起<Subject 3>")
+        );
+        assert_eq!(
+            super::compile_entity_prompt("镜头推进，5秒", "prj_owned", &entities, &refs).unwrap(),
+            "镜头推进，5秒"
+        );
     }
 
     fn recipe() -> Recipe {

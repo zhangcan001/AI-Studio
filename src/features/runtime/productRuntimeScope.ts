@@ -7,12 +7,14 @@ export const MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID = "wfl_minimax_h3_fl2va_t2
 export const MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID = "wfl_minimax_h3_fl2va_i2v_quality" as const;
 export const MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID = "wfl_minimax_h3_fl2va_first_last_quality" as const;
 export const MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID = "wfl_minimax_h3_reference_video_quality" as const;
+export const MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID = "wfl_minimax_h3_reference_standard" as const;
 export const MINIMAX_H3_FAST_WORKFLOW_IDS = [MINIMAX_H3_WORKFLOW_ID, MINIMAX_H3_FL2VA_WORKFLOW_ID] as const;
 export const MINIMAX_H3_QUALITY_WORKFLOW_IDS = [
   MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID,
   MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID,
   MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
   MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+  MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID,
 ] as const;
 export const MINIMAX_H3_WORKFLOW_IDS = [...MINIMAX_H3_QUALITY_WORKFLOW_IDS] as const;
 export const PRODUCTION_WORKFLOW_IDS = [KERA2_WORKFLOW_ID, ...MINIMAX_H3_WORKFLOW_IDS] as const;
@@ -33,6 +35,7 @@ export function productionRuntimeForWorkflowId(workflowId: string): ProductionRu
     case MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID:
     case MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID:
     case MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID:
+    case MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID:
       return "minimaxH3Video";
     default:
       return undefined;
@@ -46,7 +49,7 @@ export function h3FamilyForWorkflowId(workflowId: string): "FL2VA" | "REF2VA" | 
     || workflowId === MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID
     || workflowId === MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID
   ) return "FL2VA";
-  if (workflowId === MINIMAX_H3_WORKFLOW_ID || workflowId === MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID) return "REF2VA";
+  if (workflowId === MINIMAX_H3_WORKFLOW_ID || workflowId === MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID || workflowId === MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID) return "REF2VA";
   return undefined;
 }
 
@@ -63,7 +66,7 @@ export function h3WorkflowIdForMode(mode: string, profile: H3QualityProfile): st
     case "FL2VA_TEXT_TO_VIDEO": return MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID;
     case "FL2VA_IMAGE_TO_VIDEO": return MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID;
     case "FL2VA_FIRST_LAST": return MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID;
-    case "REF2VA_IMAGE":
+    case "REF2VA_IMAGE": return MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID;
     case "REF2VA_AUDIO":
     case "REF2VA_IMAGE_AUDIO":
     case "REF2VA_VIDEO_IMAGE": return MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID;

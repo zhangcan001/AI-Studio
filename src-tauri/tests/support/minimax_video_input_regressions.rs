@@ -1561,7 +1561,6 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
         .unwrap();
     let before = inputs.get(&input_scope).await.unwrap().unwrap();
     let prompt = "@角色在@场景中飞翔，5秒";
-    let compiled = "角色（<Picture 2>）在场景（<Picture 1>）中飞翔，5秒";
     let service = shot_service(&f, inputs.clone());
     let request = || ShotGenerationRequest {
         project_id: PROJECT_ID.into(),
@@ -1575,9 +1574,17 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
         .prepare_creation_submission(request(), f.pairs[3].0.clone(), f.pairs[3].1.clone())
         .await
         .unwrap();
-    assert!(
-        matches!(&prepared.values["prompt"], GenerationInputValue::Text(text) if text == compiled)
-    );
+    let GenerationInputValue::Text(compiled) = &prepared.values["prompt"] else {
+        panic!("compiled prompt must remain text");
+    };
+    assert!(compiled.contains("<Subject 1> is the character shown in <Picture 2>."));
+    assert!(compiled.contains("<Subject 2> is the environment shown in <Picture 1>."));
+    assert!(compiled
+        .contains("facial features, hairstyle, clothing and overall appearance from <Picture 2>"));
+    assert!(compiled.contains(
+        "spatial layout, architecture, terrain and environmental structure from <Picture 1>"
+    ));
+    assert!(compiled.contains("detailed_description:\n<Subject 1>在<Subject 2>中飞翔，5秒"));
     assert!(
         matches!(&prepared.values["reference_images"], GenerationInputValue::ImageAssets(ids) if ids == &vec![last.id.clone(), first.id.clone()])
     );
@@ -1605,16 +1612,35 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
         .await
         .unwrap();
     assert_eq!(receipt.created_count, 1);
+    // Preparing/admitting a compiled prompt must not rewrite the author's draft.
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT prompt_text FROM shots WHERE id='shot_phase2'")
+            .fetch_one(&f.pool)
+            .await
+            .unwrap(),
+        prompt
+    );
     let batch = f
         .services
         .queue
         .get(PROJECT_ID, &receipt.created_batch_ids[0])
         .await
         .unwrap();
-    assert!(batch.items[0].values_json["prompt"]["value"]
-        .as_str()
-        .unwrap()
-        .starts_with(compiled));
+    // Formal preparation includes the resolver's context after the Shot text.
+    // Assert the whole wrapper AND that full resolved body, not a weak prefix
+    // (the sound sections now follow the body).
+    let formal_body = plan[0]
+        .resolved_context
+        .prompt_context
+        .rendered_text
+        .replace("@角色", "<Subject 1>")
+        .replace("@场景", "<Subject 2>");
+    assert!(formal_body.starts_with("<Subject 1>在<Subject 2>中飞翔，5秒"));
+    let formal_compiled = compiled.replace("<Subject 1>在<Subject 2>中飞翔，5秒", &formal_body);
+    assert_eq!(
+        batch.items[0].values_json["prompt"]["value"],
+        formal_compiled
+    );
     assert_eq!(
         batch.items[0].values_json["reference_images"]["assetIds"],
         json!([last.id.as_str(), first.id.as_str()])
@@ -1645,7 +1671,10 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
         .await
         .unwrap();
     assert!(
-        matches!(&updated.values["prompt"], GenerationInputValue::Text(text) if text.starts_with("角色（<Picture 1>）"))
+        matches!(&updated.values["prompt"], GenerationInputValue::Text(text)
+        if text.contains("<Subject 1> is the character shown in <Picture 1>.")
+            && text.contains("<Subject 2> is the environment shown in <Picture 1>.")
+            && text.contains("detailed_description:\n<Subject 1>在<Subject 2>中飞翔，5秒"))
     );
     let changed_plan = preparation
         .plan_many(PROJECT_ID, &["shot_phase2".into()], ShotStage::Video)

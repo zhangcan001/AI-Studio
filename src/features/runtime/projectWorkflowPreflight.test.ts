@@ -7,6 +7,7 @@ import type {
 } from "../../types/projectWorkflow";
 import {
   MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+  MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID,
   KERA2_WORKFLOW_ID,
 } from "./productRuntimeScope";
 import {
@@ -104,16 +105,21 @@ describe("project workflow preflight", () => {
     expect(item(report, "FL2VA_IMAGE_TO_VIDEO")).toMatchObject({ recipe: modeOverride, source: "project_mode", usingFallback: false });
   });
 
-  it("uses the H3 recommendation before the first compatible recipe", () => {
+  it("uses the standard dual-image H3 recommendation before the first compatible recipe", () => {
+    const standard = videoRecipe(
+      "standard",
+      ["reference_images"],
+      MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID,
+    );
     const recommended = videoRecipe(
       "recommended",
       ["reference_image", "reference_audio", "reference_video"],
       MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
     );
     const compatible = videoRecipe("compatible", ["first_frame"]);
-    const report = preflightProjectWorkflow(config(), [imageRecipe(), recommended, compatible]);
+    const report = preflightProjectWorkflow(config(), [imageRecipe(), recommended, standard, compatible]);
 
-    expect(item(report, "REF2VA_IMAGE")).toMatchObject({ recipe: recommended, source: "recommended" });
+    expect(item(report, "REF2VA_IMAGE")).toMatchObject({ recipe: standard, source: "recommended" });
     expect(item(report, "FL2VA_IMAGE_TO_VIDEO")).toMatchObject({ recipe: recommended, source: "compatible" });
   });
 
@@ -177,7 +183,12 @@ describe("project workflow preflight", () => {
     });
   });
 
-  it("warns on a stale video default and uses the mode recommendation", () => {
+  it("warns on a stale video default and uses the image-only standard H3 recommendation", () => {
+    const standard = videoRecipe(
+      "standard",
+      ["reference_images"],
+      MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID,
+    );
     const recommended = videoRecipe(
       "recommended",
       ["reference_image", "reference_audio"],
@@ -185,12 +196,12 @@ describe("project workflow preflight", () => {
     );
     const report = preflightProjectWorkflow(config({
       videoDefault: binding("VIDEO", "DEFAULT", "missing", false),
-    }), [imageRecipe(), recommended]);
+    }), [imageRecipe(), standard, recommended]);
     const result = item(report, "REF2VA_IMAGE");
 
     expect(result).toMatchObject({
       status: "WARNING",
-      recipe: recommended,
+      recipe: standard,
       source: "recommended",
       staleConfiguredBinding: true,
       usingFallback: true,

@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./boundary-validation-cache.mjs";
 
+import { standardReferenceParentReader, standardReferenceFixtureFiles, standardReferenceScopeSince, STANDARD_REFERENCE_BASE } from "./h3-standard-reference-successor-guard.mjs";
+
 export const R1_METADATA_BASE = "0c3be97a88d5458fc16851bfa19dc10172007886";
 export const R1_METADATA_PROOF = "docs/architecture/ui-phase7b-r1-metadata-successor.json";
 export const R1_METADATA_CHANGED = [
@@ -160,10 +162,14 @@ export function phase7BR1MetadataScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...R1_METADATA_CHANGED, ...R1_METADATA_ADDED, R1_METADATA_PROOF,
+    ...standardReferenceScopeSince(root, STANDARD_REFERENCE_BASE),
   ])].sort();
 }
 export function phase7BR1MetadataFixtureFiles(root) {
-  return [...facts(root, R1_METADATA_BASE).paths, ...R1_METADATA_ADDED, R1_METADATA_PROOF];
+  return [...new Set([
+    ...facts(root, R1_METADATA_BASE).paths, ...R1_METADATA_ADDED, R1_METADATA_PROOF,
+    ...standardReferenceFixtureFiles(root),
+  ])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -172,10 +178,10 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, R1_METADATA_BASE);
   const fail = id => violations.push("ui-phase7b-r1-metadata-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(R1_METADATA_PROOF));
@@ -188,10 +194,10 @@ function validate(root, override) {
     const allowed = [...scope, R1_METADATA_PROOF].sort();
     const expected = [...parent.paths, ...R1_METADATA_ADDED, R1_METADATA_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !successor.addedPaths.includes(p) && !expected.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -211,13 +217,22 @@ function validate(root, override) {
     if (aggregate(p => parent.raw(p)) !== profiles.git
         || aggregate(p => readFileSync(join(workspace, p))) !== profiles[profile]) fail("runtime-package-bytes");
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: R1_METADATA_CHANGED,
-    addedPaths: [...R1_METADATA_ADDED, R1_METADATA_PROOF],
-    afterHashes: Object.fromEntries([...R1_METADATA_CHANGED, ...R1_METADATA_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...R1_METADATA_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...R1_METADATA_ADDED, R1_METADATA_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...R1_METADATA_CHANGED, ...R1_METADATA_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => R1_METADATA_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function uiPhase7BR1MetadataParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "uiPhase7BR1MetadataParentReader", undefined,
-    () => validate(root, undefined), R1_METADATA_PROOF);
+  const successor = standardReferenceParentReader(root);
+  const check = () => {
+    // Retain the historical checks and diagnostics even when the additive
+    // checkpoint rejects live bytes. A failed successor can never be accepted.
+    const historical = validate(root, override, successor);
+    const runtimeChanged = successor.violations.some(v => v === "h3-standard-reference-historical-runtime-bytes"
+      || v.startsWith("h3-standard-reference-runtime-package-bytes:"));
+    return { ...historical, violations: [...successor.violations, ...historical.violations,
+      ...(runtimeChanged ? ["ui-phase7b-r1-metadata-runtime-package-bytes"] : [])] };
+  };
+  if (override) return check();
+  return cachedBoundary(root, "uiPhase7BR1MetadataParentReader", undefined, check, R1_METADATA_PROOF);
 }
