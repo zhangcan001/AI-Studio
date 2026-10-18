@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "WORKBENCH_VISUAL_REFINEMENT",
+  "parentHead": "1ed43f27abcca2ae6ac42414bd0deccd46be8ae2",
+  "planningParentHead": "1ed43f27abcca2ae6ac42414bd0deccd46be8ae2",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "presentationOnly": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/desktop-visual-refinement-successor-guard.mjs": {
+      "beforeHash": "262f4e28a9687864914d257e0274686bb2fa428816db7315f5ee90813c338dd4",
+      "afterHash": "a0ad93e08f720ed34a0912aeb3b345df7142e0580dfc2b68180e638c7c65c691"
+    },
+    "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
+      "beforeHash": "79c5eaf36df5cb290f5aa0ad81f5c381b08f43710d1a213652870ab5e32ff8aa",
+      "afterHash": "de895622387ec3512c78ac16a6994fa87a9d90952c2fa3cc4f98502175d39b32"
+    },
+    "scripts/testing/workbench-visual-refinement.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "fada4d7f448ff0d9529e8ff7512e3c0817761bb414c08708aca9429bc76706a6"
+    },
+    "scripts/workbench-visual-refinement-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "18c16a8521eaea094ff0fbe838515418f2a104c84e6c1264f57a1fc98904461a"
+    },
+    "src/features/create/CreatePage.css": {
+      "beforeHash": "c065523f7a185271473a0bed6ced03e94fb3ae0b7c37ff999e5911450304e04c",
+      "afterHash": "59920005129a759db2be283ff347f5d971fc317ed4648e79e3caa75618037788"
+    },
+    "src/features/runs/RunsPage.css": {
+      "beforeHash": "aaf6b7e9218ee595fe28878219e2854349b7a0a770976d000f19d8e8427711b3",
+      "afterHash": "e4509e846e52faa84bdc44362fce9ee0a48ff7c36479b5589618d57d1d900b77"
+    },
+    "src/styles/StudioWorkbenchRefinement.test.ts": {
+      "beforeHash": null,
+      "afterHash": "83e15ee0655863ae64ef28a2d928287c531029ceaeceae7777ac70fc04408dd3"
+    }
+  }
+}
