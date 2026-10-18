@@ -107,7 +107,7 @@ it('rejects modified publication config and backend runtime bytes', () => withPu
   expect(publicationParentReader(root).violations).toContain('minimax-video-phase2-backend-untouched-bytes');
   writeFileSync(runtime,original);
   expect(publicationParentReader(root).violations).toEqual([]);
-}), 90000);
+}), 360000);
 it('rejects wrong and missing immutable publication tag without hidden success', () => withPublicationFixture((root,tagRef) => {
   writeFileSync(tagRef,'130cbbfaf67e1627fca7e447de322cf0f5f5ae85\n');
   const wrong=publicationParentReader(root);

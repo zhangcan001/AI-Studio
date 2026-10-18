@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ProjectWorkflowBindingView, ProjectWorkflowConfigView, ProjectWorkflowMode } from "../../types/projectWorkflow";
-import { KERA2_WORKFLOW_ID, MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID } from "../runtime/productRuntimeScope";
+import { KERA2_WORKFLOW_ID, MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID, MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID } from "../runtime/productRuntimeScope";
 import { ProjectWorkflowPreflight } from "./ProjectWorkflowPreflight";
 
 const mocks = vi.hoisted(() => ({
@@ -78,6 +78,7 @@ const readyCatalog = [
   videoRecipe("default", ["first_frame"]),
   videoRecipe("override", ["first_frame"]),
   videoRecipe("recommended", ["reference_image", "reference_audio", "reference_video"], MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID),
+  videoRecipe("standard", ["reference_images"], MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID),
   videoRecipe("compatible", ["first_frame", "last_frame"]),
 ];
 
@@ -107,7 +108,7 @@ describe("ProjectWorkflowPreflight", () => {
     expect(screen.getByText(/来源：项目视频默认/)).toBeTruthy();
     expect(screen.getByText(/来源：模式专用/)).toBeTruthy();
     expect(screen.getAllByText(/来源：系统推荐/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/来源：兼容回退/)).toBeTruthy();
+    expect(screen.getAllByText(/来源：兼容回退/).length).toBeGreaterThan(0);
     expect(screen.getByText(/项目绑定不可用，当前实际使用/)).toBeTruthy();
     expect(screen.getByText(/version-stale/)).toBeTruthy();
   });

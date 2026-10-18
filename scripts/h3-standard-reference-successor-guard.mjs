@@ -19,7 +19,10 @@ export const STANDARD_REFERENCE_CHANGED = [
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
   "src-tauri/src/application/builtin_runtime_packages.rs",
   "src-tauri/src/application/minimax_video_product_policy.rs",
+  "src/app/AIStudio21PublicationBoundary.test.ts",
   "src/app/MiniMaxVideoPhase2Boundary.test.ts",
+  "src/app/ReadinessLifecycleBoundary.test.ts",
+  "src/features/projects/ProjectWorkflowPreflight.test.tsx",
 ].sort();
 // The standard package's exact manifest, recipe and graph are embedded as
 // immutable Rust raw-string constants in builtin_runtime_packages.rs. This keeps

@@ -19,7 +19,7 @@
   "files": {
     "scripts/h3-standard-reference-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "ab7902e1ef4070dc1395f2c9f6c3ca7eacf4411656a4229bc80f615cbdee0115"
+      "afterHash": "6a55b47d906c6f82195efe496a00262c36b9ff0d2a2b676ba9a15fadaab7ecdd"
     },
     "scripts/testing/h3-standard-reference.test.mjs": {
       "beforeHash": null,
@@ -61,13 +61,25 @@
       "beforeHash": "98950d11d744147dedb4d8fd95a35010b137eeb7f5113b440195aeb6a6e5d879",
       "afterHash": "9c5b8cc9e4a9d4ca72c735389e909ba6ceeadff37c43b5b2d0b6d0f804741589"
     },
+    "src/app/AIStudio21PublicationBoundary.test.ts": {
+      "beforeHash": "c43fe6c5479702da48d5082135813ae54209549a5f8b47a7c538940101a51c52",
+      "afterHash": "8192e86678193d2eb18aeed14eb504a00936e2a3f96ae7e9e22b1edac3fc6773"
+    },
     "src/app/MiniMaxVideoPhase2Boundary.test.ts": {
       "beforeHash": "7c11aefe4c5466b33c0d869f31402879b3210c271cabee37e29c1d542a4a6d57",
       "afterHash": "5e2e3130f650b512289d7f9d610788efcba36cdb8fb404f2a17954d1806fb6a5"
     },
+    "src/app/ReadinessLifecycleBoundary.test.ts": {
+      "beforeHash": "09b683d3de5f35071dce4df40444e8aa741db98015e471eabebb194dcde95d02",
+      "afterHash": "1e650ab64649cd65eb9ab1858d18900a5048c1a572ddf8f5829edfb8132dedc2"
+    },
     "src/features/generators/H3StandardReferenceCatalog.test.tsx": {
       "beforeHash": null,
       "afterHash": "7004e13a7a0e1e007e46640ee29d0f38f874f505dc6e3d497b2ad8a687ae0fca"
+    },
+    "src/features/projects/ProjectWorkflowPreflight.test.tsx": {
+      "beforeHash": "ddde26bff29726c46375300ef0d7bec3f97d093176a0f22e3579b523d2609fca",
+      "afterHash": "a14d497456f48826c175373f5359fe696eaa86166e3d3a3e5a225b0032cd18c7"
     },
     "src/features/runtime/productRuntimeScope.test.ts": {
       "beforeHash": "b4ec4866bdd6caa7a11f79e6de807e6c489aa74dbdd603807d51e02f15608e38",
