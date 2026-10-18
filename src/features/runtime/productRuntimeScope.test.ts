@@ -15,6 +15,9 @@ import {
   MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
   MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
   h3RecipeForMode,
+  MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID,
+  h3FamilyForWorkflowId,
+  h3QualityProfileForWorkflowId,
 } from "./productRuntimeScope";
 
 function recipe(workflowId: string, name: string): RecipeViewModel {
@@ -37,6 +40,7 @@ describe("0.4.0 product runtime scope", () => {
       MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID,
       MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
       MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+      MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID,
     ]);
     expect(productionRuntimeForWorkflowId(KERA2_WORKFLOW_ID)).toBe("kera2Image");
     expect(productionRuntimeForWorkflowId(MINIMAX_H3_WORKFLOW_ID)).toBeUndefined();
@@ -44,6 +48,15 @@ describe("0.4.0 product runtime scope", () => {
     expect(productionRuntimeForWorkflowId(MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID)).toBe("minimaxH3Video");
     expect(productionRuntimeForWorkflowId(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID)).toBe("minimaxH3Video");
     expect(productionRuntimeForWorkflowId("wfl_other")).toBeUndefined();
+  });
+
+  it("exposes the exact standard reference identity as the image-only REF2VA default", () => {
+    const id = MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID;
+    expect(productionRuntimeForStage("video", id)).toBe("minimaxH3Video");
+    expect(productionRuntimeForStage("image", id)).toBeUndefined();
+    expect(h3FamilyForWorkflowId(id)).toBe("REF2VA");
+    expect(h3QualityProfileForWorkflowId(id)).toBe("QUALITY");
+    expect(filterProductionRuntimeCatalog([recipe(id, "Renamed"), recipe(id + "_fake", "MiniMax H3")]).map(r => r.workflowId)).toEqual([id]);
   });
 
   it("does not trust a fake ID's Kera2 or H3 display name", () => {
@@ -72,11 +85,14 @@ describe("0.4.0 product runtime scope", () => {
       recipe(MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID, "I2V quality"),
       recipe(MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID, "First/Last quality"),
       recipe(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID, "REF2VA quality"),
+      recipe(MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID, "REF2VA standard dual image"),
     ].map((item) => ({ ...item, outputTypes: ["video"] }));
     expect(h3RecipeForMode(catalog, "FL2VA_TEXT_TO_VIDEO", "QUALITY")?.workflowId).toBe(MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID);
     expect(h3RecipeForMode(catalog, "FL2VA_IMAGE_TO_VIDEO", "QUALITY")?.workflowId).toBe(MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID);
     expect(h3RecipeForMode(catalog, "FL2VA_FIRST_LAST", "QUALITY")?.workflowId).toBe(MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID);
-    expect(h3RecipeForMode(catalog, "REF2VA_IMAGE", "QUALITY")?.workflowId).toBe(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID);
+    expect(h3RecipeForMode(catalog, "REF2VA_IMAGE", "QUALITY")?.workflowId).toBe(MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID);
+    expect(h3RecipeForMode(catalog, "REF2VA_VIDEO_IMAGE", "QUALITY")?.workflowId).toBe(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID);
+    expect(h3RecipeForMode(catalog, "REF2VA_AUDIO", "QUALITY")?.workflowId).toBe(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID);
   });
 
   it("requires Krea2's exact prompt textarea key instead of the first textarea", () => {

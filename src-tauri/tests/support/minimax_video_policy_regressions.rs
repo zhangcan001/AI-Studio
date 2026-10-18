@@ -125,7 +125,7 @@ async fn fixture_with_capability(capability: bool) -> Fixture {
         })
         .collect::<Vec<_>>();
     if capability {
-        // This owned environment enables only the four installed test products.
+        // This owned environment enables only the installed approved test products.
         // Preserve legacy definitions, but do not let their intentionally missing
         // plugins block the environment-wide Comfy preflight for this fixture.
         let state = SqliteWorkflowRuntimeStateRepository::new(pool.clone());
@@ -247,7 +247,7 @@ async fn count(pool: &SqlitePool, table: &str) -> i64 {
 }
 
 #[tokio::test]
-async fn all_four_exact_products_admit_and_compile_without_changing_recipe_bytes() {
+async fn all_approved_exact_products_admit_and_compile_without_changing_recipe_bytes() {
     let f = fixture().await;
     let source = SourceAssetImportService::new(
         Arc::new(SqliteProjectRepository::new(f.pool.clone())),
@@ -318,7 +318,7 @@ async fn all_four_exact_products_admit_and_compile_without_changing_recipe_bytes
         SqliteGenerationDefinitionRepository::new(f.pool.clone()),
     ))
     .with_new_generation_admission(f.registry.clone());
-    assert_eq!(catalog.list().await.unwrap().len(), 4);
+    assert_eq!(catalog.list().await.unwrap().len(), 5);
     assert_eq!(count(&f.pool, "tasks").await, 0);
     assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);
 }

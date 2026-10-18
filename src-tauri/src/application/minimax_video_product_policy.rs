@@ -11,11 +11,12 @@ use crate::application::workflow_manifest::WorkflowManifest;
 use sha2::{Digest, Sha256};
 
 pub const REQUIRED: &str = "MINIMAX_VIDEO_PRODUCT_REQUIRED";
-pub const AUTHORIZED_PACKAGES: [&str; 4] = [
+pub const AUTHORIZED_PACKAGES: [&str; 5] = [
     "minimax_h3_fl2va_t2v_quality_2_2_0",
     "minimax_h3_fl2va_i2v_quality_2_2_0",
     "minimax_h3_fl2va_first_last_quality_2_2_0",
     "minimax_h3_reference_video_quality_2_2_0",
+    "minimax_h3_reference_standard_1_0_0",
 ];
 
 pub fn authorizes(
@@ -47,9 +48,14 @@ pub fn authorizes(
     let recipe_hash = digest(&expected.recipe_yaml);
     let snapshot = serde_json::from_str::<serde_json::Value>(&version.api_workflow_json);
     let graph = serde_json::from_slice::<serde_json::Value>(&expected.workflow_api_json);
+    let approved_version = if artifact.package_name == "minimax_h3_reference_standard_1_0_0" {
+        "1.0.0"
+    } else {
+        "2.2.0"
+    };
     manifest.validate().is_ok()
-        && manifest.workflow_version == "2.2.0"
-        && manifest.recipe_version == "2.2.0"
+        && manifest.workflow_version == approved_version
+        && manifest.recipe_version == approved_version
         && version.workflow_id == manifest.id
         && version.workflow_version == manifest.workflow_version
         && recipe.version == manifest.recipe_version
@@ -168,6 +174,41 @@ mod user_video_tests {
             recognition_metadata_json: None,
         };
         (version, recipe, artifact, live)
+    }
+
+    #[test]
+    fn standard_reference_requires_exact_product_identity_and_immutable_bytes() {
+        let (mut v, mut r, mut a, _) = fixture("video");
+        let name = "minimax_h3_reference_standard_1_0_0";
+        let live = crate::application::builtin_runtime_packages::embedded_package(name).unwrap();
+        let manifest =
+            WorkflowManifest::parse(std::str::from_utf8(&live.manifest_yaml).unwrap()).unwrap();
+        let parsed =
+            crate::compiler::RecipeParser::parse(std::str::from_utf8(&live.recipe_yaml).unwrap())
+                .unwrap();
+        let sha = |bytes: &[u8]| format!("{:x}", Sha256::digest(bytes));
+        v.workflow_id = manifest.id;
+        v.workflow_version = "1.0.0".into();
+        v.api_workflow_json = String::from_utf8(live.workflow_api_json.clone()).unwrap();
+        v.workflow_sha256 = sha(&live.workflow_api_json);
+        r.recipe_id = parsed.id;
+        r.version = "1.0.0".into();
+        r.recipe_yaml = String::from_utf8(live.recipe_yaml.clone()).unwrap();
+        r.recipe_sha256 = sha(&live.recipe_yaml);
+        a.recipe_id = r.recipe_id.clone();
+        a.package_name = name.into();
+        a.source_kind = "PRODUCT".into();
+        a.workflow_sha256 = v.workflow_sha256.clone();
+        a.recipe_sha256 = r.recipe_sha256.clone();
+        assert!(authorizes(&v, &r, &a, &live));
+        let mut drift = live.clone();
+        drift.workflow_api_json.push(b' ');
+        assert!(!authorizes(&v, &r, &a, &drift));
+        a.recipe_id = "other_recipe".into();
+        assert!(!authorizes(&v, &r, &a, &live));
+        a.recipe_id = r.recipe_id.clone();
+        v.workflow_version = "2.2.0".into();
+        assert!(!authorizes(&v, &r, &a, &live));
     }
 
     #[test]
