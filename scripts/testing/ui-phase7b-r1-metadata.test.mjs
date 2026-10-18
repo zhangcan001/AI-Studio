@@ -102,6 +102,16 @@ it("projects the explicitly scoped Studio Store and protects its new storyboard 
     .toContain("ui-phase7b-r1-metadata-added:" + tests);
 }, 120000);
 
+it("projects the explicit Library polling repair and rejects modified read regression bytes", () => {
+  const view = uiPhase7BR1MetadataParentReader(".");
+  expect(view.violations).toEqual([]);
+  for (const path of ["src/features/library/LibraryController.ts", "src/features/library/LibraryController.performance.test.tsx"]) {
+    expect(view.read(path)).toEqual(execFileSync("git", ["show", R1_METADATA_BASE + ":" + path], { encoding: "utf8" }));
+    expect(uiPhase7BR1MetadataParentReader(".", { [path]: readFileSync(path, "utf8") + "\n// undeclared polling edit\n" }).violations)
+      .toContain("ui-phase7b-r1-metadata-changed:" + path);
+  }
+}, 120000);
+
 it("rejects forged identity/hashes, protected reader edits and undeclared changes", () => {
   const proof = JSON.parse(readFileSync(R1_METADATA_PROOF, "utf8"));
   const repository = "src-tauri/src/infrastructure/database/repositories/project_backup.rs";

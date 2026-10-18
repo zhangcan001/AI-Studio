@@ -68,6 +68,8 @@ export const R1_METADATA_CHANGED = [
   "src/features/create/usePersistentVideoInputs.ts",
   "src/features/generators/GeneratorSettingsPage.test.tsx",
   "src/features/generators/GeneratorSettingsPage.tsx",
+  "src/features/library/LibraryController.performance.test.tsx",
+  "src/features/library/LibraryController.ts",
   "src/features/library/LibraryFindability.test.tsx",
   "src/features/library/LibraryPage.css",
   "src/features/library/LibraryPage.test.tsx",

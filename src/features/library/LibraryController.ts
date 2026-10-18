@@ -51,19 +51,22 @@ export function useLibraryController({route,navigate}:LibraryProps) {
   const [pageIndex,setPageIndex]=useState(0);
   const pages=useRef<{owner:string;index:number;starts:LibraryList["nextCursor"][]}>({owner:"",index:0,starts:[null]});
   const tagsOwner=useRef<string|undefined>(undefined);
-  const navigating=useRef(false);
+  const readInFlight=useRef(false);
   const selfEditInvalidation=useRef(false);
   const category=categoryFor(route);const queryScope=JSON.stringify([route.projectId,category,search.trim(),favoriteOnly,tagId,sourceKind]);
   const scope=JSON.stringify([queryScope,resourceKey(route.resource)]);
   const liveScope=useRef(scope);liveScope.current=scope;
   const previousProject=useRef(route.projectId);
-  const refresh=useCallback(async(options?:{tags?:boolean;page?:number;cursor?:LibraryList["nextCursor"]})=>{
+  const refresh=useCallback(async(options?:{tags?:boolean;page?:number;cursor?:LibraryList["nextCursor"];background?:boolean})=>{
     const token=++epoch.current;
-    navigating.current=options?.page!==undefined;
+    readInFlight.current=true;
     const target=options?.page??pages.current.index;
     const cursor=options?.cursor!==undefined?options.cursor:pages.current.starts[target]??null;
     const owns=()=>token===epoch.current&&liveScope.current===scope;
-    setLoading(true);
+    // Polling keeps the current projection visible; only user reads/navigation
+    // show the foreground loading state. A slow read must not cancel itself
+    // on every polling tick and repeatedly reread the same resources.
+    if(!options?.background)setLoading(true);
     try {
       if(mediaCategory&&(options?.tags!==false||tagsOwner.current!==route.projectId)) {
         const tags=await productClient.library.tagsList(route.projectId);
@@ -97,7 +100,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
         setProjection({scope,list,detail,relations,versions});setQueryError(undefined);
       }
     }catch(error){if(owns())setQueryError(normalizeProductError(error).message);}
-    finally{if(owns()){navigating.current=false;setLoading(false);}}
+    finally{if(owns()){readInFlight.current=false;setLoading(false);}}
   },[scope]);
   useEffect(()=>{
     inspectionOpen.current=false;setProjection(undefined);setInspection(undefined);setQueryError(undefined);setActionError(undefined);setLoading(true);
@@ -107,7 +110,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     void refresh({tags:false});
     let event:ReturnType<typeof setTimeout>|undefined;
     const unsubscribe=subscribeRunInvalidation((project,options)=>{if(project!==route.projectId)return;if(options?.library===false)return;if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}clearTimeout(event);event=setTimeout(()=>void refresh(),150);});
-    const timer=setInterval(()=>{if(!navigating.current)void refresh({tags:false});},5000);
+    const timer=setInterval(()=>{if(!readInFlight.current)void refresh({tags:false,background:true});},5000);
     return()=>{++epoch.current;unsubscribe();clearTimeout(event);clearInterval(timer);};
   },[refresh]);
   const current=projection?.scope===scope?projection:undefined;

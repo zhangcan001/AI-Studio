@@ -47,3 +47,72 @@ it("phase12_case10 one edit refresh preserves external project poll freshness an
  expect(state.subscribed).toBe(state.unsubscribed);
  const calls=state.library.list.mock.calls.length;act(()=>invalidateRuns("project-a"));await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});expect(state.library.list).toHaveBeenCalledTimes(calls);
 });
+
+it("slow Library reads remain single-flight across polling ticks",async()=>{
+ vi.useFakeTimers();state.library.list.mockReset();
+ let complete!:(value:{items:never[];nextCursor:null;coverage:string})=>void;
+ state.library.list.mockImplementation(()=>new Promise(resolve=>{complete=resolve;}));
+ const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"project-a",filter:"prompts"},navigate:vi.fn()}));
+ await drain();expect(state.library.list).toHaveBeenCalledTimes(1);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(15000);});await drain();
+ expect(state.library.list).toHaveBeenCalledTimes(1);
+ await act(async()=>complete({items:[],nextCursor:null,coverage:"complete-category"}));await drain();
+ expect(view.result.current.loading).toBe(false);
+});
+
+it("a rejected background read releases polling and preserves the current projection until recovery",async()=>{
+ vi.useFakeTimers();state.library.list.mockReset();
+ const list={items:[],nextCursor:null,coverage:"complete-category"};state.library.list.mockResolvedValue(list);
+ const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"project-a",filter:"prompts"},navigate:vi.fn()}));await drain();
+ state.library.list.mockRejectedValueOnce(new Error("temporary read error"));
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});await drain();
+ expect(view.result.current.queryError).toBeTruthy();expect(view.result.current.list).toEqual(list);expect(view.result.current.loading).toBe(false);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});await drain();
+ expect(state.library.list).toHaveBeenCalledTimes(3);expect(view.result.current.queryError).toBeUndefined();expect(view.result.current.list).toEqual(list);
+});
+
+it("an obsolete poll cannot unlock or overwrite a newer explicit refresh",async()=>{
+ vi.useFakeTimers();state.library.list.mockReset();
+ const list={items:[],nextCursor:null,coverage:"complete-category"};state.library.list.mockResolvedValue(list);
+ const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"project-a",filter:"prompts"},navigate:vi.fn()}));await drain();
+ let old!:(value:typeof list)=>void,newer!:(value:typeof list)=>void;
+ state.library.list.mockImplementationOnce(()=>new Promise(resolve=>{old=resolve;}));
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});await drain();
+ state.library.list.mockImplementationOnce(()=>new Promise(resolve=>{newer=resolve;}));
+ let refreshing!:Promise<void>;act(()=>{refreshing=view.result.current.refresh();});await drain();
+ expect(view.result.current.loading).toBe(true);
+ await act(async()=>old({...list,coverage:"obsolete"}));await drain();
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});await drain();
+ expect(state.library.list).toHaveBeenCalledTimes(3);expect(view.result.current.loading).toBe(true);expect(view.result.current.list).toEqual(list);
+ const fresh={...list,coverage:"fresh"};await act(async()=>{newer(fresh);await refreshing;});await drain();
+ expect(view.result.current.loading).toBe(false);expect(view.result.current.list).toEqual(fresh);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});await drain();expect(state.library.list).toHaveBeenCalledTimes(4);
+});
+
+it("a real Library invalidation supersedes a pending poll instead of being swallowed by the poll lock",async()=>{
+ vi.useFakeTimers();state.library.list.mockReset();
+ const list={items:[],nextCursor:null,coverage:"complete-category"};state.library.list.mockResolvedValue(list);
+ const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"project-a",filter:"prompts"},navigate:vi.fn()}));await drain();
+ let old!:(value:typeof list)=>void;state.library.list.mockImplementationOnce(()=>new Promise(resolve=>{old=resolve;}));
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});await drain();
+ const fresh={...list,coverage:"after-invalidation"};state.library.list.mockResolvedValue(fresh);
+ act(()=>invalidateRuns("project-a"));await act(async()=>{await vi.advanceTimersByTimeAsync(150);});await drain();
+ expect(state.library.list).toHaveBeenCalledTimes(3);expect(view.result.current.list).toEqual(fresh);
+ await act(async()=>old(list));await drain();expect(view.result.current.list).toEqual(fresh);
+});
+
+it("background polling retains the displayed Library without repeating the initial loading state",async()=>{
+ vi.useFakeTimers();state.library.list.mockReset();
+ const list={items:[],nextCursor:null,coverage:"complete-category"};
+ state.library.list.mockResolvedValue(list);
+ const view=renderHook(()=>useLibraryController({route:{kind:"library",projectId:"project-a",filter:"prompts"},navigate:vi.fn()}));
+ await drain();expect(view.result.current.loading).toBe(false);
+ let complete!:(value:typeof list)=>void;
+ state.library.list.mockImplementationOnce(()=>new Promise(resolve=>{complete=resolve;}));
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});await drain();
+ expect(state.library.list).toHaveBeenCalledTimes(2);
+ expect(view.result.current.loading).toBe(false);
+ expect(view.result.current.list).toEqual(list);
+ await act(async()=>complete(list));await drain();
+ expect(view.result.current.loading).toBe(false);
+});
