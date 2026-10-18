@@ -12,7 +12,7 @@ import { useStudioStore } from "../../stores/studioStore";
 import { productClient } from "../../product/client";
 import type { StoryEntity } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
-import { parseShotPrompt, resolvePromptSettings } from "./shotPromptParser";
+import { explicitEntityMentions, parseShotPrompt, resolvePromptSettings } from "./shotPromptParser";
 
 type Kind = "image" | "video" | "audio";
 type Asset = { id: string; name: string; mediaKind: string; thumbnailBytes?: number[] | null };
@@ -95,6 +95,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const [picker, setPicker] = useState<"insert" | "add" | null>(null);
   const [imagePick, setImagePick] = useState<{ field: RecipeField; title: string } | null>(null);
   const [allEntities, setAllEntities] = useState<StoryEntity[]>([]);
+  const [entitiesOwner, setEntitiesOwner] = useState<string>();
   const [entityRev, setEntityRev] = useState(0);
   const [entityPicker, setEntityPicker] = useState(false);
   const [entityUrls, setEntityUrls] = useState<Record<string, string>>({});
@@ -125,9 +126,10 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   }, []);
   useEffect(() => {
     const list = productClient.storyEntities?.list;
+    setAllEntities([]); setEntitiesOwner(undefined);
     if (!projectId || typeof list !== "function") { setAllEntities([]); return; }
     let alive = true;
-    void Promise.resolve(list(projectId, null)).then(next => next ?? []).then(next => { if (alive) setAllEntities(next); }).catch(() => { if (alive) setAllEntities([]); });
+    void Promise.resolve().then(() => list(projectId, null)).then(next => next ?? []).then(next => { if (alive) { setAllEntities(next.filter(e => e.projectId === projectId)); setEntitiesOwner(projectId); } }).catch(() => { if (alive) setAllEntities([]); });
     return () => { alive = false; };
   }, [projectId, entityRev]);
   const shotId = c.context?.selectedShot?.summary.id;
@@ -154,6 +156,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const failedKey = useRef<string | null>(null);
   // Only edits made here autosave; a restored (e.g. Library/Settings return) unsaved draft waits for an explicit save.
   const pendingSave = useRef(false);
+  useEffect(() => { pendingSave.current = false; failedKey.current = null; }, [editScope]);
   const saveRef = useRef(vi.save); saveRef.current = vi.save;
   useEffect(() => {
     if (!pendingSave.current || !vi.enabled || !vi.dirty || !vi.view || vi.loading || vi.busy) return;
@@ -250,12 +253,31 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const advancedFields = fields.filter(f => ["integer", "number", "seed"].includes(f.type) && f.key !== "duration_seconds" && !(presets.length && ["width", "height"].includes(f.key)));
   // USER recipes may declare additional text fields; never drop required/visible ones.
   const extraTextFields = fields.filter(f => f.type === "textarea" && f.key !== "prompt" && f.key !== "negative_prompt");
-  const canSubmit = !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY";
+  const mentions = explicitEntityMentions(prompt, entitiesOwner === projectId ? allEntities : []);
+  const entityField = fields.find(f => f.key === "reference_images" && f.type === "images");
+  const entityIds = mentions.entities.map(entityAvatarAssetId);
+  const referenceIds = assetIds(c.values.reference_images);
+  const combinedIds = [...new Set([...referenceIds, ...entityIds.filter((id): id is string => Boolean(id))])];
+  const entityIssue = !prompt.includes("@") ? undefined
+    : entitiesOwner !== projectId ? "正在读取角色与场景；读取失败时请刷新后再试。"
+    : mentions.error ?? (!entityField || c.generator?.mode?.toUpperCase() !== "REF2VA" ? "@角色/场景需要混合参考（REF2VA）生成器；不会覆盖已有首帧，请明确切换模式。"
+    : entityIds.some(id => !id) ? "引用的角色或场景尚未关联图片，请先在素材库添加图片。"
+    : "maxItems" in entityField && entityField.maxItems != null && combinedIds.length > entityField.maxItems ? "角色与场景参考图超过当前 Recipe 上限，请调整引用或已有参考。"
+    : entityIds.some(id => !referenceIds.includes(id!)) ? "角色与场景图片尚未加入正式参考输入，请点击应用。" : undefined);
+  const canApplyEntities = Boolean(entityField) && c.generator?.mode?.toUpperCase() === "REF2VA" && entitiesOwner === projectId && !mentions.error && entityIds.length > 0 && entityIds.every(Boolean)
+    && !(entityField && "maxItems" in entityField && entityField.maxItems != null && combinedIds.length > entityField.maxItems);
+  const canSubmit = !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY" && !entityIssue;
   const promptWarnings = resolvePromptSettings(parseShotPrompt(prompt), c.generator, c.values).warnings;
 
   if (!c.generator) return null;
   return <div className="create-composer-wrap">
     <ReadinessStatus controller={c} />
+    {prompt.includes("@") && <section aria-label="角色与场景生成引用" className="composer-entity-references">
+      <p>{entityIssue ?? "角色与场景已进入正式参考输入；后端将按实际顺序编译 H3 引用标签。"}</p>
+      {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "尚未应用"}</small>; })}
+      <button type="button" disabled={locked || !canApplyEntities || !entityIssue} onClick={() => { if (entityField && canApplyEntities) setField(entityField, combinedIds); }}>应用角色与场景参考图</button>
+      <small>使用封面图（无封面时使用第一张关联图）；保留已有参考顺序，不修改首尾帧。仅绑定镜头不等于用于生成。</small>
+    </section>}
     {projectId && shotId && allEntities.length > 0 && <div className="composer-entity-strip" role="group" aria-label="镜头角色与场景">
       {allEntities.map(entity => { const aid = entityAvatarAssetId(entity); const cover = aid ? entityUrls[aid] : undefined; const bound = isBound(entity.id);
         return <button type="button" key={entity.id} className={"composer-entity" + (bound ? " bound" : "")} aria-pressed={bound} disabled={bindBusy || c.busy || !binding.ready}

@@ -36,8 +36,12 @@ it('validates Phase4 before projecting immutable repair and UI proofs; rejects f
     (p:typeof proof)=>{p.paths['src/services/ipc.ts']={beforeHash:null,afterHash:'0'.repeat(64)};},
   ]) {const invalid=structuredClone(proof);modify(invalid);const denied=uiPhase4ParentReader('.',invalid);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);}
 }, 90000);
+// Rebuild the serial probes at one owned path. Historical immutable caches are
+// root-keyed; unique paths per assertion retain duplicate trees until worker exit.
+let phase4Fixture: string | undefined;
 async function withPhase4Probe(run:(fixture:string,paths:string[])=>void){
- const root=resolve('.'),fixture=mkdtempSync(join(root,'.codex-ui-phase4-probe-'));
+ const root=resolve('.'),fixture=phase4Fixture ??= mkdtempSync(join(root,'.codex-ui-phase4-probe-'));
+ mkdirSync(fixture,{recursive:true});
  try{
   execFileSync('git',['init','--quiet',fixture]);
   const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{cwd:root,encoding:'utf8'}).trim();

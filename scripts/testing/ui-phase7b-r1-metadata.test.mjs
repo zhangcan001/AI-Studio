@@ -28,6 +28,19 @@ it("awaits genuine task-update acknowledgements and retains RPC rejections", asy
   await expect(denied.flush()).rejects.toBe(error);
 });
 
+it("rejects undeclared byte changes in every entity-reference preparation seam", () => {
+  for (const path of [
+    "src-tauri/src/application/production_preparation_service.rs",
+    "src-tauri/src/application/shot_batch_service.rs",
+    "src-tauri/src/application/shot_service/creation.rs",
+    "src-tauri/src/application/shot_video_input_service.rs",
+  ]) {
+    expect(uiPhase7BR1MetadataParentReader(".", {
+      [path]: readFileSync(path, "utf8") + "\n// unapproved entity-reference mutation\n",
+    }).violations).toContain("ui-phase7b-r1-metadata-changed:" + path);
+  }
+});
+
 it("validates CI workflow bytes before projecting the frozen workflow for historical readers", () => {
   const workflow = ".github/workflows/ci.yml";
   const proof = JSON.parse(readFileSync(R1_METADATA_PROOF, "utf8"));
@@ -78,6 +91,20 @@ it("discovers all Boundary files explicitly and partitions them without omission
   expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
   expect(() => list("--shard=0/3")).toThrow();
   expect(() => list("--shard=1/0")).toThrow();
+});
+
+it("collects the real boundary file but never mirrored tests in an abandoned Phase4 probe", () => {
+  const root = mkdtempSync(join(process.cwd(), ".codex-ui-phase4-probe-discovery-"));
+  try {
+    const relative = "src/app/UiPhase7ASourceReadyBoundary.test.ts";
+    const mirror = join(root, relative);
+    mkdirSync(dirname(mirror), { recursive: true });
+    writeFileSync(mirror, "throw new Error('evidence copy must not execute');\n");
+    const files = execFileSync(process.execPath,
+      ["node_modules/vitest/vitest.mjs", "list", "--filesOnly", relative], { encoding: "utf8" })
+      .trim().replaceAll("\\", "/").split(/\r?\n/);
+    expect(files).toEqual([relative]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 it("validates the backup correction before projecting the frozen 0c3 backup checkpoint", () => {

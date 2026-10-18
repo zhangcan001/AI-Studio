@@ -67,8 +67,12 @@ it('selects raw-byte baselines explicitly and never accepts the other representa
   }
 }, 90000);
 
+// Tests run serially. Recreate all live bytes per case at one owned path so
+// root-keyed immutable historical readers do not retain a full tree per probe.
+let phase2Fixture: string | undefined;
 async function withPhase2OwnedFixture(run:(root:string)=>void) {
-  const root=mkdtempSync(join(tmpdir(),'ai-studio-phase2-successor-'));
+  const root=phase2Fixture ??= mkdtempSync(join(tmpdir(),'ai-studio-phase2-successor-'));
+  mkdirSync(root,{recursive:true});
   try {
     const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
     execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});

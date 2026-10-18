@@ -36,6 +36,7 @@ fn invalid(error: impl fmt::Display) -> ShotVideoInputError {
 /// Coordinates the existing repositories and preflight. The persistent input
 /// set is the media authority; result selections/legacy references are not inputs.
 pub struct ShotVideoInputService {
+    story_entities: Option<Arc<dyn crate::application::ports::StoryEntityRepository>>,
     assets: Arc<dyn crate::application::ports::AssetRepository>,
     repository: Arc<dyn ShotVideoInputRepository>,
     shots: Arc<dyn ShotRepository>,
@@ -56,6 +57,7 @@ impl ShotVideoInputService {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
+            story_entities: None,
             assets,
             repository,
             shots,
@@ -64,6 +66,64 @@ impl ShotVideoInputService {
             preparer,
             clock,
         }
+    }
+
+    pub fn with_story_entities(
+        mut self,
+        repository: Arc<dyn crate::application::ports::StoryEntityRepository>,
+    ) -> Self {
+        self.story_entities = Some(repository);
+        self
+    }
+
+    /// Resolve explicit @names against the exact Recipe's saved media, read-only.
+    /// Associations never substitute first/last frames or create a second input store.
+    /// The returned prompt and ordered media are frozen by the existing Queue together.
+    pub async fn generation_values(
+        &self,
+        scope: &ShotVideoInputScope,
+        recipe: &Recipe,
+        prompt: Option<&str>,
+    ) -> Result<BTreeMap<String, GenerationInputValue>, ShotVideoInputError> {
+        let mut values = self.values(scope, recipe).await?;
+        if let Some(prompt) = prompt {
+            values.insert("prompt".into(), GenerationInputValue::Text(prompt.into()));
+        }
+        self.compile_prompt(&scope.project_id, recipe, &mut values)
+            .await?;
+        Ok(values)
+    }
+
+    /// Also used for formal multi-Shot preparation, against its already-resolved media.
+    pub async fn compile_prompt(
+        &self,
+        project_id: &str,
+        recipe: &Recipe,
+        values: &mut BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), ShotVideoInputError> {
+        let Some(GenerationInputValue::Text(prompt)) = values.get("prompt") else {
+            return Ok(());
+        };
+        if !prompt.contains('@') {
+            return Ok(());
+        }
+        if !matches!(
+            recipe.inputs.get("reference_images"),
+            Some(InputDefinition::Images { .. })
+        ) {
+            return Err(invalid("ENTITY_REFERENCE_MODE: @角色/场景需要混合参考 REF2VA；不会替换已有首尾帧，请明确选择兼容生成器"));
+        }
+        let repository = self.story_entities.as_ref().ok_or_else(|| {
+            invalid("ENTITY_REFERENCE_UNAVAILABLE: 角色与场景解析不可用，请刷新后重试")
+        })?;
+        let entities = repository.list(project_id, None).await.map_err(invalid)?;
+        let references = match values.get("reference_images") {
+            Some(GenerationInputValue::ImageAssets(ids)) => ids.as_slice(),
+            _ => &[],
+        };
+        let compiled = compile_entity_prompt(prompt, project_id, &entities, references)?;
+        values.insert("prompt".into(), GenerationInputValue::Text(compiled));
+        Ok(())
     }
 
     pub async fn get(
@@ -363,6 +423,64 @@ pub(crate) fn media_values(
     Ok(values)
 }
 
+/// Longest explicit name wins; duplicate names fail closed instead of guessing.
+/// Keep all non-reference text unchanged and index only the actual reference_images.
+fn compile_entity_prompt(
+    prompt: &str,
+    project_id: &str,
+    entities: &[crate::domain::story_entity::StoryEntity],
+    references: &[AssetId],
+) -> Result<String, ShotVideoInputError> {
+    let mut rest = prompt;
+    let mut output = String::new();
+    while let Some(at) = rest.find('@') {
+        output.push_str(&rest[..at]);
+        rest = &rest[at + 1..];
+        let mut matches: Vec<_> = entities
+            .iter()
+            .filter(|entity| {
+                entity.project_id == project_id
+                    && !entity.name.is_empty()
+                    && rest.starts_with(&entity.name)
+                    && !(entity
+                        .name
+                        .ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                        && rest[entity.name.len()..]
+                            .starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
+            })
+            .collect();
+        matches.sort_by_key(|entity| std::cmp::Reverse(entity.name.len()));
+        let entity = matches.first().ok_or_else(|| invalid("ENTITY_REFERENCE_UNKNOWN: 存在无法识别的 @引用，请使用当前项目唯一的角色或场景名称"))?;
+        if matches
+            .iter()
+            .filter(|item| item.name == entity.name)
+            .count()
+            != 1
+        {
+            return Err(invalid(format!(
+                "ENTITY_REFERENCE_AMBIGUOUS: @{} 存在同名实体，请先改为唯一名称",
+                entity.name
+            )));
+        }
+        let asset_id = entity
+            .cover_asset_id
+            .as_ref()
+            .or_else(|| entity.image_asset_ids.first())
+            .ok_or_else(|| {
+                invalid(format!(
+                    "ENTITY_REFERENCE_MISSING_IMAGE: @{} 尚未关联图片",
+                    entity.name
+                ))
+            })?;
+        let ordinal = references.iter().position(|id| id.as_str() == asset_id)
+            .ok_or_else(|| invalid(format!("ENTITY_REFERENCE_NOT_APPLIED: @{} 的图片尚未加入当前 Recipe 的正式参考图，请点击应用角色与场景参考图", entity.name)))?;
+        output.push_str(&format!("{}（<Picture {}>）", entity.name, ordinal + 1));
+        rest = &rest[entity.name.len()..];
+    }
+    output.push_str(rest);
+    Ok(output)
+}
+
 pub(crate) fn merge_media_inputs(
     values: &mut BTreeMap<String, GenerationInputValue>,
     media: BTreeMap<String, GenerationInputValue>,
@@ -421,6 +539,64 @@ mod tests {
     use crate::application::ports::ShotVideoInputAsset;
     use crate::domain::{InputDefinition, Recipe};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn entity_prompt_uses_actual_order_and_rejects_unknown_ambiguous_or_unapplied_images() {
+        use crate::domain::{story_entity::StoryEntity, AssetId};
+        let entity = |name: &str, image: Option<&str>| StoryEntity {
+            id: name.into(),
+            project_id: "prj_owned".into(),
+            kind: crate::domain::story_entity::StoryEntityKind::Character,
+            name: name.into(),
+            description: String::new(),
+            cover_asset_id: None,
+            image_asset_ids: image.map(|id| vec![id.into()]).unwrap_or_default(),
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let hero = entity("小明", Some("ast_hero"));
+        let mother = entity("小明妈妈", Some("ast_mother"));
+        let scene = entity("太空", Some("ast_scene"));
+        let refs = ["ast_scene", "ast_mother", "ast_hero"].map(|id| AssetId::parse(id).unwrap());
+        let compile = |text: &str, all: &[StoryEntity]| {
+            super::compile_entity_prompt(text, "prj_owned", all, &refs)
+        };
+        assert_eq!(
+            compile(
+                "@小明妈妈在@太空中飞翔，5秒，@小明妈妈",
+                &[hero.clone(), mother, scene]
+            )
+            .unwrap(),
+            "小明妈妈（<Picture 2>）在太空（<Picture 1>）中飞翔，5秒，小明妈妈（<Picture 2>）"
+        );
+        assert_eq!(
+            compile("小明飞翔，0.98mp", &[hero.clone()]).unwrap(),
+            "小明飞翔，0.98mp"
+        );
+        for (text, all, code) in [
+            ("@未知", vec![hero.clone()], "UNKNOWN"),
+            ("@小明", vec![hero.clone(), hero.clone()], "AMBIGUOUS"),
+            ("@无图", vec![entity("无图", None)], "MISSING_IMAGE"),
+            (
+                "@已换图",
+                vec![entity("已换图", Some("ast_new"))],
+                "NOT_APPLIED",
+            ),
+            (
+                "@AnnaBelle",
+                vec![entity("Anna", Some("ast_hero"))],
+                "UNKNOWN",
+            ),
+        ] {
+            assert!(compile(text, &all).unwrap_err().to_string().contains(code));
+        }
+        let mut foreign = hero;
+        foreign.project_id = "prj_foreign".into();
+        assert!(compile("@小明", &[foreign])
+            .unwrap_err()
+            .to_string()
+            .contains("UNKNOWN"));
+    }
 
     fn recipe() -> Recipe {
         Recipe {

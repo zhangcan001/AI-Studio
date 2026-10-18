@@ -453,7 +453,7 @@ impl ProductionPreparationService {
             } else {
                 None
             };
-            let (readiness, values) = if let Some(error) = product_denial {
+            let (mut readiness, mut values) = if let Some(error) = product_denial {
                 (
                     readiness_with_blocker(
                         readiness,
@@ -476,6 +476,25 @@ impl ProductionPreparationService {
             } else {
                 prepare_generation_values(&context, readiness, definition)
             };
+            if context.stage == ShotStage::Video {
+                if let (Some(current), Some(definition)) = (values.as_mut(), definition) {
+                    if let Ok(recipe) = RecipeParser::parse(&definition.recipe_yaml) {
+                        if let Err(error) = self
+                            .shot_batch_service
+                            .compile_entity_references(project_id, &recipe, current)
+                            .await
+                        {
+                            readiness = readiness_with_blocker(
+                                readiness,
+                                &context,
+                                "ENTITY_REFERENCE_INVALID",
+                                error.to_string(),
+                            );
+                            values = None;
+                        }
+                    }
+                }
+            }
             let shot_id = context.structure.shot.id.clone();
             let existing_batch_ids = active_bindings
                 .iter()
@@ -484,11 +503,44 @@ impl ProductionPreparationService {
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect::<Vec<_>>();
+            // Entity display names are not part of the historical resolver hash.
+            // Compare the derived prompt too, so changing a cover among already
+            // bound images cannot silently reuse an older prepared interpretation.
+            let mut entity_stale = BTreeSet::new();
+            if context.prompt_context.rendered_text.contains('@') {
+                if let Some(
+                    crate::application::generation_input_preparer::GenerationInputValue::Text(
+                        prompt,
+                    ),
+                ) = values.as_ref().and_then(|values| values.get("prompt"))
+                {
+                    for record in prepared_records.iter().filter(|record| {
+                        record.shot_id == shot_id
+                            && record.context_hash == context.resolver_identity.context_hash
+                    }) {
+                        let snapshot = self
+                            .shot_batch_service
+                            .find_preparation_snapshot(project_id, &record.production_batch_item_id)
+                            .await?;
+                        let frozen_prompt = snapshot
+                            .as_ref()
+                            .and_then(|snapshot| {
+                                snapshot.snapshot.frozen_generation_values.get("prompt")
+                            })
+                            .and_then(|value| value.get("value"))
+                            .and_then(|value| value.as_str());
+                        if frozen_prompt != Some(prompt.as_str()) {
+                            entity_stale.insert(record.snapshot_id.clone());
+                        }
+                    }
+                }
+            }
             let matching = prepared_records
                 .iter()
                 .filter(|record| {
                     record.shot_id == shot_id
                         && record.context_hash == context.resolver_identity.context_hash
+                        && !entity_stale.contains(&record.snapshot_id)
                 })
                 .collect::<Vec<_>>();
             let matching_prepared_batch_ids = matching
@@ -501,7 +553,8 @@ impl ProductionPreparationService {
                 .iter()
                 .filter(|record| {
                     record.shot_id == shot_id
-                        && record.context_hash != context.resolver_identity.context_hash
+                        && (record.context_hash != context.resolver_identity.context_hash
+                            || entity_stale.contains(&record.snapshot_id))
                 })
                 .map(|record| record.production_batch_id.clone())
                 .collect::<BTreeSet<_>>()

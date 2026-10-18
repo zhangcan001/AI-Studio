@@ -40,6 +40,44 @@ fn input(key: &str, ordinal: i64, id: &AssetId) -> ShotVideoInputAsset {
         asset_id: id.to_string(),
     }
 }
+
+#[tokio::test]
+async fn entity_references_do_not_silently_use_an_old_i2v_first_frame() {
+    use ai_studio_lib::application::shot_service::ShotGenerationRequest;
+    let f = fixture().await;
+    let (inputs, first, _) = setup(&f).await;
+    configure(&f, 1).await;
+    inputs
+        .save(&scope(&f, 1), None, &[input("first_frame", 0, &first.id)])
+        .await
+        .unwrap();
+    let service = shot_service(&f, inputs);
+    let result = service
+        .prepare_creation_submission(
+            ShotGenerationRequest {
+                project_id: PROJECT_ID.into(),
+                shot_id: "shot_phase2".into(),
+                stage: ai_studio_lib::domain::ShotStage::Video,
+                values: BTreeMap::from([(
+                    "prompt".into(),
+                    GenerationInputValue::Text("@角色在@场景中飞翔".into()),
+                )]),
+                retry_task_id: None,
+                submission_idempotency_key: Some("entity-ref-negative".into()),
+            },
+            f.pairs[1].0.clone(),
+            f.pairs[1].1.clone(),
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "entity photos must not be silently omitted in I2V"
+    );
+    assert!(result.unwrap_err().to_string().contains("REF2VA"));
+    assert_eq!(count(&f.pool, "tasks").await, 0);
+    assert_eq!(count(&f.pool, "production_batches").await, 0);
+    assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
 fn scope(f: &Fixture, index: usize) -> ShotVideoInputScope {
     ShotVideoInputScope {
         project_id: PROJECT_ID.into(),
@@ -97,7 +135,7 @@ async fn setup(f: &Fixture) -> (Arc<ShotVideoInputService>, Asset, Asset) {
             f.comfy.clone(),
         )),
         Arc::new(SystemClock),
-    ));
+    ).with_story_entities(Arc::new(ai_studio_lib::infrastructure::database::repositories::story_entity::SqliteStoryEntityRepository::new(f.pool.clone()))));
     (service, first, last)
 }
 async fn configure(f: &Fixture, index: usize) {
@@ -1468,4 +1506,156 @@ async fn phase5c_four_mode_selection_review_occ_and_cold_sqlite_persistence_are_
         .is_empty());
     assert_eq!(count(&cold, "tasks").await, 4);
     assert_eq!(count(&cold, "production_batches").await, 1);
+}
+
+#[tokio::test]
+async fn entity_references_freeze_real_images_and_compiled_labels_without_starting_gpu() {
+    use ai_studio_lib::application::{
+        ports::StoryEntityRepository, shot_service::ShotGenerationRequest,
+    };
+    use ai_studio_lib::domain::{
+        story_entity::{StoryEntityKind, StoryEntityUpsert},
+        ShotStage,
+    };
+    use ai_studio_lib::infrastructure::database::repositories::story_entity::SqliteStoryEntityRepository;
+    let f = fixture_with_capability(true).await;
+    let (inputs, first, last) = setup(&f).await;
+    let repo = SqliteStoryEntityRepository::new(f.pool.clone());
+    let hero = repo
+        .create(
+            PROJECT_ID,
+            StoryEntityKind::Character,
+            StoryEntityUpsert {
+                name: "角色".into(),
+                description: "".into(),
+                cover_asset_id: None,
+                image_asset_ids: vec![first.id.to_string()],
+            },
+        )
+        .await
+        .unwrap();
+    repo.create(
+        PROJECT_ID,
+        StoryEntityKind::Scene,
+        StoryEntityUpsert {
+            name: "场景".into(),
+            description: "".into(),
+            cover_asset_id: None,
+            image_asset_ids: vec![last.id.to_string()],
+        },
+    )
+    .await
+    .unwrap();
+    configure(&f, 3).await;
+    let input_scope = scope(&f, 3);
+    inputs
+        .save(
+            &input_scope,
+            None,
+            &[
+                input("reference_images", 0, &last.id),
+                input("reference_images", 1, &first.id),
+            ],
+        )
+        .await
+        .unwrap();
+    let before = inputs.get(&input_scope).await.unwrap().unwrap();
+    let prompt = "@角色在@场景中飞翔，5秒";
+    let compiled = "角色（<Picture 2>）在场景（<Picture 1>）中飞翔，5秒";
+    let service = shot_service(&f, inputs.clone());
+    let request = || ShotGenerationRequest {
+        project_id: PROJECT_ID.into(),
+        shot_id: "shot_phase2".into(),
+        stage: ShotStage::Video,
+        values: BTreeMap::from([("prompt".into(), GenerationInputValue::Text(prompt.into()))]),
+        retry_task_id: None,
+        submission_idempotency_key: Some("entity-positive".into()),
+    };
+    let prepared = service
+        .prepare_creation_submission(request(), f.pairs[3].0.clone(), f.pairs[3].1.clone())
+        .await
+        .unwrap();
+    assert!(
+        matches!(&prepared.values["prompt"], GenerationInputValue::Text(text) if text == compiled)
+    );
+    assert!(
+        matches!(&prepared.values["reference_images"], GenerationInputValue::ImageAssets(ids) if ids == &vec![last.id.clone(), first.id.clone()])
+    );
+    assert_eq!(
+        inputs.get(&input_scope).await.unwrap().unwrap().token,
+        before.token
+    );
+    sqlx::query("UPDATE shots SET prompt_text=? WHERE id='shot_phase2'")
+        .bind(prompt)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let (preparation, _) = formal_preparation(&f, inputs.clone()).await;
+    let plan = preparation
+        .plan_many(PROJECT_ID, &["shot_phase2".into()], ShotStage::Video)
+        .await
+        .unwrap();
+    assert!(
+        plan.iter()
+            .all(|p| p.readiness.status == ai_studio_lib::domain::ShotReadinessStatus::Ready),
+        "{plan:#?}"
+    );
+    let receipt = preparation
+        .admit(PROJECT_ID, &["shot_phase2".into()], ShotStage::Video, false)
+        .await
+        .unwrap();
+    assert_eq!(receipt.created_count, 1);
+    let batch = f
+        .services
+        .queue
+        .get(PROJECT_ID, &receipt.created_batch_ids[0])
+        .await
+        .unwrap();
+    assert!(batch.items[0].values_json["prompt"]["value"]
+        .as_str()
+        .unwrap()
+        .starts_with(compiled));
+    assert_eq!(
+        batch.items[0].values_json["reference_images"]["assetIds"],
+        json!([last.id.as_str(), first.id.as_str()])
+    );
+    // A later entity edit cannot rewrite the frozen batch and cannot silently use
+    // the stale image in a new run. No new Task or prompt is created by admission.
+    repo.update(
+        PROJECT_ID,
+        &hero.id,
+        StoryEntityUpsert {
+            name: "角色".into(),
+            description: "changed".into(),
+            cover_asset_id: None,
+            image_asset_ids: vec![last.id.to_string()],
+        },
+    )
+    .await
+    .unwrap();
+    let frozen = f
+        .services
+        .queue
+        .get(PROJECT_ID, &receipt.created_batch_ids[0])
+        .await
+        .unwrap();
+    assert_eq!(frozen.items[0].values_json, batch.items[0].values_json);
+    let updated = service
+        .prepare_creation_submission(request(), f.pairs[3].0.clone(), f.pairs[3].1.clone())
+        .await
+        .unwrap();
+    assert!(
+        matches!(&updated.values["prompt"], GenerationInputValue::Text(text) if text.starts_with("角色（<Picture 1>）"))
+    );
+    let changed_plan = preparation
+        .plan_many(PROJECT_ID, &["shot_phase2".into()], ShotStage::Video)
+        .await
+        .unwrap();
+    assert!(!changed_plan[0].already_prepared);
+    assert_eq!(
+        changed_plan[0].stale_prepared_batch_ids,
+        vec![receipt.created_batch_ids[0].clone()]
+    );
+    assert_eq!(count(&f.pool, "tasks").await, 0);
+    assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);
 }

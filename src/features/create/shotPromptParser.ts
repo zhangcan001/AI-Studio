@@ -6,6 +6,24 @@
 import type { StoryEntity } from "../../types/storyEntity";
 import type { DraftValue, RecipeField } from "../../types/generation";
 
+/** UI projection only. Rust resolves the same explicit mentions again at admission. */
+export function explicitEntityMentions(text: string, entities: StoryEntity[]) {
+  const used: StoryEntity[] = [];
+  let rest = text;
+  while (rest.includes("@")) {
+    rest = rest.slice(rest.indexOf("@") + 1);
+    const matches = entities.filter(e => e.name && rest.startsWith(e.name)
+      && !(/[A-Za-z0-9_]$/.test(e.name) && /^[A-Za-z0-9_]/.test(rest.slice(e.name.length))))
+      .sort((a, b) => b.name.length - a.name.length);
+    if (!matches.length) return { entities: used, error: "存在无法识别的 @引用，请选择当前项目的角色或场景。" };
+    const entity = matches[0];
+    if (matches.filter(e => e.name === entity.name).length !== 1) return { entities: used, error: `@${entity.name} 存在同名实体，请先改为唯一名称。` };
+    if (!used.some(e => e.id === entity.id)) used.push(entity);
+    rest = rest.slice(entity.name.length);
+  }
+  return { entities: used, error: undefined };
+}
+
 export type ParsedResolution = { kind: "lines"; lines: number } | { kind: "size"; width: number; height: number } | { kind: "pixels"; pixels: number };
 export interface ParsedShotPrompt {
   durationSeconds?: number;

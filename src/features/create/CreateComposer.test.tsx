@@ -101,6 +101,69 @@ function pending<T>() { let resolve!: (value: T) => void; const promise = new Pr
 const auditHero: StoryEntity = { id: "hero", projectId: "owned", kind: "character", name: "审计角色", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
 const auditScene: StoryEntity = { ...auditHero, id: "scene", kind: "scene", name: "审计场景" };
 
+it("applies explicit entity images to the exact REF2VA slot through OCC without generating", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([
+    { ...auditHero, coverAssetId: "entity-first" }, { ...auditScene, imageAssetIds: ["entity-second"] },
+  ]);
+  saved.set("opaque-2", { selectionRef: "opaque-2", token: null, inputs: [], assets: [{ id: "entity-first", name: "角色", mediaKind: "image" }, { id: "entity-second", name: "场景", mediaKind: "image" }] });
+  await start("opaque-2");
+  setPrompt("@审计角色在@审计场景中飞翔，5秒");
+  fireEvent.click(await screen.findByRole("button", { name: "应用角色与场景参考图" }));
+  await waitFor(() => expect(persisted()).toEqual([
+    { inputKey: "reference_images", ordinal: 0, assetId: "entity-first" },
+    { inputKey: "reference_images", ordinal: 1, assetId: "entity-second" },
+  ]));
+  expect(promptText()).toContain("@审计角色在@审计场景中飞翔");
+  expect(screen.getByLabelText("角色与场景生成引用").textContent).toContain("<Picture 1>");
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("blocks entity mentions in I2V instead of silently generating with an old first frame", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([{ ...auditHero, coverAssetId: "entity-second" }]);
+  saved.set("opaque-1", { selectionRef: "opaque-1", token: null, assets, inputs: [{ inputKey: "first_frame", ordinal: 0, assetId: "entity-first" }] });
+  await start("opaque-1");
+  setPrompt("@审计角色飞翔");
+  expect((await screen.findByLabelText("角色与场景生成引用")).textContent).toContain("混合参考");
+  await waitFor(() => expect(screen.getByRole("button", { name: "生成" }).hasAttribute("disabled")).toBe(true));
+  expect(api.inputsSave).not.toHaveBeenCalled();
+  expect(api.generate).not.toHaveBeenCalled();
+  expect(useStudioStore.getState().values.first_frame).toEqual({ type: "image_asset", assetId: "entity-first" });
+});
+
+it("keeps existing reference order, deduplicates entity images, and fails closed on OCC save failure", async () => {
+  const hero = { ...auditHero, coverAssetId: "order-hero" };
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([hero]);
+  saved.set("opaque-2", { selectionRef: "opaque-2", token: { instanceId: "owned-occ", revision: 3 }, assets: [{ id: "order-existing", name: "已有图", mediaKind: "image" }], inputs: [{ inputKey: "reference_images", ordinal: 0, assetId: "order-existing" }] });
+  api.inputsSave.mockRejectedValue(new Error("SHOT_VIDEO_INPUT_CONFLICT"));
+  await start("opaque-2");
+  setPrompt("@审计角色飞翔，@审计角色回头");
+  fireEvent.click(await screen.findByRole("button", { name: "应用角色与场景参考图" }));
+  await waitFor(() => expect(persisted()).toEqual([
+    { inputKey: "reference_images", ordinal: 0, assetId: "order-existing" },
+    { inputKey: "reference_images", ordinal: 1, assetId: "order-hero" },
+  ]));
+  expect(api.inputsSave.mock.calls[api.inputsSave.mock.calls.length - 1]?.[0].expected).toEqual({ instanceId: "owned-occ", revision: 3 });
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("error"));
+  expect(screen.getByRole("button", { name: "生成" }).hasAttribute("disabled")).toBe(true);
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("does not apply missing or ambiguous entity images or exceed the Recipe image cap", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([auditHero, { ...auditScene, coverAssetId: "cap-scene" }]);
+  api.generatorsList.mockResolvedValue(options.map(g => g.selectionRef === "opaque-2" ? { ...g, fields: [prompt, { type: "images", key: "reference_images", label: "Images", required: false, minItems: 0, maxItems: 1 }] } : g));
+  saved.set("opaque-2", { selectionRef: "opaque-2", token: null, assets: [], inputs: [{ inputKey: "reference_images", ordinal: 0, assetId: "cap-existing" }] });
+  await start("opaque-2");
+  setPrompt("@审计角色飞翔");
+  const apply = await screen.findByRole("button", { name: "应用角色与场景参考图" });
+  expect(apply.hasAttribute("disabled")).toBe(true);
+  setPrompt("@审计场景");
+  expect(screen.getByLabelText("角色与场景生成引用").textContent).toContain("上限");
+  expect(apply.hasAttribute("disabled")).toBe(true);
+  setPrompt("@不存在");
+  expect(apply.hasAttribute("disabled")).toBe(true);
+  expect(api.inputsSave).not.toHaveBeenCalled();
+});
+
 it("audit: Generate never guesses a media slot or injects entity covers into saved inputs", async () => {
   const hero = { ...auditHero, coverAssetId: "entity-cover" };
   vi.mocked(productClient.storyEntities.list).mockResolvedValue([hero]);

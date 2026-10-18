@@ -150,6 +150,16 @@ impl ProductCreationFacade {
                 ShotServiceError::NotFound(_) => {
                     ProductError::new("PROJECT_SCOPE_VIOLATION", "无法访问当前镜头。", None)
                 }
+                ShotServiceError::InvalidInput(message) if message.starts_with("ENTITY_REFERENCE_") => {
+                    let mut error = ProductError::new(
+                        "ENTITY_REFERENCE_INVALID",
+                        "角色或场景引用未就绪：请选择混合参考生成器，并应用当前项目唯一实体的参考图。",
+                        Some("EDIT_INPUT"),
+                    );
+                    error.details.field = Some("prompt".into());
+                    error.details.technical_details = Some(message);
+                    error
+                }
                 ShotServiceError::InvalidInput(_) => ProductError::new(
                     "INVALID_INPUT",
                     "镜头或生成器配置无效。",

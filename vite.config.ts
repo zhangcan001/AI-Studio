@@ -15,7 +15,10 @@ export default defineConfig(async () => ({
   // fresh child_process/RPC session, sequenced one at a time.
   test: {
     setupFiles: ["./scripts/testing/boundary-rpc-yield.mjs"],
-    exclude: [...configDefaults.exclude, "**/.ai-bridge/**", "**/local-fixtures/**"],
+    exclude: [...configDefaults.exclude, "**/.ai-bridge/**", "**/local-fixtures/**",
+      // Phase4 negative probes copy source into owned directories. A crashed
+      // probe may survive cleanup; its mirrored tests are never test entries.
+      "**/.codex-ui-phase4-probe-*/**"],
     pool: "forks",
     fileParallelism: false,
     teardownTimeout: 120_000,

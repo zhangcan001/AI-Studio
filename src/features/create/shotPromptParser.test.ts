@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { parseShotPrompt, resolvePreset, resolvePromptSettings } from "./shotPromptParser";
+import { explicitEntityMentions, parseShotPrompt, resolvePreset, resolvePromptSettings } from "./shotPromptParser";
 import type { StoryEntity } from "../../types/storyEntity";
 
 const ent = (id: string, name: string, kind: StoryEntity["kind"]) => ({ id, name, kind } as StoryEntity);
+
+it("resolves only explicit unique @names, longest first, in occurrence order", () => {
+  const hero = ent("hero", "小明", "character"), mother = ent("mother", "小明妈妈", "character"), scene = ent("scene", "太空", "scene");
+  expect(explicitEntityMentions("@小明妈妈在@太空中飞翔，@小明妈妈看小明", [hero, mother, scene])).toEqual({ entities: [mother, scene], error: undefined });
+  expect(explicitEntityMentions("小明在太空", [hero, scene]).entities).toEqual([]);
+  expect(explicitEntityMentions("@不存在", [hero]).error).toBeTruthy();
+  expect(explicitEntityMentions("@小明", [hero, ent("other", "小明", "character")]).error).toContain("同名");
+  expect(explicitEntityMentions("@AnnaBelle", [ent("anna", "Anna", "character")]).error).toBeTruthy();
+});
 const presets = [
   { id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 },
   { id: "mp-2_09-16x9", label: "2.09MP · 1920×1088", width: 1920, height: 1088 },

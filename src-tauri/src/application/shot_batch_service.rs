@@ -192,6 +192,26 @@ impl ShotBatchService {
         self
     }
 
+    pub async fn compile_entity_references(
+        &self,
+        project_id: &str,
+        recipe: &Recipe,
+        values: &mut BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), ShotBatchServiceError> {
+        if let Some(service) = &self.video_inputs {
+            service
+                .compile_prompt(project_id, recipe, values)
+                .await
+                .map_err(|e| ShotBatchServiceError::InvalidInput(e.to_string()))?;
+        } else if matches!(values.get("prompt"), Some(GenerationInputValue::Text(text)) if text.contains('@'))
+        {
+            return Err(ShotBatchServiceError::InvalidInput(
+                "ENTITY_REFERENCE_UNAVAILABLE: 角色与场景解析不可用".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn ensure_new_generation_allowed(
         &self,
         version: &str,
@@ -912,7 +932,14 @@ impl ShotBatchService {
                 .video_inputs
                 .as_ref()
                 .expect("checked above")
-                .values(&scope, &recipe)
+                .generation_values(
+                    &scope,
+                    &recipe,
+                    values.get("prompt").and_then(|value| match value {
+                        GenerationInputValue::Text(text) => Some(text.as_str()),
+                        _ => None,
+                    }),
+                )
                 .await
             {
                 Ok(media) => {

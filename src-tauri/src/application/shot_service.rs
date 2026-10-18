@@ -596,7 +596,14 @@ impl ShotService {
                         recipe_id: definition.recipe_id.clone(),
                     };
                     let media = service
-                        .values(&scope, &recipe)
+                        .generation_values(
+                            &scope,
+                            &recipe,
+                            values.get("prompt").and_then(|value| match value {
+                                GenerationInputValue::Text(text) => Some(text.as_str()),
+                                _ => None,
+                            }),
+                        )
                         .await
                         .map_err(|e| ShotServiceError::InvalidInput(e.to_string()))?;
                     crate::application::shot_video_input_service::merge_media_inputs(

@@ -885,7 +885,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(database::repositories::SqliteShotVideoInputRepository::new(database_pool.clone())),
                 shot_repository.clone(), definition_repository.clone(), workflow_registry_service.clone(),
                 video_input_preparer, clock.clone(),
-            ));
+            ).with_story_entities(story_entity_repository.clone()));
             let shot_context_resolver = Arc::new(ShotContextResolver::new(
                 project_repository.clone(),
                 production_structure_repository.clone(),

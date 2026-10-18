@@ -72,5 +72,9 @@ it("formal video input invalidation refreshes Create and Inspector after batch O
   expect(panel).toMatch(/subscribeVideoInputInvalidation[\s\S]*?void load\(\)/);
   const persistent = readFileSync("src/features/create/usePersistentVideoInputs.ts", "utf8");
   expect(persistent).toContain("subscribeVideoInputInvalidation");
-  expect(persistent).toMatch(/subscribeVideoInputInvalidation[\s\S]*?void load\(false\)/);
+  // Background invalidation preserves dirty drafts/OCC ownership and coalesces
+  // reads received while our own save is in flight.
+  expect(persistent).toMatch(/subscribeVideoInputInvalidation[\s\S]*?void load\(false, true\)/);
+  expect(persistent).toContain("selfWrite.current");
+  expect(persistent).toContain("pendingRefresh.current");
 }, 30000);

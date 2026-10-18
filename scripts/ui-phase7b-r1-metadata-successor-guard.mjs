@@ -7,6 +7,10 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./bound
 export const R1_METADATA_BASE = "0c3be97a88d5458fc16851bfa19dc10172007886";
 export const R1_METADATA_PROOF = "docs/architecture/ui-phase7b-r1-metadata-successor.json";
 export const R1_METADATA_CHANGED = [
+  "vite.config.ts",
+  "src/app/UiPhase7ASourceReadyBoundary.test.ts",
+  "src/app/MiniMaxVideoPhase2Boundary.test.ts",
+  "src/app/MiniMaxVideoUiPhase4Boundary.test.ts",
   ".github/workflows/ci.yml",
   "scripts/run-boundary-tests.mjs",
   "scripts/testing/boundary-rpc-yield.mjs",
@@ -82,6 +86,10 @@ export const R1_METADATA_CHANGED = [
   "src/product/transport.ts",
   "src/product/types.ts",
   "src/stores/studioStore.ts",
+  "src-tauri/src/application/production_preparation_service.rs",
+  "src-tauri/src/application/shot_batch_service.rs",
+  "src-tauri/src/application/shot_service/creation.rs",
+  "src-tauri/src/application/shot_video_input_service.rs",
 ].sort();
 export const R1_METADATA_ADDED = [
   "scripts/testing/ui-phase7b-r1-metadata.test.mjs",
