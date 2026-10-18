@@ -34,6 +34,7 @@ it("rejects undeclared byte changes in every entity-reference preparation seam",
     "src-tauri/src/application/shot_batch_service.rs",
     "src-tauri/src/application/shot_service/creation.rs",
     "src-tauri/src/application/shot_video_input_service.rs",
+    "src/product/errors.ts",
   ]) {
     expect(uiPhase7BR1MetadataParentReader(".", {
       [path]: readFileSync(path, "utf8") + "\n// unapproved entity-reference mutation\n",

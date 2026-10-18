@@ -4,17 +4,19 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { StoryboardShotRows } from "./StoryboardShotRows";
 import type { StoryboardShot } from "./storyboardModel";
+import { normalizeProductError } from "../../product/errors";
+import { invalidateVideoInputs } from "../../product/videoInputInvalidation";
 
-const api = vi.hoisted(() => ({ updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn() }));
+const api = vi.hoisted(() => ({ updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: {
-  creation: { updateShot: api.updateShot, deleteShot: api.deleteShot, readinessGet: api.readinessGet, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, mediaUrl: (p: string, id: string) => `media://${p}/${id}` },
+  creation: { updateShot: api.updateShot, deleteShot: api.deleteShot, readinessGet: api.readinessGet, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, inputsGet: api.inputsGet, inputsSave: api.inputsSave, mediaUrl: (p: string, id: string) => `media://${p}/${id}` },
   storyEntities: { list: api.list, listForShot: api.listForShot, bindShot: api.bindShot },
   library: { imageGet: vi.fn(async () => [1]), thumbnailGet: vi.fn(async () => null) },
 } }));
 const hero = { id: "e1", projectId: "p", kind: "character", name: "阿离", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" } as const;
 const lane = { ...hero, id: "e2", kind: "scene", name: "雨巷" } as const;
 const shot = (id: string, ordinal: number, selectionRef: string | null = "sel"): StoryboardShot => ({ id, name: `镜头${ordinal + 1}`, ordinal, status: "TODO", candidates: [], run: null,
-  shot: { summary: { id, name: `镜头${ordinal + 1}`, ordinal }, prompt: "@阿离 走进 @雨巷", selectionRef, values: { duration_seconds: { type: "integer", value: 5 } }, referenceAssetIds: [], selectedResultId: null, recentRun: null } });
+  shot: { summary: { id, name: `镜头${ordinal + 1}`, ordinal }, prompt: "阿离 走进 雨巷", selectionRef, values: { duration_seconds: { type: "integer", value: 5 } }, referenceAssetIds: [], selectedResultId: null, recentRun: null } });
 const generator = { selectionRef: "sel", name: "H3", version: "1", mode: "t2v", mediaKind: "video", availability: true, availabilityReason: null, recommended: true,
   fields: [{ key: "duration_seconds", type: "integer", label: "时长", required: false, min: 1, max: 10 }],
   resolutionPresets: [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }, { id: "mp-2_09-9x16", label: "2.09MP · 1088×1920", width: 1088, height: 1920 }] };
@@ -25,6 +27,8 @@ beforeEach(() => {
   api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
   api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "r" }, startOutcome: "QUEUED", startIssue: null });
   api.generatorsList.mockResolvedValue([generator]);
+  api.inputsGet.mockImplementation(async s => ({ selectionRef: s.selectionRef, token: { instanceId: 'refs', revision: 4 }, inputs: [], assets: [] }));
+  api.inputsSave.mockImplementation(async r => ({ selectionRef: r.selection.selectionRef, token: { instanceId: 'refs', revision: 5 }, inputs: r.inputs, assets: [] }));
   api.updateShot.mockResolvedValue({}); api.deleteShot.mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
@@ -119,7 +123,8 @@ it("preserves dirty duration across same-value and changed-value refreshes, then
 });
 
 it("renders real shot rows with structured description, inline @entity chips and search/status filter", async () => {
-  render(<StoryboardShotRows {...props()} items={[shot("a", 0), { ...shot("b", 1), status: "COMPLETED", name: "收尾" }]} />);
+  const withMentions = shot("a", 0); withMentions.shot!.prompt = "@阿离 走进 @雨巷";
+  render(<StoryboardShotRows {...props()} items={[withMentions, { ...shot("b", 1), status: "COMPLETED", name: "收尾" }]} />);
   const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
   await waitFor(() => expect(within(within(row).getByLabelText("分镜描述")).getAllByText("阿离").length).toBeGreaterThan(0));
   expect(within(within(row).getByLabelText("分镜描述")).getByText("雨巷")).toBeTruthy();
@@ -299,4 +304,161 @@ it('row generation changes the attempt key when the actual draft changes after a
   fireEvent.click(screen.getByRole('button',{name:'生成视频'}));
   await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
   expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});
+
+it('row entity references block the old I2V selection even when the project default is now REF2VA', async () => {
+  const old = { ...generator, mode: 'I2V' };
+  const ref = { ...generator, selectionRef: 'ref', mode: 'REF2VA', recommended: true,
+    fields: [...generator.fields, { key: 'reference_images', type: 'images', label: '参考图', required: false, maxItems: 9 }] };
+  api.generatorsList.mockResolvedValue([ref, old]);
+  const item = shot('entity-old', 0); item.shot!.prompt = '@阿离 在 @雨巷 行走';
+  render(<StoryboardShotRows {...props()} items={[item]} />);
+  await screen.findByTitle('解除绑定 角色 · 阿离');
+  const generate = screen.getByRole('button', { name: '生成视频' });
+  expect(generate.hasAttribute('disabled')).toBe(true);
+  expect((screen.getByLabelText('镜头1 生成器') as HTMLSelectElement).value).toBe('sel');
+  expect(screen.getByLabelText('角色与场景生成引用').textContent).toContain('REF2VA');
+  fireEvent.click(generate);
+  expect(api.readinessGet).not.toHaveBeenCalled();
+  expect(api.generate).not.toHaveBeenCalled();
+  expect(api.updateShot).not.toHaveBeenCalled();
+});
+
+const refGenerator = { ...generator, selectionRef: 'ref', mode: 'REF2VA', persistentInputs: true,
+  fields: [...generator.fields, { key: 'reference_images', type: 'images', label: '参考图', required: false, maxItems: 9 }] };
+function referenceShot() { const item = shot('entity-ref', 0, 'ref'); item.shot!.prompt = '@阿离 在 @雨巷 行走'; return item; }
+function photos() {
+  api.list.mockResolvedValue([{ ...hero, imageAssetIds: ['hero-image'] }, { ...lane, imageAssetIds: ['scene-image'] }]);
+  api.generatorsList.mockResolvedValue([refGenerator, generator]);
+}
+
+it('row entity references save the explicitly chosen exact generator without creating media or GPU work', async () => {
+  photos();
+  const item = shot('entity-switch', 0); item.shot!.prompt = '@阿离 在 @雨巷 行走';
+  const p = props(); const h = render(<StoryboardShotRows {...p} items={[item]} />);
+  const select = await screen.findByLabelText('镜头1 生成器');
+  await waitFor(() => expect(within(select).getAllByRole('option').length).toBe(2));
+  fireEvent.change(select, { target: { value: 'ref' } });
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith('p', { shotId: item.id, name: item.name, stage: 'video', selectionRef: 'ref',
+    values: expect.objectContaining({ duration_seconds: { type: 'integer', value: 5 } }) }));
+  await screen.findByText(/镜头生成器已保存/);
+  expect(screen.getByRole('button', { name: '生成视频' }).hasAttribute('disabled')).toBe(true);
+  expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+  h.rerender(<StoryboardShotRows {...p} items={[{ ...item, shot: { ...item.shot!, selectionRef: 'ref' } }]} />);
+  await waitFor(() => expect((screen.getByLabelText('镜头1 生成器') as HTMLSelectElement).value).toBe('ref'));
+  await waitFor(() => expect(api.inputsGet).toHaveBeenCalledWith({ projectId: 'p', shotId: item.id, selectionRef: 'ref' }));
+});
+
+it('row entity references apply ordered images through OCC, retain audio, and generate only on a separate click', async () => {
+  photos();
+  const existing = [{ inputKey: 'reference_images', ordinal: 0, assetId: 'scene-image' }, { inputKey: 'reference_audios', ordinal: 0, assetId: 'audio' }];
+  api.inputsGet.mockResolvedValue({ selectionRef: 'ref', token: { instanceId: 'refs', revision: 4 }, inputs: existing, assets: [] });
+  render(<StoryboardShotRows {...props()} items={[referenceShot()]} />);
+  const apply = await screen.findByRole('button', { name: '应用角色与场景参考图' });
+  await waitFor(() => expect(apply.hasAttribute('disabled')).toBe(false));
+  expect(screen.getByRole('button', { name: '生成视频' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.click(apply);
+  await screen.findByText('角色与场景参考图已保存；尚未创建生成任务。');
+  expect(api.inputsSave).toHaveBeenCalledWith({ selection: { projectId: 'p', shotId: 'entity-ref', selectionRef: 'ref' }, expected: { instanceId: 'refs', revision: 4 }, inputs: [
+    existing[1], existing[0], { inputKey: 'reference_images', ordinal: 1, assetId: 'hero-image' },
+  ] });
+  const panel = screen.getByLabelText('角色与场景生成引用');
+  expect(panel.textContent).toContain('@阿离 → <Picture 2>'); expect(panel.textContent).toContain('@雨巷 → <Picture 1>');
+  expect(api.readinessGet).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '生成视频' }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+  expect(api.generate.mock.calls[0][0]).toMatchObject({ selectionRef: 'ref', shotId: 'entity-ref', values: { prompt: { type: 'string', value: '@阿离 在 @雨巷 行走' } } });
+});
+
+it('row entity references refuse OCC conflicts until an explicit fresh read and never auto-submit', async () => {
+  photos(); api.inputsSave.mockRejectedValueOnce({ code: 'SHOT_VIDEO_INPUT_CONFLICT', details: {} });
+  render(<StoryboardShotRows {...props()} items={[referenceShot()]} />);
+  const apply = await screen.findByRole('button', { name: '应用角色与场景参考图' });
+  await waitFor(() => expect(apply.hasAttribute('disabled')).toBe(false)); fireEvent.click(apply);
+  await screen.findByRole('alert');
+  expect(apply.hasAttribute('disabled')).toBe(true); expect(screen.getByRole('button', { name: '生成视频' }).hasAttribute('disabled')).toBe(true);
+  expect(api.generate).not.toHaveBeenCalled();
+  api.inputsGet.mockResolvedValueOnce({ selectionRef: 'ref', token: { instanceId: 'refs', revision: 9 }, inputs: [], assets: [] });
+  fireEvent.click(screen.getByRole('button', { name: '重新读取参考输入' }));
+  await waitFor(() => expect(apply.hasAttribute('disabled')).toBe(false)); fireEvent.click(apply);
+  await waitFor(() => expect(api.inputsSave).toHaveBeenLastCalledWith(expect.objectContaining({ expected: { instanceId: 'refs', revision: 9 } })));
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it.each(['missing', 'unknown', 'foreign', 'ambiguous', 'cap'])('row entity references reject %s images before any save or generation', async kind => {
+  photos(); const item = referenceShot();
+  if (kind === 'missing') api.list.mockResolvedValue([hero, lane]);
+  if (kind === 'unknown') item.shot!.prompt = '@不存在';
+  if (kind === 'foreign') api.list.mockResolvedValue([{ ...hero, projectId: 'other', imageAssetIds: ['foreign-image'] }]);
+  if (kind === 'ambiguous') api.list.mockResolvedValue([{ ...hero, imageAssetIds: ['hero-image'] }, { ...hero, id: 'duplicate', imageAssetIds: ['other-image'] }, lane]);
+  if (kind === 'cap') api.generatorsList.mockResolvedValue([{ ...refGenerator, fields: [{ key: 'reference_images', type: 'images', maxItems: 1 }] }]);
+  render(<StoryboardShotRows {...props()} items={[item]} />);
+  if (kind === 'foreign') await waitFor(() => expect(screen.getByLabelText('角色与场景生成引用').textContent).toContain('无法识别'));
+  else await screen.findByTitle('解除绑定 角色 · 阿离');
+  await waitFor(() => expect(screen.getByRole('button', { name: '应用角色与场景参考图' }).hasAttribute('disabled')).toBe(true));
+  expect(screen.getByRole('button', { name: '生成视频' }).hasAttribute('disabled')).toBe(true);
+  expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.readinessGet).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('row entity references ignore a late prior-project input read', async () => {
+  photos(); const delayed = deferred<unknown>(); api.inputsGet.mockReturnValueOnce(delayed.promise);
+  const p = props(), item = referenceShot(); const h = render(<StoryboardShotRows {...p} items={[item]} />);
+  await waitFor(() => expect(api.inputsGet).toHaveBeenCalledTimes(1));
+  h.rerender(<StoryboardShotRows {...p} projectId='other' items={[item]} />);
+  await act(async () => delayed.resolve({ selectionRef: 'ref', token: { instanceId: 'old', revision: 9 }, inputs: [{ inputKey: 'reference_images', ordinal: 0, assetId: 'hero-image' }], assets: [] }));
+  expect(screen.getByRole('button', { name: '生成视频' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByLabelText('角色与场景生成引用').textContent).not.toContain('<Picture 1>');
+  expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('keeps the typed backend entity-reference error actionable instead of hiding it as INTERNAL_ERROR', () => {
+  const error = normalizeProductError({ code: 'ENTITY_REFERENCE_INVALID', details: { field: 'prompt', action: 'EDIT_INPUT', retryable: false, technicalDetails: 'ENTITY_REFERENCE_MODE' } });
+  expect(error.code).toBe('ENTITY_REFERENCE_INVALID'); expect(error.message).toContain('当前镜头');
+  expect(error.details.field).toBe('prompt'); expect(error.details.technicalDetails).toBe('ENTITY_REFERENCE_MODE');
+});
+
+it('row entity references do not dispatch a late READY after formal reference inputs change', async () => {
+  photos(); const item = referenceShot();
+  const inputs = [{ inputKey: 'reference_images', ordinal: 0, assetId: 'hero-image' }, { inputKey: 'reference_images', ordinal: 1, assetId: 'scene-image' }];
+  api.inputsGet.mockResolvedValue({ selectionRef: 'ref', token: { instanceId: 'refs', revision: 4 }, inputs, assets: [] });
+  const ready = deferred<{ ready: boolean; issues: []; fieldErrors: []; actions: [] }>(); api.readinessGet.mockReturnValueOnce(ready.promise);
+  render(<StoryboardShotRows {...props()} items={[item]} />);
+  const generate = screen.getByRole('button', { name: '生成视频' });
+  await waitFor(() => expect(generate.hasAttribute('disabled')).toBe(false)); fireEvent.click(generate);
+  await waitFor(() => expect(api.readinessGet).toHaveBeenCalledTimes(1));
+  api.inputsGet.mockResolvedValueOnce({ selectionRef: 'ref', token: { instanceId: 'refs', revision: 5 }, inputs: [], assets: [] });
+  act(() => invalidateVideoInputs('p'));
+  await waitFor(() => expect(screen.getByLabelText('角色与场景生成引用').textContent).toContain('尚未进入生成输入'));
+  await act(async () => ready.resolve({ ready: true, issues: [], fieldErrors: [], actions: [] }));
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('row entity references ignore a save receipt after project switch without touching the new project', async () => {
+  photos(); const pending = deferred<unknown>(); api.inputsSave.mockReturnValueOnce(pending.promise);
+  const p = props(), item = referenceShot(); const h = render(<StoryboardShotRows {...p} items={[item]} />);
+  const apply = screen.getByRole('button', { name: '应用角色与场景参考图' });
+  await waitFor(() => expect(apply.hasAttribute('disabled')).toBe(false)); fireEvent.click(apply);
+  await waitFor(() => expect(api.inputsSave).toHaveBeenCalledTimes(1));
+  h.rerender(<StoryboardShotRows {...p} projectId='other' items={[item]} />);
+  await act(async () => pending.resolve({ selectionRef: 'ref', token: { instanceId: 'old', revision: 5 }, inputs: [], assets: [] }));
+  expect(screen.queryByText('角色与场景参考图已保存；尚未创建生成任务。')).toBeNull();
+  expect(api.inputsSave.mock.calls[0][0].selection.projectId).toBe('p'); expect(api.inputsSave).toHaveBeenCalledTimes(1);
+  expect(p.onChanged).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('row entity references keep a failed generator switch on the old exact pair', async () => {
+  photos(); const item = shot('switch-fail', 0); item.shot!.prompt = '@阿离'; api.updateShot.mockRejectedValueOnce({ code: 'INVALID_INPUT' });
+  render(<StoryboardShotRows {...props()} items={[item]} />);
+  const select = screen.getByLabelText('镜头1 生成器');
+  await waitFor(() => expect(within(select).getAllByRole('option').length).toBe(2)); fireEvent.change(select, { target: { value: 'ref' } });
+  await screen.findByRole('alert');
+  expect((select as HTMLSelectElement).value).toBe('sel'); expect(select.hasAttribute('disabled')).toBe(false);
+  expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('plain T2V row generation needs no image or entity-reference save', async () => {
+  render(<StoryboardShotRows {...props()} items={[shot('plain', 0)]} />);
+  fireEvent.click(await screen.findByRole('button', { name: '生成视频' }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+  expect(api.inputsGet).not.toHaveBeenCalled(); expect(api.inputsSave).not.toHaveBeenCalled();
 });

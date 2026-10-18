@@ -1,6 +1,7 @@
 import type { GeneratorBindingSummary, RunRef } from "./types";
 
 const messages = {
+  ENTITY_REFERENCE_INVALID: "角色或场景引用未就绪：请在当前镜头选择 REF2VA 并应用参考图；修改项目默认生成器不会替换已有镜头。",
   SHOT_VIDEO_INPUT_CONFLICT: "镜头输入已被更新，请刷新后重新保存；当前修改未覆盖服务器。",
   SHOT_VIDEO_INPUT_COMBINATION_INVALID: "参考图最多 9 个、参考视频最多 3 个、参考音频最多 3 个，合计不超过 12 个，且不能只有音频。",
   BLOCKED_BY_METADATA: "参考媒体缺少可用时长元数据，请重新探测或重新导入后再生成。",

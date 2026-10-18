@@ -7,7 +7,10 @@ import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage } from "./C
 import "./CreatePage.css";
 import type { GeneratorOption } from "../../product/types";
 import type { DraftValue } from "../../types/generation";
-import { parseShotPrompt, resolvePreset, resolvePromptSettings, type ParsedShotPrompt, type ResolutionPresetLike } from "./shotPromptParser";
+import { explicitEntityMentions, parseShotPrompt, resolvePreset, resolvePromptSettings, type ParsedShotPrompt, type ResolutionPresetLike } from "./shotPromptParser";
+import { draftFor } from "./createModel";
+import type { VideoInputView } from "../../types/shotVideoInput";
+import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品" };
@@ -36,6 +39,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("ALL");
   const [entities, setEntities] = useState<StoryEntity[]>([]);
+  const [entitiesOwner, setEntitiesOwner] = useState<string>();
   const [rev, setRev] = useState(0);
   useEffect(() => {
     const bump = () => setRev(v => v + 1);
@@ -44,15 +48,17 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   }, []);
   useEffect(() => {
     let alive = true;
+    setEntities([]); setEntitiesOwner(undefined);
     const list = productClient.storyEntities?.list;
     if (typeof list !== "function") return;
-    void Promise.resolve(list(projectId, null)).then(next => { if (alive) setEntities(next ?? []); }).catch(() => { if (alive) setEntities([]); });
+    void Promise.resolve().then(() => list(projectId, null)).then(next => { if (alive) { setEntities((next ?? []).filter(e => e.projectId === projectId)); setEntitiesOwner(projectId); } }).catch(() => { if (alive) setEntities([]); });
     return () => { alive = false; };
   }, [projectId, rev]);
   const urls = useEntityCovers(projectId, entities);
   const [generators, setGenerators] = useState<GeneratorOption[]>([]);
   useEffect(() => {
     let alive = true;
+    setGenerators([]);
     const list = productClient.creation?.generatorsList;
     if (typeof list !== "function") return;
     void Promise.resolve(list(projectId, "video", null)).then(next => { if (alive) setGenerators(next ?? []); }).catch(() => { if (alive) setGenerators([]); });
@@ -69,8 +75,9 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
         {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : storyboardStatusLabels[key]}</button>)}
       </div>
       <button type="button" onClick={onQueue}>任务队列</button>
+      <button type="button" onClick={() => setRev(v => v + 1)}>刷新角色与场景</button>
     </div>
-    {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={entities} urls={urls} busy={busy}
+    {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={entities} entitiesReady={entitiesOwner === projectId} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} />)}
     {!visible.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
@@ -141,8 +148,8 @@ function recognize(text: string, entities: StoryEntity[], bound: StoryEntity[], 
   return { parsed, values, addEntityIds, labels, warnings: settings.warnings };
 }
 
-function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen, onCreate, onChanged }: {
-  projectId: string; item: StoryboardShot; entities: StoryEntity[]; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption;
+function ShotRowCard({ projectId, item, entities, entitiesReady, urls, busy, generator, generators, onOpen, onCreate, onChanged }: {
+  projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
 }) {
   const [bound, setBound] = useState<StoryEntity[]>([]);
@@ -151,6 +158,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
+  const [pendingSelection, setPendingSelection] = useState<string>();
   const scopeEpoch = useRef(0);
   const bindingEpoch = useRef(0);
   const [bindingsReady, setBindingsReady] = useState(false);
@@ -164,12 +172,12 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     if (typeof listForShot === "function") {
       void Promise.resolve().then(() => listForShot(projectId, item.id)).then(next => {
         if (token !== bindingEpoch.current) return;
-        setBound(next ?? []); setBindingsReady(true);
+        setBound((next ?? []).filter(e => e.projectId === projectId)); setBindingsReady(true);
       }).catch(cause => { if (token === bindingEpoch.current) setError(normalizeProductError(cause).message); });
     }
     return () => { ++bindingEpoch.current; };
   }, [projectId, item.id, entities]);
-  const disabled = busy || working;
+  const disabled = busy || working || Boolean(pendingSelection);
   const bindingsDisabled = disabled || !bindingsReady;
   const run = async (fn: () => Promise<unknown>) => {
     const token = scopeEpoch.current;
@@ -182,7 +190,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     const next = await productClient.storyEntities.bindShot(projectId, item.id, ids);
     if (scope !== scopeEpoch.current) return;
     ++bindingEpoch.current; // A read started before this write completed is stale too.
-    setBound(next ?? []); setBindingsReady(true);
+    setBound((next ?? []).filter(e => e.projectId === projectId)); setBindingsReady(true);
   };
   const toggle = (id: string) => {
     if (bindingsDisabled) return;
@@ -191,7 +199,78 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
   const saveName = () => { const next = name.trim(); if (!next || next === item.name) { setName(item.name); return; } void run(async () => { await productClient.creation.updateShot(projectId, { shotId: item.id, name: next }); onChanged(); }); };
   const remove = () => { if (!window.confirm(`删除分镜「${item.name}」？此操作不可撤销。`)) return; void run(async () => { await productClient.creation.deleteShot(projectId, item.id); onChanged(); }); };
   const selectionRef = item.shot?.selectionRef ?? null;
+  useEffect(() => { if (pendingSelection === selectionRef) setPendingSelection(undefined); }, [pendingSelection, selectionRef]);
   const current = useMemo(() => scalarValues(item.shot?.values), [item.shot?.values]);
+  const chooseGenerator = (ref: string) => {
+    const next = generators.find(g => g.selectionRef === ref && g.availability);
+    if (!next || ref === selectionRef || disabled) return;
+    // An explicit row selection changes only this Shot, not the project default.
+    // Media are never copied between Recipes; the backend retains their own sets.
+    const token = scopeEpoch.current;
+    setPendingSelection(ref);
+    void run(async () => {
+      try {
+        await productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", selectionRef: ref, values: scalarValues(draftFor(next, null, current)) });
+        if (token !== scopeEpoch.current) return;
+        setNote("镜头生成器已保存；旧首尾帧及其他 Recipe 的正式输入仍保留，不会自动生成。");
+        onChanged();
+      } catch (cause) { if (token === scopeEpoch.current) setPendingSelection(undefined); throw cause; }
+    });
+  };
+
+  const hasMentions = prompt.includes("@");
+  const mentions = explicitEntityMentions(prompt, entitiesReady ? entities : []);
+  const referenceField = generator?.fields.find(f => f.key === "reference_images" && f.type === "images");
+  const referenceMode = generator?.mode.toUpperCase() === "REF2VA" && Boolean(referenceField);
+  const referenceScope = JSON.stringify([projectId, item.id, selectionRef]);
+  const [referenceState, setReferenceState] = useState<{ scope: string; view: VideoInputView }>();
+  const [referenceError, setReferenceError] = useState<string>();
+  const [referenceRev, setReferenceRev] = useState(0);
+  const referenceEpoch = useRef(0);
+  const notifyingInputs = useRef(false);
+  const referenceView = referenceState?.scope === referenceScope ? referenceState.view : undefined;
+  useEffect(() => subscribeVideoInputInvalidation(changed => {
+    if (changed === projectId && !notifyingInputs.current) setReferenceRev(v => v + 1);
+  }), [projectId]);
+  useEffect(() => {
+    const token = ++referenceEpoch.current;
+    setReferenceState(undefined); setReferenceError(undefined);
+    if (hasMentions && referenceMode && selectionRef) {
+      void productClient.creation.inputsGet({ projectId, shotId: item.id, selectionRef }).then(view => {
+        if (token !== referenceEpoch.current) return;
+        if (view.selectionRef !== selectionRef) { setReferenceError("参考输入身份已变化，请重新读取。"); return; }
+        setReferenceState({ scope: referenceScope, view });
+      }).catch(cause => { if (token === referenceEpoch.current) setReferenceError(normalizeProductError(cause).message); });
+    }
+    return () => { ++referenceEpoch.current; };
+  }, [referenceScope, hasMentions, referenceMode, referenceRev]);
+  const referenceIds = referenceView?.inputs.filter(i => i.inputKey === "reference_images").sort((a, b) => a.ordinal - b.ordinal).map(i => i.assetId) ?? [];
+  const entityIds = mentions.entities.map(entityAvatarAssetId);
+  const combinedIds = [...new Set([...referenceIds, ...entityIds.filter((id): id is string => Boolean(id))])];
+  const overReferenceLimit = referenceField && "maxItems" in referenceField && referenceField.maxItems != null && combinedIds.length > referenceField.maxItems;
+  const entityIssue = !hasMentions ? undefined
+    : !entitiesReady ? "正在读取当前项目角色与场景；失败时请点击刷新角色与场景。"
+    : mentions.error ?? (!referenceMode ? `当前镜头仍使用 ${generator?.mode ?? "未设置"}；@角色/场景需要 REF2VA。请在本行明确切换生成器，修改项目默认不会替换已有镜头。`
+    : entityIds.some(id => !id) ? "引用的角色或场景尚未关联图片，请先在素材库添加图片。"
+    : referenceError ?? (!referenceView ? "正在读取当前 Recipe 的正式参考输入…"
+    : overReferenceLimit ? "角色与场景参考图超过当前 Recipe 上限，请调整引用或已有参考。"
+    : entityIds.some(id => !referenceIds.includes(id!)) ? "角色与场景图片尚未进入生成输入，请点击应用角色与场景参考图。" : undefined));
+  const canApplyReferences = hasMentions && entitiesReady && !mentions.error && referenceMode && referenceView && !referenceError && !overReferenceLimit && entityIds.length > 0 && entityIds.every(Boolean);
+  const applyReferences = () => {
+    if (disabled || !canApplyReferences || !referenceView || !selectionRef) return;
+    const token = scopeEpoch.current, epoch = referenceEpoch.current;
+    void run(async () => {
+      try {
+        const next = await productClient.creation.inputsSave({ selection: { projectId, shotId: item.id, selectionRef }, expected: referenceView.token,
+          inputs: [...referenceView.inputs.filter(i => i.inputKey !== "reference_images"), ...combinedIds.map((assetId, ordinal) => ({ inputKey: "reference_images" as const, ordinal, assetId }))] });
+        if (token !== scopeEpoch.current || epoch !== referenceEpoch.current) return;
+        if (next.selectionRef !== selectionRef) throw new Error("Reference selection changed");
+        setReferenceState({ scope: referenceScope, view: next });
+        notifyingInputs.current = true; try { invalidateVideoInputs(projectId); } finally { notifyingInputs.current = false; }
+        setNote("角色与场景参考图已保存；尚未创建生成任务。");
+      } catch (cause) { if (token === scopeEpoch.current && epoch === referenceEpoch.current) setReferenceError(normalizeProductError(cause).message); throw cause; }
+    });
+  };
   const [undo, setUndo] = useState<{ values?: Scalars; boundIds?: string[] }>();
   const save = (patch: { prompt?: string; values?: Scalars }) => productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", ...patch, ...(patch.values ? { selectionRef: selectionRef ?? generator?.selectionRef } : {}) });
   const preview = useMemo(() => recognize(prompt, entities, bound, generator, current), [prompt, entities, bound, generator, current]);
@@ -244,12 +323,12 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
     saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; setDuration(String(value)); });
   };
   const noGen = !generator ? "请先在详情中选择生成器" : undefined;
-  const generationDraft = JSON.stringify([projectId, item.id, selectionRef, prompt, item.shot?.values]);
+  const generationDraft = JSON.stringify([projectId, item.id, selectionRef, prompt, item.shot?.values, referenceView?.token]);
   const generationAttempt = useRef<{ draft: string; key: string } | null>(null);
   if (generationAttempt.current?.draft !== generationDraft) generationAttempt.current = null;
   const latestGenerationDraft = useRef(generationDraft);
   latestGenerationDraft.current = generationDraft;
-  const generate = () => selectionRef && item.shot && void run(async () => {
+  const generate = () => !disabled && !entityIssue && selectionRef && item.shot && void run(async () => {
     const token = scopeEpoch.current;
     const isCurrent = () => token === scopeEpoch.current && generationDraft === latestGenerationDraft.current;
     const values = { ...item.shot!.values, prompt: { type: "string" as const, value: prompt } };
@@ -283,7 +362,7 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
     </div>
     <div className="shot-row-actions">
-      <button type="button" className="primary" disabled={disabled || !selectionRef} title={selectionRef ? "写入生产队列并生成" : "请先在详情中选择生成器"} onClick={generate}>生成视频</button>
+      <button type="button" className="primary" disabled={disabled || !selectionRef || Boolean(entityIssue)} title={entityIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate}>生成视频</button>
       <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">素材库中还没有角色与场景</li>}</ul>
     </div>
     <div className="shot-row-prompt">
@@ -291,6 +370,13 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
         onChange={e => setPrompt(e.target.value)} onBlur={savePrompt} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
+      {hasMentions && <section aria-label="角色与场景生成引用" className="composer-entity-references">
+        <p>{entityIssue ?? "角色与场景已保存到正式参考输入，生成时按以下真实顺序引用。"}</p>
+        {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "尚未应用"}</small>; })}
+        <button type="button" disabled={disabled || !canApplyReferences || !entityIssue} onClick={applyReferences}>应用角色与场景参考图</button>
+        {referenceMode && <button type="button" disabled={disabled} onClick={() => setReferenceRev(v => v + 1)}>重新读取参考输入</button>}
+        <small>使用封面图（无封面时使用第一张关联图）；保留已有参考顺序及音视频输入，不复制首尾帧，不自动生成。</small>
+      </section>}
       <dl className="shot-row-structured" aria-label="分镜描述">
         <div><dt>镜号</dt><dd>{item.ordinal + 1}</dd></div>
         <div><dt>时长</dt><dd>{shotDuration(item.shot)}</dd></div>
@@ -305,6 +391,11 @@ function ShotRowCard({ projectId, item, entities, urls, busy, generator, onOpen,
       {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
     </div>
     <div className="shot-row-fields">
+      <label><span>生成器</span><select aria-label={`${item.name} 生成器`} value={pendingSelection ?? selectionRef ?? ""} disabled={disabled} onChange={e => chooseGenerator(e.target.value)}>
+        {(!selectionRef || !generators.some(g => g.selectionRef === selectionRef)) && <option value={selectionRef ?? ""} disabled>{selectionRef ? "当前生成器不可用" : "请选择本镜头的生成器"}</option>}
+        {generators.map(g => <option key={g.selectionRef} value={g.selectionRef} disabled={!g.availability}>{g.mode.toUpperCase()} · {g.name}</option>)}
+      </select></label>
+      {pendingSelection && !working && <button type="button" onClick={onChanged}>刷新已保存的镜头设置</button>}
       <label><span>镜号</span><output>{item.ordinal + 1}</output></label>
       <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => setName(e.target.value)} onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
       {durationField

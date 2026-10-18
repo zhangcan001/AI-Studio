@@ -7,6 +7,7 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./bound
 export const R1_METADATA_BASE = "0c3be97a88d5458fc16851bfa19dc10172007886";
 export const R1_METADATA_PROOF = "docs/architecture/ui-phase7b-r1-metadata-successor.json";
 export const R1_METADATA_CHANGED = [
+  "src/product/errors.ts",
   "vite.config.ts",
   "src/app/UiPhase7ASourceReadyBoundary.test.ts",
   "src/app/MiniMaxVideoPhase2Boundary.test.ts",

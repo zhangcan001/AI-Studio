@@ -33,7 +33,7 @@
     },
     "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
       "beforeHash": null,
-      "afterHash": "df5f92662a59269d5eaae835f56aae9ac9d204c8a425fd2c167fc009ee11d461"
+      "afterHash": "79c5eaf36df5cb290f5aa0ad81f5c381b08f43710d1a213652870ab5e32ff8aa"
     },
     "scripts/ui-phase7b-backup-prompt-successor-guard.mjs": {
       "beforeHash": "3ffffc11d3a12c331a8f9634ac1f09e3d665fdec640eab0e69a114f012d25e32",
@@ -41,7 +41,7 @@
     },
     "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "acb61d1d12e8b602fd2fbc34a292af43a986b93763ad70048d2f14c883852fee"
+      "afterHash": "329a6e3633cff3a6ca3e06c4b770337f3fb1944f03e70309758d820e4d067d59"
     },
     "src-tauri/Cargo.toml": {
       "beforeHash": "c36f433438eee7550b8340f91997f87e3e88a3e12da15e25aef21e1092918f36",
@@ -325,11 +325,11 @@
     },
     "src/features/create/StoryboardShotRows.test.tsx": {
       "beforeHash": null,
-      "afterHash": "604bea04d71c0a7efbe67dc64155625c12529293d72190d9fa7b4ec85ea7a996"
+      "afterHash": "e91dc8f9caec4212a9c72524837d2c9e362a8428aaaa28f862da7fd7f59dfb4b"
     },
     "src/features/create/StoryboardShotRows.tsx": {
       "beforeHash": null,
-      "afterHash": "2a6a949d990eca1e9ecb3048e212ad2943febbfd844a7d5f9175f2e59953ccf9"
+      "afterHash": "e5febcd56130a2d67ff6ab1ced19c8c9ec5d1e840d7acfcff2e2064296c75d57"
     },
     "src/features/create/StoryboardWorkbench.test.tsx": {
       "beforeHash": null,
@@ -426,6 +426,10 @@
     "src/product/client.ts": {
       "beforeHash": "66f3090ad55f6e7eb100851606e6baa85c59abf357ad9a15250f7e4da534e4db",
       "afterHash": "4078434762efe7be6d4d3d74ff7dca9c255642cfe9e2bfe3c3bb77777f50eb72"
+    },
+    "src/product/errors.ts": {
+      "beforeHash": "65c3ff2ece0851c1984cbafe8da799e55a1a8f25e651ced679338652f6e5941d",
+      "afterHash": "1cef00ecd7d4b3e0c9a9fe897aef4ab6d23146697fd03c8286269a515b55f923"
     },
     "src/product/transport.ts": {
       "beforeHash": "4e391fe2f1bc3ebc5f31e9b4ee61d4a88e7c271306258a5c3311f07a73a76a73",
