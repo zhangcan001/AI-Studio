@@ -145,6 +145,9 @@ export function styleBoundary(root,manifest) {
   // manifests and every other CSS boundary stay frozen. No new styles exemption.
   const currentStyles={...manifest.styleSnapshots};
   if(!checkpoint.violations.length && checkpoint.afterHashes['src/features/library/LibraryPage.css'])currentStyles['src/features/library/LibraryPage.css']=checkpoint.afterHashes['src/features/library/LibraryPage.css'];
+  // The desktop successor hashes this existing quality layer exactly. This
+  // advances no historical manifest, specificity budget, or new-CSS exemption.
+  if(!checkpoint.violations.length && checkpoint.afterHashes['src/styles/studioQuality.css'])currentStyles['src/styles/studioQuality.css']=checkpoint.afterHashes['src/styles/studioQuality.css'];
   // UI Phase3 advances only these reviewed files, after the complete live
   // successor chain has validated their bytes. All other CSS stays frozen.
   if(!checkpoint.violations.length)for(const path of ['src/app/v3/AppShellV3.css','src/features/create/CreatePage.css','src/styles/studioTokens.css','src/features/runs/RunsPage.css']) {
