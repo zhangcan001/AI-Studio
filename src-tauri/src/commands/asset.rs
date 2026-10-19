@@ -509,6 +509,78 @@ pub async fn asset_pick_and_import_source_assets(
     })
 }
 
+/// Imports a batch of image files for use as character, scene, or prop references.
+/// The caller creates the corresponding story entities after the assets are persisted.
+pub async fn asset_pick_and_import_story_entity_images(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<AssetSourceImportBatchView, AppError> {
+    super::validate_project_id(&project_id)?;
+    let Some(files) = app_handle
+        .dialog()
+        .file()
+        .add_filter("图像文件", &["png", "jpg", "jpeg", "webp"])
+        .blocking_pick_files()
+    else {
+        return Ok(AssetSourceImportBatchView {
+            imported: Vec::new(),
+            failed: Vec::new(),
+            cancelled: true,
+        });
+    };
+
+    let mut paths = Vec::new();
+    let mut failed = Vec::new();
+    for file in files {
+        let display_name = selected_file_display_name(&file);
+        let path = match file.into_path() {
+            Ok(path) => path,
+            Err(_) => {
+                failed.push(AssetImportFailureView {
+                    display_name,
+                    error: "无法读取所选文件，请重新选择后重试。".to_owned(),
+                });
+                continue;
+            }
+        };
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "webp") {
+            failed.push(AssetImportFailureView {
+                display_name,
+                error: "仅支持 PNG、JPG、JPEG、WebP 图像文件。".to_owned(),
+            });
+            continue;
+        }
+        paths.push(path);
+    }
+
+    let result = state
+        .assets
+        .source_import
+        .import_files(&project_id, &paths)
+        .await;
+    failed.extend(
+        result
+            .failed
+            .into_iter()
+            .map(|failure| AssetImportFailureView {
+                display_name: failure.display_name,
+                error: failure.error,
+            }),
+    );
+
+    Ok(AssetSourceImportBatchView {
+        imported: result.imported.into_iter().map(AssetView::from).collect(),
+        failed,
+        cancelled: false,
+    })
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub async fn asset_pick_and_import_source_folder(
     app_handle: AppHandle,

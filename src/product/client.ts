@@ -18,6 +18,7 @@ export const productClient = {
         coverAssetId: request.coverAssetId ?? null, imageAssetIds: request.imageAssetIds,
       }}),
     delete: (projectId: string, id: string) => productRequest("product_story_entity_delete", { projectId, id }),
+    importImages: (projectId: string) => productRequest("product_story_entity_images_import", { projectId }),
     listForShot: (projectId: string, shotId: string) => productRequest("product_story_entity_list_for_shot", { projectId, shotId }),
     bindShot: (projectId: string, shotId: string, entityIds: string[]) =>
       productRequest("product_story_entity_bind_shot", { request: { projectId, shotId, entityIds } }),

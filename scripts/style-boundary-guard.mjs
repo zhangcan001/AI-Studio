@@ -141,6 +141,11 @@ export function styleBoundary(root,manifest) {
   const ciBudgetSuccessor=uiPhase7CParentReader(root);
   violations.push(...checkpoint.violations,...ciBudgetSuccessor.violations);
   if(!checkpoint.violations.length)for(const [path,digest] of Object.entries(checkpoint.afterHashes))if(/^src\/.+\.tsx?$/.test(path))productionSnapshot[path]=digest;
+  // The current validated successor owns new source bytes; historical readers
+  // correctly omit files which did not exist in their projected parent tree.
+  if(!ciBudgetSuccessor.violations.length)for(const path of ciBudgetSuccessor.addedPaths) {
+    if(/^src\/.+\.tsx?$/.test(path)&&ciBudgetSuccessor.afterHashes[path])productionSnapshot[path]=ciBudgetSuccessor.afterHashes[path];
+  }
   for(const [path,digest] of Object.entries(productionSnapshot)) {
     const current=ciBudgetSuccessor.changedPaths.includes(path)?ciBudgetSuccessor.read(path):read(`${root}/${path}`);
     if(hash(current)!==digest)violations.push(`behavior:${path}`);
@@ -150,6 +155,7 @@ export function styleBoundary(root,manifest) {
   // manifests and every other CSS boundary stay frozen. No new styles exemption.
   const currentStyles={...manifest.styleSnapshots};
   if(!checkpoint.violations.length && checkpoint.afterHashes['src/features/library/LibraryPage.css'])currentStyles['src/features/library/LibraryPage.css']=checkpoint.afterHashes['src/features/library/LibraryPage.css'];
+  if(!ciBudgetSuccessor.violations.length && ciBudgetSuccessor.changedPaths.includes('src/features/library/LibraryPage.css') && ciBudgetSuccessor.afterHashes['src/features/library/LibraryPage.css'])currentStyles['src/features/library/LibraryPage.css']=ciBudgetSuccessor.afterHashes['src/features/library/LibraryPage.css'];
   // The desktop successor hashes this existing quality layer exactly. This
   // advances no historical manifest, specificity budget, or new-CSS exemption.
   if(!checkpoint.violations.length && checkpoint.afterHashes['src/styles/studioQuality.css'])currentStyles['src/styles/studioQuality.css']=checkpoint.afterHashes['src/styles/studioQuality.css'];

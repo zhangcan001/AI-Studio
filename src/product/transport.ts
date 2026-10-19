@@ -14,6 +14,7 @@ interface ProductCommands {
   product_story_entity_create: { args: { request: { projectId: string; kind: string; name: string; description: string; coverAssetId: string | null; imageAssetIds: string[] } }; result: import("../types/storyEntity").StoryEntity };
   product_story_entity_update: { args: { request: { projectId: string; id: string; name: string; description: string; coverAssetId: string | null; imageAssetIds: string[] } }; result: import("../types/storyEntity").StoryEntity };
   product_story_entity_delete: { args: { projectId: string; id: string }; result: void };
+  product_story_entity_images_import: { args: { projectId: string }; result: import("../types/storyEntity").StoryEntityImageImportBatch };
   product_story_entity_list_for_shot: { args: { projectId: string; shotId: string }; result: import("../types/storyEntity").StoryEntity[] };
   product_story_entity_bind_shot: { args: { request: { projectId: string; shotId: string; entityIds: string[] } }; result: import("../types/storyEntity").StoryEntity[] };
   product_library_tags_list: { args: { projectId: string }; result: import("./libraryTypes").LibraryTag[] };

@@ -78,14 +78,22 @@ it("sourceKind change clears cursor stack and pending generated responses cannot
  expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({sourceKind:"source",cursor:null}));
 });
 
-it("merges the legacy 角色/场景/道具/风格 category into one 角色与场景 entry and keeps legacy profiles reachable",async()=>{
+it("separates character, scene, and prop navigation while keeping legacy profiles reachable",async()=>{
   const navigate=vi.fn();render(<LibraryPage route={{kind:"library",projectId:"a",filter:"profiles"}} navigate={navigate}/>);await screen.findByText("first");
   const nav=screen.getByRole("navigation",{name:"资源分类"});
-  expect(within(nav).queryByRole("button",{name:/角色 \/ 场景 \/ 道具 \/ 风格/})).toBeNull();
-  const merged=within(nav).getAllByRole("button",{name:/角色与场景/});expect(merged).toHaveLength(1);expect(merged[0].getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getByRole("tab",{name:"旧设定 · 风格"}).getAttribute("aria-selected")).toBe("true");
-  fireEvent.click(screen.getByRole("tab",{name:"故事实体"}));
-  expect(await screen.findByRole("tab",{name:"故事实体",selected:true})).toBeTruthy();
-  fireEvent.click(screen.getByRole("tab",{name:"旧设定 · 风格"}));
+  expect(within(nav).getByRole("button",{name:"角色"})).toBeTruthy();
+  expect(within(nav).getByRole("button",{name:"场景"})).toBeTruthy();
+  expect(within(nav).getByRole("button",{name:"道具"})).toBeTruthy();
+  expect(within(nav).queryByRole("button",{name:/角色与场景/})).toBeNull();
+  fireEvent.click(within(nav).getByRole("button",{name:"角色"}));
+  expect(await screen.findByRole("region",{name:"角色管理"})).toBeTruthy();
+  expect(screen.getByRole("button",{name:"批量导入角色图片"})).toBeTruthy();
+  fireEvent.click(within(nav).getByRole("button",{name:"场景"}));
+  expect(await screen.findByRole("region",{name:"场景管理"})).toBeTruthy();
+  expect(screen.queryByRole("region",{name:"角色管理"})).toBeNull();
+  fireEvent.click(within(nav).getByRole("button",{name:"道具"}));
+  expect(await screen.findByRole("region",{name:"道具管理"})).toBeTruthy();
+  expect(screen.queryByRole("region",{name:"场景管理"})).toBeNull();
+  fireEvent.click(within(nav).getByRole("button",{name:"旧设定 · 风格"}));
   expect(navigate).toHaveBeenCalledWith({kind:"library",projectId:"a",filter:"profiles"});
 });

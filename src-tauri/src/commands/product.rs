@@ -81,6 +81,61 @@ pub async fn product_creation_assets_import(
     Ok(project_source_import(result))
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryEntityImageImportAssetView {
+    pub id: String,
+    pub name: String,
+    pub original_name: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryEntityImageImportView {
+    pub imported: Vec<StoryEntityImageImportAssetView>,
+    pub failed: Vec<super::asset::AssetImportFailureView>,
+    pub cancelled: bool,
+}
+
+fn project_story_entity_image_import(
+    result: super::asset::AssetSourceImportBatchView,
+) -> StoryEntityImageImportView {
+    StoryEntityImageImportView {
+        imported: result
+            .imported
+            .into_iter()
+            .map(|asset| StoryEntityImageImportAssetView {
+                id: asset.id,
+                name: asset.name,
+                original_name: asset.original_name,
+            })
+            .collect(),
+        // Import errors can contain local filesystem paths; only expose a safe message.
+        failed: result
+            .failed
+            .into_iter()
+            .map(|failure| super::asset::AssetImportFailureView {
+                display_name: failure.display_name,
+                error: "无法导入该图像；请确认文件可读且格式合法。".into(),
+            })
+            .collect(),
+        cancelled: result.cancelled,
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_story_entity_images_import(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<StoryEntityImageImportView, ProductError> {
+    let result =
+        super::asset::asset_pick_and_import_story_entity_images(app_handle, state, project_id)
+            .await
+            .map_err(ProductError::internal)?;
+    Ok(project_story_entity_image_import(result))
+}
+
 fn project_source_import(
     result: super::asset::AssetSourceImportBatchView,
 ) -> SourceInputImportView {
@@ -127,6 +182,25 @@ mod source_input_import_tests {
         assert!(!json.contains("C:/private"));
         assert!(!json.contains("diagnostic"));
         assert_eq!(view.failed.len(), 1);
+    }
+
+    #[test]
+    fn story_entity_image_import_hides_local_paths_and_keeps_display_names() {
+        let view = super::project_story_entity_image_import(
+            crate::commands::asset::AssetSourceImportBatchView {
+                imported: Vec::new(),
+                failed: vec![crate::commands::asset::AssetImportFailureView {
+                    display_name: "夜景.webp".into(),
+                    error: "read C:/private/source/夜景.webp: permission denied".into(),
+                }],
+                cancelled: false,
+            },
+        );
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(json.contains("夜景.webp"));
+        assert!(json.contains("无法导入该图像"));
+        assert!(!json.contains("C:/private"));
+        assert!(!json.contains("permission denied"));
     }
 }
 

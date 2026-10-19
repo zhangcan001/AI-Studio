@@ -15,6 +15,12 @@ describe("product facade client", () => {
     invokeCommand.mockResolvedValueOnce({items:[]});await productClient.library.list("project-a",query);
     expect(invokeCommand).toHaveBeenLastCalledWith("product_library_list",{projectId:"project-a",query});
   });
+  it("routes story entity image imports through the typed product transport", async () => {
+    const result = { imported: [{ id: "asset-a", name: "夜景", originalName: "夜景.webp" }], failed: [], cancelled: false };
+    invokeCommand.mockResolvedValueOnce(result);
+    expect(await productClient.storyEntities.importImages("project-a")).toEqual(result);
+    expect(invokeCommand).toHaveBeenCalledWith("product_story_entity_images_import", { projectId: "project-a" });
+  });
   it("phase5 target8 transports typed library details and preserves missing-resource errors", async () => {
     const query = { category: "prompts", keyword: "中文", cursor: null, limit: 20 } as const;
     const page = { items: [], nextCursor: null, coverage: "keyset-page", coverageMessage: "数据库分页" };

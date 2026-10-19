@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "ENTITY_CATEGORY_LIBRARY",
+  "parentHead": "3ad01c3191716c70ba3c2d99ac1eb4d210447679",
+  "planningParentHead": "3ad01c3191716c70ba3c2d99ac1eb4d210447679",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "typedIpcChanged": true,
+    "backendChanged": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/entity-category-library-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "2970c085b5dcb61408359b0ce3089eaad370feb9d2b08c840a625ff10310f871"
+    },
+    "scripts/style-boundary-guard.mjs": {
+      "beforeHash": "2d5bf0e9857ab7bf727d710f82ff44e02debcba14b2720e7802d82322a5ab782",
+      "afterHash": "af2f9c23307867ffcb63625bb9ab7bdddf3099ff0c335d97686796b906859bd2"
+    },
+    "scripts/testing/entity-category-library.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "d445f17f20bf66ba844176e797202385150f090c102d1015d91075fbaa2c68a5"
+    },
+    "scripts/workbench-poll-clock-successor-guard.mjs": {
+      "beforeHash": "84066671839e008749a65fd9883a925aa42054da8682a7a404861e83503b299e",
+      "afterHash": "348922361942fe24f7f3237d41dd9ae1215ab6412d36bcaec0fa2b45472fc408"
+    },
+    "src-tauri/src/commands/asset.rs": {
+      "beforeHash": "1d613f03ebdeacc9c41098458a303429c4b5b3fcd7d8f883b36ab4ca8d82f176",
+      "afterHash": "812ca901f45b07757f99fd6b1ac2f3c06799bc923e7e49a2348bd826223eccd9"
+    },
+    "src-tauri/src/commands/product.rs": {
+      "beforeHash": "1f83735e14d00b3ee68f53dae495b66a0348baa136946eac32b98d0e3de49bdf",
+      "afterHash": "6163dd3447e24631811833064318a975bab0efa367f16cef161699ac2ba245a5"
+    },
+    "src-tauri/src/lib.rs": {
+      "beforeHash": "2b892d59a0367c2197578965405e13786bc36dbeb8dd95ba03f1701f2889782f",
+      "afterHash": "64b314ee8dc877ec0b3f55e83be58d35bb3790ef126f953bcb7cb50634e36464"
+    },
+    "src/features/library/LibraryFindability.test.tsx": {
+      "beforeHash": "f1306e5d89ea6e95ffd7f83b40649021a7b26c5d1ec7fdc9b6ff69883d4587d8",
+      "afterHash": "c39e96a7c4c0eb068f99544331dd0bd422851b305696cf0d3361cb362f99d18c"
+    },
+    "src/features/library/LibraryPage.css": {
+      "beforeHash": "603da47dc2e2fb9534815836a5e9f55c377bb387e4543b2a76412d687366b890",
+      "afterHash": "1d9e2668a03ea066a655cc417f44670efc147747636ee2518b6759170cbdb813"
+    },
+    "src/features/library/LibraryPage.tsx": {
+      "beforeHash": "1aef2d7ff0936e87cd2987d4de4880c362c2c640e335ac615609b9ee3f3facbb",
+      "afterHash": "bb3b4e68b9ad2126388982d697555bf10b85d1998fd2899fd13547e0b219c1cd"
+    },
+    "src/features/library/StoryEntityCategorySection.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "af7c1a7fe21e6e058d4144c7f99782ae18c9486bf043903f0a381e71ca544445"
+    },
+    "src/features/library/StoryEntityCategorySection.tsx": {
+      "beforeHash": null,
+      "afterHash": "ddcc35a73bc4b955d26608fbfc89f8cfa63c9f1f6a76cee4c25514ba6955d761"
+    },
+    "src/features/library/libraryModel.ts": {
+      "beforeHash": "1e638fa7cea3f6b444dff126060bdc3c469cb03b25f45cfb5c2c3c77bbe28fed",
+      "afterHash": "3035a2701092716e709b4d6e8dd4e0da2dedc7ac534ced3df915905121f62435"
+    },
+    "src/product/client.test.ts": {
+      "beforeHash": "54ce83b70a33894eb4f8264deacf8d55ce9338853e7b2a67b7ab485f785caa43",
+      "afterHash": "bcbfb8fa4014fc2d513bfb5d34760c3c9f9fb18992421259d34639f23eb97e3b"
+    },
+    "src/product/client.ts": {
+      "beforeHash": "c95e557da06e20b061ee079f9aa7dcfddcfc436ecbbb25ea9593ec59f6ee3cb3",
+      "afterHash": "0b444cfae78311aae81f948d2322b4565e4555afa31a4868ad9ebafe79c485c6"
+    },
+    "src/product/transport.ts": {
+      "beforeHash": "1659cc52d29beae23a7d3f36dd5f4f7975561930110e445efb4a55dd49eb7cc5",
+      "afterHash": "3566bc6f4754ed8ef63f66b60ca9b303be5ee9a0b01e272e6a655592d320d82a"
+    },
+    "src/types/storyEntity.ts": {
+      "beforeHash": "1bc14dc93060ad36efa16666fccb326d99cbd72b78b711e76e0074430a21149e",
+      "afterHash": "0f5cdf0abb01397bba0e4fe4b21829d6e7f98372e165c47a15a4640d61a1b064"
+    }
+  }
+}

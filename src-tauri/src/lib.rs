@@ -1252,6 +1252,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::product::product_creation_inputs_get,
             commands::product::product_creation_inputs_save,
             commands::product::product_creation_assets_import,
+            commands::product::product_story_entity_images_import,
             commands::product::product_creation_readiness_get,
             commands::product::product_creation_generate,
             commands::product::product_creation_shot_create,

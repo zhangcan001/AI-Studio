@@ -19,6 +19,18 @@ export interface StoryEntityUpsert {
   imageAssetIds: string[];
 }
 
+export interface StoryEntityImageImportAsset {
+  id: string;
+  name: string;
+  originalName: string;
+}
+
+export interface StoryEntityImageImportBatch {
+  imported: StoryEntityImageImportAsset[];
+  failed: Array<{ displayName: string; error: string }>;
+  cancelled: boolean;
+}
+
 /** Window event fired after a story entity is created, updated or deleted. */
 export const STORY_ENTITIES_CHANGED = "ai-studio:story-entities-changed";
 
