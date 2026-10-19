@@ -8,6 +8,27 @@ export const PHASE7C_PARENT = "f3b8c6708dd9b18702b9effd61fdf3d407dd179b";
 export const PHASE7C_PROOF = "docs/architecture/ui-phase7c-frontend-ci-budget-successor.json";
 export const PHASE7C_CHANGED = [
   "scripts/style-boundary-guard.mjs",
+  // Pure memoization of immutable parent blobs and commit:path reads so the
+  // fail-closed 90s Windows Boundary budget holds. No check is removed.
+  "scripts/ui-phase5-ci-repair-successor-guard.mjs",
+  "scripts/ui-phase5a-storyboard-successor-guard.mjs",
+  "scripts/ui-phase5b-mixed-video-successor-guard.mjs",
+  "scripts/ui-phase5c-review-successor-guard.mjs",
+  "scripts/ui-phase5d-ci-timeout-successor-guard.mjs",
+  "scripts/ui-phase5e-ci-shard-successor-guard.mjs",
+  "scripts/ui-phase5f-ci-memory-successor-guard.mjs",
+  "scripts/ui-phase5g-ci-timeout-successor-guard.mjs",
+  "scripts/ui-phase5h-ci-timeout-budget-successor-guard.mjs",
+  "scripts/ui-phase5i-ci-worker-teardown-successor-guard.mjs",
+  "scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs",
+  "scripts/ui-phase6a-library-source-successor-guard.mjs",
+  "scripts/ui-phase6b-library-shot-bind-successor-guard.mjs",
+  "scripts/ui-phase6c-runs-queue-unify-successor-guard.mjs",
+  "scripts/ui-phase6d-scale-integrity-successor-guard.mjs",
+  "scripts/ui-phase7a-source-ready-successor-guard.mjs",
+  "scripts/ui-phase7b-ref2va-empty-readiness-successor-guard.mjs",
+  "scripts/ui-phase7b-tsv-preview-successor-guard.mjs",
+  "scripts/ui-phase7b-tsv-receipt-eligibility-successor-guard.mjs",
   "scripts/workbench-visual-refinement-successor-guard.mjs",
   "src/app/ReadinessLifecycleBoundary.test.ts",
   "src/app/UiPhase5CiRepairBoundary.test.ts",
@@ -82,8 +103,15 @@ function walk(root, dir) {
 function validate(root, override) {
   const workspace = resolve(root), violations = [], fail = id => violations.push(`ui-phase7c-frontend-ci-budget-${id}`);
   const parent = facts(workspace, PHASE7C_PARENT);
-  const live = path => canonical(override && Object.hasOwn(override, path)
-    ? override[path] : readFileSync(join(workspace, path), "utf8"));
+  // Every predecessor reads through this projection. Read each live file once per
+  // validation; the outer cachedBoundary session still re-hashes the live tree
+  // afterwards and rejects any drift that happens while validation runs.
+  const liveBytes = new Map();
+  const live = path => {
+    if (override && Object.hasOwn(override, path)) return canonical(override[path]);
+    if (!liveBytes.has(path)) liveBytes.set(path, canonical(readFileSync(join(workspace, path), "utf8")));
+    return liveBytes.get(path);
+  };
   const scope = [...PHASE7C_CHANGED, ...PHASE7C_ADDED].sort();
   const denied = () => ({ violations, changedPaths: [], addedPaths: [], afterHashes: {},
     read: path => canonical(readFileSync(join(workspace, path), "utf8")) });

@@ -1,6 +1,6 @@
 // Authorize Phase 7A source-ready gate fixes before replaying Phase6D or older proofs.
 // Historical manifests, Runtime Package bytes, migrations and BACKUP_VERSION stay immutable.
-import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 import { uiPhase7BParentReader } from './ui-phase7b-ref2va-empty-readiness-successor-guard.mjs';
 import { phase7BHydrationFixtureFiles } from './ui-phase7b-workspace-hydration-successor-guard.mjs';
 import { createHash } from 'node:crypto';
@@ -159,9 +159,15 @@ const normalize = text => text.replaceAll('\r\n','\n');
 export const phase7AHash = text => createHash('sha256').update(normalize(text)).digest('hex');
 const rawHash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const phase7AAggregate = (paths, read) => phase7AHash(paths.map(p => `${p}\n${read(p)}`).join('\n'));
+// Immutable parent aggregates are pure functions of verified parent blobs.
+const parentAggregates=new WeakMap();
+const parentAggregate=(paths,parent)=>{let memo=parentAggregates.get(parent);if(!memo)parentAggregates.set(parent,memo=new Map());const key=paths.join('\n');if(!memo.has(key))memo.set(key,phase7AAggregate(paths,parent.read));return memo.get(key);};
 const parents = new Map();
 export function phase7AParentFacts(root) {
-  if (parents.has(root)) return parents.get(root);
+  // Immutable parent facts depend only on the verified object store, not the
+  // fixture root; owned fixtures sharing one store share one parsed snapshot.
+  const store = immutableGitStoreIdentity(root);
+  if (parents.has(store)) return parents.get(store);
   const paths = immutableGit('git',['ls-tree','-r','--name-only',PHASE7A_PARENT],{cwd:root,encoding:'utf8'})
     .trim().split(/\r?\n/).filter(p => configs.includes(p) || directories.some(dir => p.startsWith(dir+'/'))) .sort();
   const bytes = immutableGit('git',['cat-file','--batch'],{
@@ -176,8 +182,8 @@ export function phase7AParentFacts(root) {
     blobs.set(p,bytes.subarray(start,start+length));offset=start+length+1;
   }
   if (offset !== bytes.length) throw Error('Phase7A immutable trailing bytes');
-  const facts={paths,read:p=>normalize(blobs.get(p).toString('utf8')),raw:p=>blobs.get(p)};
-  parents.set(root,facts);return facts;
+  const facts={paths,read:(texts=>p=>{if(!texts.has(p))texts.set(p,normalize(blobs.get(p).toString('utf8')));return texts.get(p);})(new Map()),raw:p=>blobs.get(p)};
+  parents.set(store,facts);return facts;
 }
 function files(root,dir) {
   return readdirSync(join(root,dir),{withFileTypes:true}).flatMap(entry=>{
@@ -235,8 +241,8 @@ function validate(root,override) {
       const current=[...base,...PHASE7A_ADDED.filter(p=>p.startsWith(dir+'/')&&pattern.test(p))].sort();
       const untouched=base.filter(p=>!PHASE7A_EXISTING.includes(p)),record=proof[name];
       if(record?.beforeFiles!==base.length||record?.afterFiles!==current.length
-        ||record?.beforeAggregateHash!==phase7AAggregate(base,parent.read)
-        ||record?.untouchedAggregateHash!==phase7AAggregate(untouched,parent.read)
+        ||record?.beforeAggregateHash!==parentAggregate(base,parent)
+        ||record?.untouchedAggregateHash!==parentAggregate(untouched,parent)
         ||record?.afterAggregateHash!==phase7AAggregate(current,read))fail('aggregate:'+name);
     }
     const baselines=JSON.parse(parent.read('docs/architecture/minimax-video-phase2.json')).runtimeByteBaselines;

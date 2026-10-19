@@ -1,6 +1,6 @@
 // Authorize the Phase5D CI performance fix before replaying Phase5C or older proofs.
 // Nothing in the historical manifests or Runtime Package bytes may be rewritten.
-import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 import { uiPhase5EParentReader, phase5EFixtureFiles } from './ui-phase5e-ci-shard-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -42,9 +42,15 @@ const normalize = text => text.replaceAll('\r\n','\n');
 export const phase5DHash = text => createHash('sha256').update(normalize(text)).digest('hex');
 const rawHash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const phase5DAggregate = (paths, read) => phase5DHash(paths.map(p => `${p}\n${read(p)}`).join('\n'));
+// Immutable parent aggregates are pure functions of verified parent blobs.
+const parentAggregates=new WeakMap();
+const parentAggregate=(paths,parent)=>{let memo=parentAggregates.get(parent);if(!memo)parentAggregates.set(parent,memo=new Map());const key=paths.join('\n');if(!memo.has(key))memo.set(key,phase5DAggregate(paths,parent.read));return memo.get(key);};
 const parents = new Map();
 export function phase5DParentFacts(root) {
-  if (parents.has(root)) return parents.get(root);
+  // Immutable parent facts depend only on the verified object store, not the
+  // fixture root; owned fixtures sharing one store share one parsed snapshot.
+  const store = immutableGitStoreIdentity(root);
+  if (parents.has(store)) return parents.get(store);
   const paths = immutableGit('git',['ls-tree','-r','--name-only',PHASE5D_PARENT],{cwd:root,encoding:'utf8'})
     .trim().split(/\r?\n/).filter(p => configs.includes(p) || directories.some(dir => p.startsWith(dir+'/'))).sort();
   const bytes = immutableGit('git',['cat-file','--batch'],{
@@ -59,8 +65,8 @@ export function phase5DParentFacts(root) {
     blobs.set(p,bytes.subarray(start,start+length));offset=start+length+1;
   }
   if (offset !== bytes.length) throw Error('Phase5D immutable trailing bytes');
-  const facts={paths,read:p=>normalize(blobs.get(p).toString('utf8')),raw:p=>blobs.get(p)};
-  parents.set(root,facts);return facts;
+  const facts={paths,read:(texts=>p=>{if(!texts.has(p))texts.set(p,normalize(blobs.get(p).toString('utf8')));return texts.get(p);})(new Map()),raw:p=>blobs.get(p)};
+  parents.set(store,facts);return facts;
 }
 function files(root,dir) {
   return readdirSync(join(root,dir),{withFileTypes:true}).flatMap(entry=>{
@@ -118,8 +124,8 @@ function validate(root,override) {
       const current=[...base,...PHASE5D_ADDED.filter(p=>p.startsWith(dir+'/')&&pattern.test(p))].sort();
       const untouched=base.filter(p=>!PHASE5D_EXISTING.includes(p)),record=proof[name];
       if(record?.beforeFiles!==base.length||record?.afterFiles!==current.length
-        ||record?.beforeAggregateHash!==phase5DAggregate(base,parent.read)
-        ||record?.untouchedAggregateHash!==phase5DAggregate(untouched,parent.read)
+        ||record?.beforeAggregateHash!==parentAggregate(base,parent)
+        ||record?.untouchedAggregateHash!==parentAggregate(untouched,parent)
         ||record?.afterAggregateHash!==phase5DAggregate(current,read))fail('aggregate:'+name);
     }
     const baselines=JSON.parse(parent.read('docs/architecture/minimax-video-phase2.json')).runtimeByteBaselines;

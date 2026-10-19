@@ -1,6 +1,6 @@
 // Authorize Phase 6D scale/integrity/E2E-mock rollup before replaying Phase6C or older proofs.
 // Historical manifests, Runtime Package bytes, migrations and BACKUP_VERSION stay immutable.
-import { cachedBoundary, immutableGit } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -45,9 +45,15 @@ const normalize = text => text.replaceAll('\r\n','\n');
 export const phase6DHash = text => createHash('sha256').update(normalize(text)).digest('hex');
 const rawHash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const phase6DAggregate = (paths, read) => phase6DHash(paths.map(p => `${p}\n${read(p)}`).join('\n'));
+// Immutable parent aggregates are pure functions of verified parent blobs.
+const parentAggregates=new WeakMap();
+const parentAggregate=(paths,parent)=>{let memo=parentAggregates.get(parent);if(!memo)parentAggregates.set(parent,memo=new Map());const key=paths.join('\n');if(!memo.has(key))memo.set(key,phase6DAggregate(paths,parent.read));return memo.get(key);};
 const parents = new Map();
 export function phase6DParentFacts(root) {
-  if (parents.has(root)) return parents.get(root);
+  // Immutable parent facts depend only on the verified object store, not the
+  // fixture root; owned fixtures sharing one store share one parsed snapshot.
+  const store = immutableGitStoreIdentity(root);
+  if (parents.has(store)) return parents.get(store);
   const paths = immutableGit('git',['ls-tree','-r','--name-only',PHASE6D_PARENT],{cwd:root,encoding:'utf8'})
     .trim().split(/\r?\n/).filter(p => configs.includes(p) || directories.some(dir => p.startsWith(dir+'/'))) .sort();
   const bytes = immutableGit('git',['cat-file','--batch'],{
@@ -62,8 +68,8 @@ export function phase6DParentFacts(root) {
     blobs.set(p,bytes.subarray(start,start+length));offset=start+length+1;
   }
   if (offset !== bytes.length) throw Error('Phase6D immutable trailing bytes');
-  const facts={paths,read:p=>normalize(blobs.get(p).toString('utf8')),raw:p=>blobs.get(p)};
-  parents.set(root,facts);return facts;
+  const facts={paths,read:(texts=>p=>{if(!texts.has(p))texts.set(p,normalize(blobs.get(p).toString('utf8')));return texts.get(p);})(new Map()),raw:p=>blobs.get(p)};
+  parents.set(store,facts);return facts;
 }
 function files(root,dir) {
   return readdirSync(join(root,dir),{withFileTypes:true}).flatMap(entry=>{
@@ -121,8 +127,8 @@ function validate(root,override) {
       const current=[...base,...PHASE6D_ADDED.filter(p=>p.startsWith(dir+'/')&&pattern.test(p))].sort();
       const untouched=base.filter(p=>!PHASE6D_EXISTING.includes(p)),record=proof[name];
       if(record?.beforeFiles!==base.length||record?.afterFiles!==current.length
-        ||record?.beforeAggregateHash!==phase6DAggregate(base,parent.read)
-        ||record?.untouchedAggregateHash!==phase6DAggregate(untouched,parent.read)
+        ||record?.beforeAggregateHash!==parentAggregate(base,parent)
+        ||record?.untouchedAggregateHash!==parentAggregate(untouched,parent)
         ||record?.afterAggregateHash!==phase6DAggregate(current,read))fail('aggregate:'+name);
     }
     const baselines=JSON.parse(parent.read('docs/architecture/minimax-video-phase2.json')).runtimeByteBaselines;
