@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./boundary-validation-cache.mjs";
 
+import { desktopVisualParentReader, desktopVisualFixtureFiles, desktopVisualScopeSince, DESKTOP_VISUAL_BASE } from './desktop-visual-refinement-successor-guard.mjs';
+
 export const STANDARD_REFERENCE_BASE = "5dd2cb247ff9bbe10be7a2bf42016c7f3a2d0472";
 export const STANDARD_REFERENCE_PROOF = "docs/architecture/h3-standard-reference-successor.json";
 export const STANDARD_REFERENCE_CHANGED = [
@@ -76,10 +78,11 @@ export function standardReferenceScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...STANDARD_REFERENCE_CHANGED, ...STANDARD_REFERENCE_ADDED, STANDARD_REFERENCE_PROOF,
+    ...desktopVisualScopeSince(root, DESKTOP_VISUAL_BASE),
   ])].sort();
 }
 export function standardReferenceFixtureFiles(root) {
-  return [...facts(root, STANDARD_REFERENCE_BASE).paths, ...STANDARD_REFERENCE_ADDED, STANDARD_REFERENCE_PROOF];
+  return [...new Set([...facts(root, STANDARD_REFERENCE_BASE).paths, ...STANDARD_REFERENCE_ADDED, STANDARD_REFERENCE_PROOF, ...desktopVisualFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -88,10 +91,10 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, STANDARD_REFERENCE_BASE);
   const fail = id => violations.push("h3-standard-reference-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(STANDARD_REFERENCE_PROOF));
@@ -104,10 +107,10 @@ function validate(root, override) {
     const allowed = [...scope, STANDARD_REFERENCE_PROOF].sort();
     const expected = [...parent.paths, ...STANDARD_REFERENCE_ADDED, STANDARD_REFERENCE_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !successor.addedPaths.includes(p) && !expected.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -128,13 +131,17 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: STANDARD_REFERENCE_CHANGED,
-    addedPaths: [...STANDARD_REFERENCE_ADDED, STANDARD_REFERENCE_PROOF],
-    afterHashes: Object.fromEntries([...STANDARD_REFERENCE_CHANGED, ...STANDARD_REFERENCE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...STANDARD_REFERENCE_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...STANDARD_REFERENCE_ADDED, STANDARD_REFERENCE_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...STANDARD_REFERENCE_CHANGED, ...STANDARD_REFERENCE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => STANDARD_REFERENCE_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function standardReferenceParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "standardReferenceParentReader", undefined,
-    () => validate(root, undefined), STANDARD_REFERENCE_PROOF);
+  const successor = desktopVisualParentReader(root);
+  const check = () => {
+    const historical = validate(root, override, successor);
+    return { ...historical, violations: [...successor.violations, ...historical.violations] };
+  };
+  if (override) return check();
+  return cachedBoundary(root, "standardReferenceParentReader", undefined, check, STANDARD_REFERENCE_PROOF);
 }

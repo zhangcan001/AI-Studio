@@ -1,6 +1,7 @@
 // Phase 7B TSV receipt-eligibility repair successor; frozen TSV preview proof stays immutable.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { immutableGit } from "./boundary-validation-cache.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { uiPhase7BWorkspaceHydrationParentReader, phase7BHydrationScopeSince } from "./ui-phase7b-workspace-hydration-successor-guard.mjs";
@@ -24,8 +25,18 @@ const sha = value => createHash("sha256").update(canonical(value)).digest("hex")
 function git(root, args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
 }
+// Immutable commit:path bytes resolve through the shared verified object cache
+// (replace refs disabled); missing or non-blob paths still throw like git show.
+function immutableShow(root, commit, path) {
+  const bytes = immutableGit("git", ["cat-file", "--batch"], { cwd: root, input: commit + ":" + path + "\n", maxBuffer: 16 * 1024 * 1024 });
+  const end = bytes.indexOf(10), header = /^([a-f0-9]{40}) blob (\d+)$/.exec(bytes.subarray(0, end).toString());
+  if (!header) throw Error("immutable blob missing: " + path);
+  const start = end + 1, size = Number(header[2]);
+  if (bytes.length !== start + size + 1 || bytes[start + size] !== 10) throw Error("immutable blob boundary: " + path);
+  return bytes.subarray(start, start + size).toString("utf8");
+}
 function ancestor(root, path) {
-  return canonical(git(root, ["show", PHASE7B_RECEIPT_BASE + ":" + path]));
+  return canonical(immutableShow(root, PHASE7B_RECEIPT_BASE, path));
 }
 
 export function uiPhase7BTsvReceiptParentReader(root, override = undefined) {

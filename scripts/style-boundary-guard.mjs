@@ -10,6 +10,7 @@ export const read = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 export const hash = s => createHash('sha256').update(s).digest('hex');
 import { phase13Boundary } from './phase13-observability-guard.mjs';
 import { m1ParentReader } from './m1-readiness-boundary-guard.mjs';
+import { uiPhase7CParentReader } from './ui-phase7c-frontend-ci-budget-successor-guard.mjs';
 export function files(root) {
   return readdirSync(root, { withFileTypes:true }).flatMap(e => e.isDirectory() ? files(`${root}/${e.name}`) : [`${root}/${e.name}`]).sort();
 }
@@ -137,14 +138,21 @@ export function styleBoundary(root,manifest) {
     Object.assign(productionSnapshot,phase13.frontend.afterHashes);
   }
   const checkpoint=m1ParentReader(root);
-  violations.push(...checkpoint.violations);
+  const ciBudgetSuccessor=uiPhase7CParentReader(root);
+  violations.push(...checkpoint.violations,...ciBudgetSuccessor.violations);
   if(!checkpoint.violations.length)for(const [path,digest] of Object.entries(checkpoint.afterHashes))if(/^src\/.+\.tsx?$/.test(path))productionSnapshot[path]=digest;
-  for(const [path,digest] of Object.entries(productionSnapshot))if(hash(read(`${root}/${path}`))!==digest)violations.push(`behavior:${path}`);
+  for(const [path,digest] of Object.entries(productionSnapshot)) {
+    const current=ciBudgetSuccessor.changedPaths.includes(path)?ciBudgetSuccessor.read(path):read(`${root}/${path}`);
+    if(hash(current)!==digest)violations.push(`behavior:${path}`);
+  }
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')))if(!(path in productionSnapshot))violations.push(`new-production-source:${path}`);
   // Only a validated successor may advance this existing stylesheet; historical
   // manifests and every other CSS boundary stay frozen. No new styles exemption.
   const currentStyles={...manifest.styleSnapshots};
   if(!checkpoint.violations.length && checkpoint.afterHashes['src/features/library/LibraryPage.css'])currentStyles['src/features/library/LibraryPage.css']=checkpoint.afterHashes['src/features/library/LibraryPage.css'];
+  // The desktop successor hashes this existing quality layer exactly. This
+  // advances no historical manifest, specificity budget, or new-CSS exemption.
+  if(!checkpoint.violations.length && checkpoint.afterHashes['src/styles/studioQuality.css'])currentStyles['src/styles/studioQuality.css']=checkpoint.afterHashes['src/styles/studioQuality.css'];
   // UI Phase3 advances only these reviewed files, after the complete live
   // successor chain has validated their bytes. All other CSS stays frozen.
   if(!checkpoint.violations.length)for(const path of ['src/app/v3/AppShellV3.css','src/features/create/CreatePage.css','src/styles/studioTokens.css','src/features/runs/RunsPage.css']) {

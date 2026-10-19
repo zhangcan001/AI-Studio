@@ -1,4 +1,4 @@
-import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit as execFileSync, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 // M1-2 successor validates live bytes before historical guards read their parent.
 // Historical manifests remain immutable; no authority or transport exemption.
 import { createHash } from 'node:crypto';
@@ -20,7 +20,8 @@ const files = (root, folder, pattern) => readdirSync(join(root, folder), { withF
 const aggregate = (paths, read) => hash(paths.map(p => `${p}\n${read(p)}`).join('\n'));
 const immutable = new Map();
 function parentBlobs(root, paths) {
-  const cacheKey = JSON.stringify([root, paths]);
+  // Immutable parent blobs depend on the verified object store, not the fixture root.
+  const cacheKey = JSON.stringify([immutableGitStoreIdentity(root), paths]);
   if (immutable.has(cacheKey)) return immutable.get(cacheKey);
   const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: root,
     input: paths.map(p => `${M1_OVERVIEW_PARENT}:${p}\n`).join(''), maxBuffer: 64 * 1024 * 1024 });

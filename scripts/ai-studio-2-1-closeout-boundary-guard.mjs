@@ -1,4 +1,4 @@
-import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit as execFileSync, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 // Release-only successor. No historical manifest, runtime authority or CI exemption.
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -17,12 +17,12 @@ const files = (root,dir,pattern) => readdirSync(join(root,dir),{withFileTypes:tr
 const aggregate = (paths,read) => hash(paths.map(p=>`${p}\n${read(p)}`).join('\n'));
 const immutable = new Map();
 function parentBlobs(root) {
-  if(immutable.has(root))return immutable.get(root);
+  const store=immutableGitStoreIdentity(root);if(immutable.has(store))return immutable.get(store);
   const paths=execFileSync('git',['ls-tree','-r','--name-only',CLOSEOUT_PARENT,'src','src-tauri/src','scripts','src-tauri/migrations','docs/architecture',...existing],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).sort();
   const bytes=execFileSync('git',['cat-file','--batch'],{cwd:root,input:paths.map(p=>`${CLOSEOUT_PARENT}:${p}\n`).join(''),maxBuffer:64*1024*1024});
   const blobs=new Map();let offset=0;
   for(const p of paths){const end=bytes.indexOf(10,offset),m=/^[a-f0-9]+ blob (\d+)$/.exec(bytes.subarray(offset,end).toString());if(!m)throw Error('Closeout parent blob missing');const start=end+1,length=Number(m[1]);if(bytes[start+length]!==10)throw Error('Closeout parent blob boundary');blobs.set(p,normalize(bytes.subarray(start,start+length).toString('utf8')));offset=start+length+1;}
-  if(offset!==bytes.length)throw Error('Closeout parent trailing bytes');immutable.set(root,blobs);return blobs;
+  if(offset!==bytes.length)throw Error('Closeout parent trailing bytes');immutable.set(store,blobs);return blobs;
 }
 function closeoutParentReaderUncached(root,override) {
   const repair=rcRepairParentReader(root);

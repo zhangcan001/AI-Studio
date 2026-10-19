@@ -1,4 +1,4 @@
-import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit as execFileSync, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 import {m4MediaParentReader} from './m4-readonly-media-integrity-boundary-guard.mjs';
 // M3-2 successor validates live bytes before historical guards read their parent.
 // Historical manifests remain immutable; no authority or transport exemption.
@@ -22,7 +22,8 @@ const immutable = new Map();
 const parentFileSets = new Map();
 const frozenArtifacts = ['docs/architecture/m3-1-library-findability.json','docs/architecture/m3-1-library-scale-baseline.json','docs/architecture/m3-1-library-scale-candidate.json'];
 function parentBlobs(root, paths) {
-  const cacheKey = JSON.stringify([root, paths]);
+  // Immutable parent blobs depend on the verified object store, not the fixture root.
+  const cacheKey = JSON.stringify([immutableGitStoreIdentity(root), paths]);
   if (immutable.has(cacheKey)) return immutable.get(cacheKey);
   const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: root,
     input: paths.map(p => `${M3_VISUAL_PARENT}:${p}\n`).join(''), maxBuffer: 64 * 1024 * 1024 });

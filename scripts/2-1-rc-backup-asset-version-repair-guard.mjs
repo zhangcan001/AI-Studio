@@ -1,4 +1,4 @@
-import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit as execFileSync, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 // P1 identity successor: validate live bytes before projecting immutable release history.
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -17,12 +17,12 @@ const aggregate = (paths,read) => hash(paths.map(p=>`${p}\n${read(p)}`).join('\n
 const immutable = new Map();
 const immutableAggregates = new Map();
 function parentBlobs(root) {
-  if(immutable.has(root))return immutable.get(root);
+  const store=immutableGitStoreIdentity(root);if(immutable.has(store))return immutable.get(store);
   const paths=execFileSync('git',['ls-tree','-r','--name-only',RC_REPAIR_PARENT,'src','src-tauri/src','src-tauri/tests','scripts','src-tauri/migrations','docs/architecture','package.json','pnpm-lock.yaml','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/tauri.conf.json','.github/workflows/ci.yml',...existing],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(p=>!p.startsWith('src-tauri/tests/')||p.endsWith('.rs')).sort();
   const bytes=execFileSync('git',['cat-file','--batch'],{cwd:root,input:paths.map(p=>`${RC_REPAIR_PARENT}:${p}\n`).join(''),maxBuffer:64*1024*1024});
   const blobs=new Map();let offset=0;
   for(const p of paths){const end=bytes.indexOf(10,offset),m=/^[a-f0-9]+ blob (\d+)$/.exec(bytes.subarray(offset,end).toString());if(!m)throw Error('Closeout parent blob missing');const start=end+1,length=Number(m[1]);if(bytes[start+length]!==10)throw Error('Closeout parent blob boundary');blobs.set(p,normalize(bytes.subarray(start,start+length).toString('utf8')));offset=start+length+1;}
-  if(offset!==bytes.length)throw Error('Closeout parent trailing bytes');immutable.set(root,blobs);return blobs;
+  if(offset!==bytes.length)throw Error('Closeout parent trailing bytes');immutable.set(store,blobs);return blobs;
 }
 function rcRepairParentReaderUncached(root,override) {
   const publication=publicationParentReader(root);

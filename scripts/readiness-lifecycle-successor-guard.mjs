@@ -1,4 +1,4 @@
-import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit as execFileSync, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 // Validate only the reviewed readiness repair before replaying immutable queue/source proofs.
 import {createHash} from 'node:crypto';
 import {readFileSync,readdirSync} from 'node:fs';
@@ -50,7 +50,7 @@ const files=(root,dir,pattern)=>readdirSync(join(root,dir),{withFileTypes:true})
 }).sort();
 const parents=new Map(),aggregates=new Map();
 export function readinessLifecycleParentFacts(root,parent=READINESS_LIFECYCLE_PARENT){
- const key=JSON.stringify([root,parent]);if(parents.has(key))return parents.get(key);
+ const key=JSON.stringify([immutableGitStoreIdentity(root),parent]);if(parents.has(key))return parents.get(key);
  const paths=execFileSync('git',['ls-tree','-r','--name-only',parent],{cwd:root,encoding:'utf8'})
   .trim().split(/\r?\n/).filter(p=>p==='CONTEXT.md'||/^docs\/architecture\/.*\.md$/.test(p)||configs.includes(p)||READINESS_LIFECYCLE_GROUPS.some(([,d,r])=>p.startsWith(d+'/')&&r.test(p))).sort();
  const bytes=execFileSync('git',['cat-file','--batch'],{cwd:root,input:paths.map(p=>`${parent}:${p}\n`).join(''),maxBuffer:64*1024*1024});

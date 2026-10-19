@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "DESKTOP_VISUAL_REFINEMENT",
+  "parentHead": "0c8a974d32cfa7e671e9b1b2e6088a61370cabf1",
+  "planningParentHead": "0c8a974d32cfa7e671e9b1b2e6088a61370cabf1",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "presentationOnly": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/desktop-visual-refinement-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "262f4e28a9687864914d257e0274686bb2fa428816db7315f5ee90813c338dd4"
+    },
+    "scripts/h3-standard-reference-successor-guard.mjs": {
+      "beforeHash": "6a55b47d906c6f82195efe496a00262c36b9ff0d2a2b676ba9a15fadaab7ecdd",
+      "afterHash": "201bb3d72b42c65e5286badd61497d82d7a7431136b2eced58d645f11eb3f93c"
+    },
+    "scripts/style-boundary-guard.mjs": {
+      "beforeHash": "6e0402348636ec30105fb091dd654bd0a619120569fcfdb881c11b1038f7702b",
+      "afterHash": "cfb886669002b740493d35ebe1f18bafe0721552d3d9e17ab5ba0fa9d7d5698a"
+    },
+    "scripts/testing/desktop-visual-refinement.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "866b540254948586409becb07286e79eed3818168a844ebd53ba2001554a73b0"
+    },
+    "src/styles/StudioVisualRefinement.test.ts": {
+      "beforeHash": null,
+      "afterHash": "7ec58afc30ac26fc2818ca91f35a0beb64eb1bde772d9878903473fc45dde96d"
+    },
+    "src/styles/studioQuality.css": {
+      "beforeHash": "58c892a1dad7a494544fc8af5d994f31f8624cd2e1df2c55be71700cc552858e",
+      "afterHash": "d95e59e13ce5934f3bc919912632701485def1464799fda886e0ab2446f56a09"
+    },
+    "src/styles/studioTokens.css": {
+      "beforeHash": "959a93970fafc2b9e4946c94f7ed007c47b15aa09e7d11ee39e0ea8fb79baf2f",
+      "afterHash": "b49bf53b055e98f8d38a2608731ae1031677c3301db9a15d8b7f14895a889f9d"
+    }
+  }
+}

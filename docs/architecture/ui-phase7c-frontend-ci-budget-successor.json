@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE7C_FRONTEND_CI_BUDGET_SUCCESSOR",
+  "parentHead": "f3b8c6708dd9b18702b9effd61fdf3d407dd179b",
+  "planningParentHead": "f3b8c6708dd9b18702b9effd61fdf3d407dd179b",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "backendChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "readinessBoundaryProbesAtNinetySeconds": true,
+    "phase5CiRepairProbeBudgetRaised": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    ".github/workflows/frontend-only-ci.yml": {
+      "beforeHash": null,
+      "afterHash": "0f3e437ca3d37764a64cfc90687b599cb53fcd7dc1eead9025bffcfc916eb5da"
+    },
+    "scripts/2-1-publication-successor-guard.mjs": {
+      "beforeHash": "4407991b75f9eb4500ac9deb6c731f27a6d564f70d5a40a91c73974f496761ed",
+      "afterHash": "993f264030e580129dcf145fe455becf09803ff9f71093b59ae2bd36c47aaa16"
+    },
+    "scripts/2-1-rc-backup-asset-version-repair-guard.mjs": {
+      "beforeHash": "19e209cf857d6d8d7dfa8efa23e61ff180dcc32e4244d5ebc04e1612a9d2e1e0",
+      "afterHash": "06eb2e34e42ae7ab8f6bfda14766d52f9b7c1066c9f0e92a94a3d2384d47ac92"
+    },
+    "scripts/ai-studio-2-1-closeout-boundary-guard.mjs": {
+      "beforeHash": "5cf8eccc370cf8f7a8abf7b1a42cf997e68c05d450f66bc9d0b9907ef3407706",
+      "afterHash": "7f025e67a8436e96b68474ef17d38513f032b857a1c1a28c4af94aa4c75cb7b1"
+    },
+    "scripts/boundary-validation-cache.mjs": {
+      "beforeHash": "009b1fc27c76eecdb1011da1e86cf1d085fa8d126143ac22290f0842b9833d9b",
+      "afterHash": "cf52e1d58f7dda83b10238a5f9e9c78941db4cf2ecccb68defb7ab97e6624121"
+    },
+    "scripts/h3-generation-repair-successor-guard.mjs": {
+      "beforeHash": "36e689a692c345727c8d9a60c7fe1cea7187c973b5d7338d7275f1a1900ba166",
+      "afterHash": "22356d32d31c5cf68be591d2321033c5b8195a7673a9ccab28ef48c22f0b37bd"
+    },
+    "scripts/h3-release-closeout-phase1-guard.mjs": {
+      "beforeHash": "26cacb76939367c7edda9c83ffe2713b3741a9fe396c1f31d8e632832ee3c04b",
+      "afterHash": "ac5ee9c850e9ccde638ad3deed215a8cd02d6558027f6d8339c7cef3cc872c51"
+    },
+    "scripts/m1-overview-readiness-boundary-guard.mjs": {
+      "beforeHash": "60de284bf23b25bae4635af432cd830b437892ceedcc4ef3c9f4121461ef03a0",
+      "afterHash": "8f0abd70da0888f325f228b347212b5061615d2748bbe53f059d9a22fc0d04d1"
+    },
+    "scripts/m1-readiness-boundary-guard.mjs": {
+      "beforeHash": "400193070c2c828ddb7094cf2cc86e79234856e766609b1272896c7b51f95db8",
+      "afterHash": "be943557210d3a482bbee3c1f0187c1e0cceaa44e032102b110da6101738167f"
+    },
+    "scripts/m1-settings-runtime-boundary-guard.mjs": {
+      "beforeHash": "990caf6f4aa24457b5af18e02f5aa9d4850602644cdb1214052b35df427a9173",
+      "afterHash": "00da73e55c707aae2c4cc31228b7f62dba1d388b99d7f3b620d4cd7359dcef2a"
+    },
+    "scripts/m2-create-library-reuse-boundary-guard.mjs": {
+      "beforeHash": "12afc734eb4177d3044b0a185f72c75e34581eb2ee8b3fa3677e883815295c40",
+      "afterHash": "b5e8d328f469f3b5ae8968844fef853d7a547ea0fb0fe6fbcd64f26f03f1014b"
+    },
+    "scripts/m2-run-recovery-boundary-guard.mjs": {
+      "beforeHash": "90f142f2f3f52d6a150f63874f31f513ce30f4d0d8fe21738df1bcc5e5db0247",
+      "afterHash": "24851f856005edbff056c826b3f0930d18777762d4858c74d6773fc17d6413fa"
+    },
+    "scripts/m3-bounded-visual-library-boundary-guard.mjs": {
+      "beforeHash": "ecd344edf2458f42f117e5e9e43a3c60525d65b67b2a1e7d266b54c145536741",
+      "afterHash": "1886593a533af6618c7a10073cb496efbde20f389cfdbbdda3f8540124be3339"
+    },
+    "scripts/m3-library-findability-boundary-guard.mjs": {
+      "beforeHash": "60da0494ded7c5c76a4b54f6759f462fdf79d0431bf82080c2f0fa361f6efa45",
+      "afterHash": "5bbc14e4dd7cfbb4ab8835aadc05e053528270c140885a83920e930b11c40f2c"
+    },
+    "scripts/m4-readonly-media-integrity-boundary-guard.mjs": {
+      "beforeHash": "990e68d623c1a65ff541fdc63965c4d46d9d7064fb241c47dcb53f29e2f47c2e",
+      "afterHash": "f014a223b3d521adc01f344012579f311df5a7bc24a4f3598ffd29c55560c235"
+    },
+    "scripts/queue-lifecycle-repair-successor-guard.mjs": {
+      "beforeHash": "ea3279dcbe7c85973faa2615162a4796a372e9ebd493be5e0288cfe95ca05c26",
+      "afterHash": "a7c61d80a048a8ac3773af2bb361f8f6f4e5a0790f1f892e2d4a9ff258e34e56"
+    },
+    "scripts/readiness-lifecycle-successor-guard.mjs": {
+      "beforeHash": "08f26d8e469caba61409954808cc948f734afe28eec02bc41cc396fce0c1a19a",
+      "afterHash": "8a8b7996d6b6b7aba5e11e9ad08e4b76d468f66b94137f1c5dca23d4b32cefd2"
+    },
+    "scripts/style-boundary-guard.mjs": {
+      "beforeHash": "cfb886669002b740493d35ebe1f18bafe0721552d3d9e17ab5ba0fa9d7d5698a",
+      "afterHash": "2d5bf0e9857ab7bf727d710f82ff44e02debcba14b2720e7802d82322a5ab782"
+    },
+    "scripts/ui-phase5-ci-repair-successor-guard.mjs": {
+      "beforeHash": "be61370a4ab53e23ae944e9cd4d4420c0eb03ab435c14bf0de4391d54cada039",
+      "afterHash": "172a03370df6dfb7083ed83134a88211bdb22e08dbdaa052f889845218c9782a"
+    },
+    "scripts/ui-phase5a-storyboard-successor-guard.mjs": {
+      "beforeHash": "9016bdde499567a5503b18783904bd7f0c9cc22798f9dbd90586125e72b6bad3",
+      "afterHash": "5d5e7302b17722ddc168734a435ba286149d82f4a1d82d112ecddeb2f1d95ab6"
+    },
+    "scripts/ui-phase5b-mixed-video-successor-guard.mjs": {
+      "beforeHash": "18ca18d2b9364200458be4add22df2a2c93dee9c5db816544ef98b60082d6f95",
+      "afterHash": "169f8724dbd8a50e62d1ce4f9258d798b3306574071d993736a94bd33f96793e"
+    },
+    "scripts/ui-phase5c-review-successor-guard.mjs": {
+      "beforeHash": "5eff35d3529d2f8984b0356f9701b19a88134eb2d99cbe83c2ae488300bc7acb",
+      "afterHash": "9718925220687b5b93d3b661a4836a2ed5f36cda5f93fe73b224c5e3ce9133fc"
+    },
+    "scripts/ui-phase5d-ci-timeout-successor-guard.mjs": {
+      "beforeHash": "4eec6ce1b07d4b5b5c6cd4de1aa4d401ca5a4eef33bc7e242126f4ec17c30b98",
+      "afterHash": "0eaac2bb89932c63df9b725003240297ea1510fc9ac6081f16ed0a67bf892b99"
+    },
+    "scripts/ui-phase5e-ci-shard-successor-guard.mjs": {
+      "beforeHash": "08565b7645f142f9ea45c11e68b38446a424d4a8f560e16785fa20633fc8675b",
+      "afterHash": "8b6c2e646cc27a27f068f9698274f5dca31827419074760550857f4240fd1f62"
+    },
+    "scripts/ui-phase5f-ci-memory-successor-guard.mjs": {
+      "beforeHash": "3c2dc019b28dd13cb39524c994543ca641d030a54e8d83f19f633596a46f91e6",
+      "afterHash": "656533e4b2e8d05d75f0e2a2bbbfdcf8b3fc8bb09a623813b10c003848c6c513"
+    },
+    "scripts/ui-phase5g-ci-timeout-successor-guard.mjs": {
+      "beforeHash": "6e7fb5c1c7cbd2a727d65f2d2932ad43e221890b8f5f60df0963aa635a1bb3a7",
+      "afterHash": "8f8326cafd0529cc15423cc50a95042fdc80037dd16ba15b669f7320c5bb444f"
+    },
+    "scripts/ui-phase5h-ci-timeout-budget-successor-guard.mjs": {
+      "beforeHash": "7c4b55a9ba1879175144cd0cc86b18348125760273b504d10a1919839a3937ee",
+      "afterHash": "7b815c2fcaf0be72065e3c901e10d98e34ab73d97ebc59eb7f42f85af9cd47e1"
+    },
+    "scripts/ui-phase5i-ci-worker-teardown-successor-guard.mjs": {
+      "beforeHash": "5129807841a8a07e4b9606f164a31940570496d042f62ebdb9670b5f2daf7506",
+      "afterHash": "cec3c8c65898f9dd46cd3678140d47428693bb217750343ef97bb11c4786c9d0"
+    },
+    "scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs": {
+      "beforeHash": "6e27cf9e44ad5c22a9cb2e533202a8741f9620b7a66841e2af0b3724b1ad2dc3",
+      "afterHash": "e089e68828447e684bfdd83e20649af1730f61446c34c119c9cc02c36e9d9438"
+    },
+    "scripts/ui-phase6a-library-source-successor-guard.mjs": {
+      "beforeHash": "8d973dfea6a4f29d937ba7bcdc787e8bda98eb4ddba2b2adad345f118edafa8e",
+      "afterHash": "6c917b10a59675b17a5cd3590b16d2f575922881ad7bbd123d32cf0c62fb8825"
+    },
+    "scripts/ui-phase6b-library-shot-bind-successor-guard.mjs": {
+      "beforeHash": "29bfe6cc21987dce24f5349e162b153220ac77f16b93233d8502b0888f1dcf90",
+      "afterHash": "6a034fcc9d10825b2f341d11090427e1e8972b0158d6c1509a4eb461c37b2e45"
+    },
+    "scripts/ui-phase6c-runs-queue-unify-successor-guard.mjs": {
+      "beforeHash": "5e3e1bbef6e6cdec730be832a2872e21c11f837b40190b1b1cfea03e33a6c7ef",
+      "afterHash": "de7b77fe6d7b380191a8393a70c843dc343b755008a5657f968b52e6a485f764"
+    },
+    "scripts/ui-phase6d-scale-integrity-successor-guard.mjs": {
+      "beforeHash": "ac9338c09c0dddd9394c45bd0213248eb8ad3d5c3d957e75e9cb812af2621e52",
+      "afterHash": "dae12ceb85d416389efb0dbdc6747847adf0e2e851866adaa602344ebedc93df"
+    },
+    "scripts/ui-phase7a-source-ready-successor-guard.mjs": {
+      "beforeHash": "887ef7c6a0073ed126bf77f284c00734b806682b0ebdc1aff6179d8e7de0e331",
+      "afterHash": "7238bda6f2f395aa4122e94e7ead531054983526603f49dfc81696b8c882763d"
+    },
+    "scripts/ui-phase7b-ref2va-empty-readiness-successor-guard.mjs": {
+      "beforeHash": "a2ea89004d6f297f28cb18379627f7b051074c836ac2a8dd184cb3616db25e29",
+      "afterHash": "32e757ae7b827735352a44ef31092f050417b283735ebca81382a09a2edaf2e1"
+    },
+    "scripts/ui-phase7b-tsv-preview-successor-guard.mjs": {
+      "beforeHash": "dcebb1ce3edb723921bf5e8ea1e0b0c6c4d89f71a759d39d3ccdf6399736c710",
+      "afterHash": "543b6adc0cc46c0ac70d5cbe00140b8ccb5170e516c6d3b7036f1f4dd61c82b6"
+    },
+    "scripts/ui-phase7b-tsv-receipt-eligibility-successor-guard.mjs": {
+      "beforeHash": "2059d5d37e0ac22e855f1e1c748937ff44674e51b4d09a5eff1514aca95112c4",
+      "afterHash": "6763ddfaab6346f02a5202a39e55008971c5f070657cc78cd5c451145dbeb9a2"
+    },
+    "scripts/ui-phase7c-frontend-ci-budget-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "8dc0907ad0efd76adc6d2d0c3ae2d160468a990c79ea3fc16ee9e5fb4f2fe049"
+    },
+    "scripts/workbench-visual-refinement-successor-guard.mjs": {
+      "beforeHash": "18c16a8521eaea094ff0fbe838515418f2a104c84e6c1264f57a1fc98904461a",
+      "afterHash": "d67e1f9f4c6d5d5dec80e8e3d9e8e9c0d0352ba67d994ece855f0542af6e03fe"
+    },
+    "src/app/ReadinessLifecycleBoundary.test.ts": {
+      "beforeHash": "1e650ab64649cd65eb9ab1858d18900a5048c1a572ddf8f5829edfb8132dedc2",
+      "afterHash": "09b683d3de5f35071dce4df40444e8aa741db98015e471eabebb194dcde95d02"
+    },
+    "src/app/UiPhase5CiRepairBoundary.test.ts": {
+      "beforeHash": "815cc02254a3f05a02ac5f8ef28b56e7b5ac1c52220b9b8ac7c1def4e03aa79a",
+      "afterHash": "f7d6b4e2b4e00ee0a247b9a2f47d712336c9ff301fda18753d55d8ea6de58f3d"
+    },
+    "src/app/UiPhase7CCiBudgetSuccessorBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "d6bdc2ba159bcac70dfda23d92f799b0b150bf4fa8bd0204ba715b3eecfbd4ab"
+    }
+  }
+}

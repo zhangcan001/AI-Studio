@@ -1,0 +1,103 @@
+name: Frontend-only CI repair verification
+
+on:
+  push:
+    branches:
+      - codex/fix-frontend-boundary-budget-20261019
+
+permissions:
+  contents: read
+
+jobs:
+  frontend_tests:
+    name: Frontend tests (${{ matrix.shard }}/3)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    timeout-minutes: 35
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Frontend tests (non-Boundary shard)
+        run: >-
+          pnpm test --maxWorkers=1 --shard=${{ matrix.shard }}/3
+          --exclude src/app/**/*Boundary*.test.ts
+          --exclude src/app/**/*Boundary*.test.tsx
+          --exclude scripts/testing/**/*[Bb]oundary*.test.ts
+          --exclude scripts/testing/**/*[Bb]oundary*.test.tsx
+          --exclude scripts/testing/immutable-git-cache.test.ts
+          --exclude scripts/testing/release-boundary.test.ts
+      - name: Architecture guards
+        if: ${{ matrix.shard == 1 }}
+        run: pnpm test:architecture
+      - name: TypeScript check
+        if: ${{ matrix.shard == 1 }}
+        run: pnpm exec tsc --noEmit
+      - name: Frontend build
+        if: ${{ matrix.shard == 1 }}
+        run: pnpm exec vite build
+
+  frontend_boundary_tests:
+    name: Frontend Boundary probes (${{ matrix.shard }}/3)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    timeout-minutes: 90
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Boundary and successor-guard probes
+        run: pnpm test:boundary --shard=${{ matrix.shard }}/3
+
+  frontend:
+    name: Frontend source checks
+    needs: [frontend_tests, frontend_boundary_tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all frontend shards and mandatory gates
+        shell: bash
+        env:
+          SHARD_RESULT: ${{ needs.frontend_tests.result }}
+          BOUNDARY_RESULT: ${{ needs.frontend_boundary_tests.result }}
+        run: |
+          if [ "$SHARD_RESULT" != "success" ] || [ "$BOUNDARY_RESULT" != "success" ]; then
+            echo "Frontend shard or Boundary probes did not succeed: shards=$SHARD_RESULT boundary=$BOUNDARY_RESULT"
+            exit 1
+          fi
+          echo "All three frontend shards, Boundary probes, architecture, TypeScript and Vite succeeded."

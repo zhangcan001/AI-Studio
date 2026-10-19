@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { it, expect } from "vitest";
+import { beforeAll, it, expect } from "vitest";
 import { readFileSync, writeFileSync, copyFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, resolve } from "node:path";
@@ -7,6 +7,13 @@ import { tmpdir } from "node:os";
 import { trackTaskUpdateRpc } from "./boundary-rpc-yield.mjs";
 import { R1_METADATA_BASE, R1_METADATA_PROOF, uiPhase7BR1MetadataParentReader } from "../ui-phase7b-r1-metadata-successor-guard.mjs";
 import { uiPhase7BWorkspaceHydrationParentReader, HYDRATION_PROOF } from "../ui-phase7b-workspace-hydration-successor-guard.mjs";
+
+// Validate the cold immutable proof chain once before timed negative probes.
+// Each mutation still calls the reader, including its live-byte freshness check;
+// the five-probe test retains its original 5s timeout and every rejection check.
+beforeAll(() => {
+  expect(uiPhase7BR1MetadataParentReader(".").violations).toEqual([]);
+}, 120000);
 
 it("awaits genuine task-update acknowledgements and retains RPC rejections", async () => {
   let acknowledge;

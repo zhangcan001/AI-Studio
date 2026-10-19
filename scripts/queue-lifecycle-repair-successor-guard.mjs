@@ -1,4 +1,4 @@
-import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit as execFileSync, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 import { readinessLifecycleParentReader } from './readiness-lifecycle-successor-guard.mjs';
 // Validate the exact queue repair before projecting the immutable source checkpoint.
 import {createHash} from 'node:crypto';
@@ -22,7 +22,7 @@ const files=(root,dir,pattern)=>readdirSync(join(root,dir),{withFileTypes:true})
 }).sort();
 const parents=new Map(),aggregates=new Map();
 export function queueLifecycleParentFacts(root){
- if(parents.has(root))return parents.get(root);
+ const store=immutableGitStoreIdentity(root);if(parents.has(store))return parents.get(store);
  const paths=execFileSync('git',['ls-tree','-r','--name-only',QUEUE_LIFECYCLE_PARENT],{cwd:root,encoding:'utf8'})
   .trim().split(/\r?\n/).filter(p=>configs.includes(p)||QUEUE_LIFECYCLE_GROUPS.some(([,d,r])=>p.startsWith(d+'/')&&r.test(p))).sort();
  const bytes=execFileSync('git',['cat-file','--batch'],{cwd:root,input:paths.map(p=>`${QUEUE_LIFECYCLE_PARENT}:${p}\n`).join(''),maxBuffer:64*1024*1024});
@@ -31,7 +31,7 @@ export function queueLifecycleParentFacts(root){
   if(!m)throw Error('H3 parent blob missing');const start=end+1,length=Number(m[1]);
   if(bytes[start+length]!==10)throw Error('H3 parent blob boundary');blobs.set(p,normalize(bytes.subarray(start,start+length).toString('utf8')));offset=start+length+1;}
  if(offset!==bytes.length)throw Error('H3 parent trailing bytes');
- const result={paths,read:p=>blobs.get(p)};parents.set(root,result);return result;
+ const result={paths,read:p=>blobs.get(p)};parents.set(store,result);return result;
 }
 function queueLifecycleParentReaderUncached(root,override){
  const successor=readinessLifecycleParentReader(root);
