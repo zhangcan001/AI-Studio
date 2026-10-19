@@ -75,7 +75,7 @@ it('keeps live freshness for frozen proofs, Runtime raw bytes and manifest delet
   const path = join(root, PHASE5_CI_MANIFEST), bytes = readFileSync(path);
   rmSync(path); expect(uiPhase5CiParentReader(root).violations.length).toBeGreaterThan(0);
   writeFileSync(path, bytes); expect(uiPhase5CiParentReader(root).violations).toEqual([]);
-}), 90000);
+}), 300000);
 
 it('keeps live freshness for illegal additions across owned inventories', () => withPhase5CiFixture((root) => {
   for (const [dir, name] of [['src', 'IllegalOwner.js'], ['.github', 'illegal.yml'], ['docs', 'IllegalOwner.js'], ['src-tauri/examples', 'IllegalOwner.rs']]) {

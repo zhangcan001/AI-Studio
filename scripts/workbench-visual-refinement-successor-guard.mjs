@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./boundary-validation-cache.mjs";
+import { uiPhase7CParentReader, phase7CScopeSince, phase7CFixtureFiles } from "./ui-phase7c-frontend-ci-budget-successor-guard.mjs";
 
 export const WORKBENCH_VISUAL_BASE = "1ed43f27abcca2ae6ac42414bd0deccd46be8ae2";
 export const WORKBENCH_VISUAL_PROOF = "docs/architecture/workbench-visual-refinement-successor.json";
@@ -58,10 +59,11 @@ export function workbenchVisualScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...WORKBENCH_VISUAL_CHANGED, ...WORKBENCH_VISUAL_ADDED, WORKBENCH_VISUAL_PROOF,
+    ...phase7CScopeSince(root, WORKBENCH_VISUAL_BASE),
   ])].sort();
 }
 export function workbenchVisualFixtureFiles(root) {
-  return [...facts(root, WORKBENCH_VISUAL_BASE).paths, ...WORKBENCH_VISUAL_ADDED, WORKBENCH_VISUAL_PROOF];
+  return [...new Set([...facts(root, WORKBENCH_VISUAL_BASE).paths, ...WORKBENCH_VISUAL_ADDED, WORKBENCH_VISUAL_PROOF, ...phase7CFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -71,9 +73,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, WORKBENCH_VISUAL_BASE);
+  const workspace = resolve(root), successor = uiPhase7CParentReader(workspace, override);
+  const violations = [...successor.violations], parent = facts(workspace, WORKBENCH_VISUAL_BASE);
   const fail = id => violations.push("workbench-visual-refinement-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(WORKBENCH_VISUAL_PROOF));
@@ -83,8 +86,8 @@ function validate(root, override) {
         || JSON.stringify(proof.contracts) !== JSON.stringify(WORKBENCH_VISUAL_CONTRACTS)
         || JSON.stringify(Object.keys(proof.files ?? {}).sort()) !== JSON.stringify(scope)) fail("proof-contract");
     if (git(workspace, ["rev-parse", WORKBENCH_VISUAL_BASE]).trim() !== WORKBENCH_VISUAL_BASE) fail("ancestor");
-    const allowed = [...scope, WORKBENCH_VISUAL_PROOF].sort();
-    const expected = [...parent.paths, ...WORKBENCH_VISUAL_ADDED, WORKBENCH_VISUAL_PROOF].sort();
+    const allowed = [...scope, WORKBENCH_VISUAL_PROOF, ...successor.addedPaths].sort();
+    const expected = [...new Set([...parent.paths, ...WORKBENCH_VISUAL_ADDED, WORKBENCH_VISUAL_PROOF, ...successor.addedPaths])].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
       .trim().split(/\r?\n/).filter(relevant);
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
@@ -109,10 +112,10 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: WORKBENCH_VISUAL_CHANGED,
-    addedPaths: [...WORKBENCH_VISUAL_ADDED, WORKBENCH_VISUAL_PROOF],
+  return { violations, changedPaths: [...new Set([...WORKBENCH_VISUAL_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...WORKBENCH_VISUAL_ADDED, WORKBENCH_VISUAL_PROOF, ...successor.addedPaths],
     afterHashes: Object.fromEntries([...WORKBENCH_VISUAL_CHANGED, ...WORKBENCH_VISUAL_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
-    read: p => WORKBENCH_VISUAL_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: p => WORKBENCH_VISUAL_CHANGED.includes(p) ? parent.read(p) : successor.read(p) };
 }
 export function workbenchVisualParentReader(root, override = undefined) {
   if (override) return validate(root, override);

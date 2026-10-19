@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "UI_PHASE7C_FRONTEND_CI_BUDGET_SUCCESSOR",
+  "parentHead": "f3b8c6708dd9b18702b9effd61fdf3d407dd179b",
+  "planningParentHead": "f3b8c6708dd9b18702b9effd61fdf3d407dd179b",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "backendChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "readinessBoundaryProbesAtNinetySeconds": true,
+    "phase5CiRepairProbeBudgetRaised": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    ".github/workflows/frontend-only-ci.yml": {
+      "beforeHash": null,
+      "afterHash": "0f3e437ca3d37764a64cfc90687b599cb53fcd7dc1eead9025bffcfc916eb5da"
+    },
+    "scripts/workbench-visual-refinement-successor-guard.mjs": {
+      "beforeHash": "18c16a8521eaea094ff0fbe838515418f2a104c84e6c1264f57a1fc98904461a",
+      "afterHash": "d67e1f9f4c6d5d5dec80e8e3d9e8e9c0d0352ba67d994ece855f0542af6e03fe"
+    },
+    "src/app/ReadinessLifecycleBoundary.test.ts": {
+      "beforeHash": "1e650ab64649cd65eb9ab1858d18900a5048c1a572ddf8f5829edfb8132dedc2",
+      "afterHash": "09b683d3de5f35071dce4df40444e8aa741db98015e471eabebb194dcde95d02"
+    },
+    "src/app/UiPhase5CiRepairBoundary.test.ts": {
+      "beforeHash": "815cc02254a3f05a02ac5f8ef28b56e7b5ac1c52220b9b8ac7c1def4e03aa79a",
+      "afterHash": "f7d6b4e2b4e00ee0a247b9a2f47d712336c9ff301fda18753d55d8ea6de58f3d"
+    },
+    "scripts/ui-phase7c-frontend-ci-budget-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "766468e3f44adf551ef12f66f6c276d5e2e57c8cc47a6b15ebac2af1d2f357d5"
+    },
+    "src/app/UiPhase7CCiBudgetSuccessorBoundary.test.ts": {
+      "beforeHash": null,
+      "afterHash": "d6bdc2ba159bcac70dfda23d92f799b0b150bf4fa8bd0204ba715b3eecfbd4ab"
+    }
+  }
+}
