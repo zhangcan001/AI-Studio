@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "REFERENCE_DRAFT_RECOVERY",
+  "parentHead": "524794bc6d361e82427d81df54b4fbc3407cb40a",
+  "planningParentHead": "524794bc6d361e82427d81df54b4fbc3407cb40a",
+  "contracts": {
+    "gpuExecuted": false,
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "backendChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true
+  },
+  "files": {
+    "scripts/backup-package-bindings-successor-guard.mjs": {
+      "beforeHash": "3c220c34432ba8594f94cfb51a7993ff8d65249dd6ba5238ea6f9e9712218006",
+      "afterHash": "bda0e95454083998ba8b0d1e1a8a1b81613b1273ce257b703972ea47254d4d2b"
+    },
+    "scripts/reference-draft-recovery-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "cd34468c52998fc0e5b77d27fd2adee4e9bfa81d342e5bfe4e7f0e39a9385b7b"
+    },
+    "scripts/testing/reference-draft-recovery.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "1330db0c563bf5f6383e944d9b7171b656ea7ea855280528d20c6b1a72e2627d"
+    },
+    "src/features/create/CreateInputs.tsx": {
+      "beforeHash": "bc441a0d1500042ae289ad6690e33019147e5ac4f79b6ef2ef6ebefe9d5145a7",
+      "afterHash": "7305f3c509adbace1876fae24606b1192d11b86be666aacddb6bcc3b0596a2e4"
+    },
+    "src/features/create/CreatePage.test.tsx": {
+      "beforeHash": "0a284ab280b07b2742c15dfc73ec8aa7ff8cb1c83b56048a54716f3a7ed96c5a",
+      "afterHash": "c862f15ed1fe6fd9796fce8b5f100ff4e004ad1010fa9dbc6fab28ab9283629a"
+    }
+  }
+}

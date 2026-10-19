@@ -40,8 +40,13 @@ export function PromptPickerDialog({ controller: c, onClose }: { controller: Cre
 /** Shot long-term reference images (shot-level setting, not a generator input). */
 export function ReferencePanel({ context, save, busy }: { context: CreationContext; save: (ids: string[]) => unknown; busy: boolean }) {
   const current = context.selectedShot?.referenceAssetIds ?? [];
-  const [ids, setIds] = useState(current);
-  useEffect(() => { setIds(current); }, [context]);
+  // Context refreshes may replace objects without changing saved references.
+  // Only a different owner or an actual persisted reference change resets this edit.
+  const owner = JSON.stringify([context.projectId, context.selectedShot?.summary.id, context.stage, current]);
+  const [draft, setDraft] = useState({ owner, ids: current });
+  const ids = draft.owner === owner ? draft.ids : current;
+  const setIds = (next: string[]) => setDraft({ owner, ids: next });
+  useEffect(() => { setDraft({ owner, ids: current }); }, [owner]);
   return <details><summary>镜头长期参考图</summary><p>仅保存图片；不会替代明确的首帧、尾帧或视频输入。</p>
     <div className="create-reference-grid">{context.mediaInputs.filter(asset => asset.mediaKind === "image").map(asset => <label className="create-reference" key={asset.id}>
       <span aria-hidden="true"><AssetImageThumb projectId={context.projectId} assetId={asset.id} name={asset.name} size="lg" interactive={false} /></span>

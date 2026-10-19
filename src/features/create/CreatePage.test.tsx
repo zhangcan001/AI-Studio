@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { CreatePage } from "./CreatePage";
+import { ReferencePanel } from "./CreateInputs";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { RunsPage } from "../runs/RunsPage";
 import { useStudioStore } from "../../stores/studioStore";
@@ -622,4 +623,36 @@ it('single-page storyboard creation preserves the current draft when canonical n
   expect(promptText()).toBe('不能丢弃的草稿');
   expect(screen.getByRole('button', { name: '操作镜头一' }).getAttribute('aria-current')).toBe('true');
   expect(api.generate).not.toHaveBeenCalled();
+});
+
+describe("long-term reference draft ownership", () => {
+  it("keeps checked images across equivalent background context refreshes", () => {
+    const save=vi.fn(); const view=render(<ReferencePanel context={context("video")} save={save} busy={false}/>);
+    fireEvent.click(screen.getByRole("checkbox", {name:"首帧素材"}));
+    expect((screen.getByRole("checkbox", {name:"首帧素材"}) as HTMLInputElement).checked).toBe(true);
+    // A fresh backend response has fresh object/array identities but identical persisted inputs.
+    const refreshed={...context("video"),mediaInputs:[...inputs]};
+    view.rerender(<ReferencePanel context={refreshed} save={save} busy={false}/>);
+    expect((screen.getByRole("checkbox", {name:"首帧素材"}) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("button",{name:"保存长期参考图"}));
+    expect(save).toHaveBeenCalledWith(["img1"]);
+  });
+  it("resets draft ownership for a different shot, stage or project and does not revive old selections", () => {
+    const save=vi.fn();const view=render(<ReferencePanel context={context("video")} save={save} busy={false}/>);
+    fireEvent.click(screen.getByRole("checkbox",{name:"首帧素材"}));
+    for(const next of [context("video","shot2"),context("image","shot2"),{...context("image","shot2"),projectId:"other"},context("video")]) {
+      view.rerender(<ReferencePanel context={next} save={save} busy={false}/>);
+      expect((screen.getByRole("checkbox",{name:"首帧素材"}) as HTMLInputElement).checked).toBe(false);
+    }
+    expect(save).not.toHaveBeenCalled();
+  });
+  it("adopts changed persisted references instead of retaining a superseded draft", () => {
+    const save=vi.fn();const view=render(<ReferencePanel context={context("video")} save={save} busy={false}/>);
+    fireEvent.click(screen.getByRole("checkbox",{name:"首帧素材"}));
+    const next=context("video"); next.selectedShot!.referenceAssetIds=["img2"];
+    view.rerender(<ReferencePanel context={next} save={save} busy={false}/>);
+    expect((screen.getByRole("checkbox",{name:"首帧素材"}) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox",{name:"尾帧素材"}) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("button",{name:"保存长期参考图"}));expect(save).toHaveBeenCalledWith(["img2"]);
+  });
 });
