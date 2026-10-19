@@ -18,6 +18,10 @@
       "beforeHash": null,
       "afterHash": "0f3e437ca3d37764a64cfc90687b599cb53fcd7dc1eead9025bffcfc916eb5da"
     },
+    "scripts/style-boundary-guard.mjs": {
+      "beforeHash": "cfb886669002b740493d35ebe1f18bafe0721552d3d9e17ab5ba0fa9d7d5698a",
+      "afterHash": "2d5bf0e9857ab7bf727d710f82ff44e02debcba14b2720e7802d82322a5ab782"
+    },
     "scripts/workbench-visual-refinement-successor-guard.mjs": {
       "beforeHash": "18c16a8521eaea094ff0fbe838515418f2a104c84e6c1264f57a1fc98904461a",
       "afterHash": "d67e1f9f4c6d5d5dec80e8e3d9e8e9c0d0352ba67d994ece855f0542af6e03fe"
@@ -32,7 +36,7 @@
     },
     "scripts/ui-phase7c-frontend-ci-budget-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "766468e3f44adf551ef12f66f6c276d5e2e57c8cc47a6b15ebac2af1d2f357d5"
+      "afterHash": "a26f66853eb75c3411e4e51fe979cd9a2d80ff3a1973c2008c9ed267f73cf05d"
     },
     "src/app/UiPhase7CCiBudgetSuccessorBoundary.test.ts": {
       "beforeHash": null,

@@ -7,6 +7,7 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./bound
 export const PHASE7C_PARENT = "f3b8c6708dd9b18702b9effd61fdf3d407dd179b";
 export const PHASE7C_PROOF = "docs/architecture/ui-phase7c-frontend-ci-budget-successor.json";
 export const PHASE7C_CHANGED = [
+  "scripts/style-boundary-guard.mjs",
   "scripts/workbench-visual-refinement-successor-guard.mjs",
   "src/app/ReadinessLifecycleBoundary.test.ts",
   "src/app/UiPhase5CiRepairBoundary.test.ts",
