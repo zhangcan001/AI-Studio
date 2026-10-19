@@ -39,9 +39,12 @@ export function immutableGit(command, args, options = {}) {
   if (!immutable) return exec(command, args, options);
   const store = immutableObjectStore(options.cwd ?? '.',options.env);
   const key = JSON.stringify([store, args, options.input, options.encoding, options.maxBuffer]);
+  // Blob batches are reassembled from the verified per-store blob cache into a
+  // fresh buffer; retaining each assembled batch as well would hold a second
+  // full-snapshot copy per reader without avoiding any Git IO.
+  if (args.length === 2 && args[0] === 'cat-file') return immutableBlobBatch(store, args, options);
   // Mutable replace refs must not redefine a supposedly immutable SHA query.
-  if (!gitObjects.has(key)) gitObjects.set(key, args.length === 2 && args[0] === 'cat-file'
-    ? immutableBlobBatch(store, args, options) : exec(command, ['--no-replace-objects',...args], options));
+  if (!gitObjects.has(key)) gitObjects.set(key, exec(command, ['--no-replace-objects',...args], options));
   const value = gitObjects.get(key);
   return Buffer.isBuffer(value) ? Buffer.from(value) : value;
 }

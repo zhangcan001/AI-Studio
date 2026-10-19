@@ -1,4 +1,4 @@
-import { cachedBoundary, immutableGit as execFileSync } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit as execFileSync, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 // Validate published evidence before projecting immutable pre-publication history.
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -55,7 +55,8 @@ function liveTagTarget(root) {
   return peeledObjects.get(key);
 }
 function parentObjects(root) {
-  if (immutable.has(root)) return immutable.get(root);
+  const store = immutableGitStoreIdentity(root);
+  if (immutable.has(store)) return immutable.get(store);
   const git = args => execFileSync('git', args, {cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024}).trim();
   const all = git(['ls-tree', '-r', '--name-only', PUBLICATION_PARENT]).split(/\r?\n/).sort();
   const paths = all.filter(p => existing.includes(p) || configs.includes(p) ||
@@ -85,7 +86,7 @@ function parentObjects(root) {
   const docsOnly = JSON.stringify(git(['diff', '--name-only', RELEASE_TAG_HEAD, PUBLICATION_PARENT]).split(/\r?\n/).sort()) === JSON.stringify(docs);
   const result = {all, paths, read, fixed, parentIsRelease, docsOnly,
     historical: p => blobs.get(`release:${p}`)};
-  immutable.set(root, result); return result;
+  immutable.set(store, result); return result;
 }
 function publicationParentReaderUncached(root, override) {
   const successor = h3RepairParentReader(root);

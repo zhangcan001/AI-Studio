@@ -18,6 +18,70 @@
       "beforeHash": null,
       "afterHash": "0f3e437ca3d37764a64cfc90687b599cb53fcd7dc1eead9025bffcfc916eb5da"
     },
+    "scripts/2-1-publication-successor-guard.mjs": {
+      "beforeHash": "4407991b75f9eb4500ac9deb6c731f27a6d564f70d5a40a91c73974f496761ed",
+      "afterHash": "993f264030e580129dcf145fe455becf09803ff9f71093b59ae2bd36c47aaa16"
+    },
+    "scripts/2-1-rc-backup-asset-version-repair-guard.mjs": {
+      "beforeHash": "19e209cf857d6d8d7dfa8efa23e61ff180dcc32e4244d5ebc04e1612a9d2e1e0",
+      "afterHash": "06eb2e34e42ae7ab8f6bfda14766d52f9b7c1066c9f0e92a94a3d2384d47ac92"
+    },
+    "scripts/ai-studio-2-1-closeout-boundary-guard.mjs": {
+      "beforeHash": "5cf8eccc370cf8f7a8abf7b1a42cf997e68c05d450f66bc9d0b9907ef3407706",
+      "afterHash": "7f025e67a8436e96b68474ef17d38513f032b857a1c1a28c4af94aa4c75cb7b1"
+    },
+    "scripts/boundary-validation-cache.mjs": {
+      "beforeHash": "009b1fc27c76eecdb1011da1e86cf1d085fa8d126143ac22290f0842b9833d9b",
+      "afterHash": "cf52e1d58f7dda83b10238a5f9e9c78941db4cf2ecccb68defb7ab97e6624121"
+    },
+    "scripts/h3-generation-repair-successor-guard.mjs": {
+      "beforeHash": "36e689a692c345727c8d9a60c7fe1cea7187c973b5d7338d7275f1a1900ba166",
+      "afterHash": "22356d32d31c5cf68be591d2321033c5b8195a7673a9ccab28ef48c22f0b37bd"
+    },
+    "scripts/h3-release-closeout-phase1-guard.mjs": {
+      "beforeHash": "26cacb76939367c7edda9c83ffe2713b3741a9fe396c1f31d8e632832ee3c04b",
+      "afterHash": "ac5ee9c850e9ccde638ad3deed215a8cd02d6558027f6d8339c7cef3cc872c51"
+    },
+    "scripts/m1-overview-readiness-boundary-guard.mjs": {
+      "beforeHash": "60de284bf23b25bae4635af432cd830b437892ceedcc4ef3c9f4121461ef03a0",
+      "afterHash": "8f0abd70da0888f325f228b347212b5061615d2748bbe53f059d9a22fc0d04d1"
+    },
+    "scripts/m1-readiness-boundary-guard.mjs": {
+      "beforeHash": "400193070c2c828ddb7094cf2cc86e79234856e766609b1272896c7b51f95db8",
+      "afterHash": "be943557210d3a482bbee3c1f0187c1e0cceaa44e032102b110da6101738167f"
+    },
+    "scripts/m1-settings-runtime-boundary-guard.mjs": {
+      "beforeHash": "990caf6f4aa24457b5af18e02f5aa9d4850602644cdb1214052b35df427a9173",
+      "afterHash": "00da73e55c707aae2c4cc31228b7f62dba1d388b99d7f3b620d4cd7359dcef2a"
+    },
+    "scripts/m2-create-library-reuse-boundary-guard.mjs": {
+      "beforeHash": "12afc734eb4177d3044b0a185f72c75e34581eb2ee8b3fa3677e883815295c40",
+      "afterHash": "b5e8d328f469f3b5ae8968844fef853d7a547ea0fb0fe6fbcd64f26f03f1014b"
+    },
+    "scripts/m2-run-recovery-boundary-guard.mjs": {
+      "beforeHash": "90f142f2f3f52d6a150f63874f31f513ce30f4d0d8fe21738df1bcc5e5db0247",
+      "afterHash": "24851f856005edbff056c826b3f0930d18777762d4858c74d6773fc17d6413fa"
+    },
+    "scripts/m3-bounded-visual-library-boundary-guard.mjs": {
+      "beforeHash": "ecd344edf2458f42f117e5e9e43a3c60525d65b67b2a1e7d266b54c145536741",
+      "afterHash": "1886593a533af6618c7a10073cb496efbde20f389cfdbbdda3f8540124be3339"
+    },
+    "scripts/m3-library-findability-boundary-guard.mjs": {
+      "beforeHash": "60da0494ded7c5c76a4b54f6759f462fdf79d0431bf82080c2f0fa361f6efa45",
+      "afterHash": "5bbc14e4dd7cfbb4ab8835aadc05e053528270c140885a83920e930b11c40f2c"
+    },
+    "scripts/m4-readonly-media-integrity-boundary-guard.mjs": {
+      "beforeHash": "990e68d623c1a65ff541fdc63965c4d46d9d7064fb241c47dcb53f29e2f47c2e",
+      "afterHash": "f014a223b3d521adc01f344012579f311df5a7bc24a4f3598ffd29c55560c235"
+    },
+    "scripts/queue-lifecycle-repair-successor-guard.mjs": {
+      "beforeHash": "ea3279dcbe7c85973faa2615162a4796a372e9ebd493be5e0288cfe95ca05c26",
+      "afterHash": "a7c61d80a048a8ac3773af2bb361f8f6f4e5a0790f1f892e2d4a9ff258e34e56"
+    },
+    "scripts/readiness-lifecycle-successor-guard.mjs": {
+      "beforeHash": "08f26d8e469caba61409954808cc948f734afe28eec02bc41cc396fce0c1a19a",
+      "afterHash": "8a8b7996d6b6b7aba5e11e9ad08e4b76d468f66b94137f1c5dca23d4b32cefd2"
+    },
     "scripts/style-boundary-guard.mjs": {
       "beforeHash": "cfb886669002b740493d35ebe1f18bafe0721552d3d9e17ab5ba0fa9d7d5698a",
       "afterHash": "2d5bf0e9857ab7bf727d710f82ff44e02debcba14b2720e7802d82322a5ab782"
@@ -100,7 +164,7 @@
     },
     "scripts/ui-phase7c-frontend-ci-budget-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "ea574f425634bfc188b6e232054150e2c71d70ad97e4b98aa284476f883a7664"
+      "afterHash": "8dc0907ad0efd76adc6d2d0c3ae2d160468a990c79ea3fc16ee9e5fb4f2fe049"
     },
     "scripts/workbench-visual-refinement-successor-guard.mjs": {
       "beforeHash": "18c16a8521eaea094ff0fbe838515418f2a104c84e6c1264f57a1fc98904461a",

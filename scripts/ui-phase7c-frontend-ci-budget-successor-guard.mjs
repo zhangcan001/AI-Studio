@@ -7,9 +7,25 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./bound
 export const PHASE7C_PARENT = "f3b8c6708dd9b18702b9effd61fdf3d407dd179b";
 export const PHASE7C_PROOF = "docs/architecture/ui-phase7c-frontend-ci-budget-successor.json";
 export const PHASE7C_CHANGED = [
+  "scripts/boundary-validation-cache.mjs",
   "scripts/style-boundary-guard.mjs",
   // Pure memoization of immutable parent blobs and commit:path reads so the
   // fail-closed 90s Windows Boundary budget holds. No check is removed.
+  "scripts/2-1-publication-successor-guard.mjs",
+  "scripts/2-1-rc-backup-asset-version-repair-guard.mjs",
+  "scripts/ai-studio-2-1-closeout-boundary-guard.mjs",
+  "scripts/h3-generation-repair-successor-guard.mjs",
+  "scripts/h3-release-closeout-phase1-guard.mjs",
+  "scripts/m1-overview-readiness-boundary-guard.mjs",
+  "scripts/m1-readiness-boundary-guard.mjs",
+  "scripts/m1-settings-runtime-boundary-guard.mjs",
+  "scripts/m2-create-library-reuse-boundary-guard.mjs",
+  "scripts/m2-run-recovery-boundary-guard.mjs",
+  "scripts/m3-bounded-visual-library-boundary-guard.mjs",
+  "scripts/m3-library-findability-boundary-guard.mjs",
+  "scripts/m4-readonly-media-integrity-boundary-guard.mjs",
+  "scripts/queue-lifecycle-repair-successor-guard.mjs",
+  "scripts/readiness-lifecycle-successor-guard.mjs",
   "scripts/ui-phase5-ci-repair-successor-guard.mjs",
   "scripts/ui-phase5a-storyboard-successor-guard.mjs",
   "scripts/ui-phase5b-mixed-video-successor-guard.mjs",
