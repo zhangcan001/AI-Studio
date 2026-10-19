@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "WORKBENCH_POLL_CLOCK",
+  "parentHead": "d765ce73f2fa4c90042b7fc4d08bce4f03b5bdd0",
+  "planningParentHead": "d765ce73f2fa4c90042b7fc4d08bce4f03b5bdd0",
+  "contracts": {
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "schemaChanged": false,
+    "testOnly": true,
+    "backendChanged": false,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/reference-draft-recovery-successor-guard.mjs": {
+      "beforeHash": "cd34468c52998fc0e5b77d27fd2adee4e9bfa81d342e5bfe4e7f0e39a9385b7b",
+      "afterHash": "5190098aaa454ce29fdd4e04c2823cdf08f16ce4054ab1c3fca4c7e2cb530aa5"
+    },
+    "scripts/testing/workbench-poll-clock.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "763a9604bc38f66d9cc38b8dceb63b7bb26017375fba05b86abcccb35691ca80"
+    },
+    "scripts/workbench-poll-clock-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "84066671839e008749a65fd9883a925aa42054da8682a7a404861e83503b299e"
+    },
+    "src/features/create/StoryboardWorkbench.test.tsx": {
+      "beforeHash": "ca5cdf70bf2696a442e9c4e0e6bd4224711bd49f54912c5141c98ac78b735987",
+      "afterHash": "e4290021567e9ac41320725aa58d28acb3c8c7994d2a369ebe87af491c154298"
+    }
+  }
+}

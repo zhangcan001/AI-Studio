@@ -116,19 +116,27 @@ function idleContext(shotId: string | null, withTask: boolean): CreationContext 
 
 it("D3: a waiting queue item without a Task keeps a bounded poll until the Task appears", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  let task = false;
-  api.get.mockImplementation(async (_p: string, shotId: string | null) => idleContext(shotId, task));
-  api.runList.mockResolvedValue({ items: [run("QUEUED", 0, 1)], nextCursor: null, coverage: "" });
-  api.runGet.mockResolvedValue(run("RUNNING", 0, 1));
-  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
-  await screen.findByRole("article", { name: "镜头03" });
-  expect(api.runGet).not.toHaveBeenCalled();
-  task = true;
-  const before = api.get.mock.calls.length;
-  await act(async () => { vi.advanceTimersByTime(8000); });
-  for (let i = 0; i < 20 && !api.runGet.mock.calls.length; i++) await act(async () => { await new Promise(r => setTimeout(r, 10)); });
-  expect(api.get.mock.calls.length).toBeGreaterThan(before);
-  expect(api.runGet).toHaveBeenCalledWith("p", { source: "production-run", id: "t1" });
+  const interval = vi.spyOn(window, "setInterval");
+  try {
+    let task = false;
+    api.get.mockImplementation(async (_p: string, shotId: string | null) => idleContext(shotId, task));
+    api.runList.mockResolvedValue({ items: [run("QUEUED", 0, 1)], nextCursor: null, coverage: "" });
+    api.runGet.mockResolvedValue(run("RUNNING", 0, 1));
+    // Flush initial reads and their passive polling effect before advancing the clock.
+    // A rendered card alone is not a barrier for setInterval installation.
+    await act(async () => { render(<StoryboardWorkbench route={route} navigate={vi.fn()} />); });
+    expect(screen.getByRole("article", { name: "镜头03" })).toBeTruthy();
+    expect(interval).toHaveBeenCalledWith(expect.any(Function), 8000);
+    expect(api.runGet).not.toHaveBeenCalled();
+    task = true;
+    const before = api.get.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(7999); });
+    expect(api.get.mock.calls.length).toBe(before);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(api.get.mock.calls.length).toBeGreaterThan(before);
+    expect(api.runGet).toHaveBeenCalledWith("p", { source: "production-run", id: "t1" });
+    expect(api.generate).not.toHaveBeenCalled();
+  } finally { interval.mockRestore(); }
 });
 
 it("D3: run invalidation for this project refreshes the workbench without any GENERATING shot", async () => {

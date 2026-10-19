@@ -1,3 +1,4 @@
+import { workbenchPollClockParentReader, workbenchPollClockScopeSince, workbenchPollClockFixtureFiles, WORKBENCH_POLL_CLOCK_BASE } from './workbench-poll-clock-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -60,10 +61,11 @@ export function referenceDraftScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...REFERENCE_DRAFT_CHANGED, ...REFERENCE_DRAFT_ADDED, REFERENCE_DRAFT_PROOF,
+    ...workbenchPollClockScopeSince(root, WORKBENCH_POLL_CLOCK_BASE),
   ])].sort();
 }
 export function referenceDraftFixtureFiles(root) {
-  return [...facts(root, REFERENCE_DRAFT_BASE).paths, ...REFERENCE_DRAFT_ADDED, REFERENCE_DRAFT_PROOF];
+  return [...new Set([...facts(root, REFERENCE_DRAFT_BASE).paths, ...REFERENCE_DRAFT_ADDED, REFERENCE_DRAFT_PROOF, ...workbenchPollClockFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -72,10 +74,10 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, REFERENCE_DRAFT_BASE);
   const fail = id => violations.push("reference-draft-recovery-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(REFERENCE_DRAFT_PROOF));
@@ -88,10 +90,10 @@ function validate(root, override) {
     const allowed = [...scope, REFERENCE_DRAFT_PROOF].sort();
     const expected = [...parent.paths, ...REFERENCE_DRAFT_ADDED, REFERENCE_DRAFT_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -111,13 +113,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: REFERENCE_DRAFT_CHANGED,
-    addedPaths: [...REFERENCE_DRAFT_ADDED, REFERENCE_DRAFT_PROOF],
-    afterHashes: Object.fromEntries([...REFERENCE_DRAFT_CHANGED, ...REFERENCE_DRAFT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...REFERENCE_DRAFT_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...REFERENCE_DRAFT_ADDED, REFERENCE_DRAFT_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...REFERENCE_DRAFT_CHANGED, ...REFERENCE_DRAFT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => REFERENCE_DRAFT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function referenceDraftParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "referenceDraftParentReader", undefined,
-    () => validate(root, undefined), REFERENCE_DRAFT_PROOF);
+  const successor = workbenchPollClockParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "referenceDraftParentReader", undefined, check, REFERENCE_DRAFT_PROOF);
 }
