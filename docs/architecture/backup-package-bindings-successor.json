@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "BACKUP_PACKAGE_BINDINGS",
+  "parentHead": "05abb6e8f3766b5d95c24149a6e706350b1cab37",
+  "planningParentHead": "05abb6e8f3766b5d95c24149a6e706350b1cab37",
+  "contracts": {
+    "schemaChanged": false,
+    "gpuExecuted": false,
+    "historicalProofBytesUnchanged": true,
+    "runtimeBytesChanged": false,
+    "additiveV21Provenance": true,
+    "backupVersion": 21,
+    "backupFormatChanged": true
+  },
+  "files": {
+    "scripts/backup-package-bindings-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "3c220c34432ba8594f94cfb51a7993ff8d65249dd6ba5238ea6f9e9712218006"
+    },
+    "scripts/storyboard-atomic-row-successor-guard.mjs": {
+      "beforeHash": "5377609ae0437dc380e5b63b7c16210c046caf16323f54080562d37a60aab206",
+      "afterHash": "d6284587034d86cc445f08400e822685ce916cdd46028d15ffd8ca57378c1bcd"
+    },
+    "scripts/testing/backup-package-bindings.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "2d9913d1785f6dd4c113191ad0c11695a975cb07babc63b91c854c1ae5bcf00a"
+    },
+    "src-tauri/src/application/project_backup_service.rs": {
+      "beforeHash": "3e7ae396f3a054becffdd441e3068b609324691831117df9511fadca8e7b5cc8",
+      "afterHash": "e03b7070ae9abbf6d34c10c2183d172362f0883d8f9b95f399505cccbc1a955f"
+    },
+    "src-tauri/src/infrastructure/database/repositories/project_backup.rs": {
+      "beforeHash": "cef498a40b843d9c3801736a003a35b7f6abb31008ddfaac2ac884743a020330",
+      "afterHash": "b71119027a654106b82fd6dc33b0b3c57a72b28346efaad2004f51551dc41da1"
+    }
+  }
+}

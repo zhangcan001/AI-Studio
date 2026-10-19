@@ -104,6 +104,8 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
         let prompt_entries = query_prompt_entries(&mut transaction, project_id).await?;
         let prompt_versions = query_prompt_versions(&mut transaction, project_id).await?;
         let batches = query_batches(&mut transaction, project_id).await?;
+        let production_package_batch_bindings =
+            query_production_package_batch_bindings(&mut transaction, project_id).await?;
         let items = query_batch_items(&mut transaction, &batches).await?;
         let preparation_snapshots =
             query_production_preparation_snapshots(&mut transaction, project_id).await?;
@@ -482,6 +484,7 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             reference_set_items,
             shot_profile_bindings,
             story_entities,
+            production_package_batch_bindings,
             shot_story_entity_bindings,
             shot_reference_set_bindings,
             scope_profile_bindings,
@@ -3754,6 +3757,18 @@ async fn restore_rows_in_transaction(
             .bind(&project.id).bind(item.execution_type.map(|value| value.as_str())).bind(&item.submission_idempotency_key)
             .execute(&mut **transaction).await.map_err(|error| RepositoryError::database(error.to_string()))?;
     }
+    for binding in &document.production_package_batch_bindings {
+        let Some(batch_id) = batch_ids.get(&binding.batch_id) else {
+            continue;
+        };
+        sqlx::query("INSERT INTO production_package_batch_bindings
+            (project_id, package_key, package_root, manifest_sha256, package_id, package_name, batch_id, chunk_index, chunk_count, package_item_ids_json, created_at, source_kind)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PRODUCTION_PACKAGE')")
+            .bind(&project.id).bind(&binding.package_key).bind(&binding.package_root).bind(&binding.manifest_sha256)
+            .bind(&binding.package_id).bind(&binding.package_name).bind(batch_id).bind(i64::from(binding.chunk_index)).bind(i64::from(binding.chunk_count))
+            .bind(serde_json::to_string(&binding.package_item_ids).map_err(|e| RepositoryError::serialization("production package item ids", e.to_string()))?)
+            .bind(&binding.created_at).execute(&mut **transaction).await.map_err(|e| RepositoryError::database(e.to_string()))?;
+    }
     for template in &document.production_run_templates {
         let Some(template_id) = production_run_template_ids.get(&template.id) else {
             continue;
@@ -6592,4 +6607,40 @@ async fn restore_provenance_lineage(
         restored_generation_tool_usages,
         restored_generation_asset_versions,
     ))
+}
+
+async fn query_production_package_batch_bindings(
+    tx: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupProductionPackageBatchBinding>, RepositoryError> {
+    let rows = sqlx::query("SELECT package_key, package_root, manifest_sha256, package_id, package_name, batch_id, chunk_index, chunk_count, package_item_ids_json, created_at
+        FROM production_package_batch_bindings WHERE project_id = ? ORDER BY created_at, batch_id, package_key")
+        .bind(project_id).fetch_all(&mut **tx).await.map_err(|e| RepositoryError::database(e.to_string()))?;
+    rows.into_iter()
+        .map(|row| {
+            let decode = |e: sqlx::Error| RepositoryError::database(e.to_string());
+            let chunk = |key: &str| -> Result<u32, RepositoryError> {
+                u32::try_from(row.try_get::<i64, _>(key).map_err(decode)?)
+                    .map_err(|_| RepositoryError::integrity("生产包分块超出范围"))
+            };
+            Ok(BackupProductionPackageBatchBinding {
+                package_key: row.try_get("package_key").map_err(decode)?,
+                package_root: row.try_get("package_root").map_err(decode)?,
+                manifest_sha256: row.try_get("manifest_sha256").map_err(decode)?,
+                package_id: row.try_get("package_id").map_err(decode)?,
+                package_name: row.try_get("package_name").map_err(decode)?,
+                batch_id: row.try_get("batch_id").map_err(decode)?,
+                chunk_index: chunk("chunk_index")?,
+                chunk_count: chunk("chunk_count")?,
+                package_item_ids: serde_json::from_str(
+                    &row.try_get::<String, _>("package_item_ids_json")
+                        .map_err(decode)?,
+                )
+                .map_err(|e| {
+                    RepositoryError::serialization("production package item ids", e.to_string())
+                })?,
+                created_at: row.try_get("created_at").map_err(decode)?,
+            })
+        })
+        .collect()
 }

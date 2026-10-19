@@ -254,6 +254,8 @@ pub struct BackupInventoryCounts {
     /// Missing from manifests produced before Backup v20.
     #[serde(default)]
     pub artifact_reviews: usize,
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub production_package_batch_bindings: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1230,6 +1232,9 @@ pub struct BackupDocument {
     /// Additive (migration 045/046). Older archives omit these and restore empty sets.
     #[serde(default)]
     pub(crate) story_entities: Vec<BackupStoryEntity>,
+    /// Additive v21 provenance (migration026); older archives restore an empty list.
+    #[serde(default)]
+    pub(crate) production_package_batch_bindings: Vec<BackupProductionPackageBatchBinding>,
     #[serde(default)]
     pub(crate) shot_story_entity_bindings: Vec<BackupShotStoryEntityBinding>,
     #[serde(default)]
@@ -2557,6 +2562,10 @@ fn write_zip_to_path(
     Ok(())
 }
 
+fn is_zero_count(count: &usize) -> bool {
+    *count == 0
+}
+
 fn build_inventory_counts(document: &BackupDocument) -> BackupInventoryCounts {
     BackupInventoryCounts {
         assets: document.assets.len(),
@@ -2571,6 +2580,7 @@ fn build_inventory_counts(document: &BackupDocument) -> BackupInventoryCounts {
             .saturating_add(document.generation_asset_versions.len()),
         tasks: document.tasks.len(),
         artifact_reviews: document.artifact_reviews.len(),
+        production_package_batch_bindings: document.production_package_batch_bindings.len(),
     }
 }
 
@@ -2916,6 +2926,7 @@ fn validate_document_entries(
     }
     validate_asset_video_prompt_document(document)?;
     queue_metadata::validate(document)?;
+    validate_package_bindings(document)?;
     validate_project_workflow_binding_document(document, version)?;
     validate_workflow_registry_document(document, version)?;
     validate_production_item_review_document(document)?;
@@ -5303,20 +5314,22 @@ mod tests {
     }
 
     use super::{
-        assemble_reference_anchor_backups, collect_exact_asset_id_references, hash_bytes,
-        inspect_archive, remap_reference_anchor_assets, remap_snapshot_asset_references,
-        restored_name, safe_zip_path, validate_asset_video_prompt_document,
-        validate_organization_document, validate_production_structure_document,
+        assemble_reference_anchor_backups, build_inventory_counts,
+        collect_exact_asset_id_references, hash_bytes, inspect_archive,
+        remap_reference_anchor_assets, remap_snapshot_asset_references, restored_name,
+        safe_zip_path, validate_asset_video_prompt_document, validate_organization_document,
+        validate_package_bindings, validate_production_structure_document,
         validate_prompt_document, validate_reference_anchor_document, write_zip_to_path,
         BackupArtifactReview, BackupAsset, BackupAssetRelation, BackupAssetTag, BackupAssetTagLink,
         BackupAssetVersion, BackupAssetVideoPrompt, BackupDocument, BackupFileSource,
         BackupGenerationAssetVersion, BackupGenerationToolUsage, BackupInventoryCounts,
         BackupMapping, BackupModel, BackupModelVersion, BackupProductionEpisode,
-        BackupProductionScene, BackupProductionSeries, BackupProject, BackupPromptEntry,
-        BackupPromptVersion, BackupReferenceAnchor, BackupReferenceAnchorAsset, BackupShot,
-        BackupShotSceneAssignment, BackupSnapshot, BackupTask, BackupTool, BackupToolCapability,
-        BackupToolInstance, BackupToolVersion, DbReferenceAnchor, DbReferenceAnchorAsset,
-        ProductionStructureIds, ProjectBackupManifest, ProjectBackupService,
+        BackupProductionPackageBatchBinding, BackupProductionScene, BackupProductionSeries,
+        BackupProject, BackupPromptEntry, BackupPromptVersion, BackupReferenceAnchor,
+        BackupReferenceAnchorAsset, BackupShot, BackupShotSceneAssignment, BackupSnapshot,
+        BackupTask, BackupTool, BackupToolCapability, BackupToolInstance, BackupToolVersion,
+        DbReferenceAnchor, DbReferenceAnchorAsset, ProductionStructureIds, ProjectBackupManifest,
+        ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{
@@ -5840,6 +5853,7 @@ mod tests {
             reference_set_items: Vec::new(),
             shot_profile_bindings: Vec::new(),
             story_entities: Vec::new(),
+            production_package_batch_bindings: Vec::new(),
             shot_story_entity_bindings: Vec::new(),
             shot_reference_set_bindings: Vec::new(),
             scope_profile_bindings: Vec::new(),
@@ -7844,6 +7858,7 @@ mod tests {
             reference_set_items: Vec::new(),
             shot_profile_bindings: Vec::new(),
             story_entities: Vec::new(),
+            production_package_batch_bindings: Vec::new(),
             shot_story_entity_bindings: Vec::new(),
             shot_reference_set_bindings: Vec::new(),
             scope_profile_bindings: Vec::new(),
@@ -8036,6 +8051,7 @@ mod tests {
             reference_set_items: Vec::new(),
             shot_profile_bindings: Vec::new(),
             story_entities: Vec::new(),
+            production_package_batch_bindings: Vec::new(),
             shot_story_entity_bindings: Vec::new(),
             shot_reference_set_bindings: Vec::new(),
             scope_profile_bindings: Vec::new(),
@@ -8328,6 +8344,10 @@ mod tests {
             if name == "manifest.json" {
                 let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
                 manifest["logicalSnapshotChecksum"] = json!(hash_bytes(&project_bytes));
+                manifest["inventory"]["productionPackageBatchBindings"] = json!(project
+                    ["productionPackageBatchBindings"]
+                    .as_array()
+                    .map_or(0, Vec::len));
                 bytes = serde_json::to_vec_pretty(&manifest).unwrap();
             }
             if name == "project.json" {
@@ -8339,6 +8359,335 @@ mod tests {
         writer.finish().unwrap();
     }
 
+    #[test]
+    fn every_migration_table_is_backed_up_or_explicitly_excluded() {
+        let backed_up: &[&str] = &[
+            "artifact_reviews",
+            "asset_favorites",
+            "asset_relations",
+            "asset_tag_links",
+            "asset_tags",
+            "asset_versions",
+            "asset_video_prompts",
+            "assets",
+            "benchmark_candidates",
+            "benchmark_experiments",
+            "benchmark_quality_scores",
+            "benchmark_runs",
+            "character_profiles",
+            "consistency_scope_profile_bindings",
+            "consistency_scope_reference_set_bindings",
+            "costume_variants",
+            "external_asset_imports",
+            "external_production_handoff_entities",
+            "external_production_handoffs",
+            "generation_asset_versions",
+            "generation_snapshots",
+            "generation_tool_usages",
+            "model_versions",
+            "models",
+            "presets",
+            "production_batch_items",
+            "production_batches",
+            "production_episodes",
+            "production_item_reviews",
+            "production_package_batch_bindings",
+            "production_preparation_snapshots",
+            "production_run_templates",
+            "production_runs",
+            "production_scenes",
+            "production_series",
+            "production_stage_items",
+            "production_stages",
+            "profile_revisions",
+            "project_workflow_bindings",
+            "projects",
+            "prompt_entries",
+            "prompt_versions",
+            "prop_profiles",
+            "recipes",
+            "reference_anchor_assets",
+            "reference_anchors",
+            "reference_set_items",
+            "reference_sets",
+            "scene_profiles",
+            "script_import_drafts",
+            "script_sources",
+            "shot_generation_links",
+            "shot_profile_bindings",
+            "shot_reference_assets",
+            "shot_reference_set_bindings",
+            "shot_scene_assignments",
+            "shot_stage_configs",
+            "shot_stage_prompts",
+            "shot_story_entity_bindings",
+            "shot_video_input_assets",
+            "shot_video_input_sets",
+            "shots",
+            "story_entities",
+            "story_entity_images",
+            "style_profiles",
+            "task_events",
+            "task_output_assets",
+            "tasks",
+            "tool_capabilities",
+            "tool_instances",
+            "tool_versions",
+            "tools",
+            "workflow_runtime_artifacts",
+            "workflow_versions",
+            "workflows",
+        ];
+        let excluded: &[(&str, &str)] = &[
+            (
+                "app_repair_jobs",
+                "Database-scoped one-time repair journal, not project data.",
+            ),
+            (
+                "production_deferred_starts",
+                "Live dispatcher requests must never resume implicitly on restore.",
+            ),
+            (
+                "project_templates",
+                "Global reusable templates, no project ownership.",
+            ),
+            (
+                "workflow_recipe_promotions",
+                "Global workflow promotion state, no project ownership.",
+            ),
+            (
+                "workflow_recipe_runtime_states",
+                "Machine runtime availability, never restore executable state.",
+            ),
+            (
+                "workflow_runtime_states",
+                "Machine runtime availability, never restore executable state.",
+            ),
+        ];
+        let mut actual = std::collections::BTreeSet::new();
+        for entry in
+            std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+                .unwrap()
+        {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("sql") {
+                continue;
+            }
+            let sql = std::fs::read_to_string(path).unwrap();
+            let words: Vec<_> = sql.split_whitespace().collect();
+            for i in 0..words.len().saturating_sub(2) {
+                if words[i].eq_ignore_ascii_case("CREATE")
+                    && words[i + 1].eq_ignore_ascii_case("TABLE")
+                {
+                    let start = if words[i + 2].eq_ignore_ascii_case("IF") {
+                        i + 5
+                    } else {
+                        i + 2
+                    };
+                    actual.insert(words[start].trim_end_matches('(').to_owned());
+                }
+            }
+        }
+        let mut covered = std::collections::BTreeSet::new();
+        let source = concat!(
+            include_str!("../infrastructure/database/repositories/project_backup.rs"),
+            include_str!("../infrastructure/database/repositories/project_backup/video_inputs.rs")
+        );
+        for table in backed_up {
+            assert!(covered.insert(table.to_string()));
+            assert!(
+                source.contains(&format!("FROM {table}")),
+                "missing export SELECT for {table}"
+            );
+            assert!(
+                source.contains(&format!("INTO {table}")),
+                "missing restore INSERT for {table}"
+            );
+        }
+        for (table, why) in excluded {
+            assert!(!why.trim().is_empty());
+            assert!(
+                covered.insert(table.to_string()),
+                "duplicate/excluded table {table}"
+            );
+        }
+        assert_eq!(
+            covered, actual,
+            "new migration tables require real backup coverage or a reasoned exclusion"
+        );
+    }
+    fn package_binding(
+        batch: &str,
+        index: u32,
+        ids: &[&str],
+    ) -> BackupProductionPackageBatchBinding {
+        BackupProductionPackageBatchBinding {
+            package_key: "a".repeat(64),
+            package_root: r"C:\owned-test-package".into(),
+            manifest_sha256: "b".repeat(64),
+            package_id: Some("manifest-package".into()),
+            package_name: "owned package".into(),
+            batch_id: batch.into(),
+            chunk_index: index,
+            chunk_count: 2,
+            package_item_ids: ids.iter().map(|s| s.to_string()).collect(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+    #[tokio::test]
+    async fn backup_round_trip_restores_package_bindings_and_blocks_duplicate_enqueue() {
+        use crate::{
+            application::ports::ProductionQueueRepository,
+            domain::{
+                ProductionBatch, ProductionBatchId, ProductionBatchStatus,
+                ProductionPackageProvenance,
+            },
+            infrastructure::database::repositories::SqliteProductionQueueRepository,
+        };
+        let dir = tempdir().unwrap();
+        let (pool, service, project, archive) = seed_current_v20_legacy_shot_fixture(&dir).await;
+        sqlx::query("INSERT INTO production_batches (id,project_id,name,status,continue_on_failure,created_at,updated_at) VALUES ('pbt_chunk2',?,'second','COMPLETED',0,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").bind(&project).execute(&pool).await.unwrap();
+        for binding in [
+            package_binding("pbt_current_v20", 0, &["manifest-item-a"]),
+            package_binding("pbt_chunk2", 1, &["manifest-item-b"]),
+        ] {
+            sqlx::query("INSERT INTO production_package_batch_bindings (project_id,package_key,package_root,manifest_sha256,package_id,package_name,batch_id,chunk_index,chunk_count,package_item_ids_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+                .bind(&project).bind(binding.package_key).bind(binding.package_root).bind(binding.manifest_sha256).bind(binding.package_id).bind(binding.package_name).bind(binding.batch_id)
+                .bind(i64::from(binding.chunk_index)).bind(i64::from(binding.chunk_count)).bind(serde_json::to_string(&binding.package_item_ids).unwrap()).bind(binding.created_at).execute(&pool).await.unwrap();
+        }
+        let source_before:Vec<(String,String)>=sqlx::query_as("SELECT batch_id,package_item_ids_json FROM production_package_batch_bindings WHERE project_id=? ORDER BY batch_id").bind(&project).fetch_all(&pool).await.unwrap();
+        service.export(&project, archive.clone()).await.unwrap();
+        let (_, doc, _) = inspect_archive(&archive).unwrap();
+        assert_eq!(doc.production_package_batch_bindings.len(), 2);
+        assert_eq!(
+            build_inventory_counts(&doc).production_package_batch_bindings,
+            2
+        );
+        for mutate in 0..6 {
+            let mut bad = doc.clone();
+            let binding = &mut bad.production_package_batch_bindings[0];
+            match mutate {
+                0 => binding.batch_id = "missing".into(),
+                1 => binding.chunk_index = binding.chunk_count,
+                2 => binding.package_key = "A".repeat(64),
+                3 => binding.manifest_sha256 = "bad".into(),
+                4 => {
+                    binding.package_item_ids = doc.production_package_batch_bindings[1]
+                        .package_item_ids
+                        .clone()
+                }
+                _ => {
+                    let duplicate = binding.clone();
+                    bad.production_package_batch_bindings.push(duplicate);
+                }
+            }
+            assert!(validate_package_bindings(&bad).is_err());
+            let invalid = dir.path().join(format!("bad-package-{mutate}.aiarchive"));
+            rewrite_v21_queue_document(&archive, &invalid, |project| {
+                project["productionPackageBatchBindings"] =
+                    serde_json::to_value(&bad.production_package_batch_bindings).unwrap();
+            });
+            assert!(
+                service.inspect(invalid).await.is_err(),
+                "inspect must reject bad package provenance {mutate}"
+            );
+        }
+        let preview = service.inspect(archive.clone()).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let rows:Vec<(String,String,String,String,String)> = sqlx::query_as("SELECT p.batch_id,p.package_root,p.package_key,p.manifest_sha256,p.package_item_ids_json FROM production_package_batch_bindings p JOIN production_batches b ON b.id=p.batch_id AND b.project_id=p.project_id WHERE p.project_id=? ORDER BY p.chunk_index").bind(&restored.id).fetch_all(&pool).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        for (i, row) in rows.iter().enumerate() {
+            let expected = doc
+                .production_package_batch_bindings
+                .iter()
+                .find(|b| b.chunk_index as usize == i)
+                .unwrap();
+            assert_ne!(row.0, expected.batch_id);
+            assert_eq!(row.1, expected.package_root);
+            assert_eq!(row.2, "a".repeat(64));
+            assert_eq!(row.3, "b".repeat(64));
+            assert_eq!(
+                serde_json::from_str::<Vec<String>>(&row.4).unwrap(),
+                expected.package_item_ids
+            );
+        }
+        let repo = SqliteProductionQueueRepository::new(pool.clone());
+        let now = chrono::Utc::now();
+        let batch = ProductionBatch {
+            id: ProductionBatchId::parse("pbt_duplicate_probe".into()).unwrap(),
+            project_id: restored.id.clone(),
+            name: "duplicate".into(),
+            status: ProductionBatchStatus::Ready,
+            continue_on_failure: false,
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let provenance = ProductionPackageProvenance {
+            source_package_key: "a".repeat(64),
+            source_package_root: rows[0].1.clone(),
+            source_package_manifest_sha256: "b".repeat(64),
+            source_package_id: Some("manifest-package".into()),
+            source_package_name: "owned package".into(),
+            source_package_chunk_index: 0,
+            source_package_chunk_count: 2,
+            package_item_ids: vec!["manifest-item-a".into()],
+        };
+        let item = crate::domain::ProductionBatchItem {
+            id: crate::domain::ProductionBatchItemId::new(),
+            batch_id: batch.id.clone(),
+            ordinal: 0,
+            workflow_version_id: doc.items[0].workflow_version_id.clone(),
+            recipe_id: doc.items[0].recipe_id.clone(),
+            values_json: json!({}),
+            status: crate::domain::ProductionBatchItemStatus::Pending,
+            task_id: None,
+            retry_of_item_id: None,
+            error_code: None,
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let error = repo
+            .insert_with_provenance(&batch, &[item], &provenance)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, crate::application::ports::RepositoryError::Integrity { ref message } if message.contains("already bound")), "must reach the duplicate-package guard, not reject an unrelated invalid fixture: {error}");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM production_batches WHERE id='pbt_duplicate_probe'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        let source_after:Vec<(String,String)>=sqlx::query_as("SELECT batch_id,package_item_ids_json FROM production_package_batch_bindings WHERE project_id=? ORDER BY batch_id").bind(&project).fetch_all(&pool).await.unwrap();
+        assert_eq!(source_after, source_before);
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+        let legacy = dir.path().join("legacy-no-package.aiarchive");
+        rewrite_v21_queue_document(&archive, &legacy, |d| {
+            d.as_object_mut()
+                .unwrap()
+                .remove("productionPackageBatchBindings");
+        });
+        let preview = service.inspect(legacy).await.unwrap();
+        let old = service.restore(&preview.inspection_id).await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM production_package_batch_bindings WHERE project_id=?"
+            )
+            .bind(&old.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+    }
     #[tokio::test]
     async fn v21_execution_metadata_roundtrip_preserves_authority_and_remaps_owned_inputs() {
         let directory = tempdir().unwrap();
@@ -10219,6 +10568,7 @@ mod tests {
                 lineage: 0,
                 tasks: 0,
                 artifact_reviews: 0,
+                production_package_batch_bindings: 0,
             });
             inventory.assets = inventory.assets.saturating_add(99);
             manifest.inventory = Some(inventory);
@@ -11691,4 +12041,50 @@ mod video_input_tests {
         .unwrap()
         .is_some());
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupProductionPackageBatchBinding {
+    pub package_key: String,
+    /// Provenance only; restore never opens or executes this source-machine path.
+    pub package_root: String,
+    pub manifest_sha256: String,
+    pub package_id: Option<String>,
+    pub package_name: String,
+    pub batch_id: String,
+    pub chunk_index: u32,
+    pub chunk_count: u32,
+    pub package_item_ids: Vec<String>,
+    pub created_at: String,
+}
+fn validate_package_bindings(document: &BackupDocument) -> Result<(), AppError> {
+    let batch_ids: HashSet<_> = document.batches.iter().map(|b| b.id.as_str()).collect();
+    let mut unique = HashSet::new();
+    let mut items = HashSet::new();
+    let hash = |value: &str| {
+        value.len() == 64
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    };
+    for binding in &document.production_package_batch_bindings {
+        if !batch_ids.contains(binding.batch_id.as_str())
+            || !hash(&binding.package_key)
+            || !hash(&binding.manifest_sha256)
+            || binding.chunk_count == 0
+            || binding.chunk_index >= binding.chunk_count
+            || !unique.insert((&binding.package_key, &binding.batch_id))
+        {
+            return Err(AppError::backup_invalid(
+                "生产包批次来源身份、哈希或分块无效",
+            ));
+        }
+        for id in &binding.package_item_ids {
+            if id.trim().is_empty() || !items.insert((&binding.package_key, id)) {
+                return Err(AppError::backup_invalid("生产包条目重复或为空"));
+            }
+        }
+    }
+    Ok(())
 }
