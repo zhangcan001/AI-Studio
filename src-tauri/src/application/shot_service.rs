@@ -138,6 +138,7 @@ pub struct PreparedShotGeneration {
 
 pub struct ShotService {
     video_inputs: Option<Arc<crate::application::shot_video_input_service::ShotVideoInputService>>,
+    row_edits: Option<Arc<dyn crate::application::ports::ShotRowEditRepository>>,
     repository: Arc<dyn ShotRepository>,
     task_repository: Arc<dyn TaskRepository>,
     asset_repository: Arc<dyn AssetRepository>,
@@ -163,6 +164,7 @@ impl ShotService {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
+            row_edits: None,
             video_inputs: None,
             repository,
             task_repository,
@@ -198,6 +200,59 @@ impl ShotService {
         self
     }
 
+    pub fn with_row_edit_repository(
+        mut self,
+        repository: Arc<dyn crate::application::ports::ShotRowEditRepository>,
+    ) -> Self {
+        self.row_edits = Some(repository);
+        self
+    }
+    pub(crate) async fn prepare_row_config(
+        &self,
+        request: ShotStageConfigRequest,
+    ) -> Result<ShotStageConfigRecord, ShotServiceError> {
+        let definition = self
+            .definition_repository
+            .find(&request.workflow_version_id, &request.recipe_id)
+            .await?
+            .ok_or_else(|| {
+                ShotServiceError::InvalidInput("所选工作流版本或 Recipe 当前不可用".into())
+            })?;
+        Ok(ShotStageConfigRecord {
+            shot_id: request.shot_id,
+            stage: request.stage,
+            workflow_version_id: request.workflow_version_id,
+            recipe_id: request.recipe_id,
+            scalar_values: validate_stage_config_values(
+                request.stage,
+                &definition,
+                &request.values,
+            )?,
+            updated_at: self.clock.now(),
+        })
+    }
+    pub(crate) async fn save_row_atomic(
+        &self,
+        mut request: crate::application::ports::ShotRowEditRecord,
+    ) -> Result<(ShotView, Vec<crate::domain::story_entity::StoryEntity>), ShotServiceError> {
+        validate_project(&request.project_id)?;
+        self.get(&request.project_id, &request.shot_id).await?;
+        request.prompt_text = request
+            .prompt_text
+            .map(|p| canonical_prompt_text(&p))
+            .transpose()
+            .map_err(ShotServiceError::InvalidInput)?;
+        request.updated_at = self.clock.now();
+        let repository = self
+            .row_edits
+            .as_ref()
+            .ok_or_else(|| ShotServiceError::InvalidInput("镜头行保存服务不可用".into()))?;
+        let entities = repository.save_row_atomic(&request).await?;
+        Ok((
+            self.get(&request.project_id, &request.shot_id).await?,
+            entities,
+        ))
+    }
     pub async fn list(&self, project_id: &str) -> Result<Vec<ShotView>, ShotServiceError> {
         validate_project(project_id)?;
         let data = self.repository.list(project_id).await?;

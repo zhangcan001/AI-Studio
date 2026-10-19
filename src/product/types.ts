@@ -109,3 +109,6 @@ export interface RunShotContext { id: string; name: string; stage: string }
 export interface RunInput { taskId: string | null; itemId?: string | null; generatorName: string; selectionRef: string | null; values: Record<string, import("../types/generation").DraftValue>; reuseUnavailableReason: string | null; errorMessage: string | null }
 export interface RunResult { assetId: string; name: string; mediaKind: string | null; assetExists: boolean; availability: string | null; reviewState: string | null; reviewRevision: number | null; selectedShotIds: string[]; thumbnailBytes: number[] | null }
 export interface RunResultReviewRequest { runRef: RunRef; assetId: string; decision: "APPROVED" | "REJECTED"; comment: string; expectedRevision: number }
+
+export type CreationShotRowSave = { shotId: string; stage: "video"; prompt?: string; selectionRef?: string; values?: Record<string, Extract<import("../types/generation").DraftValue, { type: "string" | "integer" | "number" | "seed_random" | "seed_fixed" }>>; entityIds?: string[] };
+export type CreationShotRowSaveResult = { shot: CreationShot; boundEntities: import("../types/storyEntity").StoryEntity[] };

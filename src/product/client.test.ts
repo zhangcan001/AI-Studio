@@ -120,3 +120,10 @@ describe("product facade client", () => {
     expectTypeOf(productClient.run.get).returns.resolves.toEqualTypeOf<ProductRun>();
   });
 });
+
+it("sends an atomic typed row save without invoking separate writes", async () => {
+  const request = {shotId:"s", stage:"video" as const, prompt:"hello", entityIds:[]};
+  const result = {shot:{},boundEntities:[]}; invokeCommand.mockResolvedValueOnce(result);
+  expect(await productClient.creation.saveShotRow("p",request)).toEqual(result);
+  expect(invokeCommand).toHaveBeenLastCalledWith("product_creation_shot_row_save", {projectId:"p",request});
+});

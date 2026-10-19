@@ -7,9 +7,9 @@ import type { StoryboardShot } from "./storyboardModel";
 import { normalizeProductError } from "../../product/errors";
 import { invalidateVideoInputs } from "../../product/videoInputInvalidation";
 
-const api = vi.hoisted(() => ({ updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn() }));
+const api = vi.hoisted(() => ({ saveShotRow: vi.fn(), updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: {
-  creation: { updateShot: api.updateShot, deleteShot: api.deleteShot, readinessGet: api.readinessGet, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, inputsGet: api.inputsGet, inputsSave: api.inputsSave, mediaUrl: (p: string, id: string) => `media://${p}/${id}` },
+  creation: { saveShotRow: api.saveShotRow, updateShot: api.updateShot, deleteShot: api.deleteShot, readinessGet: api.readinessGet, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, inputsGet: api.inputsGet, inputsSave: api.inputsSave, mediaUrl: (p: string, id: string) => `media://${p}/${id}` },
   storyEntities: { list: api.list, listForShot: api.listForShot, bindShot: api.bindShot },
   library: { imageGet: vi.fn(async () => [1]), thumbnailGet: vi.fn(async () => null) },
 } }));
@@ -29,6 +29,7 @@ beforeEach(() => {
   api.generatorsList.mockResolvedValue([generator]);
   api.inputsGet.mockImplementation(async s => ({ selectionRef: s.selectionRef, token: { instanceId: 'refs', revision: 4 }, inputs: [], assets: [] }));
   api.inputsSave.mockImplementation(async r => ({ selectionRef: r.selection.selectionRef, token: { instanceId: 'refs', revision: 5 }, inputs: r.inputs, assets: [] }));
+  api.saveShotRow.mockImplementation(async (_p: string, req: {entityIds?: string[]}) => ({ shot: shot("a",0).shot, boundEntities: [hero, lane].filter(e => (req.entityIds ?? ["e1"]).includes(e.id)) }));
   api.updateShot.mockResolvedValue({}); api.deleteShot.mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
@@ -190,15 +191,18 @@ it("saves the prompt on blur and auto-fills recognized duration, aspect/resoluti
   expect(within(row).getByLabelText("识别结果").textContent).toContain("画幅 9:16 · 768×1344");
   expect(within(row).getByLabelText("识别结果").textContent).toContain("场景 @雨巷");
   fireEvent.blur(box);
-  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", { shotId: "a", name: "镜头1", stage: "video", prompt: "阿离 走进 雨巷 8秒 竖屏 720p", selectionRef: "sel",
-    values: { duration_seconds: { type: "integer", value: 8 }, width: { type: "integer", value: 768 }, height: { type: "integer", value: 1344 } } }));
-  await waitFor(() => expect(api.bindShot).toHaveBeenCalledWith("p", "a", ["e1", "e2"]));
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalledWith("p", { shotId: "a", stage: "video", prompt: "阿离 走进 雨巷 8秒 竖屏 720p", selectionRef: "sel",
+    values: { duration_seconds: { type: "integer", value: 8 }, width: { type: "integer", value: 768 }, height: { type: "integer", value: 1344 } }, entityIds: ["e1", "e2"] }));
+  expect(api.bindShot).not.toHaveBeenCalled();
+  expect(api.updateShot).not.toHaveBeenCalled();
+  expect(api.saveShotRow).toHaveBeenCalledTimes(1);
   const status = (await within(row).findByText(/已识别并填入/)).closest("p")!;
   expect(status.textContent).toContain("已识别并填入：时长 8 秒 · 画幅 9:16 · 768×1344 · 场景 @雨巷");
   expect(p.onChanged).toHaveBeenCalled();
   fireEvent.click(within(status).getByRole("button", { name: "撤销" }));
-  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", { shotId: "a", name: "镜头1", stage: "video", selectionRef: "sel", values: { duration_seconds: { type: "integer", value: 5 } } }));
-  await waitFor(() => expect(api.bindShot).toHaveBeenLastCalledWith("p", "a", ["e1"]));
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenLastCalledWith("p", { shotId: "a", stage: "video", selectionRef: "sel", values: { duration_seconds: { type: "integer", value: 5 } }, entityIds: ["e1"] }));
+  expect(api.saveShotRow).toHaveBeenCalledTimes(2);
+  expect(api.bindShot).not.toHaveBeenCalled();
   await within(row).findByText("已撤销自动填入");
 });
 
@@ -216,7 +220,7 @@ it("edits duration, aspect and resolution inline through updateShot; Ctrl+Enter 
   const box = within(row).getByLabelText("镜头1 提示词");
   fireEvent.change(box, { target: { value: "只改文字" } });
   fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
-  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", { shotId: "a", name: "镜头1", stage: "video", prompt: "只改文字" }));
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenLastCalledWith("p", { shotId: "a", stage: "video", prompt: "只改文字" }));
   expect(await within(row).findByText("提示词已保存")).toBeTruthy();
 });
 
@@ -238,7 +242,7 @@ it("shows read-only duration/aspect when no generator exists and never sends val
   const box = within(row).getByLabelText("镜头1 提示词");
   await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
   fireEvent.change(box, { target: { value: "竖屏 6秒" } }); fireEvent.blur(box);
-  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", { shotId: "b", name: "镜头1", stage: "video", prompt: "竖屏 6秒" }));
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalledWith("p", { shotId: "b", stage: "video", prompt: "竖屏 6秒" }));
 });
 
 it("explains an incomplete width-only setting instead of silently ignoring it", async () => {
@@ -248,7 +252,7 @@ it("explains an incomplete width-only setting instead of silently ignoring it", 
   fireEvent.change(box, { target: { value: "画幅1920" } });
   expect(screen.getByRole("status", { name: "提示词识别提示" }).textContent).toContain("画幅/分辨率信息不完整");
   fireEvent.blur(box);
-  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", { shotId: "width-only", name: "镜头1", stage: "video", prompt: "画幅1920" }));
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalledWith("p", { shotId: "width-only", stage: "video", prompt: "画幅1920" }));
   expect(api.generate).not.toHaveBeenCalled();
 });
 
@@ -260,7 +264,7 @@ it.each(["0.5MP", "50万像素", "总像素500000"])("saves %s as approved dimen
   const box = await screen.findByLabelText("镜头1 提示词");
   await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
   fireEvent.change(box, { target: { value: text } }); fireEvent.blur(box);
-  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", expect.objectContaining({
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalledWith("p", expect.objectContaining({
     shotId: "pixels", prompt: text, selectionRef: "sel", values: expect.objectContaining({ width: { type: "integer", value: 960 }, height: { type: "integer", value: 544 } }),
   })));
   expect((await screen.findByText(/已识别并填入/)).textContent).toContain("522240 像素");
@@ -276,7 +280,7 @@ it.each([
   const box = await screen.findByLabelText("镜头1 提示词");
   await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
   fireEvent.change(box, { target: { value: text } }); fireEvent.blur(box);
-  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", expect.objectContaining({
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalledWith("p", expect.objectContaining({
     shotId: "explicit-size", prompt: text, selectionRef: "sel",
     values: expect.objectContaining({ width: { type: "integer", value: width }, height: { type: "integer", value: height } }),
   })));
@@ -511,4 +515,17 @@ it('ignores a late failed list response from the previous project', async () => 
   await waitFor(() => expect(api.list).toHaveBeenLastCalledWith('other', null));
   await act(async () => reject({ code: 'PROJECT_READ_FAILED' }));
   expect(screen.queryAllByRole('alert')).toHaveLength(0);
+});
+
+it("preserves prompt draft and offers no undo when the atomic save fails", async () => {
+  api.saveShotRow.mockRejectedValueOnce({code: "INVALID_INPUT"});
+  const p = props(); render(<StoryboardShotRows {...p} items={[shot("a",0)]}/>);
+  const box = await screen.findByLabelText("镜头1 提示词");
+  await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(box, {target:{value:"阿离 雨巷 8秒"}}); fireEvent.blur(box);
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalledTimes(1));
+  await screen.findByRole("alert");
+  expect((box as HTMLTextAreaElement).value).toBe("阿离 雨巷 8秒");
+  expect(screen.queryByRole("button", {name:"撤销"})).toBeNull();
+  expect(api.updateShot).not.toHaveBeenCalled(); expect(api.bindShot).not.toHaveBeenCalled(); expect(p.onChanged).not.toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import { storyboardAtomicParentReader, storyboardAtomicScopeSince, storyboardAtomicFixtureFiles, STORYBOARD_ATOMIC_BASE } from './storyboard-atomic-row-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -60,10 +61,11 @@ export function storyboardLoadScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...STORYBOARD_LOAD_CHANGED, ...STORYBOARD_LOAD_ADDED, STORYBOARD_LOAD_PROOF,
+    ...storyboardAtomicScopeSince(root, STORYBOARD_ATOMIC_BASE),
   ])].sort();
 }
 export function storyboardLoadFixtureFiles(root) {
-  return [...facts(root, STORYBOARD_LOAD_BASE).paths, ...STORYBOARD_LOAD_ADDED, STORYBOARD_LOAD_PROOF];
+  return [...new Set([...facts(root, STORYBOARD_LOAD_BASE).paths, ...STORYBOARD_LOAD_ADDED, STORYBOARD_LOAD_PROOF, ...storyboardAtomicFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -72,10 +74,10 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, STORYBOARD_LOAD_BASE);
   const fail = id => violations.push("storyboard-load-recovery-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(STORYBOARD_LOAD_PROOF));
@@ -88,10 +90,10 @@ function validate(root, override) {
     const allowed = [...scope, STORYBOARD_LOAD_PROOF].sort();
     const expected = [...parent.paths, ...STORYBOARD_LOAD_ADDED, STORYBOARD_LOAD_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -111,13 +113,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: STORYBOARD_LOAD_CHANGED,
-    addedPaths: [...STORYBOARD_LOAD_ADDED, STORYBOARD_LOAD_PROOF],
-    afterHashes: Object.fromEntries([...STORYBOARD_LOAD_CHANGED, ...STORYBOARD_LOAD_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...STORYBOARD_LOAD_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...STORYBOARD_LOAD_ADDED, STORYBOARD_LOAD_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...STORYBOARD_LOAD_CHANGED, ...STORYBOARD_LOAD_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => STORYBOARD_LOAD_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function storyboardLoadParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "storyboardLoadParentReader", undefined,
-    () => validate(root, undefined), STORYBOARD_LOAD_PROOF);
+  const successor = storyboardAtomicParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "storyboardLoadParentReader", undefined, check, STORYBOARD_LOAD_PROOF);
 }

@@ -30,6 +30,9 @@ mod story_entity_contract {
             sqlx::query("INSERT INTO shots (id, project_id, ordinal, name, prompt_text, created_at, updated_at) VALUES (?, ?, 0, ?, '', '2026-01-01', '2026-01-01')")
                 .bind(id).bind(project).bind(id).execute(&db.pool).await.unwrap();
         }
+        sqlx::query("INSERT INTO workflows (id,name,category,mode,created_at,updated_at) VALUES ('wf','test','test','video','2026-01-01','2026-01-01')").execute(&db.pool).await.unwrap();
+        sqlx::query("INSERT INTO workflow_versions (id,workflow_id,version,api_workflow_json,workflow_sha256,created_at) VALUES ('wv','wf','1','{}','hash','2026-01-01')").execute(&db.pool).await.unwrap();
+        sqlx::query("INSERT INTO recipes (id,workflow_version_id,version,schema_version,recipe_yaml,recipe_sha256,created_at) VALUES ('r','wv','1',1,'schema_version: 1','hash','2026-01-01')").execute(&db.pool).await.unwrap();
         let service =
             StoryEntityService::new(Arc::new(SqliteStoryEntityRepository::new(db.pool.clone())));
         (db, service)
@@ -70,6 +73,123 @@ mod story_entity_contract {
         db.close().await;
     }
 
+    fn row_request(
+        ids: Option<Vec<String>>,
+    ) -> ai_studio_lib::application::ports::ShotRowEditRecord {
+        use ai_studio_lib::{
+            application::ports::{ShotRowEditRecord, ShotStageConfigRecord},
+            domain::ShotStage,
+        };
+        ShotRowEditRecord {
+            project_id: "prj_a".into(),
+            shot_id: "sht_a".into(),
+            stage: ShotStage::Video,
+            prompt_text: Some("new prompt".into()),
+            config: Some(ShotStageConfigRecord {
+                shot_id: "sht_a".into(),
+                stage: ShotStage::Video,
+                workflow_version_id: "wv".into(),
+                recipe_id: "r".into(),
+                scalar_values: serde_json::json!({"duration_seconds":{"type":"integer","value":8}}),
+                updated_at: chrono::Utc::now(),
+            }),
+            entity_ids: ids,
+            updated_at: chrono::Utc::now(),
+        }
+    }
+    async fn row_bytes(
+        db: &ProjectDatabase,
+    ) -> (
+        Vec<(String, String, String)>,
+        Vec<(String, String, String)>,
+        Vec<(String, String, String, i64)>,
+    ) {
+        (sqlx::query_as("SELECT shot_id, stage, prompt_text FROM shot_stage_prompts ORDER BY shot_id,stage").fetch_all(&db.pool).await.unwrap(),
+         sqlx::query_as("SELECT shot_id, stage, scalar_values_json FROM shot_stage_configs ORDER BY shot_id,stage").fetch_all(&db.pool).await.unwrap(), bindings(db).await)
+    }
+    #[tokio::test]
+    async fn shot_row_save_writes_prompt_config_and_bindings_atomically_and_preserves_none() {
+        use ai_studio_lib::{
+            application::ports::ShotRowEditRepository,
+            infrastructure::database::repositories::story_entity::SqliteShotRowEditRepository,
+        };
+        let (db, service) = fixture().await;
+        let e = service
+            .create(
+                "prj_a",
+                StoryEntityKind::Character,
+                input("hero", None, &[]),
+            )
+            .await
+            .unwrap();
+        let repo = SqliteShotRowEditRepository::new(db.pool.clone());
+        let result = repo
+            .save_row_atomic(&row_request(Some(vec![e.id.clone()])))
+            .await
+            .unwrap();
+        assert_eq!(result[0].id, e.id);
+        let before = row_bytes(&db).await;
+        assert_eq!(before.0[0].2, "new prompt");
+        assert!(before.1[0].2.contains("8"));
+        assert_eq!(before.2.len(), 1);
+        repo.save_row_atomic(&row_request(None)).await.unwrap();
+        assert_eq!(bindings(&db).await, before.2);
+        repo.save_row_atomic(&row_request(Some(vec![])))
+            .await
+            .unwrap();
+        assert!(bindings(&db).await.is_empty());
+        let tasks: i64 = sqlx::query_scalar("SELECT count(*) FROM tasks")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(tasks, 0);
+        close(db).await;
+    }
+    #[tokio::test]
+    async fn shot_row_save_rolls_back_invalid_duplicate_foreign_and_wrong_shot() {
+        use ai_studio_lib::{
+            application::ports::ShotRowEditRepository,
+            infrastructure::database::repositories::story_entity::SqliteShotRowEditRepository,
+        };
+        let (db, service) = fixture().await;
+        let local = service
+            .create(
+                "prj_a",
+                StoryEntityKind::Character,
+                input("hero", None, &[]),
+            )
+            .await
+            .unwrap();
+        let foreign = service
+            .create("prj_b", StoryEntityKind::Scene, input("foreign", None, &[]))
+            .await
+            .unwrap();
+        let repo = SqliteShotRowEditRepository::new(db.pool.clone());
+        repo.save_row_atomic(&row_request(Some(vec![local.id.clone()])))
+            .await
+            .unwrap();
+        let before = row_bytes(&db).await;
+        for ids in [
+            vec![foreign.id],
+            vec![local.id.clone(), local.id],
+            vec!["missing".into()],
+        ] {
+            let mut req = row_request(Some(ids));
+            req.prompt_text = Some("must rollback".into());
+            req.config.as_mut().unwrap().scalar_values =
+                serde_json::json!({"duration_seconds":{"type":"integer","value":9}});
+            assert!(repo.save_row_atomic(&req).await.is_err());
+            assert_eq!(row_bytes(&db).await, before);
+        }
+        let mut req = row_request(Some(vec![]));
+        req.shot_id = "sht_b".into();
+        assert!(matches!(
+            repo.save_row_atomic(&req).await,
+            Err(ai_studio_lib::application::ports::RepositoryError::NotFound { .. })
+        ));
+        assert_eq!(row_bytes(&db).await, before);
+        close(db).await;
+    }
     #[tokio::test]
     async fn owned_images_and_binding_order_survive_database_reopen_without_tasks() {
         let (db, service) = fixture().await;

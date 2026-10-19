@@ -125,11 +125,12 @@ function Avatar({ entity, url }: { entity: StoryEntity; url?: string }) {
 
 function newKey() { try { return crypto.randomUUID(); } catch { return `sb-${Date.now()}-${Math.random().toString(36).slice(2)}`; } }
 
-type Scalars = Record<string, DraftValue>;
+type Scalar = Extract<DraftValue, {type: "string" | "integer" | "number" | "seed_random" | "seed_fixed"}>;
+type Scalars = Record<string, Scalar>;
 const SCALAR_TYPES = new Set(["integer", "number", "seed_random", "seed_fixed"]);
 /** Only generator scalars are persisted in stage configs; prompt/assets are owned elsewhere. */
 function scalarValues(values: Record<string, DraftValue> | undefined): Scalars {
-  return Object.fromEntries(Object.entries(values ?? {}).filter(([, v]) => SCALAR_TYPES.has(v.type)));
+  return Object.fromEntries(Object.entries(values ?? {}).filter((entry): entry is [string, Scalar] => SCALAR_TYPES.has(entry[1].type)));
 }
 function numberOf(v: DraftValue | undefined) { return v?.type === "integer" || v?.type === "number" ? v.value : undefined; }
 function aspectKey(p: ResolutionPresetLike) { const m = /-(\d+)x(\d+)$/.exec(p.id); return m ? `${m[1]}:${m[2]}` : `${p.width}:${p.height}`; }
@@ -285,6 +286,15 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const save = (patch: { prompt?: string; values?: Scalars }) => productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", ...patch, ...(patch.values ? { selectionRef: selectionRef ?? generator?.selectionRef } : {}) });
   const preview = useMemo(() => recognize(prompt, entities, bound, generator, current), [prompt, entities, bound, generator, current]);
   /** Saves the prompt and applies recognized fields; the note lists exactly what was filled, with undo. */
+  const saveRow = async (patch: Omit<import("../../product/types").CreationShotRowSave, "shotId" | "stage">) => {
+    const scope = scopeEpoch.current;
+    ++bindingEpoch.current;
+    const result = await productClient.creation.saveShotRow(projectId, { shotId: item.id, stage: "video", ...patch });
+    if (scope !== scopeEpoch.current) return false;
+    ++bindingEpoch.current;
+    setBound(result.boundEntities.filter(e => e.projectId === projectId)); setBindingsReady(true);
+    return true;
+  };
   const savePrompt = () => {
     if (bindingsDisabled) return;
     const text = prompt.trim();
@@ -293,16 +303,14 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     if (!promptChanged && !r.values && !r.addEntityIds.length) return;
     void run(async () => {
       const before = { values: r.values ? current : undefined, boundIds: r.addEntityIds.length ? bound.map(e => e.id) : undefined };
-      await save({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && generator ? { values: r.values } : {}) });
-      if (r.addEntityIds.length) await replaceBindings([...bound.map(e => e.id), ...r.addEntityIds]);
+      if (!await saveRow({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && generator ? { values: r.values, selectionRef: generator.selectionRef } : {}), ...(r.addEntityIds.length ? { entityIds: [...bound.map(e => e.id), ...r.addEntityIds] } : {}) })) return;
       const applied = r.labels.filter(l => !l.includes("（"));
       if (applied.length) { setUndo(before); setNote(`已识别并填入：${applied.join(" · ")}`); } else { setUndo(undefined); setNote("提示词已保存"); }
       onChanged();
     });
   };
   const undoRecognized = () => undo && !bindingsDisabled && void run(async () => {
-    if (undo.values && generator) await save({ values: undo.values });
-    if (undo.boundIds) await replaceBindings(undo.boundIds);
+    if (!await saveRow({ ...(undo.values && generator ? { values: undo.values, selectionRef: generator.selectionRef } : {}), ...(undo.boundIds ? { entityIds: undo.boundIds } : {}) })) return;
     setUndo(undefined); setNote("已撤销自动填入"); onChanged();
   });
   const saveValues = (next: Scalars, afterSave?: () => void) => void run(async () => { await save({ values: next }); afterSave?.(); onChanged(); });

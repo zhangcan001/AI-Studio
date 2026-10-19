@@ -345,6 +345,141 @@ pub mod story_entity {
         }
     }
 
+    async fn replace_shot_bindings_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        project_id: &str,
+        shot_id: &str,
+        entity_ids: &[String],
+        now: &str,
+    ) -> Result<(), RepositoryError> {
+        // Validate the complete replacement in this transaction, even when
+        // clearing it. Independent FKs do not prove shared project ownership.
+        let shot_exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM shots WHERE id = ? AND project_id = ?)",
+        )
+        .bind(shot_id)
+        .bind(project_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+        if shot_exists == 0 {
+            return Err(RepositoryError::integrity("镜头不存在或不属于当前项目"));
+        }
+        let mut unique = std::collections::HashSet::new();
+        for entity_id in entity_ids {
+            if !unique.insert(entity_id) {
+                return Err(RepositoryError::integrity("实体绑定不能重复"));
+            }
+            let found: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM story_entities WHERE id = ? AND project_id = ?)",
+            )
+            .bind(entity_id)
+            .bind(project_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?;
+            if found == 0 {
+                return Err(RepositoryError::integrity("实体不存在或不属于当前项目"));
+            }
+        }
+        sqlx::query("DELETE FROM shot_story_entity_bindings WHERE project_id = ? AND shot_id = ?")
+            .bind(project_id)
+            .bind(shot_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| RepositoryError::Database {
+                message: e.to_string(),
+            })?;
+        for (ordinal, entity_id) in entity_ids.iter().enumerate() {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query(
+                    "INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(&id)
+                .bind(project_id)
+                .bind(shot_id)
+                .bind(entity_id)
+                .bind(ordinal as i64)
+                .bind(now)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| RepositoryError::Database { message: e.to_string() })?;
+        }
+
+        Ok(())
+    }
+
+    pub struct SqliteShotRowEditRepository {
+        pool: SqlitePool,
+    }
+    impl SqliteShotRowEditRepository {
+        pub fn new(pool: SqlitePool) -> Self {
+            Self { pool }
+        }
+    }
+    #[async_trait]
+    impl crate::application::ports::ShotRowEditRepository for SqliteShotRowEditRepository {
+        async fn save_row_atomic(
+            &self,
+            req: &crate::application::ports::ShotRowEditRecord,
+        ) -> Result<Vec<StoryEntity>, RepositoryError> {
+            let db = |e: sqlx::Error| RepositoryError::database(e.to_string());
+            if req.prompt_text.is_none() && req.config.is_none() && req.entity_ids.is_none() {
+                return Err(RepositoryError::integrity("镜头行保存不能为空"));
+            }
+            let mut tx = self.pool.begin().await.map_err(db)?;
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM shots WHERE id = ? AND project_id = ?)",
+            )
+            .bind(&req.shot_id)
+            .bind(&req.project_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db)?;
+            if exists == 0 {
+                return Err(RepositoryError::not_found("shot", &req.shot_id));
+            }
+            let now = req.updated_at.to_rfc3339();
+            // Keep SQL aligned with shot.rs::insert_stage_prompts; edited text clears provenance.
+            if let Some(prompt) = &req.prompt_text {
+                sqlx::query("INSERT INTO shot_stage_prompts (shot_id, stage, prompt_text, prompt_entry_id, prompt_version_id, updated_at)
+                    VALUES (?, ?, ?, NULL, NULL, ?) ON CONFLICT(shot_id, stage) DO UPDATE SET
+                    prompt_text = excluded.prompt_text, prompt_entry_id = NULL, prompt_version_id = NULL, updated_at = excluded.updated_at")
+                    .bind(&req.shot_id).bind(req.stage.as_str()).bind(prompt).bind(&now).execute(&mut *tx).await.map_err(db)?;
+            }
+            // Keep SQL aligned with shot.rs::upsert_stage_configs_atomic.
+            if let Some(config) = &req.config {
+                if config.shot_id != req.shot_id || config.stage != req.stage {
+                    return Err(RepositoryError::integrity("镜头配置身份不匹配"));
+                }
+                crate::domain::validate_scalar_values(&config.scalar_values)
+                    .map_err(|e| RepositoryError::integrity(e.to_string()))?;
+                sqlx::query("INSERT INTO shot_stage_configs (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(shot_id, stage) DO UPDATE SET workflow_version_id = excluded.workflow_version_id,
+                    recipe_id = excluded.recipe_id, scalar_values_json = excluded.scalar_values_json, updated_at = excluded.updated_at")
+                    .bind(&req.shot_id).bind(req.stage.as_str()).bind(&config.workflow_version_id).bind(&config.recipe_id)
+                    .bind(config.scalar_values.to_string()).bind(&now).execute(&mut *tx).await.map_err(db)?;
+            }
+            if let Some(ids) = &req.entity_ids {
+                replace_shot_bindings_tx(&mut tx, &req.project_id, &req.shot_id, ids, &now).await?;
+            }
+            // Read the exact committed replacement within the same transaction, not via a racing pool read.
+            let rows = sqlx::query("SELECT e.* FROM shot_story_entity_bindings b JOIN story_entities e ON e.id=b.entity_id AND e.project_id=b.project_id
+                WHERE b.project_id=? AND b.shot_id=? ORDER BY b.ordinal, e.id")
+                .bind(&req.project_id).bind(&req.shot_id).fetch_all(&mut *tx).await.map_err(db)?;
+            let mut entities = Vec::new();
+            for row in rows {
+                let id: String = row.get("id");
+                let images = sqlx::query_scalar::<_, String>("SELECT asset_id FROM story_entity_images WHERE entity_id=? ORDER BY ordinal, asset_id")
+                    .bind(id).fetch_all(&mut *tx).await.map_err(db)?;
+                entities.push(SqliteStoryEntityRepository::map_row(&row, images)?);
+            }
+            tx.commit().await.map_err(db)?;
+            Ok(entities)
+        }
+    }
     #[async_trait]
     impl StoryEntityRepository for SqliteStoryEntityRepository {
         async fn list(
@@ -582,63 +717,7 @@ pub mod story_entity {
                 .map_err(|e| RepositoryError::Database {
                     message: e.to_string(),
                 })?;
-            // Validate the complete replacement in this transaction, even when
-            // clearing it. Independent FKs do not prove shared project ownership.
-            let shot_exists: i64 = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM shots WHERE id = ? AND project_id = ?)",
-            )
-            .bind(shot_id)
-            .bind(project_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| RepositoryError::database(error.to_string()))?;
-            if shot_exists == 0 {
-                return Err(RepositoryError::integrity("镜头不存在或不属于当前项目"));
-            }
-            let mut unique = std::collections::HashSet::new();
-            for entity_id in entity_ids {
-                if !unique.insert(entity_id) {
-                    return Err(RepositoryError::integrity("实体绑定不能重复"));
-                }
-                let found: i64 = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM story_entities WHERE id = ? AND project_id = ?)",
-                )
-                .bind(entity_id)
-                .bind(project_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|error| RepositoryError::database(error.to_string()))?;
-                if found == 0 {
-                    return Err(RepositoryError::integrity("实体不存在或不属于当前项目"));
-                }
-            }
-            sqlx::query(
-                "DELETE FROM shot_story_entity_bindings WHERE project_id = ? AND shot_id = ?",
-            )
-            .bind(project_id)
-            .bind(shot_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| RepositoryError::Database {
-                message: e.to_string(),
-            })?;
-            for (ordinal, entity_id) in entity_ids.iter().enumerate() {
-                let id = Uuid::new_v4().to_string();
-                sqlx::query(
-                    "INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)",
-                )
-                .bind(&id)
-                .bind(project_id)
-                .bind(shot_id)
-                .bind(entity_id)
-                .bind(ordinal as i64)
-                .bind(&now)
-                .bind(&now)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| RepositoryError::Database { message: e.to_string() })?;
-            }
+            replace_shot_bindings_tx(&mut tx, project_id, shot_id, entity_ids, &now).await?;
             tx.commit().await.map_err(|e| RepositoryError::Database {
                 message: e.to_string(),
             })?;

@@ -38,6 +38,7 @@ interface ProductCommands {
   product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };
   product_creation_shot_create: { args: { projectId: string }; result: CreationShotSummary };
+  product_creation_shot_row_save: { args: { projectId: string; request: import("./types").CreationShotRowSave }; result: import("./types").CreationShotRowSaveResult };
   product_creation_shot_update: { args: { projectId: string; request: CreationShotUpdate }; result: CreationShotSummary };
   product_creation_shot_delete: { args: { projectId: string; shotId: string }; result: void };
   product_creation_references_set: { args: { projectId: string; shotId: string; stage: "image" | "video"; assetIds: string[] }; result: CreationShot };

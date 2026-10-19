@@ -961,6 +961,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 shot_batch_repository.clone(),
                 clock.clone(),
             )
+            .with_row_edit_repository(Arc::new(infrastructure::database::repositories::story_entity::SqliteShotRowEditRepository::new(database_pool.clone())))
             .with_stage_prompt_repository(shot_bulk_repository.clone())
             .with_generation_snapshot_repository(snapshot_repository.clone()).with_video_inputs(shot_video_input_service.clone()));
             let shot_batch_service = Arc::new(ShotBatchService::new(
@@ -1255,6 +1256,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::product::product_creation_generate,
             commands::product::product_creation_shot_create,
             commands::product::product_creation_shot_update,
+            commands::product::product_creation_shot_row_save,
             commands::product::product_creation_shot_delete,
             commands::product::product_creation_references_set,
             commands::product::product_creation_result_select,

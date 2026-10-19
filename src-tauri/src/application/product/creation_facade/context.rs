@@ -431,6 +431,80 @@ impl ProductCreationFacade {
         project_shot(&shot, stage)
     }
 
+    pub async fn save_shot_row(
+        &self,
+        project_id: &str,
+        fields: CreationShotFields,
+        entity_ids: Option<Vec<String>>,
+    ) -> Result<CreationShotRowSaveView, ProductError> {
+        if fields.prompt.is_none() && fields.values.is_none() && entity_ids.is_none() {
+            return Err(ProductError::new(
+                "INVALID_INPUT",
+                "镜头行保存不能为空。",
+                Some("EDIT_INPUT"),
+            ));
+        }
+        let stage = stage(&fields.stage)?;
+        self.bindings
+            .get(project_id)
+            .await
+            .map_err(ProductError::binding)?;
+        self.shots
+            .get(project_id, &fields.shot_id)
+            .await
+            .map_err(shot_error)?;
+        let config = if let Some(values) = fields.values {
+            let selection = ExactGeneratorSelection::decode(
+                fields
+                    .selection_ref
+                    .as_deref()
+                    .ok_or_else(ProductError::invalid_selection)?,
+            )?;
+            if !self
+                .bindings
+                .is_workflow_available_for_recipe(
+                    &selection.workflow_version_id,
+                    &selection.recipe_id,
+                )
+                .await
+                .map_err(ProductError::binding)?
+            {
+                return Err(ProductError::invalid_selection());
+            }
+            Some(
+                self.shots
+                    .prepare_row_config(ShotStageConfigRequest {
+                        project_id: project_id.into(),
+                        shot_id: fields.shot_id.clone(),
+                        stage,
+                        workflow_version_id: selection.workflow_version_id,
+                        recipe_id: selection.recipe_id,
+                        values,
+                    })
+                    .await
+                    .map_err(shot_error)?,
+            )
+        } else {
+            None
+        };
+        let (shot, bound_entities) = self
+            .shots
+            .save_row_atomic(crate::application::ports::ShotRowEditRecord {
+                project_id: project_id.into(),
+                shot_id: fields.shot_id,
+                stage,
+                prompt_text: fields.prompt,
+                config,
+                entity_ids,
+                updated_at: chrono::Utc::now(),
+            })
+            .await
+            .map_err(shot_error)?;
+        Ok(CreationShotRowSaveView {
+            shot: project_shot(&shot, stage)?,
+            bound_entities,
+        })
+    }
     pub async fn delete_shot(&self, project_id: &str, shot_id: &str) -> Result<(), ProductError> {
         self.bindings
             .get(project_id)
@@ -503,4 +577,11 @@ impl ProductCreationFacade {
             .map_err(shot_error)?;
         project_shot(&shot, stage)
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreationShotRowSaveView {
+    pub shot: CreationShot,
+    pub bound_entities: Vec<crate::domain::story_entity::StoryEntity>,
 }

@@ -246,3 +246,28 @@ pub mod story_entity_repository {
     }
 }
 pub use story_entity_repository::StoryEntityRepository;
+
+// Atomic storyboard edits reuse existing Shot/StoryEntity persistence authorities.
+pub mod shot_row_edit_repository {
+    use super::{RepositoryError, ShotStageConfigRecord};
+    use crate::domain::{story_entity::StoryEntity, ShotStage};
+    use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
+    pub struct ShotRowEditRecord {
+        pub project_id: String,
+        pub shot_id: String,
+        pub stage: ShotStage,
+        pub prompt_text: Option<String>,
+        pub config: Option<ShotStageConfigRecord>,
+        pub entity_ids: Option<Vec<String>>,
+        pub updated_at: DateTime<Utc>,
+    }
+    #[async_trait]
+    pub trait ShotRowEditRepository: Send + Sync {
+        async fn save_row_atomic(
+            &self,
+            request: &ShotRowEditRecord,
+        ) -> Result<Vec<StoryEntity>, RepositoryError>;
+    }
+}
+pub use shot_row_edit_repository::{ShotRowEditRecord, ShotRowEditRepository};

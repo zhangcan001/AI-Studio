@@ -513,29 +513,7 @@ impl CreationShotUpdateDto {
         if self.prompt.is_none() && self.values.is_none() {
             return Ok((update, None));
         }
-        let values = match self.values {
-            None => None,
-            Some(values) => Some(
-                values
-                    .into_iter()
-                    .map(|(key, value)| {
-                        value
-                            .into_application(&key)
-                            .map(|value| (key.clone(), value))
-                            .map_err(|error| {
-                                let mut result = ProductError::new(
-                                    "INVALID_INPUT",
-                                    "输入格式无效。",
-                                    Some("EDIT_INPUT"),
-                                );
-                                result.details.field = Some(key.clone());
-                                result.details.technical_details = Some(error.to_string());
-                                result
-                            })
-                    })
-                    .collect::<Result<_, _>>()?,
-            ),
-        };
+        let values = row_scalar_values(self.values)?;
         Ok((
             update,
             Some(CreationShotFields {
@@ -816,4 +794,101 @@ pub async fn product_story_entity_bind_shot(
     request: crate::commands::story_entities::StoryEntityShotBindRequest,
 ) -> Result<Vec<crate::domain::story_entity::StoryEntity>, crate::error::AppError> {
     crate::commands::story_entities::product_story_entity_bind_shot(state, request).await
+}
+
+fn row_scalar_values(
+    values: Option<std::collections::BTreeMap<String, super::generation::InputValueDto>>,
+) -> Result<
+    Option<
+        std::collections::BTreeMap<
+            String,
+            crate::application::generation_input_preparer::GenerationInputValue,
+        >,
+    >,
+    ProductError,
+> {
+    Ok(match values {
+        None => None,
+        Some(values) => Some(
+            values
+                .into_iter()
+                .map(|(key, value)| {
+                    value
+                        .into_application(&key)
+                        .map(|value| (key.clone(), value))
+                        .map_err(|error| {
+                            let mut result = ProductError::new(
+                                "INVALID_INPUT",
+                                "输入格式无效。",
+                                Some("EDIT_INPUT"),
+                            );
+                            result.details.field = Some(key.clone());
+                            result.details.technical_details = Some(error.to_string());
+                            result
+                        })
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+    })
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreationShotRowSaveDto {
+    shot_id: String,
+    stage: String,
+    prompt: Option<String>,
+    selection_ref: Option<String>,
+    values: Option<std::collections::BTreeMap<String, super::generation::InputValueDto>>,
+    entity_ids: Option<Vec<String>>,
+}
+impl CreationShotRowSaveDto {
+    fn into_parts(self) -> Result<(CreationShotFields, Option<Vec<String>>), ProductError> {
+        if self.prompt.is_none() && self.values.is_none() && self.entity_ids.is_none() {
+            return Err(ProductError::new(
+                "INVALID_INPUT",
+                "镜头行保存不能为空。",
+                Some("EDIT_INPUT"),
+            ));
+        }
+        Ok((
+            CreationShotFields {
+                shot_id: self.shot_id,
+                stage: self.stage,
+                prompt: self.prompt,
+                selection_ref: self.selection_ref,
+                values: row_scalar_values(self.values)?,
+            },
+            self.entity_ids,
+        ))
+    }
+}
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_creation_shot_row_save(
+    state: State<'_, AppState>,
+    project_id: String,
+    request: CreationShotRowSaveDto,
+) -> Result<crate::application::product::creation_facade::CreationShotRowSaveView, ProductError> {
+    let (fields, ids) = request.into_parts()?;
+    creation(&state)
+        .save_shot_row(&project_id, fields, ids)
+        .await
+}
+#[cfg(test)]
+mod shot_row_dto_tests {
+    use super::*;
+    #[test]
+    fn strict_row_command_rejects_unknown_empty_and_malformed_values() {
+        assert!(serde_json::from_value::<CreationShotRowSaveDto>(
+            serde_json::json!({"shotId":"s", "stage":"video", "extra":1})
+        )
+        .is_err());
+        let empty: CreationShotRowSaveDto =
+            serde_json::from_value(serde_json::json!({"shotId":"s", "stage":"video"})).unwrap();
+        assert_eq!(empty.into_parts().err().unwrap().code, "INVALID_INPUT");
+        let clear: CreationShotRowSaveDto = serde_json::from_value(
+            serde_json::json!({"shotId":"s", "stage":"video", "entityIds":[]}),
+        )
+        .unwrap();
+        assert!(clear.into_parts().is_ok());
+    }
 }
