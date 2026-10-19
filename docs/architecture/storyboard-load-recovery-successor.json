@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "STORYBOARD_LOAD_RECOVERY",
+  "parentHead": "01a5a14f50cdea55f37193be61b3319c1f659733",
+  "planningParentHead": "01a5a14f50cdea55f37193be61b3319c1f659733",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "backendChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "gpuExecuted": false
+  },
+  "files": {
+    "scripts/storyboard-load-recovery-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "a8b8473d2199980ab6f94eebe94d72049003bfb2391c0d495a97f7e559d4f1a6"
+    },
+    "scripts/testing/storyboard-load-recovery.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "b58b68024ba1d8b319fbb25448437394721af7741b6f710768337a202f3bd558"
+    },
+    "scripts/ui-phase7c-frontend-ci-budget-successor-guard.mjs": {
+      "beforeHash": "8dc0907ad0efd76adc6d2d0c3ae2d160468a990c79ea3fc16ee9e5fb4f2fe049",
+      "afterHash": "ac3e20089acf07fa94cd02f1a23662cff16035b778e74dd3e2cd8e3b5e3f86bc"
+    },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": "e91dc8f9caec4212a9c72524837d2c9e362a8428aaaa28f862da7fd7f59dfb4b",
+      "afterHash": "4aaa93749c4ae8de4aa2b8f2ab6b65b1c1891a1e9f91dc3556572dc1374cbe07"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": "e5febcd56130a2d67ff6ab1ced19c8c9ec5d1e840d7acfcff2e2064296c75d57",
+      "afterHash": "f3074e7ca3144566f565a8e6739be29b731ba11e4b852293782bb030c5208df4"
+    }
+  }
+}

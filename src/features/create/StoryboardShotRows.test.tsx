@@ -462,3 +462,53 @@ it('plain T2V row generation needs no image or entity-reference save', async () 
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
   expect(api.inputsGet).not.toHaveBeenCalled(); expect(api.inputsSave).not.toHaveBeenCalled();
 });
+
+it('shows an alert and retry when story entity list fails, and recovers on retry', async () => {
+  const cause = { code: 'PROJECT_READ_FAILED' };
+  api.list.mockRejectedValueOnce(cause);
+  const item = shot('failed-entities', 0); item.shot!.prompt = '@阿离';
+  render(<StoryboardShotRows {...props()} items={[item]} />);
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain(normalizeProductError(cause).message);
+  expect(screen.queryByText(/正在读取当前项目角色与场景/)).toBeNull();
+  expect(screen.queryByText('素材库中还没有角色与场景')).toBeNull();
+  fireEvent.click(within(alert).getByRole('button', { name: '重试角色与场景' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  expect(await screen.findByTitle('绑定 场景 · 雨巷')).toBeTruthy();
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('shows an alert and retry when generator list fails, and recovers on retry', async () => {
+  const cause = { code: 'GENERATOR_UNAVAILABLE' };
+  api.generatorsList.mockRejectedValueOnce(cause);
+  const item = shot('failed-generators', 0); item.shot!.prompt = '@阿离';
+  render(<StoryboardShotRows {...props()} items={[item]} />);
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain(normalizeProductError(cause).message);
+  expect(screen.queryByText(/当前镜头仍使用 未设置/)).toBeNull();
+  fireEvent.click(within(alert).getByRole('button', { name: '重试生成器' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  expect(within(screen.getByLabelText('镜头1 生成器')).getByRole('option', { name: /H3/ })).toBeTruthy();
+});
+
+it('clears list errors when switching project', async () => {
+  api.list.mockRejectedValueOnce({ code: 'PROJECT_READ_FAILED' });
+  api.generatorsList.mockRejectedValueOnce({ code: 'GENERATOR_UNAVAILABLE' });
+  const p = props(); const h = render(<StoryboardShotRows {...p} items={[shot('a', 0)]} />);
+  await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
+  h.rerender(<StoryboardShotRows {...p} projectId='other' items={[shot('b', 0)]} />);
+  expect(screen.queryAllByRole('alert')).toHaveLength(0);
+  await waitFor(() => expect(api.list).toHaveBeenLastCalledWith('other', null));
+  expect(screen.queryAllByRole('alert')).toHaveLength(0);
+});
+
+it('ignores a late failed list response from the previous project', async () => {
+  let reject!: (cause: unknown) => void;
+  api.list.mockReturnValueOnce(new Promise((_, no) => { reject = no; }));
+  const p = props(); const h = render(<StoryboardShotRows {...p} items={[shot('a', 0)]} />);
+  await waitFor(() => expect(api.list).toHaveBeenCalledWith('p', null));
+  h.rerender(<StoryboardShotRows {...p} projectId='other' items={[shot('b', 0)]} />);
+  await waitFor(() => expect(api.list).toHaveBeenLastCalledWith('other', null));
+  await act(async () => reject({ code: 'PROJECT_READ_FAILED' }));
+  expect(screen.queryAllByRole('alert')).toHaveLength(0);
+});

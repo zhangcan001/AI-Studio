@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./boundary-validation-cache.mjs";
 
+import { storyboardLoadParentReader, storyboardLoadScopeSince, storyboardLoadFixtureFiles, STORYBOARD_LOAD_BASE } from './storyboard-load-recovery-successor-guard.mjs';
+
 export const PHASE7C_PARENT = "f3b8c6708dd9b18702b9effd61fdf3d407dd179b";
 export const PHASE7C_PROOF = "docs/architecture/ui-phase7c-frontend-ci-budget-successor.json";
 export const PHASE7C_CHANGED = [
@@ -104,10 +106,11 @@ export function phase7CScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(path => !old.paths.includes(path) || tip.read(path) !== old.read(path)),
     ...PHASE7C_CHANGED, ...PHASE7C_ADDED, PHASE7C_PROOF,
+    ...storyboardLoadScopeSince(root, STORYBOARD_LOAD_BASE),
   ])].sort();
 }
 export function phase7CFixtureFiles(root) {
-  return [...facts(root, PHASE7C_PARENT).paths, ...PHASE7C_ADDED, PHASE7C_PROOF];
+  return [...new Set([...facts(root, PHASE7C_PARENT).paths, ...PHASE7C_ADDED, PHASE7C_PROOF, ...storyboardLoadFixtureFiles(root)])];
 }
 function walk(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(entry => {
@@ -116,7 +119,7 @@ function walk(root, dir) {
     return entry.isDirectory() ? walk(root, path) : [path];
   }).sort();
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], fail = id => violations.push(`ui-phase7c-frontend-ci-budget-${id}`);
   const parent = facts(workspace, PHASE7C_PARENT);
   // Every predecessor reads through this projection. Read each live file once per
@@ -125,7 +128,7 @@ function validate(root, override) {
   const liveBytes = new Map();
   const live = path => {
     if (override && Object.hasOwn(override, path)) return canonical(override[path]);
-    if (!liveBytes.has(path)) liveBytes.set(path, canonical(readFileSync(join(workspace, path), "utf8")));
+    if (!liveBytes.has(path)) liveBytes.set(path, canonical(successor.read(path)));
     return liveBytes.get(path);
   };
   const scope = [...PHASE7C_CHANGED, ...PHASE7C_ADDED].sort();
@@ -144,11 +147,11 @@ function validate(root, override) {
     if (git(workspace, ["rev-parse", PHASE7C_PARENT]).trim() !== PHASE7C_PARENT) fail("parent-missing");
 
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant).sort();
+      .trim().split(/\r?\n/).filter(path => relevant(path) && !successor.addedPaths.includes(path)).sort();
     const expected = [...new Set([...parent.paths, ...PHASE7C_ADDED, PHASE7C_PROOF])].sort();
     if (JSON.stringify(inventory) !== JSON.stringify(expected)) fail("inventory");
     const actual = ["vite.config.ts", ...[".github/workflows", "src", "scripts", "docs/architecture", "src-tauri"]
-      .flatMap(dir => walk(workspace, dir))].filter(relevant).sort();
+      .flatMap(dir => walk(workspace, dir))].filter(path => relevant(path) && !successor.addedPaths.includes(path)).sort();
     if (JSON.stringify(actual) !== JSON.stringify(expected)) fail("filesystem-inventory");
 
     const changed = parent.paths.filter(path => live(path) !== parent.read(path)).sort();
@@ -179,13 +182,18 @@ function validate(root, override) {
   } catch (error) { fail(`validation:${String(error).slice(0, 180)}`); }
   return {
     violations,
-    changedPaths: PHASE7C_CHANGED,
-    addedPaths: [...PHASE7C_ADDED, PHASE7C_PROOF],
-    afterHashes: Object.fromEntries(scope.map(path => [path, proof?.files?.[path]?.afterHash ?? ""])),
+    changedPaths: [...new Set([...PHASE7C_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...PHASE7C_ADDED, PHASE7C_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries(scope.map(path => [path, proof?.files?.[path]?.afterHash ?? ""])), ...successor.afterHashes },
     read: path => PHASE7C_CHANGED.includes(path) ? parent.read(path) : live(path),
   };
 }
 export function uiPhase7CParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "uiPhase7CParentReader", undefined, () => validate(root, undefined), PHASE7C_PROOF);
+  const successor = storyboardLoadParentReader(root);
+  const check = () => {
+    const historical = validate(root, override, successor);
+    return { ...historical, violations: [...successor.violations, ...historical.violations] };
+  };
+  if (override) return check();
+  return cachedBoundary(root, "uiPhase7CParentReader", undefined, check, PHASE7C_PROOF);
 }

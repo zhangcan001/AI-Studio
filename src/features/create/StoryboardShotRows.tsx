@@ -40,6 +40,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("ALL");
   const [entities, setEntities] = useState<StoryEntity[]>([]);
   const [entitiesOwner, setEntitiesOwner] = useState<string>();
+  const [entitiesError, setEntitiesError] = useState<{ projectId: string; message: string }>();
   const [rev, setRev] = useState(0);
   useEffect(() => {
     const bump = () => setRev(v => v + 1);
@@ -48,22 +49,28 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   }, []);
   useEffect(() => {
     let alive = true;
-    setEntities([]); setEntitiesOwner(undefined);
+    setEntities([]); setEntitiesOwner(undefined); setEntitiesError(undefined);
     const list = productClient.storyEntities?.list;
     if (typeof list !== "function") return;
-    void Promise.resolve().then(() => list(projectId, null)).then(next => { if (alive) { setEntities((next ?? []).filter(e => e.projectId === projectId)); setEntitiesOwner(projectId); } }).catch(() => { if (alive) setEntities([]); });
+    void Promise.resolve().then(() => list(projectId, null)).then(next => { if (alive) { setEntities((next ?? []).filter(e => e.projectId === projectId)); setEntitiesOwner(projectId); setEntitiesError(undefined); } }).catch(cause => { if (alive) setEntitiesError({ projectId, message: normalizeProductError(cause).message }); });
     return () => { alive = false; };
   }, [projectId, rev]);
-  const urls = useEntityCovers(projectId, entities);
-  const [generators, setGenerators] = useState<GeneratorOption[]>([]);
+  const currentEntities = entitiesOwner === projectId ? entities : [];
+  const urls = useEntityCovers(projectId, currentEntities);
+  const [generatorState, setGeneratorState] = useState<{ projectId: string; items: GeneratorOption[] }>();
+  const [generatorsError, setGeneratorsError] = useState<{ projectId: string; message: string }>();
+  const [generatorsRev, setGeneratorsRev] = useState(0);
+  const generators = generatorState?.projectId === projectId ? generatorState.items : [];
+  const entityFailure = entitiesError?.projectId === projectId ? entitiesError.message : undefined;
+  const generatorFailure = generatorsError?.projectId === projectId ? generatorsError.message : undefined;
   useEffect(() => {
     let alive = true;
-    setGenerators([]);
+    setGeneratorState(undefined); setGeneratorsError(undefined);
     const list = productClient.creation?.generatorsList;
     if (typeof list !== "function") return;
-    void Promise.resolve(list(projectId, "video", null)).then(next => { if (alive) setGenerators(next ?? []); }).catch(() => { if (alive) setGenerators([]); });
+    void Promise.resolve().then(() => list(projectId, "video", null)).then(next => { if (alive) { setGeneratorState({ projectId, items: next ?? [] }); setGeneratorsError(undefined); } }).catch(cause => { if (alive) setGeneratorsError({ projectId, message: normalizeProductError(cause).message }); });
     return () => { alive = false; };
-  }, [projectId]);
+  }, [projectId, generatorsRev]);
   const q = query.trim().toLowerCase();
   const visible = items.filter(item => (filter === "ALL" || item.status === filter)
     && (!q || item.name.toLowerCase().includes(q) || (item.shot?.prompt ?? "").toLowerCase().includes(q)));
@@ -77,7 +84,9 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       <button type="button" onClick={onQueue}>任务队列</button>
       <button type="button" onClick={() => setRev(v => v + 1)}>刷新角色与场景</button>
     </div>
-    {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={entities} entitiesReady={entitiesOwner === projectId} urls={urls} busy={busy} generators={generators}
+    {entityFailure && <p role="alert" className="storyboard-error">角色与场景读取失败：{entityFailure} <button type="button" onClick={() => setRev(v => v + 1)}>重试角色与场景</button></p>}
+    {generatorFailure && <p role="alert" className="storyboard-error">生成器读取失败：{generatorFailure} <button type="button" onClick={() => setGeneratorsRev(v => v + 1)}>重试生成器</button></p>}
+    {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} />)}
     {!visible.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
@@ -148,8 +157,8 @@ function recognize(text: string, entities: StoryEntity[], bound: StoryEntity[], 
   return { parsed, values, addEntityIds, labels, warnings: settings.warnings };
 }
 
-function ShotRowCard({ projectId, item, entities, entitiesReady, urls, busy, generator, generators, onOpen, onCreate, onChanged }: {
-  projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
+function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged }: {
+  projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
 }) {
   const [bound, setBound] = useState<StoryEntity[]>([]);
@@ -249,7 +258,8 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, urls, busy, gen
   const combinedIds = [...new Set([...referenceIds, ...entityIds.filter((id): id is string => Boolean(id))])];
   const overReferenceLimit = referenceField && "maxItems" in referenceField && referenceField.maxItems != null && combinedIds.length > referenceField.maxItems;
   const entityIssue = !hasMentions ? undefined
-    : !entitiesReady ? "正在读取当前项目角色与场景；失败时请点击刷新角色与场景。"
+    : !entitiesReady ? entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : "正在读取当前项目角色与场景…"
+    : generatorsFailed ? "生成器读取失败，请点击上方重试。"
     : mentions.error ?? (!referenceMode ? `当前镜头仍使用 ${generator?.mode ?? "未设置"}；@角色/场景需要 REF2VA。请在本行明确切换生成器，修改项目默认不会替换已有镜头。`
     : entityIds.some(id => !id) ? "引用的角色或场景尚未关联图片，请先在素材库添加图片。"
     : referenceError ?? (!referenceView ? "正在读取当前 Recipe 的正式参考输入…"
@@ -322,7 +332,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, urls, busy, gen
     const value = durationField.type === "integer" ? Math.round(n) : n;
     saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; setDuration(String(value)); });
   };
-  const noGen = !generator ? "请先在详情中选择生成器" : undefined;
+  const noGen = generatorsFailed ? "生成器读取失败，请点击上方重试。" : !generator ? "请先在详情中选择生成器" : undefined;
   const generationDraft = JSON.stringify([projectId, item.id, selectionRef, prompt, item.shot?.values, referenceView?.token]);
   const generationAttempt = useRef<{ draft: string; key: string } | null>(null);
   if (generationAttempt.current?.draft !== generationDraft) generationAttempt.current = null;
@@ -363,7 +373,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, urls, busy, gen
     </div>
     <div className="shot-row-actions">
       <button type="button" className="primary" disabled={disabled || !selectionRef || Boolean(entityIssue)} title={entityIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate}>生成视频</button>
-      <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">素材库中还没有角色与场景</li>}</ul>
+      <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>
     <div className="shot-row-prompt">
       <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 0.98MP / 50万像素 / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
