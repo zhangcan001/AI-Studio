@@ -1,3 +1,4 @@
+import { entityReferenceAutoApplyParentReader, entityReferenceAutoApplyScopeSince, entityReferenceAutoApplyFixtureFiles, ENTITY_REFERENCE_AUTO_APPLY_BASE } from './entity-reference-auto-apply-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -75,10 +76,11 @@ export function retiredUiCodeCleanupScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...RETIRED_UI_CODE_CLEANUP_CHANGED, ...RETIRED_UI_CODE_CLEANUP_ADDED, RETIRED_UI_CODE_CLEANUP_PROOF,
+    ...entityReferenceAutoApplyScopeSince(root, ENTITY_REFERENCE_AUTO_APPLY_BASE),
   ])].sort();
 }
 export function retiredUiCodeCleanupFixtureFiles(root) {
-  return [...facts(root, RETIRED_UI_CODE_CLEANUP_BASE).paths, ...RETIRED_UI_CODE_CLEANUP_ADDED, RETIRED_UI_CODE_CLEANUP_PROOF];
+  return [...new Set([...facts(root, RETIRED_UI_CODE_CLEANUP_BASE).paths, ...RETIRED_UI_CODE_CLEANUP_ADDED, RETIRED_UI_CODE_CLEANUP_PROOF, ...entityReferenceAutoApplyFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -87,10 +89,10 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, RETIRED_UI_CODE_CLEANUP_BASE);
   const fail = id => violations.push("retired-ui-code-cleanup-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(RETIRED_UI_CODE_CLEANUP_PROOF));
@@ -103,10 +105,10 @@ function validate(root, override) {
     const allowed = [...scope, RETIRED_UI_CODE_CLEANUP_PROOF].sort();
     const expected = [...parent.paths, ...RETIRED_UI_CODE_CLEANUP_ADDED, RETIRED_UI_CODE_CLEANUP_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -126,13 +128,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: RETIRED_UI_CODE_CLEANUP_CHANGED,
-    addedPaths: [...RETIRED_UI_CODE_CLEANUP_ADDED, RETIRED_UI_CODE_CLEANUP_PROOF],
-    afterHashes: Object.fromEntries([...RETIRED_UI_CODE_CLEANUP_CHANGED, ...RETIRED_UI_CODE_CLEANUP_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...RETIRED_UI_CODE_CLEANUP_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...RETIRED_UI_CODE_CLEANUP_ADDED, RETIRED_UI_CODE_CLEANUP_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...RETIRED_UI_CODE_CLEANUP_CHANGED, ...RETIRED_UI_CODE_CLEANUP_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => RETIRED_UI_CODE_CLEANUP_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function retiredUiCodeCleanupParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "retiredUiCodeCleanupParentReader", undefined,
-    () => validate(root, undefined), RETIRED_UI_CODE_CLEANUP_PROOF);
+  const successor = entityReferenceAutoApplyParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "retiredUiCodeCleanupParentReader", undefined, check, RETIRED_UI_CODE_CLEANUP_PROOF);
 }

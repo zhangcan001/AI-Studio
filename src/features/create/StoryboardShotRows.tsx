@@ -265,7 +265,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     : entityIds.some(id => !id) ? "引用的角色或场景尚未关联图片，请先在素材库添加图片。"
     : referenceError ?? (!referenceView ? "正在读取当前 Recipe 的正式参考输入…"
     : overReferenceLimit ? "角色与场景参考图超过当前 Recipe 上限，请调整引用或已有参考。"
-    : entityIds.some(id => !referenceIds.includes(id!)) ? "角色与场景图片尚未进入生成输入，请点击应用角色与场景参考图。" : undefined));
+    : entityIds.some(id => !referenceIds.includes(id!)) ? "正在自动应用角色与场景参考图…" : undefined));
   const canApplyReferences = hasMentions && entitiesReady && !mentions.error && referenceMode && referenceView && !referenceError && !overReferenceLimit && entityIds.length > 0 && entityIds.every(Boolean);
   const applyReferences = () => {
     if (disabled || !canApplyReferences || !referenceView || !selectionRef) return;
@@ -282,6 +282,19 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       } catch (cause) { if (token === scopeEpoch.current && epoch === referenceEpoch.current) setReferenceError(normalizeProductError(cause).message); throw cause; }
     });
   };
+  // Reuse the formal OCC write, not entity bindings or a generation side effect.
+  // Only saved row prompts are eligible; typing/IME must not persist half a name.
+  const referenceApplyKey = JSON.stringify([referenceScope, prompt, referenceView?.token, combinedIds]);
+  const referenceAttempt = useRef<string | null>(null);
+  useEffect(() => {
+    if (disabled || !canApplyReferences || !entityIds.some(id => !referenceIds.includes(id!))
+        || prompt.trim() !== (item.shot?.prompt ?? "").trim() || referenceAttempt.current === referenceApplyKey) return;
+    const timer = setTimeout(() => {
+      referenceAttempt.current = referenceApplyKey;
+      applyReferences();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [disabled, canApplyReferences, referenceApplyKey, item.shot?.prompt]);
   const [undo, setUndo] = useState<{ values?: Scalars; boundIds?: string[] }>();
   const save = (patch: { prompt?: string; values?: Scalars }) => productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", ...patch, ...(patch.values ? { selectionRef: selectionRef ?? generator?.selectionRef } : {}) });
   const preview = useMemo(() => recognize(prompt, entities, bound, generator, current), [prompt, entities, bound, generator, current]);
@@ -390,7 +403,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
       {hasMentions && <section aria-label="角色与场景生成引用" className="composer-entity-references">
         <p>{entityIssue ?? "角色与场景已保存到正式参考输入，生成时按以下真实顺序引用。"}</p>
-        {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "尚未应用"}</small>; })}
+        {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "等待自动应用"}</small>; })}
         <button type="button" disabled={disabled || !canApplyReferences || !entityIssue} onClick={applyReferences}>应用角色与场景参考图</button>
         {referenceMode && <button type="button" disabled={disabled} onClick={() => setReferenceRev(v => v + 1)}>重新读取参考输入</button>}
         <small>使用封面图（无封面时使用第一张关联图）；保留已有参考顺序及音视频输入，不复制首尾帧，不自动生成。</small>

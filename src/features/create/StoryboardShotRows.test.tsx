@@ -353,15 +353,13 @@ it('row entity references save the explicitly chosen exact generator without cre
   await waitFor(() => expect(api.inputsGet).toHaveBeenCalledWith({ projectId: 'p', shotId: item.id, selectionRef: 'ref' }));
 });
 
-it('row entity references apply ordered images through OCC, retain audio, and generate only on a separate click', async () => {
+it('row entity references automatically apply ordered images through OCC, retain audio, and generate only on a separate click', async () => {
   photos();
   const existing = [{ inputKey: 'reference_images', ordinal: 0, assetId: 'scene-image' }, { inputKey: 'reference_audios', ordinal: 0, assetId: 'audio' }];
   api.inputsGet.mockResolvedValue({ selectionRef: 'ref', token: { instanceId: 'refs', revision: 4 }, inputs: existing, assets: [] });
   render(<StoryboardShotRows {...props()} items={[referenceShot()]} />);
-  const apply = await screen.findByRole('button', { name: '应用角色与场景参考图' });
-  await waitFor(() => expect(apply.hasAttribute('disabled')).toBe(false));
+  await screen.findByRole('button', { name: '应用角色与场景参考图' });
   expect(screen.getByRole('button', { name: '生成视频' }).hasAttribute('disabled')).toBe(true);
-  fireEvent.click(apply);
   await screen.findByText('角色与场景参考图已保存；尚未创建生成任务。');
   expect(api.inputsSave).toHaveBeenCalledWith({ selection: { projectId: 'p', shotId: 'entity-ref', selectionRef: 'ref' }, expected: { instanceId: 'refs', revision: 4 }, inputs: [
     existing[1], existing[0], { inputKey: 'reference_images', ordinal: 1, assetId: 'hero-image' },
@@ -432,7 +430,7 @@ it('row entity references do not dispatch a late READY after formal reference in
   await waitFor(() => expect(api.readinessGet).toHaveBeenCalledTimes(1));
   api.inputsGet.mockResolvedValueOnce({ selectionRef: 'ref', token: { instanceId: 'refs', revision: 5 }, inputs: [], assets: [] });
   act(() => invalidateVideoInputs('p'));
-  await waitFor(() => expect(screen.getByLabelText('角色与场景生成引用').textContent).toContain('尚未进入生成输入'));
+  await waitFor(() => expect(screen.getByLabelText('角色与场景生成引用').textContent).toContain('正在自动应用'));
   await act(async () => ready.resolve({ ready: true, issues: [], fieldErrors: [], actions: [] }));
   expect(api.generate).not.toHaveBeenCalled();
 });
@@ -528,4 +526,31 @@ it("preserves prompt draft and offers no undo when the atomic save fails", async
   expect((box as HTMLTextAreaElement).value).toBe("阿离 雨巷 8秒");
   expect(screen.queryByRole("button", {name:"撤销"})).toBeNull();
   expect(api.updateShot).not.toHaveBeenCalled(); expect(api.bindShot).not.toHaveBeenCalled(); expect(p.onChanged).not.toHaveBeenCalled();
+});
+
+it('automatically applies newly saved row mentions once, without saving an unfinished edit', async () => {
+  photos(); const p = props(), item = referenceShot(); item.shot!.prompt = '';
+  const h = render(<StoryboardShotRows {...p} items={[item]} />);
+  const editor = screen.getByLabelText('镜头1 提示词');
+  await waitFor(() => expect(editor.hasAttribute('disabled')).toBe(false));
+  fireEvent.change(editor, { target: { value: '@阿离' } });
+  await act(async () => { await new Promise(r => setTimeout(r, 320)); });
+  expect(api.inputsSave).not.toHaveBeenCalled();
+  fireEvent.blur(editor);
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalled());
+  h.rerender(<StoryboardShotRows {...p} items={[{ ...item, shot: { ...item.shot!, prompt: '@阿离' } }]} />);
+  await waitFor(() => expect(api.inputsSave).toHaveBeenCalledTimes(1));
+  await act(async () => { await new Promise(r => setTimeout(r, 400)); });
+  expect(api.inputsSave).toHaveBeenCalledTimes(1);
+  expect(api.inputsSave.mock.calls[0][0].inputs).toEqual([{ inputKey: 'reference_images', ordinal: 0, assetId: 'hero-image' }]);
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('cancels a pending automatic row reference write on project switch', async () => {
+  photos(); const p = props(), item = referenceShot();
+  const h = render(<StoryboardShotRows {...p} items={[item]} />);
+  await waitFor(() => expect(api.inputsGet).toHaveBeenCalledTimes(1));
+  h.rerender(<StoryboardShotRows {...p} projectId='other' items={[item]} />);
+  await act(async () => { await new Promise(r => setTimeout(r, 400)); });
+  expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
 });

@@ -101,14 +101,14 @@ function pending<T>() { let resolve!: (value: T) => void; const promise = new Pr
 const auditHero: StoryEntity = { id: "hero", projectId: "owned", kind: "character", name: "审计角色", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
 const auditScene: StoryEntity = { ...auditHero, id: "scene", kind: "scene", name: "审计场景" };
 
-it("applies explicit entity images to the exact REF2VA slot through OCC without generating", async () => {
+it("automatically applies explicit entity images to the exact REF2VA slot through OCC without generating", async () => {
   vi.mocked(productClient.storyEntities.list).mockResolvedValue([
     { ...auditHero, coverAssetId: "entity-first" }, { ...auditScene, imageAssetIds: ["entity-second"] },
   ]);
   saved.set("opaque-2", { selectionRef: "opaque-2", token: null, inputs: [], assets: [{ id: "entity-first", name: "角色", mediaKind: "image" }, { id: "entity-second", name: "场景", mediaKind: "image" }] });
   await start("opaque-2");
   setPrompt("@审计角色在@审计场景中飞翔，5秒");
-  fireEvent.click(await screen.findByRole("button", { name: "应用角色与场景参考图" }));
+
   await waitFor(() => expect(persisted()).toEqual([
     { inputKey: "reference_images", ordinal: 0, assetId: "entity-first" },
     { inputKey: "reference_images", ordinal: 1, assetId: "entity-second" },
@@ -137,7 +137,7 @@ it("keeps existing reference order, deduplicates entity images, and fails closed
   api.inputsSave.mockRejectedValue(new Error("SHOT_VIDEO_INPUT_CONFLICT"));
   await start("opaque-2");
   setPrompt("@审计角色飞翔，@审计角色回头");
-  fireEvent.click(await screen.findByRole("button", { name: "应用角色与场景参考图" }));
+
   await waitFor(() => expect(persisted()).toEqual([
     { inputKey: "reference_images", ordinal: 0, assetId: "order-existing" },
     { inputKey: "reference_images", ordinal: 1, assetId: "order-hero" },
@@ -413,4 +413,70 @@ it("entities without a cover use their first linked image as avatar in the strip
   fireEvent.keyDown(promptEditor(),{key:"@"});
   const pick=await screen.findByRole("listbox",{name:"插入角色与场景"});
   expect(within(pick).getByRole("option").querySelector("img")).toBeTruthy();
+});
+
+it("automatically applies a second entity mention once while preserving the first saved image", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([
+    { ...auditHero, coverAssetId: 'entity-first' }, { ...auditScene, coverAssetId: 'entity-second' },
+  ]);
+  await start('opaque-2'); setPrompt('@审计角色');
+  await waitFor(() => expect(api.inputsSave).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(composer().getAttribute('data-inputs')).toBe('saved'));
+  setPrompt('@审计角色 在 @审计场景');
+  await waitFor(() => expect(api.inputsSave).toHaveBeenCalledTimes(2));
+  expect(persisted()).toEqual([
+    { inputKey: 'reference_images', ordinal: 0, assetId: 'entity-first' },
+    { inputKey: 'reference_images', ordinal: 1, assetId: 'entity-second' },
+  ]);
+  await act(async () => { await new Promise(r => setTimeout(r, 350)); });
+  expect(api.inputsSave).toHaveBeenCalledTimes(2); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("does not persist partial IME entity mentions and automatically resumes on composition end", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([{ ...auditHero, coverAssetId: 'entity-first' }]);
+  await start('opaque-2');
+  fireEvent.compositionStart(promptEditor()); setPrompt('@审计角色');
+  await act(async () => { await new Promise(r => setTimeout(r, 350)); });
+  expect(api.inputsSave).not.toHaveBeenCalled();
+  fireEvent.compositionEnd(promptEditor());
+  await waitFor(() => expect(api.inputsSave).toHaveBeenCalledTimes(1));
+  expect(persisted()).toEqual([{ inputKey: 'reference_images', ordinal: 0, assetId: 'entity-first' }]);
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("cancels a superseded automatic composer reference edit instead of saving the old mention", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([{ ...auditHero, coverAssetId: 'entity-first' }]);
+  await start('opaque-2'); setPrompt('@审计角色'); setPrompt('没有引用的画面');
+  await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+  expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("does not automatically retry a rejected entity input save", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([{ ...auditHero, coverAssetId: 'entity-first' }]);
+  api.inputsSave.mockRejectedValue(new Error('SHOT_VIDEO_INPUT_CONFLICT'));
+  await start('opaque-2'); setPrompt('@审计角色');
+  await waitFor(() => expect(composer().getAttribute('data-inputs')).toBe('error'));
+  await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+  expect(api.inputsSave).toHaveBeenCalledTimes(1); expect(api.generate).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '生成' }).hasAttribute('disabled')).toBe(true);
+});
+
+it("cancels a pending automatic composer write when switching to a different Recipe", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([{ ...auditHero, coverAssetId: 'entity-first' }]);
+  await start('opaque-2'); setPrompt('@审计角色');
+  fireEvent.change(screen.getByLabelText('选择生成器'), { target: { value: 'opaque-1' } });
+  await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+  expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("preserves the prompt caret while automatically adding mentioned entity images", async () => {
+  vi.mocked(productClient.storyEntities.list).mockResolvedValue([{ ...auditHero, coverAssetId: 'entity-first' }]);
+  await start('opaque-2'); setPrompt('@审计角色 向前行走');
+  const editor = promptEditor(), text = editor.firstChild!;
+  editor.focus(); const range = document.createRange(); range.setStart(text, 3); range.collapse(true);
+  const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+  await waitFor(() => expect(api.inputsSave).toHaveBeenCalledTimes(1));
+  expect(editor.firstChild).toBe(text);
+  expect(selection.anchorNode).toBe(text); expect(selection.anchorOffset).toBe(3);
+  expect(api.generate).not.toHaveBeenCalled();
 });

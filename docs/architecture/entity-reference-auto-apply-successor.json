@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "ENTITY_REFERENCE_AUTO_APPLY",
+  "parentHead": "d183d7c711ac2aa516a182dbcb5e12d8a58665f3",
+  "planningParentHead": "d183d7c711ac2aa516a182dbcb5e12d8a58665f3",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "queueAuthorityChanged": false,
+    "gpuExecuted": false,
+    "exactRecipeInputsPreserved": true,
+    "explicitGenerationRequired": true,
+    "occAndProjectIsolationPreserved": true,
+    "automaticRetriesDisabled": true
+  },
+  "files": {
+    "docs/architecture/entity-reference-auto-apply.md": {
+      "beforeHash": null,
+      "afterHash": "94cdf39fec987784da75f76bb99351363284ce468c4612797b6dc509a277f498"
+    },
+    "scripts/entity-reference-auto-apply-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "f53cdca7a722d01fa1e79ae1eefe678b756e64add53983093e99b0f9a48e3033"
+    },
+    "scripts/retired-ui-code-cleanup-successor-guard.mjs": {
+      "beforeHash": "0cd73610d13fb81233bc2078caae4aa8f981d8da804b52880bcdcf8687dfcab0",
+      "afterHash": "f77bd22905577771f066ab1466d193d214a1359faf9634bfc8bd823241888529"
+    },
+    "scripts/testing/entity-reference-auto-apply.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "b810e2d18b051af40bb5afdbbcc981c5eed9fca8ad4581fcf25ad81116a47707"
+    },
+    "src/features/create/CreateComposer.test.tsx": {
+      "beforeHash": "122540c923d9450a29967aa439414a21a8afb629e1816029100764437d156e21",
+      "afterHash": "a3ef0a77c64a40476c35c8abfd00a8caa588d1fa1708e1d581d6c889650f3ccf"
+    },
+    "src/features/create/CreateComposer.tsx": {
+      "beforeHash": "f1d684e877fda3c1273fad24510930c07bdbb119823eb1a23ecf1bac6f6849e5",
+      "afterHash": "e2c159d40d3595429b0a6b50df2ed7bce37eecd8aad3c3ccc3f4f873d43b3c34"
+    },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": "c9156f46dd606cd12afa467f0bece826628f3cedf0c12212d5695361c1aa0324",
+      "afterHash": "b66e2feb2cd4ede97d57d40938bb350fa19d16bdb75fbe518923fd74f1a3bca3"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": "6c563ecd8b3cbf62976b48bded2758525c5d23a5a2bef0c4ad6a49b78de6433d",
+      "afterHash": "38d74688e38b08ce3ccb903148ee5b80fd6db92f212fc637b7efb1d8fab8664a"
+    }
+  }
+}

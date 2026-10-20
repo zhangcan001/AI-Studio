@@ -108,6 +108,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const imageKey = images.map(r => `${r.n}:${r.assetId}`).join("|") + `@${projectId ?? ""}`;
   const urlKey = images.map(r => imgUrls[r.assetId] ?? "").join("|");
   const composing = useRef(false);
+  const [compositionRevision, setCompositionRevision] = useState(0);
   const imageIds = images.map(r => r.assetId).join("|");
   useEffect(() => {
     if (!projectId) return; let alive = true;
@@ -169,8 +170,11 @@ export function CreateComposer({ controller: c }: { controller: CreateController
 
   useLayoutEffect(() => {
     const root = editor.current; if (!root) return;
-    if (emitted.current === prompt && root.dataset.refs === imageKey) {
-      // Thumbnail arrival only: patch the chip images in place; text nodes and the selection stay untouched.
+    if (emitted.current === prompt && root.dataset.scope === editScope
+        && (root.dataset.refs === imageKey || !/Image \d+/.test(prompt))) {
+      // Plain @mentions don't need Image chips rebuilt when automatic refs arrive.
+      // Patch thumbnails in place, preserving text nodes, IME and the caret.
+      root.dataset.refs = imageKey;
       root.querySelectorAll<HTMLElement>(".composer-chip").forEach(chip => {
         const ref = images.find(r => String(r.n) === chip.dataset.ref); const u = ref ? url(ref) : undefined;
         if (!u) return; const img = chip.querySelector("img");
@@ -180,8 +184,8 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       return;
     }
     if (composing.current) return; // never rebuild mid IME composition; compositionend re-emits
-    build(root, prompt, images, url); root.dataset.refs = imageKey; emitted.current = prompt;
-  }, [prompt, imageKey, urlKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    build(root, prompt, images, url); root.dataset.refs = imageKey; root.dataset.scope = editScope; emitted.current = prompt;
+  }, [prompt, imageKey, urlKey, editScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const emit = () => {
     const root = editor.current; if (!root || !promptField) return;
@@ -263,9 +267,17 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     : mentions.error ?? (!entityField || c.generator?.mode?.toUpperCase() !== "REF2VA" ? "@角色/场景需要混合参考（REF2VA）生成器；不会覆盖已有首帧，请明确切换模式。"
     : entityIds.some(id => !id) ? "引用的角色或场景尚未关联图片，请先在素材库添加图片。"
     : "maxItems" in entityField && entityField.maxItems != null && combinedIds.length > entityField.maxItems ? "角色与场景参考图超过当前 Recipe 上限，请调整引用或已有参考。"
-    : entityIds.some(id => !referenceIds.includes(id!)) ? "角色与场景图片尚未加入正式参考输入，请点击应用。" : undefined);
+    : entityIds.some(id => !referenceIds.includes(id!)) ? "正在自动应用角色与场景参考图…" : undefined);
   const canApplyEntities = Boolean(entityField) && c.generator?.mode?.toUpperCase() === "REF2VA" && entitiesOwner === projectId && !mentions.error && entityIds.length > 0 && entityIds.every(Boolean)
     && !(entityField && "maxItems" in entityField && entityField.maxItems != null && combinedIds.length > entityField.maxItems);
+  const entityApplyKey = JSON.stringify([editScope, prompt, combinedIds]);
+  useEffect(() => {
+    if (locked || vi.error || !canApplyEntities || !entityField || !entityIds.some(id => !referenceIds.includes(id!))) return;
+    const timer = setTimeout(() => {
+      if (!composing.current) setField(entityField, combinedIds);
+    }, AUTOSAVE_MS);
+    return () => clearTimeout(timer);
+  }, [entityApplyKey, locked, vi.error, canApplyEntities, compositionRevision]);
   const canSubmit = !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY" && !entityIssue;
   const promptWarnings = resolvePromptSettings(parseShotPrompt(prompt), c.generator, c.values).warnings;
 
@@ -274,7 +286,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     <ReadinessStatus controller={c} />
     {prompt.includes("@") && <section aria-label="角色与场景生成引用" className="composer-entity-references">
       <p>{entityIssue ?? "角色与场景已进入正式参考输入；后端将按实际顺序编译 H3 引用标签。"}</p>
-      {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "尚未应用"}</small>; })}
+      {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "等待自动应用"}</small>; })}
       <button type="button" disabled={locked || !canApplyEntities || !entityIssue} onClick={() => { if (entityField && canApplyEntities) setField(entityField, combinedIds); }}>应用角色与场景参考图</button>
       <small>使用封面图（无封面时使用第一张关联图）；保留已有参考顺序，不修改首尾帧。仅绑定镜头不等于用于生成。</small>
     </section>}
@@ -314,7 +326,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     </div>}
     {promptField && <div className="composer-prompt">
       <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} title="总像素可写0.5MP、0.98MP、50万像素或总像素500000；MP按ComfyUI的1024×1024约定，实际尺寸按当前预设匹配。" data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面；可写0.98MP / 50万像素"}
-        onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={() => { saveCaret(); applyPromptSettings(); }}
+        onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); setCompositionRevision(v => v + 1); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={() => { saveCaret(); applyPromptSettings(); }}
         onKeyDown={e => { if (e.key === "@") { e.preventDefault(); saveCaret(); if (allEntities.length) setEntityPicker(true); else if (images.length) setPicker("insert"); } else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); } }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />
       <span className="composer-count" aria-hidden="true">{prompt.length} 字</span>
