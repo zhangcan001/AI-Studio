@@ -1,3 +1,4 @@
+import { retiredUiCodeCleanupParentReader, retiredUiCodeCleanupScopeSince, retiredUiCodeCleanupFixtureFiles, RETIRED_UI_CODE_CLEANUP_BASE } from './retired-ui-code-cleanup-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -66,10 +67,11 @@ export function generationProgressRefreshScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...GENERATION_PROGRESS_REFRESH_CHANGED, ...GENERATION_PROGRESS_REFRESH_ADDED, GENERATION_PROGRESS_REFRESH_PROOF,
+    ...retiredUiCodeCleanupScopeSince(root, RETIRED_UI_CODE_CLEANUP_BASE),
   ])].sort();
 }
 export function generationProgressRefreshFixtureFiles(root) {
-  return [...facts(root, GENERATION_PROGRESS_REFRESH_BASE).paths, ...GENERATION_PROGRESS_REFRESH_ADDED, GENERATION_PROGRESS_REFRESH_PROOF];
+  return [...new Set([...facts(root, GENERATION_PROGRESS_REFRESH_BASE).paths, ...GENERATION_PROGRESS_REFRESH_ADDED, GENERATION_PROGRESS_REFRESH_PROOF, ...retiredUiCodeCleanupFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -78,10 +80,10 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, GENERATION_PROGRESS_REFRESH_BASE);
   const fail = id => violations.push("generation-progress-refresh-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(GENERATION_PROGRESS_REFRESH_PROOF));
@@ -94,10 +96,10 @@ function validate(root, override) {
     const allowed = [...scope, GENERATION_PROGRESS_REFRESH_PROOF].sort();
     const expected = [...parent.paths, ...GENERATION_PROGRESS_REFRESH_ADDED, GENERATION_PROGRESS_REFRESH_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -117,13 +119,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: GENERATION_PROGRESS_REFRESH_CHANGED,
-    addedPaths: [...GENERATION_PROGRESS_REFRESH_ADDED, GENERATION_PROGRESS_REFRESH_PROOF],
-    afterHashes: Object.fromEntries([...GENERATION_PROGRESS_REFRESH_CHANGED, ...GENERATION_PROGRESS_REFRESH_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...GENERATION_PROGRESS_REFRESH_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...GENERATION_PROGRESS_REFRESH_ADDED, GENERATION_PROGRESS_REFRESH_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...GENERATION_PROGRESS_REFRESH_CHANGED, ...GENERATION_PROGRESS_REFRESH_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => GENERATION_PROGRESS_REFRESH_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function generationProgressRefreshParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "generationProgressRefreshParentReader", undefined,
-    () => validate(root, undefined), GENERATION_PROGRESS_REFRESH_PROOF);
+  const successor = retiredUiCodeCleanupParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "generationProgressRefreshParentReader", undefined, check, GENERATION_PROGRESS_REFRESH_PROOF);
 }

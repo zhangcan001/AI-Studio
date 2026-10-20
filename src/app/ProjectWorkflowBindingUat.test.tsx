@@ -5,10 +5,6 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecipeViewModel } from "../types/generation";
-import type {
-  ProjectWorkflowBindingView,
-  ProjectWorkflowConfigView,
-} from "../types/projectWorkflow";
 import { EMPTY_WORKSPACE_RESUME, useWorkspaceResumeStore } from "../stores/workspaceResumeStore";
 import { useProjectStore } from "../stores/projectStore";
 import App from "./App";
@@ -51,16 +47,6 @@ vi.mock("./ShellHost", () => ({
 }));
 vi.mock("./StartupScreen", () => ({ StartupScreen: ({ onRetry }: { onRetry: () => void }) => <button onClick={onRetry}>重试</button> }));
 vi.mock("./WorkspaceErrorBoundary", () => ({ WorkspaceErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</> }));
-vi.mock("../features/workflow-lab/WorkflowLabPage", () => ({
-  WorkflowLabPage: ({ onUseInProject }: { onUseInProject: (workflowId: string, recipeId: string) => Promise<void> }) => (
-    <button
-      type="button"
-      onClick={() => void onUseInProject(mocks.selectedWorkflow.workflowId, mocks.selectedWorkflow.recipeId)}
-    >
-      用于当前项目
-    </button>
-  ),
-}));
 vi.mock("./v3/ProjectOverviewPage", () => ({
   ProjectOverviewPage: ({ navigate }: { navigate: (route: import("./routes/types").AppRoute) => void }) => (
     <button
@@ -72,7 +58,6 @@ vi.mock("./v3/ProjectOverviewPage", () => ({
   ),
 }));
 vi.mock("../features/projects/ProjectWorkspace", () => ({ ProjectWorkspace: () => null }));
-vi.mock("../features/studio/GenerationStudio", () => ({ GenerationStudio: () => null }));
 vi.mock("../features/assets/AssetWorkspace", () => ({ AssetWorkspace: () => null }));
 vi.mock("../features/assets/AssetVideoBatchWorkspace", () => ({ AssetVideoBatchWorkspace: () => null }));
 vi.mock("../features/tasks/TaskHistory", () => ({ TaskHistory: () => null }));
@@ -110,38 +95,10 @@ function recipe(outputTypes?: Array<"image" | "video">): RecipeViewModel {
   };
 }
 
-function binding(
-  stage: "IMAGE" | "VIDEO",
-  mode: ProjectWorkflowBindingView["mode"],
-  workflowVersionId: string,
-  recipeId: string,
-): ProjectWorkflowBindingView {
-  return {
-    stage,
-    mode,
-    workflowVersionId,
-    recipeId,
-    createdAt: "2026-09-03T00:00:00.000Z",
-    updatedAt: "2026-09-03T00:00:00.000Z",
-    available: true,
-    bindingInstanceId: `bnd_${stage.toLowerCase()}_${mode.toLowerCase()}`,
-    revision: 1,
-  };
-}
-
-function config(
-  imageDefault: ProjectWorkflowBindingView | null | undefined,
-  videoDefault: ProjectWorkflowBindingView | null | undefined,
-  videoModeOverrides: ProjectWorkflowBindingView[] = [],
-): ProjectWorkflowConfigView {
-  return { projectId: project.id, imageDefault, videoDefault, videoModeOverrides };
-}
-
 async function openWorkflowAction() {
   const user = userEvent.setup();
-  await waitFor(() => expect(screen.getByRole("button", { name: "工作流" })).toBeTruthy());
-  await user.click(screen.getByRole("button", { name: "工作流" }));
-  await user.click(await screen.findByRole("button", { name: "用于当前项目" }));
+  await user.click(await screen.findByRole("button", { name: "工作流" }));
+  await screen.findByRole("heading", { name: "工作流导入与编辑已停用" });
 }
 
 function prepareApp(catalog: RecipeViewModel[], hasProject = true, projectList = hasProject ? [project] : []) {
@@ -186,118 +143,21 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("DEV-080 用于当前项目持久化 UAT", () => {
-  it("保存 image 默认，并保留 video 默认和全部 video mode overrides", async () => {
-    const selected = recipe(["image"]);
-    const videoDefault = binding("VIDEO", "DEFAULT", "OLD_VIDEO_WV", "OLD_VIDEO_R");
-    const overrides = [
-      binding("VIDEO", "FL2VA_TEXT_TO_VIDEO", "OVERRIDE_WV_1", "OVERRIDE_R_1"),
-      binding("VIDEO", "FL2VA_IMAGE_TO_VIDEO", "OVERRIDE_WV_2", "OVERRIDE_R_2"),
-      binding("VIDEO", "FL2VA_FIRST_LAST", "OVERRIDE_WV_3", "OVERRIDE_R_3"),
-      binding("VIDEO", "REF2VA_IMAGE", "OVERRIDE_WV_4", "OVERRIDE_R_4"),
-      binding("VIDEO", "REF2VA_AUDIO", "OVERRIDE_WV_5", "OVERRIDE_R_5"),
-      binding("VIDEO", "REF2VA_IMAGE_AUDIO", "OVERRIDE_WV_6", "OVERRIDE_R_6"),
-      binding("VIDEO", "REF2VA_VIDEO_IMAGE", "OVERRIDE_WV_7", "OVERRIDE_R_7"),
-    ];
-    const current = config(binding("IMAGE", "DEFAULT", "OLD_IMAGE_WV", "OLD_IMAGE_R"), videoDefault, overrides);
-    const saved = config(binding("IMAGE", "DEFAULT", selected.workflowVersionId, selected.recipeId), videoDefault, overrides);
-    mocks.getProjectWorkflowConfig.mockResolvedValue(current);
-    mocks.upsertProjectWorkflowBinding.mockResolvedValue(saved);
-    prepareApp([selected]);
-
+describe("Retired workflow route real-page UAT", () => {
+  it.each([["image"], ["video"], ["image", "video"], []] as Array<Array<"image" | "video">>)("never binds a generator for catalog outputs %j", async (...outputs) => {
+    prepareApp([recipe(outputs)]);
     await openWorkflowAction();
-
-    await waitFor(() => expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledTimes(1));
-    expect(mocks.listGenerationCatalog.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith("project-1", {
-      stage: "IMAGE", mode: "DEFAULT", workflowVersionId: selected.workflowVersionId, recipeId: selected.recipeId,
-      expectedBindingInstanceId: "bnd_image_default", expectedRevision: 1,
-    });
-    await waitFor(() => expect(document.querySelector(".workflow-notice")?.textContent).toContain("已设为当前项目图片默认工作流"));
-    expect(document.querySelector(".workflow-notice")?.textContent).not.toContain(selected.workflowVersionId);
-    expect(document.querySelector(".workflow-notice")?.textContent).not.toContain(selected.recipeId);
-  });
-
-  it("保存 video 默认，并保留 image 默认和全部 video mode overrides", async () => {
-    mocks.selectedWorkflow.workflowId = "VIDEO_WF";
-    mocks.selectedWorkflow.recipeId = "VIDEO_R";
-    const selected = recipe(["video"]);
-    const imageDefault = binding("IMAGE", "DEFAULT", "OLD_IMAGE_WV", "OLD_IMAGE_R");
-    const overrides = [binding("VIDEO", "REF2VA_IMAGE", "OVERRIDE_WV", "OVERRIDE_R")];
-    const current = config(imageDefault, binding("VIDEO", "DEFAULT", "OLD_VIDEO_WV", "OLD_VIDEO_R"), overrides);
-    const saved = config(imageDefault, binding("VIDEO", "DEFAULT", selected.workflowVersionId, selected.recipeId), overrides);
-    mocks.getProjectWorkflowConfig.mockResolvedValue(current);
-    mocks.upsertProjectWorkflowBinding.mockResolvedValue(saved);
-    prepareApp([selected]);
-
-    await openWorkflowAction();
-
-    await waitFor(() => expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledTimes(1));
-    expect(mocks.upsertProjectWorkflowBinding).toHaveBeenCalledWith("project-1", {
-      stage: "VIDEO", mode: "DEFAULT", workflowVersionId: selected.workflowVersionId, recipeId: selected.recipeId,
-      expectedBindingInstanceId: "bnd_video_default", expectedRevision: 1,
-    });
-    await waitFor(() => expect(document.querySelector(".workflow-notice")?.textContent).toContain("已设为当前项目视频默认工作流"));
-  });
-
-  it("没有项目时拒绝绑定", async () => {
-    const selected = recipe(["image"]);
-    prepareApp([selected], false);
-
-    await openWorkflowAction();
-
-    await waitFor(() => expect(document.querySelector(".global-error")?.textContent).toContain("当前项目不可用，无法绑定工作流。"));
+    expect(screen.queryByRole("button", { name: "用于当前项目" })).toBeNull();
     expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
     expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
+    expect(mocks.removeProjectWorkflowBinding).not.toHaveBeenCalled();
+    expect(mocks.listGenerationCatalog).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "选择项目生成器" })).toBeTruthy();
   });
-
-  it("replace 返回非 exact pair 时拒绝确认", async () => {
-    const selected = recipe(["image"]);
-    mocks.getProjectWorkflowConfig.mockResolvedValue(config(null, null));
-    mocks.upsertProjectWorkflowBinding.mockResolvedValue(
-      config(binding("IMAGE", "DEFAULT", "WRONG_WV", "WRONG_R"), null),
-    );
-    prepareApp([selected]);
-
+  it("an absent active project has navigation only and cannot mutate bindings", async () => {
+    prepareApp([], false);
     await openWorkflowAction();
-
-    await waitFor(() => expect(document.querySelector(".global-error")?.textContent).toContain("绑定写入后校验失败"));
-    expect(document.querySelector(".workflow-notice")).toBeNull();
-  });
-
-  it("目录没有 exact workflowId + recipeId 时拒绝绑定", async () => {
-    mocks.selectedWorkflow.workflowId = "MISSING_WF";
-    mocks.selectedWorkflow.recipeId = "MISSING_R";
-    const requested = recipe(["image"]);
-    prepareApp([{ ...requested, recipeId: "OTHER_R" }]);
-
-    await openWorkflowAction();
-
-    await waitFor(() => expect(document.querySelector(".global-error")?.textContent).toContain("刚添加的工作流暂时还没有出现在项目工作流列表中，请刷新后重试。"));
-    expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
-    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
-  });
-
-  it("没有输出时拒绝绑定", async () => {
-    const selected = recipe();
-    prepareApp([selected]);
-
-    await openWorkflowAction();
-
-    await waitFor(() => expect(document.querySelector(".global-error")?.textContent).toContain("该工作流没有图片或视频输出，无法绑定为项目默认工作流。"));
-    expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
-    expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
-  });
-
-  it("双输出时进入项目设置但不猜测默认阶段", async () => {
-    const selected = recipe(["image", "video"]);
-    const current = config(null, null);
-    mocks.getProjectWorkflowConfig.mockResolvedValue(current);
-    prepareApp([selected]);
-
-    await openWorkflowAction();
-
-    await waitFor(() => expect(document.querySelector(".workflow-notice")?.textContent).toContain("同时输出图片和视频，未自动绑定"));
+    expect(screen.getByRole("button", { name: "选择项目" })).toBeTruthy();
     expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
     expect(mocks.upsertProjectWorkflowBinding).not.toHaveBeenCalled();
   });

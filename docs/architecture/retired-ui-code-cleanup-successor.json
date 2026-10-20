@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RETIRED_UI_CODE_CLEANUP",
+  "parentHead": "bf6c4708c1de1d28ed59608d0a48bf7443373b57",
+  "planningParentHead": "bf6c4708c1de1d28ed59608d0a48bf7443373b57",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "queueAuthorityChanged": false,
+    "gpuExecuted": false,
+    "retiredAuthoringCallbacksRemoved": true,
+    "legacyRouteNavigationPreserved": true,
+    "currentGeneratorBindingsPreserved": true,
+    "safetyAndErrorFeedbackPreserved": true
+  },
+  "files": {
+    "docs/architecture/retired-ui-code-cleanup.md": {
+      "beforeHash": null,
+      "afterHash": "93836629a6f1d77dfe3647975dcf89cb346b916e8efcbe0fb20d6deb028495bd"
+    },
+    "scripts/generation-progress-refresh-successor-guard.mjs": {
+      "beforeHash": "71c3f0480f6f5d8135150bc80c2a94b84b6530c40fb5ce5800fcde940e34e012",
+      "afterHash": "1fef2ce0bfefcd3e3a717ad2f329c41bb9c44872e04e1a5ea60b3d140ce2bd4f"
+    },
+    "scripts/retired-ui-code-cleanup-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "0cd73610d13fb81233bc2078caae4aa8f981d8da804b52880bcdcf8687dfcab0"
+    },
+    "scripts/testing/retired-ui-code-cleanup.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "cf0d97d22aacac2d31aa9a85d4b8f76f58b63386f94b4b80824ca5bffdd67653"
+    },
+    "src/app/App.navigation.test.ts": {
+      "beforeHash": "f78e8ca2d7d6aeab8709c4a4dc156a4a8404ce6b88b89195ada92bfe52b64811",
+      "afterHash": "540adcac28ca30385edc5c2e35cf5d08195574f18e3a86031a5c10f46c68df27"
+    },
+    "src/app/App.tsx": {
+      "beforeHash": "22b372f94281e5bbc6ea3748170cdbd907d66113fd4c77f3618aeb76ffeb4e78",
+      "afterHash": "0f93293f78db018324826668428a18f9068c4f1a800cd534539b762c0360ec76"
+    },
+    "src/app/Phase7Retirement.test.tsx": {
+      "beforeHash": "7adf94190c5158e5dc31e25e093c4244658b7a162535851502ad6db8955e0698",
+      "afterHash": "d6a0637f52355c17c0735116e73e0d5ff0de7bfdf6511c4e605752c09c48e250"
+    },
+    "src/app/ProjectWorkflowBindingUat.test.tsx": {
+      "beforeHash": "a32f6a54900bf5296174f8fe47cf46bb615ac1b5de6a104c35b88ce71e192f7f",
+      "afterHash": "b7568d867f77a5a57f3aac19ab40280ccc6e9ffd5a55f4df0718fba4726812f7"
+    },
+    "src/app/WorkflowNavigationUat.test.tsx": {
+      "beforeHash": "f44e12e99593280924b658fce9f5b4bded7fa225ebb40faa3f09a35938596dbc",
+      "afterHash": "6335ea2bdfa6b969f1326ad928bba7e2cd8f8df6feb0435a91feb4cb0342f04d"
+    },
+    "src/features/assets/AssetVideoBatchWorkspace.test.tsx": {
+      "beforeHash": "a0d6adc667a4cab3e9d031d46e687342bf5fbfc94688eac32234edc9989ff8a8",
+      "afterHash": "9c2f0f5d5131659c7502729bf5ee04ba98f7830e716304a52b00efd8f7548e11"
+    },
+    "src/features/assets/AssetVideoBatchWorkspace.tsx": {
+      "beforeHash": "f99b12475ae308b8cee263e505800b9b834e3b5093fa788098c1f17f32afd7cc",
+      "afterHash": "ed69b01f10181ad9158194364c5dfed3b628f1330f37a9fb98ffdb7b3873e4f8"
+    },
+    "src/features/assets/AssetVideoGenericQueueSubmission.test.tsx": {
+      "beforeHash": "76061a56c7e5bfba9b9b8f63606804cdf0bebc3c31f8625df9a2222947ba40b8",
+      "afterHash": "b2a0110e4cafa0ffb6a24c08707aab0b6d29ff2fe70d1403b52fa9df0fc77a4e"
+    },
+    "src/features/create/CreatePage.tsx": {
+      "beforeHash": "895a8010fbf93979886685731a4edc4df99ad49fa14b1205c8e915d205a8ca26",
+      "afterHash": "15b8a0295efab8e4aa61a04718537b661aea143c64dbe0833de55f0d2e63c05e"
+    },
+    "src/features/generators/GeneratorSettingsPage.tsx": {
+      "beforeHash": "7a9cb395a8d10cb4f95d987b1ed4607ff5603c516137de4a4df600793a5c53ed",
+      "afterHash": "e5668ac0f4d2d826227542be5da6358bcef35c3c7330fe24483dfea2d3a77711"
+    },
+    "src/features/library/LibraryPage.tsx": {
+      "beforeHash": "bb3b4e68b9ad2126388982d697555bf10b85d1998fd2899fd13547e0b219c1cd",
+      "afterHash": "662f384771d9c3b51a979ef7271068926f4cb257269db7b25af6a022624e3a4f"
+    },
+    "src/features/workflow-lab/WorkflowLabPage.tsx": {
+      "beforeHash": "c3fff60feb9e2e31d01f0e7f1b10e9879dd94595d3b625976df272b9f5da98ce",
+      "afterHash": "ef6fea99cf71f675921972b1cca24d904bef6dc44460071ae1ec693543405559"
+    }
+  }
+}

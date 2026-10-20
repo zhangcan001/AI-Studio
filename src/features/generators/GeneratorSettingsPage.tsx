@@ -65,7 +65,7 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
     } finally { locked.current = false; if (token === generation.current) setBusy(false); }
   }
   return <section className="generator-settings" aria-label="项目生成器设置" aria-busy={loading || busy}>
-    <header><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p><p>新增工作流由软件内置提供，不再支持直接导入或手动映射。已有绑定与历史记录保留。</p></header>
+    <header><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p></header>
     {loading && <p role="status">正在读取生成器…</p>}{error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {!loading && !error && !options.length && <p role="status" data-testid="no-video-generators">暂无可用的视频生成器。请刷新设置并检查本地运行环境，或更新包含所需内置生成器的软件版本。</p>}
     {!loading && slots.map(slot => {

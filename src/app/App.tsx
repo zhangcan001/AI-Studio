@@ -24,8 +24,6 @@ import {
   listShots,
   reconcileActiveTasks,
   refreshComfyCapabilities,
-  getProjectWorkflowConfig,
-  upsertProjectWorkflowBinding,
 } from "../services/tauriClient";
 import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
@@ -42,11 +40,6 @@ import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
-import type {
-  ProjectWorkflowBindingInput,
-  ProjectWorkflowBindingView,
-  ProjectWorkflowConfigView,
-} from "../types/projectWorkflow";
 import { type Workspace } from "../types/workspaceResume";
 import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
@@ -65,7 +58,6 @@ import { fromLegacyLocation, toLegacyLocation, type LegacyLocation } from "./rou
 import { readRouteResume, resolveResume, validateResumeChildren } from "./routes/resumeAdapter";
 import { productClient } from "../product/client";
 import { routeProjectId, type AppRoute } from "./routes/types";
-import { labCreationSelection } from "../services/workflowLabClient";
 import "./App.css";
 import "../styles/studioTokens.css";
 import "../styles/uiPolish.css";
@@ -83,57 +75,8 @@ const GeneratorSettingsPage = lazy(() => import("../features/generators/Generato
 const SettingsWorkspace = lazy(() => import("../features/settings/SettingsWorkspace").then(({ SettingsWorkspace }) => ({ default: SettingsWorkspace })));
 const ShotWorkspace = lazy(() => import("../features/shots/ShotWorkspace").then(({ ShotWorkspace }) => ({ default: ShotWorkspace })));
 
-export function workflowUseProjectDestination(
-  catalog: readonly Pick<RecipeViewModel, "workflowId" | "recipeId">[],
-  workflowId: string,
-  recipeId: string,
-): "projects" | undefined {
-  return catalog.some((recipe) => recipe.workflowId === workflowId && recipe.recipeId === recipeId)
-    ? "projects"
-    : undefined;
-}
-
 export { resolveProjectCommandCenterNavigation } from "./routes/commandCenterAdapter";
 import { resolveProjectCommandCenterNavigation } from "./routes/commandCenterAdapter";
-
-export type WorkflowDefaultStage = "IMAGE" | "VIDEO";
-export type WorkflowDefaultSelection = WorkflowDefaultStage | "DUAL" | "NONE";
-
-export function workflowDefaultSelection(recipe: Pick<RecipeViewModel, "outputTypes">): WorkflowDefaultSelection {
-  const hasImage = recipe.outputTypes?.includes("image") ?? false;
-  const hasVideo = recipe.outputTypes?.includes("video") ?? false;
-  if (hasImage && hasVideo) return "DUAL";
-  if (hasImage) return "IMAGE";
-  if (hasVideo) return "VIDEO";
-  return "NONE";
-}
-
-function bindingInput(binding: ProjectWorkflowBindingView): ProjectWorkflowBindingInput {
-  return {
-    stage: binding.stage,
-    mode: binding.mode,
-    workflowVersionId: binding.workflowVersionId,
-    recipeId: binding.recipeId,
-  };
-}
-
-export function projectWorkflowBindingsForRecipe(
-  config: ProjectWorkflowConfigView,
-  stage: WorkflowDefaultStage,
-  recipe: Pick<RecipeViewModel, "workflowVersionId" | "recipeId">,
-): ProjectWorkflowBindingInput[] {
-  const replacement: ProjectWorkflowBindingInput = {
-    stage,
-    mode: "DEFAULT",
-    workflowVersionId: recipe.workflowVersionId,
-    recipeId: recipe.recipeId,
-  };
-  return [
-    stage === "IMAGE" ? replacement : config.imageDefault ? bindingInput(config.imageDefault) : undefined,
-    stage === "VIDEO" ? replacement : config.videoDefault ? bindingInput(config.videoDefault) : undefined,
-    ...config.videoModeOverrides.map(bindingInput),
-  ].filter((binding): binding is ProjectWorkflowBindingInput => Boolean(binding));
-}
 
 function keepsNativeContextMenu(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
@@ -173,7 +116,6 @@ function App() {
   const focusedAssetId = location.assetId;
   const focusedCollectionFilter = location.collectionFilter;
   const [shotDraftDirty, setShotDraftDirty] = useState(false);
-  const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const applyRuntimeStatus = useCallback((status?: ComfyStatus) => {
     setBootstrapState(current => {
@@ -188,11 +130,9 @@ function App() {
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [taskEventsReady, setTaskEventsReady] = useState(false);
   const [taskEventError, setTaskEventError] = useState<string | undefined>();
   const [connectionLoading, setConnectionLoading] = useState(false);
   const [capabilityLoading, setCapabilityLoading] = useState(false);
-  const [workflowNotice, setWorkflowNotice] = useState<string | null>(null);
   const [productionAdmission, setProductionAdmission] = useState<ProductionAdmissionStatus>({ busy: false });
   const projects = useProjectStore((state) => state.projects);
   const activeProjectId = routeProjectId(route);
@@ -234,12 +174,10 @@ function App() {
         if (cancelled) cleanup();
         else {
           unlisten = cleanup;
-          setTaskEventsReady(true);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setTaskEventsReady(false);
           setTaskEventError("任务事件通道不可用");
         }
       });
@@ -320,7 +258,6 @@ function App() {
   }, [loadWorkspaceResume, setProjectError, setProjectLoading, setProjects, restore]);
 
   useEffect(() => {
-    setVideoBatchAssets([]);
   }, [activeProjectId]);
 
   async function allowProjectSwitch(projectId?: string) {
@@ -329,7 +266,6 @@ function App() {
     if (studio.draftDirty && !await confirmDraftDiscard("当前项目有未保存的创作草稿。切换项目会放弃该草稿，是否继续？")) return false;
     studio.resetDraft();
     useTaskStore.getState().clear();
-    setVideoBatchAssets([]);
     useProjectStore.getState().setActiveProject(projectId);
     return true;
   }
@@ -428,68 +364,6 @@ function App() {
     }
   }
 
-  async function reloadCatalog() {
-    setCatalog(await listGenerationCatalog());
-  }
-
-  async function openWorkflowForProject(workflowId: string, recipeId: string) {
-    setError(null);
-    setWorkflowNotice(null);
-    try {
-      const nextCatalog = await listGenerationCatalog();
-      setCatalog(nextCatalog);
-      const recipe = nextCatalog.find((candidate) => candidate.workflowId === workflowId && candidate.recipeId === recipeId);
-      if (!recipe) {
-        setError("刚添加的工作流暂时还没有出现在项目工作流列表中，请刷新后重试。");
-        return;
-      }
-      const currentProject = useProjectStore.getState().activeProject();
-      if (!currentProject) {
-        setError("当前项目不可用，无法绑定工作流。");
-        return;
-      }
-
-      const selection = workflowDefaultSelection(recipe);
-      if (selection === "NONE") {
-        setError("该工作流没有图片或视频输出，无法绑定为项目默认工作流。");
-        return;
-      }
-      if (selection === "DUAL") {
-        openProject(currentProject.id, "projects");
-        setWorkflowNotice("该工作流同时输出图片和视频，未自动绑定。请在项目工作流设置中明确选择图片或视频默认工作流。");
-        return;
-      }
-
-      const currentConfig = await getProjectWorkflowConfig(currentProject.id);
-      const currentBinding = selection === "IMAGE" ? currentConfig.imageDefault : currentConfig.videoDefault;
-      const nextConfig = await upsertProjectWorkflowBinding(currentProject.id, {
-        stage: selection,
-        mode: "DEFAULT",
-        workflowVersionId: recipe.workflowVersionId,
-        recipeId: recipe.recipeId,
-        expectedBindingInstanceId: currentBinding?.bindingInstanceId ?? null,
-        expectedRevision: currentBinding?.revision ?? null,
-      });
-      const confirmedBinding = selection === "IMAGE" ? nextConfig.imageDefault : nextConfig.videoDefault;
-      if (
-        !confirmedBinding
-        || confirmedBinding.workflowVersionId !== recipe.workflowVersionId
-        || confirmedBinding.recipeId !== recipe.recipeId
-      ) {
-        setError("项目工作流绑定写入后校验失败，未确认目标工作流，请重试。");
-        return;
-      }
-
-      openProject(currentProject.id, "projects");
-      setWorkflowNotice(
-        `已设为当前项目${selection === "IMAGE" ? "图片" : "视频"}默认工作流：${recipe.name}`,
-      );
-      setError(null);
-    } catch (openError: unknown) {
-      setError(toUserMessage(openError));
-    }
-  }
-
   function loadHistoricalInputs(draft: ReusableGenerationDraft) {
     if (!activeProjectId || draft.projectId !== activeProjectId) {
       setError("当前任务属于其他项目，请先切换到对应项目。");
@@ -560,8 +434,7 @@ function App() {
     setError(null);
   }
 
-  function openVideoBatch(assets: AssetView[]) {
-    setVideoBatchAssets(assets);
+  function openVideoBatch() {
     navigateToWorkspace("video");
     setError(null);
   }
@@ -734,23 +607,18 @@ function App() {
         )}
         {activeProject && route.kind === "create" && route.surface === "batch" && route.stage === "video" && (
           <WorkspaceErrorBoundary
-            resetKey={`${activeProject.id}:${videoBatchAssets.map((asset) => asset.id).join(",")}`}
+            resetKey={activeProject.id}
             onBackToAssets={() => navigateToWorkspace("assets")}
             onRetry={() => {
-              setVideoBatchAssets([]);
               navigateToWorkspace("video");
             }}
           >
             <AssetVideoBatchWorkspace
               projectId={activeProject.id}
-              catalog={catalog}
-              initialAssets={videoBatchAssets}
               comfyConnected={isConnected}
-              taskEventsReady={taskEventsReady}
               productionAdmission={productionAdmission}
               focusProductionBatchId={focusedProductionBatchId}
               onAdmissionChanged={refreshProductionAdmission}
-              onProductionBatchFocused={() => undefined}
               onOpenTask={(taskId) => {
                 openTask(taskId);
               }}
@@ -758,7 +626,6 @@ function App() {
                 openProductionQueueFromShot(batchId);
               }}
               onBackToAssets={() => navigateToWorkspace("assets")}
-              onOpenWorkflows={() => void navigate({ kind: "project-settings", projectId: activeProject.id, section: "generators" })}
             />
           </WorkspaceErrorBoundary>
         )}
@@ -789,23 +656,7 @@ function App() {
         )}
         {(route.kind === "system-settings" || route.kind === "project-settings") && route.section === "advanced-workflows" && (
           <WorkflowLabPage
-            initialDiagnosticsOpen={route.kind === "system-settings" && route.returnTo?.kind === "system-settings" && route.returnTo.section !== "advanced-tools"}
             projectId={activeProject?.id}
-            catalog={catalog}
-            comfyConnected={isConnected}
-            onCatalogChanged={reloadCatalog}
-            onOpenStudio={async (workflowId, recipeId) => {
-              const candidates = catalog.filter(item => item.workflowId === workflowId && item.recipeId === recipeId);
-              if (!activeProject || candidates.length !== 1) throw new Error("无法确定生成器的确切版本，请刷新后重新选择。");
-              const selected = candidates[0];
-              if (!selected.outputTypes?.includes("video")) throw new Error("当前产品仅支持视频生成器，请选择视频工作流。");
-              const destination = route.kind === "system-settings" && route.returnTo?.kind === "create" ? { ...route.returnTo, stage: "video" as const } : { kind: "create" as const, projectId: activeProject.id, stage: "video" as const };
-              useStudioStore.getState().setPendingRunIntent({ projectId: activeProject.id, stage: "video", selectionRef: labCreationSelection(selected.workflowVersionId, selected.recipeId), values: useStudioStore.getState().values });
-              await navigate(destination);
-            }}
-            onUseInProject={openWorkflowForProject}
-            onOpenProjectSettings={() => void navigate({ kind: "project-settings", projectId: activeProject!.id, section: "generators" })}
-            onOpenTask={(taskId) => { openTask(taskId); }}
             returnTo={route.kind === "system-settings" ? route.returnTo : route.kind === "project-settings" ? { kind: "project-settings", projectId: route.projectId, section: "generators" } : undefined}
             navigate={navigate}
           />
@@ -830,7 +681,6 @@ function App() {
       </Suspense>
 
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
-      {workflowNotice && <p className="workflow-notice" role="status">{workflowNotice}</p>}
       {error && <p className="error-message global-error">提示：{error}</p>}
         </div>
       </ShellHost>

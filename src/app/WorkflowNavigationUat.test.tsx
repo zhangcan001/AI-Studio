@@ -21,10 +21,9 @@ beforeEach(() => {
 afterEach(cleanup);
 const returnTo: AppRoute = { kind: "create", projectId: "project-1", shotId: "shot-1", stage: "video" };
 function retired(projectId: string | undefined = "project-1", destination: AppRoute | undefined = returnTo) {
-  const callbacks = { onCatalogChanged: vi.fn(), onOpenStudio: vi.fn(), onUseInProject: vi.fn() };
   const navigate = vi.fn();
-  render(<WorkflowLabPage projectId={projectId} catalog={[]} comfyConnected={false} navigate={navigate} returnTo={destination} initialDiagnosticsOpen {...callbacks} />);
-  return { navigate, callbacks };
+  render(<WorkflowLabPage projectId={projectId} navigate={navigate} returnTo={destination} />);
+  return { navigate };
 }
 
 describe("Workflow authoring retirement navigation UAT", () => {
@@ -37,11 +36,11 @@ describe("Workflow authoring retirement navigation UAT", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
   it("a restored legacy route does not load authoring, benchmarks, repairs, or mutate bindings", async () => {
-    const { navigate, callbacks } = retired();
+    const { navigate } = retired();
     await Promise.resolve();
     expect(screen.getByRole("heading", { name: "工作流导入与编辑已停用" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /添加工作流|导入|用于当前项目|Benchmark/ })).toBeNull();
-    for (const callback of [...Object.values(tauriMocks), ...Object.values(callbacks), navigate]) expect(callback).not.toHaveBeenCalled();
+    for (const callback of [...Object.values(tauriMocks), navigate]) expect(callback).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "选择项目生成器" }));
     expect(navigate).toHaveBeenCalledWith({ kind: "project-settings", projectId: "project-1", section: "generators" });
     fireEvent.click(screen.getByRole("button", { name: "返回原页面" }));

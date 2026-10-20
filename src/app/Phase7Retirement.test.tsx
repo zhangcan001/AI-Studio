@@ -106,3 +106,22 @@ it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()
  for(const [root,previous] of Object.entries(matrix.frozenSources)){const expected=root==='src-tauri/src'?{...phase8.backendSourceSnapshot,files:reviewed.files ?? phase8.backendSourceSnapshot.files,sha256:reviewed.sha256}:root==='src/app/App.css'?phase9.appCssSnapshot:previous;const list=root.endsWith('.css')?[root]:allFiles(root).filter(f=>root!=='src-tauri/migrations'||!successor.addedPaths.includes(f));expect(list).toHaveLength(expected.files);const text=list.map(f=>f+'\n'+(root==='src-tauri/migrations'?successor.read(f):root==='src-tauri/src'?phase3.read(f):read(f)).replaceAll('\r\n','\n')).join('\n');expect(createHash('sha256').update(text).digest('hex')).toBe(expected.sha256);}
 
 },120000); // Exact historical source traversal; budget covers successor-chain growth under contention.
+
+it('cleanup: retired workflow route carries navigation only, no dormant authoring callbacks', () => {
+ const app=read('src/app/App.tsx'), page=read('src/features/workflow-lab/WorkflowLabPage.tsx');
+ expect(app).not.toMatch(/openWorkflowForProject|setWorkflowNotice|labCreationSelection|onCatalogChanged=|onUseInProject=/);
+ expect(page).not.toMatch(/WorkflowWorkspaceProps|useWorkflowLabController|initialDiagnosticsOpen/);
+ expect(page).toContain('返回原页面');
+});
+it('cleanup: retired asset batch shell has no local import/picker implementation or hidden selector', () => {
+ const source=read('src/features/assets/AssetVideoBatchWorkspace.tsx');
+ expect(source).not.toMatch(/ProjectFolderImportControls|h3InitialGenerationMode|h3PickerAssets|projectParameterSourceLabel|model-version-selector/);
+ expect(source).toContain('ProductionQueuePanel'); expect(source).toContain('hideCreate');
+});
+it('cleanup: ordinary guidance avoids repeated retirement notices and implementation names', () => {
+ expect(read('src/features/generators/GeneratorSettingsPage.tsx')).not.toContain('不再支持直接导入或手动映射');
+ expect(read('src/features/library/LibraryPage.tsx')).not.toContain('视频创作请优先使用外部导入素材');
+ const source=ts.createSourceFile('retired.tsx',read('src/features/assets/AssetVideoBatchWorkspace.tsx'),ts.ScriptTarget.Latest,true);
+ const copy:string[]=[];const visit=(node:ts.Node)=>{if(ts.isJsxText(node)||ts.isStringLiteral(node))copy.push(node.text);ts.forEachChild(node,visit);};visit(source);
+ expect(copy.join(' ')).not.toContain('ShotBatchAssetBindPanel');
+});
