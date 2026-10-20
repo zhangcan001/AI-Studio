@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "LIBRARY_CONFIRM_CI_RACE",
+  "parentHead": "719de4986385fd9b9c25944267f16453689f9921",
+  "planningParentHead": "719de4986385fd9b9c25944267f16453689f9921",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "queueAuthorityChanged": false,
+    "gpuExecuted": false,
+    "productImplementationChanged": false,
+    "unknownMetadataFailsClosed": true,
+    "explicitVideoReferenceConsentRequired": true,
+    "timeoutsAndAssertionsNotWeakened": true
+  },
+  "files": {
+    "docs/architecture/library-confirm-ci-race.md": {
+      "beforeHash": null,
+      "afterHash": "1b146a8a615ee8a6d77877288defb271999cac4944d2d7efad2f7d11f4803577"
+    },
+    "scripts/entity-reference-auto-apply-successor-guard.mjs": {
+      "beforeHash": "f53cdca7a722d01fa1e79ae1eefe678b756e64add53983093e99b0f9a48e3033",
+      "afterHash": "682d318cff889f96dcbf889c3e694c0fa7f8c96e6ba9567730920d0422fa0415"
+    },
+    "scripts/library-confirm-ci-race-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "2502ffcdb1c95cd75e85aa600ca019671c063c02c5c80b06a1b0f64c6a4f099b"
+    },
+    "scripts/testing/library-confirm-ci-race.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "3cdf196deb5a9d93857edd74e53f1123ac37b1e220a64e0100b6be16d9b81d2e"
+    },
+    "src/features/create/CreateLibraryBind.phase6b.test.tsx": {
+      "beforeHash": "df323d2cb6db85eadaca4054a8b8ed89a9ca9f85afdc1000b7f67769387d2e85",
+      "afterHash": "42da46bc09a12b915204f2f3933c059472fa3b4833346c3b7041e2b298f55cf5"
+    }
+  }
+}

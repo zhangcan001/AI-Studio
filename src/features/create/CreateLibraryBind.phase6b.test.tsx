@@ -103,11 +103,21 @@ it("B01/B02 external image binds to first_frame via OCC; generated image cannot 
 it("B02 generated video requires confirm and only binds reference_videos", async () => {
   api.get.mockResolvedValue(ctx("exact-ref"));
   useStudioStore.getState().setPendingLibraryIntent({ kind: "asset", projectId: "project-a", assetId: "gen-vid", mediaKind: "video" });
-  api.libraryGet.mockResolvedValue({ kind: "asset", asset: { id: "gen-vid", projectId: "project-a", name: "生成视频", assetType: "video", category: "generated_video", sourceTaskId: "tsk" } });
+  const detail = { kind: "asset", asset: { id: "gen-vid", projectId: "project-a", name: "生成视频", assetType: "video", category: "generated_video", sourceTaskId: "tsk" } };
+  let resolveMeta!: (value: typeof detail) => void;
+  const metadata = new Promise<typeof detail>(resolve => { resolveMeta = resolve; });
+  api.libraryGet.mockReturnValue(metadata);
   render(<CreatePage route={{ kind: "create", projectId: "project-a", shotId: "shot-a", stage: "video" }} navigate={vi.fn()} />);
   const apply = await screen.findByRole("button", { name: "应用到参考视频" });
   expect(apply.hasAttribute("disabled")).toBe(true);
-  fireEvent.click(screen.getByRole("checkbox", { name: /确认将生成视频仅作为视频参考/ }));
+  expect(screen.queryByRole("checkbox", { name: /确认将生成视频仅作为视频参考/ })).toBeNull();
+  expect(api.inputsSave).not.toHaveBeenCalled();
+  resolveMeta(detail);
+  const confirm = await screen.findByRole("checkbox", { name: /确认将生成视频仅作为视频参考/ });
+  expect((confirm as HTMLInputElement).checked).toBe(false);
+  expect(screen.getByRole("button", { name: "应用到参考视频" }).hasAttribute("disabled")).toBe(true);
+  expect(api.inputsSave).not.toHaveBeenCalled();
+  fireEvent.click(confirm);
   await waitFor(() => expect(screen.getByRole("button", { name: "应用到参考视频" }).hasAttribute("disabled")).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "应用到参考视频" }));
   await waitFor(() => expect(api.inputsSave).toHaveBeenCalled());
