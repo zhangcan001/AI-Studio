@@ -482,7 +482,575 @@ const STANDARD_REFERENCE_WORKFLOW: &str = r####"{
 }
 "####;
 
+// User-supplied Veda graph: fixed default Turbo branch; examples are never shipped.
+// Upstream node contract: https://github.com/veda-sparse/Veda-on-ComfyUI
+const VEDA_REFERENCE_MANIFEST: &str = r####"schema_version: 1
+id: wfl_minimax_h3_reference_veda_turbo
+name: MiniMax H3 Veda 全能参考 · Turbo 4步（1–8图）
+workflow_version: 1.0.0
+recipe_version: 1.0.0
+category: video
+mode: ref2va
+"####;
+
+const VEDA_REFERENCE_RECIPE: &str = r####"schema_version: 1
+id: rcp_minimax_h3_reference_veda_turbo_1_0_0
+name: MiniMax H3 Veda 全能参考 · Turbo 4步（1–8图）
+workflow:
+  file: workflow_api.json
+inputs:
+  duration_seconds:
+    type: integer
+    label: Duration (seconds)
+    required: true
+    default: 5
+    min: 4
+    max: 15
+    step: 1
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  reference_images:
+    type: images
+    label: Reference images (Picture 1–8)
+    required: true
+    min_items: 1
+    max_items: 8
+  width:
+    type: integer
+    label: Width
+    required: true
+    default: 1376
+    min: 32
+    max: 2048
+    step: 32
+  height:
+    type: integer
+    label: Height
+    required: true
+    default: 768
+    min: 32
+    max: 2048
+    step: 32
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 0
+    max: 1125899906842624
+bindings:
+  - source: duration_seconds
+    target:
+      node: "132"
+      input: value
+  - source: prompt
+    target:
+      node: "138"
+      input: value
+  - source: reference_images
+    item: 0
+    target:
+      node: "137"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_0
+  - source: reference_images
+    item: 1
+    target:
+      node: "139"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_1
+  - source: reference_images
+    item: 2
+    target:
+      node: "149"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_2
+  - source: reference_images
+    item: 3
+    target:
+      node: "150"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_3
+  - source: reference_images
+    item: 4
+    target:
+      node: "151"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_4
+  - source: reference_images
+    item: 5
+    target:
+      node: "152"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_5
+  - source: reference_images
+    item: 6
+    target:
+      node: "153"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_6
+  - source: reference_images
+    item: 7
+    target:
+      node: "154"
+      input: image
+    clear_targets:
+      - node: "136"
+        input: ref_images.ref_image_7
+  - source: width
+    target:
+      node: "136"
+      input: width
+  - source: height
+    target:
+      node: "136"
+      input: height
+  - source: seed
+    target:
+      node: "129"
+      input: noise_seed
+outputs:
+  - id: generated_video
+    type: video
+    node: "92"
+    required: true
+"####;
+
+const VEDA_REFERENCE_WORKFLOW: &str = r####"{
+  "92": {
+    "inputs": {
+      "filename_prefix": "video/MiniMax_H3",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto",
+      "video": [
+        "130",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "119": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_video_vae_int8_convrot.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "120": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "121": {
+    "inputs": {
+      "samples": [
+        "125",
+        0
+      ],
+      "vae": [
+        "120",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码（音频）"
+    }
+  },
+  "122": {
+    "inputs": {
+      "samples": [
+        "125",
+        0
+      ],
+      "vae": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "123": {
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "124": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": [
+        "144",
+        0
+      ],
+      "denoise": 1,
+      "model": [
+        "127",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "125": {
+    "inputs": {
+      "noise": [
+        "129",
+        0
+      ],
+      "guider": [
+        "126",
+        0
+      ],
+      "sampler": [
+        "123",
+        0
+      ],
+      "sigmas": [
+        "124",
+        0
+      ],
+      "latent_image": [
+        "136",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "126": {
+    "inputs": {
+      "model": [
+        "147",
+        0
+      ],
+      "conditioning": [
+        "136",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基本引导器"
+    }
+  },
+  "127": {
+    "inputs": {
+      "unet_name": "minmaxh3\\minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "128": {
+    "inputs": {
+      "clip_name": "minmaxh3\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "129": {
+    "inputs": {
+      "noise_seed": 0
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "130": {
+    "inputs": {
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB",
+      "codec": "none",
+      "images": [
+        "161",
+        0
+      ],
+      "audio": [
+        "162",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "131": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "132",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "数学表达式"
+    }
+  },
+  "132": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (Duration)"
+    }
+  },
+  "136": {
+    "inputs": {
+      "prompt": [
+        "138",
+        0
+      ],
+      "width": 1376,
+      "height": 768,
+      "length": [
+        "131",
+        1
+      ],
+      "ref_image_size": "match",
+      "clip": [
+        "128",
+        0
+      ],
+      "vae": [
+        "119",
+        0
+      ],
+      "audio_vae": [
+        "120",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "137",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "139",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "149",
+        0
+      ],
+      "ref_images.ref_image_3": [
+        "150",
+        0
+      ],
+      "ref_images.ref_image_4": [
+        "151",
+        0
+      ],
+      "ref_images.ref_image_5": [
+        "152",
+        0
+      ],
+      "ref_images.ref_image_6": [
+        "153",
+        0
+      ],
+      "ref_images.ref_image_7": [
+        "154",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 参考转视频"
+    }
+  },
+  "137": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "138": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Input Text (Prompt)"
+    }
+  },
+  "139": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "144": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (Lightning LoRA)"
+    }
+  },
+  "145": {
+    "inputs": {
+      "lora_name": "minmanH3\\minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "127",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "147": {
+    "inputs": {
+      "predictor": "minimax_h3_r2va_veda_preview_fp8.safetensors",
+      "generated_sparsity": "32",
+      "reference_sparsity": "32",
+      "full_attention_layers": "",
+      "full_attention_steps": "",
+      "verbose": false,
+      "model": [
+        "145",
+        0
+      ]
+    },
+    "class_type": "VedaSparseAttention",
+    "_meta": {
+      "title": "⚡ Veda Sparse Attention (MiniMax H3)"
+    }
+  },
+  "149": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "150": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "151": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "152": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "153": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "154": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "160": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "round(a * 24)",
+      "values.a": [
+        "132",
+        0
+      ]
+    }
+  },
+  "161": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "122",
+        0
+      ],
+      "batch_index": 0,
+      "length": [
+        "160",
+        1
+      ]
+    }
+  },
+  "162": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "121",
+        0
+      ],
+      "start_index": 0,
+      "duration": [
+        "132",
+        0
+      ]
+    }
+  }
+}
+"####;
+
 const PACKAGES: &[BuiltinPackage] = &[
+    BuiltinPackage {
+        directory: "minimax_h3_reference_veda_turbo_1_0_0",
+        manifest: VEDA_REFERENCE_MANIFEST,
+        recipe: VEDA_REFERENCE_RECIPE,
+        workflow: VEDA_REFERENCE_WORKFLOW,
+    },
     BuiltinPackage {
         directory: "minimax_h3_reference_standard_1_0_0",
         manifest: STANDARD_REFERENCE_MANIFEST,
@@ -937,6 +1505,109 @@ mod tests {
     use crate::domain::WorkflowDocument;
     use tempfile::tempdir;
 
+    fn veda_reference() -> &'static super::BuiltinPackage {
+        PACKAGES
+            .iter()
+            .find(|p| p.directory == "minimax_h3_reference_veda_turbo_1_0_0")
+            .unwrap()
+    }
+
+    #[test]
+    fn veda_reference_preserves_turbo_chain_and_sanitizes_examples() {
+        let p = veda_reference();
+        let g: serde_json::Value = serde_json::from_str(p.workflow).unwrap();
+        assert!(active_package(p));
+        assert_eq!(g["144"]["inputs"]["value"], 4);
+        assert_eq!(g["124"]["inputs"]["steps"], serde_json::json!(["144", 0]));
+        assert_eq!(g["147"]["class_type"], "VedaSparseAttention");
+        assert_eq!(g["147"]["inputs"]["model"], serde_json::json!(["145", 0]));
+        assert_eq!(g["145"]["inputs"]["model"], serde_json::json!(["127", 0]));
+        assert_eq!(g["126"]["inputs"]["model"], serde_json::json!(["147", 0]));
+        assert_eq!(
+            g["147"]["inputs"]["predictor"],
+            "minimax_h3_r2va_veda_preview_fp8.safetensors"
+        );
+        assert_eq!(g["147"]["inputs"]["generated_sparsity"], "32");
+        assert_eq!(g["147"]["inputs"]["reference_sparsity"], "32");
+        assert_eq!(g["138"]["inputs"]["value"], "");
+        for id in ["137", "139", "149", "150", "151", "152", "153", "154"] {
+            assert_eq!(g[id]["inputs"]["image"], "");
+        }
+        for id in ["115", "141", "142", "143", "146"] {
+            assert!(g.get(id).is_none());
+        }
+        let standard: serde_json::Value =
+            serde_json::from_str(standard_reference().workflow).unwrap();
+        assert_eq!(standard["143"]["inputs"]["value"], 20);
+        assert!(standard.get("147").is_none());
+    }
+
+    #[test]
+    fn veda_reference_compiles_one_to_eight_images_in_order_without_empty_slots() {
+        use crate::domain::{CompileRequest, InputValue};
+        let p = veda_reference();
+        let recipe = RecipeParser::parse(p.recipe).unwrap();
+        let workflow = WorkflowDocument::parse(serde_json::from_str(p.workflow).unwrap()).unwrap();
+        let slot_nodes = ["137", "139", "149", "150", "151", "152", "153", "154"];
+        for count in 0..=9 {
+            let images = (0..count)
+                .map(|i| format!("reference-{i}.png"))
+                .collect::<Vec<_>>();
+            let request = CompileRequest::new(
+                [
+                    (
+                        "prompt".into(),
+                        InputValue::String("Requested action with <Picture 1>".into()),
+                    ),
+                    (
+                        "reference_images".into(),
+                        InputValue::Images(images.clone()),
+                    ),
+                    ("duration_seconds".into(), InputValue::Integer(5)),
+                    ("width".into(), InputValue::Integer(1376)),
+                    ("height".into(), InputValue::Integer(768)),
+                    (
+                        "seed".into(),
+                        InputValue::Seed(crate::domain::SeedValue::Fixed(42)),
+                    ),
+                ]
+                .into(),
+            );
+            let result = crate::application::product::h3_resolution::compile_checked(
+                &crate::compiler::WorkflowCompiler,
+                &workflow,
+                &recipe,
+                &request,
+            );
+            if !(1..=8).contains(&count) {
+                assert!(result.is_err(), "reference count {count} must be rejected");
+                continue;
+            }
+            let compiled = result.unwrap();
+            let g = compiled.workflow;
+            for (i, id) in slot_nodes.iter().enumerate() {
+                let key = format!("ref_images.ref_image_{i}");
+                if i < count {
+                    assert_eq!(g["136"]["inputs"][key.as_str()], serde_json::json!([id, 0]));
+                    assert_eq!(g[*id]["inputs"]["image"], images[i]);
+                } else {
+                    assert!(g["136"]["inputs"].get(&key).is_none());
+                    assert!(g.get(*id).is_none(), "unused image loader must be removed");
+                }
+            }
+            assert_eq!(
+                g["138"]["inputs"]["value"],
+                "Requested action with <Picture 1>"
+            );
+            assert_eq!(g["136"]["inputs"]["width"], 1376);
+            assert_eq!(g["136"]["inputs"]["height"], 768);
+            assert_eq!(g["129"]["inputs"]["noise_seed"], 42);
+            assert_eq!(g["130"]["inputs"]["images"], serde_json::json!(["161", 0]));
+            assert_eq!(g["130"]["inputs"]["audio"], serde_json::json!(["162", 0]));
+            assert_eq!(recipe.outputs[0].node, "92");
+        }
+    }
+
     fn standard_reference() -> &'static super::BuiltinPackage {
         PACKAGES
             .iter()
@@ -1121,9 +1792,9 @@ mod tests {
         );
         let first = service.sync().await.unwrap();
         assert_eq!(first.invalid, 0, "{:?}", first.errors);
-        assert_eq!(first.inserted, 5);
+        assert_eq!(first.inserted, 6);
         let second = service.sync().await.unwrap();
-        assert_eq!(second.reused, 5);
+        assert_eq!(second.reused, 6);
         assert_eq!(second.inserted, 0);
         let versions = SqliteWorkflowRuntimeRepository::new(pool.clone())
             .list_versions_for_workflow("wfl_minimax_h3_reference_standard")
@@ -1422,8 +2093,8 @@ mod tests {
         ensure_installed(directory.path()).unwrap();
         let installed = std::fs::read_dir(directory.path()).unwrap().count();
         assert_eq!(
-            installed, 5,
-            "four quality modes plus the approved standard dual-image package install"
+            installed, 6,
+            "four quality modes plus the approved standard and Veda reference packages install"
         );
         assert!(!directory
             .path()

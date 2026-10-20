@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "H3_VEDA_REFERENCE",
+  "parentHead": "4adf15d2ad4ff0f54f57eb9356d1ebca745832e0",
+  "planningParentHead": "4adf15d2ad4ff0f54f57eb9356d1ebca745832e0",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "embeddedPackageAdded": true,
+    "existingPackagesUnchanged": true,
+    "referenceImagesMin": 1,
+    "referenceImagesMax": 8,
+    "fixedSamplingSteps": 4,
+    "gpuExecuted": false
+  },
+  "files": {
+    "docs/architecture/h3-veda-reference-integration.md": {
+      "beforeHash": null,
+      "afterHash": "8c451bf02e265a26c9e63e41d0cd50f812f58c661d8eb4bc5067b2108ddbaa0e"
+    },
+    "scripts/entity-category-library-successor-guard.mjs": {
+      "beforeHash": "2970c085b5dcb61408359b0ce3089eaad370feb9d2b08c840a625ff10310f871",
+      "afterHash": "e49ce30f0cfde9def7bdcf61800a194f9bb0e564da2aa53943b69d9a83eb4fb1"
+    },
+    "scripts/h3-veda-reference-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "d176c0410a79d476a642fb9965878af3eb51ff8d1ba2a514113b32a765b38779"
+    },
+    "scripts/testing/h3-veda-reference.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "e3c5f9c3d12ec4f26dd08ab9315a96e5a1bcb985c174f6cf1622fbbb595b3642"
+    },
+    "src-tauri/src/application/builtin_runtime_packages.rs": {
+      "beforeHash": "0c6bb5499ceb59290320d5bbe7739b38254ef684ddd5e22468add82f8cebd917",
+      "afterHash": "e8cc219769688eb977812a7da121b4aeba3a0b3355758ef4c3c22e33d123b4ec"
+    },
+    "src-tauri/src/application/minimax_video_product_policy.rs": {
+      "beforeHash": "e9f711c19898e4340435c1b17bd0333b223b5e88a489aa27016dd1dc7506ee60",
+      "afterHash": "5c4dd404a75ea0945c67e2dbe217719fe9a748c06ae1c3edc8dbce56f1ba2932"
+    },
+    "src-tauri/src/application/product_runtime_scope.rs": {
+      "beforeHash": "14b9bbc6e2eda106dfb7b9189b00106c1204a2c05751187d3b299b036a09a3e3",
+      "afterHash": "797c4896260d7951042120e066192c3e47bf6b42627b36d5eeeb23b00b08c331"
+    },
+    "src-tauri/src/application/scheduler.rs": {
+      "beforeHash": "b93b9fa7338f47bcb8ce684718047dca628330118c77789cceff3ab55c2b2b35",
+      "afterHash": "e62edbd8d6cd3bab8149682bdb68f28f31e301a21ae27b4a1a41accd0949464a"
+    },
+    "src-tauri/tests/dev082_unified_workflow_library.rs": {
+      "beforeHash": "3e1ed13433ec7f0fff898de088aebb21f61da6470f374405cb6541cae8c1c225",
+      "afterHash": "f61a52c870a708717f49d04c60a3bb54d87987e1d8a2fca602e95a60c244b759"
+    },
+    "src-tauri/tests/support/minimax_video_policy_regressions.rs": {
+      "beforeHash": "9c5b8cc9e4a9d4ca72c735389e909ba6ceeadff37c43b5b2d0b6d0f804741589",
+      "afterHash": "f3c0ed237545432a9f3f48019842eb9a6aa3ad3f97da46a37f794be26a515108"
+    }
+  }
+}

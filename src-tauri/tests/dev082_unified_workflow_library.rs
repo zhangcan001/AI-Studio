@@ -1275,7 +1275,7 @@ mod lifecycle_e2e {
         );
         let fresh = environment.services(CapabilityFixture::Ready, None);
         let fresh_sync = fresh.library_service.sync().await.unwrap();
-        assert_eq!(fresh_sync.packages_found, 5);
+        assert_eq!(fresh_sync.packages_found, 6);
         assert_eq!(fresh_sync.invalid, 0);
         let mut installed = fresh
             .runtime_repository
@@ -1321,8 +1321,8 @@ mod lifecycle_e2e {
             .sync()
             .await
             .expect("fresh runtime package discovery should sync");
-        // Existing installations retain historical Krea2 and five active videos.
-        assert_eq!(first_sync.packages_found, 6);
+        // Existing installations retain historical Krea2 and six active videos.
+        assert_eq!(first_sync.packages_found, 7);
         assert_eq!(first_sync.invalid, 0, "{:?}", first_sync.errors);
 
         let versions = services
@@ -1347,6 +1347,7 @@ mod lifecycle_e2e {
             ("wfl_minimax_h3_fl2va_first_last_quality", "2.2.0"),
             ("wfl_minimax_h3_reference_video_quality", "2.2.0"),
             ("wfl_minimax_h3_reference_standard", "1.0.0"),
+            ("wfl_minimax_h3_reference_veda_turbo", "1.0.0"),
         ];
         expected_identities.sort_unstable();
         assert_eq!(installed_identities, expected_identities);
@@ -1392,7 +1393,7 @@ mod lifecycle_e2e {
             .list()
             .await
             .unwrap();
-        assert_eq!(catalog.len(), 5);
+        assert_eq!(catalog.len(), 6);
         assert!(!catalog.iter().any(|v| v.workflow_id == KERA2_WORKFLOW_ID));
         let binding_service = ProjectWorkflowBindingService::new(
             services.binding_repository.clone(),
@@ -1484,7 +1485,7 @@ mod lifecycle_e2e {
             .sync()
             .await
             .expect("second runtime package sync should complete");
-        assert_eq!(second_sync.packages_found, 6);
+        assert_eq!(second_sync.packages_found, 7);
         assert_eq!(second_sync.invalid, 0, "{:?}", second_sync.errors);
         let repeated_versions = services
             .runtime_repository

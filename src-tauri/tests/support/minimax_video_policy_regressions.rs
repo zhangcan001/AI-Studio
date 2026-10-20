@@ -318,7 +318,10 @@ async fn all_approved_exact_products_admit_and_compile_without_changing_recipe_b
         SqliteGenerationDefinitionRepository::new(f.pool.clone()),
     ))
     .with_new_generation_admission(f.registry.clone());
-    assert_eq!(catalog.list().await.unwrap().len(), 5);
+    assert_eq!(
+        catalog.list().await.unwrap().len(),
+        AUTHORIZED_PACKAGES.len()
+    );
     assert_eq!(count(&f.pool, "tasks").await, 0);
     assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);
 }

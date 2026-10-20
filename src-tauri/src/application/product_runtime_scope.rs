@@ -10,6 +10,7 @@ pub const MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID: &str =
 pub const MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID: &str = "wfl_minimax_h3_reference_video_quality";
 
 pub const MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID: &str = "wfl_minimax_h3_reference_standard";
+pub const MINIMAX_H3_REFERENCE_VEDA_WORKFLOW_ID: &str = "wfl_minimax_h3_reference_veda_turbo";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductionRuntimeKind {
@@ -35,7 +36,8 @@ pub fn production_runtime_for_workflow_id(workflow_id: &str) -> Option<Productio
         | MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID
         | MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID
         | MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID
-        | MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID => Some(ProductionRuntimeKind::MiniMaxH3Video),
+        | MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID
+        | MINIMAX_H3_REFERENCE_VEDA_WORKFLOW_ID => Some(ProductionRuntimeKind::MiniMaxH3Video),
         _ => None,
     }
 }
@@ -62,7 +64,8 @@ mod tests {
         KERA2_WORKFLOW_ID, MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
         MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID, MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID,
         MINIMAX_H3_FL2VA_WORKFLOW_ID, MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
-        MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID,
+        MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID, MINIMAX_H3_REFERENCE_VEDA_WORKFLOW_ID,
+        MINIMAX_H3_WORKFLOW_ID,
     };
     use crate::domain::ShotStage;
 
@@ -86,6 +89,7 @@ mod tests {
             MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
             MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
             MINIMAX_H3_REFERENCE_STANDARD_WORKFLOW_ID,
+            MINIMAX_H3_REFERENCE_VEDA_WORKFLOW_ID,
         ] {
             assert_eq!(
                 production_runtime_for_workflow_id(workflow_id),
