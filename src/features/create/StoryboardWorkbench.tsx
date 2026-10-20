@@ -17,6 +17,7 @@ import { useStudioStore } from "../../stores/studioStore";
 export const STORYBOARD_MAX_DETAIL_SHOTS = 60;
 const CONCURRENCY = 4;
 const POLL_MS = 8000;
+const EVENT_REFRESH_MS = 500;
 
 interface Props extends CreateProps {
   // Cross-feature composition belongs to the app, not the Create feature.
@@ -54,9 +55,12 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   scope.current = projectId;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     if (inFlight.current) return;
-    inFlight.current = true; const token = ++epoch.current; setBusy(true);
+    inFlight.current = true; const token = ++epoch.current;
+    // Progress reads must not toggle every action button. Foreground reads and
+    // the existing row/create mutation locks still prevent duplicate actions.
+    if (!background) setBusy(true);
     try {
       // Formal Queue/Run read model: a waiting item may have no Task yet, so
       // shot.recentRun alone cannot tell us whether a refresh is still needed.
@@ -83,15 +87,32 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       setQueueActive(Boolean(active?.items?.length));
       setItems(result); setTruncated(Math.max(0, summaries.length - bounded.length)); setError(undefined);
     } catch (cause) { if (token === epoch.current) setError(normalizeProductError(cause).message); }
-    finally { inFlight.current = false; if (token === epoch.current) setBusy(false); }
+    finally { if (token === epoch.current) { inFlight.current = false; setBusy(false); } }
   }, [projectId]);
 
   useEffect(() => { void load(); return () => { epoch.current++; inFlight.current = false; }; }, [load]);
   const anyGenerating = items?.some(item => item.status === "GENERATING") ?? false;
-  useEffect(() => subscribeRunInvalidation(changed => { if (changed === projectId) void load(); }), [projectId, load]);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let dirty = false;
+    const flush = () => {
+      timer = undefined;
+      if (!dirty) return;
+      // Keep the final notification pending while a slow read completes. Do not
+      // restart the timer on every event: continuous progress must not starve it.
+      if (!inFlight.current) { dirty = false; void load(true); }
+      else timer = setTimeout(flush, EVENT_REFRESH_MS);
+    };
+    const unsubscribe = subscribeRunInvalidation(changed => {
+      if (changed !== projectId) return;
+      dirty = true;
+      if (timer === undefined) timer = setTimeout(flush, EVENT_REFRESH_MS);
+    });
+    return () => { unsubscribe(); clearTimeout(timer); };
+  }, [projectId, load]);
   useEffect(() => {
     if (!anyGenerating && !queueActive) return;
-    const timer = window.setInterval(() => void load(), POLL_MS);
+    const timer = window.setInterval(() => void load(true), POLL_MS);
     return () => window.clearInterval(timer);
   }, [anyGenerating, queueActive, load]);
 

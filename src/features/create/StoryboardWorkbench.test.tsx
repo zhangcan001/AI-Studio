@@ -182,3 +182,70 @@ it("defaults to the shot-row editing view with search, status filters and task q
   expect(navigate).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "分镜模式" }).getAttribute("aria-pressed")).toBe("true");
 });
+
+it("background polling preserves existing buttons while manual refresh still locks them", async () => {
+  window.localStorage.setItem("ai-studio.storyboard.view", "shots");
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const current = (id: string | null) => { const c = context(id); return c.selectedShot ? { ...c, selectedShot: { ...c.selectedShot, selectionRef: "video-selection" } } : c; };
+  api.get.mockImplementation(async (_p: string, id: string | null) => current(id));
+  api.runList.mockResolvedValue({ items: [run("RUNNING", 0, 1)], nextCursor: null, coverage: "" });
+  api.runGet.mockResolvedValue(run("RUNNING", 0, 1));
+  await act(async () => { render(<StoryboardWorkbench route={route} navigate={vi.fn()} />); });
+  const button = screen.getAllByRole<HTMLButtonElement>("button", { name: "生成视频" })[0];
+  const create = screen.getByRole<HTMLButtonElement>("button", { name: "+ 新建镜头" });
+  expect(button.disabled).toBe(false);
+  let release!: (value: CreationContext) => void;
+  const hold = () => { const pending = new Promise<CreationContext>(r => { release = r; }); api.get.mockImplementation(async (_p: string, id: string | null) => id === null ? pending : current(id)); };
+  hold();
+  await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+  expect(button.disabled).toBe(false); expect(create.disabled).toBe(false);
+  expect(button).toBe(screen.getAllByRole("button", { name: "生成视频" })[0]);
+  await act(async () => { release(current(null)); });
+  hold(); fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+  expect(button.disabled).toBe(true); expect(create.disabled).toBe(true);
+  await act(async () => { release(current(null)); });
+  expect(button.disabled).toBe(false);
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("coalesces progress reads, retains invalidation during slow IPC, and disposes pending reads on unmount", async () => {
+  vi.useFakeTimers();
+  api.get.mockImplementation(async (_p: string, id: string | null) => idleContext(id, false));
+  await act(async () => { render(<StoryboardWorkbench route={route} navigate={vi.fn()} />); });
+  const reads = () => api.get.mock.calls.filter(([, id]) => id === null).length;
+  const create = screen.getByRole<HTMLButtonElement>("button", { name: "+ 新建镜头" });
+  let release!: (value: CreationContext) => void;
+  api.get.mockImplementation((_p: string, id: string | null) => id === null ? new Promise<CreationContext>(r => { release = r; }) : Promise.resolve(idleContext(id, false)));
+  act(() => { invalidateRuns("other"); for (let i = 0; i < 20; i++) invalidateRuns("p"); });
+  expect(reads()).toBe(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+  expect(reads()).toBe(2); expect(create.disabled).toBe(false);
+  act(() => { for (let i = 0; i < 20; i++) invalidateRuns("p"); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(reads()).toBe(2);
+  api.get.mockImplementation(async (_p: string, id: string | null) => idleContext(id, false));
+  await act(async () => { release(idleContext(null, false)); await vi.advanceTimersByTimeAsync(500); });
+  expect(reads()).toBe(3); // Final invalidation is not swallowed by the in-flight read.
+  act(() => { invalidateRuns("p"); });
+  cleanup();
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); invalidateRuns("p"); });
+  expect(reads()).toBe(3); expect(vi.getTimerCount()).toBe(0);
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("old-project completion cannot release the new project's read lock or overwrite its shots", async () => {
+  vi.useFakeTimers();
+  let oldRelease!: (value: CreationContext) => void;
+  let nextRelease!: (value: CreationContext) => void;
+  api.get.mockImplementation((p: string, id: string | null) => id !== null ? Promise.resolve({ ...context(id), projectId: p }) : new Promise<CreationContext>(r => { if (p === "p") oldRelease = r; else nextRelease = r; }));
+  const view = render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  view.rerender(<StoryboardWorkbench route={{ ...route, projectId: "next" }} navigate={vi.fn()} />);
+  act(() => invalidateRuns("next"));
+  await act(async () => { oldRelease({ ...context(null), shots: [] }); await vi.advanceTimersByTimeAsync(1000); });
+  expect(api.get.mock.calls.filter(([p, id]) => p === "next" && id === null)).toHaveLength(1);
+  api.get.mockImplementation(async (p: string, id: string | null) => ({ ...context(id), projectId: p }));
+  await act(async () => { nextRelease({ ...context(null), projectId: "next" }); await vi.advanceTimersByTimeAsync(500); });
+  expect(screen.getByRole("article", { name: "镜头01" })).toBeTruthy();
+  expect(api.get.mock.calls.filter(([p, id]) => p === "next" && id === null)).toHaveLength(2);
+  expect(api.generate).not.toHaveBeenCalled();
+});

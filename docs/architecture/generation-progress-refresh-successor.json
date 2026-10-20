@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "GENERATION_PROGRESS_REFRESH",
+  "parentHead": "ec26f20564ecbc15fd95beb3bf60b0f56e32f5a3",
+  "planningParentHead": "ec26f20564ecbc15fd95beb3bf60b0f56e32f5a3",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "gpuExecuted": false,
+    "backgroundReadsDoNotLockActions": true,
+    "mutationLocksPreserved": true,
+    "singleFlightScopeIsolation": true,
+    "progressNotificationsCoalesced": true
+  },
+  "files": {
+    "docs/architecture/generation-progress-refresh.md": {
+      "beforeHash": null,
+      "afterHash": "a830bb93a90b82e9f796d782591450b78ce18ee612496d35dc9b3b748ca2b9de"
+    },
+    "scripts/generation-progress-refresh-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "71c3f0480f6f5d8135150bc80c2a94b84b6530c40fb5ce5800fcde940e34e012"
+    },
+    "scripts/testing/generation-progress-refresh.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "3a78d9f26aac0d7385ebd6e42b85e272ce25a11fc62a27ce1d18e61825a0dc9d"
+    },
+    "scripts/workflow-authoring-retirement-successor-guard.mjs": {
+      "beforeHash": "9f70a74b5f1809eff55787fef7ff70a62f27234d3b34aaf4f7a0ff68124f2f20",
+      "afterHash": "3aa7770281f9b5f78a505f99a87e631336402f9f0308bf33f7e4c401227e6902"
+    },
+    "src/app/FeatureLifecycle.test.tsx": {
+      "beforeHash": "6da7abda76df2489896c49f7e7faf9f23b289d4e4cff6bffec12cbd60743ef3a",
+      "afterHash": "5fb23b7317f4e22d8134dd976abccd5d5726339e6a3204548ab7bad82f8ec780"
+    },
+    "src/features/create/StoryboardWorkbench.test.tsx": {
+      "beforeHash": "e4290021567e9ac41320725aa58d28acb3c8c7994d2a369ebe87af491c154298",
+      "afterHash": "b2ba90cd07d3d2c53ea221ba7716534df1b23639b670d539c5de37be5b1eec94"
+    },
+    "src/features/create/StoryboardWorkbench.tsx": {
+      "beforeHash": "4106bfba3fd5c3ca227526221e562593592a18feaecf3e696681bf050acd3083",
+      "afterHash": "fbb35bca0d160b7fece3ed2b9a6720bbda7f64f9db15ba44bdd486ac7d8e3ef0"
+    },
+    "src/features/library/LibraryController.ts": {
+      "beforeHash": "e00585eb4a2c481d6e00b4cc91410f79412ef98a3a6b8500c3154fe056a2526f",
+      "afterHash": "e17fbdf9767e13f223284380970f8ba7b5db7fda573d6789a07e9c8d47134246"
+    }
+  }
+}

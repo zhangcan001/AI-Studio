@@ -85,3 +85,20 @@ it('phase11_library abandons old projections and removes subscriptions on projec
   await act(async () => { vi.advanceTimersByTime(6000); invalidateRuns('b'); vi.advanceTimersByTime(150); });
   expect(api.library.list).toHaveBeenCalledTimes(calls + 1); expect(vi.getTimerCount()).toBe(0); expect(navigate).not.toHaveBeenCalled();
 });
+
+it('library event refresh stays quiet while preserving its existing projection', async () => {
+  const route: LibraryRoute = { kind: 'library', projectId: 'a', filter: 'prompts' };
+  const hook = renderHook(() => useLibraryController({ route, navigate: vi.fn() }));
+  await act(async () => {});
+  expect(hook.result.current.loading).toBe(false);
+  vi.useFakeTimers();
+  const pending = deferred<LibraryList>(); api.library.list.mockReturnValue(pending.promise);
+  act(() => { invalidateRuns('a'); invalidateRuns('a'); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+  expect(hook.result.current.loading).toBe(false);
+  expect(hook.result.current.list).toEqual(emptyLibrary);
+  expect(api.library.list).toHaveBeenCalledTimes(2);
+  await act(async () => { pending.resolve({ ...emptyLibrary, coverageMessage: 'completed-slow-read' }); });
+  expect(hook.result.current.list?.coverageMessage).toBe('completed-slow-read');
+  expect(hook.result.current.loading).toBe(false);
+});
