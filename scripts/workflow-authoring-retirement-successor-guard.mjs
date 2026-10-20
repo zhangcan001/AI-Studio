@@ -24,6 +24,7 @@ export const WORKFLOW_AUTHORING_RETIREMENT_CHANGED = [
   "src/features/generators/GeneratorSettingsPage.tsx",
   "src/features/settings/SettingsWorkspace.test.tsx",
   "src/features/settings/SettingsWorkspace.tsx",
+  "src/features/workflow-lab/WorkflowLabBoundary.test.tsx",
   "src/features/workflow-lab/WorkflowLabPage.tsx"
 ].sort();
 // Runtime Package paths are immutable in this checkpoint.

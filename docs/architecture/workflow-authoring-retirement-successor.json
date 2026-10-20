@@ -36,7 +36,7 @@
     },
     "scripts/workflow-authoring-retirement-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "4075529c1cf2d4249780d6e2af3359b47deae9a4a1b898eabbbda39679cd6ab4"
+      "afterHash": "9f70a74b5f1809eff55787fef7ff70a62f27234d3b34aaf4f7a0ff68124f2f20"
     },
     "src/app/App.tsx": {
       "beforeHash": "8e9d8eb60be5e44b748029591387a6304edf44d53e632b38a44cabb743f927ec",
@@ -93,6 +93,10 @@
     "src/features/settings/SettingsWorkspace.tsx": {
       "beforeHash": "40fd866a987adc5a6379ef78a0db6e82c5990c958f14200d74b8daecf8125e63",
       "afterHash": "0472cd335066684b2051f813a17841dce242baf2ec255512e2683400d793813a"
+    },
+    "src/features/workflow-lab/WorkflowLabBoundary.test.tsx": {
+      "beforeHash": "9293c14139d8a302334428a1f8a93ac9626152fd49effc12d14977570abbcf49",
+      "afterHash": "44d0e2f5359300ac72b41547e848f096198d9bd8a38c7faa04aced5454d7a369"
     },
     "src/features/workflow-lab/WorkflowLabPage.tsx": {
       "beforeHash": "8e6045c20825b70bbc9a7f624fb73a9f91ca627f1faa29c64c5d92ce709b0e5e",

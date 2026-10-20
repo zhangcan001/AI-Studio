@@ -54,7 +54,7 @@ it("phase6_target15 Advanced seam whitelists existing clients only and exact sel
 it("phase6_target16 real normal GeneratorSettings, advanced-only Lab and compatibility adapters remain explicit without new migration", () => {
   const host = read("src/app/App.tsx");
   expect(host).toContain('<GeneratorSettingsPage'); expect(host).toContain('<WorkflowLabPage'); expect(host).not.toContain("shellMode");
-  expect(read("src/features/workflow-lab/WorkflowLabPage.tsx")).toContain("useWorkflowLabController(");
+  expect(read("src/features/workflow-lab/WorkflowLabPage.tsx")).not.toContain("useWorkflowLabController(");
   const nav = read("src/app/v3/ShellChrome.tsx").split('export function ShellNavigation')[1];
   expect(nav).not.toMatch(/workflow|advanced|generators/);
   const schema=minimaxVideoPhase2ParentReader('.');expect(schema.violations).toEqual([]);
