@@ -114,7 +114,7 @@ function validate(root, override) {
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
   return { violations, changedPaths: [...new Set([...WORKBENCH_VISUAL_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...WORKBENCH_VISUAL_ADDED, WORKBENCH_VISUAL_PROOF, ...successor.addedPaths],
-    afterHashes: Object.fromEntries([...WORKBENCH_VISUAL_CHANGED, ...WORKBENCH_VISUAL_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+    afterHashes: { ...Object.fromEntries([...WORKBENCH_VISUAL_CHANGED, ...WORKBENCH_VISUAL_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => WORKBENCH_VISUAL_CHANGED.includes(p) ? parent.read(p) : successor.read(p) };
 }
 export function workbenchVisualParentReader(root, override = undefined) {

@@ -14,10 +14,10 @@ describe("Canonical shell navigation preserves former StudioShell intent", () =>
     expect(html).not.toContain("studio-global-rail");
     expect(html).toContain(section === "creation" ? "创作" : "运行");
   });
-  it("keeps workflows under explicit Advanced navigation rather than a normal rail item", () => {
+  it("preserves old workflow locators without exposing a workflow authoring entry", () => {
     const route=fromLegacyLocation({workspace:"workflows",projectId:"p"});
     const html=renderToStaticMarkup(<ShellHost route={route} projectSelector={null} navigate={vi.fn()} back={vi.fn()}><div>Workflow Lab</div></ShellHost>);
     expect(route).toMatchObject({kind:"project-settings",section:"advanced-workflows"});
-    expect(html).toContain("高级工作流");expect(html).not.toMatch(/aria-current="page"[^>]*>创作/);expect(html).not.toContain("返回旧版导航");
+    expect(html).not.toContain("高级工作流");expect(html).not.toMatch(/aria-current="page"[^>]*>创作/);expect(html).not.toContain("返回旧版导航");
   });
 });

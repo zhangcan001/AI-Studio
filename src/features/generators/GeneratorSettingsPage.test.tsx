@@ -15,7 +15,7 @@ it("phase6_target1 friendly normal projection hides raw identities and requireme
   expect(document.body.textContent).not.toMatch(/wfl_|instance-A|recipe_|workflowVersionId|nodeId|sha256/);
   expect(api.set).not.toHaveBeenCalled();
 });
-it("phase6_target2 default binding save uses exact opaque locator and both OCC tokens; Advanced has canonical return", async () => {
+it("phase6_target2 default binding save uses exact opaque locator and both OCC tokens; environment has canonical return", async () => {
   api.list.mockImplementation(async (_project, stage) => stage === "video" ? [...options, { ...options[0], selectionRef: "video", mode: "fl2va_text_to_video" }] : []);
   const navigate = vi.fn(); render(<GeneratorSettingsPage projectId="p" navigate={navigate} />);
   const select = await screen.findByLabelText("默认视频生成器");
@@ -28,8 +28,9 @@ it("phase6_target2 default binding save uses exact opaque locator and both OCC t
   await waitFor(() => expect(mode.closest("article")?.querySelector("button")?.disabled).toBe(false));
   fireEvent.click(mode.closest("article")!.querySelector("button")!);
   await waitFor(() => expect(api.set).toHaveBeenLastCalledWith("p", { stage: "VIDEO", mode: "FL2VA_TEXT_TO_VIDEO", selectionRef: "video", expectedRevision: null, expectedBindingInstanceId: null }));
-  fireEvent.click(screen.getByRole("button", { name: "打开高级工作流 Lab" }));
-  expect(navigate).toHaveBeenCalledWith({ kind: "system-settings", section: "advanced-workflows", returnTo: { kind: "project-settings", projectId: "p", section: "generators" } });
+  expect(screen.queryByRole("button", { name: /高级工作流/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "检查本地运行环境" }));
+  expect(navigate).toHaveBeenCalledWith({ kind: "system-settings", section: "general", returnTo: { kind: "project-settings", projectId: "p", section: "generators" } });
 });
 it("phase6_target3 stale and ABA conflicts refresh read projection without retry or overwrite", async () => {
   render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
@@ -57,10 +58,12 @@ it("retired image generators are not offered; IMAGE binding data is untouched", 
   expect(api.list).not.toHaveBeenCalledWith("p", "image");
   expect(api.set).not.toHaveBeenCalled();
 });
-it("empty video catalog shows a clear empty state pointing to advanced workflows", async () => {
+it("empty video catalog directs users to builtin updates/environment, never import", async () => {
   api.list.mockImplementation(async () => []);
   render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
-  expect((await screen.findByTestId("no-video-generators")).textContent).toContain("高级工作流");
+  const empty = (await screen.findByTestId("no-video-generators")).textContent;
+  expect(empty).toContain("内置生成器");
+  expect(empty).not.toMatch(/高级工作流|导入并验证/);
 });
 it("imported user video generators are selectable; stray image options never reach the video slot", async () => {
   const user = { ...options[0], selectionRef: "user-i2v", name: "My I2V", mode: "image_to_video" };

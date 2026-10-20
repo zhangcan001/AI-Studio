@@ -10,6 +10,13 @@ it('M1-1 bypasses discard only for an exact scoped Create return with existing s
   const next = { kind: 'system-settings', section: 'general', returnTo: current } as const;
   expect(preservesCreateDraftForSettings(current, next, 'p:s:image')).toBe(true);
   expect(preservesCreateDraftForSettings(current, { ...next, section: 'advanced-workflows' }, 'p:s:image')).toBe(true);
+  const generators = { kind: 'project-settings', projectId: 'p', section: 'generators' } as const;
+  expect(preservesCreateDraftForSettings(current, generators, 'p:s:image')).toBe(true);
+  expect(preservesCreateDraftForSettings(current, generators)).toBe(false);
+  expect(preservesCreateDraftForSettings(current, generators, 'p:other:image')).toBe(false);
+  expect(preservesCreateDraftForSettings(current, generators, 'p:s:video')).toBe(false);
+  expect(preservesCreateDraftForSettings(current, { ...generators, projectId: 'other' }, 'p:s:image')).toBe(false);
+  expect(preservesCreateDraftForSettings(current, { ...generators, section: 'general' }, 'p:s:image')).toBe(false);
   for (const route of [
     { ...next, section: 'advanced-tools' }, { kind: 'project-list' },
     { ...next, returnTo: { ...current, projectId: 'other' } },

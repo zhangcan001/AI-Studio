@@ -36,8 +36,9 @@ it("Settings carries the exact return context and advanced/project entries remai
   rerender(<AppShellV3 route={settings} projectSelector={null} navigate={navigate} back={vi.fn()}>设置内容</AppShellV3>);
   expect(screen.getByRole("button",{name:"设置"}).getAttribute("aria-current")).toBe("page");
   expect(screen.getByRole("button",{name:"概览"}).hasAttribute("aria-current")).toBe(false);
-  fireEvent.click(screen.getByRole("button",{name:"高级工作流"}));
-  expect(navigate).toHaveBeenLastCalledWith({kind:"system-settings",section:"advanced-workflows",returnTo:create});
+  expect(screen.queryByRole("button",{name:"高级工作流"})).toBeNull();
+  fireEvent.click(screen.getByRole("button",{name:"高级工具"}));
+  expect(navigate).toHaveBeenLastCalledWith({kind:"system-settings",section:"advanced-tools",returnTo:create});
   fireEvent.click(screen.getByRole("button",{name:"项目设置"}));
   expect(navigate).toHaveBeenLastCalledWith({kind:"project-settings",projectId:"p",section:"general"});
 });

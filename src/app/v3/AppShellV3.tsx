@@ -55,7 +55,6 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
               ].map(([section, label]) => <button type="button" key={section} onClick={() => navigate({ kind: "project-settings", projectId, section })}>{label}</button>)}
             </details>
           </>}
-          <button type="button" title="高级工作流" onClick={() => navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: settingsReturn })}>高级工作流</button>
           <button type="button" title="高级工具" onClick={() => navigate({ kind: "system-settings", section: "advanced-tools", returnTo: settingsReturn })}>高级工具</button>
         </nav>}
         {route.kind === "library" && projectId && <button type="button" title="提示词" onClick={() => navigate({ kind: "library", projectId, filter: "prompts" })}>提示词</button>}

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "WORKFLOW_AUTHORING_RETIREMENT",
+  "parentHead": "448f0f079f3234084163225d0e16eed70dbba836",
+  "planningParentHead": "448f0f079f3234084163225d0e16eed70dbba836",
+  "contracts": {
+    "backupFormatChanged": false,
+    "authoringUiRetired": true,
+    "gpuExecuted": false,
+    "historicalProofBytesUnchanged": true,
+    "existingBindingsPreserved": true,
+    "legacyRoutesReadOnly": true,
+    "schemaChanged": false,
+    "runtimeBytesChanged": false
+  },
+  "files": {
+    "docs/architecture/workflow-authoring-retirement.md": {
+      "beforeHash": null,
+      "afterHash": "14ce29856ddfbd8f76c56c29378e8f61854e2667739474c53781364f7ba9debd"
+    },
+    "scripts/h3-veda-reference-successor-guard.mjs": {
+      "beforeHash": "d176c0410a79d476a642fb9965878af3eb51ff8d1ba2a514113b32a765b38779",
+      "afterHash": "1d78cf6987ebd3b79a1e971412ea2fe26c6af35d049143b4a86c421b74b79d1e"
+    },
+    "scripts/style-boundary-guard.mjs": {
+      "beforeHash": "af2f9c23307867ffcb63625bb9ab7bdddf3099ff0c335d97686796b906859bd2",
+      "afterHash": "24d7dfd2fc85c427f0e5c9dd5a73913ad89891df1ed16df649629019f0f910a8"
+    },
+    "scripts/testing/workflow-authoring-retirement.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "8460e5bc74493958e856d3f5e5f0640a2e459bb6a96e6eec3efb1d2631a33a16"
+    },
+    "scripts/workbench-visual-refinement-successor-guard.mjs": {
+      "beforeHash": "d67e1f9f4c6d5d5dec80e8e3d9e8e9c0d0352ba67d994ece855f0542af6e03fe",
+      "afterHash": "fa1023f2912166b8988a7e40a31c8991d8c0b8485bab95fa3def1b30ba441205"
+    },
+    "scripts/workflow-authoring-retirement-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "4075529c1cf2d4249780d6e2af3359b47deae9a4a1b898eabbbda39679cd6ab4"
+    },
+    "src/app/App.tsx": {
+      "beforeHash": "8e9d8eb60be5e44b748029591387a6304edf44d53e632b38a44cabb743f927ec",
+      "afterHash": "22b372f94281e5bbc6ea3748170cdbd907d66113fd4c77f3618aeb76ffeb4e78"
+    },
+    "src/app/M1ReadinessBoundary.test.ts": {
+      "beforeHash": "6cb95e766f96a0f9d3de635bc824952add054bb9830f2fa7d7b71956d2440ef2",
+      "afterHash": "fe2a2a1c67efd3b1714f32c90ce1d52ea16f56983e2e373d6acf3f3f87e627d8"
+    },
+    "src/app/Phase7Retirement.test.tsx": {
+      "beforeHash": "81f3f6691707b22b5e5f3f3fe451010de31e638badcc3e9ce5cb06cc0a053a41",
+      "afterHash": "7adf94190c5158e5dc31e25e093c4244658b7a162535851502ad6db8955e0698"
+    },
+    "src/app/StudioShell.test.tsx": {
+      "beforeHash": "02e26582a24323ec340b9d80797190c32437b541cb7530421fd4584698c78ee0",
+      "afterHash": "5294c0782b08f5f7f38a7093659947c00b39c8266c6faeb6ed1d171ac821e99d"
+    },
+    "src/app/WorkflowNavigationUat.test.tsx": {
+      "beforeHash": "439af4f5513335c883b784bd9b172210d884171cbb32b6c9f368474a8369dd8d",
+      "afterHash": "f44e12e99593280924b658fce9f5b4bded7fa225ebb40faa3f09a35938596dbc"
+    },
+    "src/app/v3/AppShellV3.tsx": {
+      "beforeHash": "a057edd603db1cb1670ec88836983af98c91f6296346c7fd000d533f4c76189c",
+      "afterHash": "99b0461ae84fa7fe0ca7aec464881090c822cc271c4778db30ced96e49ad240e"
+    },
+    "src/app/v3/VideoShell.test.tsx": {
+      "beforeHash": "ca1b3ad71c5e9f4b3f3190189cf580ceeada8a6812484b3d96a1b503a3b4ae9e",
+      "afterHash": "b80d69a06882a39a62a048262920bb7b88ff0be0dfed9e0db4f97ae93412b581"
+    },
+    "src/features/create/CreateController.ts": {
+      "beforeHash": "d99b6eb8495b4435b657ff91c80f943e033952f245ff578d43bbac4a975ce4b7",
+      "afterHash": "0c5eee780a5e38556598708ef6719cc62fbd9224382e4e0ee629619a49fc4c17"
+    },
+    "src/features/create/CreatePage.test.tsx": {
+      "beforeHash": "c862f15ed1fe6fd9796fce8b5f100ff4e004ad1010fa9dbc6fab28ab9283629a",
+      "afterHash": "a2e9b73c1ba8295de4df1e61abc2f8542815703517dd3b262f4f55675f60454a"
+    },
+    "src/features/create/CreatePage.tsx": {
+      "beforeHash": "40ba3bb82ea6a241304c9eefcbf7157e187d7ad2941e6b11ebabe46d6c828b94",
+      "afterHash": "895a8010fbf93979886685731a4edc4df99ad49fa14b1205c8e915d205a8ca26"
+    },
+    "src/features/generators/GeneratorSettingsPage.test.tsx": {
+      "beforeHash": "a345c00ed157bfb24edd7105fe2df1f893b5d0b0f34346cc1b189cec7c9c5c8b",
+      "afterHash": "43ded809167aed838cbc2da635304ee73a48c214b33ecbb085d3533c36e4a0f2"
+    },
+    "src/features/generators/GeneratorSettingsPage.tsx": {
+      "beforeHash": "a1a470b159606a71b77041db9fe2b698ba6e66c7aa5b807bb4efc04f10892676",
+      "afterHash": "7a9cb395a8d10cb4f95d987b1ed4607ff5603c516137de4a4df600793a5c53ed"
+    },
+    "src/features/settings/SettingsWorkspace.test.tsx": {
+      "beforeHash": "35c7ee021dbb3549441bec669cde5f700545920c78618c10abdf4ba3b012d6ff",
+      "afterHash": "e2bbce12f633d426ec4397ae82b8963388cad23dec4b871fb20c4a2b084290eb"
+    },
+    "src/features/settings/SettingsWorkspace.tsx": {
+      "beforeHash": "40fd866a987adc5a6379ef78a0db6e82c5990c958f14200d74b8daecf8125e63",
+      "afterHash": "0472cd335066684b2051f813a17841dce242baf2ec255512e2683400d793813a"
+    },
+    "src/features/workflow-lab/WorkflowLabPage.tsx": {
+      "beforeHash": "8e6045c20825b70bbc9a7f624fb73a9f91ca627f1faa29c64c5d92ce709b0e5e",
+      "afterHash": "c3fff60feb9e2e31d01f0e7f1b10e9879dd94595d3b625976df272b9f5da98ce"
+    }
+  }
+}

@@ -147,7 +147,9 @@ export function styleBoundary(root,manifest) {
     if(/^src\/.+\.tsx?$/.test(path)&&ciBudgetSuccessor.afterHashes[path])productionSnapshot[path]=ciBudgetSuccessor.afterHashes[path];
   }
   for(const [path,digest] of Object.entries(productionSnapshot)) {
-    const current=ciBudgetSuccessor.changedPaths.includes(path)?ciBudgetSuccessor.read(path):read(`${root}/${path}`);
+    // The validated afterHashes describe live bytes, not projected parent bytes.
+    // Mixing the two rejects authorized successors and can hide live drift.
+    const current=read(`${root}/${path}`);
     if(hash(current)!==digest)violations.push(`behavior:${path}`);
   }
   for(const path of files(`${root}/src`).map(p=>p.slice(root.length+1)).filter(p=>/\.tsx?$/.test(p)&&!p.includes('.test.')))if(!(path in productionSnapshot))violations.push(`new-production-source:${path}`);

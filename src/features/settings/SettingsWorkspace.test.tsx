@@ -82,3 +82,12 @@ it("opens secondary Tool Hub through callback only", async () => {
   const cb = await page(); fireEvent.click(screen.getByRole("button", { name: "查看本地工具登记（高级）" }));
   expect(cb.onOpenToolHub).toHaveBeenCalledTimes(1); expect(api.testComfyConnection).not.toHaveBeenCalled(); expect(api.saveComfyEndpoint).not.toHaveBeenCalled();
 });
+
+it("removes workflow import/authoring diagnostics entry without removing Task diagnostics", async () => {
+  const oldEntry = vi.fn();
+  await page({ onOpenWorkflowDiagnostics: oldEntry });
+  expect(screen.queryByRole("button", { name: /工作流包诊断|高级.*Lab/ })).toBeNull();
+  expect(screen.getByRole("region", { name: "执行诊断" })).toBeTruthy();
+  expect(screen.getByText(/生成工作流由软件内置提供/)).toBeTruthy();
+  expect(oldEntry).not.toHaveBeenCalled();
+});

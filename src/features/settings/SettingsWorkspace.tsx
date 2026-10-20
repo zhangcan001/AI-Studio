@@ -51,7 +51,6 @@ export function SettingsWorkspace({
   initialTaskId,
   onOpenRun,
   onOpenAudit,
-  onOpenWorkflowDiagnostics,
   onOpenProjectGenerators,
   onOpenToolHub,
 }: Props) {
@@ -420,7 +419,7 @@ export function SettingsWorkspace({
       </div>
 
       <DiagnosticsExecutionPanel key={`${projectId ?? "none"}:${initialTaskId ?? ""}`} projectId={projectId} initialTaskId={initialTaskId} onOpenRun={onOpenRun} onOpenAudit={onOpenAudit} />
-      <button type="button" onClick={onOpenWorkflowDiagnostics} disabled={!onOpenWorkflowDiagnostics}>工作流包诊断（高级 Lab）</button>
+      <p role="note">生成工作流由软件内置提供；节点、模型和连接问题可在本页检查。已有运行与任务诊断不受影响。</p>
 
       <section className="settings-card" aria-label="本地工具登记说明">
         <p>本地工具中心显示已登记的工具、实例、版本和最近健康记录；不会自动发现、安装、启动或连接工具。</p>

@@ -422,13 +422,14 @@ describe("Target16 architecture", () => {
     render(<Host />); await loaded(); fireEvent.click(screen.getByText("高级")); fireEvent.click(screen.getByRole("button", { name: "批量镜头 / 外部素材绑定" })); expect(navigations).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "project-settings", section: "advanced-shots" }));
   }, 15000);
 });
-it("phase6_target4 canonical Lab routes and legacy deep links preserve Create draft on return", async () => {
+it("phase6_target4 generator settings and legacy deep links preserve Create draft without workflow import", async () => {
   const route = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
   const navigate = vi.fn();
   const view = render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
   setPrompt("Lab return draft");
-  fireEvent.click(screen.getByRole("button", { name: "工作流 / Benchmark" }));
-  expect(navigate).toHaveBeenCalledWith({ kind: "system-settings", section: "advanced-workflows", returnTo: route });
+  expect(screen.queryByRole("button", { name: "工作流 / Benchmark" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "项目生成器设置" }));
+  expect(navigate).toHaveBeenCalledWith({ kind: "project-settings", projectId: route.projectId, section: "generators" });
   view.unmount();
   expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "Lab return draft" });
   render(<CreatePage runtime={{ ...runtime, devices: [] }} route={route} navigate={navigate} />); await loaded();
@@ -507,7 +508,7 @@ describe("M2-2 precise library reuse", () => {
   });
 });
 
-it("M2-2 video prompt provenance survives historical stage and Settings/Workflow return snapshots", async()=>{
+it("M2-2 video prompt provenance survives historical stage and Settings/Generator return snapshots", async()=>{
  const route = { kind:"create", projectId:"project", shotId:"shot1", stage:"video" } as const;
  const view = render(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={navigations}/>); await loaded();
  fireEvent.click(screen.getByRole("button",{name:"选择提示词"}));fireEvent.click(screen.getByRole("button",{name:"我的提示词 · 版本 2"}));
@@ -515,7 +516,7 @@ it("M2-2 video prompt provenance survives historical stage and Settings/Workflow
  expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
  view.rerender(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={navigations}/>); await loaded();
  expect(useStudioStore.getState().creationPromptProvenance).toEqual({promptId:"prm-choice",promptVersionId:"prv-choice"});
- fireEvent.click(screen.getByRole("button",{name:"工作流 / Benchmark"}));
+ fireEvent.click(screen.getByRole("button",{name:"项目生成器设置"}));
  expect(useStudioStore.getState().creationPromptProvenance?.promptVersionId).toBe("prv-choice");
  expect(useStudioStore.getState().creationLabReturn?.scope).toBe("project:shot1:video");
 });

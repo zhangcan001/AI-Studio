@@ -149,6 +149,8 @@ const taskRecoveryServices = { listRecentTasks, reconcileActiveTasks };
 const shotConsistencyServices = { getConsistencyScopeBinding, getShotConsistencyBinding, getShotContextDraft, listConsistencyProfiles, listCostumeVariants, listReferenceSets, replaceConsistencyScopeBinding, replaceShotConsistencyBinding };
 
 export function preservesCreateDraftForSettings(current: AppRoute, next: AppRoute, savedScope?: string) {
+  if (current.kind === "create" && next.kind === "project-settings" && next.section === "generators") return next.projectId === current.projectId
+    && savedScope === `${current.projectId}:${current.shotId ?? ""}:${current.stage}`;
   if (current.kind === "create" && next.kind === "library") return next.projectId === current.projectId
     && savedScope === `${current.projectId}:${current.shotId ?? ""}:${current.stage}`;
   return current.kind === "create" && next.kind === "system-settings"
@@ -756,7 +758,7 @@ function App() {
                 openProductionQueueFromShot(batchId);
               }}
               onBackToAssets={() => navigateToWorkspace("assets")}
-              onOpenWorkflows={() => navigateToWorkspace("workflows")}
+              onOpenWorkflows={() => void navigate({ kind: "project-settings", projectId: activeProject.id, section: "generators" })}
             />
           </WorkspaceErrorBoundary>
         )}
@@ -815,7 +817,6 @@ function App() {
             initialTaskId={route.returnTo?.kind === "runs" && route.returnTo.run?.source === "task" ? route.returnTo.run.id : undefined}
             onOpenRun={(projectId, taskId) => void navigate({ kind: "runs", projectId, run: { source: "task", id: taskId } })}
             onOpenAudit={(projectId, taskId) => void navigate({ kind: "project-settings", projectId, section: "advanced-tasks", auditTaskId: taskId })}
-            onOpenWorkflowDiagnostics={() => void navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: route })}
             onOpenProjectGenerators={(projectId) => void navigate({ kind: "project-settings", projectId, section: "generators" })}
             onOpenToolHub={() => void navigate({ kind: "system-settings", section: "advanced-tools", returnTo: route })}
             comfy={comfy}

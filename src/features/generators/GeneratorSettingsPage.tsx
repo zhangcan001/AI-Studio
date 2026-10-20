@@ -65,9 +65,9 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
     } finally { locked.current = false; if (token === generation.current) setBusy(false); }
   }
   return <section className="generator-settings" aria-label="项目生成器设置" aria-busy={loading || busy}>
-    <header><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p></header>
+    <header><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p><p>新增工作流由软件内置提供，不再支持直接导入或手动映射。已有绑定与历史记录保留。</p></header>
     {loading && <p role="status">正在读取生成器…</p>}{error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {!loading && !error && !options.length && <p role="status" data-testid="no-video-generators">暂无可用的视频生成器。请在下方“高级”中打开高级工作流 Lab，导入并验证视频工作流后再回来选择。</p>}
+    {!loading && !error && !options.length && <p role="status" data-testid="no-video-generators">暂无可用的视频生成器。请刷新设置并检查本地运行环境，或更新包含所需内置生成器的软件版本。</p>}
     {!loading && slots.map(slot => {
       const key = `${slot.stage}:${slot.mode}`;
       const binding = bindings.find(b => b.stage === slot.stage && b.mode === slot.mode);
@@ -75,13 +75,13 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
       const selected = choices[key] ?? binding?.selectionRef ?? "";
       const option = available.find(o => o.selectionRef === selected);
       return <article key={key}><h2>{slot.label}</h2><label>生成器<select aria-label={slot.label} disabled={busy || !!error} value={selected} onChange={e => setChoices(c => ({ ...c, [key]: e.target.value }))}>
-        <option value="">未配置</option>{binding && !available.some(o => o.selectionRef === binding.selectionRef) && <option value={binding.selectionRef}>原生成器不可用，请到高级工作流检查</option>}
+        <option value="">未配置</option>{binding && !available.some(o => o.selectionRef === binding.selectionRef) && <option value={binding.selectionRef}>原生成器不可用，请检查本地运行环境或明确选择其他生成器</option>}
         {available.map((o, i) => <option key={o.selectionRef} value={o.selectionRef}>{generatorLabel(o, i)}{!o.availability ? " · 不可用" : ""}</option>)}
       </select></label>
-      {option && <><p>{generatorLabel(option, available.indexOf(option))}</p><p>输入要求：{option.fields.filter(f => "required" in f && f.required).map(fieldLabel).join("、") || "无必填素材"}</p><p>{option.availability ? "可用" : "当前不可用，请在高级工作流中检查"}</p></>}
+      {option && <><p>{generatorLabel(option, available.indexOf(option))}</p><p>输入要求：{option.fields.filter(f => "required" in f && f.required).map(fieldLabel).join("、") || "无必填素材"}</p><p>{option.availability ? "可用" : "当前不可用，请检查本地节点、模型与运行环境"}</p></>}
       <button type="button" disabled={busy || !!error || !option?.availability || selected === binding?.selectionRef} onClick={() => void save(slot.stage, slot.mode, selected)}>保存设置</button>
     </article>; })}
     <button type="button" disabled={busy} onClick={() => void refresh(generation.current).then(() => setError(undefined)).catch(e => setError(normalizeProductError(e).message))}>刷新设置</button>
-    <details><summary>高级</summary><p>管理工作流、映射、版本和高级验证，不会自动修改项目生成器。</p><button type="button" onClick={() => navigate({ kind: "system-settings", section: "advanced-workflows", returnTo: { kind: "project-settings", projectId, section: "generators" } })}>打开高级工作流 Lab</button></details>
+    <button type="button" onClick={() => navigate({ kind: "system-settings", section: "general", returnTo: { kind: "project-settings", projectId, section: "generators" } })}>检查本地运行环境</button>
   </section>;
 }

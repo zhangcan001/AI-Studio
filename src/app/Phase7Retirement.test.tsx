@@ -54,9 +54,10 @@ it("phase7_target6 asset prompt routes are normal Library with explicit advanced
  expect(fromLegacyLocation({workspace:"prompts",projectId:project})).toMatchObject({kind:"library",filter:"prompts"});
  for(const filter of ["advanced-assets","advanced-prompts"])expect(normalLibrary({kind:"library",projectId:project,filter})).toBe(false);
 });
-it("phase7_target7 old workflow routes reach the real Lab not a wrapper",()=>{
+it("phase7_target7 old workflow routes reach a safe retirement notice, never the import surface",()=>{
  for(const projectId of [undefined,project])expect(fromLegacyLocation({workspace:"workflows",projectId})).toMatchObject({section:"advanced-workflows"});
  expect(app()).toContain('<WorkflowLabPage');expect(app()).not.toContain('import("../features/workflows/WorkflowWorkspace")');expect(existsSync("src/features/workflows/WorkflowWorkspace.tsx")).toBe(false);expect(existsSync("src/services/workflowClient.ts")).toBe(true);
+ const retired=read("src/features/workflow-lab/WorkflowLabPage.tsx");expect(retired).toContain("工作流导入与编辑已停用");expect(retired).not.toMatch(/<WorkflowLabSurface|<LabBenchmarkPane|<LabDiagnosticsPane|useWorkflowLabController\(/);
 });
 it("phase7_target8 command center defaults to Overview and retains explicit analysis",()=>{
  expect(fromLegacyLocation({workspace:"command-center",projectId:project})).toEqual({kind:"project",projectId:project,page:"overview"});expect(fromLegacyLocation({workspace:"command-center",section:"analysis",projectId:project})).toEqual({kind:"project-settings",projectId:project,section:"advanced-project"});expect(fromLegacyLocation({workspace:"projects",projectId:project})).toMatchObject({kind:"project-settings",section:"general"});
@@ -73,7 +74,7 @@ it("phase7_target10 runtime dispatch cannot resurrect retired screens",()=>{
 });
 it("phase7_target11 Advanced capabilities remain explicitly reachable",()=>{
  for(const marker of ['route.surface === "batch"','route.filter === "advanced-assets"','route.filter === "advanced-prompts"','route.section === "advanced-tools"','route.section === "advanced-workflows"','["advanced-shots", "advanced-production", "advanced-review"].includes(route.section)','route.section === "advanced-tasks"','route.section === "advanced-project"'])expect(app()).toContain(marker);
- expect(read("src/features/workflow-lab/WorkflowLabPage.tsx")).toContain("LabDiagnosticsPane");for(const r of matrix.rows.filter(r=>r.decision==="KEEP_ADVANCED"))expect(existsSync(r.file)).toBe(true);
+ expect(read("src/features/workflow-lab/LabDiagnosticsPane.tsx")).toContain("LabDiagnosticsPane");for(const r of matrix.rows.filter(r=>r.decision==="KEEP_ADVANCED"))expect(existsSync(r.file)).toBe(true);
 });
 it("phase7_target12 Product and Advanced transport guards remain intact",()=>{
  for(const dir of ["src/features/create","src/features/runs","src/features/library"]){for(const file of files(dir).filter(f=>!f.includes('.test.')))expect(read(file)).not.toMatch(/from ["'][^"']*(?:tauriClient|services\/ipc)["']|@tauri-apps\/api/);}

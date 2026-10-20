@@ -1,29 +1,17 @@
 import type { AppRoute } from "../../app/routes/types";
-import { useWorkflowLabController,type WorkflowWorkspaceProps } from "../workflows/useWorkflowLabController";
+import type { WorkflowWorkspaceProps } from "../workflows/useWorkflowLabController";
 import "./WorkflowLabPage.css";
-import { LabDiagnosticsPane } from "./LabDiagnosticsPane";
-import { LabBenchmarkPane } from "./LabBenchmarkPane";
-import { useState } from "react";
-import { toUserMessage } from "../../i18n/errorMessages";
-import { WorkflowLabSurface } from "./WorkflowLabSurface";
 
-/** Advanced view over existing Onboarding/Registry/Queue authorities, not a store. */
-export function WorkflowLabPage({ returnTo, navigate, initialDiagnosticsOpen, ...props }: WorkflowWorkspaceProps & { returnTo?: AppRoute; navigate: (route: AppRoute) => unknown; initialDiagnosticsOpen?: boolean }) {
-  const [actionError, setActionError] = useState<string>();
-  const controller = useWorkflowLabController({ ...props, onOpenStudio: async (workflowId, recipeId) => {
-    setActionError(undefined);
-    try { await props.onOpenStudio(workflowId, recipeId); } catch (error) { setActionError(toUserMessage(error)); }
-  }, onUseInProject: async (workflowId, recipeId) => {
-    setActionError(undefined);
-    try { await props.onUseInProject(workflowId, recipeId); } catch (error) { setActionError(toUserMessage(error)); }
-  } });
-  return <section className="workflow-lab" aria-label="高级工作流 Lab">
-    <header><h1>高级工作流 Lab</h1><p>导入、映射、版本与诊断。高级验证仍使用现有生产队列；浏览不会修改项目绑定。</p>
-      {returnTo && <button type="button" onClick={() => navigate(returnTo)}>返回原页面</button>}
+/** Compatibility destination for saved routes only. Never loads authoring IPC. */
+export function WorkflowLabPage({ projectId, returnTo, navigate }: WorkflowWorkspaceProps & { returnTo?: AppRoute; navigate: (route: AppRoute) => unknown; initialDiagnosticsOpen?: boolean }) {
+  // Do not let a legacy return locator bounce back into the retired surface.
+  const canReturn = returnTo && !((returnTo.kind === "system-settings" || returnTo.kind === "project-settings") && returnTo.section === "advanced-workflows");
+  return <section className="workflow-lab" aria-label="工作流入口已停用">
+    <header><h1>工作流导入与编辑已停用</h1>
+      <p>新增工作流将通过软件内置的生成器提供，不再直接导入、自动识别或手动映射工作流。</p>
+      <p>已有项目绑定、历史任务、生成结果与备份保持不变；不会自动替换生成器或启动任务。</p>
+      {projectId ? <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>选择项目生成器</button> : <button type="button" onClick={() => navigate({ kind: "project-list" })}>选择项目</button>}
+      {canReturn && <button type="button" onClick={() => navigate(returnTo)}>返回原页面</button>}
     </header>
-    {actionError && <p role="alert">{actionError}</p>}
-    <WorkflowLabSurface controller={controller} />
-    <details><summary>高级验证 · Benchmark</summary>{props.projectId ? <LabBenchmarkPane projectId={props.projectId} catalog={props.catalog} onOpenTask={props.onOpenTask} /> : <p>选择项目后才能运行高级验证。</p>}</details>
-    <details open={initialDiagnosticsOpen}><summary>诊断与修复状态</summary><LabDiagnosticsPane items={controller.items} /></details>
   </section>;
 }
