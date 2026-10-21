@@ -602,6 +602,645 @@ pub mod folder_batch_import_service {
             .collect()
     }
 
+    use crate::application::{
+        generation_service::NewGenerationAdmission,
+        ports::{
+            AssetRepository, Clock, GenerationDefinitionRepository, ProjectRepository,
+            ShotBulkRepository,
+        },
+        story_entity_service::StoryEntityService,
+    };
+    use crate::domain::story_entity::StoryEntity;
+    use std::{
+        collections::HashMap,
+        io::Read,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
+    use tokio::sync::Mutex;
+
+    #[derive(Clone, Debug, Default, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub struct PreviewOptions {
+        pub name_suffix: Option<String>,
+    }
+    #[derive(Clone, Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct EntityPreview {
+        pub name: String,
+        pub kind: String,
+        pub action: String,
+        pub image_count: usize,
+        pub existing_entity_id: Option<String>,
+    }
+    #[derive(Clone, Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Preview {
+        pub session_id: String,
+        pub preview_version: u64,
+        pub name_suffix: Option<String>,
+        pub display_root_name: String,
+        pub manifest_sha256: String,
+        pub format_source: String,
+        pub shot_count: usize,
+        pub valid_count: usize,
+        pub error_count: usize,
+        pub warning_count: usize,
+        pub max_queue_items: usize,
+        pub create_queue_default: bool,
+        pub characters: Vec<EntityPreview>,
+        pub rows: Vec<Row>,
+        pub errors: Vec<crate::application::shot_bulk_service::BulkIssue>,
+        pub warnings: Vec<String>,
+    }
+    #[derive(Clone)]
+    struct Plan {
+        manifest: Manifest,
+        view: Preview,
+        file_sha256: BTreeMap<String, String>,
+        entities: Vec<StoryEntity>,
+        fingerprints: BTreeMap<String, String>,
+        options: PreviewOptions,
+    }
+    #[derive(Clone)]
+    struct Session {
+        project_id: String,
+        root: PathBuf,
+        created_at: chrono::DateTime<chrono::Utc>,
+        plan: Plan,
+    }
+    pub struct FolderBatchImportService {
+        sessions: Mutex<HashMap<String, Session>>,
+        definitions: Arc<dyn GenerationDefinitionRepository>,
+        admission: Arc<dyn NewGenerationAdmission>,
+        shots: Arc<dyn ShotBulkRepository>,
+        entities: Arc<StoryEntityService>,
+        assets: Arc<dyn AssetRepository>,
+        projects: Arc<dyn ProjectRepository>,
+        clock: Arc<dyn Clock>,
+    }
+    impl FolderBatchImportService {
+        pub fn new(
+            definitions: Arc<dyn GenerationDefinitionRepository>,
+            admission: Arc<dyn NewGenerationAdmission>,
+            shots: Arc<dyn ShotBulkRepository>,
+            entities: Arc<StoryEntityService>,
+            assets: Arc<dyn AssetRepository>,
+            projects: Arc<dyn ProjectRepository>,
+            clock: Arc<dyn Clock>,
+        ) -> Self {
+            Self {
+                sessions: Mutex::new(HashMap::new()),
+                definitions,
+                admission,
+                shots,
+                entities,
+                assets,
+                projects,
+                clock,
+            }
+        }
+        pub async fn pick(
+            &self,
+            project_id: &str,
+            root: PathBuf,
+        ) -> Result<Preview, ImportFailure> {
+            crate::domain::validate_project_id(project_id)
+                .map_err(|_| failure("INVALID_MANIFEST", "项目标识无效"))?;
+            let id = format!("fbi_{}", uuid::Uuid::new_v4());
+            let plan = self
+                .build(project_id, &root, &id, 1, &PreviewOptions::default())
+                .await?;
+            let mut sessions = self.sessions.lock().await;
+            sessions.retain(|_, s| {
+                self.clock
+                    .now()
+                    .signed_duration_since(s.created_at)
+                    .num_minutes()
+                    < 30
+            });
+            if sessions.len() >= 32 {
+                return Err(failure(
+                    "IMPORT_IN_PROGRESS",
+                    "导入会话过多，请先关闭未使用的预览",
+                ));
+            }
+            let view = plan.view.clone();
+            sessions.insert(
+                id,
+                Session {
+                    project_id: project_id.into(),
+                    root,
+                    created_at: self.clock.now(),
+                    plan,
+                },
+            );
+            Ok(view)
+        }
+        pub async fn rescan(
+            &self,
+            id: &str,
+            options: PreviewOptions,
+        ) -> Result<Preview, ImportFailure> {
+            let session = self.session(id).await?;
+            if options
+                .name_suffix
+                .as_ref()
+                .is_some_and(|s| s.chars().count() > 80 || s.contains(['\n', '\r', '\0']))
+            {
+                return Err(failure(
+                    "INVALID_MANIFEST",
+                    "名称后缀最长 80 字，不能含换行或 NUL",
+                ));
+            }
+            let version = session
+                .plan
+                .view
+                .preview_version
+                .checked_add(1)
+                .ok_or_else(|| failure("STALE_PREVIEW", "请重新选择文件夹"))?;
+            let plan = self
+                .build(&session.project_id, &session.root, id, version, &options)
+                .await?;
+            let mut sessions = self.sessions.lock().await;
+            let live = sessions
+                .get_mut(id)
+                .ok_or_else(|| failure("SESSION_CONSUMED", "会话已关闭"))?;
+            if live.plan.view.preview_version != session.plan.view.preview_version {
+                return Err(failure("STALE_PREVIEW", "预览已被更新，请重新校验"));
+            }
+            live.plan = plan;
+            live.created_at = self.clock.now();
+            Ok(live.plan.view.clone())
+        }
+        pub async fn discard(&self, id: &str) -> Result<(), ImportFailure> {
+            self.sessions.lock().await.remove(id);
+            Ok(())
+        }
+        async fn session(&self, id: &str) -> Result<Session, ImportFailure> {
+            let sessions = self.sessions.lock().await;
+            let s = sessions
+                .get(id)
+                .ok_or_else(|| failure("SESSION_CONSUMED", "预览已关闭或过期，请重新选择文件夹"))?;
+            if self
+                .clock
+                .now()
+                .signed_duration_since(s.created_at)
+                .num_minutes()
+                >= 30
+            {
+                return Err(failure("SESSION_CONSUMED", "预览已过期，请重新选择文件夹"));
+            }
+            Ok(s.clone())
+        }
+        async fn build(
+            &self,
+            project: &str,
+            root: &Path,
+            id: &str,
+            version: u64,
+            options: &PreviewOptions,
+        ) -> Result<Plan, ImportFailure> {
+            let scanned =
+                super::source_asset_import_service::scan_import_folder(root).map_err(|_| {
+                    failure(
+                        "LINK_REJECTED",
+                        "目录不可安全扫描或超过 4 层/10,000 条目限制",
+                    )
+                })?;
+            let bytes = read_file(root, "manifest.json", 1024 * 1024)?;
+            let manifest = parse_manifest(&bytes)?;
+            if self
+                .projects
+                .find_by_id(project)
+                .await
+                .map_err(|_| failure("PROJECT_UNAVAILABLE", "无法读取项目"))?
+                .is_none()
+            {
+                return Err(failure("PROJECT_UNAVAILABLE", "项目不存在"));
+            }
+            let names = self
+                .shots
+                .list_bulk_data(project)
+                .await
+                .map_err(|_| failure("PROJECT_UNAVAILABLE", "无法读取当前项目镜头"))?
+                .into_iter()
+                .map(|s| s.shot.name)
+                .collect::<Vec<_>>();
+            let existing = self
+                .entities
+                .list(project, None)
+                .await
+                .map_err(|_| failure("PROJECT_UNAVAILABLE", "无法读取当前项目实体"))?;
+            let mut entities = existing.clone();
+            for (i, entity) in manifest.characters.iter().enumerate() {
+                if !existing.iter().any(|e| {
+                    e.name == entity.name
+                        && e.kind.as_str() == entity.kind.as_deref().unwrap_or("character")
+                }) {
+                    entities.push(StoryEntity {
+                        id: format!("manifest-{i}"),
+                        project_id: project.into(),
+                        name: entity.name.clone(),
+                        kind: crate::domain::story_entity::StoryEntityKind::parse(
+                            entity.kind.as_deref().unwrap_or("character"),
+                        )
+                        .map_err(|_| failure("INVALID_MANIFEST", "实体类型无效"))?,
+                        description: entity.description.clone().unwrap_or_default(),
+                        cover_asset_id: None,
+                        image_asset_ids: vec![],
+                        created_at: String::new(),
+                        updated_at: String::new(),
+                    });
+                }
+            }
+            let mut rows = normalize(&manifest, options.name_suffix.as_deref(), &names);
+            let mut file_sha256 = BTreeMap::new();
+            let mut fingerprints = BTreeMap::new();
+            let mut used = BTreeSet::new();
+            for row in &mut rows {
+                if crate::domain::canonical_shot_name(&row.name).is_err() {
+                    row_error(
+                        row,
+                        failure("INVALID_MANIFEST", "镜头名称不符合正式命名规则"),
+                    );
+                }
+                let mentions = super::shot_video_input_service::explicit_entity_mentions(
+                    &row.prompt,
+                    project,
+                    &entities,
+                );
+                let mut reference_paths = row.references.clone();
+                match mentions {
+                    Err(error) => {
+                        row_error(row, failure("ENTITY_REFERENCE_UNKNOWN", error.to_string()))
+                    }
+                    Ok(mentions) => {
+                        for entity in &mentions {
+                            if !row.entity_names.contains(&entity.name) {
+                                row.entity_names.push(entity.name.clone());
+                            }
+                        }
+                        for entity in mentions {
+                            match entity_image(&manifest, &existing, entity) {
+                                Ok(path) => {
+                                    if !reference_paths.contains(&path) {
+                                        reference_paths.push(path);
+                                    }
+                                }
+                                Err(error) => row_error(row, error),
+                            }
+                        }
+                    }
+                }
+                let mut files: BTreeSet<String> = row
+                    .first_frame
+                    .iter()
+                    .chain(row.last_frame.iter())
+                    .chain(row.references.iter())
+                    .cloned()
+                    .collect();
+                for name in row.entity_names.clone() {
+                    let matches: Vec<_> = entities.iter().filter(|e| e.name == name).collect();
+                    if matches.len() != 1 {
+                        row_error(
+                            row,
+                            failure(
+                                "ENTITY_REFERENCE_AMBIGUOUS",
+                                "实体不存在或同名，请使用唯一实体名称",
+                            ),
+                        );
+                        continue;
+                    }
+                    let entity = matches[0];
+                    used.insert(entity.id.clone());
+                    if !existing.iter().any(|e| e.id == entity.id) {
+                        if let Some(declared) = manifest.characters.iter().find(|e| e.name == name)
+                        {
+                            files.extend(declared.images.iter().cloned());
+                        }
+                    } else {
+                        let cover = entity
+                            .cover_asset_id
+                            .as_ref()
+                            .or_else(|| entity.image_asset_ids.first());
+                        if let Some(asset) = cover {
+                            match crate::domain::AssetId::parse(asset) {
+                                Err(_) => row_error(
+                                    row,
+                                    failure("ENTITY_REFERENCE_MISSING_IMAGE", "实体参考素材不可用"),
+                                ),
+                                Ok(asset) => {
+                                    let available =
+                                        self.assets.find_by_id(&asset).await.map_err(|_| {
+                                            failure("IMAGE_INVALID", "无法检查实体素材")
+                                        })?;
+                                    let receipt = self
+                                        .assets
+                                        .find_external_import(project, &asset)
+                                        .await
+                                        .map_err(|_| {
+                                            failure("IMAGE_INVALID", "无法检查素材收据")
+                                        })?;
+                                    if available.as_ref().is_none_or(|a| {
+                                        a.project_id != project
+                                            || a.source_task_id.is_some()
+                                            || a.category != crate::domain::SOURCE_IMAGE_CATEGORY
+                                    }) || receipt.is_none()
+                                    {
+                                        row_error(row,failure("IMAGE_INVALID","实体图片必须是当前项目具有导入收据的外部 SOURCE 图片"));
+                                    }
+                                }
+                            }
+                        } else {
+                            row_error(
+                                row,
+                                failure("ENTITY_REFERENCE_MISSING_IMAGE", "实体没有关联图片"),
+                            );
+                        }
+                    }
+                }
+                for file in files {
+                    if file_sha256.contains_key(&file) {
+                        continue;
+                    }
+                    match read_file(
+                        root,
+                        &file,
+                        super::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
+                    ) {
+                        Ok(bytes) => {
+                            let name = Path::new(&file)
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("");
+                            if !scanned.contains(&file)
+                                || super::source_asset_import_service::inspect_import_image(
+                                    name, &bytes,
+                                )
+                                .is_err()
+                            {
+                                row_error(
+                                    row,
+                                    failure(
+                                        "IMAGE_INVALID",
+                                        "参考文件必须是扩展名匹配、可解码的 PNG/JPEG/WebP 图片",
+                                    ),
+                                );
+                            } else {
+                                file_sha256.insert(file, sha(&bytes));
+                            }
+                        }
+                        Err(error) => row_error(row, error),
+                    }
+                }
+                row.reference_count = reference_paths.iter().collect::<BTreeSet<_>>().len();
+                if let Some(generator) = &row.generator {
+                    let generator = generator.clone();
+                    let pair = serde_json::to_string(&generator).expect("serializable generator");
+                    let definition = self
+                        .definitions
+                        .find_active(&generator.workflow_version_id, &generator.recipe_id)
+                        .await
+                        .map_err(|_| failure("GENERATOR_UNAVAILABLE", "无法读取生成器"))?;
+                    let admitted = self
+                        .admission
+                        .is_available_for_new_generation(
+                            &generator.workflow_version_id,
+                            &generator.recipe_id,
+                        )
+                        .await
+                        .map_err(|_| failure("GENERATOR_UNAVAILABLE", "无法检查生成器准入"))?;
+                    match definition.filter(|_| admitted) {
+                        None => row_error(
+                            row,
+                            failure("GENERATOR_UNAVAILABLE", "所选生成器不允许新的视频生产"),
+                        ),
+                        Some(definition) => {
+                            fingerprints.insert(
+                                pair,
+                                format!(
+                                    "{}:{}",
+                                    definition.workflow_sha256, definition.recipe_sha256
+                                ),
+                            );
+                            if let Err(error) =
+                                validate_definition(row, &definition, &reference_paths)
+                            {
+                                row_error(row, error);
+                            }
+                        }
+                    }
+                }
+            }
+            let characters = entities
+                .iter()
+                .filter(|e| used.contains(&e.id))
+                .map(|e| EntityPreview {
+                    name: e.name.clone(),
+                    kind: e.kind.as_str().into(),
+                    action: if existing.iter().any(|old| old.id == e.id) {
+                        "reuse"
+                    } else {
+                        "create"
+                    }
+                    .into(),
+                    image_count: if existing.iter().any(|old| old.id == e.id) {
+                        e.image_asset_ids.len()
+                    } else {
+                        manifest
+                            .characters
+                            .iter()
+                            .find(|m| m.name == e.name)
+                            .map(|m| m.images.len())
+                            .unwrap_or(0)
+                    },
+                    existing_entity_id: existing
+                        .iter()
+                        .find(|old| old.id == e.id)
+                        .map(|old| old.id.clone()),
+                })
+                .collect();
+            let mut warnings = if scanned.iter().any(|p| !file_sha256.contains_key(p)) {
+                vec!["目录含未引用图片；只会导入选中有效行实际使用的文件。".into()]
+            } else {
+                vec![]
+            };
+            for declared in &manifest.characters {
+                if existing.iter().any(|e| e.name == declared.name) {
+                    warnings.push(format!(
+                        "复用实体 {}：清单内该实体图片将被忽略，不修改已有实体。",
+                        declared.name
+                    ));
+                } else if existing
+                    .iter()
+                    .any(|e| e.name.to_lowercase() == declared.name.to_lowercase())
+                {
+                    warnings.push(format!(
+                        "实体 {} 与已有名称仅大小写不同；@ 引用仍精确区分大小写。",
+                        declared.name
+                    ));
+                }
+            }
+            let view = Preview {
+                session_id: id.into(),
+                preview_version: version,
+                name_suffix: options.name_suffix.clone(),
+                display_root_name: root
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "所选目录".into()),
+                manifest_sha256: sha(&bytes),
+                format_source: "manifest".into(),
+                shot_count: rows.len(),
+                valid_count: rows.iter().filter(|r| r.errors.is_empty()).count(),
+                error_count: rows.iter().filter(|r| !r.errors.is_empty()).count(),
+                warning_count: warnings.len(),
+                max_queue_items: super::shot_batch_service::MAX_SHOT_BATCH_ITEMS,
+                create_queue_default: manifest.queue.create.unwrap_or(true),
+                characters,
+                rows,
+                errors: vec![],
+                warnings,
+            };
+            Ok(Plan {
+                manifest,
+                view,
+                file_sha256,
+                entities,
+                fingerprints,
+                options: options.clone(),
+            })
+        }
+    }
+    fn row_error(row: &mut Row, error: ImportFailure) {
+        row.errors
+            .push(crate::application::shot_bulk_service::BulkIssue {
+                code: error.code,
+                message: error.message,
+                row_number: Some(row.row_number),
+                shot_id: None,
+            });
+    }
+    fn read_file(root: &Path, relative: &str, limit: u64) -> Result<Vec<u8>, ImportFailure> {
+        if !safe_relative_path(relative) {
+            return Err(failure("PATH_OUTSIDE_ROOT", "拒绝不安全相对路径"));
+        }
+        let file = super::source_asset_import_service::open_import_file(root, relative)
+            .map_err(|_| failure("FILE_NOT_FOUND", "文件不可安全读取、丢失或已被替换"))?;
+        let size = file
+            .metadata()
+            .map_err(|_| failure("IMAGE_INVALID", "无法检查文件"))?
+            .len();
+        if size > limit {
+            return Err(failure("SCAN_LIMIT_EXCEEDED", "文件超过安全大小限制"));
+        }
+        let mut bytes = Vec::new();
+        file.take(limit + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| failure("IMAGE_INVALID", "文件读取失败"))?;
+        if bytes.len() as u64 != size {
+            return Err(failure("STALE_PREVIEW", "文件在读取期间发生变化"));
+        }
+        Ok(bytes)
+    }
+    fn entity_image(
+        manifest: &Manifest,
+        existing: &[StoryEntity],
+        entity: &StoryEntity,
+    ) -> Result<String, ImportFailure> {
+        if existing.iter().any(|e| e.id == entity.id) {
+            entity
+                .cover_asset_id
+                .as_ref()
+                .or_else(|| entity.image_asset_ids.first())
+                .map(|id| format!("managed:{id}"))
+                .ok_or_else(|| failure("ENTITY_REFERENCE_MISSING_IMAGE", "实体缺少参考图片"))
+        } else {
+            manifest
+                .characters
+                .iter()
+                .find(|e| e.name == entity.name)
+                .and_then(|e| e.cover.as_ref().or_else(|| e.images.first()))
+                .cloned()
+                .ok_or_else(|| failure("ENTITY_REFERENCE_MISSING_IMAGE", "新实体缺少参考图片"))
+        }
+    }
+    fn validate_definition(
+        row: &Row,
+        definition: &crate::application::ports::GenerationDefinition,
+        references: &[String],
+    ) -> Result<(), ImportFailure> {
+        use super::shot_workflow_compatibility::{classify_shot_recipe, ShotVideoInputMode};
+        use crate::domain::{CompileRequest, InputValue, SeedValue, ShotStage, WorkflowDocument};
+        let recipe = crate::compiler::RecipeParser::parse(&definition.recipe_yaml)
+            .map_err(|_| failure("GENERATOR_UNAVAILABLE", "Recipe 无效"))?;
+        let compatibility =
+            classify_shot_recipe(ShotStage::Video, &definition.workflow_id, &recipe)
+                .map_err(|_| failure("MODE_MISMATCH", "Recipe 不支持镜头视频输入"))?;
+        let compatible = match (&row.mode, &compatibility.input_mode) {
+            (Mode::FirstLast, ShotVideoInputMode::FirstLast)
+            | (Mode::Reference, ShotVideoInputMode::ReferenceMedia) => true,
+            (Mode::Image, ShotVideoInputMode::SingleImage { key }) => key == "first_frame",
+            _ => false,
+        };
+        if !compatible {
+            return Err(failure(
+                "MODE_MISMATCH",
+                "所选 Recipe 的正式输入模式与该行不一致",
+            ));
+        }
+        let mut values = BTreeMap::from([
+            ("prompt".into(), InputValue::String(row.prompt.clone())),
+            ("width".into(), InputValue::Integer(row.width)),
+            ("height".into(), InputValue::Integer(row.height)),
+            (
+                "duration_seconds".into(),
+                InputValue::Integer(row.duration_seconds),
+            ),
+        ]);
+        if let Some(seed) = row.seed {
+            values.insert("seed".into(), InputValue::Seed(SeedValue::Fixed(seed)));
+        }
+        if let Some(path) = &row.first_frame {
+            values.insert("first_frame".into(), InputValue::Image(path.clone()));
+        }
+        if let Some(path) = &row.last_frame {
+            values.insert("last_frame".into(), InputValue::Image(path.clone()));
+        }
+        if row.mode == Mode::Reference {
+            values.insert(
+                "reference_images".into(),
+                InputValue::Images(references.to_vec()),
+            );
+        }
+        let workflow = WorkflowDocument::parse(definition.workflow_json.clone())
+            .map_err(|_| failure("GENERATOR_UNAVAILABLE", "工作流无效"))?;
+        super::product::h3_resolution::compile_checked(
+            &crate::compiler::WorkflowCompiler,
+            &workflow,
+            &recipe,
+            &CompileRequest::new(values),
+        )
+        .map_err(|e| {
+            let code = match &e {
+                crate::compiler::CompileError::InputOutOfRange { input, .. }
+                    if input == "duration_seconds" =>
+                {
+                    "DURATION_OUT_OF_RANGE"
+                }
+                crate::compiler::CompileError::InputOutOfRange { input, .. }
+                    if input == "width" || input == "height" =>
+                {
+                    "RESOLUTION_UNSUPPORTED"
+                }
+                _ => "INPUT_VALIDATION_FAILED",
+            };
+            failure(code, e.to_string())
+        })?;
+        Ok(())
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -761,6 +1400,276 @@ pub mod folder_batch_import_service {
             assert!(
                 crate::application::source_asset_import_service::scan_import_folder(root).is_err()
             );
+        }
+        struct PreviewClock;
+        impl crate::application::ports::Clock for PreviewClock {
+            fn now(&self) -> chrono::DateTime<chrono::Utc> {
+                chrono::Utc::now()
+            }
+        }
+        struct PreviewDefinitions(Vec<crate::application::ports::GenerationDefinition>);
+        #[async_trait::async_trait]
+        impl crate::application::ports::GenerationDefinitionRepository for PreviewDefinitions {
+            async fn find(
+                &self,
+                version: &str,
+                recipe: &str,
+            ) -> Result<
+                Option<crate::application::ports::GenerationDefinition>,
+                crate::application::ports::RepositoryError,
+            > {
+                Ok(self
+                    .0
+                    .iter()
+                    .find(|d| d.workflow_version_id == version && d.recipe_id == recipe)
+                    .cloned())
+            }
+            async fn list_available(
+                &self,
+            ) -> Result<
+                Vec<crate::application::ports::AvailableGenerationDefinition>,
+                crate::application::ports::RepositoryError,
+            > {
+                Ok(vec![])
+            }
+        }
+        struct PreviewAdmission;
+        #[async_trait::async_trait]
+        impl crate::application::generation_service::NewGenerationAdmission for PreviewAdmission {
+            async fn is_available_for_new_generation(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> Result<bool, crate::application::ports::RepositoryError> {
+                Ok(true)
+            }
+        }
+        struct PreviewFixture {
+            _temp: tempfile::TempDir,
+            root: std::path::PathBuf,
+            pool: sqlx::SqlitePool,
+            service: FolderBatchImportService,
+        }
+        async fn preview_fixture() -> PreviewFixture {
+            use crate::infrastructure::database::repositories::story_entity::SqliteStoryEntityRepository;
+            use crate::infrastructure::database::{
+                SqliteAssetRepository, SqliteProjectRepository, SqliteShotRepository,
+            };
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("sample");
+            std::fs::create_dir_all(root.join("images")).unwrap();
+            let pool = crate::infrastructure::database::initialize(&temp.path().join("test.db"))
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO projects(id,name,root_path,created_at,updated_at) VALUES ('prj_00000000-0000-4000-8000-000000000001','Import test',?,'2026-10-21T00:00:00Z','2026-10-21T00:00:00Z')")
+                .bind(temp.path().join("project").to_string_lossy().to_string()).execute(&pool).await.unwrap();
+            let mut definitions = Vec::new();
+            let mut m = manifest();
+            for (mode, package, version, workflow_id) in [
+                (
+                    Mode::FirstLast,
+                    "minimax_h3_fl2va_first_last_quality_2_2_0",
+                    "first-version",
+                    "wfl_minimax_h3_fl2va_first_last_quality",
+                ),
+                (
+                    Mode::Reference,
+                    "minimax_h3_reference_video_quality_2_2_0",
+                    "ref-version",
+                    "wfl_minimax_h3_reference_video_quality",
+                ),
+            ] {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("runtime_packages")
+                    .join(package);
+                let yaml = std::fs::read_to_string(path.join("recipe.yaml")).unwrap();
+                let workflow = std::fs::read(path.join("workflow_api.json")).unwrap();
+                let recipe = crate::compiler::RecipeParser::parse(&yaml).unwrap();
+                m.generators.insert(
+                    mode,
+                    Generator {
+                        workflow_version_id: version.into(),
+                        recipe_id: recipe.id.clone(),
+                    },
+                );
+                definitions.push(crate::application::ports::GenerationDefinition {
+                    workflow_id: workflow_id.into(),
+                    workflow_version_id: version.into(),
+                    recipe_id: recipe.id,
+                    workflow_version: "2.2.0".into(),
+                    workflow_sha256: sha(&workflow),
+                    recipe_version: "2.2.0".into(),
+                    recipe_sha256: sha(yaml.as_bytes()),
+                    package_name: None,
+                    package_source_path: None,
+                    workflow_json: serde_json::from_slice(&workflow).unwrap(),
+                    recipe_yaml: yaml,
+                });
+            }
+            m.characters.push(ManifestEntity {
+                name: "Alice".into(),
+                kind: None,
+                description: None,
+                images: vec!["images/alice.png".into()],
+                cover: None,
+            });
+            let mut png = Vec::new();
+            image::DynamicImage::new_rgb8(32, 32)
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .unwrap();
+            for name in ["a.png", "b.png", "c.png", "alice.png"] {
+                std::fs::write(root.join("images").join(name), &png).unwrap();
+            }
+            std::fs::write(root.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
+            let service = FolderBatchImportService::new(
+                Arc::new(PreviewDefinitions(definitions)),
+                Arc::new(PreviewAdmission),
+                Arc::new(SqliteShotRepository::new(pool.clone())),
+                Arc::new(StoryEntityService::new(Arc::new(
+                    SqliteStoryEntityRepository::new(pool.clone()),
+                ))),
+                Arc::new(SqliteAssetRepository::new(pool.clone())),
+                Arc::new(SqliteProjectRepository::new(pool.clone())),
+                Arc::new(PreviewClock),
+            );
+            PreviewFixture {
+                _temp: temp,
+                root,
+                pool,
+                service,
+            }
+        }
+        #[tokio::test]
+        async fn previews_real_folder_and_formal_recipe_without_any_writes() {
+            let fixture = preview_fixture().await;
+            let view = fixture
+                .service
+                .pick(
+                    "prj_00000000-0000-4000-8000-000000000001",
+                    fixture.root.clone(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                (view.shot_count, view.valid_count, view.error_count),
+                (2, 2, 0),
+                "{:?}",
+                view.rows
+            );
+            assert_eq!(view.rows[1].reference_count, 2);
+            assert_eq!(view.characters[0].action, "create");
+            assert!(!serde_json::to_string(&view)
+                .unwrap()
+                .contains(&fixture.root.to_string_lossy().to_string()));
+            for table in [
+                "shots",
+                "tasks",
+                "production_batches",
+                "shot_generation_links",
+                "assets",
+                "story_entities",
+            ] {
+                let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                    .fetch_one(&fixture.pool)
+                    .await
+                    .unwrap();
+                assert_eq!(count, 0, "{table}");
+            }
+            fixture.pool.close().await;
+        }
+        #[tokio::test]
+        async fn rescan_has_versioned_suffix_and_discard_or_expiry_cannot_reopen() {
+            let fixture = preview_fixture().await;
+            let first = fixture
+                .service
+                .pick(
+                    "prj_00000000-0000-4000-8000-000000000001",
+                    fixture.root.clone(),
+                )
+                .await
+                .unwrap();
+            let next = fixture
+                .service
+                .rescan(
+                    &first.session_id,
+                    PreviewOptions {
+                        name_suffix: Some(" copy".into()),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(next.preview_version, first.preview_version + 1);
+            assert!(next.rows[0].name.ends_with(" copy"));
+            fixture.service.discard(&first.session_id).await.unwrap();
+            assert!(fixture
+                .service
+                .rescan(&first.session_id, PreviewOptions::default())
+                .await
+                .is_err());
+            let view = fixture
+                .service
+                .pick(
+                    "prj_00000000-0000-4000-8000-000000000001",
+                    fixture.root.clone(),
+                )
+                .await
+                .unwrap();
+            fixture
+                .service
+                .sessions
+                .lock()
+                .await
+                .get_mut(&view.session_id)
+                .unwrap()
+                .created_at -= chrono::Duration::minutes(31);
+            assert!(fixture
+                .service
+                .rescan(&view.session_id, PreviewOptions::default())
+                .await
+                .is_err());
+            assert!(fixture
+                .service
+                .pick(
+                    "prj_00000000-0000-4000-8000-000000000002",
+                    fixture.root.clone()
+                )
+                .await
+                .is_err());
+            fixture.pool.close().await;
+        }
+        #[tokio::test]
+        async fn formal_constraints_and_missing_or_bad_images_are_row_errors() {
+            let fixture = preview_fixture().await;
+            std::fs::write(fixture.root.join("images/a.png"), b"not image").unwrap();
+            let view = fixture
+                .service
+                .pick(
+                    "prj_00000000-0000-4000-8000-000000000001",
+                    fixture.root.clone(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(view.valid_count, 1);
+            let mut m: Manifest =
+                serde_json::from_slice(&std::fs::read(fixture.root.join("manifest.json")).unwrap())
+                    .unwrap();
+            m.shots[1].duration_seconds = Some(1);
+            std::fs::write(
+                fixture.root.join("manifest.json"),
+                serde_json::to_vec(&m).unwrap(),
+            )
+            .unwrap();
+            let view = fixture
+                .service
+                .rescan(&view.session_id, PreviewOptions::default())
+                .await
+                .unwrap();
+            assert_eq!(view.valid_count, 0);
+            assert!(view.rows[1]
+                .errors
+                .iter()
+                .any(|e| e.code == "DURATION_OUT_OF_RANGE"));
+            fixture.pool.close().await;
         }
     }
 }

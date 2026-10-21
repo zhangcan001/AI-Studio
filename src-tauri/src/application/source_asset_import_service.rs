@@ -182,38 +182,7 @@ impl SourceAssetImportService {
         bytes: &[u8],
     ) -> Result<Asset, SourceAssetImportError> {
         let original_name = safe_file_name(original_name)?;
-        let actual_bytes = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        if actual_bytes > MAX_SOURCE_IMAGE_BYTES {
-            return Err(SourceAssetImportError::SourceImageTooLarge {
-                max_bytes: MAX_SOURCE_IMAGE_BYTES,
-                actual_bytes,
-            });
-        }
-        let inspected =
-            inspect_bytes(bytes).map_err(|error| SourceAssetImportError::InvalidSourceImage {
-                message: error.to_string(),
-            })?;
-        let extension = Path::new(&original_name)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if !(extension == inspected.extension
-            || (extension == "jpeg" && inspected.extension == "jpg"))
-        {
-            return Err(SourceAssetImportError::InvalidSourceImage {
-                message: "file extension does not match decoded image".into(),
-            });
-        }
-        image::ImageReader::new(std::io::Cursor::new(bytes))
-            .with_guessed_format()
-            .map_err(|e| SourceAssetImportError::InvalidSourceImage {
-                message: e.to_string(),
-            })?
-            .decode()
-            .map_err(|e| SourceAssetImportError::InvalidSourceImage {
-                message: e.to_string(),
-            })?;
+        let inspected = inspect_import_image(&original_name, bytes)?;
         let project_root = self
             .project_repository
             .get_storage_root(project_id)
@@ -1596,4 +1565,44 @@ mod tests {
         assert!(directory.is_dir());
         assert_eq!(std::fs::read_dir(directory).unwrap().count(), 0);
     }
+}
+
+/// The exact source-import validation, reused by read-only folder preview.
+pub(crate) fn inspect_import_image(
+    original_name: &str,
+    bytes: &[u8],
+) -> Result<crate::application::image_inspection::InspectedImage, SourceAssetImportError> {
+    let original_name = safe_file_name(original_name)?;
+    let actual_bytes = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if actual_bytes > MAX_SOURCE_IMAGE_BYTES {
+        return Err(SourceAssetImportError::SourceImageTooLarge {
+            max_bytes: MAX_SOURCE_IMAGE_BYTES,
+            actual_bytes,
+        });
+    }
+    let inspected =
+        inspect_bytes(bytes).map_err(|error| SourceAssetImportError::InvalidSourceImage {
+            message: error.to_string(),
+        })?;
+    let extension = Path::new(&original_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !(extension == inspected.extension || (extension == "jpeg" && inspected.extension == "jpg"))
+    {
+        return Err(SourceAssetImportError::InvalidSourceImage {
+            message: "file extension does not match decoded image".into(),
+        });
+    }
+    image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| SourceAssetImportError::InvalidSourceImage {
+            message: e.to_string(),
+        })?
+        .decode()
+        .map_err(|e| SourceAssetImportError::InvalidSourceImage {
+            message: e.to_string(),
+        })?;
+    Ok(inspected)
 }

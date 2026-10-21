@@ -111,6 +111,8 @@ pub struct ProjectServices {
 }
 
 pub struct ShotServices {
+    pub folder_import:
+        Arc<crate::application::folder_batch_import_service::FolderBatchImportService>,
     pub shot: Arc<ShotService>,
     pub video_inputs: Arc<crate::application::shot_video_input_service::ShotVideoInputService>,
     pub batch: Arc<ShotBatchService>,

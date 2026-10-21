@@ -8,10 +8,14 @@ export const FOLDER_BATCH_IMPORT_BASE = "ebc5e087585e38c70156a7f05f41615cc84affd
 export const FOLDER_BATCH_IMPORT_PROOF = "docs/architecture/folder-batch-import-successor.json";
 export const FOLDER_BATCH_IMPORT_CHANGED = [
   "scripts/library-confirm-ci-race-successor-guard.mjs",
+  "src-tauri/src/app_state.rs",
   "src-tauri/src/application/mod.rs",
   "src-tauri/src/application/shot_video_input_service.rs",
   "src-tauri/src/application/source_asset_import_service.rs",
-  "src-tauri/src/application/source_asset_import_service/source_paths.rs"
+  "src-tauri/src/application/source_asset_import_service/source_paths.rs",
+  "src-tauri/src/commands/mod.rs",
+  "src-tauri/src/lib.rs",
+  "src/services/tauriClient.ts"
 ].sort();
 // Runtime Package paths are immutable in this checkpoint.
 export const FOLDER_BATCH_IMPORT_RUNTIME = [];
@@ -19,7 +23,8 @@ export const FOLDER_BATCH_IMPORT_ADDED = [
   "scripts/folder-batch-import-successor-guard.mjs",
   "scripts/testing/folder-batch-import.test.mjs",
   "src/features/shots/__fixtures__/folderEntityMentions.json",
-  "src/features/shots/folderBatchImportMentions.test.ts"
+  "src/features/shots/folderBatchImportMentions.test.ts",
+  "src/types/folderBatchImport.ts"
 ].sort();
 export const FOLDER_BATCH_IMPORT_CONTRACTS = {
   "schemaChanged": false,
@@ -29,7 +34,7 @@ export const FOLDER_BATCH_IMPORT_CONTRACTS = {
   "historicalProofBytesUnchanged": true,
   "gpuExecuted": false,
   "productImplementationChanged": true,
-  "checkpointStage": "P1"
+  "checkpointStage": "P2"
 };
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");

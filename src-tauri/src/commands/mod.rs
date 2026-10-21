@@ -227,3 +227,61 @@ pub mod story_entities {
             .await
     }
 }
+
+pub mod folder_batch_import {
+    use crate::application::folder_batch_import_service::{ImportFailure, Preview, PreviewOptions};
+    use crate::{app_state::AppState, error::AppError};
+    use tauri::{AppHandle, State};
+    use tauri_plugin_dialog::DialogExt;
+    fn map_error(error: ImportFailure) -> AppError {
+        let mut mapped = AppError::invalid_input(error.message);
+        mapped.details = Some(serde_json::json!({"code":error.code,"stage":error.stage}));
+        mapped
+    }
+    #[tauri::command(rename_all = "camelCase")]
+    pub async fn folder_batch_import_pick(
+        app_handle: AppHandle,
+        state: State<'_, AppState>,
+        project_id: String,
+    ) -> Result<Option<Preview>, AppError> {
+        super::validate_project_id(&project_id)?;
+        let Some(folder) = app_handle.dialog().file().blocking_pick_folder() else {
+            return Ok(None);
+        };
+        let root = folder
+            .into_path()
+            .map_err(|_| AppError::filesystem("所选目录无法读取"))?;
+        state
+            .shots
+            .folder_import
+            .pick(&project_id, root)
+            .await
+            .map(Some)
+            .map_err(map_error)
+    }
+    #[tauri::command(rename_all = "camelCase")]
+    pub async fn folder_batch_import_rescan(
+        state: State<'_, AppState>,
+        session_id: String,
+        options: PreviewOptions,
+    ) -> Result<Preview, AppError> {
+        state
+            .shots
+            .folder_import
+            .rescan(&session_id, options)
+            .await
+            .map_err(map_error)
+    }
+    #[tauri::command(rename_all = "camelCase")]
+    pub async fn folder_batch_import_discard(
+        state: State<'_, AppState>,
+        session_id: String,
+    ) -> Result<(), AppError> {
+        state
+            .shots
+            .folder_import
+            .discard(&session_id)
+            .await
+            .map_err(map_error)
+    }
+}

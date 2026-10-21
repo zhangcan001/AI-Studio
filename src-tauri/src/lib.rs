@@ -973,7 +973,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_repository.clone(),
                 clock.clone(),
             )
-            .with_stage_prompt_repository(shot_bulk_repository).with_video_inputs(shot_video_input_service.clone())
+            .with_stage_prompt_repository(shot_bulk_repository.clone()).with_video_inputs(shot_video_input_service.clone())
             .with_new_generation_admission(workflow_registry_service.clone()));
             let production_preparation_service = Arc::new(ProductionPreparationService::new(
                 shot_batch_service.clone(),
@@ -1037,6 +1037,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     jobs
                 },
             ));
+            let folder_import_service=Arc::new(application::folder_batch_import_service::FolderBatchImportService::new(
+                definition_repository.clone(),workflow_registry_service.clone(),shot_bulk_repository.clone(),
+                story_entity_service.clone(),asset_repository.clone(),project_repository.clone(),clock.clone(),
+            ));
             let startup_repair_jobs = repair_job_runner.clone();
             let startup_recovery = task_recovery_service.clone();
             let startup_production_queue = production_queue_service.clone();
@@ -1078,6 +1082,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 },
                 project_context,
                 ShotServices {
+                    folder_import: folder_import_service,
                     shot: shot_service,
                     video_inputs: shot_video_input_service,
                     batch: shot_batch_service,
@@ -1386,6 +1391,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::generation::workflow_execution_create,
             commands::generation::workflow_execution_create_batch,
             commands::generation::generation_create_batch,
+            commands::folder_batch_import::folder_batch_import_pick,
+            commands::folder_batch_import::folder_batch_import_rescan,
+            commands::folder_batch_import::folder_batch_import_discard,
             commands::h3_local_import::h3_local_import_pick_directory,
             commands::h3_local_import::h3_local_import_rescan,
             commands::h3_local_import::h3_local_import_commit,
