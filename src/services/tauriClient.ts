@@ -2198,3 +2198,7 @@ export function folderBatchImportRescan(sessionId: string, options: { nameSuffix
 export function folderBatchImportDiscard(sessionId: string): Promise<void> {
   return invoke("folder_batch_import_discard", { sessionId });
 }
+
+export function folderBatchImportCommit(request:import("../types/folderBatchImport").FolderImportCommitRequest):Promise<import("../types/folderBatchImport").FolderImportResult>{
+  return invoke("folder_batch_import_commit",{request});
+}

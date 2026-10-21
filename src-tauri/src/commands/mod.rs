@@ -233,6 +233,18 @@ pub mod folder_batch_import {
     use crate::{app_state::AppState, error::AppError};
     use tauri::{AppHandle, State};
     use tauri_plugin_dialog::DialogExt;
+    #[tauri::command(rename_all = "camelCase")]
+    pub async fn folder_batch_import_commit(
+        state: State<'_, AppState>,
+        request: crate::application::folder_batch_import_service::CommitRequest,
+    ) -> Result<crate::application::folder_batch_import_service::ImportResult, AppError> {
+        state
+            .shots
+            .folder_import
+            .commit(request)
+            .await
+            .map_err(map_error)
+    }
     fn map_error(error: ImportFailure) -> AppError {
         let mut mapped = AppError::invalid_input(error.message);
         mapped.details = Some(serde_json::json!({"code":error.code,"stage":error.stage}));

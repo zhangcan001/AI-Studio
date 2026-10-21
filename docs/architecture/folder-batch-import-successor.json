@@ -11,12 +11,12 @@
     "historicalProofBytesUnchanged": true,
     "gpuExecuted": false,
     "productImplementationChanged": true,
-    "checkpointStage": "P2"
+    "checkpointStage": "P3"
   },
   "files": {
     "scripts/folder-batch-import-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "824fd01abf866c1209805a82bebfce17377fc6067c50e09949e48f6f7c2a5ad8"
+      "afterHash": "e06b2d9396356bff46d7fbd01cda46c822494cf38a586f8337747d2506941542"
     },
     "scripts/library-confirm-ci-race-successor-guard.mjs": {
       "beforeHash": "2502ffcdb1c95cd75e85aa600ca019671c063c02c5c80b06a1b0f64c6a4f099b",
@@ -32,7 +32,11 @@
     },
     "src-tauri/src/application/mod.rs": {
       "beforeHash": "97e86019c4059ff056ec8bcb9743a9deda670ac7d7c493b185dbb3747d52806f",
-      "afterHash": "906e956f0a76d32d04a4c7e364ec8759438b6388ee2e18f155a43bdc3c43b3f4"
+      "afterHash": "c5413ffa0c2628a960113934ee484cf85418c3b18e277ac4b9666f933a3c4ee7"
+    },
+    "src-tauri/src/application/shot_batch_service.rs": {
+      "beforeHash": "0246759404af57516e33daceef7fc2c9804ee1f9b02f9791bb0dc7282332ff09",
+      "afterHash": "0072632a533278fd4f4c36e4bb356d2203095b94093bb10b8633ae9d6e685554"
     },
     "src-tauri/src/application/shot_video_input_service.rs": {
       "beforeHash": "2e0fe451762e902ef9ce95924b39149a08c70edcfbea937856b86366db8d84c3",
@@ -48,11 +52,11 @@
     },
     "src-tauri/src/commands/mod.rs": {
       "beforeHash": "ac9b23c48336ba44f8648c5fc794207b6b2452c7d834831c4291cdd540525c24",
-      "afterHash": "b21233b81a1cf7d418a26173ef64a60a82d43df364a6197ba7f927f690171953"
+      "afterHash": "ed2d8872459734af0fea783920daf9b849defbcaff5e8cc59daba5356e505ca8"
     },
     "src-tauri/src/lib.rs": {
       "beforeHash": "64b314ee8dc877ec0b3f55e83be58d35bb3790ef126f953bcb7cb50634e36464",
-      "afterHash": "2383044db9b84e474cf032157f63762360a48df422c160df8544d70ba391f6b7"
+      "afterHash": "e88bb6a9f0f75fc7e8634bdb5ab23b28d54702c390fee6852507f8ac3f1a64a6"
     },
     "src/features/shots/__fixtures__/folderEntityMentions.json": {
       "beforeHash": null,
@@ -64,11 +68,11 @@
     },
     "src/services/tauriClient.ts": {
       "beforeHash": "5147c17deb6e2d2521697cb142b347e1385c06f69cf07da07cd09f3bf1786d84",
-      "afterHash": "c34df066bb796804a89c8fdbb23e198cd3310b419c16c8f20a68d69779d4021c"
+      "afterHash": "7ba9e453c6c180317fbe5dba343b20c4cbf3255a721168288ad3c8969b971581"
     },
     "src/types/folderBatchImport.ts": {
       "beforeHash": null,
-      "afterHash": "3ecf4582da35841372b0f4ac9167f6b062ed75c5fc8da8440cc734a0c6dda761"
+      "afterHash": "b77b2e4f851bb048a147c725fbf4441d6b150698ed924293cffe5598a91a0feb"
     }
   }
 }

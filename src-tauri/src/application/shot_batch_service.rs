@@ -514,6 +514,23 @@ impl ShotBatchService {
         &self,
         request: CreateShotBatchRequest,
     ) -> Result<ProductionBatchDetail, ShotBatchServiceError> {
+        self.create_named(request, None).await
+    }
+
+    /// Same authoritative frozen batch preparation, with an explicit import label.
+    pub(crate) async fn create_named(
+        &self,
+        request: CreateShotBatchRequest,
+        name: Option<String>,
+    ) -> Result<ProductionBatchDetail, ShotBatchServiceError> {
+        let name = name.map(|s| s.trim().to_owned());
+        if name.as_ref().is_some_and(|s| {
+            s.is_empty() || s.chars().count() > 120 || s.contains(['\0', '\n', '\r'])
+        }) {
+            return Err(ShotBatchServiceError::InvalidInput(
+                "批次名称必须为1–120字且不能含控制换行".into(),
+            ));
+        }
         validate_project(&request.project_id)?;
         if request.shot_ids.is_empty() || request.shot_ids.len() > MAX_SHOT_BATCH_ITEMS {
             return Err(ShotBatchServiceError::InvalidInput(format!(
@@ -566,11 +583,13 @@ impl ShotBatchService {
         let batch = ProductionBatch {
             id: batch_id.clone(),
             project_id: request.project_id.clone(),
-            name: format!(
-                "{label} · {} · {}",
-                project.name,
-                now.format("%Y-%m-%d %H:%M:%S")
-            ),
+            name: name.unwrap_or_else(|| {
+                format!(
+                    "{label} · {} · {}",
+                    project.name,
+                    now.format("%Y-%m-%d %H:%M:%S")
+                )
+            }),
             status: ProductionBatchStatus::Ready,
             // H3 remains execution-serial, but an independent failed Shot
             // should not block the remaining selected Shots.

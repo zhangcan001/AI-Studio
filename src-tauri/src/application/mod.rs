@@ -363,6 +363,16 @@ pub mod folder_batch_import_service {
                 "仅支持 ai-studio-shot-batch version 1",
             ));
         }
+        if manifest.queue.name.as_ref().is_some_and(|name| {
+            name.trim().is_empty()
+                || name.trim().chars().count() > 120
+                || name.contains(['\0', '\n', '\r'])
+        }) {
+            return Err(failure(
+                "INVALID_MANIFEST",
+                "批次名称必须为1–120字且不能含换行或 NUL",
+            ));
+        }
         if manifest.name.trim().is_empty()
             || manifest.shots.is_empty()
             || manifest.shots.len() > 500
@@ -668,9 +678,14 @@ pub mod folder_batch_import_service {
         root: PathBuf,
         created_at: chrono::DateTime<chrono::Utc>,
         plan: Plan,
+        state: SessionState,
     }
     pub struct FolderBatchImportService {
         sessions: Mutex<HashMap<String, Session>>,
+        commit_services: Option<CommitServices>,
+        project_locks: Arc<std::sync::Mutex<BTreeSet<String>>>,
+        #[cfg(test)]
+        faults: std::sync::Mutex<BTreeSet<&'static str>>,
         definitions: Arc<dyn GenerationDefinitionRepository>,
         admission: Arc<dyn NewGenerationAdmission>,
         shots: Arc<dyn ShotBulkRepository>,
@@ -691,6 +706,10 @@ pub mod folder_batch_import_service {
         ) -> Self {
             Self {
                 sessions: Mutex::new(HashMap::new()),
+                commit_services: None,
+                project_locks: Arc::new(std::sync::Mutex::new(BTreeSet::new())),
+                #[cfg(test)]
+                faults: std::sync::Mutex::new(BTreeSet::new()),
                 definitions,
                 admission,
                 shots,
@@ -713,11 +732,13 @@ pub mod folder_batch_import_service {
                 .await?;
             let mut sessions = self.sessions.lock().await;
             sessions.retain(|_, s| {
-                self.clock
-                    .now()
-                    .signed_duration_since(s.created_at)
-                    .num_minutes()
-                    < 30
+                matches!(s.state, SessionState::Writing)
+                    || self
+                        .clock
+                        .now()
+                        .signed_duration_since(s.created_at)
+                        .num_minutes()
+                        < 30
             });
             if sessions.len() >= 32 {
                 return Err(failure(
@@ -733,6 +754,7 @@ pub mod folder_batch_import_service {
                     root,
                     created_at: self.clock.now(),
                     plan,
+                    state: SessionState::Previewed,
                 },
             );
             Ok(view)
@@ -743,6 +765,12 @@ pub mod folder_batch_import_service {
             options: PreviewOptions,
         ) -> Result<Preview, ImportFailure> {
             let session = self.session(id).await?;
+            if !matches!(session.state, SessionState::Previewed) {
+                return Err(failure(
+                    "SESSION_CONSUMED",
+                    "写入中的或已结束的会话不能重新校验",
+                ));
+            }
             if options
                 .name_suffix
                 .as_ref()
@@ -766,7 +794,9 @@ pub mod folder_batch_import_service {
             let live = sessions
                 .get_mut(id)
                 .ok_or_else(|| failure("SESSION_CONSUMED", "会话已关闭"))?;
-            if live.plan.view.preview_version != session.plan.view.preview_version {
+            if !matches!(live.state, SessionState::Previewed)
+                || live.plan.view.preview_version != session.plan.view.preview_version
+            {
                 return Err(failure("STALE_PREVIEW", "预览已被更新，请重新校验"));
             }
             live.plan = plan;
@@ -774,7 +804,14 @@ pub mod folder_batch_import_service {
             Ok(live.plan.view.clone())
         }
         pub async fn discard(&self, id: &str) -> Result<(), ImportFailure> {
-            self.sessions.lock().await.remove(id);
+            let mut sessions = self.sessions.lock().await;
+            if sessions
+                .get(id)
+                .is_some_and(|s| matches!(s.state, SessionState::Writing))
+            {
+                return Err(failure("IMPORT_IN_PROGRESS", "写入中不能丢弃会话"));
+            }
+            sessions.remove(id);
             Ok(())
         }
         async fn session(&self, id: &str) -> Result<Session, ImportFailure> {
@@ -782,12 +819,13 @@ pub mod folder_batch_import_service {
             let s = sessions
                 .get(id)
                 .ok_or_else(|| failure("SESSION_CONSUMED", "预览已关闭或过期，请重新选择文件夹"))?;
-            if self
-                .clock
-                .now()
-                .signed_duration_since(s.created_at)
-                .num_minutes()
-                >= 30
+            if !matches!(s.state, SessionState::Writing)
+                && self
+                    .clock
+                    .now()
+                    .signed_duration_since(s.created_at)
+                    .num_minutes()
+                    >= 30
             {
                 return Err(failure("SESSION_CONSUMED", "预览已过期，请重新选择文件夹"));
             }
@@ -1241,6 +1279,814 @@ pub mod folder_batch_import_service {
         Ok(())
     }
 
+    #[derive(Clone)]
+    enum SessionState {
+        Previewed,
+        Writing,
+        Terminal(Box<ImportResult>),
+    }
+    #[derive(Clone, Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub struct CommitRequest {
+        pub session_id: String,
+        pub preview_version: u64,
+        pub manifest_sha256: String,
+        pub include_row_keys: Vec<String>,
+        pub create_queue: bool,
+        pub auto_start: bool,
+        pub name_suffix: Option<String>,
+    }
+    #[derive(Clone, Debug, Default, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Residual {
+        pub unverified_file_cleanup: bool,
+        pub shot_ids: Vec<String>,
+        pub entity_ids: Vec<String>,
+        pub asset_ids: Vec<String>,
+        pub batch_id: Option<String>,
+    }
+    #[derive(Clone, Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CompensationError {
+        pub target: String,
+        pub id: String,
+        pub message: String,
+    }
+    #[derive(Clone, Debug, Default, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ImportResult {
+        pub outcome: String,
+        pub failure: Option<ImportFailure>,
+        pub compensation_errors: Vec<CompensationError>,
+        pub created_shot_ids: Vec<String>,
+        pub reused_entity_ids: Vec<String>,
+        pub created_entity_ids: Vec<String>,
+        pub imported_asset_ids: Vec<String>,
+        pub batch_id: Option<String>,
+        pub item_count: usize,
+        pub auto_started: bool,
+        pub residual: Residual,
+        pub warnings: Vec<String>,
+    }
+    /// Test seam for explicit Start only; the product adapter delegates to the existing admission/Queue authority.
+    #[async_trait::async_trait]
+    pub trait ImportStart: Send + Sync {
+        async fn start(&self, project: &str, batch: &str) -> Result<(), ImportFailure>;
+    }
+    #[async_trait::async_trait]
+    impl ImportStart for super::production_start_admission_service::ProductionStartAdmissionService {
+        async fn start(&self, project: &str, batch: &str) -> Result<(), ImportFailure> {
+            super::production_start_admission_service::ProductionStartAdmissionService::start(
+                self, project, batch,
+            )
+            .await
+            .map_err(|_| {
+                failure(
+                    "QUEUE_START_FAILED",
+                    "正式启动失败；批次已保留，请到生产队列检查后显式启动",
+                )
+            })
+        }
+    }
+    pub struct CommitServices {
+        pub bulk: Arc<super::shot_bulk_service::ShotBulkService>,
+        pub shots: Arc<super::shot_service::ShotService>,
+        pub source: Arc<super::source_asset_import_service::SourceAssetImportService>,
+        pub inputs: Arc<super::shot_video_input_service::ShotVideoInputService>,
+        pub batch: Arc<super::shot_batch_service::ShotBatchService>,
+        pub queue: Arc<super::production_queue_service::ProductionQueueService>,
+        pub deletion: Arc<super::asset_deletion_service::AssetDeletionService>,
+        pub start: Arc<dyn ImportStart>,
+    }
+    struct ProjectImportGuard {
+        project: String,
+        locks: Arc<std::sync::Mutex<BTreeSet<String>>>,
+    }
+    impl ProjectImportGuard {
+        fn acquire(
+            locks: Arc<std::sync::Mutex<BTreeSet<String>>>,
+            project: &str,
+        ) -> Result<Self, ImportFailure> {
+            if !locks
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(project.into())
+            {
+                return Err(failure(
+                    "IMPORT_IN_PROGRESS",
+                    "当前项目正在提交另一份导入，请稍后查看结果",
+                ));
+            }
+            Ok(Self {
+                project: project.into(),
+                locks,
+            })
+        }
+    }
+    impl Drop for ProjectImportGuard {
+        fn drop(&mut self) {
+            self.locks
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&self.project);
+        }
+    }
+    fn stage_failure(stage: &str, code: &str, message: &str) -> ImportFailure {
+        ImportFailure {
+            stage: stage.into(),
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+    fn source_failure(
+        result: &mut ImportResult,
+        error: super::source_asset_import_service::SourceAssetImportError,
+    ) -> ImportFailure {
+        if matches!(
+            error,
+            super::source_asset_import_service::SourceAssetImportError::AssetPersistence { .. }
+        ) {
+            // The existing importer owns file rollback but cannot attest every deletion.
+            result.residual.unverified_file_cleanup = true;
+            result.compensation_errors.push(CompensationError {
+                target: "source-files".into(),
+                id: "unconfirmed".into(),
+                message:
+                    "素材存储发生错误；底层文件清理未能确认，请检查导入日志，不要直接重复导入。"
+                        .into(),
+            });
+        }
+        stage_failure(
+            "A",
+            "SOURCE_IMPORT_FAILED",
+            "素材导入失败，请检查项目存储和素材格式",
+        )
+    }
+    fn selected_files(plan: &Plan, rows: &[Row]) -> Result<BTreeSet<String>, ImportFailure> {
+        let mut files: BTreeSet<_> = rows
+            .iter()
+            .flat_map(|r| {
+                r.first_frame
+                    .iter()
+                    .chain(r.last_frame.iter())
+                    .chain(r.references.iter())
+            })
+            .cloned()
+            .collect();
+        for name in rows.iter().flat_map(|r| r.entity_names.iter()) {
+            if plan
+                .view
+                .characters
+                .iter()
+                .any(|e| e.name == *name && e.action == "create")
+            {
+                let entity = plan
+                    .manifest
+                    .characters
+                    .iter()
+                    .find(|e| e.name == *name)
+                    .ok_or_else(|| failure("STALE_PREVIEW", "实体计划不完整"))?;
+                files.extend(entity.images.iter().cloned());
+            }
+        }
+        if files.len() > 500 {
+            return Err(failure(
+                "REFERENCE_LIMIT",
+                "本次选中镜头去重后的引用文件超过 500 个，请减少选择",
+            ));
+        }
+        Ok(files)
+    }
+    impl FolderBatchImportService {
+        pub fn with_commit_services(mut self, services: CommitServices) -> Self {
+            self.commit_services = Some(services);
+            self
+        }
+        fn injection(&self, stage: &str) -> Result<(), ImportFailure> {
+            #[cfg(test)]
+            {
+                let faults = self.faults.lock().unwrap_or_else(|e| e.into_inner());
+                if stage == "B" && faults.contains("B_PANIC") {
+                    panic!("owned import panic fixture");
+                }
+                if faults.contains(stage) {
+                    return Err(stage_failure(
+                        stage,
+                        "INJECTED_FAILURE",
+                        "隔离测试注入的失败",
+                    ));
+                }
+            }
+            #[cfg(not(test))]
+            let _ = stage;
+            Ok(())
+        }
+        pub async fn commit(&self, request: CommitRequest) -> Result<ImportResult, ImportFailure> {
+            let initial = self.session(&request.session_id).await?;
+            let _guard =
+                ProjectImportGuard::acquire(self.project_locks.clone(), &initial.project_id)?;
+            let session = self.session(&request.session_id).await?;
+            match &session.state {
+                SessionState::Terminal(result) => {
+                    let mut result = (**result).clone();
+                    result
+                        .warnings
+                        .push("SESSION_CONSUMED：返回上次结果，未重复写入。".into());
+                    return Ok(result);
+                }
+                SessionState::Writing => {
+                    return Err(failure(
+                        "SESSION_CONSUMED",
+                        "上次写入未正常结案；不会再次执行，请检查残留后重新选择文件夹",
+                    ))
+                }
+                SessionState::Previewed => {}
+            }
+            let preview = &session.plan.view;
+            if request.preview_version != preview.preview_version
+                || request.manifest_sha256 != preview.manifest_sha256
+                || request.name_suffix != preview.name_suffix
+            {
+                return Err(failure(
+                    "STALE_PREVIEW",
+                    "名称后缀或预览版本已变化，请重新校验",
+                ));
+            }
+            let keys: BTreeSet<_> = request.include_row_keys.iter().cloned().collect();
+            if keys.is_empty()
+                || keys.len() != request.include_row_keys.len()
+                || keys
+                    .iter()
+                    .any(|key| !preview.rows.iter().any(|r| r.row_key == *key))
+            {
+                return Err(failure("INVALID_MANIFEST", "必须选择有效且不重复的会话行"));
+            }
+            let rows: Vec<_> = preview
+                .rows
+                .iter()
+                .filter(|r| keys.contains(&r.row_key))
+                .cloned()
+                .collect();
+            if rows.iter().any(|r| !r.errors.is_empty()) {
+                return Err(failure("INVALID_MANIFEST", "错误行不可提交"));
+            }
+            if request.auto_start && !request.create_queue {
+                return Err(failure(
+                    "INVALID_MANIFEST",
+                    "自动开始需要先创建正式生产批次",
+                ));
+            }
+            if request.create_queue && rows.len() > super::shot_batch_service::MAX_SHOT_BATCH_ITEMS
+            {
+                return Err(failure(
+                    "REFERENCE_LIMIT",
+                    format!(
+                        "正式单批上限为 {} 项；请选择更少镜头，或不创建队列",
+                        super::shot_batch_service::MAX_SHOT_BATCH_ITEMS
+                    ),
+                ));
+            }
+            let files = selected_files(&session.plan, &rows)?;
+            let filename = match preview.format_source.as_str() {
+                "h3-batch" => "h3-batch.json",
+                "h3-omni-batch" => "h3-omni-batch.json",
+                _ => "manifest.json",
+            };
+            if sha(&read_file(&session.root, filename, 1024 * 1024)
+                .map_err(|_| failure("STALE_PREVIEW", "清单已丢失或无法安全读取"))?)
+                != preview.manifest_sha256
+            {
+                return Err(failure("STALE_PREVIEW", "清单已变化，请重新校验"));
+            }
+            for file in &files {
+                let bytes = read_file(
+                    &session.root,
+                    file,
+                    super::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
+                )
+                .map_err(|_| failure("STALE_PREVIEW", "引用文件已丢失或无法安全读取"))?;
+                if session.plan.file_sha256.get(file) != Some(&sha(&bytes)) {
+                    return Err(failure("STALE_PREVIEW", "引用文件内容已变化，请重新校验"));
+                }
+            }
+            let fresh = self
+                .build(
+                    &session.project_id,
+                    &session.root,
+                    &request.session_id,
+                    preview.preview_version,
+                    &session.plan.options,
+                )
+                .await?;
+            for row in &rows {
+                let next = fresh
+                    .view
+                    .rows
+                    .iter()
+                    .find(|r| r.row_key == row.row_key)
+                    .ok_or_else(|| failure("STALE_PREVIEW", "镜头计划已变化"))?;
+                if let Some(issue) = next.errors.first() {
+                    return Err(failure(&issue.code, issue.message.clone()));
+                }
+                if serde_json::to_value(row).ok() != serde_json::to_value(next).ok() {
+                    return Err(failure("STALE_PREVIEW", "镜头或实体计划已变化，请重新校验"));
+                }
+                let key = serde_json::to_string(
+                    row.generator
+                        .as_ref()
+                        .ok_or_else(|| failure("GENERATOR_UNAVAILABLE", "生成器不存在"))?,
+                )
+                .unwrap();
+                if session.plan.fingerprints.get(&key) != fresh.fingerprints.get(&key) {
+                    return Err(failure("STALE_PREVIEW", "正式生成器版本内容已变化"));
+                }
+                for name in &row.entity_names {
+                    let old = session.plan.entities.iter().find(|e| e.name == *name);
+                    let new = fresh.entities.iter().find(|e| e.name == *name);
+                    if serde_json::to_value(old).ok() != serde_json::to_value(new).ok() {
+                        return Err(failure("STALE_PREVIEW", "实体或参考图已被更新，请重新校验"));
+                    }
+                }
+            }
+            let services = self
+                .commit_services
+                .as_ref()
+                .ok_or_else(|| failure("IMPORT_UNAVAILABLE", "导入写入服务未配置"))?;
+            {
+                let mut sessions = self.sessions.lock().await;
+                let live = sessions
+                    .get_mut(&request.session_id)
+                    .ok_or_else(|| failure("SESSION_CONSUMED", "会话已关闭"))?;
+                if !matches!(live.state, SessionState::Previewed)
+                    || live.plan.view.preview_version != request.preview_version
+                {
+                    return Err(failure("STALE_PREVIEW", "预览已更新"));
+                }
+                live.state = SessionState::Writing;
+            }
+            let mut result = ImportResult {
+                outcome: "completed".into(),
+                ..Default::default()
+            };
+            if let Err(error) = self
+                .write(
+                    services,
+                    &session,
+                    &fresh,
+                    &rows,
+                    &files,
+                    &request,
+                    &mut result,
+                )
+                .await
+            {
+                result.failure = Some(error);
+                self.compensate(services, &session.project_id, &mut result)
+                    .await;
+            }
+            if let Some(live) = self.sessions.lock().await.get_mut(&request.session_id) {
+                live.state = SessionState::Terminal(Box::new(result.clone()));
+            }
+            Ok(result)
+        }
+        async fn write(
+            &self,
+            services: &CommitServices,
+            session: &Session,
+            plan: &Plan,
+            rows: &[Row],
+            files: &BTreeSet<String>,
+            request: &CommitRequest,
+            result: &mut ImportResult,
+        ) -> Result<(), ImportFailure> {
+            use crate::application::generation_input_preparer::GenerationInputValue;
+            use crate::application::ports::{
+                ShotRowEditRecord, ShotStageConfigRecord, ShotStagePromptRecord,
+                ShotVideoInputAsset, ShotVideoInputScope,
+            };
+            use crate::domain::{SeedValue, ShotStage};
+            let project = &session.project_id;
+            let mut assets = BTreeMap::new();
+            self.injection("A")?;
+            for file in files {
+                let bytes = read_file(
+                    &session.root,
+                    file,
+                    super::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
+                )
+                .map_err(|_| stage_failure("A", "STALE_PREVIEW", "素材已无法安全读取"))?;
+                if plan.file_sha256.get(file) != Some(&sha(&bytes)) {
+                    return Err(stage_failure(
+                        "A",
+                        "STALE_PREVIEW",
+                        "素材在导入期间发生变化",
+                    ));
+                }
+                let name = Path::new(file)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .ok_or_else(|| stage_failure("A", "IMAGE_INVALID", "素材文件名无效"))?;
+                let asset = services
+                    .source
+                    .import_bytes(project, name, &bytes)
+                    .await
+                    .map_err(|error| source_failure(result, error))?;
+                let id = asset.id.to_string();
+                assets.insert(file.clone(), id.clone());
+                result.imported_asset_ids.push(id);
+            }
+            self.injection("B")?;
+            let mut entities = BTreeMap::new();
+            for name in rows.iter().flat_map(|r| r.entity_names.iter()) {
+                if entities.contains_key(name) {
+                    continue;
+                }
+                let entity = plan
+                    .entities
+                    .iter()
+                    .find(|e| e.name == *name)
+                    .ok_or_else(|| stage_failure("B", "ENTITY_NOT_FOUND", "实体不可用"))?;
+                let entity = if plan
+                    .view
+                    .characters
+                    .iter()
+                    .any(|e| e.name == *name && e.action == "create")
+                {
+                    let declaration = plan
+                        .manifest
+                        .characters
+                        .iter()
+                        .find(|e| e.name == *name)
+                        .ok_or_else(|| stage_failure("B", "ENTITY_NOT_FOUND", "实体声明不可用"))?;
+                    let ids = declaration
+                        .images
+                        .iter()
+                        .map(|p| {
+                            assets.get(p).cloned().ok_or_else(|| {
+                                stage_failure("B", "IMAGE_INVALID", "实体图片尚未导入")
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let cover = declaration
+                        .cover
+                        .as_ref()
+                        .and_then(|p| assets.get(p))
+                        .cloned()
+                        .or_else(|| ids.first().cloned());
+                    let created = self
+                        .entities
+                        .create(
+                            project,
+                            entity.kind,
+                            crate::domain::story_entity::StoryEntityUpsert {
+                                name: name.clone(),
+                                description: entity.description.clone(),
+                                cover_asset_id: cover,
+                                image_asset_ids: ids,
+                            },
+                        )
+                        .await
+                        .map_err(|_| stage_failure("B", "ENTITY_CREATE_FAILED", "实体创建失败"))?;
+                    result.created_entity_ids.push(created.id.clone());
+                    created
+                } else {
+                    if !result.reused_entity_ids.contains(&entity.id) {
+                        result.reused_entity_ids.push(entity.id.clone());
+                    }
+                    entity.clone()
+                };
+                entities.insert(name.clone(), entity);
+            }
+            self.injection("C1")?;
+            let content = serde_json::json!({"schemaVersion":1,"shots":rows.iter().map(|r|serde_json::json!({"name":r.name,"description":format!("导入自 {} · manifest {}",plan.view.display_root_name,&plan.view.manifest_sha256[..12]),"videoPrompt":r.prompt})).collect::<Vec<_>>()});
+            let created = services
+                .bulk
+                .commit_import(&super::shot_bulk_service::ShotBulkImportRequest {
+                    project_id: project.clone(),
+                    format: super::shot_bulk_service::ShotBulkInputFormat::Json,
+                    contents: content.to_string(),
+                })
+                .await
+                .map_err(|_| {
+                    stage_failure(
+                        "C1",
+                        "SHOT_CREATE_FAILED",
+                        "镜头创建失败；可能发生同名或并发编辑冲突",
+                    )
+                })?;
+            result.created_shot_ids = created.created.into_iter().map(|r| r.shot_id).collect();
+            if result.created_shot_ids.len() != rows.len() {
+                return Err(stage_failure(
+                    "C1",
+                    "SHOT_CREATE_FAILED",
+                    "镜头创建数量不一致，拒绝继续",
+                ));
+            }
+            self.injection("C2")?;
+            let mut configs = Vec::new();
+            let mut prompts = Vec::new();
+            for (row, id) in rows.iter().zip(&result.created_shot_ids) {
+                let pair = row
+                    .generator
+                    .as_ref()
+                    .ok_or_else(|| stage_failure("C2", "GENERATOR_UNAVAILABLE", "生成器不可用"))?;
+                let definition = self
+                    .definitions
+                    .find_active(&pair.workflow_version_id, &pair.recipe_id)
+                    .await
+                    .map_err(|_| stage_failure("C2", "GENERATOR_UNAVAILABLE", "生成器无法读取"))?
+                    .ok_or_else(|| stage_failure("C2", "GENERATOR_UNAVAILABLE", "生成器不可用"))?;
+                let mut values = BTreeMap::from([
+                    ("width".into(), GenerationInputValue::Integer(row.width)),
+                    ("height".into(), GenerationInputValue::Integer(row.height)),
+                    (
+                        "duration_seconds".into(),
+                        GenerationInputValue::Integer(row.duration_seconds),
+                    ),
+                ]);
+                if let Some(seed) = row.seed {
+                    values.insert(
+                        "seed".into(),
+                        GenerationInputValue::Seed(SeedValue::Fixed(seed)),
+                    );
+                }
+                let scalar_values = super::shot_service::validate_stage_config_values(
+                    ShotStage::Video,
+                    &definition,
+                    &values,
+                )
+                .map_err(|_| {
+                    stage_failure("C2", "INPUT_VALIDATION_FAILED", "阶段参数已不再有效")
+                })?;
+                configs.push(ShotStageConfigRecord {
+                    shot_id: id.clone(),
+                    stage: ShotStage::Video,
+                    workflow_version_id: pair.workflow_version_id.clone(),
+                    recipe_id: pair.recipe_id.clone(),
+                    scalar_values,
+                    updated_at: self.clock.now(),
+                });
+                prompts.push(ShotStagePromptRecord {
+                    shot_id: id.clone(),
+                    stage: ShotStage::Video,
+                    prompt_text: super::prompt_library_service::canonical_prompt_text(&row.prompt)
+                        .map_err(|_| stage_failure("C3", "INVALID_PROMPT", "提示词不合法"))?,
+                    prompt_entry_id: None,
+                    prompt_version_id: None,
+                    updated_at: self.clock.now(),
+                });
+            }
+            self.shots
+                .upsert_stage_configs_atomic(project, &configs, &[])
+                .await
+                .map_err(|_| stage_failure("C2", "CONFIG_SAVE_FAILED", "阶段配置保存失败"))?;
+            self.injection("C3")?;
+            self.shots
+                .update_stage_prompts_atomic(project, &prompts)
+                .await
+                .map_err(|_| stage_failure("C3", "PROMPT_SAVE_FAILED", "提示词保存失败"))?;
+            self.injection("C4")?;
+            for (row, id) in rows.iter().zip(&result.created_shot_ids) {
+                let ids = row
+                    .entity_names
+                    .iter()
+                    .filter_map(|n| entities.get(n).map(|e| e.id.clone()))
+                    .collect();
+                services
+                    .shots
+                    .save_row_atomic(ShotRowEditRecord {
+                        project_id: project.clone(),
+                        shot_id: id.clone(),
+                        stage: ShotStage::Video,
+                        prompt_text: None,
+                        config: None,
+                        entity_ids: Some(ids),
+                        updated_at: self.clock.now(),
+                    })
+                    .await
+                    .map_err(|_| stage_failure("C4", "ENTITY_BIND_FAILED", "镜头实体绑定失败"))?;
+            }
+            self.injection("D")?;
+            for (row, id) in rows.iter().zip(&result.created_shot_ids) {
+                let mut inputs = Vec::new();
+                for (key, path) in [
+                    ("first_frame", row.first_frame.as_ref()),
+                    ("last_frame", row.last_frame.as_ref()),
+                ] {
+                    if let Some(path) = path {
+                        inputs.push(ShotVideoInputAsset {
+                            input_key: key.into(),
+                            ordinal: 0,
+                            asset_id: assets.get(path).cloned().ok_or_else(|| {
+                                stage_failure("D", "IMAGE_INVALID", "图片未成功导入")
+                            })?,
+                        });
+                    }
+                }
+                if row.mode == Mode::Reference {
+                    let mut refs: Vec<_> = row
+                        .references
+                        .iter()
+                        .filter_map(|p| assets.get(p).cloned())
+                        .collect();
+                    let bound: Vec<_> = entities.values().cloned().collect();
+                    for entity in super::shot_video_input_service::explicit_entity_mentions(
+                        &row.prompt,
+                        project,
+                        &bound,
+                    )
+                    .map_err(|_| stage_failure("D", "ENTITY_REFERENCE_UNKNOWN", "实体引用不可用"))?
+                    {
+                        let cover = entity
+                            .cover_asset_id
+                            .as_ref()
+                            .or_else(|| entity.image_asset_ids.first())
+                            .ok_or_else(|| stage_failure("D", "IMAGE_INVALID", "实体图片不可用"))?;
+                        if !refs.contains(cover) {
+                            refs.push(cover.clone());
+                        }
+                    }
+                    let mut unique = Vec::new();
+                    for id in refs {
+                        if !unique.contains(&id) {
+                            unique.push(id);
+                        }
+                    }
+                    inputs.extend(unique.into_iter().enumerate().map(|(i, id)| {
+                        ShotVideoInputAsset {
+                            input_key: "reference_images".into(),
+                            ordinal: i as i64,
+                            asset_id: id,
+                        }
+                    }));
+                }
+                let pair = row.generator.as_ref().unwrap();
+                let saved = services
+                    .inputs
+                    .save(
+                        &ShotVideoInputScope {
+                            project_id: project.clone(),
+                            shot_id: id.clone(),
+                            workflow_version_id: pair.workflow_version_id.clone(),
+                            recipe_id: pair.recipe_id.clone(),
+                        },
+                        None,
+                        &inputs,
+                    )
+                    .await;
+                if saved.is_err() {
+                    result.residual.shot_ids.push(id.clone());
+                    return Err(stage_failure(
+                        "D",
+                        "INPUT_SAVE_FAILED",
+                        "正式输入保存被拒绝；保留可能被并发编辑的镜头",
+                    ));
+                }
+            }
+            self.injection("E")?;
+            if request.create_queue {
+                let batch_plan = services
+                    .batch
+                    .plan_for_shots(project, ShotStage::Video, &result.created_shot_ids)
+                    .await
+                    .map_err(|_| stage_failure("E", "BATCH_BLOCKED", "正式批量准备不可用"))?;
+                if batch_plan
+                    .rows
+                    .iter()
+                    .any(|r| !r.blocking_reasons.is_empty() || !r.eligible)
+                {
+                    return Err(stage_failure(
+                        "E",
+                        "BATCH_BLOCKED",
+                        "正式预检阻断了批次；未启动生产",
+                    ));
+                }
+                let batch = services
+                    .batch
+                    .create_named(
+                        super::shot_batch_service::CreateShotBatchRequest {
+                            project_id: project.clone(),
+                            stage: ShotStage::Video,
+                            shot_ids: result.created_shot_ids.clone(),
+                        },
+                        plan.manifest.queue.name.clone(),
+                    )
+                    .await
+                    .map_err(|_| stage_failure("E", "BATCH_BLOCKED", "批次创建失败，未启动生产"))?;
+                result.batch_id = Some(batch.batch.id.as_str().to_owned());
+                result.item_count = batch.items.len();
+                if !batch.batch.continue_on_failure {
+                    return Err(stage_failure(
+                        "E",
+                        "BATCH_POLICY_MISMATCH",
+                        "正式批次策略不匹配",
+                    ));
+                }
+                self.injection("E_AFTER")?;
+                if request.auto_start {
+                    match services
+                        .start
+                        .start(project, result.batch_id.as_deref().unwrap())
+                        .await
+                    {
+                        Ok(()) => result.auto_started = true,
+                        Err(error) => result.warnings.push(error.to_string()),
+                    }
+                }
+            }
+            Ok(())
+        }
+        async fn compensate(
+            &self,
+            services: &CommitServices,
+            project: &str,
+            result: &mut ImportResult,
+        ) {
+            if let Some(batch) = &result.batch_id {
+                let owned_pending =
+                    services
+                        .queue
+                        .get(project, batch)
+                        .await
+                        .ok()
+                        .is_some_and(|d| {
+                            d.batch.status == crate::domain::ProductionBatchStatus::Ready
+                                && d.items.len() == result.item_count
+                                && d.items.iter().all(|i| {
+                                    i.status == crate::domain::ProductionBatchItemStatus::Pending
+                                        && i.task_id.is_none()
+                                })
+                        });
+                if !owned_pending
+                    || services.queue.archive(project, batch).await.is_err()
+                    || services.queue.delete(project, batch).await.is_err()
+                {
+                    result.residual.batch_id = Some(batch.clone());
+                    result.compensation_errors.push(CompensationError {
+                        target: "batch".into(),
+                        id: batch.clone(),
+                        message: "批次不再是从未启动的待执行状态，或归档/删除失败；已保留".into(),
+                    });
+                }
+            }
+            for id in result.created_shot_ids.iter().rev() {
+                if result.residual.shot_ids.contains(id)
+                    || result.residual.batch_id.is_some()
+                    || services.shots.delete(project, id).await.is_err()
+                {
+                    if !result.residual.shot_ids.contains(id) {
+                        result.residual.shot_ids.push(id.clone());
+                    }
+                    result.compensation_errors.push(CompensationError {
+                        target: "shot".into(),
+                        id: id.clone(),
+                        message: "保留未清理批次的镜头关联，或镜头受保护/删除失败".into(),
+                    });
+                }
+            }
+            for id in result.created_entity_ids.iter().rev() {
+                if !result.residual.shot_ids.is_empty()
+                    || self.entities.delete(project, id).await.is_err()
+                {
+                    result.residual.entity_ids.push(id.clone());
+                    result.compensation_errors.push(CompensationError {
+                        target: "entity".into(),
+                        id: id.clone(),
+                        message: "保留仍有关联或未能清理的实体".into(),
+                    });
+                }
+            }
+            for id in result.imported_asset_ids.iter().rev() {
+                if self.injection("DELETE_ASSET").is_err()
+                    || services
+                        .deletion
+                        .delete(project, std::slice::from_ref(id))
+                        .await
+                        .is_err()
+                {
+                    result.residual.asset_ids.push(id.clone());
+                    result.compensation_errors.push(CompensationError {
+                        target: "asset".into(),
+                        id: id.clone(),
+                        message: "素材受保护或删除失败".into(),
+                    });
+                }
+            }
+            result.outcome = if !result.residual.unverified_file_cleanup
+                && result.residual.batch_id.is_none()
+                && result.residual.shot_ids.is_empty()
+                && result.residual.entity_ids.is_empty()
+                && result.residual.asset_ids.is_empty()
+            {
+                "compensated"
+            } else {
+                "partial"
+            }
+            .into();
+            tracing::warn!(outcome=%result.outcome,stage=?result.failure.as_ref().map(|e|&e.stage),"folder import compensation completed");
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -1430,7 +2276,22 @@ pub mod folder_batch_import_service {
                 Vec<crate::application::ports::AvailableGenerationDefinition>,
                 crate::application::ports::RepositoryError,
             > {
-                Ok(vec![])
+                Ok(self
+                    .0
+                    .iter()
+                    .map(
+                        |d| crate::application::ports::AvailableGenerationDefinition {
+                            workflow_id: d.workflow_id.clone(),
+                            workflow_version_id: d.workflow_version_id.clone(),
+                            recipe_id: d.recipe_id.clone(),
+                            recipe_version: d.recipe_version.clone(),
+                            name: d.workflow_id.clone(),
+                            category: "video".into(),
+                            mode: "video".into(),
+                            recipe_yaml: d.recipe_yaml.clone(),
+                        },
+                    )
+                    .collect())
             }
         }
         struct PreviewAdmission;
@@ -1444,7 +2305,9 @@ pub mod folder_batch_import_service {
                 Ok(true)
             }
         }
+        const TEST_PROJECT: &str = "prj_00000000-0000-4000-8000-000000000001";
         struct PreviewFixture {
+            start: Arc<CountStart>,
             _temp: tempfile::TempDir,
             root: std::path::PathBuf,
             pool: sqlx::SqlitePool,
@@ -1506,6 +2369,11 @@ pub mod folder_batch_import_service {
                     recipe_yaml: yaml,
                 });
             }
+            for d in &definitions {
+                sqlx::query("INSERT INTO workflows(id,name,category,mode,created_at,updated_at) VALUES (?,?,'video','video',?,?)").bind(&d.workflow_id).bind(&d.workflow_id).bind(chrono::Utc::now().to_rfc3339()).bind(chrono::Utc::now().to_rfc3339()).execute(&pool).await.unwrap();
+                sqlx::query("INSERT INTO workflow_versions(id,workflow_id,version,api_workflow_json,workflow_sha256,created_at) VALUES (?,?,?,?,?,?)").bind(&d.workflow_version_id).bind(&d.workflow_id).bind(&d.workflow_version).bind(d.workflow_json.to_string()).bind(&d.workflow_sha256).bind(chrono::Utc::now().to_rfc3339()).execute(&pool).await.unwrap();
+                sqlx::query("INSERT INTO recipes(id,workflow_version_id,version,schema_version,recipe_yaml,recipe_sha256,created_at) VALUES (?,?,?,1,?,?,?)").bind(&d.recipe_id).bind(&d.workflow_version_id).bind(&d.recipe_version).bind(&d.recipe_yaml).bind(&d.recipe_sha256).bind(chrono::Utc::now().to_rfc3339()).execute(&pool).await.unwrap();
+            }
             m.characters.push(ManifestEntity {
                 name: "Alice".into(),
                 kind: None,
@@ -1521,18 +2389,29 @@ pub mod folder_batch_import_service {
                 std::fs::write(root.join("images").join(name), &png).unwrap();
             }
             std::fs::write(root.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
+            let definitions = Arc::new(PreviewDefinitions(definitions));
+            let entity_service = Arc::new(StoryEntityService::new(Arc::new(
+                SqliteStoryEntityRepository::new(pool.clone()),
+            )));
+            let start = Arc::new(CountStart::default());
+            let commits = commit_services(
+                &pool,
+                definitions.clone(),
+                entity_service.clone(),
+                start.clone(),
+            );
             let service = FolderBatchImportService::new(
-                Arc::new(PreviewDefinitions(definitions)),
+                definitions,
                 Arc::new(PreviewAdmission),
                 Arc::new(SqliteShotRepository::new(pool.clone())),
-                Arc::new(StoryEntityService::new(Arc::new(
-                    SqliteStoryEntityRepository::new(pool.clone()),
-                ))),
+                entity_service,
                 Arc::new(SqliteAssetRepository::new(pool.clone())),
                 Arc::new(SqliteProjectRepository::new(pool.clone())),
                 Arc::new(PreviewClock),
-            );
+            )
+            .with_commit_services(commits);
             PreviewFixture {
+                start,
                 _temp: temp,
                 root,
                 pool,
@@ -1670,6 +2549,561 @@ pub mod folder_batch_import_service {
                 .iter()
                 .any(|e| e.code == "DURATION_OUT_OF_RANGE"));
             fixture.pool.close().await;
+        }
+        struct NoExecution;
+        #[async_trait::async_trait]
+        impl crate::application::ports::ComfyAdapter for NoExecution {
+            async fn health_check(
+                &self,
+            ) -> Result<
+                crate::application::ports::ComfyHealth,
+                crate::application::ports::ComfyAdapterError,
+            > {
+                panic!("import must not contact ComfyUI")
+            }
+            async fn get_system_stats(
+                &self,
+            ) -> Result<
+                crate::application::ports::SystemStats,
+                crate::application::ports::ComfyAdapterError,
+            > {
+                panic!("import must not contact ComfyUI")
+            }
+            async fn get_object_info(
+                &self,
+            ) -> Result<serde_json::Value, crate::application::ports::ComfyAdapterError>
+            {
+                panic!("import must not contact ComfyUI")
+            }
+            async fn get_history(
+                &self,
+                _: &str,
+            ) -> Result<
+                crate::application::ports::ComfyHistory,
+                crate::application::ports::ComfyAdapterError,
+            > {
+                panic!("import must not contact ComfyUI")
+            }
+            async fn download_output(
+                &self,
+                _: &crate::application::ports::ComfyOutputFile,
+            ) -> Result<
+                crate::application::ports::ComfyOutputData,
+                crate::application::ports::ComfyAdapterError,
+            > {
+                panic!("import must not download")
+            }
+            async fn submit_workflow(
+                &self,
+                _: &str,
+                _: &str,
+                _: serde_json::Value,
+            ) -> Result<
+                crate::application::ports::PromptSubmission,
+                crate::application::ports::ComfyAdapterError,
+            > {
+                panic!("import must not submit GPU")
+            }
+            async fn subscribe_events(
+                &self,
+                _: &str,
+            ) -> Result<
+                Box<dyn crate::application::ports::ComfyEventSubscription>,
+                crate::application::ports::ComfyAdapterError,
+            > {
+                panic!("import must not subscribe")
+            }
+        }
+        #[derive(Default)]
+        struct CountStart(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl ImportStart for CountStart {
+            async fn start(&self, _: &str, _: &str) -> Result<(), ImportFailure> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        fn commit_services(
+            pool: &sqlx::SqlitePool,
+            definitions: Arc<dyn GenerationDefinitionRepository>,
+            entities: Arc<StoryEntityService>,
+            start: Arc<CountStart>,
+        ) -> CommitServices {
+            use crate::application::*;
+            use crate::infrastructure::database::repositories::{
+                story_entity::SqliteShotRowEditRepository,
+                story_entity::SqliteStoryEntityRepository, SqliteShotVideoInputRepository,
+            };
+            use crate::infrastructure::database::*;
+            let clock = Arc::new(PreviewClock);
+            let shots = Arc::new(SqliteShotRepository::new(pool.clone()));
+            let assets = Arc::new(SqliteAssetRepository::new(pool.clone()));
+            let projects = Arc::new(SqliteProjectRepository::new(pool.clone()));
+            let tasks = Arc::new(SqliteTaskRepository::new(pool.clone()));
+            let snapshots = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
+            let queue_repo = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
+            let prompts = Arc::new(SqlitePromptLibraryRepository::new(pool.clone()));
+            let store = Arc::new(crate::infrastructure::filesystem::FileSystemAssetStore::new());
+            let comfy = Arc::new(NoExecution);
+            let admission = Arc::new(PreviewAdmission);
+            let preparer = Arc::new(generation_input_preparer::GenerationInputPreparer::new(
+                assets.clone(),
+                store.clone(),
+                projects.clone(),
+                comfy.clone(),
+            ));
+            let inputs = Arc::new(
+                shot_video_input_service::ShotVideoInputService::new(
+                    assets.clone(),
+                    Arc::new(SqliteShotVideoInputRepository::new(pool.clone())),
+                    shots.clone(),
+                    definitions.clone(),
+                    admission.clone(),
+                    preparer,
+                    clock.clone(),
+                )
+                .with_story_entities(Arc::new(SqliteStoryEntityRepository::new(pool.clone()))),
+            );
+            let generation = Arc::new(generation_service::GenerationService::new(
+                tasks.clone(),
+                snapshots.clone(),
+                definitions.clone(),
+                comfy.clone(),
+                projects.clone(),
+                store.clone(),
+                assets.clone(),
+                clock.clone(),
+            ));
+            let recovery = Arc::new(task_recovery_service::TaskRecoveryService::new(
+                tasks.clone(),
+                snapshots,
+                assets.clone(),
+                comfy,
+                projects.clone(),
+                store.clone(),
+                clock.clone(),
+                Arc::new(ports::NoopTaskUpdateSink),
+            ));
+            let queue = Arc::new(
+                production_queue_service::ProductionQueueService::new(
+                    queue_repo.clone(),
+                    tasks.clone(),
+                    definitions.clone(),
+                    generation,
+                    queue_repo.clone(),
+                    recovery,
+                    clock.clone(),
+                )
+                .with_new_generation_admission(admission.clone()),
+            );
+            let query = Arc::new(task_query_service::TaskQueryService::new(
+                tasks.clone(),
+                assets.clone(),
+                definitions.clone(),
+            ));
+            let shot = Arc::new(
+                shot_service::ShotService::new(
+                    shots.clone(),
+                    tasks.clone(),
+                    assets.clone(),
+                    definitions.clone(),
+                    prompts.clone(),
+                    query,
+                    queue_repo.clone(),
+                    clock.clone(),
+                )
+                .with_row_edit_repository(Arc::new(SqliteShotRowEditRepository::new(pool.clone())))
+                .with_stage_prompt_repository(shots.clone())
+                .with_video_inputs(inputs.clone()),
+            );
+            let batch = Arc::new(
+                shot_batch_service::ShotBatchService::new(
+                    shots.clone(),
+                    queue_repo,
+                    tasks,
+                    assets.clone(),
+                    definitions.clone(),
+                    projects.clone(),
+                    clock.clone(),
+                )
+                .with_stage_prompt_repository(shots.clone())
+                .with_video_inputs(inputs.clone())
+                .with_new_generation_admission(admission),
+            );
+            let _ = entities;
+            CommitServices {
+                bulk: Arc::new(shot_bulk_service::ShotBulkService::new(
+                    shots,
+                    definitions,
+                    prompts,
+                    clock.clone(),
+                )),
+                shots: shot,
+                source: Arc::new(source_asset_import_service::SourceAssetImportService::new(
+                    projects.clone(),
+                    store.clone(),
+                    assets.clone(),
+                    clock,
+                )),
+                inputs,
+                batch,
+                queue,
+                deletion: Arc::new(asset_deletion_service::AssetDeletionService::new(
+                    assets,
+                    Arc::new(SqliteAssetDeletionRepository::new(pool.clone())),
+                    projects,
+                    store,
+                )),
+                start,
+            }
+        }
+        fn request(preview: &Preview, queue: bool) -> CommitRequest {
+            CommitRequest {
+                session_id: preview.session_id.clone(),
+                preview_version: preview.preview_version,
+                manifest_sha256: preview.manifest_sha256.clone(),
+                include_row_keys: preview
+                    .rows
+                    .iter()
+                    .filter(|r| r.errors.is_empty())
+                    .map(|r| r.row_key.clone())
+                    .collect(),
+                create_queue: queue,
+                auto_start: false,
+                name_suffix: preview.name_suffix.clone(),
+            }
+        }
+        async fn count(pool: &sqlx::SqlitePool, table: &str) -> i64 {
+            sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(pool)
+                .await
+                .unwrap()
+        }
+        async fn assert_no_execution(pool: &sqlx::SqlitePool) {
+            assert_eq!(count(pool, "tasks").await, 0);
+            // Authoritative Prepare creates NULL-task links to pending items, not results.
+            let invalid_links:i64=sqlx::query_scalar("SELECT COUNT(*) FROM shot_generation_links l LEFT JOIN production_batch_items i ON i.id=l.production_batch_item_id WHERE l.task_id IS NOT NULL OR i.id IS NULL OR i.status!='PENDING'").fetch_one(pool).await.unwrap();
+            assert_eq!(invalid_links, 0);
+            let generated: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM assets WHERE source_task_id IS NOT NULL OR category!='source_image'")
+                    .fetch_one(pool)
+                    .await
+                    .unwrap();
+            assert_eq!(generated, 0);
+            assert!(sqlx::query("PRAGMA foreign_key_check")
+                .fetch_all(pool)
+                .await
+                .unwrap()
+                .is_empty());
+        }
+        #[tokio::test]
+        async fn commit_real_sources_independent_slots_entities_and_frozen_queue_without_execution()
+        {
+            let f = preview_fixture().await;
+            let preview = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(preview.valid_count, 2);
+            let req = request(&preview, true);
+            let result = f.service.commit(req.clone()).await.unwrap();
+            assert_eq!(result.outcome, "completed", "{result:?}");
+            assert_eq!(result.created_shot_ids.len(), 2);
+            assert_eq!(result.imported_asset_ids.len(), 4);
+            assert_eq!(result.created_entity_ids.len(), 1);
+            assert!(!result.auto_started);
+            let services = f.service.commit_services.as_ref().unwrap();
+            let batch = services
+                .queue
+                .get(TEST_PROJECT, result.batch_id.as_ref().unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                batch.batch.status,
+                crate::domain::ProductionBatchStatus::Ready
+            );
+            assert_eq!(batch.items.len(), 2);
+            assert!(batch.items.iter().all(|i| i.status
+                == crate::domain::ProductionBatchItemStatus::Pending
+                && i.task_id.is_none()));
+            let input_rows:Vec<(String,String)>=sqlx::query_as("SELECT input_key,asset_id FROM shot_video_input_assets WHERE shot_id=? ORDER BY input_key,ordinal").bind(&result.created_shot_ids[0]).fetch_all(&f.pool).await.unwrap();
+            assert_eq!(input_rows.len(), 2);
+            assert_eq!(input_rows[0].0, "first_frame");
+            assert_eq!(input_rows[1].0, "last_frame");
+            assert_ne!(input_rows[0].1, input_rows[1].1);
+            let refs:i64=sqlx::query_scalar("SELECT COUNT(*) FROM shot_video_input_assets WHERE shot_id=? AND input_key='reference_images'").bind(&result.created_shot_ids[1]).fetch_one(&f.pool).await.unwrap();
+            assert_eq!(refs, 2);
+            let before: Vec<String> = sqlx::query_scalar(
+                "SELECT values_json FROM production_batch_items ORDER BY ordinal",
+            )
+            .fetch_all(&f.pool)
+            .await
+            .unwrap();
+            let prompts = vec![crate::application::ports::ShotStagePromptRecord {
+                shot_id: result.created_shot_ids[0].clone(),
+                stage: crate::domain::ShotStage::Video,
+                prompt_text: "later edit".into(),
+                prompt_entry_id: None,
+                prompt_version_id: None,
+                updated_at: chrono::Utc::now(),
+            }];
+            f.service
+                .shots
+                .update_stage_prompts_atomic(TEST_PROJECT, &prompts)
+                .await
+                .unwrap();
+            let after: Vec<String> = sqlx::query_scalar(
+                "SELECT values_json FROM production_batch_items ORDER BY ordinal",
+            )
+            .fetch_all(&f.pool)
+            .await
+            .unwrap();
+            assert_eq!(before, after);
+            let again = f.service.commit(req).await.unwrap();
+            assert_eq!(again.created_shot_ids, result.created_shot_ids);
+            assert!(again
+                .warnings
+                .iter()
+                .any(|w| w.contains("SESSION_CONSUMED")));
+            assert_eq!(count(&f.pool, "shots").await, 2);
+            assert_eq!(count(&f.pool, "assets").await, 4);
+            assert_no_execution(&f.pool).await;
+            let duplicate = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(duplicate.valid_count, 0);
+            let suffixed = f
+                .service
+                .rescan(
+                    &duplicate.session_id,
+                    PreviewOptions {
+                        name_suffix: Some(" copy".into()),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(suffixed.valid_count, 2);
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn all_committed_substeps_compensate_and_terminal_repeat_never_writes() {
+            for stage in ["A", "B", "C1", "C2", "C3", "C4", "D", "E", "E_AFTER"] {
+                let f = preview_fixture().await;
+                let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+                let req = request(&p, true);
+                f.service.faults.lock().unwrap().insert(stage);
+                let r = f.service.commit(req.clone()).await.unwrap();
+                assert_eq!(r.outcome, "compensated", "stage={stage}: {r:?}");
+                assert_eq!(r.failure.as_ref().unwrap().stage, stage);
+                for table in ["shots", "story_entities", "assets", "production_batches"] {
+                    assert_eq!(count(&f.pool, table).await, 0, "{stage}/{table}: {r:?}");
+                }
+                let repeat = f.service.commit(req).await.unwrap();
+                assert_eq!(repeat.outcome, r.outcome);
+                assert_no_execution(&f.pool).await;
+                f.pool.close().await;
+            }
+        }
+        #[tokio::test]
+        async fn failed_cleanup_reports_partial_and_never_retries_writes() {
+            let f = preview_fixture().await;
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let req = request(&p, false);
+            f.service
+                .faults
+                .lock()
+                .unwrap()
+                .extend(["C3", "DELETE_ASSET"]);
+            let r = f.service.commit(req.clone()).await.unwrap();
+            assert_eq!(r.outcome, "partial");
+            assert_eq!(r.failure.unwrap().stage, "C3");
+            assert_eq!(r.residual.asset_ids.len(), 4);
+            assert!(!r.compensation_errors.is_empty());
+            f.service.faults.lock().unwrap().clear();
+            let r2 = f.service.commit(req).await.unwrap();
+            assert_eq!(r2.outcome, "partial");
+            assert_eq!(count(&f.pool, "assets").await, 4);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn stale_tokens_changed_bytes_and_duplicate_selection_reject_before_writes() {
+            let f = preview_fixture().await;
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let mut req = request(&p, false);
+            req.preview_version += 1;
+            assert_eq!(
+                f.service.commit(req).await.unwrap_err().code,
+                "STALE_PREVIEW"
+            );
+            let mut req = request(&p, false);
+            req.include_row_keys.push(req.include_row_keys[0].clone());
+            assert!(f.service.commit(req).await.is_err());
+            std::fs::write(f.root.join("images/a.png"), b"changed").unwrap();
+            assert_eq!(
+                f.service.commit(request(&p, false)).await.unwrap_err().code,
+                "STALE_PREVIEW"
+            );
+            assert_eq!(count(&f.pool, "assets").await, 0);
+            assert_eq!(count(&f.pool, "shots").await, 0);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn selection_imports_only_used_files_and_explicit_start_uses_existing_admission_seam()
+        {
+            let f = preview_fixture().await;
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let mut req = request(&p, true);
+            req.include_row_keys.truncate(1);
+            req.auto_start = true;
+            let r = f.service.commit(req).await.unwrap();
+            assert_eq!(r.outcome, "completed", "{r:?}");
+            assert!(r.auto_started);
+            assert_eq!(r.imported_asset_ids.len(), 2);
+            assert!(r.created_entity_ids.is_empty());
+            assert_eq!(r.item_count, 1);
+            assert_eq!(f.start.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn project_raii_lock_writing_state_and_panic_cannot_repeat_import() {
+            let f = preview_fixture().await;
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let guard =
+                ProjectImportGuard::acquire(f.service.project_locks.clone(), TEST_PROJECT).unwrap();
+            assert_eq!(
+                f.service.commit(request(&p, false)).await.unwrap_err().code,
+                "IMPORT_IN_PROGRESS"
+            );
+            drop(guard);
+            let service = Arc::new(f.service);
+            service.faults.lock().unwrap().insert("B_PANIC");
+            let req = request(&p, false);
+            let other = req.clone();
+            let task = {
+                let service = service.clone();
+                tokio::spawn(async move { service.commit(req).await })
+            };
+            assert!(task.await.unwrap_err().is_panic());
+            assert!(service.project_locks.lock().unwrap().is_empty());
+            assert_eq!(
+                service.commit(other).await.unwrap_err().code,
+                "SESSION_CONSUMED"
+            );
+            assert!(service
+                .rescan(&p.session_id, PreviewOptions::default())
+                .await
+                .is_err());
+            assert!(service.discard(&p.session_id).await.is_err());
+            assert_eq!(count(&f.pool, "assets").await, 4);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn overlapping_commits_and_stale_suffix_cannot_duplicate_imports() {
+            let f = preview_fixture().await;
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let old = request(&p, false);
+            let p = f
+                .service
+                .rescan(
+                    &p.session_id,
+                    PreviewOptions {
+                        name_suffix: Some(" v2".into()),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                f.service.commit(old).await.unwrap_err().code,
+                "STALE_PREVIEW"
+            );
+            let req = request(&p, false);
+            let (a, b) = tokio::join!(f.service.commit(req.clone()), f.service.commit(req));
+            assert!(
+                a.as_ref().is_ok_and(|r| r.outcome == "completed")
+                    || b.as_ref().is_ok_and(|r| r.outcome == "completed")
+            );
+            for r in [a, b] {
+                if let Err(e) = r {
+                    assert_eq!(e.code, "IMPORT_IN_PROGRESS");
+                }
+            }
+            assert_eq!(count(&f.pool, "shots").await, 2);
+            assert_eq!(count(&f.pool, "assets").await, 4);
+            assert_eq!(count(&f.pool, "story_entities").await, 1);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn reused_entity_is_readonly_and_ignored_entity_images_are_never_imported() {
+            let f = preview_fixture().await;
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let r = f.service.commit(request(&p, false)).await.unwrap();
+            assert_eq!(r.outcome, "completed");
+            let before = f.service.entities.list(TEST_PROJECT, None).await.unwrap();
+            std::fs::remove_file(f.root.join("images/alice.png")).unwrap();
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let p = f
+                .service
+                .rescan(
+                    &p.session_id,
+                    PreviewOptions {
+                        name_suffix: Some(" second".into()),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(p.valid_count, 2);
+            let r = f.service.commit(request(&p, false)).await.unwrap();
+            assert_eq!(r.outcome, "completed", "{r:?}");
+            assert!(r.created_entity_ids.is_empty());
+            assert_eq!(r.reused_entity_ids.len(), 1);
+            assert_eq!(r.imported_asset_ids.len(), 3);
+            let after = f.service.entities.list(TEST_PROJECT, None).await.unwrap();
+            assert_eq!(
+                serde_json::to_value(before).unwrap(),
+                serde_json::to_value(after).unwrap()
+            );
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn formal_single_batch_limit_is_checked_before_any_writes() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let mut m: Manifest = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let row = m.shots[0].clone();
+            m.shots = (0..101)
+                .map(|i| {
+                    let mut r = row.clone();
+                    r.id = Some(format!("id{i}"));
+                    r.name = Some(format!("shot{i}"));
+                    r
+                })
+                .collect();
+            std::fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(p.valid_count, 101);
+            assert_eq!(p.max_queue_items, 100);
+            assert_eq!(
+                f.service.commit(request(&p, true)).await.unwrap_err().code,
+                "REFERENCE_LIMIT"
+            );
+            for table in ["shots", "assets", "story_entities", "production_batches"] {
+                assert_eq!(count(&f.pool, table).await, 0);
+            }
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[test]
+        fn source_storage_error_cannot_claim_verified_file_compensation() {
+            let mut result = ImportResult::default();
+            let e=source_failure(&mut result,super::super::source_asset_import_service::SourceAssetImportError::AssetPersistence{message:"private path".into()});
+            assert!(result.residual.unverified_file_cleanup);
+            assert_eq!(result.compensation_errors.len(), 1);
+            assert_eq!(e.stage, "A");
+            assert!(!e.message.contains("private"));
+            let mut m = manifest();
+            m.queue.name = Some("\n".into());
+            assert!(parse_manifest(&serde_json::to_vec(&m).unwrap()).is_err());
         }
     }
 }

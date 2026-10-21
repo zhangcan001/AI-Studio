@@ -1040,7 +1040,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let folder_import_service=Arc::new(application::folder_batch_import_service::FolderBatchImportService::new(
                 definition_repository.clone(),workflow_registry_service.clone(),shot_bulk_repository.clone(),
                 story_entity_service.clone(),asset_repository.clone(),project_repository.clone(),clock.clone(),
-            ));
+            ).with_commit_services(application::folder_batch_import_service::CommitServices {
+                bulk:shot_bulk_service.clone(),shots:shot_service.clone(),source:source_asset_import_service.clone(),
+                inputs:shot_video_input_service.clone(),batch:shot_batch_service.clone(),queue:production_queue_service.clone(),
+                deletion:asset_deletion_service.clone(),start:production_start_admission_service.clone(),
+            }));
             let startup_repair_jobs = repair_job_runner.clone();
             let startup_recovery = task_recovery_service.clone();
             let startup_production_queue = production_queue_service.clone();
@@ -1394,6 +1398,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::folder_batch_import::folder_batch_import_pick,
             commands::folder_batch_import::folder_batch_import_rescan,
             commands::folder_batch_import::folder_batch_import_discard,
+            commands::folder_batch_import::folder_batch_import_commit,
             commands::h3_local_import::h3_local_import_pick_directory,
             commands::h3_local_import::h3_local_import_rescan,
             commands::h3_local_import::h3_local_import_commit,

@@ -13,3 +13,16 @@ export interface FolderImportPreview {
   characters: Array<{ name: string; kind: string; action: "reuse" | "create"; imageCount: number; existingEntityId: string | null }>;
   rows: FolderImportRow[]; errors: FolderImportIssue[]; warnings: string[];
 }
+
+export interface FolderImportCommitRequest {
+ sessionId:string;previewVersion:number;manifestSha256:string;includeRowKeys:string[];
+ createQueue:boolean;autoStart:boolean;nameSuffix:string|null;
+}
+export interface FolderImportResult {
+ outcome:"completed"|"compensated"|"partial";
+ failure:{stage:string;code:string;message:string}|null;
+ compensationErrors:{target:string;id:string;message:string}[];
+ createdShotIds:string[];reusedEntityIds:string[];createdEntityIds:string[];importedAssetIds:string[];
+ batchId:string|null;itemCount:number;autoStarted:boolean;
+ residual:{unverifiedFileCleanup:boolean;shotIds:string[];entityIds:string[];assetIds:string[];batchId:string|null};warnings:string[];
+}

@@ -10,6 +10,7 @@ export const FOLDER_BATCH_IMPORT_CHANGED = [
   "scripts/library-confirm-ci-race-successor-guard.mjs",
   "src-tauri/src/app_state.rs",
   "src-tauri/src/application/mod.rs",
+  "src-tauri/src/application/shot_batch_service.rs",
   "src-tauri/src/application/shot_video_input_service.rs",
   "src-tauri/src/application/source_asset_import_service.rs",
   "src-tauri/src/application/source_asset_import_service/source_paths.rs",
@@ -34,7 +35,7 @@ export const FOLDER_BATCH_IMPORT_CONTRACTS = {
   "historicalProofBytesUnchanged": true,
   "gpuExecuted": false,
   "productImplementationChanged": true,
-  "checkpointStage": "P2"
+  "checkpointStage": "P3"
 };
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");
