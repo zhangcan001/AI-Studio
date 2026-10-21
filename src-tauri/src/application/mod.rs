@@ -633,7 +633,126 @@ pub mod folder_batch_import_service {
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     pub struct PreviewOptions {
         pub name_suffix: Option<String>,
+        pub legacy: Option<LegacyDefaults>,
     }
+    #[derive(Clone, Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub struct LegacyDefaults {
+        pub selection_ref: String,
+        pub duration_seconds: i64,
+        pub width: i64,
+        pub height: i64,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyImageRow {
+        image: String,
+        prompt: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyReferenceRow {
+        #[serde(default)]
+        images: Vec<String>,
+        #[serde(default)]
+        videos: Vec<String>,
+        #[serde(default)]
+        audios: Vec<String>,
+        prompt: String,
+    }
+    fn legacy_manifest(
+        bytes: &[u8],
+        source: &str,
+        options: &PreviewOptions,
+    ) -> Result<Manifest, ImportFailure> {
+        let mode = if source == "h3-batch" {
+            Mode::Image
+        } else {
+            Mode::Reference
+        };
+        let rows: Vec<(Option<String>, Vec<String>, String)> = if mode == Mode::Image {
+            let rows: Vec<LegacyImageRow> = serde_json::from_slice(bytes)
+                .map_err(|_| failure("INVALID_MANIFEST", "旧版 h3-batch 清单格式无效"))?;
+            rows.into_iter()
+                .map(|r| (Some(r.image), vec![], r.prompt))
+                .collect()
+        } else {
+            let rows: Vec<LegacyReferenceRow> = serde_json::from_slice(bytes)
+                .map_err(|_| failure("INVALID_MANIFEST", "旧版 h3-omni-batch 清单格式无效"))?;
+            if rows
+                .iter()
+                .any(|r| !r.videos.is_empty() || !r.audios.is_empty())
+            {
+                return Err(failure(
+                    "UNSUPPORTED_LEGACY_MEDIA",
+                    "旧版导入暂不支持视频/音频参考；不会忽略这些素材",
+                ));
+            }
+            rows.into_iter()
+                .map(|r| (None, r.images, r.prompt))
+                .collect()
+        };
+        let mut generators = BTreeMap::new();
+        let mut defaults = Parameters {
+            mode: Some(mode.clone()),
+            ..Default::default()
+        };
+        if let Some(selected) = &options.legacy {
+            let pair = super::product::selection_ref::ExactGeneratorSelection::decode(
+                &selected.selection_ref,
+            )
+            .map_err(|_| {
+                failure(
+                    "GENERATOR_UNAVAILABLE",
+                    "请选择正式生成器，不能由名称猜测身份",
+                )
+            })?;
+            generators.insert(
+                mode.clone(),
+                Generator {
+                    workflow_version_id: pair.workflow_version_id,
+                    recipe_id: pair.recipe_id,
+                },
+            );
+            defaults.duration_seconds = Some(selected.duration_seconds);
+            defaults.width = Some(selected.width);
+            defaults.height = Some(selected.height);
+        }
+        let manifest = Manifest {
+            format: "ai-studio-shot-batch".into(),
+            version: 1,
+            name: "旧版 H3 分镜导入".into(),
+            generators,
+            defaults,
+            characters: vec![],
+            queue: QueueOptions::default(),
+            shots: rows
+                .into_iter()
+                .enumerate()
+                .map(|(i, (first, references, prompt))| ManifestShot {
+                    id: None,
+                    name: Some(format!("镜头 {:03}", i + 1)),
+                    mode: Some(mode.clone()),
+                    prompt,
+                    first_frame: first,
+                    last_frame: None,
+                    references,
+                    characters: vec![],
+                    duration_seconds: None,
+                    aspect_ratio: None,
+                    resolution_preset: None,
+                    width: None,
+                    height: None,
+                    seed: None,
+                })
+                .collect(),
+        };
+        parse_manifest(
+            &serde_json::to_vec(&manifest)
+                .map_err(|_| failure("INVALID_MANIFEST", "旧版清单转换失败"))?,
+        )
+    }
+
     #[derive(Clone, Debug, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct EntityPreview {
@@ -846,8 +965,44 @@ pub mod folder_batch_import_service {
                         "目录不可安全扫描或超过 4 层/10,000 条目限制",
                     )
                 })?;
-            let bytes = read_file(root, "manifest.json", 1024 * 1024)?;
-            let manifest = parse_manifest(&bytes)?;
+            let has = |name: &str| {
+                root.join(name)
+                    .try_exists()
+                    .map_err(|_| failure("FILE_NOT_FOUND", "无法检查清单文件"))
+            };
+            let modern = has("manifest.json")?;
+            let (filename, format_source) = if modern {
+                ("manifest.json", "manifest")
+            } else {
+                match (has("h3-batch.json")?, has("h3-omni-batch.json")?) {
+                    (true, false) => ("h3-batch.json", "h3-batch"),
+                    (false, true) => ("h3-omni-batch.json", "h3-omni-batch"),
+                    (true, true) => {
+                        return Err(failure(
+                            "INVALID_MANIFEST",
+                            "同时存在两种旧清单，请保留一种或提供 manifest.json",
+                        ))
+                    }
+                    _ => {
+                        return Err(failure(
+                            "FILE_NOT_FOUND",
+                            "文件夹缺少 manifest.json 或受支持的旧版 H3 清单",
+                        ))
+                    }
+                }
+            };
+            let bytes = read_file(root, filename, 1024 * 1024)?;
+            let manifest = if modern {
+                if options.legacy.is_some() {
+                    return Err(failure(
+                        "INVALID_MANIFEST",
+                        "现代 manifest 的生成器与参数不可由旧版选项覆盖",
+                    ));
+                }
+                parse_manifest(&bytes)?
+            } else {
+                legacy_manifest(&bytes, format_source, options)?
+            };
             if self
                 .projects
                 .find_by_id(project)
@@ -1120,6 +1275,13 @@ pub mod folder_batch_import_service {
                     ));
                 }
             }
+            if !modern {
+                warnings.push("使用旧版 H3 清单，建议迁移到 manifest.json。".into());
+            }
+            if manifest.queue.auto_start == Some(true) {
+                warnings
+                    .push("清单申请了自动开始，但仍需在确认区域明确勾选；默认不执行生产。".into());
+            }
             let view = Preview {
                 session_id: id.into(),
                 preview_version: version,
@@ -1129,7 +1291,7 @@ pub mod folder_batch_import_service {
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "所选目录".into()),
                 manifest_sha256: sha(&bytes),
-                format_source: "manifest".into(),
+                format_source: format_source.into(),
                 shot_count: rows.len(),
                 valid_count: rows.iter().filter(|r| r.errors.is_empty()).count(),
                 error_count: rows.iter().filter(|r| !r.errors.is_empty()).count(),
@@ -1921,19 +2083,28 @@ pub mod folder_batch_import_service {
                     }));
                 }
                 let pair = row.generator.as_ref().unwrap();
-                let saved = services
-                    .inputs
-                    .save(
-                        &ShotVideoInputScope {
-                            project_id: project.clone(),
-                            shot_id: id.clone(),
-                            workflow_version_id: pair.workflow_version_id.clone(),
-                            recipe_id: pair.recipe_id.clone(),
-                        },
-                        None,
-                        &inputs,
-                    )
-                    .await;
+                let input_scope = ShotVideoInputScope {
+                    project_id: project.clone(),
+                    shot_id: id.clone(),
+                    workflow_version_id: pair.workflow_version_id.clone(),
+                    recipe_id: pair.recipe_id.clone(),
+                };
+                #[cfg(test)]
+                {
+                    let inject_occ = self
+                        .faults
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .contains("D_OCC");
+                    if inject_occ {
+                        services
+                            .inputs
+                            .save(&input_scope, None, &inputs[..1])
+                            .await
+                            .unwrap();
+                    }
+                }
+                let saved = services.inputs.save(&input_scope, None, &inputs).await;
                 if saved.is_err() {
                     result.residual.shot_ids.push(id.clone());
                     return Err(stage_failure(
@@ -2341,6 +2512,12 @@ pub mod folder_batch_import_service {
                     "ref-version",
                     "wfl_minimax_h3_reference_video_quality",
                 ),
+                (
+                    Mode::Image,
+                    "minimax_h3_fl2va_i2v_quality_2_2_0",
+                    "image-version",
+                    "wfl_minimax_h3_fl2va_i2v_quality",
+                ),
             ] {
                 let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("runtime_packages")
@@ -2473,6 +2650,7 @@ pub mod folder_batch_import_service {
                     &first.session_id,
                     PreviewOptions {
                         name_suffix: Some(" copy".into()),
+                        legacy: None,
                     },
                 )
                 .await
@@ -2828,6 +3006,10 @@ pub mod folder_batch_import_service {
             assert_eq!(input_rows[0].0, "first_frame");
             assert_eq!(input_rows[1].0, "last_frame");
             assert_ne!(input_rows[0].1, input_rows[1].1);
+            let names:Vec<String>=sqlx::query_scalar("SELECT a.original_name FROM shot_video_input_assets i JOIN assets a ON a.id=i.asset_id WHERE i.shot_id=? ORDER BY i.input_key,i.ordinal").bind(&result.created_shot_ids[0]).fetch_all(&f.pool).await.unwrap();
+            assert_eq!(names, vec!["a.png", "b.png"]);
+            let names:Vec<String>=sqlx::query_scalar("SELECT a.original_name FROM shot_video_input_assets i JOIN assets a ON a.id=i.asset_id WHERE i.shot_id=? ORDER BY i.ordinal").bind(&result.created_shot_ids[1]).fetch_all(&f.pool).await.unwrap();
+            assert_eq!(names, vec!["c.png", "alice.png"]);
             let refs:i64=sqlx::query_scalar("SELECT COUNT(*) FROM shot_video_input_assets WHERE shot_id=? AND input_key='reference_images'").bind(&result.created_shot_ids[1]).fetch_one(&f.pool).await.unwrap();
             assert_eq!(refs, 2);
             let before: Vec<String> = sqlx::query_scalar(
@@ -2873,6 +3055,7 @@ pub mod folder_batch_import_service {
                     &duplicate.session_id,
                     PreviewOptions {
                         name_suffix: Some(" copy".into()),
+                        legacy: None,
                     },
                 )
                 .await
@@ -3007,6 +3190,7 @@ pub mod folder_batch_import_service {
                     &p.session_id,
                     PreviewOptions {
                         name_suffix: Some(" v2".into()),
+                        legacy: None,
                     },
                 )
                 .await
@@ -3047,6 +3231,7 @@ pub mod folder_batch_import_service {
                     &p.session_id,
                     PreviewOptions {
                         name_suffix: Some(" second".into()),
+                        legacy: None,
                     },
                 )
                 .await
@@ -3104,6 +3289,169 @@ pub mod folder_batch_import_service {
             let mut m = manifest();
             m.queue.name = Some("\n".into());
             assert!(parse_manifest(&serde_json::to_vec(&m).unwrap()).is_err());
+        }
+        fn legacy_options(pair: &Generator, width: i64, height: i64) -> PreviewOptions {
+            let selection = crate::application::product::selection_ref::ExactGeneratorSelection {
+                workflow_version_id: pair.workflow_version_id.clone(),
+                recipe_id: pair.recipe_id.clone(),
+            }
+            .encode()
+            .unwrap();
+            PreviewOptions {
+                name_suffix: None,
+                legacy: Some(LegacyDefaults {
+                    selection_ref: selection,
+                    duration_seconds: 6,
+                    width,
+                    height,
+                }),
+            }
+        }
+        #[tokio::test]
+        async fn legacy_image_and_reference_require_explicit_exact_generator_and_recheck() {
+            for (file, mode, data) in [
+                (
+                    "h3-batch.json",
+                    Mode::Image,
+                    serde_json::json!([{"image":"images/a.png","prompt":"slow move"}]),
+                ),
+                (
+                    "h3-omni-batch.json",
+                    Mode::Reference,
+                    serde_json::json!([{"images":["images/c.png"],"videos":[],"audios":[],"prompt":"slow move"}]),
+                ),
+            ] {
+                let f = preview_fixture().await;
+                let path = f.root.join("manifest.json");
+                let manifest: Manifest =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                std::fs::remove_file(&path).unwrap();
+                std::fs::write(f.root.join(file), serde_json::to_vec(&data).unwrap()).unwrap();
+                let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+                assert_ne!(p.format_source, "manifest");
+                assert_eq!(p.valid_count, 0);
+                assert!(p.warnings.iter().any(|w| w.contains("旧版 H3")));
+                assert_eq!(count(&f.pool, "assets").await, 0);
+                let row = &p.rows[0];
+                let options = legacy_options(&manifest.generators[&mode], row.width, row.height);
+                let p = f.service.rescan(&p.session_id, options).await.unwrap();
+                assert_eq!(p.valid_count, 1, "{:?}", p.rows);
+                let r = f.service.commit(request(&p, false)).await.unwrap();
+                assert_eq!(r.outcome, "completed", "{r:?}");
+                assert_eq!(r.created_shot_ids.len(), 1);
+                assert_eq!(r.imported_asset_ids.len(), 1);
+                assert_no_execution(&f.pool).await;
+                f.pool.close().await;
+            }
+        }
+        #[tokio::test]
+        async fn legacy_media_ambiguity_and_modern_override_fail_closed() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let original = std::fs::read(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            std::fs::write(f.root.join("h3-omni-batch.json"),br#"[{"images":["images/c.png"],"videos":["clip.mp4"],"audios":[],"prompt":"move"}]"#).unwrap();
+            assert_eq!(
+                f.service
+                    .pick(TEST_PROJECT, f.root.clone())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "UNSUPPORTED_LEGACY_MEDIA"
+            );
+            std::fs::write(
+                f.root.join("h3-batch.json"),
+                br#"[{"image":"images/a.png","prompt":"move"}]"#,
+            )
+            .unwrap();
+            assert_eq!(
+                f.service
+                    .pick(TEST_PROJECT, f.root.clone())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "INVALID_MANIFEST"
+            );
+            std::fs::write(&path, &original).unwrap();
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(p.format_source, "manifest");
+            assert_eq!(p.valid_count, 2);
+            let m: Manifest = serde_json::from_slice(&original).unwrap();
+            let options = legacy_options(
+                &m.generators[&Mode::Image],
+                p.rows[0].width,
+                p.rows[0].height,
+            );
+            assert_eq!(
+                f.service
+                    .rescan(&p.session_id, options)
+                    .await
+                    .unwrap_err()
+                    .code,
+                "INVALID_MANIFEST"
+            );
+            std::fs::write(&path, b"{}").unwrap();
+            assert_eq!(
+                f.service
+                    .pick(TEST_PROJECT, f.root.clone())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "INVALID_MANIFEST"
+            );
+            assert_eq!(count(&f.pool, "assets").await, 0);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        struct RejectStart;
+        #[async_trait::async_trait]
+        impl ImportStart for RejectStart {
+            async fn start(&self, _: &str, _: &str) -> Result<(), ImportFailure> {
+                Err(failure("QUEUE_START_FAILED", "正式启动未准入"))
+            }
+        }
+        #[tokio::test]
+        async fn start_rejection_keeps_prepared_batch_and_never_compensates_or_executes() {
+            let mut f = preview_fixture().await;
+            f.service.commit_services.as_mut().unwrap().start = Arc::new(RejectStart);
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let mut req = request(&p, true);
+            req.auto_start = true;
+            let r = f.service.commit(req).await.unwrap();
+            assert_eq!(r.outcome, "completed");
+            assert!(!r.auto_started);
+            assert!(r.warnings.iter().any(|w| w.contains("QUEUE_START_FAILED")));
+            assert!(r.batch_id.is_some());
+            assert_eq!(count(&f.pool, "shots").await, 2);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn occ_conflict_retains_the_concurrent_input_and_never_deletes_its_shot() {
+            let f = preview_fixture().await;
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            f.service.faults.lock().unwrap().insert("D_OCC");
+            let req = request(&p, true);
+            let r = f.service.commit(req.clone()).await.unwrap();
+            assert_eq!(r.outcome, "partial");
+            assert_eq!(r.failure.unwrap().stage, "D");
+            assert_eq!(r.residual.shot_ids, vec![r.created_shot_ids[0].clone()]);
+            assert!(r.batch_id.is_none());
+            let kept: Vec<String> = sqlx::query_scalar(
+                "SELECT input_key FROM shot_video_input_assets WHERE shot_id=? ORDER BY ordinal",
+            )
+            .bind(&r.created_shot_ids[0])
+            .fetch_all(&f.pool)
+            .await
+            .unwrap();
+            assert_eq!(kept, vec!["first_frame"]);
+            assert_eq!(count(&f.pool, "shots").await, 1);
+            assert_no_execution(&f.pool).await;
+            let again = f.service.commit(req).await.unwrap();
+            assert_eq!(again.outcome, "partial");
+            assert_eq!(again.created_shot_ids, r.created_shot_ids);
+            assert_eq!(count(&f.pool, "shots").await, 1);
+            f.pool.close().await;
         }
     }
 }

@@ -11,12 +11,16 @@
     "historicalProofBytesUnchanged": true,
     "gpuExecuted": false,
     "productImplementationChanged": true,
-    "checkpointStage": "P4"
+    "checkpointStage": "P5"
   },
   "files": {
+    "docs/architecture/folder-batch-import.md": {
+      "beforeHash": null,
+      "afterHash": "9507091670ec74c954a39363f4ef5f60e8707a7d38318b5511fccefe678430e4"
+    },
     "scripts/folder-batch-import-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "0f4feca4257b5417000bd7923c70be7e2e2c2700bdaed93c9b7480ff4e2eade5"
+      "afterHash": "9897b1d990bf8da2446489c6d7eb9aeedb7a47365a01fcee93f813b45cc4876b"
     },
     "scripts/library-confirm-ci-race-successor-guard.mjs": {
       "beforeHash": "2502ffcdb1c95cd75e85aa600ca019671c063c02c5c80b06a1b0f64c6a4f099b",
@@ -32,7 +36,7 @@
     },
     "src-tauri/src/application/mod.rs": {
       "beforeHash": "97e86019c4059ff056ec8bcb9743a9deda670ac7d7c493b185dbb3747d52806f",
-      "afterHash": "c5413ffa0c2628a960113934ee484cf85418c3b18e277ac4b9666f933a3c4ee7"
+      "afterHash": "b93993269bdd28a28aa6f0acc016ef82f1e85c114eb7347fdf169f339e7dde5e"
     },
     "src-tauri/src/application/shot_batch_service.rs": {
       "beforeHash": "0246759404af57516e33daceef7fc2c9804ee1f9b02f9791bb0dc7282332ff09",
@@ -72,11 +76,11 @@
     },
     "src/features/shots/FolderBatchImportPanel.test.tsx": {
       "beforeHash": null,
-      "afterHash": "a5adc5fe11ae8af18c0a31dd6222ce721b01d15b784b30161de43e1296db2e4b"
+      "afterHash": "a2f8876d749b981f70955ef3cc185a8c278aa6c94bdd8e2dd607203aa6b68850"
     },
     "src/features/shots/FolderBatchImportPanel.tsx": {
       "beforeHash": null,
-      "afterHash": "b235dce0355394abb22a5201b2e7ab1e00dec6f7bc6fbccee751e2c3c557f5e6"
+      "afterHash": "7eb5b0404bade652efae3212f90f4240a74a2a1e6410d8968d6dea3a6991c7b8"
     },
     "src/features/shots/ShotWorkspace.tsx": {
       "beforeHash": "6221c0cbfda68929f3b8f37895518a4a7f1d248da717157ba4a80b8ce2be4967",
@@ -92,7 +96,11 @@
     },
     "src/features/shots/useFolderBatchImportController.ts": {
       "beforeHash": null,
-      "afterHash": "bd81d24cf98718c8600daf97adccb650c4258f770d0e177a1d2638f208d30d89"
+      "afterHash": "31cff7304aa90b70dd02d82d7b735eff68b8937687ac204588c1c88e7a36a08a"
+    },
+    "src/product/client.test.ts": {
+      "beforeHash": "bcbfb8fa4014fc2d513bfb5d34760c3c9f9fb18992421259d34639f23eb97e3b",
+      "afterHash": "d7418ee693a38d92cb75545765abe97dc4d20511633344e8793828b7bf455819"
     },
     "src/product/client.ts": {
       "beforeHash": "0b444cfae78311aae81f948d2322b4565e4555afa31a4868ad9ebafe79c485c6",
@@ -100,19 +108,19 @@
     },
     "src/product/transport.ts": {
       "beforeHash": "3566bc6f4754ed8ef63f66b60ca9b303be5ee9a0b01e272e6a655592d320d82a",
-      "afterHash": "fa19a4db487c84881eb1024fc839c9274ef94c8272d47eb6eed6633cdb756a63"
+      "afterHash": "0c68d21b21ea470d82e251077653154efd8cff04cc898611d4e17298bb445428"
     },
     "src/services/tauriClient.ts": {
       "beforeHash": "5147c17deb6e2d2521697cb142b347e1385c06f69cf07da07cd09f3bf1786d84",
-      "afterHash": "7ba9e453c6c180317fbe5dba343b20c4cbf3255a721168288ad3c8969b971581"
+      "afterHash": "77d197ba65e0faa249d3829f41093615e743040490053a69769832af43d66a14"
     },
     "src/styles/studioQuality.css": {
       "beforeHash": "d95e59e13ce5934f3bc919912632701485def1464799fda886e0ab2446f56a09",
-      "afterHash": "d2688883f2251d25a91c7f5815fe6cfaff5e4cf30f679528f822866e8592541f"
+      "afterHash": "758d1968fc8557162a6dcf07e9c7f3cd41d8d2418016e37e4eae9b61a91a4b7d"
     },
     "src/types/folderBatchImport.ts": {
       "beforeHash": null,
-      "afterHash": "b77b2e4f851bb048a147c725fbf4441d6b150698ed924293cffe5598a91a0feb"
+      "afterHash": "14732df67ec3426fc252c67e30e1cc5ee5eedb35dc3d9fda2295e8052d5d86df"
     }
   }
 }

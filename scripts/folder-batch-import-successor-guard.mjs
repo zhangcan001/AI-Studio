@@ -20,6 +20,7 @@ export const FOLDER_BATCH_IMPORT_CHANGED = [
   "src/features/create/StoryboardWorkbench.test.tsx",
   "src/features/create/StoryboardWorkbench.tsx",
   "src/features/shots/ShotWorkspace.tsx",
+  "src/product/client.test.ts",
   "src/product/client.ts",
   "src/product/transport.ts",
   "src/services/tauriClient.ts",
@@ -28,6 +29,7 @@ export const FOLDER_BATCH_IMPORT_CHANGED = [
 // Runtime Package paths are immutable in this checkpoint.
 export const FOLDER_BATCH_IMPORT_RUNTIME = [];
 export const FOLDER_BATCH_IMPORT_ADDED = [
+  "docs/architecture/folder-batch-import.md",
   "scripts/folder-batch-import-successor-guard.mjs",
   "scripts/testing/folder-batch-import.test.mjs",
   "src/features/shots/FolderBatchImportPanel.test.tsx",
@@ -45,7 +47,7 @@ export const FOLDER_BATCH_IMPORT_CONTRACTS = {
   "historicalProofBytesUnchanged": true,
   "gpuExecuted": false,
   "productImplementationChanged": true,
-  "checkpointStage": "P4"
+  "checkpointStage": "P5"
 };
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");

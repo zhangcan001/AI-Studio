@@ -2192,7 +2192,7 @@ function mapShotContextPreview(value: ShotContextDraftDto): ConsistencyContextPr
 export function folderBatchImportPick(projectId: string): Promise<import("../types/folderBatchImport").FolderImportPreview | null> {
   return invoke("folder_batch_import_pick", { projectId });
 }
-export function folderBatchImportRescan(sessionId: string, options: { nameSuffix?: string | null }): Promise<import("../types/folderBatchImport").FolderImportPreview> {
+export function folderBatchImportRescan(sessionId: string, options: import("../types/folderBatchImport").FolderImportPreviewOptions): Promise<import("../types/folderBatchImport").FolderImportPreview> {
   return invoke("folder_batch_import_rescan", { sessionId, options });
 }
 export function folderBatchImportDiscard(sessionId: string): Promise<void> {

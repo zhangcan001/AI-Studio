@@ -6,7 +6,7 @@ import { folderBatchImportPick, folderBatchImportRescan, folderBatchImportDiscar
 /** Product bridge reuses the exact typed Native commands; no feature gains legacy access. */
 export const folderImportTransport = {
   pick: (projectId:string) => folderBatchImportPick(projectId),
-  rescan: (sessionId:string, options:{nameSuffix?:string|null}) => folderBatchImportRescan(sessionId,options),
+  rescan: (sessionId:string, options:import("../types/folderBatchImport").FolderImportPreviewOptions) => folderBatchImportRescan(sessionId,options),
   discard: (sessionId:string) => folderBatchImportDiscard(sessionId),
   commit: (request:import("../types/folderBatchImport").FolderImportCommitRequest) => folderBatchImportCommit(request),
 };

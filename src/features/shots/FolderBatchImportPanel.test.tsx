@@ -1,17 +1,36 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useLayoutEffect } from "react";
+import { useFolderBatchImportController } from "./useFolderBatchImportController";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderBatchImportPanel, FolderBatchImportDialog } from "./FolderBatchImportPanel";
 import type { FolderImportPreview, FolderImportResult } from "../../types/folderBatchImport";
-const api=vi.hoisted(()=>({pick:vi.fn(),rescan:vi.fn(),discard:vi.fn(),commit:vi.fn()}));
-vi.mock("../../product/client",()=>({productClient:{folderImport:{pick:api.pick,rescan:api.rescan,discard:api.discard,commit:api.commit}}}));
+const api=vi.hoisted(()=>({pick:vi.fn(),rescan:vi.fn(),discard:vi.fn(),commit:vi.fn(),generators:vi.fn()}));
+vi.mock("../../product/client",()=>({productClient:{creation:{generatorsList:api.generators},folderImport:{pick:api.pick,rescan:api.rescan,discard:api.discard,commit:api.commit}}}));
 function preview(id="session",bad=true):FolderImportPreview{return {sessionId:id,previewVersion:1,nameSuffix:null,displayRootName:"fixture",manifestSha256:"abc",formatSource:"manifest",shotCount:3,validCount:bad?2:3,errorCount:bad?1:0,warningCount:0,maxQueueItems:100,createQueueDefault:true,characters:[],errors:[],warnings:[],rows:[0,1,2].map(i=>({rowKey:`r${i}`,rowNumber:i+1,manifestId:null,mode:i===0?"firstLast":"reference",name:`镜头${i}`,promptPreview:"真实原文",durationSeconds:6,width:1280,height:768,generatorLabel:"Exact",firstFrame:i===0?"a.png":null,lastFrame:i===0?"b.png":null,referenceCount:2,entityNames:[],errors:i===2&&bad?[{code:"FILE_NOT_FOUND",message:"图片缺失"}]:[],warnings:[]}))};}
 function result(outcome:FolderImportResult["outcome"]="completed"):FolderImportResult{return {outcome,failure:outcome==="completed"?null:{stage:"C3",code:"PROMPT_SAVE_FAILED",message:"写入失败"},compensationErrors:[],createdShotIds:["s1","s2"],reusedEntityIds:[],createdEntityIds:[],importedAssetIds:["a","b"],batchId:"batch",itemCount:2,autoStarted:false,residual:{unverifiedFileCleanup:false,shotIds:[],entityIds:[],assetIds:[],batchId:null},warnings:[]};}
 function deferred<T>(){let resolve!:(v:T)=>void;let reject!:(e:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
-beforeEach(()=>{vi.clearAllMocks();api.pick.mockResolvedValue(preview());api.rescan.mockResolvedValue({...preview(),previewVersion:2});api.discard.mockResolvedValue(undefined);api.commit.mockResolvedValue(result());HTMLDialogElement.prototype.showModal=function(){this.setAttribute("open","");};});
+beforeEach(()=>{vi.clearAllMocks();api.generators.mockResolvedValue([]);api.pick.mockResolvedValue(preview());api.rescan.mockResolvedValue({...preview(),previewVersion:2});api.discard.mockResolvedValue(undefined);api.commit.mockResolvedValue(result());HTMLDialogElement.prototype.showModal=function(){this.setAttribute("open","");};});
 afterEach(cleanup);
 async function pick(){fireEvent.click(screen.getByRole("button",{name:"选择文件夹"}));await screen.findByText("fixture");}
 describe("folder import preview and authority",()=>{
+ it("legacy defaults use an explicit catalog identity and require a server rescan",async()=>{
+  const p=preview("legacy",false);p.formatSource="h3-batch";p.rows=p.rows.slice(0,1);p.shotCount=1;p.validCount=0;p.errorCount=1;p.rows[0].errors=[{code:"GENERATOR_UNAVAILABLE",message:"请选择生成器"}];
+  api.pick.mockResolvedValue(p);api.generators.mockResolvedValue([{selectionRef:"exact-selection",name:"Installed",version:"1",mode:"I2V",mediaKind:"video",availability:true,recommended:false,availabilityReason:null,fields:[],resolutionPresets:[{id:"official-preset",label:"Official",width:1280,height:768}]}]);
+  api.rescan.mockResolvedValue({...p,previewVersion:2,validCount:1,rows:[{...p.rows[0],errors:[]}]});
+  render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();
+  const select=await screen.findByRole("combobox",{name:"生成器"});await screen.findByRole("option",{name:/Installed/});fireEvent.change(select,{target:{value:"exact-selection"}});expect(screen.getByRole("button",{name:"确认导入"})).toHaveProperty("disabled",true);
+  fireEvent.click(screen.getByRole("button",{name:"重新校验"}));await waitFor(()=>expect(screen.getByRole("button",{name:"确认导入"})).toHaveProperty("disabled",false));expect(api.rescan).toHaveBeenCalledWith("legacy",{nameSuffix:null,legacy:{selectionRef:"exact-selection",durationSeconds:6,width:1280,height:768}});
+  fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");expect(api.commit.mock.calls[0][0]).toMatchObject({sessionId:"legacy",previewVersion:2,autoStart:false});
+ });
+ it("does not offer a queue which successful compensation already deleted",async()=>{
+  api.commit.mockResolvedValue(result("compensated"));render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenQueue={vi.fn()}/>);await pick();fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入失败，已补偿本次新增数据");expect(screen.queryByRole("button",{name:"查看生产队列"})).toBeNull();
+ });
+ it("fences project ownership before passive cleanup can clear the old preview",async()=>{
+  const observations:Array<{visible:string|undefined;allowed:boolean}>=[];
+  function Probe({project,submit}:{project:string;submit:boolean}) {const c=useFolderBatchImportController(project,vi.fn());useLayoutEffect(()=>{if(submit){observations.push({visible:c.preview?.sessionId,allowed:c.canCommit});void c.commit();}},[project,submit]);return <><button onClick={()=>void c.pick()}>选择文件夹</button><p>{c.preview?.displayRootName}</p></>;}
+  const view=render(<Probe project="p" submit={false}/>);await pick();view.rerender(<Probe project="q" submit={true}/>);expect(observations).toEqual([{visible:undefined,allowed:false}]);expect(api.commit).not.toHaveBeenCalled();
+ });
  it("commits exact valid row keys and starts nothing by default",async()=>{
   const imported=vi.fn();const queue=vi.fn();render(<FolderBatchImportPanel projectId="p" onImported={imported} onCancel={vi.fn()} onOpenQueue={queue}/>);await pick();
   expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("disabled",true);expect(screen.getByText("FILE_NOT_FOUND：图片缺失")).toBeTruthy();

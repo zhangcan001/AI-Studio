@@ -26,3 +26,6 @@ export interface FolderImportResult {
  batchId:string|null;itemCount:number;autoStarted:boolean;
  residual:{unverifiedFileCleanup:boolean;shotIds:string[];entityIds:string[];assetIds:string[];batchId:string|null};warnings:string[];
 }
+
+export interface FolderImportLegacyDefaults {selectionRef:string;durationSeconds:number;width:number;height:number}
+export interface FolderImportPreviewOptions {nameSuffix:string|null;legacy?:FolderImportLegacyDefaults|null}

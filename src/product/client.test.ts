@@ -133,3 +133,12 @@ it("sends an atomic typed row save without invoking separate writes", async () =
   expect(await productClient.creation.saveShotRow("p",request)).toEqual(result);
   expect(invokeCommand).toHaveBeenLastCalledWith("product_creation_shot_row_save", {projectId:"p",request});
 });
+
+it("folder import product bridge preserves the existing typed command payloads and errors",async()=>{
+  const request={sessionId:"session",previewVersion:2,manifestSha256:"raw",includeRowKeys:["row"],createQueue:true,autoStart:false,nameSuffix:null};
+  invokeCommand.mockResolvedValueOnce({sessionId:"session"});await productClient.folderImport.pick("project");expect(invokeCommand).toHaveBeenLastCalledWith("folder_batch_import_pick",{projectId:"project"});
+  invokeCommand.mockResolvedValueOnce({previewVersion:2});await productClient.folderImport.rescan("session",{nameSuffix:" v2"});expect(invokeCommand).toHaveBeenLastCalledWith("folder_batch_import_rescan",{sessionId:"session",options:{nameSuffix:" v2"}});
+  invokeCommand.mockResolvedValueOnce({outcome:"completed"});await productClient.folderImport.commit(request);expect(invokeCommand).toHaveBeenLastCalledWith("folder_batch_import_commit",{request});
+  const error={code:"INVALID_INPUT",message:"stale",details:{code:"STALE_PREVIEW",stage:"PREVIEW"}};invokeCommand.mockRejectedValueOnce(error);await expect(productClient.folderImport.commit(request)).rejects.toBe(error);
+  invokeCommand.mockResolvedValueOnce(undefined);await productClient.folderImport.discard("session");expect(invokeCommand).toHaveBeenLastCalledWith("folder_batch_import_discard",{sessionId:"session"});
+});

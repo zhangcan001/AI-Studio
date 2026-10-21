@@ -462,3 +462,6 @@ body::after {
 .folder-import pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .folder-import :focus-visible { outline: 2px solid var(--studio-accent); outline-offset: 3px; }
 @media (max-width: 760px) { .folder-import-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .folder-import { padding: 16px; } .folder-import-actions label { flex-wrap: wrap; } }
+.folder-import small { font-size: 12px; line-height: 1.5; }
+.folder-import fieldset { display: grid; gap: 12px; margin-block: 16px; border: 1px solid var(--studio-border); }
+.folder-import select { min-height: 44px; padding: 8px; max-width: 100%; color: var(--studio-text); background: var(--studio-surface-1); border: 1px solid var(--studio-border); }
