@@ -249,3 +249,11 @@ it("old-project completion cannot release the new project's read lock or overwri
   expect(api.get.mock.calls.filter(([p, id]) => p === "next" && id === null)).toHaveLength(2);
   expect(api.generate).not.toHaveBeenCalled();
 });
+
+it("folder import opens in the workbench, preserves navigation and reuses the existing queue route", async () => {
+  api.get.mockImplementation(async (_p:string,id:string|null)=>context(id));api.runGet.mockResolvedValue(run("SUCCEEDED",1,1));
+  const navigate=vi.fn();const renderFolderImport=vi.fn((props:{onCancel:()=>void;onOpenQueue:(id:string)=>void;onImported:()=>unknown})=><section aria-label="folder pane"><button onClick={()=>props.onOpenQueue("prepared")}>查看新批次</button><button onClick={props.onCancel}>返回分镜</button></section>);
+  render(<StoryboardWorkbench route={route} navigate={navigate} renderFolderImport={renderFolderImport} renderRuns={r=><p>{r.run?.id}</p>}/>);
+  await screen.findByRole("article",{name:"镜头01"});fireEvent.click(screen.getByRole("button",{name:"导入分镜脚本"}));expect(screen.getByRole("region",{name:"folder pane"})).toBeTruthy();expect(navigate).not.toHaveBeenCalled();
+  expect(renderFolderImport.mock.calls[0][0]).toMatchObject({projectId:"p"});fireEvent.click(screen.getByRole("button",{name:"查看新批次"}));expect(screen.getByText("prepared")).toBeTruthy();expect(screen.queryByRole("region",{name:"folder pane"})).toBeNull();expect(api.generate).not.toHaveBeenCalled();
+});

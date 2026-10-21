@@ -11,12 +11,12 @@
     "historicalProofBytesUnchanged": true,
     "gpuExecuted": false,
     "productImplementationChanged": true,
-    "checkpointStage": "P3"
+    "checkpointStage": "P4"
   },
   "files": {
     "scripts/folder-batch-import-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "e06b2d9396356bff46d7fbd01cda46c822494cf38a586f8337747d2506941542"
+      "afterHash": "0f4feca4257b5417000bd7923c70be7e2e2c2700bdaed93c9b7480ff4e2eade5"
     },
     "scripts/library-confirm-ci-race-successor-guard.mjs": {
       "beforeHash": "2502ffcdb1c95cd75e85aa600ca019671c063c02c5c80b06a1b0f64c6a4f099b",
@@ -58,6 +58,30 @@
       "beforeHash": "64b314ee8dc877ec0b3f55e83be58d35bb3790ef126f953bcb7cb50634e36464",
       "afterHash": "e88bb6a9f0f75fc7e8634bdb5ab23b28d54702c390fee6852507f8ac3f1a64a6"
     },
+    "src/app/NormalProductPages.tsx": {
+      "beforeHash": "23bf473ef0fa2d371e8ef1ad911fefc0949acb221ff39949dc2d01d802d5a0c4",
+      "afterHash": "c3682aad7be1f636ab6234a9c822220e468108e694f96e256555202c2a096d26"
+    },
+    "src/features/create/StoryboardWorkbench.test.tsx": {
+      "beforeHash": "b2ba90cd07d3d2c53ea221ba7716534df1b23639b670d539c5de37be5b1eec94",
+      "afterHash": "11ae423a9bc0425683c86d6588d72ab35b196515064ee223a084ba9eebece137"
+    },
+    "src/features/create/StoryboardWorkbench.tsx": {
+      "beforeHash": "fbb35bca0d160b7fece3ed2b9a6720bbda7f64f9db15ba44bdd486ac7d8e3ef0",
+      "afterHash": "b42c435c53d421c4c106ff56f9f06e695d21c4faee0582e69c7e5ca2a6d72209"
+    },
+    "src/features/shots/FolderBatchImportPanel.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "a5adc5fe11ae8af18c0a31dd6222ce721b01d15b784b30161de43e1296db2e4b"
+    },
+    "src/features/shots/FolderBatchImportPanel.tsx": {
+      "beforeHash": null,
+      "afterHash": "b235dce0355394abb22a5201b2e7ab1e00dec6f7bc6fbccee751e2c3c557f5e6"
+    },
+    "src/features/shots/ShotWorkspace.tsx": {
+      "beforeHash": "6221c0cbfda68929f3b8f37895518a4a7f1d248da717157ba4a80b8ce2be4967",
+      "afterHash": "9a4a4a58ba5fd11d2d855fe5ebc88f9157e3196af3c3e23dfea73da83d74e790"
+    },
     "src/features/shots/__fixtures__/folderEntityMentions.json": {
       "beforeHash": null,
       "afterHash": "0702bc788affd4237d134f4ba91ab2a1163b90d7788c03cc8348f66c8affedfb"
@@ -66,9 +90,25 @@
       "beforeHash": null,
       "afterHash": "d1bd76a198c106569d53ba8105dbff42195994d856dd67f72cb01827d707240c"
     },
+    "src/features/shots/useFolderBatchImportController.ts": {
+      "beforeHash": null,
+      "afterHash": "bd81d24cf98718c8600daf97adccb650c4258f770d0e177a1d2638f208d30d89"
+    },
+    "src/product/client.ts": {
+      "beforeHash": "0b444cfae78311aae81f948d2322b4565e4555afa31a4868ad9ebafe79c485c6",
+      "afterHash": "126e616c7a30083bd1f9bbc62df31799acde04c37599b1cda05a64e6a6f52cef"
+    },
+    "src/product/transport.ts": {
+      "beforeHash": "3566bc6f4754ed8ef63f66b60ca9b303be5ee9a0b01e272e6a655592d320d82a",
+      "afterHash": "fa19a4db487c84881eb1024fc839c9274ef94c8272d47eb6eed6633cdb756a63"
+    },
     "src/services/tauriClient.ts": {
       "beforeHash": "5147c17deb6e2d2521697cb142b347e1385c06f69cf07da07cd09f3bf1786d84",
       "afterHash": "7ba9e453c6c180317fbe5dba343b20c4cbf3255a721168288ad3c8969b971581"
+    },
+    "src/styles/studioQuality.css": {
+      "beforeHash": "d95e59e13ce5934f3bc919912632701485def1464799fda886e0ab2446f56a09",
+      "afterHash": "d2688883f2251d25a91c7f5815fe6cfaff5e4cf30f679528f822866e8592541f"
     },
     "src/types/folderBatchImport.ts": {
       "beforeHash": null,

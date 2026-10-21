@@ -1,7 +1,8 @@
-import { productRequest, productMediaUrl } from "./transport";
+import { productRequest, productMediaUrl, folderImportTransport } from "./transport";
 import type { CreationSubmission, CreationShotUpdate, GeneratorBindingSetRequest, RunRef, RunRetryRequest, RunListFilter } from "./types";
 
 export const productClient = {
+  folderImport: folderImportTransport,
   storyEntities: {
     list: (projectId: string, kind: import("../types/storyEntity").StoryEntityKind | null = null) =>
       productRequest("product_story_entity_list", { projectId, kind }),

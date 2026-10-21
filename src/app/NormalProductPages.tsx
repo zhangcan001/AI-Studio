@@ -9,6 +9,7 @@ import { normalRuns } from "../features/runs/runsModel";
 const CreatePage = lazy(() => import("../features/create/CreatePage").then(({ CreatePage }) => ({ default: CreatePage })));
 const StoryboardWorkbench = lazy(() => import("../features/create/StoryboardWorkbench").then(({ StoryboardWorkbench }) => ({ default: StoryboardWorkbench })));
 const LibraryPage = lazy(() => import("../features/library/LibraryPage").then(({ LibraryPage }) => ({ default: LibraryPage })));
+const FolderBatchImportDialog=lazy(()=>import("../features/shots/FolderBatchImportPanel").then(m=>({default:m.FolderBatchImportDialog})));
 const RunsPage = lazy(() => import("../features/runs/RunsPage").then(({ RunsPage }) => ({ default: RunsPage })));
 
 interface Props {
@@ -25,7 +26,7 @@ export function NormalProductPages({ project: activeProject, runtime, route, nav
   // canonical Shot route still owns the embedded Create controller and draft guard.
   const storyboard = route.kind === "create" && route.stage === "video";
   return <>
-    {activeProject && normalCreate(route) && route.kind === "create" && storyboard && <StoryboardWorkbench key={activeProject.id} route={route} runtime={runtime} navigate={navigate} onDirtyChange={onDirtyChange} renderRuns={(runRoute, inlineNavigate) => <RunsPage route={runRoute} navigate={inlineNavigate} />} />}
+    {activeProject && normalCreate(route) && route.kind === "create" && storyboard && <StoryboardWorkbench key={activeProject.id} route={route} runtime={runtime} navigate={navigate} onDirtyChange={onDirtyChange} renderFolderImport={props=><FolderBatchImportDialog {...props}/>} renderRuns={(runRoute, inlineNavigate) => <RunsPage route={runRoute} navigate={inlineNavigate} />} />}
     {activeProject && (normalCreate(route) || (route.kind === "create" && route.stage === "image")) && route.kind === "create" && !storyboard && <CreatePage key={activeProject.id} route={route} runtime={runtime} navigate={navigate} onDirtyChange={onDirtyChange} />}
     {activeProject && normalLibrary(route) && route.kind === "library" && <LibraryPage key={activeProject.id} route={route} navigate={navigate} />}
     {activeProject && normalRuns(route) && route.kind === "runs" && <RunsPage key={activeProject.id} route={route} navigate={navigate} />}

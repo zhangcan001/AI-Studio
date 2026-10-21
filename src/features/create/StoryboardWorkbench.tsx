@@ -20,6 +20,7 @@ const POLL_MS = 8000;
 const EVENT_REFRESH_MS = 500;
 
 interface Props extends CreateProps {
+  renderFolderImport?: (props:{projectId:string;onImported:()=>unknown;onCancel:()=>void;onOpenQueue:(batchId:string)=>void;onOpenLegacy:()=>void})=>ReactNode;
   // Cross-feature composition belongs to the app, not the Create feature.
   renderRuns?: (route: Extract<AppRoute, { kind: "runs" }>, navigate: CreateProps["navigate"]) => ReactNode;
 }
@@ -29,7 +30,7 @@ interface Props extends CreateProps {
  * product facade (creation context + run status). The embedded Create controller
  * retains Studio Store ownership and submits only through the Production Queue.
  */
-export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, renderRuns }: Props) {
+export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, renderRuns, renderFolderImport }: Props) {
   const [items, setItems] = useState<StoryboardShot[]>();
   const [truncated, setTruncated] = useState(0);
   const [error, setError] = useState<string>();
@@ -38,6 +39,8 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const createInFlight = useRef(false);
   const [view, setViewState] = useState<StoryboardView>(() => readView());
   const setView = (next: StoryboardView) => { setViewState(next); try { window.localStorage.setItem(VIEW_KEY, next); } catch { /* storage unavailable */ } };
+  const [folderImportOpen,setFolderImportOpen]=useState(false);
+  useEffect(()=>setFolderImportOpen(false),[route.projectId]);
   const [reviewId, setReviewId] = useState<string>();
   const [selectedId, setSelectedId] = useState<string>();
   const [runRoute, setRunRoute] = useState<Extract<AppRoute, { kind: "runs" }>>();
@@ -161,7 +164,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       {truncated > 0 && <small role="note">状态统计仅覆盖已加载的 {stats.total} 个镜头。</small>}
       <div className="storyboard-header-actions">
         <button type="button" onClick={() => setRunRoute({ kind: "runs", projectId })}>任务队列与运行记录</button>
-        <button type="button" onClick={() => void navigate({ kind: "project-settings", projectId, section: "advanced-production" })}>导入分镜脚本</button>
+        <button type="button" onClick={() => setFolderImportOpen(true)} disabled={!renderFolderImport}>导入分镜脚本</button>
         <button type="button" className="primary" title="前往批量镜头，由生产队列统一执行" onClick={() => void navigate({ kind: "project-settings", projectId, section: "advanced-shots" })}>批量生成待制作镜头</button>
       </div>
     </header>
@@ -220,6 +223,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       </aside>
     </div>}
     {reviewItem && <ReviewPanel key={`${projectId}:${reviewItem.id}:${reviewItem.run?.ref.id}`} projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} />}
+    {folderImportOpen && renderFolderImport?.({projectId,onImported:()=>load(),onCancel:()=>setFolderImportOpen(false),onOpenQueue:(id)=>{setFolderImportOpen(false);setRunRoute({kind:"runs",projectId,run:{source:"queue-batch",id}});},onOpenLegacy:()=>{setFolderImportOpen(false);void navigate({kind:"project-settings",projectId,section:"advanced-production"});}})}
     {runRoute && <WorkbenchRuns route={runRoute} navigate={navigateInline} renderRuns={renderRuns} onClose={() => setRunRoute(undefined)} />}
   </div></ThumbnailProjectContext.Provider></MediaLightboxScope>;
 }

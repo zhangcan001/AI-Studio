@@ -1,6 +1,15 @@
 import { invokeCommand } from "../services/ipc";
 import { normalizeProductError } from "./errors";
 import { buildAssetMediaUrl } from "../services/mediaUrl";
+import { folderBatchImportPick, folderBatchImportRescan, folderBatchImportDiscard, folderBatchImportCommit } from "../services/tauriClient";
+
+/** Product bridge reuses the exact typed Native commands; no feature gains legacy access. */
+export const folderImportTransport = {
+  pick: (projectId:string) => folderBatchImportPick(projectId),
+  rescan: (sessionId:string, options:{nameSuffix?:string|null}) => folderBatchImportRescan(sessionId,options),
+  discard: (sessionId:string) => folderBatchImportDiscard(sessionId),
+  commit: (request:import("../types/folderBatchImport").FolderImportCommitRequest) => folderBatchImportCommit(request),
+};
 
 export const productMediaUrl = buildAssetMediaUrl;
 import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest, RunList, RunListFilter } from "./types";

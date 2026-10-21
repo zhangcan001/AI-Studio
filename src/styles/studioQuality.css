@@ -432,3 +432,33 @@ body::after {
     font-size: 0.6rem;
   }
 }
+
+/* Folder batch import: bounded dialog/table; all rules are feature-prefixed. */
+.folder-import-dialog { width: min(1180px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); padding: 0; color: var(--studio-text); background: var(--studio-surface-1); border: 1px solid var(--studio-border); border-radius: var(--studio-radius-md); }
+.folder-import-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.folder-import { padding: 24px; font-size: 14px; line-height: 1.6; }
+.folder-import header, .folder-import-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.folder-import h2 { margin: 0; font-size: 20px; }
+.folder-import h3 { font-size: 17px; }
+.folder-import p { margin: 8px 0; }
+.folder-import-actions { justify-content: flex-start; margin-block: 16px; }
+.folder-import button { min-height: 44px; padding: 8px 16px; cursor: pointer; }
+.folder-import button:disabled { cursor: not-allowed; }
+.folder-import input[type="checkbox"] { width: 18px; height: 18px; margin: 8px; accent-color: var(--studio-accent); }
+.folder-import label { display: inline-flex; align-items: center; gap: 8px; }
+.folder-import input:not([type="checkbox"]) { min-height: 40px; padding: 8px; color: var(--studio-text); background: var(--studio-surface-1); border: 1px solid var(--studio-border); border-radius: var(--studio-radius-md); }
+.folder-import-summary { display: flex; flex-wrap: wrap; gap: 24px; padding: 16px; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-md); }
+.folder-import-summary dt, .folder-import small { color: var(--studio-text-secondary); }
+.folder-import-summary dd { margin: 4px 0 0; font-weight: 600; }
+.folder-import-table { max-height: 45dvh; overflow: auto; margin-block: 16px; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-md); }
+.folder-import table { width: 100%; border-collapse: collapse; text-align: left; }
+.folder-import th { position: sticky; top: 0; background: var(--studio-surface-1); z-index: 1; }
+.folder-import th, .folder-import td { padding: 12px; vertical-align: top; border-bottom: 1px solid var(--studio-border); overflow-wrap: anywhere; }
+.folder-import td:nth-child(2) { min-width: 180px; max-width: 360px; }
+.folder-import small { display: block; }
+.folder-import .folder-import-error { color: var(--studio-danger); }
+.folder-import footer { display: grid; gap: 12px; }
+.folder-import footer .primary { justify-self: start; }
+.folder-import pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.folder-import :focus-visible { outline: 2px solid var(--studio-accent); outline-offset: 3px; }
+@media (max-width: 760px) { .folder-import-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .folder-import { padding: 16px; } .folder-import-actions label { flex-wrap: wrap; } }

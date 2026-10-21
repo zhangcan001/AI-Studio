@@ -1,3 +1,4 @@
+import { FolderBatchImportDialog } from "./FolderBatchImportPanel";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createShot,
@@ -342,6 +343,7 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
   const onVideoInputsReadyChange = useCallback((owner: string, ready: boolean) => {
     setVideoInputsReady(old => old?.owner === owner && old.ready === ready ? old : {owner,ready});
   }, []);
+  const [folderImportOpen,setFolderImportOpen]=useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [bulkBindOpen, setBulkBindOpen] = useState(false);
   const [structureMenuOpen, setStructureMenuOpen] = useState(false);
@@ -1396,10 +1398,11 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
   const consistencyScope = consistencyScopeForSelection(workspaceSelection, projectId, projectName, productionStructure, shots);
   const showConsistencyScope = mode === "creation" && Boolean(consistencyWorkspace) && Boolean(consistencyScope) && contextSurface !== "shot";
 
-  if (loading) return <section className="workspace-panel shot-workspace"><p className="project-loading">正在加载镜头制作...</p></section>;
+  if (loading && !folderImportOpen) return <section className="workspace-panel shot-workspace"><p className="project-loading">正在加载镜头制作...</p></section>;
 
   return (
     <section className="workspace-panel shot-workspace" aria-busy={busy} data-studio-mode={mode}>
+      {folderImportOpen && <FolderBatchImportDialog projectId={projectId} onImported={()=>reload()} onCancel={()=>setFolderImportOpen(false)} onOpenQueue={id=>{setFolderImportOpen(false);onOpenProductionQueue?.(id);}} />}
       {loadWarning && <p className="error-message" role="alert">{loadWarning}</p>}
       {mode === "creation" && bulkImportOpen && <ShotBulkImportPanel
         projectId={projectId}
@@ -1427,8 +1430,9 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
             headerActions={<div className="shot-structure-more">
               <button type="button" className="shot-structure-more-button" aria-label="更多结构操作" aria-haspopup="menu" aria-expanded={structureMenuOpen} onClick={() => setStructureMenuOpen((open) => !open)}>⋯</button>
               {structureMenuOpen && <div className="shot-structure-more-menu" role="menu" aria-label="结构操作菜单">
-                {mode === "creation" && <button type="button" role="menuitem" onClick={() => { setBulkImportOpen((open) => !open); setBulkBindOpen(false); setStructureMenuOpen(false); }}>{bulkImportOpen ? "收起批量导入" : "批量导入"}</button>}
-                {mode === "creation" && <button type="button" role="menuitem" onClick={() => { setBulkBindOpen((open) => !open); setBulkImportOpen(false); setStructureMenuOpen(false); }}>{bulkBindOpen ? "收起批量绑定素材" : "批量绑定素材"}</button>}
+                {mode !== "review" && <button type="button" role="menuitem" onClick={()=>{setFolderImportOpen(true);setBulkImportOpen(false);setBulkBindOpen(false);setStructureMenuOpen(false);}}>从文件夹导入分镜</button>}
+                {mode === "creation" && <button type="button" role="menuitem" onClick={() => { setFolderImportOpen(false); setBulkImportOpen((open) => !open); setBulkBindOpen(false); setStructureMenuOpen(false); }}>{bulkImportOpen ? "收起批量导入" : "批量导入"}</button>}
+                {mode === "creation" && <button type="button" role="menuitem" onClick={() => { setFolderImportOpen(false); setBulkBindOpen((open) => !open); setBulkImportOpen(false); setStructureMenuOpen(false); }}>{bulkBindOpen ? "收起批量绑定素材" : "批量绑定素材"}</button>}
                 {mode !== "review" && <button type="button" role="menuitem" onClick={() => { openStructureManagement(workspaceSelection); setStructureMenuOpen(false); }}>结构管理</button>}
                 <button type="button" role="menuitem" onClick={() => { void exportManifest(); setStructureMenuOpen(false); }} disabled={busy}>导出清单</button>
                 <button type="button" role="menuitem" onClick={() => { void reload(); setStructureMenuOpen(false); }} disabled={busy}>刷新</button>
