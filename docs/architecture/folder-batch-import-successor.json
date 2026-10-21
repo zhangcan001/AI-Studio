@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "FOLDER_BATCH_IMPORT",
+  "parentHead": "ebc5e087585e38c70156a7f05f41615cc84affdf",
+  "planningParentHead": "ebc5e087585e38c70156a7f05f41615cc84affdf",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": false,
+    "checkpointStage": "P0"
+  },
+  "files": {
+    "scripts/folder-batch-import-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "d0f8c62f83bb25926eb9530ab74c9e71d6c88dbf7c107f8d4d9ab4779ca50351"
+    },
+    "scripts/library-confirm-ci-race-successor-guard.mjs": {
+      "beforeHash": "2502ffcdb1c95cd75e85aa600ca019671c063c02c5c80b06a1b0f64c6a4f099b",
+      "afterHash": "017190f62015b12d919a4adaa032ae3849d902f0061eb1c665cdeb548b2bdfad"
+    },
+    "scripts/testing/folder-batch-import.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "997be4137ddee3a7d82af252a43655ce1803ba1de34e34c352a66dd8f81493d9"
+    }
+  }
+}
