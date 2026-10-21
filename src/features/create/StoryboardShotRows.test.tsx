@@ -233,6 +233,23 @@ it("uses the default generator for a shot without stage config so the first inli
   expect(within(row).getByRole("button", { name: "生成视频" }).hasAttribute("disabled")).toBe(true);
 });
 
+it("uses available REF2VA for new unconfigured rows but preserves an existing FIRST_LAST row", async () => {
+  const firstLast = { ...generator, selectionRef: "fl-default", mode: "FIRST_LAST" };
+  const reference = { ...generator, selectionRef: "ref-default", mode: "REF2VA", recommended: false };
+  api.generatorsList.mockResolvedValue([firstLast, reference]);
+  const existing = shot("existing", 1);
+  existing.shot = { ...existing.shot!, selectionRef: firstLast.selectionRef };
+  render(<StoryboardShotRows {...props()} items={[shot("new", 0, null), existing]} />);
+  const rows = await screen.findAllByRole("article");
+  for (const [index, row] of rows.entries()) {
+    const control = await within(row).findByLabelText(`镜头${index + 1} 画幅`);
+    fireEvent.change(control, { target: { value: "9:16" } });
+  }
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", expect.objectContaining({ shotId: "new", selectionRef: reference.selectionRef })));
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", expect.objectContaining({ shotId: "existing", selectionRef: firstLast.selectionRef })));
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
 it("shows read-only duration/aspect when no generator exists and never sends values", async () => {
   api.generatorsList.mockResolvedValue([]);
   render(<StoryboardShotRows {...props()} items={[shot("b", 0, null)]} />);

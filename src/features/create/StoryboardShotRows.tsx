@@ -8,7 +8,7 @@ import "./CreatePage.css";
 import type { GeneratorOption } from "../../product/types";
 import type { DraftValue } from "../../types/generation";
 import { explicitEntityMentions, parseShotPrompt, resolvePreset, resolvePromptSettings, type ParsedShotPrompt, type ResolutionPresetLike } from "./shotPromptParser";
-import { draftFor } from "./createModel";
+import { defaultGenerator, draftFor } from "./createModel";
 import type { VideoInputView } from "../../types/shotVideoInput";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
@@ -95,12 +95,12 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
 
 /**
  * The shot's own generator; for a shot without a saved stage config, the same
- * default the create page picks (recommended+available, then available), so
+ * default the create page picks (available REF2VA first), so
  * duration/aspect can be set inline and the first save creates the stage config.
  */
 export function rowGenerator(generators: GeneratorOption[], selectionRef: string | null) {
   if (selectionRef) return generators.find(g => g.selectionRef === selectionRef);
-  return generators.find(g => g.recommended && g.availability) ?? generators.find(g => g.availability) ?? generators.find(g => g.recommended) ?? generators[0];
+  return defaultGenerator(generators) ?? generators.find(g => g.recommended) ?? generators[0];
 }
 
 function useEntityCovers(projectId: string, entities: StoryEntity[]) {

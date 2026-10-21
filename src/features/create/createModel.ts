@@ -4,6 +4,14 @@ import type { DraftValue, GenerationValues, RecipeField } from "../../types/gene
 import { defaultGenerationValues } from "../../stores/studioStore";
 export type CreateRoute = Extract<AppRoute, { kind: "create" }>;
 export const scopeKey = (route: CreateRoute) => `${route.projectId}:${route.shotId ?? ""}:${route.stage}`;
+/** UI default only. Saved Shot/Recipe identities and draft/reuse selections take precedence. */
+export function defaultGenerator(generators: GeneratorOption[], recentSelection?: string) {
+  const available = generators.filter(generator => generator.availability);
+  const reference = available.filter(generator => generator.mediaKind === "video" && generator.mode.toUpperCase() === "REF2VA");
+  return reference.find(generator => generator.recommended) ?? reference[0]
+    ?? available.find(generator => generator.selectionRef === recentSelection)
+    ?? available.find(generator => generator.recommended) ?? available[0];
+}
 export function normalCreate(route: AppRoute) { return route.kind === "create" && route.surface !== "batch"; }
 export { modeLabel, generatorLabel, fieldLabel } from "../../product/generatorPresentation";
 export function mediaKind(field: RecipeField): CreationAsset["mediaKind"] | null {

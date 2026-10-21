@@ -81,7 +81,11 @@ function files(root, dir) {
 function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, LIBRARY_CONFIRM_CI_RACE_BASE);
   const fail = id => violations.push("library-confirm-ci-race-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : successor.read(p));
+  // Only an exact, independently validated successor byte version may be projected.
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(LIBRARY_CONFIRM_CI_RACE_PROOF));

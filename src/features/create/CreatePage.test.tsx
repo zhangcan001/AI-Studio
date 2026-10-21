@@ -10,7 +10,7 @@ import { RunsPage } from "../runs/RunsPage";
 import { useStudioStore } from "../../stores/studioStore";
 import type { CreationAccepted, CreationContext, GeneratorOption, ProductRun, CreationAsset } from "../../product/types";
 import type { AppRoute } from "../../app/routes/types";
-import { normalCreate, mediaValue, modeLabel, draftFor } from "./createModel";
+import { normalCreate, mediaValue, modeLabel, draftFor, defaultGenerator } from "./createModel";
 import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
 import { resolveCreateReadinessAction, focusCreateInput } from "./createReadinessAction";
 import { promptText, setPrompt } from "./composerTestUtils";
@@ -52,6 +52,60 @@ beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   URL.createObjectURL = vi.fn(() => "blob:fixture"); URL.revokeObjectURL = vi.fn();
 });
+describe("new Shot reference-mode default", () => {
+  const firstLast: GeneratorOption = { ...videos[2], mode: "FIRST_LAST", name: "Same display name", recommended: true };
+  const reference: GeneratorOption = { ...videos[0], selectionRef: "exact-reference", mode: "REF2VA", name: "Same display name", recommended: false };
+  it("defaults an unconfigured Shot to available REF2VA instead of the first recommended mode or recent FIRST_LAST", async () => {
+    sessionStorage.setItem("aistudio.create.lastGenerator.v1:project:video", firstLast.selectionRef);
+    api.generatorsList.mockResolvedValue([firstLast, reference]);
+    render(<Host />); await loaded();
+    expect(screen.getByLabelText("选择生成器")).toHaveProperty("value", reference.selectionRef);
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("preserves an existing Shot's exact FIRST_LAST selection and saved inputs", async () => {
+    api.generatorsList.mockResolvedValue([firstLast, reference]);
+    api.get.mockImplementation((_p: string, id: string | null, stage: "image" | "video") => {
+      const view = context(stage, id);
+      view.selectedShot = { ...view.selectedShot!, selectionRef: firstLast.selectionRef, values: { first_frame: { type: "image_asset", assetId: "img1" }, last_frame: { type: "image_asset", assetId: "img2" } } };
+      return Promise.resolve(view);
+    });
+    render(<Host />); await loaded();
+    expect(screen.getByLabelText("选择生成器")).toHaveProperty("value", firstLast.selectionRef);
+    expect(useStudioStore.getState().values.first_frame).toEqual({ type: "image_asset", assetId: "img1" });
+    expect(useStudioStore.getState().values.last_frame).toEqual({ type: "image_asset", assetId: "img2" });
+    expect(useStudioStore.getState().values.reference_images).toBeUndefined();
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("does not select an unavailable reference generator", async () => {
+    api.generatorsList.mockResolvedValue([firstLast, { ...reference, availability: false }]);
+    render(<Host />); await loaded();
+    expect(screen.getByLabelText("选择生成器")).toHaveProperty("value", firstLast.selectionRef);
+  });
+  it("does not replace a missing existing generator with the new default", async () => {
+    api.generatorsList.mockResolvedValue([reference]);
+    api.get.mockImplementation((_p: string, id: string | null, stage: "image" | "video") => {
+      const view = context(stage, id); view.selectedShot = { ...view.selectedShot!, selectionRef: "missing-existing-pair" }; return Promise.resolve(view);
+    });
+    render(<Host />); await loaded();
+    expect(screen.getByLabelText("选择生成器")).toHaveProperty("value", "");
+    expect(await screen.findByText("原生成器当前不可用，请明确选择其他生成器；未自动替换。")).toBeTruthy();
+    expect(api.generate).not.toHaveBeenCalled();
+  });
+  it("uses formal mode instead of names and retains the exact selected object", () => {
+    const renamed = { ...reference, name: "Unrelated display name" };
+    expect(defaultGenerator([{ ...firstLast, name: "全能参考" }, renamed])).toBe(renamed);
+    expect(defaultGenerator([firstLast, { ...renamed, availability: false }])).toBe(firstLast);
+    expect(defaultGenerator([])).toBeUndefined();
+    expect(defaultGenerator([{ ...renamed, availability: false }])).toBeUndefined();
+  });
+  it("prefers a recommended available reference variant without changing image-stage defaults", () => {
+    const preferred = { ...reference, selectionRef: "another-exact-reference", recommended: true };
+    expect(defaultGenerator([reference, preferred])).toBe(preferred);
+    expect(defaultGenerator([image])).toBe(image);
+    expect(defaultGenerator([firstLast], firstLast.selectionRef)).toBe(firstLast);
+  });
+});
+
 describe("H3 native resolution presets", () => {
   const native = [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }];
   it("uses backend evidence rather than a generator name and updates both dimensions atomically", async () => {

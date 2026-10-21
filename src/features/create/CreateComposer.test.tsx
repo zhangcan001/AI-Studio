@@ -27,7 +27,7 @@ const options = [
 const assets = [{id:"first",name:"外部首帧",mediaKind:"image"},{id:"second",name:"第二张",mediaKind:"image"}] satisfies VideoInputView["assets"];
 let saved:Map<string,VideoInputView>;
 const nav = vi.fn();
-function context(projectId=route.projectId):CreationContext { return {projectId,projectName:"Owned",stage:"video",shots:[{id:"one",name:"镜头一",ordinal:0}],selectedShot:{summary:{id:"one",name:"one",ordinal:0},prompt:"",selectionRef:null,values:{},referenceAssetIds:[],selectedResultId:null,recentRun:null},candidates:[],mediaInputs:[],promptChoices:[]} as CreationContext; }
+function context(projectId=route.projectId):CreationContext { return {projectId,projectName:"Owned",stage:"video",shots:[{id:"one",name:"镜头一",ordinal:0}],selectedShot:{summary:{id:"one",name:"one",ordinal:0},prompt:"",selectionRef:"opaque-0",values:{},referenceAssetIds:[],selectedResultId:null,recentRun:null},candidates:[],mediaInputs:[],promptChoices:[]} as CreationContext; }
 function view(selectionRef:string):VideoInputView { return saved.get(selectionRef)??{selectionRef,token:null,inputs:[],assets}; }
 beforeEach(()=>{
   vi.resetAllMocks();useStudioStore.getState().resetDraft();saved=new Map();sessionStorage.clear();

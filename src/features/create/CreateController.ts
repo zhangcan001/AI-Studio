@@ -7,7 +7,7 @@ import type { GenerationValues, DraftValue } from "../../types/generation";
 import type { AppRoute } from "../../app/routes/types";
 import { useStudioStore } from "../../stores/studioStore";
 import type { ComfyStatus } from "../../types/comfy";
-import { assetIds, draftFor, mediaKind, mediaValue, scopeKey, type CreateRoute } from "./createModel";
+import { assetIds, defaultGenerator, draftFor, mediaKind, mediaValue, scopeKey, type CreateRoute } from "./createModel";
 import { usePersistentVideoInputs } from "./usePersistentVideoInputs";
 
 const LAST_GENERATOR_KEY = "aistudio.create.lastGenerator.v1";
@@ -92,8 +92,9 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
         // intents are consumed separately, including same-Shot in-place reuse.
         const reuse = intent && !intent.target && intent.projectId === route.projectId && intent.stage === route.stage ? intent : undefined;
         const lastUsedRef = !reuse && !saved ? readLastGenerator(route.projectId, route.stage) : undefined;
-        const selected = reuse ? options.find(item => item.selectionRef === reuse.selectionRef) : saved ? options.find(item => item.selectionRef === saved.selection) : options.find(item => item.selectionRef === next.selectedShot?.selectionRef) ?? (lastUsedRef ? options.find(item => item.selectionRef === lastUsedRef && item.availability) : undefined) ?? options.find(item => item.recommended && item.availability) ?? options.find(item => item.availability);
-        if ((reuse || saved) && !selected) setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
+        const configuredRef = next.selectedShot?.selectionRef;
+        const selected = reuse ? options.find(item => item.selectionRef === reuse.selectionRef) : saved ? options.find(item => item.selectionRef === saved.selection) : configuredRef ? options.find(item => item.selectionRef === configuredRef) : defaultGenerator(options, lastUsedRef);
+        if ((reuse || saved || configuredRef) && !selected) setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
         initialized = true; setContext(next); setGenerators(options); setSelection(selected?.selectionRef ?? "");
         if (selected?.selectionRef) writeLastGenerator(route.projectId, route.stage, selected.selectionRef);
         setRestoredDraft(saved && selected ? { key, selection: selected.selectionRef, values: saved.values } : undefined);
