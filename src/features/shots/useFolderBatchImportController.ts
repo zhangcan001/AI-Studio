@@ -4,7 +4,7 @@ import type { FolderImportLegacyDefaults } from "../../types/folderBatchImport";
 import { productClient } from "../../product/client";
 import { IpcError } from "../../services/ipc";
 import { toUserMessage } from "../../i18n/errorMessages";
-function importError(e:unknown):string {if(e instanceof IpcError && typeof e.details==="object" && e.details!==null && "code" in e.details && typeof e.details.code==="string")return e.details.code+"："+e.message;return toUserMessage(e);}
+function importError(e:unknown):string {if(e instanceof IpcError && typeof e.details==="object" && e.details!==null && "code" in e.details && typeof e.details.code==="string")return e.message || toUserMessage(e);return toUserMessage(e);}
 import type { FolderImportPreview, FolderImportResult } from "../../types/folderBatchImport";
 
 /** Ephemeral import session only; never owns a Shot or Studio Store draft. */

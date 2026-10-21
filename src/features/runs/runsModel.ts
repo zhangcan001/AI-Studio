@@ -16,8 +16,7 @@ export function coverageMessage(coverage?: string | null) {
   if (!coverage || coverage === "RECENT_50_TASKS_AND_PRODUCTION_WITH_UNARCHIVED_QUEUES") {
     return "当前覆盖最近 50 个任务与生产运行，以及未归档队列；更早的任务记录请查看完整任务历史；此处不提供完整混合运行历史分页。";
   }
-  if (coverage === "FINITE") return "当前为有限投影列表，不提供混合历史分页。";
-  return `运行覆盖：${coverage}。不提供完整混合运行历史分页。`;
+  return "当前仅显示部分近期运行。";
 }
 export function actionLabel(action: "START" | "PAUSE" | "CANCEL", status: ProductRun["status"]) {
   if (action === "START") return status === "PAUSED" ? "继续运行" : "启动运行";

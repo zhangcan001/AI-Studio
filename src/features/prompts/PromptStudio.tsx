@@ -437,7 +437,6 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                       {historyError && <p className="error-message" role="alert">生成历史加载失败：{historyError}</p>}
                       {!historyLoading && !historyError && !history.length && <p className="empty-state">当前项目暂无生成任务。</p>}
                       {!historyLoading && !historyError && history.length > 0 && <ul className="prompt-studio-history-list">{history.slice(0, 6).map((task) => <li key={task.id}><strong>{task.workflowName}</strong><span>{taskStatusLabel(task.status)} · {formatDateTime(task.createdAt)} · 输出 {task.outputCount} 个</span></li>)}</ul>}
-                      <p className="prompt-studio-note">任务历史和结果资产继续由现有 Task / Result 权威提供；本页面只读展示，不会自动创建任务。</p>
                     </section>
                     <section className="prompt-studio-subpanel" aria-label="Prompt Studio 跨模块溯源">
                       <div className="prompt-studio-panel-heading"><h4>跨模块溯源</h4><span className="status-pill">只读</span></div>

@@ -29,7 +29,7 @@ const GATE_KEYS: readonly string[] = [
 
 export function ShotReadinessInspector({ detail, loading = false, error, onRetry }: ShotReadinessInspectorProps) {
   if (loading) {
-    return <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查"><div className="shot-readiness-inspector-empty"><strong>正在读取镜头详情</strong><span>按需解析上下文与七项门禁…</span></div></aside>;
+    return <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查"><div className="shot-readiness-inspector-empty"><strong>正在读取镜头详情</strong><span>正在检查镜头…</span></div></aside>;
   }
 
   if (error) {
@@ -37,7 +37,7 @@ export function ShotReadinessInspector({ detail, loading = false, error, onRetry
   }
 
   if (!detail) {
-    return <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查"><div className="shot-readiness-inspector-empty"><strong>选择一个镜头</strong><span>右侧会显示完整上下文、七项门禁与冻结前检查摘要。</span></div></aside>;
+    return <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查"><div className="shot-readiness-inspector-empty"><strong>选择一个镜头</strong><span>右侧会显示镜头信息和七项检查结果。</span></div></aside>;
   }
 
   const readiness = detail.readiness;
@@ -73,8 +73,8 @@ export function ShotReadinessInspector({ detail, loading = false, error, onRetry
         {detail.stalePreparedBatchIds.length > 0 && <em className="shot-readiness-stale">旧上下文</em>}
       </div>
 
-      <section className="shot-readiness-inspector-section" aria-label="七项门禁">
-        <div className="shot-readiness-inspector-section-heading"><h4>七项门禁</h4><span>{preparationStatusLabel(status)}</span></div>
+      <section className="shot-readiness-inspector-section" aria-label="七项检查">
+        <div className="shot-readiness-inspector-section-heading"><h4>七项检查</h4><span>{preparationStatusLabel(status)}</span></div>
         <div className="shot-readiness-gates">
           {GATE_KEYS.map((key) => <GateRow key={key} gate={gateMap.get(key)} gateKey={key} />)}
         </div>

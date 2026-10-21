@@ -24,7 +24,7 @@ describe("folder import preview and authority",()=>{
   fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");expect(api.commit.mock.calls[0][0]).toMatchObject({sessionId:"legacy",previewVersion:2,autoStart:false});
  });
  it("does not offer a queue which successful compensation already deleted",async()=>{
-  api.commit.mockResolvedValue(result("compensated"));render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenQueue={vi.fn()}/>);await pick();fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入失败，已补偿本次新增数据");expect(screen.queryByRole("button",{name:"查看生产队列"})).toBeNull();
+  api.commit.mockResolvedValue(result("compensated"));render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenQueue={vi.fn()}/>);await pick();fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入失败，本次新增的数据已撤回");expect(screen.queryByRole("button",{name:"查看生产队列"})).toBeNull();
  });
  it("fences project ownership before passive cleanup can clear the old preview",async()=>{
   const observations:Array<{visible:string|undefined;allowed:boolean}>=[];
@@ -33,7 +33,7 @@ describe("folder import preview and authority",()=>{
  });
  it("commits exact valid row keys and starts nothing by default",async()=>{
   const imported=vi.fn();const queue=vi.fn();render(<FolderBatchImportPanel projectId="p" onImported={imported} onCancel={vi.fn()} onOpenQueue={queue}/>);await pick();
-  expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("disabled",true);expect(screen.getByText("FILE_NOT_FOUND：图片缺失")).toBeTruthy();
+  expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("disabled",true);expect(screen.getByText("图片缺失")).toBeTruthy();
   fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");
   expect(api.commit).toHaveBeenCalledExactlyOnceWith({sessionId:"session",previewVersion:1,manifestSha256:"abc",includeRowKeys:["r0","r1"],createQueue:true,autoStart:false,nameSuffix:null});
   expect(imported).toHaveBeenCalledOnce();fireEvent.click(screen.getByRole("button",{name:"查看生产队列"}));expect(queue).toHaveBeenCalledWith("batch");expect(screen.queryByRole("button",{name:"确认导入"})).toBeNull();
@@ -46,7 +46,7 @@ describe("folder import preview and authority",()=>{
  });
  it("reports partial cleanup and blocks double click/repeated writes",async()=>{
   const save=deferred<FolderImportResult>();api.commit.mockReturnValue(save.promise);render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();const b=screen.getByRole("button",{name:"确认导入"});fireEvent.click(b);fireEvent.click(b);expect(api.commit).toHaveBeenCalledOnce();expect(screen.getByRole("button",{name:"关闭"})).toHaveProperty("disabled",true);
-  const r=result("partial");r.residual.assetIds=["retained"];r.compensationErrors=[{target:"asset",id:"retained",message:"仍被引用"}];await act(async()=>save.resolve(r));expect(screen.getByText("导入未完成，有数据残留")).toBeTruthy();expect(screen.getByText(/C3 \/ PROMPT_SAVE_FAILED/)).toBeTruthy();expect(screen.getByText(/asset retained/)).toBeTruthy();expect(screen.queryByRole("button",{name:"确认导入"})).toBeNull();
+  const r=result("partial");r.residual.assetIds=["retained"];r.compensationErrors=[{target:"asset",id:"retained",message:"仍被引用"}];await act(async()=>save.resolve(r));expect(screen.getByText("导入未完成，有部分数据未能撤回")).toBeTruthy();expect(screen.getByText("写入失败")).toBeTruthy();expect(screen.getByText("素材：仍被引用")).toBeTruthy();expect(screen.getByText(/未撤回：镜头 0 个、角色\/场景 0 个、素材 1 个/)).toBeTruthy();expect(screen.queryByRole("button",{name:"确认导入"})).toBeNull();
  });
  it("keeps completed result after list refresh error and never retries automatically",async()=>{
   render(<FolderBatchImportPanel projectId="p" onImported={()=>Promise.reject(Error("refresh"))} onCancel={vi.fn()}/>);await pick();fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");await screen.findByText(/列表刷新失败/);expect(api.commit).toHaveBeenCalledOnce();

@@ -57,7 +57,7 @@ const detail: ShotProductionPlanDetail = {
 describe("ShotReadinessInspector", () => {
   it("shows all seven gates, context hash, profile sources, reference summary, and offline blocker", () => {
     const html = renderToStaticMarkup(<ShotReadinessInspector detail={detail} />);
-    expect(html).toContain("七项门禁");
+    expect(html).toContain("七项检查");
     for (const label of ["角色", "场景", "参考", "提示词", "工作流", "输出", "ComfyUI"]) {
       expect(html).toContain(label);
     }
