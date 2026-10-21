@@ -81,6 +81,10 @@ impl Scan {
 /// Scan only owned selections, never follow links/junctions, never walk unbounded.
 /// A limit violation imports nothing rather than an arbitrary directory prefix.
 pub(super) fn scan_images(root: &Path, max_files: usize) -> Scan {
+    scan_images_with_depth(root, max_files, MAX_SCAN_DEPTH)
+}
+
+pub(super) fn scan_images_with_depth(root: &Path, max_files: usize, max_depth: usize) -> Scan {
     let mut result = Scan::default();
     if validate_components(root).is_err() || !root.is_dir() {
         result.failure(root, "目录不可访问或包含不安全路径/符号链接。");
@@ -89,7 +93,7 @@ pub(super) fn scan_images(root: &Path, max_files: usize) -> Scan {
     let mut stack = vec![(root.to_path_buf(), 0)];
     let mut count = 0;
     while let Some((directory, depth)) = stack.pop() {
-        if depth > MAX_SCAN_DEPTH {
+        if depth > max_depth {
             result.files.clear();
             result.failure(root, "目录层数超过安全限制。");
             return result;

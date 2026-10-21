@@ -10,13 +10,13 @@
     "productionQueueOnlyExecution": true,
     "historicalProofBytesUnchanged": true,
     "gpuExecuted": false,
-    "productImplementationChanged": false,
-    "checkpointStage": "P0"
+    "productImplementationChanged": true,
+    "checkpointStage": "P1"
   },
   "files": {
     "scripts/folder-batch-import-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "d0f8c62f83bb25926eb9530ab74c9e71d6c88dbf7c107f8d4d9ab4779ca50351"
+      "afterHash": "298c6b55391920a8ff2e09a66d8fb837d3c6512c8aab710cae4db6074908badb"
     },
     "scripts/library-confirm-ci-race-successor-guard.mjs": {
       "beforeHash": "2502ffcdb1c95cd75e85aa600ca019671c063c02c5c80b06a1b0f64c6a4f099b",
@@ -25,6 +25,30 @@
     "scripts/testing/folder-batch-import.test.mjs": {
       "beforeHash": null,
       "afterHash": "997be4137ddee3a7d82af252a43655ce1803ba1de34e34c352a66dd8f81493d9"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "97e86019c4059ff056ec8bcb9743a9deda670ac7d7c493b185dbb3747d52806f",
+      "afterHash": "b8d0a60b77b71e11ca3d36a06933f94f9a6d93cfdcb2f452ed64088c667b5ce4"
+    },
+    "src-tauri/src/application/shot_video_input_service.rs": {
+      "beforeHash": "2e0fe451762e902ef9ce95924b39149a08c70edcfbea937856b86366db8d84c3",
+      "afterHash": "240c16737335dff3e8df4f7bb4e950fbb96cb0941d401cc561d1c75fe05eda2c"
+    },
+    "src-tauri/src/application/source_asset_import_service.rs": {
+      "beforeHash": "f1d351e293ffc23ebb6030225a39ff955d366d2ae0ce02f7e866225953e6b009",
+      "afterHash": "488a44cb5e5866f99ed68cc99abc75cea96921cec56d42c1063f3ecd7bf6979c"
+    },
+    "src-tauri/src/application/source_asset_import_service/source_paths.rs": {
+      "beforeHash": "e199846c5637b19bd8ec52b268720227283e5b47dc370e4b42847bdfc8cf81bb",
+      "afterHash": "9665fb4c3a990b3a9b0b8ce42156fd54eccceec420d93836190c351ad6fb2412"
+    },
+    "src/features/shots/__fixtures__/folderEntityMentions.json": {
+      "beforeHash": null,
+      "afterHash": "0702bc788affd4237d134f4ba91ab2a1163b90d7788c03cc8348f66c8affedfb"
+    },
+    "src/features/shots/folderBatchImportMentions.test.ts": {
+      "beforeHash": null,
+      "afterHash": "d1bd76a198c106569d53ba8105dbff42195994d856dd67f72cb01827d707240c"
     }
   }
 }

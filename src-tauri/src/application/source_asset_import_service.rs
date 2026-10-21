@@ -18,6 +18,36 @@ use tokio::io::AsyncReadExt;
 mod source_paths;
 use source_paths::{open_source_file, scan_images, MAX_SOURCE_FILES};
 
+/// Narrow folder-import facade. Legacy source import retains its own budgets.
+pub(crate) fn scan_import_folder(root: &Path) -> Result<Vec<String>, String> {
+    let scan = source_paths::scan_images_with_depth(root, 10_000, 4);
+    if !scan.failed.is_empty() {
+        return Err(
+            "LINK_REJECTED_OR_SCAN_LIMIT: 目录含不安全路径、无法读取项或超过扫描限制".into(),
+        );
+    }
+    scan.files
+        .iter()
+        .map(|p| {
+            p.strip_prefix(root)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .map_err(|_| "PATH_OUTSIDE_ROOT".into())
+        })
+        .collect()
+}
+
+pub(crate) fn open_import_file(root: &Path, relative: &str) -> std::io::Result<std::fs::File> {
+    if !crate::application::folder_batch_import_service::safe_relative_path(relative) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "PATH_OUTSIDE_ROOT",
+        ));
+    }
+    let path = root.join(relative);
+    source_paths::within_root(root, &path)?;
+    open_source_file(&path)
+}
+
 pub const MAX_SOURCE_IMAGE_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_SOURCE_VIDEO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_SOURCE_AUDIO_BYTES: u64 = 512 * 1024 * 1024;

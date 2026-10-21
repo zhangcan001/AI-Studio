@@ -427,6 +427,65 @@ pub(crate) fn media_values(
 /// Keep all non-reference text unchanged and index only the actual reference_images.
 /// Entity names are UI aliases, not visual descriptions; role-specific retention
 /// instructions anchor the model to the pictures rather than the alias wording.
+pub(crate) fn match_entity_mention<'a>(
+    rest: &str,
+    project_id: &str,
+    entities: &'a [crate::domain::story_entity::StoryEntity],
+) -> Result<&'a crate::domain::story_entity::StoryEntity, ShotVideoInputError> {
+    let mut matches: Vec<_> = entities
+        .iter()
+        .filter(|entity| {
+            entity.project_id == project_id
+                && !entity.name.is_empty()
+                && rest.starts_with(&entity.name)
+                && !(entity
+                    .name
+                    .ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                    && rest[entity.name.len()..]
+                        .starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
+        })
+        .collect();
+    matches.sort_by_key(|entity| std::cmp::Reverse(entity.name.len()));
+    let entity = matches.first().ok_or_else(|| {
+        invalid(
+            "ENTITY_REFERENCE_UNKNOWN: 存在无法识别的 @引用，请使用当前项目唯一的角色或场景名称",
+        )
+    })?;
+    if matches
+        .iter()
+        .filter(|item| item.name == entity.name)
+        .count()
+        != 1
+    {
+        return Err(invalid(format!(
+            "ENTITY_REFERENCE_AMBIGUOUS: @{} 存在同名实体，请先改为唯一名称",
+            entity.name
+        )));
+    }
+    Ok(entity)
+}
+
+pub(crate) fn explicit_entity_mentions<'a>(
+    prompt: &str,
+    project_id: &str,
+    entities: &'a [crate::domain::story_entity::StoryEntity],
+) -> Result<Vec<&'a crate::domain::story_entity::StoryEntity>, ShotVideoInputError> {
+    let mut rest = prompt;
+    let mut found = Vec::new();
+    while let Some(at) = rest.find('@') {
+        rest = &rest[at + 1..];
+        let entity = match_entity_mention(rest, project_id, entities)?;
+        if !found
+            .iter()
+            .any(|e: &&crate::domain::story_entity::StoryEntity| e.id == entity.id)
+        {
+            found.push(entity);
+        }
+        rest = &rest[entity.name.len()..];
+    }
+    Ok(found)
+}
+
 fn compile_entity_prompt(
     prompt: &str,
     project_id: &str,
@@ -443,32 +502,7 @@ fn compile_entity_prompt(
     while let Some(at) = rest.find('@') {
         output.push_str(&rest[..at]);
         rest = &rest[at + 1..];
-        let mut matches: Vec<_> = entities
-            .iter()
-            .filter(|entity| {
-                entity.project_id == project_id
-                    && !entity.name.is_empty()
-                    && rest.starts_with(&entity.name)
-                    && !(entity
-                        .name
-                        .ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
-                        && rest[entity.name.len()..]
-                            .starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
-            })
-            .collect();
-        matches.sort_by_key(|entity| std::cmp::Reverse(entity.name.len()));
-        let entity = matches.first().ok_or_else(|| invalid("ENTITY_REFERENCE_UNKNOWN: 存在无法识别的 @引用，请使用当前项目唯一的角色或场景名称"))?;
-        if matches
-            .iter()
-            .filter(|item| item.name == entity.name)
-            .count()
-            != 1
-        {
-            return Err(invalid(format!(
-                "ENTITY_REFERENCE_AMBIGUOUS: @{} 存在同名实体，请先改为唯一名称",
-                entity.name
-            )));
-        }
+        let entity = match_entity_mention(rest, project_id, entities)?;
         let asset_id = entity
             .cover_asset_id
             .as_ref()

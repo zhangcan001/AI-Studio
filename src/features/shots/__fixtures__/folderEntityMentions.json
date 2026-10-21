@@ -1,0 +1,8 @@
+[
+  {"names":["Alice","Alice Smith"],"prompt":"@Alice Smith turns; @Alice follows @Alice","expected":["Alice Smith","Alice"]},
+  {"names":["Alice"],"prompt":"@alice turns","expected":null},
+  {"names":["Al"],"prompt":"@Alice turns","expected":null},
+  {"names":["Alice","Alice"],"prompt":"@Alice turns","expected":null},
+  {"names":["小明","小明同学"],"prompt":"@小明同学，和@小明走过走廊","expected":["小明同学","小明"]},
+  {"names":["Alice"],"prompt":"no explicit references","expected":[]}
+]
