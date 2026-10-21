@@ -1653,7 +1653,7 @@ pub mod folder_batch_import_service {
                     let mut result = (**result).clone();
                     result
                         .warnings
-                        .push("SESSION_CONSUMED：返回上次结果，未重复写入。".into());
+                        .push("这次导入已经完成，以下是上次的结果，没有重复写入。".into());
                     return Ok(result);
                 }
                 SessionState::Writing => {
@@ -1920,7 +1920,7 @@ pub mod folder_batch_import_service {
                 entities.insert(name.clone(), entity);
             }
             self.injection("C1")?;
-            let content = serde_json::json!({"schemaVersion":1,"shots":rows.iter().map(|r|serde_json::json!({"name":r.name,"description":format!("导入自 {} · manifest {}",plan.view.display_root_name,&plan.view.manifest_sha256[..12]),"videoPrompt":r.prompt})).collect::<Vec<_>>()});
+            let content = serde_json::json!({"schemaVersion":1,"shots":rows.iter().map(|r|serde_json::json!({"name":r.name,"description":format!("导入自 {}",plan.view.display_root_name),"videoPrompt":r.prompt})).collect::<Vec<_>>()});
             let created = services
                 .bulk
                 .commit_import(&super::shot_bulk_service::ShotBulkImportRequest {
@@ -3040,10 +3040,7 @@ pub mod folder_batch_import_service {
             assert_eq!(before, after);
             let again = f.service.commit(req).await.unwrap();
             assert_eq!(again.created_shot_ids, result.created_shot_ids);
-            assert!(again
-                .warnings
-                .iter()
-                .any(|w| w.contains("SESSION_CONSUMED")));
+            assert!(again.warnings.iter().any(|w| w.contains("没有重复写入")));
             assert_eq!(count(&f.pool, "shots").await, 2);
             assert_eq!(count(&f.pool, "assets").await, 4);
             assert_no_execution(&f.pool).await;

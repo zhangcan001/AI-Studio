@@ -25,7 +25,11 @@
     },
     "scripts/user-copy-cleanup-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "f3e2b546ed69ec34c47c5526525867db80034780bc8b4adeb38144049c0845f0"
+      "afterHash": "85e79803f6aeb67e4c3d04d5be112a1065996446d2c1efd01b845fb7cff6985a"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "b93993269bdd28a28aa6f0acc016ef82f1e85c114eb7347fdf169f339e7dde5e",
+      "afterHash": "39b89987d0dda106f626ff04b282b47e55ff9c8a680545fff437515f5bcad012"
     },
     "src/features/assets/AssetPreview.tsx": {
       "beforeHash": "b93d1bdf75c159d61128474e197cb566e923dfe04a769ad8275f40506b0dfa16",

@@ -8,6 +8,7 @@ export const USER_COPY_CLEANUP_BASE = "d7f4ec7d46b6395df072eec69a834f03d8409cab"
 export const USER_COPY_CLEANUP_PROOF = "docs/architecture/user-copy-cleanup-successor.json";
 export const USER_COPY_CLEANUP_CHANGED = [
   "scripts/default-reference-generator-successor-guard.mjs",
+  "src-tauri/src/application/mod.rs",
   "src/features/assets/AssetPreview.tsx",
   "src/features/prompts/PromptStudio.tsx",
   "src/features/runs/RunsPage.tsx",
