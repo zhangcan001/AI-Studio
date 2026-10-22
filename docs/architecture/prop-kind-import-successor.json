@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "PROP_KIND_IMPORT",
+  "parentHead": "0c4c208ac8e1b4559bea60cfb200661d38e18117",
+  "planningParentHead": "0c4c208ac8e1b4559bea60cfb200661d38e18117",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "manifestPropKindOnly": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "docs/architecture/folder-batch-import.md": {
+      "beforeHash": "9507091670ec74c954a39363f4ef5f60e8707a7d38318b5511fccefe678430e4",
+      "afterHash": "e1320ad5496611a16bb5a8ee0d23b161155e8cd3427c8a931826faba6436d247"
+    },
+    "scripts/prop-kind-import-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "eea35b9279a0ea7ef6bbc1249adf6a7c80340e9f5d2d2632d5ba886ef249225a"
+    },
+    "scripts/testing/prop-kind-import.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "c28d0e857373d4b918e91e181883ce3f2d5081fc57c25c816c53db52546831cf"
+    },
+    "scripts/user-copy-cleanup-successor-guard.mjs": {
+      "beforeHash": "85e79803f6aeb67e4c3d04d5be112a1065996446d2c1efd01b845fb7cff6985a",
+      "afterHash": "4daefcd204bf8a11e54267f7c91a586c17a472ff36cb52ace130982fd55359af"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "39b89987d0dda106f626ff04b282b47e55ff9c8a680545fff437515f5bcad012",
+      "afterHash": "49461ee2ccb26ad859300d41f4ab3327dbbab061b3b30c104b9fd80d3b29c3ca"
+    },
+    "src/features/shots/FolderBatchImportPanel.tsx": {
+      "beforeHash": "5e451153e334387cd8105de8305f5897471e1070b7503b060c9fe7d3aaf5a01c",
+      "afterHash": "f9f8d05e678cb15dd1ddb7ff1aa75cb81705f53b1c3173ef8b88967e12945a08"
+    }
+  }
+}

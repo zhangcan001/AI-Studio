@@ -400,7 +400,7 @@ pub mod folder_batch_import_service {
                 || entity
                     .kind
                     .as_deref()
-                    .is_some_and(|k| !matches!(k, "character" | "scene"))
+                    .is_some_and(|k| !matches!(k, "character" | "scene" | "prop"))
                 || entity
                     .cover
                     .as_ref()
@@ -1027,6 +1027,16 @@ pub mod folder_batch_import_service {
                 .map_err(|_| failure("PROJECT_UNAVAILABLE", "无法读取当前项目实体"))?;
             let mut entities = existing.clone();
             for (i, entity) in manifest.characters.iter().enumerate() {
+                let declared_kind = entity.kind.as_deref().unwrap_or("character");
+                if existing
+                    .iter()
+                    .any(|e| e.name == entity.name && e.kind.as_str() != declared_kind)
+                {
+                    return Err(failure(
+                        "INVALID_MANIFEST",
+                        format!("实体 {} 与项目中已有的同名实体类型不同", entity.name),
+                    ));
+                }
                 if !existing.iter().any(|e| {
                     e.name == entity.name
                         && e.kind.as_str() == entity.kind.as_deref().unwrap_or("character")
@@ -3211,6 +3221,90 @@ pub mod folder_batch_import_service {
             assert_eq!(count(&f.pool, "assets").await, 4);
             assert_eq!(count(&f.pool, "story_entities").await, 1);
             assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        fn add_prop_entity(f: &PreviewFixture, kind: &str) {
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["characters"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "name": "调阅签", "kind": kind, "images": ["images/prop.png"]
+                }));
+            value["shots"][1]["prompt"] = "@Alice 拿起 @调阅签".into();
+            std::fs::copy(f.root.join("images/a.png"), f.root.join("images/prop.png")).unwrap();
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        }
+        #[tokio::test]
+        async fn manifest_prop_entity_is_created_bound_and_invalid_kind_rejected() {
+            let f = preview_fixture().await;
+            add_prop_entity(&f, "prop");
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(p.valid_count, 2, "{:?}", p.rows);
+            let prop = p.characters.iter().find(|e| e.name == "调阅签").unwrap();
+            assert_eq!(
+                (prop.kind.as_str(), prop.action.as_str()),
+                ("prop", "create")
+            );
+            assert_eq!(p.rows[1].entity_names, vec!["Alice", "调阅签"]);
+            let r = f.service.commit(request(&p, false)).await.unwrap();
+            assert_eq!(r.outcome, "completed", "{r:?}");
+            assert_eq!(r.created_entity_ids.len(), 2);
+            let props = f
+                .service
+                .entities
+                .list(
+                    TEST_PROJECT,
+                    Some(crate::domain::story_entity::StoryEntityKind::Prop),
+                )
+                .await
+                .unwrap();
+            assert_eq!(props.len(), 1);
+            assert_eq!(props[0].name, "调阅签");
+            assert_eq!(props[0].image_asset_ids.len(), 1);
+            let names:Vec<String>=sqlx::query_scalar("SELECT a.original_name FROM shot_video_input_assets i JOIN assets a ON a.id=i.asset_id WHERE i.shot_id=? AND i.input_key='reference_images' ORDER BY i.ordinal").bind(&r.created_shot_ids[1]).fetch_all(&f.pool).await.unwrap();
+            assert!(names.contains(&"prop.png".to_string()), "{names:?}");
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+            let f = preview_fixture().await;
+            add_prop_entity(&f, "item");
+            let err = f
+                .service
+                .pick(TEST_PROJECT, f.root.clone())
+                .await
+                .unwrap_err();
+            assert_eq!(err.code, "INVALID_MANIFEST");
+            assert_eq!(count(&f.pool, "story_entities").await, 0);
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn existing_same_name_entity_with_other_kind_is_rejected_before_writes() {
+            let f = preview_fixture().await;
+            f.service
+                .entities
+                .create(
+                    TEST_PROJECT,
+                    crate::domain::story_entity::StoryEntityKind::Character,
+                    crate::domain::story_entity::StoryEntityUpsert {
+                        name: "调阅签".into(),
+                        description: String::new(),
+                        cover_asset_id: None,
+                        image_asset_ids: vec![],
+                    },
+                )
+                .await
+                .unwrap();
+            add_prop_entity(&f, "prop");
+            let err = f
+                .service
+                .pick(TEST_PROJECT, f.root.clone())
+                .await
+                .unwrap_err();
+            assert_eq!(err.code, "INVALID_MANIFEST");
+            assert_eq!(count(&f.pool, "shots").await, 0);
+            assert_eq!(count(&f.pool, "assets").await, 0);
             f.pool.close().await;
         }
         #[tokio::test]
