@@ -1271,4 +1271,77 @@ mod tests {
             0
         );
     }
+
+    #[tokio::test]
+    async fn composition_kind_migration_preserves_entities_images_and_bindings() {
+        use sqlx::sqlite::SqliteConnectOptions;
+        let dir = tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join("app.db"))
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = std::borrow::Cow::Owned(
+            old.migrations
+                .iter()
+                .filter(|m| m.version <= 46)
+                .cloned()
+                .collect(),
+        );
+        old.run(&pool).await.unwrap();
+        for sql in [
+            "INSERT INTO projects(id,name,root_path,created_at,updated_at) VALUES ('p1','P','/tmp/p','t','t')",
+            "INSERT INTO assets(id,project_id,type,category,name,storage_path,sha256,created_at,updated_at) VALUES ('a1','p1','image','source_image','a.png','a.png','00','t','t')",
+            "INSERT INTO shots(id,project_id,name,ordinal,prompt_text,created_at,updated_at) VALUES ('s1','p1','S01',0,'','t','t')",
+            "INSERT INTO story_entities(id,project_id,kind,name,cover_asset_id,created_at,updated_at) VALUES ('e1','p1','prop','调阅签','a1','t','t')",
+            "INSERT INTO story_entity_images(entity_id,asset_id,ordinal,created_at) VALUES ('e1','a1',0,'t')",
+            "INSERT INTO shot_story_entity_bindings(id,project_id,shot_id,entity_id,ordinal,created_at,updated_at) VALUES ('b1','p1','s1','e1',0,'t','t')",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+        }
+        assert!(sqlx::query("INSERT INTO story_entities(id,project_id,kind,name,created_at,updated_at) VALUES ('e0','p1','composition','x','t','t')").execute(&pool).await.is_err());
+        super::MIGRATOR.run(&pool).await.unwrap();
+        let one = |sql: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(sql)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(one("SELECT COUNT(*) FROM story_entities WHERE id='e1' AND kind='prop' AND cover_asset_id='a1'").await, 1);
+        assert_eq!(one("SELECT COUNT(*) FROM story_entity_images").await, 1);
+        assert_eq!(
+            one("SELECT COUNT(*) FROM shot_story_entity_bindings").await,
+            1
+        );
+        assert_eq!(one("PRAGMA foreign_keys").await, 1);
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(one("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('uq_story_entities_project_kind_name','idx_story_entities_project_kind_updated')").await, 2);
+        sqlx::query("INSERT INTO story_entities(id,project_id,kind,name,created_at,updated_at) VALUES ('e2','p1','composition','剧情01','t','t')").execute(&pool).await.unwrap();
+        assert!(sqlx::query("INSERT INTO story_entities(id,project_id,kind,name,created_at,updated_at) VALUES ('e3','p1','layout','x','t','t')").execute(&pool).await.is_err());
+        assert!(sqlx::query("INSERT INTO story_entities(id,project_id,kind,name,created_at,updated_at) VALUES ('e4','p1','composition','剧情01','t','t')").execute(&pool).await.is_err());
+        // Cascades still point at the rebuilt table.
+        sqlx::query("DELETE FROM story_entities WHERE id='e1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(one("SELECT COUNT(*) FROM story_entity_images").await, 0);
+        assert_eq!(
+            one("SELECT COUNT(*) FROM shot_story_entity_bindings").await,
+            0
+        );
+        assert_eq!(one("SELECT COUNT(*) FROM assets").await, 1);
+        pool.close().await;
+    }
 }

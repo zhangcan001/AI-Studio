@@ -20,6 +20,7 @@ it.each([
   { kind: "character" as StoryEntityKind, label: "角色", filename: "苏蔓.png" },
   { kind: "scene" as StoryEntityKind, label: "场景", filename: "夜晚街道.webp" },
   { kind: "prop" as StoryEntityKind, label: "道具", filename: "古剑.jpg" },
+  { kind: "composition" as StoryEntityKind, label: "构图", filename: "剧情01.png" },
 ])("bulk imports $label images as separate entities named from their filenames", async ({ kind, label, filename }) => {
   api.list.mockResolvedValue([]);
   api.importImages.mockResolvedValue({

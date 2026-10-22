@@ -3,12 +3,13 @@ import { productClient } from "../product/client";
 import type { LibraryCursor, LibraryItem, LibraryQuery, LibraryTag } from "../product/libraryTypes";
 import { AssetImageThumb } from "../features/create/CreateMediaPreview";
 
-export type ImagePickTab = "all" | "character" | "scene" | "prop" | "untagged";
+export type ImagePickTab = "all" | "character" | "scene" | "prop" | "composition" | "untagged";
 const TABS: { id: ImagePickTab; label: string; tagHints: string[] }[] = [
   { id: "all", label: "全部", tagHints: [] },
   { id: "character", label: "角色", tagHints: ["角色", "character", "char"] },
   { id: "scene", label: "场景", tagHints: ["场景", "scene", "环境"] },
   { id: "prop", label: "物品", tagHints: ["物品", "道具", "prop", "object"] },
+  { id: "composition", label: "构图", tagHints: ["构图", "composition", "layout", "剧情"] },
   { id: "untagged", label: "未分类", tagHints: [] },
 ];
 
@@ -71,7 +72,7 @@ export function ImageAssetPicker({
       .then(async tagList => {
       if (!alive || !current()) return;
       setTags(tagList);
-      const tagId = (tab === "character" || tab === "scene" || tab === "prop")
+      const tagId = (tab === "character" || tab === "scene" || tab === "prop" || tab === "composition")
         ? (tagList.find(tag => matchesHints(tag.name, hints))?.id ?? null)
         : null;
       try {
@@ -131,7 +132,7 @@ export function ImageAssetPicker({
     const exclude = new Set(excludeIds);
     let rows = loadedScope === scope ? items.filter(i => i.resourceRef.kind === "asset" && !exclude.has(i.resourceRef.id)) : [];
     // When tag filter is unavailable, fall back to title/subtype heuristics for entity tabs.
-    if (tab === "character" || tab === "scene" || tab === "prop") {
+    if (tab === "character" || tab === "scene" || tab === "prop" || tab === "composition") {
       const hints = TABS.find(x => x.id === tab)!.tagHints;
       const hasTag = tags.some(tag => matchesHints(tag.name, hints));
       if (!hasTag) rows = rows.filter(i => matchesHints(i.title, hints) || matchesHints(i.subtype, hints));
@@ -150,7 +151,7 @@ export function ImageAssetPicker({
     // These choices belong to the current caller, not to an earlier Library response.
     let rows = localChoices.filter(a => a.mediaKind === "image" && !exclude.has(a.id) && !libIds.has(a.id));
     if (q) rows = rows.filter(a => a.name.toLowerCase().includes(q));
-    if (tab === "character" || tab === "scene" || tab === "prop") {
+    if (tab === "character" || tab === "scene" || tab === "prop" || tab === "composition") {
       const hints = TABS.find(x => x.id === tab)!.tagHints;
       rows = rows.filter(a => matchesHints(a.name, hints));
     } else if (tab === "untagged") {

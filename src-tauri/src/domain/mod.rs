@@ -32,6 +32,7 @@ pub mod story_entity {
         Character,
         Scene,
         Prop,
+        Composition,
     }
 
     impl StoryEntityKind {
@@ -40,6 +41,7 @@ pub mod story_entity {
                 Self::Character => "character",
                 Self::Scene => "scene",
                 Self::Prop => "prop",
+                Self::Composition => "composition",
             }
         }
 
@@ -48,6 +50,7 @@ pub mod story_entity {
                 "character" => Ok(Self::Character),
                 "scene" => Ok(Self::Scene),
                 "prop" => Ok(Self::Prop),
+                "composition" => Ok(Self::Composition),
                 _ => Err(format!("unsupported story entity kind: {value}")),
             }
         }

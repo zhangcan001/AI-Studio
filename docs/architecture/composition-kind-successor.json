@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "COMPOSITION_KIND",
+  "parentHead": "ecb180018fcf475c4a78ed7003f91d3dc23435a1",
+  "planningParentHead": "ecb180018fcf475c4a78ed7003f91d3dc23435a1",
+  "contracts": {
+    "schemaChanged": true,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "compositionKindMigration047": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "docs/architecture/folder-batch-import.md": {
+      "beforeHash": "e1320ad5496611a16bb5a8ee0d23b161155e8cd3427c8a931826faba6436d247",
+      "afterHash": "6cfd18ec95ccf51ee13506a9c6e6c403993e99236aad32d69a5edcca97a16dce"
+    },
+    "scripts/composition-kind-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "66f528d05d23db55b0abb97002762d0712b57e4d7c4d128595ebb67ab31e1151"
+    },
+    "scripts/guard-chain-perf-successor-guard.mjs": {
+      "beforeHash": "23e9f072c214bd5c485b4f5daa27fc5ec3e0d96bf691b49904b5c69a6a11fc6b",
+      "afterHash": "2f3847eb10ef084dd1f80136ee64074a9e7108fb696d1256f4a9ff0f66b389f9"
+    },
+    "scripts/testing/composition-kind.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "43e3f015a4eab60941dcae3d2340434d5a940160b0d2377916c18e1f950411d7"
+    },
+    "src-tauri/migrations/047_story_entity_composition_kind.sql": {
+      "beforeHash": null,
+      "afterHash": "22b41d400d7588dbb37a201e504e8ba1c2b25ba8d8aab2f862106c538030f51d"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "49461ee2ccb26ad859300d41f4ab3327dbbab061b3b30c104b9fd80d3b29c3ca",
+      "afterHash": "bd9ec9cffe82aabbcc4c294de9c0b1f8119728e2f22df9548dbbc9885bf6f7e9"
+    },
+    "src-tauri/src/application/project_backup_service.rs": {
+      "beforeHash": "e03b7070ae9abbf6d34c10c2183d172362f0883d8f9b95f399505cccbc1a955f",
+      "afterHash": "c2cff3d37c0f0d0388a5b3c04b7226ffb72e56f0e5b541e03a14670429643a11"
+    },
+    "src-tauri/src/application/shot_video_input_service.rs": {
+      "beforeHash": "240c16737335dff3e8df4f7bb4e950fbb96cb0941d401cc561d1c75fe05eda2c",
+      "afterHash": "870bc557af21d8dffbb8f42a4b05d17b05cd158c39bff02393d84ad1c067cf21"
+    },
+    "src-tauri/src/domain/mod.rs": {
+      "beforeHash": "5d979dcd5587f36238a9d569864cfb8dbddd1f8b6f120951aa28bfd6164183cd",
+      "afterHash": "99f28e2577ececa434743f8197866fd8cf34ea6735ef688e2989c0e846b2b012"
+    },
+    "src-tauri/src/infrastructure/database/dev048_consistency_e2e.rs": {
+      "beforeHash": "35f6e3caaec04ee5a5f8c044175415d8ca73449a9fda462aac8cf2eba4ea93f5",
+      "afterHash": "6e46d85d6abfe79e281890e0ee934714086f3025f8e7af846931c03257ae9840"
+    },
+    "src-tauri/src/infrastructure/database/pool.rs": {
+      "beforeHash": "12ae0964abffa4f4f7e4496eb990e171bcab3ff4b86201a5dccf68ab016fc13e",
+      "afterHash": "0a440018396f62e184541344c07bd32b363f3785148b977b9893947d0e2068e8"
+    },
+    "src-tauri/tests/dev040_safety.rs": {
+      "beforeHash": "49843b3f2f33309ded9af8e7cb6d89b2c6d30f3a74554bc4dc9b6e3bd98ba267",
+      "afterHash": "6df34dbdde93c884b054200dc3641dd455b670bc1af5a731b69edf7e97098981"
+    },
+    "src/components/ImageAssetPicker.test.tsx": {
+      "beforeHash": "2a956568d2a1805bb8efd57c539a4ac6d5c6ccec3f9e0e66d908e13837dd6dbb",
+      "afterHash": "e57eb1c96b8b81686dc0ca7223c41d931948e7904afb51e0e7afce1a91bd616c"
+    },
+    "src/components/ImageAssetPicker.tsx": {
+      "beforeHash": "166c7ac725d6323529402d497f382be43739dc8e5c4b6148ca653eea943872c0",
+      "afterHash": "1b14c321665b3f09ad285a387aa385de754f13d38b143485158e91de00eff64e"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": "af53417648cfab7ed59e20fa204bafab7ee11f4da459ad3c77985bca0eb5a43a",
+      "afterHash": "4e5dee27c8ab70f34c95f7eff6d722456bd86b451513e1695e68f08b17b1b045"
+    },
+    "src/features/library/LibraryPage.tsx": {
+      "beforeHash": "662f384771d9c3b51a979ef7271068926f4cb257269db7b25af6a022624e3a4f",
+      "afterHash": "ef3774abfd10746641a019d79ab0f00fa9ede3d6d954a4a91e5df88a0e649ea7"
+    },
+    "src/features/library/StoryEntitiesSection.tsx": {
+      "beforeHash": "f6e6b70a42d000579fdb8056700e0fbfc0a289ec52b7aa8fc2b2c674e1af4831",
+      "afterHash": "c29a48300dd9ffde2c22226a17d4933b922364448ead2a11795ff276b03da0b7"
+    },
+    "src/features/library/StoryEntityCategorySection.test.tsx": {
+      "beforeHash": "af7c1a7fe21e6e058d4144c7f99782ae18c9486bf043903f0a381e71ca544445",
+      "afterHash": "f73028376c72ed3c64f1ac77ee843865475982b862cefec31498edb76f091b52"
+    },
+    "src/features/library/StoryEntityCategorySection.tsx": {
+      "beforeHash": "ddcc35a73bc4b955d26608fbfc89f8cfa63c9f1f6a76cee4c25514ba6955d761",
+      "afterHash": "ea0190d984bed68d0639aa0711cd504948891a0c9d2763e1d2af03dbfb9d2c48"
+    },
+    "src/features/shots/FolderBatchImportPanel.test.tsx": {
+      "beforeHash": "7083db19d8e27f79363e0036f6a0f5590baf83c6bbcf69500978e53018933636",
+      "afterHash": "f6adc4487d28a89f6e71037dfd3d048cd8b2bc0a87f7bc1b8c53a1dad9b00ced"
+    },
+    "src/features/shots/FolderBatchImportPanel.tsx": {
+      "beforeHash": "f9f8d05e678cb15dd1ddb7ff1aa75cb81705f53b1c3173ef8b88967e12945a08",
+      "afterHash": "e19e10bb3d66be0370b2823e9c384652fd9478acb7851cd859267978dfe1629a"
+    },
+    "src/types/storyEntity.ts": {
+      "beforeHash": "0f5cdf0abb01397bba0e4fe4b21829d6e7f98372e165c47a15a4640d61a1b064",
+      "afterHash": "9f4795af3fac917292206e49bdaa301893790b459787100ed6f31e9c002d59f4"
+    }
+  }
+}

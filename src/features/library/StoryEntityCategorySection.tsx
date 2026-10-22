@@ -9,6 +9,7 @@ const KIND_LABEL: Record<StoryEntityKind, string> = {
   character: "角色",
   scene: "场景",
   prop: "道具",
+  composition: "构图",
 };
 
 function entityError(cause: unknown): string {

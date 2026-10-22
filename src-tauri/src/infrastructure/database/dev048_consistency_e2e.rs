@@ -1607,7 +1607,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 46)
+            .is_some_and(|version| version <= 47)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"2.1.0-personal\""));

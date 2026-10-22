@@ -31,6 +31,11 @@ describe("folder import preview and authority",()=>{
   function Probe({project,submit}:{project:string;submit:boolean}) {const c=useFolderBatchImportController(project,vi.fn());useLayoutEffect(()=>{if(submit){observations.push({visible:c.preview?.sessionId,allowed:c.canCommit});void c.commit();}},[project,submit]);return <><button onClick={()=>void c.pick()}>选择文件夹</button><p>{c.preview?.displayRootName}</p></>;}
   const view=render(<Probe project="p" submit={false}/>);await pick();view.rerender(<Probe project="q" submit={true}/>);expect(observations).toEqual([{visible:undefined,allowed:false}]);expect(api.commit).not.toHaveBeenCalled();
  });
+ it("labels prop and composition entities in the import plan",async()=>{
+  const p=preview("kinds",false);p.characters=[{name:"调阅签",kind:"prop",action:"create",imageCount:1,existingEntityId:null},{name:"剧情01",kind:"composition",action:"create",imageCount:1,existingEntityId:null}];api.pick.mockResolvedValue(p);
+  render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();
+  expect(screen.getByText("调阅签 · 道具 · 新建，1 张图")).toBeTruthy();expect(screen.getByText("剧情01 · 构图 · 新建，1 张图")).toBeTruthy();
+ });
  it("commits exact valid row keys and starts nothing by default",async()=>{
   const imported=vi.fn();const queue=vi.fn();render(<FolderBatchImportPanel projectId="p" onImported={imported} onCancel={vi.fn()} onOpenQueue={queue}/>);await pick();
   expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("disabled",true);expect(screen.getByText("图片缺失")).toBeTruthy();

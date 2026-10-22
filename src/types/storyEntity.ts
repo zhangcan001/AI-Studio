@@ -1,4 +1,4 @@
-export type StoryEntityKind = "character" | "scene" | "prop";
+export type StoryEntityKind = "character" | "scene" | "prop" | "composition";
 
 export interface StoryEntity {
   id: string;

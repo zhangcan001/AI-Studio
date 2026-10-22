@@ -9,6 +9,7 @@ const KINDS: { id: StoryEntityKind; label: string }[] = [
   { id: "character", label: "角色" },
   { id: "scene", label: "场景" },
   { id: "prop", label: "物品" },
+  { id: "composition", label: "构图" },
 ];
 
 /** Keep the backend reason (e.g. duplicate name) visible instead of only the generic category message. */

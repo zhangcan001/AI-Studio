@@ -13,8 +13,8 @@ import type { VideoInputView } from "../../types/shotVideoInput";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 
-const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品" };
-const KINDS: StoryEntityKind[] = ["scene", "character", "prop"];
+const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品", composition: "构图" };
+const KINDS: StoryEntityKind[] = ["scene", "character", "prop", "composition"];
 const FILTERS: (StoryboardShotStatus | "ALL")[] = ["ALL", "TODO", "GENERATING", "REVIEW", "COMPLETED", "FAILED"];
 
 interface RowsProps {
@@ -415,6 +415,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         <div><dt>场景</dt><dd>{chips(byKind.scene)}</dd></div>
         <div><dt>角色</dt><dd>{chips(byKind.character)}</dd></div>
         <div><dt>物品</dt><dd>{chips(byKind.prop)}</dd></div>
+        <div><dt>构图</dt><dd>{chips(byKind.composition)}</dd></div>
         <div><dt>画面内容</dt><dd>{content}</dd></div>
       </dl>
       <div className="shot-row-toolbar"><button type="button" onClick={onOpen}>编辑</button><button type="button" onClick={onOpen}>详情</button></div>

@@ -530,15 +530,26 @@ fn compile_entity_prompt(
                         "spatial layout, architecture, terrain and environmental structure",
                     ),
                     StoryEntityKind::Prop => ("object", "shape, materials and distinctive details"),
+                    StoryEntityKind::Composition => (
+                        "composition",
+                        "framing, camera angle, subject placement and overall layout",
+                    ),
                 };
                 definitions.push(format!(
                     "<Subject {subject}> is the {role} shown in <Picture {}>.",
                     ordinal + 1
                 ));
-                retention.push(format!(
-                    "<Subject {subject}>: fully_preserved - retain {features} from <Picture {}>, except changes explicitly requested in detailed_description.",
-                    ordinal + 1
-                ));
+                retention.push(if entity.kind == StoryEntityKind::Composition {
+                    format!(
+                        "<Subject {subject}>: composition_reference - <Picture {}> defines the shot composition; follow its {features}, not the appearance of its people or setting, except changes explicitly requested in detailed_description.",
+                        ordinal + 1
+                    )
+                } else {
+                    format!(
+                        "<Subject {subject}>: fully_preserved - retain {features} from <Picture {}>, except changes explicitly requested in detailed_description.",
+                        ordinal + 1
+                    )
+                });
                 subject
             }
         };
@@ -759,6 +770,7 @@ mod tests {
             entity("人物", StoryEntityKind::Character),
             entity("场景", StoryEntityKind::Scene),
             entity("道具", StoryEntityKind::Prop),
+            entity("剧情01", StoryEntityKind::Composition),
         ];
         let refs = [AssetId::parse("ast_shared").unwrap()];
         for (name, role, features) in [
@@ -769,6 +781,11 @@ mod tests {
                 "spatial layout, architecture, terrain",
             ),
             ("道具", "object", "shape, materials and distinctive details"),
+            (
+                "剧情01",
+                "composition",
+                "framing, camera angle, subject placement and overall layout",
+            ),
         ] {
             let compiled = super::compile_entity_prompt(
                 &format!("@{name}，按要求变为红色"),
@@ -800,6 +817,12 @@ mod tests {
             super::compile_entity_prompt("镜头推进，5秒", "prj_owned", &entities, &refs).unwrap(),
             "镜头推进，5秒"
         );
+        let compiled =
+            super::compile_entity_prompt("按@剧情01构图", "prj_owned", &entities, &refs).unwrap();
+        assert!(compiled.contains(
+            "<Subject 1>: composition_reference - <Picture 1> defines the shot composition"
+        ));
+        assert!(!compiled.contains("fully_preserved"));
     }
 
     fn recipe() -> Recipe {

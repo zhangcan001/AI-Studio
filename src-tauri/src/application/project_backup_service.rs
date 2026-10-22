@@ -8464,27 +8464,50 @@ mod tests {
                 "Machine runtime availability, never restore executable state.",
             ),
         ];
+        // Replay table DDL in migration order so only tables that still exist
+        // after every migration count (a rebuild's transient table is renamed
+        // or dropped by the migration that created it).
         let mut actual = std::collections::BTreeSet::new();
-        for entry in
+        let mut paths: Vec<_> =
             std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
                 .unwrap()
-        {
-            let path = entry.unwrap().path();
-            if path.extension().and_then(|e| e.to_str()) != Some("sql") {
-                continue;
-            }
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("sql"))
+                .collect();
+        paths.sort();
+        let name = |word: &str| word.trim_end_matches(';').trim_end_matches('(').to_owned();
+        for path in paths {
             let sql = std::fs::read_to_string(path).unwrap();
             let words: Vec<_> = sql.split_whitespace().collect();
+            let at = |i: usize, w: &str| words.get(i).is_some_and(|x| x.eq_ignore_ascii_case(w));
             for i in 0..words.len().saturating_sub(2) {
-                if words[i].eq_ignore_ascii_case("CREATE")
-                    && words[i + 1].eq_ignore_ascii_case("TABLE")
-                {
-                    let start = if words[i + 2].eq_ignore_ascii_case("IF") {
-                        i + 5
+                let skip_if = |j: usize, exists: &str| {
+                    if at(j, "IF") && at(j + 1, "NOT") && exists == "NOT" {
+                        j + 3
+                    } else if at(j, "IF") && exists == "" {
+                        j + 2
                     } else {
-                        i + 2
-                    };
-                    actual.insert(words[start].trim_end_matches('(').to_owned());
+                        j
+                    }
+                };
+                if at(i, "CREATE") && at(i + 1, "TABLE") {
+                    if let Some(word) = words.get(skip_if(i + 2, "NOT")) {
+                        actual.insert(name(word));
+                    }
+                } else if at(i, "DROP") && at(i + 1, "TABLE") {
+                    if let Some(word) = words.get(skip_if(i + 2, "")) {
+                        actual.remove(&name(word));
+                    }
+                } else if at(i, "ALTER")
+                    && at(i + 1, "TABLE")
+                    && at(i + 3, "RENAME")
+                    && at(i + 4, "TO")
+                {
+                    if let Some(to) = words.get(i + 5) {
+                        if actual.remove(&name(words[i + 2])) {
+                            actual.insert(name(to));
+                        }
+                    }
                 }
             }
         }

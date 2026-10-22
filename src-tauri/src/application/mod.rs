@@ -400,7 +400,7 @@ pub mod folder_batch_import_service {
                 || entity
                     .kind
                     .as_deref()
-                    .is_some_and(|k| !matches!(k, "character" | "scene" | "prop"))
+                    .is_some_and(|k| !matches!(k, "character" | "scene" | "prop" | "composition"))
                 || entity
                     .cover
                     .as_ref()
@@ -3277,6 +3277,50 @@ pub mod folder_batch_import_service {
                 .unwrap_err();
             assert_eq!(err.code, "INVALID_MANIFEST");
             assert_eq!(count(&f.pool, "story_entities").await, 0);
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn manifest_composition_entity_is_created_and_bound_in_reference_mode() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["characters"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "name": "剧情01", "kind": "composition", "images": ["images/layout01.png"]
+                }));
+            value["shots"][1]["prompt"] = "@Alice 按 @剧情01 构图走向镜头".into();
+            std::fs::copy(
+                f.root.join("images/a.png"),
+                f.root.join("images/layout01.png"),
+            )
+            .unwrap();
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(p.valid_count, 2, "{:?}", p.rows);
+            let c = p.characters.iter().find(|e| e.name == "剧情01").unwrap();
+            assert_eq!(
+                (c.kind.as_str(), c.action.as_str()),
+                ("composition", "create")
+            );
+            let r = f.service.commit(request(&p, false)).await.unwrap();
+            assert_eq!(r.outcome, "completed", "{r:?}");
+            let list = f
+                .service
+                .entities
+                .list(
+                    TEST_PROJECT,
+                    Some(crate::domain::story_entity::StoryEntityKind::Composition),
+                )
+                .await
+                .unwrap();
+            assert_eq!(list.len(), 1);
+            assert_eq!(list[0].name, "剧情01");
+            let names:Vec<String>=sqlx::query_scalar("SELECT a.original_name FROM shot_video_input_assets i JOIN assets a ON a.id=i.asset_id WHERE i.shot_id=? AND i.input_key='reference_images' ORDER BY i.ordinal").bind(&r.created_shot_ids[1]).fetch_all(&f.pool).await.unwrap();
+            assert!(names.contains(&"layout01.png".to_string()), "{names:?}");
+            assert_no_execution(&f.pool).await;
             f.pool.close().await;
         }
         #[tokio::test]

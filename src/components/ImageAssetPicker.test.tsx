@@ -106,6 +106,7 @@ it("shows thumbnail tiles with search and entity tabs, and selects an asset", as
   const dialog = await screen.findByRole("dialog", { name: "选择图片素材" });
   await waitFor(() => expect(within(dialog).getByRole("option", { name: /角色甲/ })).toBeTruthy());
   expect(within(dialog).getByRole("tab", { name: "角色" })).toBeTruthy();
+  expect(within(dialog).getByRole("tab", { name: "构图" })).toBeTruthy();
   api.list.mockResolvedValue({ items: [{ resourceRef: { kind: "asset", id: "a2" }, title: "风景", subtype: "image", createdAt: "", updatedAt: "", thumbnailAvailable: true }], nextCursor: null });
   fireEvent.change(within(dialog).getByLabelText("搜索图片"), { target: { value: "风景" } });
   expect(within(dialog).queryByRole("option", { name: /角色甲/ })).toBeNull();
