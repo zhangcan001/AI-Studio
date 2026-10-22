@@ -1,3 +1,4 @@
+import { guardChainPerfParentReader, guardChainPerfScopeSince, guardChainPerfFixtureFiles, GUARD_CHAIN_PERF_BASE } from './guard-chain-perf-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -64,10 +65,11 @@ export function propKindImportScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...PROP_KIND_IMPORT_CHANGED, ...PROP_KIND_IMPORT_ADDED, PROP_KIND_IMPORT_PROOF,
+    ...guardChainPerfScopeSince(root, GUARD_CHAIN_PERF_BASE),
   ])].sort();
 }
 export function propKindImportFixtureFiles(root) {
-  return [...facts(root, PROP_KIND_IMPORT_BASE).paths, ...PROP_KIND_IMPORT_ADDED, PROP_KIND_IMPORT_PROOF];
+  return [...new Set([...facts(root, PROP_KIND_IMPORT_BASE).paths, ...PROP_KIND_IMPORT_ADDED, PROP_KIND_IMPORT_PROOF, ...guardChainPerfFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -76,10 +78,14 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, PROP_KIND_IMPORT_BASE);
   const fail = id => violations.push("prop-kind-import-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : readFileSync(join(workspace, p), "utf8"));
+  // Only an exact, independently validated successor byte version may be projected.
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(PROP_KIND_IMPORT_PROOF));
@@ -92,10 +98,10 @@ function validate(root, override) {
     const allowed = [...scope, PROP_KIND_IMPORT_PROOF].sort();
     const expected = [...parent.paths, ...PROP_KIND_IMPORT_ADDED, PROP_KIND_IMPORT_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -115,13 +121,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: PROP_KIND_IMPORT_CHANGED,
-    addedPaths: [...PROP_KIND_IMPORT_ADDED, PROP_KIND_IMPORT_PROOF],
-    afterHashes: Object.fromEntries([...PROP_KIND_IMPORT_CHANGED, ...PROP_KIND_IMPORT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...PROP_KIND_IMPORT_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...PROP_KIND_IMPORT_ADDED, PROP_KIND_IMPORT_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...PROP_KIND_IMPORT_CHANGED, ...PROP_KIND_IMPORT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => PROP_KIND_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function propKindImportParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "propKindImportParentReader", undefined,
-    () => validate(root, undefined), PROP_KIND_IMPORT_PROOF);
+  const successor = guardChainPerfParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "propKindImportParentReader", undefined, check, PROP_KIND_IMPORT_PROOF);
 }

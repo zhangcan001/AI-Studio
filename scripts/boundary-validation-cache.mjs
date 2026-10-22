@@ -105,7 +105,7 @@ function immutableBlobBatch(store, args, options) {
   if (result.length > (options.maxBuffer ?? 1024 * 1024)) return exec('git', ['--no-replace-objects', ...args], options);
   return options.encoding && options.encoding !== 'buffer' ? result.toString(options.encoding) : result;
 }
-function identity(root) {
+function identity(root, seen) {
   const hash = createHash('sha256');
   // The explicit raw-byte profile is a validation input, never inferred from
   // live package bytes. Changing it must invalidate every historical reader.
@@ -117,6 +117,7 @@ function identity(root) {
       if (entry.isDirectory()) visit(path);
       else {
         const bytes = readFileSync(join(root, path));
+        seen?.set(path, bytes);
         hash.update(JSON.stringify([path, bytes.length])); hash.update(bytes);
       }
     }
@@ -165,7 +166,7 @@ export function cachedBoundary(root, name, override, validate, proofPath) {
   const outer = !session;
   // Stage nested successes until the outer live validation commits. A drifted
   // outer identity must not retain nested accepts under a doomed byte profile.
-  if (outer) session = {root, identity: identity(root), staged: new Map()};
+  if (outer) { const files = new Map(); session = {root, identity: identity(root, files), staged: new Map(), files, texts: new Map()}; }
   try {
     if (session.root !== root) throw Error('Mixed boundary roots in one validation');
     const key = JSON.stringify([root, session.identity, name, override ?? null]);
@@ -189,4 +190,20 @@ export function cachedBoundary(root, name, override, validate, proofPath) {
     }
     return result;
   } finally { if (outer) session = undefined; }
+}
+// Live bytes read during one outer validation session. The session's opening
+// identity hashed exactly these bytes and its closing identity re-reads the
+// tree, so any drift mid-session is still rejected. Outside a session (or for a
+// different root) every read stays fresh from disk.
+export function sessionLiveRead(root, path) {
+  if (session && session.root === resolve(root) && !path.includes('..')) {
+    let text = session.texts.get(path);
+    if (text === undefined) {
+      const bytes = session.files.get(path) ?? readFileSync(join(root, path));
+      session.files.set(path, bytes);
+      session.texts.set(path, text = bytes.toString('utf8'));
+    }
+    return text;
+  }
+  return readFileSync(join(root, path), 'utf8');
 }

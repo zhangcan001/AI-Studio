@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "GUARD_CHAIN_PERF",
+  "parentHead": "86cd696723c03dd46ec97abcf7e650e5a1672dab",
+  "planningParentHead": "86cd696723c03dd46ec97abcf7e650e5a1672dab",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": false,
+    "guardSemanticsUnchanged": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "scripts/boundary-validation-cache.mjs": {
+      "beforeHash": "cf52e1d58f7dda83b10238a5f9e9c78941db4cf2ecccb68defb7ab97e6624121",
+      "afterHash": "759c228c5a56ec9c8b52bdc3ffaffce39b085ea779f0b7b80f0cbe006c237714"
+    },
+    "scripts/guard-chain-perf-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "23e9f072c214bd5c485b4f5daa27fc5ec3e0d96bf691b49904b5c69a6a11fc6b"
+    },
+    "scripts/prop-kind-import-successor-guard.mjs": {
+      "beforeHash": "eea35b9279a0ea7ef6bbc1249adf6a7c80340e9f5d2d2632d5ba886ef249225a",
+      "afterHash": "05c11b8e2862aaf9bba28c607ffa67e39141982b70e258da8bebebed27e847ef"
+    },
+    "scripts/testing/guard-chain-perf.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "94c9d954a10e20981582e1ecc2bf4f49fb055d9370842a0f53aae4123a7f48f0"
+    }
+  }
+}
