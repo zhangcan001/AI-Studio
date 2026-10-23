@@ -1391,6 +1391,9 @@ pub mod folder_batch_import_service {
         let compatible = match (&row.mode, &compatibility.input_mode) {
             (Mode::FirstLast, ShotVideoInputMode::FirstLast)
             | (Mode::Reference, ShotVideoInputMode::ReferenceMedia) => true,
+            (Mode::Reference, ShotVideoInputMode::ReferenceImages { key, .. }) => {
+                key == "reference_images"
+            }
             (Mode::Image, ShotVideoInputMode::SingleImage { key }) => key == "first_frame",
             _ => false,
         };
@@ -2271,6 +2274,75 @@ pub mod folder_batch_import_service {
     #[cfg(test)]
     mod tests {
         use super::*;
+        fn multi_image_definition(key: &str) -> crate::application::ports::GenerationDefinition {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("runtime_packages/minimax_h3_reference_video_quality_2_2_0");
+            let mut recipe: serde_json::Value =
+                yaml_serde::from_str(&std::fs::read_to_string(path.join("recipe.yaml")).unwrap())
+                    .unwrap();
+            let inputs = recipe["inputs"].as_object_mut().unwrap();
+            inputs.remove("reference_videos");
+            inputs.remove("reference_audios");
+            let mut images = inputs.remove("reference_images").unwrap();
+            images["min_items"] = 1.into();
+            images["max_items"] = 8.into();
+            inputs.insert(key.into(), images);
+            recipe["bindings"]
+                .as_array_mut()
+                .unwrap()
+                .retain_mut(|binding| match binding["source"].as_str().unwrap() {
+                    "reference_videos" | "reference_audios" => false,
+                    "reference_images" => {
+                        binding["source"] = key.into();
+                        binding["item"].as_u64().is_some_and(|item| item < 8)
+                    }
+                    _ => true,
+                });
+            let yaml = yaml_serde::to_string(&recipe).unwrap();
+            let workflow = std::fs::read(path.join("workflow_api.json")).unwrap();
+            crate::application::ports::GenerationDefinition {
+                workflow_id: "wfl_custom_multi_image".into(),
+                workflow_version_id: "multi-image-version".into(),
+                recipe_id: recipe["id"].as_str().unwrap().into(),
+                workflow_version: "1.0.0".into(),
+                workflow_sha256: sha(&workflow),
+                recipe_version: "1.0.0".into(),
+                recipe_sha256: sha(yaml.as_bytes()),
+                package_name: None,
+                package_source_path: None,
+                workflow_json: serde_json::from_slice(&workflow).unwrap(),
+                recipe_yaml: yaml,
+            }
+        }
+        #[test]
+        fn default_multi_image_reference_compiles_and_checks_bounds() {
+            let row = normalize(&manifest(), None, &[]).remove(1);
+            for key in ["reference_images", "pictures"] {
+                let definition = multi_image_definition(key);
+                let references: Vec<_> = (0..6).map(|i| format!("images/{i}.png")).collect();
+                if key != "reference_images" {
+                    // Import persistence uses the formal reference_images slot.
+                    assert_eq!(
+                        validate_definition(&row, &definition, &references)
+                            .unwrap_err()
+                            .code,
+                        "MODE_MISMATCH"
+                    );
+                    continue;
+                }
+                validate_definition(&row, &definition, &references).unwrap();
+                assert!(validate_definition(&row, &definition, &[]).is_err());
+                let excess = vec!["images/a.png".into(); 9];
+                assert!(validate_definition(&row, &definition, &excess).is_err());
+                let image_row = normalize(&manifest(), None, &[]).remove(0);
+                assert_eq!(
+                    validate_definition(&image_row, &definition, &references)
+                        .unwrap_err()
+                        .code,
+                    "MODE_MISMATCH"
+                );
+            }
+        }
         fn manifest() -> Manifest {
             parse_manifest(br#"{"format":"ai-studio-shot-batch","version":1,"name":"test","generators":{"firstLast":{"workflowVersionId":"wv","recipeId":"recipe"},"reference":{"workflowVersionId":"ref","recipeId":"recipe"}},"defaults":{"durationSeconds":5,"aspectRatio":"16:9","resolutionPreset":"0.98"},"shots":[{"prompt":"open door","mode":"firstLast","firstFrame":"images/a.png","lastFrame":"images/b.png"},{"prompt":"@Alice turn","mode":"reference","references":["images/c.png"],"aspectRatio":"9:16"}]}"#).unwrap()
         }
