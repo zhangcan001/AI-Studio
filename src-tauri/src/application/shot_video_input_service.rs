@@ -1102,7 +1102,7 @@ pub(crate) fn reject_ungeneratable_combination(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{media_values, reject_ungeneratable_combination};
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::ports::ShotVideoInputAsset;
@@ -1653,6 +1653,70 @@ mod tests {
             false
         )
         .is_err());
+    }
+
+    use super::{composition_detail_hint, composition_looks_detailed};
+    fn png(image: image::RgbImage) -> Vec<u8> {
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    /// A rendered-scene-like picture: many colours and dense edges.
+    pub(crate) fn noisy_png() -> Vec<u8> {
+        let mut seed = 0x9e3779b9u32;
+        png(image::RgbImage::from_fn(128, 128, |_, _| {
+            let mut next = || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                (seed & 0xff) as u8
+            };
+            image::Rgb([next(), next(), next()])
+        }))
+    }
+
+    #[test]
+    fn composition_detail_heuristic_flags_rendered_pictures_only() {
+        let flat = png(image::RgbImage::from_pixel(
+            128,
+            128,
+            image::Rgb([240, 240, 240]),
+        ));
+        let line_art = png(image::RgbImage::from_fn(128, 128, |x, y| {
+            if x % 32 == 0 || y == x || y == 64 {
+                image::Rgb([0, 0, 0])
+            } else {
+                image::Rgb([255, 255, 255])
+            }
+        }));
+        let silhouette = png(image::RgbImage::from_fn(128, 128, |x, y| {
+            let (dx, dy) = (x as i32 - 64, y as i32 - 70);
+            if dx * dx + dy * dy < 900 || (x > 56 && x < 72 && y < 40) {
+                image::Rgb([20, 20, 20])
+            } else {
+                image::Rgb([200, 200, 200])
+            }
+        }));
+        let gradient = png(image::RgbImage::from_fn(128, 128, |x, y| {
+            image::Rgb([(x * 2) as u8, (y * 2) as u8, 128])
+        }));
+        for (name, bytes) in [
+            ("flat", &flat),
+            ("line", &line_art),
+            ("silhouette", &silhouette),
+            ("gradient", &gradient),
+        ] {
+            assert!(!composition_looks_detailed(bytes), "{name}");
+        }
+        assert!(composition_looks_detailed(&noisy_png()));
+        assert!(!composition_looks_detailed(b"not an image"));
+        assert_eq!(
+            composition_detail_hint("剧情01"),
+            "构图图「剧情01」细节较多，可能干扰场景，建议改用纯色背景、线稿或剪影"
+        );
     }
 
     fn recipe() -> Recipe {

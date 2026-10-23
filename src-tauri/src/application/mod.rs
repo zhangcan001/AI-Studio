@@ -4133,6 +4133,70 @@ pub mod folder_batch_import_service {
             assert_no_execution(&f.pool).await;
             f.pool.close().await;
         }
+        #[tokio::test]
+        async fn detailed_composition_picture_hints_in_preview_and_readiness_without_blocking() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["characters"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "name": "剧情01", "kind": "composition", "images": ["images/layout01.png"]
+                }));
+            value["shots"][1]["prompt"] = "@Alice 按 @剧情01 构图走向镜头".into();
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            std::fs::write(
+                f.root.join("images/layout01.png"),
+                crate::application::shot_video_input_service::tests::noisy_png(),
+            )
+            .unwrap();
+            let hint = "构图图「剧情01」细节较多，可能干扰场景，建议改用纯色背景、线稿或剪影";
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(p.valid_count, 2, "{:?}", p.rows);
+            assert!(p.warnings.iter().any(|w| w == hint), "{:?}", p.warnings);
+            let r = f.service.commit(request(&p, false)).await.unwrap();
+            assert_eq!(r.outcome, "completed", "{r:?}");
+            let rows: Vec<(String, i64, String)> = sqlx::query_as("SELECT i.asset_id, i.ordinal, a.sha256 FROM shot_video_input_assets i JOIN assets a ON a.id=i.asset_id WHERE i.shot_id=? AND i.input_key='reference_images' ORDER BY i.ordinal").bind(&r.created_shot_ids[1]).fetch_all(&f.pool).await.unwrap();
+            let set = crate::domain::shot_context::ResolvedVideoInputSet {
+                workflow_version_id: "ref-version".into(),
+                recipe_id: "recipe".into(),
+                instance_id: None,
+                revision: None,
+                inputs: rows
+                    .into_iter()
+                    .map(|(asset_id, ordinal, sha256)| {
+                        crate::domain::shot_context::ResolvedVideoInputAsset {
+                            input_key: "reference_images".into(),
+                            ordinal,
+                            asset_id,
+                            media_type: "image".into(),
+                            sha256,
+                            duration_ms: None,
+                        }
+                    })
+                    .collect(),
+            };
+            let services = f.service.commit_services.as_ref().unwrap();
+            assert_eq!(
+                services
+                    .inputs
+                    .composition_detail_hints(TEST_PROJECT, &set)
+                    .await,
+                vec![hint.to_string()]
+            );
+            // Cached by content hash; still the same non-blocking hint.
+            assert_eq!(
+                services
+                    .inputs
+                    .composition_detail_hints(TEST_PROJECT, &set)
+                    .await,
+                vec![hint.to_string()]
+            );
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
         fn add_composition_usage(f: &PreviewFixture, opening: &str, ending: &str, prompt: &str) {
             let path = f.root.join("manifest.json");
             let mut value: serde_json::Value =
