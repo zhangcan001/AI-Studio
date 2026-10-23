@@ -1497,11 +1497,24 @@ pub mod folder_batch_import_service {
                 vec![]
             };
             for declared in &manifest.characters {
-                if existing.iter().any(|e| e.name == declared.name) {
+                if let Some(old) = existing.iter().find(|e| e.name == declared.name) {
                     warnings.push(format!(
-                        "复用实体 {}：清单内该实体图片将被忽略，不修改已有实体。",
+                        "复用实体 {}：使用项目中已有的实体图片，同一镜头内该实体只计一张参考图。",
                         declared.name
                     ));
+                    let given = declared.description.as_deref().unwrap_or("").trim();
+                    if fill_description(&old.description, declared.description.as_deref()).is_some()
+                    {
+                        warnings.push(format!(
+                            "「{}」已有描述为空或不是英文，导入时将填入清单中的英文外观描述。",
+                            declared.name
+                        ));
+                    } else if !given.is_empty() && given != old.description.trim() {
+                        warnings.push(format!(
+                            "「{}」已有英文描述，保留原描述，未使用清单中的描述。",
+                            declared.name
+                        ));
+                    }
                 } else if existing
                     .iter()
                     .any(|e| e.name.to_lowercase() == declared.name.to_lowercase())
@@ -1580,6 +1593,18 @@ pub mod folder_batch_import_service {
             return Err(failure("STALE_PREVIEW", "文件在读取期间发生变化"));
         }
         Ok(bytes)
+    }
+    /// English manifest appearance text for a reused entity whose description
+    /// is empty or not English. English text is never overwritten.
+    fn fill_description(current: &str, given: Option<&str>) -> Option<String> {
+        use super::shot_video_input_service::mostly_english;
+        let given = given?.trim();
+        let current = current.trim();
+        (!given.is_empty()
+            && mostly_english(given)
+            && given != current
+            && (current.is_empty() || !mostly_english(current)))
+        .then(|| given.to_string())
     }
     /// Cover first, then other declared images of a manifest entity.
     fn declared_paths(manifest: &Manifest, name: &str) -> Vec<String> {
@@ -2229,7 +2254,33 @@ pub mod folder_batch_import_service {
                     if !result.reused_entity_ids.contains(&entity.id) {
                         result.reused_entity_ids.push(entity.id.clone());
                     }
-                    entity.clone()
+                    let given = plan
+                        .manifest
+                        .characters
+                        .iter()
+                        .find(|e| e.name == *name)
+                        .and_then(|e| e.description.as_deref());
+                    match fill_description(&entity.description, given) {
+                        // Only an empty or non-English description is filled;
+                        // name and images of the reused entity stay unchanged.
+                        Some(description) => self
+                            .entities
+                            .update(
+                                project,
+                                &entity.id,
+                                crate::domain::story_entity::StoryEntityUpsert {
+                                    name: entity.name.clone(),
+                                    description,
+                                    cover_asset_id: entity.cover_asset_id.clone(),
+                                    image_asset_ids: entity.image_asset_ids.clone(),
+                                },
+                            )
+                            .await
+                            .map_err(|_| {
+                                stage_failure("B", "ENTITY_UPDATE_FAILED", "实体描述更新失败")
+                            })?,
+                        None => entity.clone(),
+                    }
                 };
                 entities.insert(name.clone(), entity);
             }
@@ -3569,6 +3620,125 @@ pub mod folder_batch_import_service {
                 .unwrap();
             assert_eq!(suffixed.valid_count, 2);
             f.pool.close().await;
+        }
+        /// Regression (project '111'): reused entities listed both as reference
+        /// paths and @ mentions were counted and bound twice (managed:{asset} plus
+        /// the manifest path), pushing shots past the 8-image limit.
+        async fn reimport_with_existing_entity_paths_and_mentions(
+            same_bytes: bool,
+        ) -> (PreviewFixture, Preview, ImportResult) {
+            let f = preview_fixture().await;
+            let first = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let done = f.service.commit(request(&first, true)).await.unwrap();
+            assert_eq!(done.outcome, "completed", "{done:?}");
+            let mut m: Manifest =
+                serde_json::from_slice(&std::fs::read(f.root.join("manifest.json")).unwrap())
+                    .unwrap();
+            let png = std::fs::read(f.root.join("images/alice.png")).unwrap();
+            let mut refs = vec!["images/c.png".to_string()];
+            for i in 0..6 {
+                let mut other = Vec::new();
+                image::DynamicImage::new_rgb8(32 + i, 32)
+                    .write_to(
+                        &mut std::io::Cursor::new(&mut other),
+                        image::ImageFormat::Png,
+                    )
+                    .unwrap();
+                let name = format!("images/d{i}.png");
+                std::fs::write(f.root.join(&name), other).unwrap();
+                refs.push(name);
+            }
+            refs.push("images/alice.png".into());
+            m.shots[1].references = refs;
+            m.characters[0].description = Some("Tall woman in a red wool coat".into());
+            std::fs::write(
+                f.root.join("manifest.json"),
+                serde_json::to_vec(&m).unwrap(),
+            )
+            .unwrap();
+            if !same_bytes {
+                let mut other = Vec::new();
+                image::DynamicImage::new_rgb8(40, 40)
+                    .write_to(
+                        &mut std::io::Cursor::new(&mut other),
+                        image::ImageFormat::Png,
+                    )
+                    .unwrap();
+                assert_ne!(other, png);
+                std::fs::write(f.root.join("images/alice.png"), other).unwrap();
+            }
+            let again = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let preview = f
+                .service
+                .rescan(
+                    &again.session_id,
+                    PreviewOptions {
+                        name_suffix: Some(" copy".into()),
+                        legacy: None,
+                    },
+                )
+                .await
+                .unwrap();
+            let row = &preview.rows[1];
+            assert!(row.errors.is_empty(), "{:?}", row.errors);
+            // c + d0..d5 + Alice once = 8, within the limit (was 9 before).
+            assert_eq!(row.reference_count, 8);
+            assert_eq!(preview.valid_count, 2);
+            let result = f.service.commit(request(&preview, true)).await.unwrap();
+            assert_eq!(result.outcome, "completed", "{result:?}");
+            (f, preview, result)
+        }
+        async fn bound_reference_assets(f: &PreviewFixture, shot: &str) -> Vec<String> {
+            sqlx::query_scalar("SELECT asset_id FROM shot_video_input_assets WHERE shot_id=? AND input_key='reference_images' ORDER BY ordinal").bind(shot).fetch_all(&f.pool).await.unwrap()
+        }
+        async fn alice(f: &PreviewFixture) -> (String, String) {
+            sqlx::query_as(
+                "SELECT cover_asset_id, description FROM story_entities WHERE name='Alice'",
+            )
+            .fetch_one(&f.pool)
+            .await
+            .unwrap()
+        }
+        #[tokio::test]
+        async fn reused_entity_same_bytes_counts_and_binds_one_project_image() {
+            let (f, preview, result) = reimport_with_existing_entity_paths_and_mentions(true).await;
+            let refs = bound_reference_assets(&f, &result.created_shot_ids[1]).await;
+            assert_eq!(refs.len(), 8);
+            assert_eq!(refs.iter().collect::<BTreeSet<_>>().len(), 8);
+            let (cover, description) = alice(&f).await;
+            assert_eq!(refs.iter().filter(|r| **r == cover).count(), 1);
+            assert_eq!(description, "Tall woman in a red wool coat");
+            assert!(!preview.rows[1]
+                .warnings
+                .iter()
+                .any(|w| w.message.contains("已有实体图片不同")));
+            assert_eq!(count(&f.pool, "story_entities").await, 1);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn reused_entity_different_bytes_keeps_project_image_and_warns() {
+            let (f, preview, result) =
+                reimport_with_existing_entity_paths_and_mentions(false).await;
+            assert!(preview.rows[1]
+                .warnings
+                .iter()
+                .any(|w| w.message.contains("「Alice」与项目中已有实体图片不同")));
+            let refs = bound_reference_assets(&f, &result.created_shot_ids[1]).await;
+            assert_eq!(refs.len(), 8);
+            let (cover, _) = alice(&f).await;
+            assert_eq!(refs.iter().filter(|r| **r == cover).count(), 1);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[test]
+        fn reused_entity_description_fills_only_empty_or_non_english() {
+            let en = Some("Tall woman in a red coat");
+            assert_eq!(fill_description("", en).as_deref(), en);
+            assert_eq!(fill_description("红衣高个女子", en).as_deref(), en);
+            assert_eq!(fill_description("A short man", en), None);
+            assert_eq!(fill_description("", Some("红衣女子")), None);
+            assert_eq!(fill_description("", None), None);
         }
         #[tokio::test]
         async fn all_committed_substeps_compensate_and_terminal_repeat_never_writes() {
