@@ -582,6 +582,39 @@ fn compile_entity_prompt(
     )
 }
 
+/// Section headers of the official H3 Ref2VA full-reference prompt, in order.
+const REF2VA_SECTIONS: [&str; 6] = [
+    "subject_definitions:",
+    "summary:",
+    "retention_analysis:",
+    "detailed_description:",
+    "overall_soundscape:",
+    "non_diegetic_music:",
+];
+
+/// Text already written in the six-section structure is passed through as-is
+/// (after label substitution) instead of being wrapped a second time.
+fn has_ref2va_sections(text: &str) -> bool {
+    let mut from = 0;
+    REF2VA_SECTIONS.iter().all(|section| {
+        let found = text[from..]
+            .lines()
+            .scan(from, |offset, line| {
+                let at = *offset;
+                *offset += line.len() + 1;
+                Some((at, line))
+            })
+            .find(|(_, line)| line.trim() == *section);
+        match found {
+            Some((at, _)) => {
+                from = (at + section.len()).min(text.len());
+                true
+            }
+            None => false,
+        }
+    })
+}
+
 fn compile_entity_prompt_with_usage(
     prompt: &str,
     project_id: &str,
@@ -590,11 +623,13 @@ fn compile_entity_prompt_with_usage(
     usage: &crate::domain::story_entity::ShotCompositionUsage,
 ) -> Result<String, ShotVideoInputError> {
     use crate::domain::story_entity::StoryEntityKind;
-    let mut has_usage = false;
 
     let mut rest = prompt;
     let mut output = String::new();
     let mut subjects = Vec::new();
+    let mut pictures: Vec<&String> = Vec::new();
+    let mut subject_kinds = Vec::new();
+    let mut layout_pictures: Vec<(usize, Option<(&str, &str)>)> = Vec::new();
     let mut definitions = Vec::new();
     let mut retention = Vec::new();
     while let Some(at) = rest.find('@') {
@@ -613,10 +648,32 @@ fn compile_entity_prompt_with_usage(
             })?;
         let ordinal = references.iter().position(|id| id.as_str() == asset_id)
             .ok_or_else(|| invalid(format!("ENTITY_REFERENCE_NOT_APPLIED: @{} 的图片尚未加入当前 Recipe 的正式参考图，请点击应用角色与场景参考图", entity.name)))?;
+        let picture = ordinal + 1;
+        if entity.kind == StoryEntityKind::Composition {
+            // Composition pictures are layout references only: a standalone
+            // <Picture N>, never a <Subject N> and never a first/last keyframe.
+            if !pictures.contains(&&entity.id) {
+                pictures.push(&entity.id);
+                let opening = usage.opening_entity_id.as_deref() == Some(entity.id.as_str());
+                let ending = usage.ending_entity_id.as_deref() == Some(entity.id.as_str());
+                let moment = if opening {
+                    Some(("opening", "at the start of the shot"))
+                } else if ending {
+                    Some(("ending", "near the end of the shot"))
+                } else {
+                    None
+                };
+                layout_pictures.push((picture, moment));
+            }
+            output.push_str(&format!("<Picture {picture}>"));
+            rest = &rest[entity.name.len()..];
+            continue;
+        }
         let subject = match subjects.iter().position(|id| *id == &entity.id) {
             Some(index) => index + 1,
             None => {
                 subjects.push(&entity.id);
+                subject_kinds.push(entity.kind);
                 let subject = subjects.len();
                 let (role, features) = match entity.kind {
                     StoryEntityKind::Character => (
@@ -628,39 +685,14 @@ fn compile_entity_prompt_with_usage(
                         "spatial layout, architecture, terrain and environmental structure",
                     ),
                     StoryEntityKind::Prop => ("object", "shape, materials and distinctive details"),
-                    StoryEntityKind::Composition => (
-                        "composition",
-                        "framing, camera angle, subject placement and overall layout",
-                    ),
+                    StoryEntityKind::Composition => unreachable!("handled above"),
                 };
                 definitions.push(format!(
-                    "<Subject {subject}> is the {role} shown in <Picture {}>.",
-                    ordinal + 1
+                    "<Subject {subject}> is the {role} shown in <Picture {picture}>."
                 ));
-                let opening = usage.opening_entity_id.as_deref() == Some(entity.id.as_str());
-                let ending = usage.ending_entity_id.as_deref() == Some(entity.id.as_str());
-                has_usage |= entity.kind == StoryEntityKind::Composition && (opening || ending);
-                retention.push(if entity.kind == StoryEntityKind::Composition && opening {
-                    format!(
-                        "<Subject {subject}>: opening_composition - <Picture {}> defines ONLY the opening frame of the shot: camera framing, angle, subject positions and object placement at the start; it does not govern the rest of the shot or the appearance of its people or setting.",
-                        ordinal + 1
-                    )
-                } else if entity.kind == StoryEntityKind::Composition && ending {
-                    format!(
-                        "<Subject {subject}>: ending_composition - <Picture {}> defines ONLY the final frame of the shot: camera framing, angle, subject positions and object placement at the end; the middle of the shot transitions to it as described in detailed_description, not the appearance of its people or setting.",
-                        ordinal + 1
-                    )
-                } else if entity.kind == StoryEntityKind::Composition {
-                    format!(
-                        "<Subject {subject}>: composition_reference - <Picture {}> defines the shot composition; follow its {features}, not the appearance of its people or setting, except changes explicitly requested in detailed_description.",
-                        ordinal + 1
-                    )
-                } else {
-                    format!(
-                        "<Subject {subject}>: fully_preserved - retain {features} from <Picture {}>, except changes explicitly requested in detailed_description.",
-                        ordinal + 1
-                    )
-                });
+                retention.push(format!(
+                    "<Subject {subject}>: fully_preserved - retain {features} from <Picture {picture}>, except changes explicitly requested in detailed_description."
+                ));
                 subject
             }
         };
@@ -668,18 +700,76 @@ fn compile_entity_prompt_with_usage(
         rest = &rest[entity.name.len()..];
     }
     output.push_str(rest);
-    if subjects.is_empty() {
+    if (subjects.is_empty() && pictures.is_empty()) || has_ref2va_sections(&output) {
         return Ok(output);
     }
+    let placed = if subjects.is_empty() {
+        "the characters".to_string()
+    } else {
+        (1..=subjects.len())
+            .map(|n| format!("<Subject {n}>"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    for (picture, moment) in &layout_pictures {
+        let (layout, when) = match moment {
+            Some((name, when)) => (format!(" {name} layout"), format!(" {when}")),
+            None => (String::new(), String::new()),
+        };
+        definitions.push(format!(
+            "<Picture {picture}> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of {placed} and props{when}."
+        ));
+        retention.push(format!(
+            "<Picture {picture}> (shot-planning reference for [Shot 1]{layout}): partially_preserved - only viewpoint, subject placement, facing and prop positions are retained; the appearance and clothing of people in this picture are not used, identities follow {placed}."
+        ));
+    }
+    let body = if output.contains("[Shot ") {
+        output.clone()
+    } else {
+        format!("[Shot 1] {output}")
+    };
     // Ref2VA section order follows the official H3 prompt-writing convention.
     // Do not invent camera, motion, dialogue or music absent from the user text.
-    let usage_summary = if has_usage {
-        " The opening composition governs only the first frame and the ending composition only the last frame; the shot moves between them as described below."
-    } else {
-        ""
-    };
+    let count = |kind: StoryEntityKind| subject_kinds.iter().filter(|k| **k == kind).count();
+    let mut parts = Vec::new();
+    for (n, one, many) in [
+        (
+            count(StoryEntityKind::Character),
+            "referenced character",
+            "referenced characters",
+        ),
+        (
+            count(StoryEntityKind::Scene),
+            "referenced environment",
+            "referenced environments",
+        ),
+        (
+            count(StoryEntityKind::Prop),
+            "referenced object",
+            "referenced objects",
+        ),
+    ] {
+        if n > 0 {
+            parts.push(format!("{n} {}", if n == 1 { one } else { many }));
+        }
+    }
+    let mut summary = String::from("[reference generation] The target video is a single shot");
+    if !parts.is_empty() {
+        summary.push_str(" featuring ");
+        summary.push_str(&parts.join(", "));
+    }
+    summary.push('.');
+    if !pictures.is_empty() {
+        summary.push_str(&format!(
+            " {} shot-planning reference picture{} define{} only where the characters, environment and props are placed; appearance comes from the subject references.",
+            pictures.len(),
+            if pictures.len() == 1 { "" } else { "s" },
+            if pictures.len() == 1 { "s" } else { "" },
+        ));
+    }
+    summary.push_str(" Actions follow detailed_description.");
     Ok(format!(
-        "subject_definitions:\n{}\n\nsummary:\nUse the referenced subjects for the requested video. Pictures define appearance and environment; follow the actions and camera directions below.{usage_summary}\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment reference as the character reference.\n\ndetailed_description:\n{output}\n\noverall_soundscape:\nFollow any sound directions in detailed_description.\n\nnon_diegetic_music:\nFollow any music directions in detailed_description.",
+        "subject_definitions:\n{}\n\nsummary:\n{summary}\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment or layout reference as the character reference.\n\ndetailed_description:\nA single continuous shot whose visual style follows the reference pictures.\n{body}\n\noverall_soundscape:\nFollow any sound directions in detailed_description.\n\nnon_diegetic_music:\nFollow any music directions in detailed_description.",
         definitions.join("\n"), retention.join("\n")
     ))
 }
@@ -781,7 +871,9 @@ mod tests {
         assert!(text.contains(
             "spatial layout, architecture, terrain and environmental structure from <Picture 1>"
         ));
-        assert!(text.contains("detailed_description:\n<Subject 1>在<Subject 2>中飞翔，镜头推进；<Subject 1>说：\"向前！\"，5秒"));
+        assert!(text.contains(
+            "[Shot 1] <Subject 1>在<Subject 2>中飞翔，镜头推进；<Subject 1>说：\"向前！\"，5秒"
+        ));
         assert_eq!(text.matches("is the character shown").count(), 1);
         assert!(!text.contains("太空"));
         assert!(!text.contains("未引用"));
@@ -834,8 +926,7 @@ mod tests {
         .unwrap();
         assert!(compiled.contains("<Subject 1> is the character shown in <Picture 2>."));
         assert!(compiled.contains("<Subject 2> is the environment shown in <Picture 1>."));
-        assert!(compiled
-            .contains("detailed_description:\n<Subject 1>在<Subject 2>中飞翔，5秒，<Subject 1>"));
+        assert!(compiled.contains("[Shot 1] <Subject 1>在<Subject 2>中飞翔，5秒，<Subject 1>"));
         assert_eq!(
             compile("小明飞翔，0.98mp", &[hero.clone()]).unwrap(),
             "小明飞翔，0.98mp"
@@ -897,11 +988,6 @@ mod tests {
                 "spatial layout, architecture, terrain",
             ),
             ("道具", "object", "shape, materials and distinctive details"),
-            (
-                "剧情01",
-                "composition",
-                "framing, camera angle, subject placement and overall layout",
-            ),
         ] {
             let compiled = super::compile_entity_prompt(
                 &format!("@{name}，按要求变为红色"),
@@ -915,7 +1001,7 @@ mod tests {
             assert!(
                 compiled.contains("except changes explicitly requested in detailed_description")
             );
-            assert!(compiled.contains("detailed_description:\n<Subject 1>，按要求变为红色"));
+            assert!(compiled.contains("[Shot 1] <Subject 1>，按要求变为红色"));
             assert!(!compiled.contains("<Subject 2>"));
         }
         let compiled =
@@ -926,18 +1012,17 @@ mod tests {
                 "<Subject {subject}> is the {role} shown in <Picture 1>."
             )));
         }
-        assert!(
-            compiled.contains("detailed_description:\n<Subject 1>走入<Subject 2>拿起<Subject 3>")
-        );
+        assert!(compiled.contains("[Shot 1] <Subject 1>走入<Subject 2>拿起<Subject 3>"));
         assert_eq!(
             super::compile_entity_prompt("镜头推进，5秒", "prj_owned", &entities, &refs).unwrap(),
             "镜头推进，5秒"
         );
         let compiled =
             super::compile_entity_prompt("按@剧情01构图", "prj_owned", &entities, &refs).unwrap();
-        assert!(compiled.contains(
-            "<Subject 1>: composition_reference - <Picture 1> defines the shot composition"
-        ));
+        assert!(compiled.contains("<Picture 1> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of the characters and props."));
+        assert!(compiled.contains("<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved - only viewpoint"));
+        assert!(compiled.contains("[Shot 1] 按<Picture 1>构图"));
+        assert!(!compiled.contains("<Subject 1"));
         assert!(!compiled.contains("fully_preserved"));
     }
 
@@ -999,16 +1084,28 @@ mod tests {
         let compiled =
             super::compile_entity_prompt_with_usage(text, "prj_owned", &entities, &refs, &usage)
                 .unwrap();
+        assert!(compiled.contains("<Picture 1> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of <Subject 1> and props at the start of the shot."));
+        assert!(compiled.contains("<Picture 1> (shot-planning reference for [Shot 1] opening layout): partially_preserved - only viewpoint, subject placement, facing and prop positions are retained; the appearance and clothing of people in this picture are not used, identities follow <Subject 1>."));
         assert!(compiled.contains(
-            "<Subject 1>: opening_composition - <Picture 1> defines ONLY the opening frame"
+            "<Picture 4> (shot-planning reference for [Shot 1] ending layout): partially_preserved"
         ));
         assert!(compiled.contains(
-            "<Subject 4>: ending_composition - <Picture 4> defines ONLY the final frame"
+            "<Picture 3> (shot-planning reference for [Shot 1]): partially_preserved - "
         ));
-        assert!(compiled.contains(
-            "<Subject 3>: composition_reference - <Picture 3> defines the shot composition"
-        ));
-        assert!(compiled.contains("the ending composition only the last frame"));
+        assert!(compiled.contains("<Subject 1> is the character shown in <Picture 2>."));
+        assert!(compiled.contains("[Shot 1] 开场按 <Picture 1> 的构图，<Subject 1> 走过 <Picture 3>，最后停在 <Picture 4> 的构图"));
+        for banned in [
+            "opening_composition",
+            "ending_composition",
+            "composition_reference",
+            "<Subject 2>",
+            "begins from",
+            "ends on",
+            "first frame",
+            "last frame",
+        ] {
+            assert!(!compiled.contains(banned), "{banned}");
+        }
         // Only an ending: the opening slot is untouched.
         let mut refs = vec![id("ast_end"), id("ast_open")];
         let ending = ShotCompositionUsage {
@@ -1027,9 +1124,146 @@ mod tests {
             &ending,
         )
         .unwrap();
-        assert!(compiled.contains("<Subject 1>: composition_reference"));
-        assert!(compiled.contains("<Subject 2>: ending_composition - <Picture 2>"));
-        assert!(!compiled.contains("opening_composition"));
+        assert!(compiled
+            .contains("<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved"));
+        assert!(compiled.contains(
+            "<Picture 2> (shot-planning reference for [Shot 1] ending layout): partially_preserved"
+        ));
+        assert!(!compiled.contains("attribute_transfer"));
+        assert!(!compiled.contains("opening layout"));
+    }
+
+    #[test]
+    fn composition_pictures_are_layout_only_with_official_markers_and_summary() {
+        use crate::domain::{
+            story_entity::{ShotCompositionUsage, StoryEntity, StoryEntityKind},
+            AssetId,
+        };
+        let entity = |id: &str, kind, cover: &str| StoryEntity {
+            id: id.into(),
+            project_id: "prj_owned".into(),
+            kind,
+            name: id.into(),
+            description: String::new(),
+            cover_asset_id: Some(cover.into()),
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let entities = [
+            entity("沈簿", StoryEntityKind::Character, "ast_a"),
+            entity("林舟", StoryEntityKind::Character, "ast_b"),
+            entity("开场构图", StoryEntityKind::Composition, "ast_open"),
+            entity("结尾构图", StoryEntityKind::Composition, "ast_end"),
+        ];
+        let id = |v: &str| AssetId::parse(v).unwrap();
+        let refs = [id("ast_a"), id("ast_b"), id("ast_open"), id("ast_end")];
+        let both = ShotCompositionUsage {
+            opening_entity_id: Some("开场构图".into()),
+            ending_entity_id: Some("结尾构图".into()),
+        };
+        let text = "按@开场构图的站位，@沈簿站在门口，@林舟坐在桌后；@沈簿走到桌前递出信封，最后两人位置如@结尾构图，8秒";
+        let compiled =
+            super::compile_entity_prompt_with_usage(text, "prj_owned", &entities, &refs, &both)
+                .unwrap();
+        println!("{compiled}");
+        assert!(compiled.contains("<Subject 1> is the character shown in <Picture 1>."));
+        assert!(compiled.contains("<Subject 2> is the character shown in <Picture 2>."));
+        assert!(compiled.contains("<Picture 3> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of <Subject 1>, <Subject 2> and props at the start of the shot."));
+        assert!(compiled.contains("detailed_description:\nA single continuous shot whose visual style follows the reference pictures.\n[Shot 1] "));
+        assert!(compiled.contains("<Picture 3> (shot-planning reference for [Shot 1] opening layout): partially_preserved - only viewpoint, subject placement, facing and prop positions are retained; the appearance and clothing of people in this picture are not used, identities follow <Subject 1>, <Subject 2>."));
+        assert!(compiled.contains(
+            "<Picture 4> (shot-planning reference for [Shot 1] ending layout): partially_preserved"
+        ));
+        assert!(!compiled.contains("attribute_transfer"));
+        assert!(compiled.contains("summary:\n[reference generation] The target video is a single shot featuring 2 referenced characters."));
+        assert!(compiled.contains("[Shot 1] 按<Picture 3>的站位，<Subject 1>站在门口，<Subject 2>坐在桌后；<Subject 1>走到桌前递出信封，最后两人位置如<Picture 4>，8秒"));
+        assert!(!compiled.contains("<Subject 3>"));
+        let markers: Vec<&str> = compiled
+            .lines()
+            .filter_map(|l| l.split_once("): ").or_else(|| l.split_once(">: ")))
+            .filter_map(|(_, r)| r.split(" - ").next())
+            .collect();
+        assert!(!markers.is_empty());
+        for marker in markers {
+            assert!(
+                [
+                    "fully_preserved",
+                    "partially_preserved",
+                    "attribute_transfer",
+                    "weak_reference"
+                ]
+                .contains(&marker),
+                "{marker}"
+            );
+        }
+        for banned in [
+            "opening_composition",
+            "ending_composition",
+            "composition_reference",
+            "Use the referenced subjects for the requested video",
+        ] {
+            assert!(!compiled.contains(banned), "{banned}");
+        }
+        // Missing opening or ending composition still compiles.
+        for usage in [
+            ShotCompositionUsage {
+                opening_entity_id: None,
+                ending_entity_id: Some("结尾构图".into()),
+            },
+            ShotCompositionUsage {
+                opening_entity_id: Some("开场构图".into()),
+                ending_entity_id: None,
+            },
+            ShotCompositionUsage::default(),
+        ] {
+            let c = super::compile_entity_prompt_with_usage(
+                "@沈簿和@林舟对话，6秒",
+                "prj_owned",
+                &entities,
+                &refs,
+                &usage,
+            )
+            .unwrap();
+            assert!(c.starts_with("subject_definitions:\n<Subject 1>"));
+            assert!(!c.contains("<Picture 3> is"));
+            assert!(c.contains("[reference generation]"));
+        }
+        // Composition-only prompt still compiles as a layout picture.
+        let c = super::compile_entity_prompt_with_usage(
+            "按@结尾构图收尾",
+            "prj_owned",
+            &entities,
+            &refs,
+            &both,
+        )
+        .unwrap();
+        assert!(c.contains("<Picture 4> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of the characters and props near the end of the shot."));
+        assert!(c.contains("summary:\n[reference generation] The target video is a single shot."));
+        // Six-section text is passed through, never wrapped a second time.
+        assert_eq!(
+            super::compile_entity_prompt_with_usage(
+                &compiled,
+                "prj_owned",
+                &entities,
+                &refs,
+                &both
+            )
+            .unwrap(),
+            compiled
+        );
+        let user_sections = "subject_definitions:\n@沈簿 是主角\n\nsummary:\n[reference generation] 自写\n\nretention_analysis:\n略\n\ndetailed_description:\n@沈簿 推门，按@开场构图\n\noverall_soundscape:\n雨声\n\nnon_diegetic_music:\n无";
+        let c = super::compile_entity_prompt_with_usage(
+            user_sections,
+            "prj_owned",
+            &entities,
+            &refs,
+            &both,
+        )
+        .unwrap();
+        assert_eq!(c.matches("subject_definitions:").count(), 1);
+        assert!(c.starts_with("subject_definitions:\n<Subject 1> 是主角"));
+        assert!(c.contains("<Subject 1> 推门，按<Picture 3>"));
     }
 
     fn recipe() -> Recipe {

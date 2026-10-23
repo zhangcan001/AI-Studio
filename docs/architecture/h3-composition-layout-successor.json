@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "H3_COMPOSITION_LAYOUT",
+  "parentHead": "ed8ff13ec51febdeb49a84ac9e9ddc1f4869cd88",
+  "planningParentHead": "ed8ff13ec51febdeb49a84ac9e9ddc1f4869cd88",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "shotDurationCapSeconds": 11,
+    "compositionAsShotPlanningReference": true,
+    "officialRetentionMarkersOnly": true,
+    "englishPromptGuide": true,
+    "englishPromptHintNonBlocking": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "scripts/h3-composition-layout-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "6ffd443869d3edc4484e5316ec6574ba2427f0c2dc3b2317a503982dd04cc54a"
+    },
+    "scripts/shot-duration-cap-successor-guard.mjs": {
+      "beforeHash": "7a76a5055c48d838a8782fcf93196fa6e55cc325ec796a531a98b151db27be9b",
+      "afterHash": "fd3cc3335d7b9679b8c7138d9d84790af0accddbe7d58533b977b6bb4644611c"
+    },
+    "scripts/testing/h3-composition-layout.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "be5ec349840109b6583170c61c27307bbda439ba9d301b97befd3e850a995f1e"
+    },
+    "src-tauri/src/application/shot_video_input_service.rs": {
+      "beforeHash": "f591fa94a7603f0ed773a8755946c5afa3a98d993e16aed7860ac72dfbe8b0a1",
+      "afterHash": "0e054942d782ddab9f98beb76ec702699fcc1d2655895cbdac3de0a36e7c3b6b"
+    },
+    "src-tauri/tests/support/minimax_video_input_regressions.rs": {
+      "beforeHash": "22a52e822853610df4a986069d87b9dc6981f5e848d9311ec9cba71c0093c4b7",
+      "afterHash": "fdd1ade07d954c1efabc062511b1ed4f1c5dc8d97bbe11f70ee7d714febf0425"
+    },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": "679c6af78b97771fdf59b44bc463cdbaaee9e24066c61826ef6383dc79b9551c",
+      "afterHash": "0a23d5ade8d15a6361fb035d9b5ea914f4902da31f65f11f09840160558023c4"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": "d0cc2f29a0ec534d49bdf82da4262daf81464b6ecb39e944c0da3b2c9725ff9d",
+      "afterHash": "fd7c4c4a59649e0d4d4ad4ea0cd8cd1beef47877dc5a761aadb819c3f063f677"
+    },
+    "src/product/promptLanguage.test.ts": {
+      "beforeHash": null,
+      "afterHash": "deb3d2ed17ec34a82e1a94a524163d26940de965211e1fb54f7b9f69d3a0d4c4"
+    },
+    "src/product/promptLanguage.ts": {
+      "beforeHash": null,
+      "afterHash": "8ec1e36806b0eabee971423f53c2efa0fa0e61b2d2aa39f65a2dce4c6ebc5154"
+    }
+  }
+}

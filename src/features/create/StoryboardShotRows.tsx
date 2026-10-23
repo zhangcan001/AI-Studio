@@ -13,6 +13,7 @@ import type { VideoInputView } from "../../types/shotVideoInput";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 import { SHOT_DURATION_LIMIT_MESSAGE, shotDurationIssue, shotDurationMax } from "../../product/shotDuration";
+import { englishPromptHint } from "../../product/promptLanguage";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品", composition: "构图" };
 const KINDS: StoryEntityKind[] = ["scene", "character", "prop", "composition"];
@@ -430,6 +431,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         onChange={e => setPrompt(e.target.value)} onBlur={savePrompt} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
+      {englishPromptHint(prompt) && <p className="muted" aria-label="提示词语言建议">{englishPromptHint(prompt)}</p>}
       {hasMentions && <section aria-label="角色与场景生成引用" className="composer-entity-references">
         <p>{entityIssue ?? "角色与场景已保存到正式参考输入，生成时按以下真实顺序引用。"}</p>
         {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "等待自动应用"}</small>; })}

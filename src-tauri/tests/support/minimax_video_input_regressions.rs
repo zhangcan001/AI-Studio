@@ -1584,7 +1584,7 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
     assert!(compiled.contains(
         "spatial layout, architecture, terrain and environmental structure from <Picture 1>"
     ));
-    assert!(compiled.contains("detailed_description:\n<Subject 1>在<Subject 2>中飞翔，5秒"));
+    assert!(compiled.contains("[Shot 1] <Subject 1>在<Subject 2>中飞翔，5秒"));
     assert!(
         matches!(&prepared.values["reference_images"], GenerationInputValue::ImageAssets(ids) if ids == &vec![last.id.clone(), first.id.clone()])
     );
@@ -1674,7 +1674,7 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
         matches!(&updated.values["prompt"], GenerationInputValue::Text(text)
         if text.contains("<Subject 1> is the character shown in <Picture 1>.")
             && text.contains("<Subject 2> is the environment shown in <Picture 1>.")
-            && text.contains("detailed_description:\n<Subject 1>在<Subject 2>中飞翔，5秒"))
+            && text.contains("[Shot 1] <Subject 1>在<Subject 2>中飞翔，5秒"))
     );
     let changed_plan = preparation
         .plan_many(PROJECT_ID, &["shot_phase2".into()], ShotStage::Video)
