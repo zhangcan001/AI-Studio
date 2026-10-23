@@ -31,7 +31,9 @@ it.each([
   api.create.mockResolvedValue({});
 
   render(<StoryEntityCategorySection projectId="project-a" kind={kind} />);
-  fireEvent.click(await screen.findByRole("button", { name: `批量导入${label}图片` }));
+  const bulkButton = await screen.findByRole("button", { name: `批量导入${label}图片` });
+  await waitFor(() => expect(bulkButton.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(bulkButton);
 
   await waitFor(() => expect(api.create).toHaveBeenCalledWith({
     projectId: "project-a",
