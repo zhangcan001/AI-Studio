@@ -704,8 +704,6 @@ fn has_ref2va_sections(text: &str) -> bool {
     })
 }
 
-/// True when the text is mostly English (Latin letters clearly outnumber Han
-/// characters), so it can be injected into the English prompt as-is.
 /// Cheap, non-blocking clutter heuristic for a composition picture. The image
 /// is reduced to at most 64x64; it counts as detailed when it has many distinct
 /// colours together with dense edges or strong colour (a rendered scene), while
@@ -750,6 +748,8 @@ pub(crate) fn composition_detail_hint(name: &str) -> String {
     format!("构图图「{name}」细节较多，可能干扰场景，建议改用纯色背景、线稿或剪影")
 }
 
+/// True when the text is mostly English (Latin letters clearly outnumber Han
+/// characters), so it can be injected into the English prompt as-is.
 pub(crate) fn mostly_english(text: &str) -> bool {
     let han = text
         .chars()
@@ -967,6 +967,18 @@ pub(crate) fn compile_ref2va_prompt(
             .collect::<Vec<_>>()
             .join(", ")
     };
+    // The shot's scene picture anchors the environment; composition pictures
+    // only give layout and must not pull in their own background.
+    let scene = state
+        .subjects
+        .iter()
+        .enumerate()
+        .find(|(_, s)| s.entity.kind == StoryEntityKind::Scene)
+        .map(|(index, s)| (index + 1, s));
+    let environment = match scene {
+        Some((_, s)) => format!("; the environment follows <Picture {}>.", s.picture),
+        None => ".".into(),
+    };
     for (_, picture, moment) in &state.pictures {
         let (layout, when) = match moment {
             Some((name, when)) => (format!(" {name} layout"), format!(" {when}")),
@@ -976,7 +988,7 @@ pub(crate) fn compile_ref2va_prompt(
             "<Picture {picture}> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of {placed} and props{when}."
         ));
         retention.push(format!(
-            "<Picture {picture}> (shot-planning reference for [Shot 1]{layout}): partially_preserved - only viewpoint, subject placement, facing and prop positions are retained; the appearance and clothing of people in this picture are not used, identities follow {placed}."
+            "<Picture {picture}> (shot-planning reference for [Shot 1]{layout}): partially_preserved - storyboard/layout reference only for the opening camera framing, character placement and facing, and prop positions; camera movement during the shot is not limited by this picture. Ignore its background, colors, lighting and textures{environment} The appearance and clothing of people in this picture are not used, identities follow {placed}."
         ));
     }
     let prefix = if has_audio_reference {
@@ -1044,8 +1056,35 @@ pub(crate) fn compile_ref2va_prompt(
         "Quiet room tone matching the environment; follow any sound directions in detailed_description.".into()
     });
     let music = music_text.unwrap_or_else(|| "N/A".into());
+    let anchor = match scene {
+        Some((n, s)) => {
+            let label = format!("<Picture {}>", s.picture);
+            let lower = format!("{style}\n{body}").to_lowercase();
+            let anchored = lower.contains(&label.to_lowercase())
+                && ["unchanged", "same", "consistent"]
+                    .iter()
+                    .any(|w| lower.contains(w));
+            let appearance = s.entity.description.trim().trim_end_matches(['.', ' ']);
+            let place = if !appearance.is_empty() && mostly_english(appearance) {
+                // "the same a dim study" -> "the same dim study".
+                let lower = appearance.to_lowercase();
+                ["a ", "an ", "the "]
+                    .iter()
+                    .find(|article| lower.starts_with(**article))
+                    .map_or(appearance, |article| &appearance[article.len()..])
+                    .to_string()
+            } else {
+                format!("<Subject {n}>")
+            };
+            (!anchored).then(|| format!(
+                "Set in the same {place} as {label}; the room layout, set dressing and lighting stay consistent for the entire shot, while the camera may move freely, including large moves.\n"
+            ))
+        }
+        None => None,
+    }
+    .unwrap_or_default();
     Ok(format!(
-        "subject_definitions:\n{}\n\nsummary:\n{summary}\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment or layout reference as the character reference.\n\ndetailed_description:\n{style}\n{body}\n\noverall_soundscape:\n{soundscape}\n\nnon_diegetic_music:\n{music}",
+        "subject_definitions:\n{}\n\nsummary:\n{summary}\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment or layout reference as the character reference.\n\ndetailed_description:\n{style}\n{anchor}{body}\n\noverall_soundscape:\n{soundscape}\n\nnon_diegetic_music:\n{music}",
         definitions.join("\n"), retention.join("\n")
     ))
 }
@@ -1296,10 +1335,95 @@ pub(crate) mod tests {
         let compiled =
             super::compile_entity_prompt("按@剧情01构图", "prj_owned", &entities, &refs).unwrap();
         assert!(compiled.contains("<Picture 1> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of the characters and props."));
-        assert!(compiled.contains("<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved - only viewpoint"));
+        assert!(compiled.contains("<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved - storyboard/layout reference only for the opening camera framing"));
         assert!(compiled.contains("[Shot 1] 按<Picture 1>构图"));
         assert!(!compiled.contains("<Subject 1"));
         assert!(!compiled.contains("fully_preserved"));
+    }
+
+    #[test]
+    fn composition_follows_scene_picture_and_scene_anchor_allows_free_camera() {
+        use crate::domain::{
+            story_entity::{StoryEntity, StoryEntityKind},
+            AssetId,
+        };
+        let entity = |id: &str, kind, cover: &str, description: &str| StoryEntity {
+            id: id.into(),
+            project_id: "prj_owned".into(),
+            kind,
+            name: id.into(),
+            description: description.into(),
+            cover_asset_id: Some(cover.into()),
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let entities = [
+            entity("沈簿", StoryEntityKind::Character, "ast_hero", ""),
+            entity(
+                "旧档房",
+                StoryEntityKind::Scene,
+                "ast_room",
+                "dim archive room with tall wooden shelves",
+            ),
+            entity("持账低位", StoryEntityKind::Composition, "ast_layout", ""),
+            entity("空房", StoryEntityKind::Scene, "ast_empty", "空旷的房间"),
+        ];
+        let refs: Vec<AssetId> = ["ast_layout", "ast_hero", "ast_room", "ast_empty"]
+            .iter()
+            .map(|v| AssetId::parse(*v).unwrap())
+            .collect();
+        let style = crate::domain::story_entity::ShotPromptSections {
+            style: Some("Cinematic realism, soft window light.".into()),
+            ..Default::default()
+        };
+        let compile = |text: &str| {
+            super::compile_ref2va_prompt(
+                text,
+                "prj_owned",
+                &entities,
+                &refs,
+                &Default::default(),
+                &style,
+                false,
+            )
+            .unwrap()
+        };
+        let compiled = compile("@沈簿在@旧档房里按@持账低位构图蹲下抽出账册，镜头大幅环绕");
+        println!("{compiled}");
+        let note = "<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved - storyboard/layout reference only for the opening camera framing, character placement and facing, and prop positions; camera movement during the shot is not limited by this picture. Ignore its background, colors, lighting and textures; the environment follows <Picture 3>. The appearance and clothing of people in this picture are not used, identities follow <Subject 1>, <Subject 2>.";
+        assert!(compiled.contains(note), "{compiled}");
+        let anchor = "Set in the same dim archive room with tall wooden shelves as <Picture 3>; the room layout, set dressing and lighting stay consistent for the entire shot, while the camera may move freely, including large moves.";
+        assert!(compiled.contains(&format!(
+            "detailed_description:\nCinematic realism, soft window light.\n{anchor}\n[Shot 1] <Subject 1>在<Subject 2>里"
+        )), "{compiled}");
+        assert_eq!(compiled.matches("Set in the same").count(), 1);
+        for banned in [
+            "static camera",
+            "locked-off",
+            "no camera movement",
+            "camera stays still",
+        ] {
+            assert!(!compiled.to_lowercase().contains(banned), "{banned}");
+        }
+        // Writer already anchored the scene picture: no second anchor.
+        let written =
+            compile("@沈簿在@旧档房里蹲下，<Picture 3> 的房间保持不变 same room，按@持账低位构图");
+        assert!(!written.contains("Set in the same"), "{written}");
+        // Non-English scene description falls back to the subject label.
+        let fallback = compile("@沈簿走进@空房，按@持账低位构图");
+        assert!(
+            fallback.contains("Set in the same <Subject 2> as <Picture 4>;"),
+            "{fallback}"
+        );
+        assert!(fallback.contains("the environment follows <Picture 4>."));
+        // No scene picture: no anchor and no environment clause.
+        let alone = compile("@沈簿按@持账低位构图蹲下");
+        assert!(!alone.contains("Set in the same"));
+        assert!(!alone.contains("environment follows"));
+        assert!(
+            alone.contains("Ignore its background, colors, lighting and textures. The appearance")
+        );
     }
 
     #[test]
@@ -1361,7 +1485,7 @@ pub(crate) mod tests {
             super::compile_entity_prompt_with_usage(text, "prj_owned", &entities, &refs, &usage)
                 .unwrap();
         assert!(compiled.contains("<Picture 1> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of <Subject 1> and props at the start of the shot."));
-        assert!(compiled.contains("<Picture 1> (shot-planning reference for [Shot 1] opening layout): partially_preserved - only viewpoint, subject placement, facing and prop positions are retained; the appearance and clothing of people in this picture are not used, identities follow <Subject 1>."));
+        assert!(compiled.contains("<Picture 1> (shot-planning reference for [Shot 1] opening layout): partially_preserved - storyboard/layout reference only for the opening camera framing, character placement and facing, and prop positions; camera movement during the shot is not limited by this picture. Ignore its background, colors, lighting and textures. The appearance and clothing of people in this picture are not used, identities follow <Subject 1>."));
         assert!(compiled.contains(
             "<Picture 4> (shot-planning reference for [Shot 1] ending layout): partially_preserved"
         ));
@@ -1447,7 +1571,7 @@ pub(crate) mod tests {
         assert!(compiled.contains("<Subject 2> is the character shown in <Picture 2>."));
         assert!(compiled.contains("<Picture 3> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of <Subject 1>, <Subject 2> and props at the start of the shot."));
         assert!(compiled.contains("detailed_description:\nA single continuous shot whose visual style follows the reference pictures.\n[Shot 1] "));
-        assert!(compiled.contains("<Picture 3> (shot-planning reference for [Shot 1] opening layout): partially_preserved - only viewpoint, subject placement, facing and prop positions are retained; the appearance and clothing of people in this picture are not used, identities follow <Subject 1>, <Subject 2>."));
+        assert!(compiled.contains("<Picture 3> (shot-planning reference for [Shot 1] opening layout): partially_preserved - storyboard/layout reference only for the opening camera framing, character placement and facing, and prop positions; camera movement during the shot is not limited by this picture. Ignore its background, colors, lighting and textures. The appearance and clothing of people in this picture are not used, identities follow <Subject 1>, <Subject 2>."));
         assert!(compiled.contains(
             "<Picture 4> (shot-planning reference for [Shot 1] ending layout): partially_preserved"
         ));
@@ -1605,7 +1729,8 @@ pub(crate) mod tests {
         assert!(c.contains("<Subject 3> (appears in [Shot 1], [Shot 2]): fully_preserved - retain"));
         assert!(c.contains("<Subject 2> is the environment in <Picture 3>, a dim study"));
         assert!(c.contains("summary:\n[reference generation] <Subject 1> enters <Subject 2> and hands a letter to <Subject 3>."));
-        assert!(c.contains("detailed_description:\nRealistic period drama style with warm lamplight.\n[Shot 1] Positioned as in <Picture 4>, <Subject 1>"));
+        assert!(c.contains("detailed_description:\nRealistic period drama style with warm lamplight.\nSet in the same dim study with tall dark-wood bookshelves along the left wall as <Picture 3>; the room layout, set dressing and lighting stay consistent for the entire shot, while the camera may move freely, including large moves.\n[Shot 1] Positioned as in <Picture 4>, <Subject 1>"), "{c}");
+        assert!(c.contains("Ignore its background, colors, lighting and textures; the environment follows <Picture 3>."));
         assert!(c.contains("\n[Shot 2] At 00:04.000, the shot cuts to <Subject 3>."));
         assert_eq!(c.matches("\n[Shot 1] ").count(), 1);
         assert!(c.contains("overall_soundscape:\nQuiet indoor room tone."));
