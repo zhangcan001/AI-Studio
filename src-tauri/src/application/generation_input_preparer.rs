@@ -222,6 +222,29 @@ impl GenerationInputPreparer {
     /// New-generation policy only. Historical reads/preflights remain separate.
     /// Receipt, ownership, managed file, size, hash and decoded image metadata
     /// must all agree. No inference from a name, category or source tag.
+    /// Best-effort read of a managed asset's bytes for non-blocking hints.
+    pub(crate) async fn read_asset_bytes(
+        &self,
+        project_id: &str,
+        asset: &Asset,
+    ) -> Option<Vec<u8>> {
+        if asset.project_id != project_id
+            || asset.file_size
+                > crate::application::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES
+        {
+            return None;
+        }
+        let root = self
+            .project_repository
+            .get_storage_root(project_id)
+            .await
+            .ok()??;
+        self.asset_store
+            .read(&root, std::path::Path::new(&asset.storage_path))
+            .await
+            .ok()
+    }
+
     pub async fn validate_external_image_inputs(
         &self,
         project_id: &str,

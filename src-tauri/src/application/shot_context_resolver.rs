@@ -339,7 +339,17 @@ impl ShotContextResolver {
                             recipe_id: recipe.clone(),
                         };
                         match service.context_input(&scope).await {
-                            Ok(inputs) => context.stage_input.video_inputs = Some(inputs),
+                            Ok(inputs) => {
+                                for hint in
+                                    service.composition_detail_hints(project_id, &inputs).await
+                                {
+                                    context.diagnostics.push(ContextDiagnostic::warning(
+                                        "COMPOSITION_REFERENCE_DETAILED",
+                                        hint,
+                                    ));
+                                }
+                                context.stage_input.video_inputs = Some(inputs)
+                            }
                             Err(error) => {
                                 // Keep a formal empty set so reference_gate does not
                                 // fall back to confirmed-result / legacy keyframe copy.

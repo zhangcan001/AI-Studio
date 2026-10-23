@@ -44,6 +44,8 @@ pub struct ShotVideoInputService {
     admission: Arc<dyn NewGenerationAdmission>,
     preparer: Arc<GenerationInputPreparer>,
     clock: Arc<dyn Clock>,
+    /// Composition clutter verdict per image sha256 (content-addressed).
+    detail_cache: std::sync::Mutex<std::collections::HashMap<String, bool>>,
 }
 
 impl ShotVideoInputService {
@@ -65,7 +67,75 @@ impl ShotVideoInputService {
             admission,
             preparer,
             clock,
+            detail_cache: Default::default(),
         }
+    }
+
+    /// Non-blocking hints for composition pictures in the saved formal
+    /// references that look too detailed (may fight the scene picture).
+    pub async fn composition_detail_hints(
+        &self,
+        project_id: &str,
+        inputs: &crate::domain::shot_context::ResolvedVideoInputSet,
+    ) -> Vec<String> {
+        use crate::domain::story_entity::StoryEntityKind;
+        let Some(repository) = &self.story_entities else {
+            return Vec::new();
+        };
+        let Ok(entities) = repository.list(project_id, None).await else {
+            return Vec::new();
+        };
+        let mut hints = Vec::new();
+        for entity in entities
+            .iter()
+            .filter(|e| e.kind == StoryEntityKind::Composition)
+        {
+            let Some(cover) = entity_cover(entity) else {
+                continue;
+            };
+            let Some(input) = inputs
+                .inputs
+                .iter()
+                .find(|i| i.input_key == "reference_images" && &i.asset_id == cover)
+            else {
+                continue;
+            };
+            let cached = self
+                .detail_cache
+                .lock()
+                .unwrap()
+                .get(&input.sha256)
+                .copied();
+            let detailed = match cached {
+                Some(value) => value,
+                None => {
+                    let Ok(Some(asset)) = self
+                        .assets
+                        .find_by_id(&match AssetId::parse(cover) {
+                            Ok(id) => id,
+                            Err(_) => continue,
+                        })
+                        .await
+                    else {
+                        continue;
+                    };
+                    let Some(bytes) = self.preparer.read_asset_bytes(project_id, &asset).await
+                    else {
+                        continue;
+                    };
+                    let value = composition_looks_detailed(&bytes);
+                    self.detail_cache
+                        .lock()
+                        .unwrap()
+                        .insert(asset.sha256.clone(), value);
+                    value
+                }
+            };
+            if detailed {
+                hints.push(composition_detail_hint(&entity.name));
+            }
+        }
+        hints
     }
 
     pub fn with_story_entities(
@@ -636,6 +706,50 @@ fn has_ref2va_sections(text: &str) -> bool {
 
 /// True when the text is mostly English (Latin letters clearly outnumber Han
 /// characters), so it can be injected into the English prompt as-is.
+/// Cheap, non-blocking clutter heuristic for a composition picture. The image
+/// is reduced to at most 64x64; it counts as detailed when it has many distinct
+/// colours together with dense edges or strong colour (a rendered scene), while
+/// flat backgrounds, line art and silhouettes stay quiet. Undecodable -> false.
+pub(crate) fn composition_looks_detailed(bytes: &[u8]) -> bool {
+    let Ok(image) = image::load_from_memory(bytes) else {
+        return false;
+    };
+    let small = image.thumbnail(64, 64).to_rgb8();
+    let (w, h) = small.dimensions();
+    let pixels = (w * h) as f64;
+    if pixels < 16.0 {
+        return false;
+    }
+    let mut colors = std::collections::HashSet::new();
+    let mut saturation = 0.0;
+    let luma =
+        |p: &image::Rgb<u8>| (p[0] as i32 * 299 + p[1] as i32 * 587 + p[2] as i32 * 114) / 1000;
+    let (mut edges, mut pairs) = (0u32, 0u32);
+    for (x, y, p) in small.enumerate_pixels() {
+        colors.insert((p[0] >> 4, p[1] >> 4, p[2] >> 4));
+        let (max, min) = (*p.0.iter().max().unwrap(), *p.0.iter().min().unwrap());
+        if max > 0 {
+            saturation += (max - min) as f64 / max as f64;
+        }
+        for (nx, ny) in [(x + 1, y), (x, y + 1)] {
+            if nx < w && ny < h {
+                pairs += 1;
+                if (luma(p) - luma(small.get_pixel(nx, ny))).abs() > 24 {
+                    edges += 1;
+                }
+            }
+        }
+    }
+    let unique = colors.len() as f64 / pixels;
+    let edge = edges as f64 / pairs.max(1) as f64;
+    let saturation = saturation / pixels;
+    unique >= 0.5 || (unique >= 0.15 && (edge >= 0.15 || saturation >= 0.35))
+}
+
+pub(crate) fn composition_detail_hint(name: &str) -> String {
+    format!("构图图「{name}」细节较多，可能干扰场景，建议改用纯色背景、线稿或剪影")
+}
+
 pub(crate) fn mostly_english(text: &str) -> bool {
     let han = text
         .chars()

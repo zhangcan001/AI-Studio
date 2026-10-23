@@ -1507,6 +1507,28 @@ pub mod folder_batch_import_service {
             } else {
                 vec![]
             };
+            // Non-blocking: a composition picture from the package that looks
+            // like a rendered scene may fight the scene picture's background.
+            for entity in entities
+                .iter()
+                .filter(|e| e.kind == crate::domain::story_entity::StoryEntityKind::Composition)
+            {
+                let Some(path) = declared_paths(&manifest, &entity.name).into_iter().next() else {
+                    continue;
+                };
+                if read_file(
+                    root,
+                    &path,
+                    super::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
+                )
+                .is_ok_and(|bytes| {
+                    super::shot_video_input_service::composition_looks_detailed(&bytes)
+                }) {
+                    warnings.push(super::shot_video_input_service::composition_detail_hint(
+                        &entity.name,
+                    ));
+                }
+            }
             for declared in &manifest.characters {
                 if let Some(old) = existing.iter().find(|e| e.name == declared.name) {
                     warnings.push(format!(
