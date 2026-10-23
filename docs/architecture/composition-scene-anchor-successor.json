@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "COMPOSITION_SCENE_ANCHOR",
+  "parentHead": "eeec3ba300716c1be3b61b033b1cc1255bf54365",
+  "planningParentHead": "eeec3ba300716c1be3b61b033b1cc1255bf54365",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "compositionFollowsScenePicture": true,
+    "sceneAnchorAllowsCameraMoves": true,
+    "frozenBatchesUnchanged": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "scripts/composition-detail-hint-successor-guard.mjs": {
+      "beforeHash": "4f3b4102b1c48b4dce7cffc8108df14fa0c950984903660626f63983a0b47c48",
+      "afterHash": "f7b192594f576c254b8e0b8e74795b06332915d3b879a972d5788f1f0b755c7b"
+    },
+    "scripts/composition-scene-anchor-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "432b1b3675e8d5bdf58cd14258c3a3b64c07629093e2539e57e07de430f102de"
+    },
+    "scripts/testing/composition-scene-anchor.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "9634ce1de21d0f108505b46f457dfec6f0324b3a3d709a11891453a50b55ba53"
+    },
+    "src-tauri/src/application/shot_video_input_service.rs": {
+      "beforeHash": "97b548563e9b4b3d1fd2dcc28900b59a7e5675cf12594daeb6579eb60602d3bd",
+      "afterHash": "71064f580f0f0bbba5829ff9a0a9f57d85f2bb47c7df477cfc45444eb2610e6f"
+    }
+  }
+}

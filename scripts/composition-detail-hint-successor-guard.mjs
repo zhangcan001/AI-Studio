@@ -1,3 +1,4 @@
+import { compositionSceneAnchorParentReader, compositionSceneAnchorScopeSince, compositionSceneAnchorFixtureFiles, COMPOSITION_SCENE_ANCHOR_BASE } from './composition-scene-anchor-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -67,10 +68,11 @@ export function compositionDetailHintScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...COMPOSITION_DETAIL_HINT_CHANGED, ...COMPOSITION_DETAIL_HINT_ADDED, COMPOSITION_DETAIL_HINT_PROOF,
+    ...compositionSceneAnchorScopeSince(root, COMPOSITION_SCENE_ANCHOR_BASE),
   ])].sort();
 }
 export function compositionDetailHintFixtureFiles(root) {
-  return [...facts(root, COMPOSITION_DETAIL_HINT_BASE).paths, ...COMPOSITION_DETAIL_HINT_ADDED, COMPOSITION_DETAIL_HINT_PROOF];
+  return [...new Set([...facts(root, COMPOSITION_DETAIL_HINT_BASE).paths, ...COMPOSITION_DETAIL_HINT_ADDED, COMPOSITION_DETAIL_HINT_PROOF, ...compositionSceneAnchorFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -79,10 +81,14 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, COMPOSITION_DETAIL_HINT_BASE);
   const fail = id => violations.push("composition-detail-hint-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  // Only an exact, independently validated successor byte version may be projected.
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(COMPOSITION_DETAIL_HINT_PROOF));
@@ -95,10 +101,10 @@ function validate(root, override) {
     const allowed = [...scope, COMPOSITION_DETAIL_HINT_PROOF].sort();
     const expected = [...parent.paths, ...COMPOSITION_DETAIL_HINT_ADDED, COMPOSITION_DETAIL_HINT_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -118,13 +124,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: COMPOSITION_DETAIL_HINT_CHANGED,
-    addedPaths: [...COMPOSITION_DETAIL_HINT_ADDED, COMPOSITION_DETAIL_HINT_PROOF],
-    afterHashes: Object.fromEntries([...COMPOSITION_DETAIL_HINT_CHANGED, ...COMPOSITION_DETAIL_HINT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...COMPOSITION_DETAIL_HINT_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...COMPOSITION_DETAIL_HINT_ADDED, COMPOSITION_DETAIL_HINT_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...COMPOSITION_DETAIL_HINT_CHANGED, ...COMPOSITION_DETAIL_HINT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => COMPOSITION_DETAIL_HINT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function compositionDetailHintParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "compositionDetailHintParentReader", undefined,
-    () => validate(root, undefined), COMPOSITION_DETAIL_HINT_PROOF);
+  const successor = compositionSceneAnchorParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "compositionDetailHintParentReader", undefined, check, COMPOSITION_DETAIL_HINT_PROOF);
 }
