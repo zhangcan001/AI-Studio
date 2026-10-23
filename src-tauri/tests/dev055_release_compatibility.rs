@@ -1008,6 +1008,18 @@ async fn remove_migration_028_schema(pool: &SqlitePool) {
         .execute(pool)
         .await
         .expect("039 source workflow column should be removable from the isolated fixture");
+    // Migration 049 adds columns to the pre-existing shots table; drop them so the
+    // isolated fixture can replay it (ignored when already absent).
+    for column in [
+        "prompt_style",
+        "prompt_summary",
+        "prompt_soundscape",
+        "prompt_music",
+    ] {
+        let _ = sqlx::query(&format!("ALTER TABLE shots DROP COLUMN {column}"))
+            .execute(pool)
+            .await;
+    }
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 28")
         .execute(pool)
         .await
@@ -1062,6 +1074,18 @@ async fn remove_migrations_after_021(pool: &SqlitePool) {
             .await
             .expect("022 tables should be removable from the isolated fixture");
     }
+    // Migration 049 adds columns to the pre-existing shots table; drop them so the
+    // isolated fixture can replay it (ignored when already absent).
+    for column in [
+        "prompt_style",
+        "prompt_summary",
+        "prompt_soundscape",
+        "prompt_music",
+    ] {
+        let _ = sqlx::query(&format!("ALTER TABLE shots DROP COLUMN {column}"))
+            .execute(pool)
+            .await;
+    }
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 22")
         .execute(pool)
         .await
@@ -1074,6 +1098,18 @@ async fn remove_migrations_after_026(pool: &SqlitePool) {
         .execute(pool)
         .await
         .expect("027 project workflow table should be removable from the isolated fixture");
+    // Migration 049 adds columns to the pre-existing shots table; drop them so the
+    // isolated fixture can replay it (ignored when already absent).
+    for column in [
+        "prompt_style",
+        "prompt_summary",
+        "prompt_soundscape",
+        "prompt_music",
+    ] {
+        let _ = sqlx::query(&format!("ALTER TABLE shots DROP COLUMN {column}"))
+            .execute(pool)
+            .await;
+    }
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 27")
         .execute(pool)
         .await
@@ -1315,6 +1351,18 @@ async fn remove_migration_024(pool: &SqlitePool) {
         .execute(pool)
         .await
         .expect("024 table should be removable from the isolated fixture");
+    // Migration 049 adds columns to the pre-existing shots table; drop them so the
+    // isolated fixture can replay it (ignored when already absent).
+    for column in [
+        "prompt_style",
+        "prompt_summary",
+        "prompt_soundscape",
+        "prompt_music",
+    ] {
+        let _ = sqlx::query(&format!("ALTER TABLE shots DROP COLUMN {column}"))
+            .execute(pool)
+            .await;
+    }
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 24")
         .execute(pool)
         .await
@@ -1787,6 +1835,18 @@ async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_039() {
         .execute(&pool)
         .await
         .expect("039 source workflow column should drop from the isolated 1.1 fixture");
+    // Migration 049 adds columns to the pre-existing shots table; drop them so the
+    // isolated fixture can replay it (ignored when already absent).
+    for column in [
+        "prompt_style",
+        "prompt_summary",
+        "prompt_soundscape",
+        "prompt_music",
+    ] {
+        let _ = sqlx::query(&format!("ALTER TABLE shots DROP COLUMN {column}"))
+            .execute(&pool)
+            .await;
+    }
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 32")
         .execute(&pool)
         .await

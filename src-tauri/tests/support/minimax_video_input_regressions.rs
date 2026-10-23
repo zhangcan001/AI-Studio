@@ -1672,7 +1672,7 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
         .unwrap();
     assert!(
         matches!(&updated.values["prompt"], GenerationInputValue::Text(text)
-        if text.contains("<Subject 1> is the character shown in <Picture 1>.")
+        if text.contains("<Subject 1> is the character in <Picture 1>, changed.")
             && text.contains("<Subject 2> is the environment shown in <Picture 1>.")
             && text.contains("[Shot 1] <Subject 1>在<Subject 2>中飞翔，5秒"))
     );

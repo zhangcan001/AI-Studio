@@ -425,6 +425,18 @@ async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
         .execute(pool)
         .await
         .expect("039 source workflow column should be removable in isolated fixture");
+    // Migration 049 adds columns to the pre-existing shots table; drop them so the
+    // isolated fixture can replay it (ignored when already absent).
+    for column in [
+        "prompt_style",
+        "prompt_summary",
+        "prompt_soundscape",
+        "prompt_music",
+    ] {
+        let _ = sqlx::query(&format!("ALTER TABLE shots DROP COLUMN {column}"))
+            .execute(pool)
+            .await;
+    }
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 24")
         .execute(pool)
         .await

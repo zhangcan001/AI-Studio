@@ -31,7 +31,7 @@
     },
     "scripts/h3-prompt-sections-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "2dc5d5d1a8377f3de917f9205cbdad60322d0ad49feba9c4d30fbc796c3ecf7f"
+      "afterHash": "4f9228be9683349b748c208a419f910b664d7ef99e34947d6349a63af9af5015"
     },
     "scripts/testing/h3-prompt-sections.test.mjs": {
       "beforeHash": null,
@@ -71,7 +71,7 @@
     },
     "src-tauri/src/infrastructure/database/dev048_consistency_e2e.rs": {
       "beforeHash": "1de6517f138a3819de661080c6af490238e6fbb7410df4a0baa300ca58584ded",
-      "afterHash": "87127204cb65be88a61f214738424b749ff8d55a2e697608cf24879fc4428b0b"
+      "afterHash": "0077596527a1c9ed3a69551f4d37fd224955e6b93a9e627f897de1fc8a46f56d"
     },
     "src-tauri/src/infrastructure/database/pool.rs": {
       "beforeHash": "44008499d9ec88ce57a4e1f577d7421737d3ec9c75ceb3e36607a85445f73c47",
@@ -92,6 +92,14 @@
     "src-tauri/tests/dev040_safety.rs": {
       "beforeHash": "bdff60510186c569e94e7b6420f126ef3b20a19e6a2eb99d93eab92d2773f844",
       "afterHash": "802f9e61bd65f63aefad81a5fcb8265a32d5dba8f9611039b416d99d39c7d82e"
+    },
+    "src-tauri/tests/dev055_release_compatibility.rs": {
+      "beforeHash": "1e5349998904969bf294548e03405f588a045f4e10b7239d81e1572188c96a07",
+      "afterHash": "1340a3753085c5152a9cdd7224e926656768d1c700e1a1ff39211f5b9b217c18"
+    },
+    "src-tauri/tests/support/minimax_video_input_regressions.rs": {
+      "beforeHash": "fdd1ade07d954c1efabc062511b1ed4f1c5dc8d97bbe11f70ee7d714febf0425",
+      "afterHash": "6cf570f18532554e95da839d6be5b759b3cd8507975159bc4bb9a45a411cac25"
     },
     "src/features/create/StoryboardShotRows.test.tsx": {
       "beforeHash": "0a23d5ade8d15a6361fb035d9b5ea914f4902da31f65f11f09840160558023c4",

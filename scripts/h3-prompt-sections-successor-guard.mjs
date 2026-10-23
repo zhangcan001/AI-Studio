@@ -22,6 +22,8 @@ export const H3_PROMPT_SECTIONS_CHANGED = [
   "src-tauri/src/infrastructure/database/repositories/project_backup.rs",
   "src-tauri/src/lib.rs",
   "src-tauri/tests/dev040_safety.rs",
+  "src-tauri/tests/dev055_release_compatibility.rs",
+  "src-tauri/tests/support/minimax_video_input_regressions.rs",
   "src/features/create/StoryboardShotRows.test.tsx",
   "src/features/create/StoryboardShotRows.tsx",
   "src/features/library/StoryEntitiesSection.tsx",
