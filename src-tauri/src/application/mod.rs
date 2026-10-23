@@ -1667,6 +1667,53 @@ pub mod folder_batch_import_service {
                 .remove(&self.project);
         }
     }
+    /// User-facing Chinese reason for a ShotBatchServiceError: no bare codes or IDs.
+    pub(crate) fn batch_error_reason(
+        error: &super::shot_batch_service::ShotBatchServiceError,
+    ) -> String {
+        use super::shot_batch_service::ShotBatchServiceError as E;
+        match error {
+            E::InvalidInput(message) => {
+                if message.starts_with(crate::application::minimax_video_product_policy::REQUIRED) {
+                    "项目绑定的生成器版本不可用于新生成，请在项目生成器设置中重新选择".into()
+                } else {
+                    chinese_reason(message)
+                }
+            }
+            E::NotFound(_) => "项目不存在或已被删除".into(),
+            E::Repository(_) => "数据库读写失败，请稍后重试".into(),
+        }
+    }
+    /// Keeps Chinese explanations, strips internal IDs; English-only text becomes a generic hint.
+    pub(crate) fn chinese_reason(message: &str) -> String {
+        let has_cjk = message
+            .chars()
+            .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+        if !has_cjk {
+            return "正式输入校验未通过（参考素材或生成参数不符合生成器要求）".into();
+        }
+        let mut cleaned = message.to_owned();
+        for prefix in [
+            "ast_", "sht_", "prj_", "wfv_", "rcp_", "tsk_", "pbi_", "pbt_",
+        ] {
+            while let Some(start) = cleaned.find(prefix) {
+                let end = cleaned[start..]
+                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+                    .map_or(cleaned.len(), |n| start + n);
+                cleaned.replace_range(start..end, "");
+            }
+        }
+        let cleaned = cleaned
+            .trim_start_matches("INVALID_INPUT:")
+            .trim()
+            .trim_end_matches(['：', ':', '/'])
+            .trim();
+        if cleaned.is_empty() {
+            "正式输入校验未通过".into()
+        } else {
+            cleaned.to_owned()
+        }
+    }
     fn stage_failure(stage: &str, code: &str, message: &str) -> ImportFailure {
         ImportFailure {
             stage: stage.into(),
@@ -2246,16 +2293,30 @@ pub mod folder_batch_import_service {
                     .batch
                     .plan_for_shots(project, ShotStage::Video, &result.created_shot_ids)
                     .await
-                    .map_err(|_| stage_failure("E", "BATCH_BLOCKED", "正式批量准备不可用"))?;
-                if batch_plan
+                    .map_err(|e| {
+                        stage_failure(
+                            "E",
+                            "BATCH_BLOCKED",
+                            &format!("正式批量准备不可用：{}", batch_error_reason(&e)),
+                        )
+                    })?;
+                if let Some(row) = batch_plan
                     .rows
                     .iter()
-                    .any(|r| !r.blocking_reasons.is_empty() || !r.eligible)
+                    .find(|r| !r.blocking_reasons.is_empty() || !r.eligible)
                 {
+                    let reason = if row.blocking_reasons.is_empty() {
+                        "镜头暂不满足入队条件".to_owned()
+                    } else {
+                        row.blocking_reasons.join("；")
+                    };
                     return Err(stage_failure(
                         "E",
                         "BATCH_BLOCKED",
-                        "正式预检阻断了批次；未启动生产",
+                        &format!(
+                            "正式预检阻断了批次；未启动生产：{}",
+                            chinese_reason(&reason)
+                        ),
                     ));
                 }
                 let batch = services
@@ -2269,7 +2330,13 @@ pub mod folder_batch_import_service {
                         plan.manifest.queue.name.clone(),
                     )
                     .await
-                    .map_err(|_| stage_failure("E", "BATCH_BLOCKED", "批次创建失败，未启动生产"))?;
+                    .map_err(|e| {
+                        stage_failure(
+                            "E",
+                            "BATCH_BLOCKED",
+                            &format!("批次创建失败，未启动生产：{}", batch_error_reason(&e)),
+                        )
+                    })?;
                 result.batch_id = Some(batch.batch.id.as_str().to_owned());
                 result.item_count = batch.items.len();
                 if !batch.batch.continue_on_failure {
@@ -3168,6 +3235,63 @@ pub mod folder_batch_import_service {
                 .await
                 .unwrap()
                 .is_empty());
+        }
+        #[tokio::test]
+        async fn import_while_project_video_task_runs_is_blocked_by_precheck_with_chinese_reason() {
+            // Repro: a second folder import while an earlier shot's video task is RUNNING.
+            // The scoped precheck used to ignore the project-wide strict-serial guard,
+            // so create_named failed with an unexplained "批次创建失败".
+            let f = preview_fixture().await;
+            let preview = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let first = f.service.commit(request(&preview, true)).await.unwrap();
+            assert_eq!(first.outcome, "completed", "{first:?}");
+            let now = chrono::Utc::now().to_rfc3339();
+            sqlx::query("INSERT INTO tasks(id,project_id,workflow_id,workflow_version_id,recipe_id,status,progress_mode,progress_current,progress_total,prompt_id,created_at,queued_at,started_at) VALUES ('tsk_00000000-0000-4000-8000-0000000000aa',?1,'wfl_minimax_h3_reference_video_quality','ref-version',(SELECT recipe_id FROM production_batch_items LIMIT 1),'RUNNING','indeterminate',NULL,NULL,'p1',?2,?2,?2)")
+                .bind(TEST_PROJECT).bind(&now).execute(&f.pool).await.unwrap();
+            sqlx::query("UPDATE shot_generation_links SET task_id='tsk_00000000-0000-4000-8000-0000000000aa' WHERE shot_id=? AND stage='video'")
+                .bind(&first.created_shot_ids[0]).execute(&f.pool).await.unwrap();
+            let second = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let again = f
+                .service
+                .rescan(
+                    &second.session_id,
+                    PreviewOptions {
+                        name_suffix: Some(" 二".into()),
+                        legacy: None,
+                    },
+                )
+                .await
+                .unwrap();
+            let r = f.service.commit(request(&again, true)).await.unwrap();
+            let failure = r.failure.expect("must be blocked");
+            assert!(
+                failure.message.starts_with("正式预检阻断了批次")
+                    && failure.message.contains("视频阶段严格串行"),
+                "{failure:?}"
+            );
+            assert!(!failure.message.contains("tsk_") && !failure.message.contains("sht_"));
+            f.pool.close().await;
+        }
+        #[test]
+        fn batch_error_reason_is_chinese_without_ids() {
+            use crate::application::shot_batch_service::ShotBatchServiceError as E;
+            assert_eq!(
+                batch_error_reason(&E::InvalidInput("REF2VA 参考图重复：ast_00000000-1".into())),
+                "REF2VA 参考图重复"
+            );
+            assert!(
+                batch_error_reason(&E::InvalidInput("generation definition missing".into()))
+                    .starts_with("正式输入校验未通过")
+            );
+            assert!(batch_error_reason(&E::InvalidInput(format!(
+                "{}: wfv_x/rcp_y",
+                crate::application::minimax_video_product_policy::REQUIRED
+            )))
+            .contains("生成器版本"));
+            assert_eq!(
+                batch_error_reason(&E::NotFound("prj_x".into())),
+                "项目不存在或已被删除"
+            );
         }
         #[tokio::test]
         async fn commit_real_sources_independent_slots_entities_and_frozen_queue_without_execution()

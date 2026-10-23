@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "BATCH_CREATE_REASON",
+  "parentHead": "e572d054535fe2904096cfc1f2e4e3ab3b180660",
+  "planningParentHead": "e572d054535fe2904096cfc1f2e4e3ab3b180660",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "strictSerialGuardEvaluatedProjectWide": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "scripts/batch-create-reason-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "48fb1b8de995e808b7bb0c8b951340bc06d066854de15d757077e77de9068c58"
+    },
+    "scripts/composition-usage-successor-guard.mjs": {
+      "beforeHash": "3cd6a7dfc8943e6f37399560b95db1ed403cee23d2863181347036a63492e9b3",
+      "afterHash": "f5bd9b0dd3c4cc7edf122760bcf895f4a4a505e11b117c0435243d69fc3006cc"
+    },
+    "scripts/testing/batch-create-reason.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "20f2f45dbce553dfb66a5fecbabcf6c630ff0cba9e188d5939137890bffd13af"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "277889d0723c8593f017272ef940fc2c07a0b486c331b4be0875ea0554cfad6f",
+      "afterHash": "93a21825bba7600c53a77bf8f32baab21acd911c9bb05c938dc31e2139459232"
+    },
+    "src-tauri/src/application/shot_batch_service.rs": {
+      "beforeHash": "f9ada7c009993487adb53ae4cf50d3a561ca40fcaddebffbe048d509e94b00e5",
+      "afterHash": "0f225a6988dab8d8923a232a605b7f4aed18d5255257920da8ec910e48ff3843"
+    }
+  }
+}

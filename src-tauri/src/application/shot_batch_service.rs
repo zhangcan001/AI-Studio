@@ -647,13 +647,10 @@ impl ShotBatchService {
         stage: ShotStage,
         shot_ids: Option<&HashSet<String>>,
     ) -> Result<Vec<PlannedShot>, ShotBatchServiceError> {
-        let shots = self
-            .shot_repository
-            .list(project_id)
-            .await?
-            .into_iter()
-            .filter(|data| shot_ids.is_none_or(|ids| ids.contains(&data.shot.id)))
-            .collect::<Vec<_>>();
+        // Task statuses and the strict-serial video guard are evaluated over
+        // the whole project, so a scoped precheck (plan_for_shots) agrees with
+        // create_named, which always plans the full project.
+        let all_shots = self.shot_repository.list(project_id).await?;
         let available_definitions = self
             .definition_repository
             .list_available()
@@ -671,7 +668,7 @@ impl ShotBatchService {
             .collect::<HashMap<_, _>>();
         let mut task_statuses = HashMap::<String, TaskStatus>::new();
         let mut missing_tasks = HashSet::<String>::new();
-        for data in &shots {
+        for data in &all_shots {
             for link in &data.generation_links {
                 let Some(task_id) = link.task_id.as_deref() else {
                     continue;
@@ -693,7 +690,7 @@ impl ShotBatchService {
             }
         }
         let active_video_task = stage == ShotStage::Video
-            && shots.iter().any(|data| {
+            && all_shots.iter().any(|data| {
                 data.generation_links.iter().any(|link| {
                     link.stage == ShotStage::Video
                         && link
@@ -703,6 +700,10 @@ impl ShotBatchService {
                             .is_some_and(|status| !status.is_terminal())
                 })
             });
+        let shots = all_shots
+            .into_iter()
+            .filter(|data| shot_ids.is_none_or(|ids| ids.contains(&data.shot.id)))
+            .collect::<Vec<_>>();
         let stage_prompts = if let Some(repository) = &self.stage_prompt_repository {
             repository
                 .list_bulk_data(project_id)
