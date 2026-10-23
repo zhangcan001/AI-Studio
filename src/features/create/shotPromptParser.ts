@@ -3,6 +3,7 @@
  * into a shot prompt: duration, aspect ratio, resolution, story-entity mentions
  * and shot number. The prompt text itself is never rewritten.
  */
+import { MAX_SHOT_DURATION_SECONDS, shotDurationMax } from "../../product/shotDuration";
 import type { StoryEntity } from "../../types/storyEntity";
 import type { DraftValue, RecipeField } from "../../types/generation";
 
@@ -154,7 +155,9 @@ export function resolvePromptSettings(parsed: ParsedShotPrompt, generator: { fie
   if (parsed.durationSeconds !== undefined) {
     const field = generator?.fields.find(f => f.key === "duration_seconds");
     if (field && (field.type === "integer" || field.type === "number")) {
-      duration = { type: field.type, value: Math.min(field.max ?? Infinity, Math.max(field.min ?? -Infinity, parsed.durationSeconds)) };
+      const max = shotDurationMax(field.max);
+      if (parsed.durationSeconds > MAX_SHOT_DURATION_SECONDS && (field.max ?? Infinity) > MAX_SHOT_DURATION_SECONDS) warnings.push(`提示词中的时长 ${parsed.durationSeconds} 秒超过上限，已按 ${max} 秒填入（显存限制）。`);
+      duration = { type: field.type, value: Math.min(max, Math.max(field.min ?? -Infinity, parsed.durationSeconds)) };
     } else warnings.push("当前生成器没有时长参数，未自动填入。");
   }
   const width = current.width, height = current.height;

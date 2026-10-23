@@ -1034,9 +1034,11 @@ impl ProductionOrchestratorService {
             ));
         }
         if let Some(duration) = request.default_duration_seconds {
-            if !(1..=15).contains(&duration) {
+            if !(1..=crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS)
+                .contains(&i64::from(duration))
+            {
                 return Err(ProductionOrchestratorError::InvalidInput(
-                    "模板默认视频时长必须在 1–15 秒之间。".to_owned(),
+                    "模板默认视频时长必须在 1–11 秒之间（显存限制）。".to_owned(),
                 ));
             }
         }

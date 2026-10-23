@@ -66,6 +66,13 @@ pub fn active_h3_kind(workflow: Value, recipe: &Recipe) -> Option<String> {
 }
 
 /// 16:9 megapixel ladder (aligned to 32). Labels use the MP tag as shown in UI.
+/// Product-wide shot duration cap (seconds). Longer MiniMax H3 / Veda shots
+/// exhaust 16 GB of VRAM and crash ComfyUI, so import, readiness, queue
+/// creation and dispatch all reject them. Frontend mirror: `src/product/shotDuration.ts`.
+pub const MAX_SHOT_DURATION_SECONDS: i64 = 11;
+/// User-facing explanation for a rejected over-limit shot.
+pub const SHOT_DURATION_LIMIT_MESSAGE: &str = "镜头时长最长 11 秒（显存限制），请改短后再生成。";
+
 const H3_MP_16X9: [(&str, f64, i64, i64); 14] = [
     ("0.2", 0.2, 608, 352),
     ("0.3", 0.3, 736, 416),
@@ -234,12 +241,12 @@ pub fn validate_resolved(
         _ => Err(CompileError::InputRequired { input: key.into() }),
     };
     let duration = integer("duration_seconds")?;
-    if !(4..=15).contains(&duration) {
+    if !(4..=MAX_SHOT_DURATION_SECONDS).contains(&duration) {
         return Err(CompileError::InputOutOfRange {
             input: "duration_seconds".into(),
             value: duration,
             min: Some(4),
-            max: Some(15),
+            max: Some(MAX_SHOT_DURATION_SECONDS),
         });
     }
     let (width, height) = (integer("width")?, integer("height")?);
@@ -407,7 +414,7 @@ outputs:
     #[test]
     fn duration_and_resolution_are_product_admission_not_ui_constraints() {
         for class in ["MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"] {
-            for duration in [3, 4, 15, 16] {
+            for duration in [3, 4, 11, 12, 15, 16] {
                 assert_eq!(
                     validate_resolved(
                         workflow(class),
@@ -415,7 +422,7 @@ outputs:
                         &production_values(class, duration, 1344, 768)
                     )
                     .is_ok(),
-                    (4..=15).contains(&duration)
+                    (4..=MAX_SHOT_DURATION_SECONDS).contains(&duration)
                 );
             }
             for (width, height) in h3_base_resolutions() {

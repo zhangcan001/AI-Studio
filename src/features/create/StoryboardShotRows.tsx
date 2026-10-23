@@ -12,6 +12,7 @@ import { defaultGenerator, draftFor } from "./createModel";
 import type { VideoInputView } from "../../types/shotVideoInput";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
+import { SHOT_DURATION_LIMIT_MESSAGE, shotDurationIssue, shotDurationMax } from "../../product/shotDuration";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品", composition: "构图" };
 const KINDS: StoryEntityKind[] = ["scene", "character", "prop", "composition"];
@@ -351,6 +352,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     if (duration === "" ) { if (prev !== undefined) { const { duration_seconds: _, ...rest } = current; saveValues(rest, () => { durationDirty.current = false; }); } else durationDirty.current = false; return; }
     const n = Number(duration); if (!Number.isFinite(n) || n === prev) { durationDirty.current = false; setDuration(prev === undefined ? "" : String(prev)); return; }
     const value = durationField.type === "integer" ? Math.round(n) : n;
+    if (shotDurationIssue(value)) { setError(SHOT_DURATION_LIMIT_MESSAGE); return; }
     saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; setDuration(String(value)); });
   };
   const noGen = generatorsFailed ? "生成器读取失败，请点击上方重试。" : !generator ? "请先在详情中选择生成器" : undefined;
@@ -359,7 +361,8 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   if (generationAttempt.current?.draft !== generationDraft) generationAttempt.current = null;
   const latestGenerationDraft = useRef(generationDraft);
   latestGenerationDraft.current = generationDraft;
-  const generate = () => !disabled && !entityIssue && selectionRef && item.shot && void run(async () => {
+  const durationIssue = shotDurationIssue(savedDuration);
+  const generate = () => !disabled && !entityIssue && !durationIssue && selectionRef && item.shot && void run(async () => {
     const token = scopeEpoch.current;
     const isCurrent = () => token === scopeEpoch.current && generationDraft === latestGenerationDraft.current;
     const values = { ...item.shot!.values, prompt: { type: "string" as const, value: prompt } };
@@ -419,7 +422,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
     </div>
     <div className="shot-row-actions">
-      <button type="button" className="primary" disabled={disabled || !selectionRef || Boolean(entityIssue)} title={entityIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate}>生成视频</button>
+      <button type="button" className="primary" disabled={disabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate}>生成视频</button>
       <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>
     <div className="shot-row-prompt">
@@ -464,8 +467,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <label><span>镜号</span><output>{item.ordinal + 1}</output></label>
       <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => setName(e.target.value)} onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
       {durationField
-        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={"max" in durationField ? durationField.max : undefined} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => { durationDirty.current = true; setDuration(e.target.value); }} onBlur={saveDuration} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
+        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => { durationDirty.current = true; setDuration(e.target.value); }} onBlur={saveDuration} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
         : <label><span>时长</span><output title={noGen ?? "当前生成器没有时长参数"}>{shotDuration(item.shot)}</output></label>}
+      {durationIssue && <small className="shot-row-duration-issue" role="alert">{durationIssue}</small>}
       {presets.length > 0
         ? <><label><span>画幅</span><select aria-label={`${item.name} 画幅`} value={currentAspect ?? ""} disabled={disabled} onChange={e => chooseAspect(e.target.value)}>{!currentAspect && <option value="" disabled>未设置</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
           <label><span>分辨率</span><select aria-label={`${item.name} 分辨率`} value={currentPreset?.id ?? ""} disabled={disabled} onChange={e => choosePreset(presets.find(p => p.id === e.target.value))}>{!currentPreset && <option value="" disabled>{curW && curH ? `${curW}×${curH}` : "未设置"}</option>}{sizeList.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label></>

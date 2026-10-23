@@ -124,6 +124,12 @@ describe("resolvePromptSettings", () => {
     expect(settings.preset?.id).toBe("mp-2_09-9x16");
     expect(settings.warnings).toEqual([]);
   });
+  it("caps prompt durations at the 11 s product limit and says so", () => {
+    const generator = { fields: [{ type: "integer", key: "duration_seconds", label: "duration", required: true, min: 4, max: 15 }] as const, resolutionPresets: presets };
+    const settings = resolvePromptSettings(parseShotPrompt("时长14秒"), generator, {});
+    expect(settings.duration).toEqual({ type: "integer", value: 11 });
+    expect(settings.warnings).toEqual([expect.stringContaining("显存限制")]);
+  });
   it("explains unsupported settings and leaves missing Recipe fields untouched", () => {
     const settings = resolvePromptSettings(parseShotPrompt("21:9 5秒"), { fields: [], resolutionPresets: presets }, {});
     expect(settings.duration).toBeUndefined();

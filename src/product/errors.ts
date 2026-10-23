@@ -22,6 +22,7 @@ const messages = {
   LIBRARY_QUERY_INVALID: "资源库查询已变化，请重新加载当前分类。",
   MISSING_INPUT: "请填写必需输入。",
   INPUT_TYPE_MISMATCH: "输入类型不匹配，请重新选择。",
+  DURATION_TOO_LONG: "镜头时长最长 11 秒（显存限制），请改短后再生成。",
   INPUT_OUT_OF_RANGE: "输入超出允许范围或数量，请调整。",
   ASSET_PROJECT_MISMATCH: "输入素材不属于当前项目。",
   ASSET_TYPE_MISMATCH: "输入素材类型不匹配。",

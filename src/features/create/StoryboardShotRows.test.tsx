@@ -598,3 +598,17 @@ it("hides 构图用途 when the shot has no bound composition", async () => {
   await screen.findByTitle("绑定 场景 · 雨巷");
   expect(screen.queryByLabelText("镜头1 开场构图")).toBeNull();
 });
+
+it("blocks over-limit (11 s) shots: existing value kept, error shown, generation disabled, longer edits rejected", async () => {
+  const long = shot("a", 0); long.shot!.values = { duration_seconds: { type: "integer", value: 14 } };
+  render(<StoryboardShotRows {...props()} items={[long]} />);
+  const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
+  const input = await within(row).findByLabelText("镜头1 时长（秒）") as HTMLInputElement;
+  expect(input.value).toBe("14");
+  expect(input.getAttribute("max")).toBe("10");
+  expect(within(row).getAllByText(/镜头时长最长 11 秒（显存限制）/).length).toBeGreaterThan(0);
+  expect((within(row).getByRole("button", { name: "生成视频" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(input, { target: { value: "13" } }); fireEvent.blur(input);
+  await new Promise(r => setTimeout(r, 20));
+  expect(api.updateShot).not.toHaveBeenCalled();
+});

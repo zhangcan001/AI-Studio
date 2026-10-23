@@ -2559,7 +2559,8 @@ mod tests {
             (16, vec!["a.png"], false),
             (4, vec!["a.png", "b.png", "c.png"], false),
             (4, vec!["a.png"], true),
-            (15, vec!["a.png", "b.png"], true),
+            (11, vec!["a.png", "b.png"], true),
+            (12, vec!["a.png", "b.png"], false),
         ] {
             let request = CompileRequest::new(
                 [
@@ -2793,7 +2794,7 @@ mod tests {
             let workflow =
                 WorkflowDocument::parse(serde_json::from_str(package.workflow).unwrap()).unwrap();
             assert!(package.manifest.contains("workflow_version: 2.2.0"));
-            for duration in [3, 4, 15, 16] {
+            for duration in [3, 4, 11, 12, 15, 16] {
                 let mut values: std::collections::BTreeMap<String, InputValue> = [
                     ("duration_seconds".into(), InputValue::Integer(duration)),
                     ("prompt".into(), InputValue::String("test".into())),
@@ -2821,7 +2822,8 @@ mod tests {
                 );
                 assert_eq!(
                     compiled.is_ok(),
-                    (4..=15).contains(&duration),
+                    (4..=crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS)
+                        .contains(&duration),
                     "{}: {} {:?}",
                     package.directory,
                     duration,
@@ -2866,7 +2868,7 @@ mod tests {
             let recipe = RecipeParser::parse(old.recipe).unwrap();
             let workflow =
                 WorkflowDocument::parse(serde_json::from_str(old.workflow).unwrap()).unwrap();
-            for duration in [3, 4, 15, 16] {
+            for duration in [3, 4, 11, 12, 15, 16] {
                 let mut request = CompileRequest::new(
                     [
                         ("duration_seconds".into(), InputValue::Integer(duration)),
@@ -2899,7 +2901,8 @@ mod tests {
                         &request
                     )
                     .is_ok(),
-                    (4..=15).contains(&duration)
+                    (4..=crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS)
+                        .contains(&duration)
                 );
             }
         }

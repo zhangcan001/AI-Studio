@@ -331,7 +331,7 @@ it("mode dropdown switches generator; resolution, aspect and duration reach the 
   fireEvent.change(screen.getByLabelText("画面比例"),{target:{value:"9:16"}});
   expect(useStudioStore.getState().values.width).toEqual({type:"integer",value:768});expect(useStudioStore.getState().values.height).toEqual({type:"integer",value:1344});
   fireEvent.change(screen.getByLabelText("时长（秒）"),{target:{value:"10"}});
-  expect(screen.getByLabelText("时长（秒）").getAttribute("max")).toBe("15");
+  expect(screen.getByLabelText("时长（秒）").getAttribute("max")).toBe("11");
   setPrompt("a cat");
   await ready();fireEvent.click(screen.getByRole("button",{name:"生成"}));
   await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));

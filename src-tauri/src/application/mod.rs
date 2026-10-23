@@ -610,10 +610,15 @@ pub mod folder_batch_import_service {
                     .duration_seconds
                     .or(manifest.defaults.duration_seconds)
                     .unwrap_or(5);
-                if !(1..=15).contains(&duration) {
+                if duration > super::product::h3_resolution::MAX_SHOT_DURATION_SECONDS {
+                    errors.push(failure(
+                        "DURATION_TOO_LONG",
+                        super::product::h3_resolution::SHOT_DURATION_LIMIT_MESSAGE,
+                    ));
+                } else if duration < 1 {
                     errors.push(failure(
                         "DURATION_OUT_OF_RANGE",
-                        "时长应为 1–15 的整数，且仍需通过 Recipe 正式限制",
+                        "时长应为 1–11 的整数，且仍需通过 Recipe 正式限制",
                     ));
                 }
                 let (width, height) = resolution(&manifest.defaults, shot).unwrap_or_else(|e| {
@@ -1537,6 +1542,16 @@ pub mod folder_batch_import_service {
             &CompileRequest::new(values),
         )
         .map_err(|e| {
+            if let crate::compiler::CompileError::InputOutOfRange { input, value, .. } = &e {
+                if input == "duration_seconds"
+                    && *value > super::product::h3_resolution::MAX_SHOT_DURATION_SECONDS
+                {
+                    return failure(
+                        "DURATION_TOO_LONG",
+                        super::product::h3_resolution::SHOT_DURATION_LIMIT_MESSAGE,
+                    );
+                }
+            }
             let code = match &e {
                 crate::compiler::CompileError::InputOutOfRange { input, .. }
                     if input == "duration_seconds" =>
@@ -2585,19 +2600,22 @@ pub mod folder_batch_import_service {
         #[test]
         fn bounds_and_duplicate_names_require_formal_suffix_revalidation() {
             let mut m = manifest();
-            for duration in [0, 16] {
+            m.shots[0].duration_seconds = Some(0);
+            assert!(normalize(&m, None, &[])[0]
+                .errors
+                .iter()
+                .any(|e| e.code == "DURATION_OUT_OF_RANGE"));
+            for duration in [12, 16] {
                 m.shots[0].duration_seconds = Some(duration);
-                assert!(normalize(&m, None, &[])[0]
-                    .errors
-                    .iter()
-                    .any(|e| e.code == "DURATION_OUT_OF_RANGE"));
+                let row = &normalize(&m, None, &[])[0];
+                assert!(row.errors.iter().any(|e| e.code == "DURATION_TOO_LONG"
+                    && e.message.contains("镜头时长最长 11 秒（显存限制）")));
             }
-            for duration in [1, 15] {
+            for duration in [1, 11] {
                 m.shots[0].duration_seconds = Some(duration);
-                assert!(!normalize(&m, None, &[])[0]
-                    .errors
-                    .iter()
-                    .any(|e| e.code == "DURATION_OUT_OF_RANGE"));
+                assert!(!normalize(&m, None, &[])[0].errors.iter().any(|e| {
+                    e.code == "DURATION_OUT_OF_RANGE" || e.code == "DURATION_TOO_LONG"
+                }));
             }
             assert!(normalize(&m, None, &["TEST S01".into()])[0]
                 .errors

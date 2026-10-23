@@ -340,6 +340,13 @@ fn generation_error(error: GenerationServiceError) -> ProductError {
             C::UnknownInput { input } | C::InputTypeMismatch { input, .. } => {
                 ("INPUT_TYPE_MISMATCH", Some(input.clone()))
             }
+            C::InputOutOfRange { input, value, .. }
+                if input == "duration_seconds"
+                    && *value
+                        > crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS =>
+            {
+                ("DURATION_TOO_LONG", Some(input.clone()))
+            }
             C::InputOutOfRange { input, .. }
             | C::InputStepMismatch { input, .. }
             | C::InputNumberOutOfRange { input, .. }
@@ -390,6 +397,9 @@ fn generation_error(error: GenerationServiceError) -> ProductError {
         "ASSET_PROJECT_MISMATCH" => "输入素材不属于当前项目。",
         "MISSING_INPUT" => "请填写必需输入。",
         "INPUT_TYPE_MISMATCH" => "输入类型不匹配，请重新选择。",
+        "DURATION_TOO_LONG" => {
+            crate::application::product::h3_resolution::SHOT_DURATION_LIMIT_MESSAGE
+        }
         "INPUT_OUT_OF_RANGE" => "输入超出允许范围或数量，请调整。",
         "RUNTIME_BLOCKED" => "运行环境暂时不可用，请检查连接或稍后重试。",
         "GENERATOR_UNAVAILABLE" => "生成器当前不可用，请重新选择。",
@@ -442,6 +452,17 @@ mod tests {
         assert_eq!(issue.code, "INPUT_OUT_OF_RANGE");
         assert_eq!(issue.details.action, Some("EDIT_INPUT"));
         assert_eq!(issue.details.field.as_deref(), Some("width"));
+        let too_long = generation_error(GenerationServiceError::Compile(
+            CompileError::InputOutOfRange {
+                input: "duration_seconds".into(),
+                value: 14,
+                min: Some(4),
+                max: Some(11),
+            },
+        ));
+        assert_eq!(too_long.code, "DURATION_TOO_LONG");
+        assert!(too_long.message.contains("镜头时长最长 11 秒（显存限制）"));
+        assert_eq!(too_long.details.field.as_deref(), Some("duration_seconds"));
     }
     #[test]
     fn h3_submission_errors_preserve_resolution_and_metadata_authority() {

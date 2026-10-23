@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { shotDurationIssue, shotDurationMax } from "../../product/shotDuration";
 import type { RecipeField } from "../../types/generation";
 import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, mediaKind, mediaValue } from "./createModel";
@@ -278,7 +279,8 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     }, AUTOSAVE_MS);
     return () => clearTimeout(timer);
   }, [entityApplyKey, locked, vi.error, canApplyEntities, compositionRevision]);
-  const canSubmit = !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY" && !entityIssue;
+  const durationIssue = shotDurationIssue((() => { const v = c.values.duration_seconds; return v?.type === "integer" || v?.type === "number" ? v.value : undefined; })());
+  const canSubmit = !durationIssue && !c.busy && Boolean(c.generator?.availability) && vi.ready && c.readinessState === "READY" && !entityIssue;
   const promptWarnings = resolvePromptSettings(parseShotPrompt(prompt), c.generator, c.values).warnings;
 
   if (!c.generator) return null;
@@ -383,9 +385,10 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       {promptField && <button type="button" className="composer-text" onClick={() => setPromptPicker(true)}>选择提示词</button>}
       <span className="composer-spacer" />
       {presets.length > 0 && <ResolutionPicker controller={c} presets={pickerPresets} current={current} />}
-      {durationField && <label className="composer-pick" title="时长">◷<input id="create-field-duration_seconds" aria-label={fieldLabel(durationField)} type="number" min={"min" in durationField ? durationField.min : undefined} max={"max" in durationField ? durationField.max : undefined} step={("step" in durationField && durationField.step) || (durationField.type === "integer" ? 1 : "any")} disabled={c.busy} value={(() => { const v = c.values.duration_seconds; return v?.type === "integer" || v?.type === "number" ? v.value : ""; })()} onChange={e => e.target.value === "" ? c.removeValue("duration_seconds") : c.setValue("duration_seconds", { type: durationField.type as "integer", value: Number(e.target.value) })} />s</label>}
+      {durationField && <label className="composer-pick" title="时长">◷<input id="create-field-duration_seconds" aria-label={fieldLabel(durationField)} type="number" min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={("step" in durationField && durationField.step) || (durationField.type === "integer" ? 1 : "any")} disabled={c.busy} value={(() => { const v = c.values.duration_seconds; return v?.type === "integer" || v?.type === "number" ? v.value : ""; })()} onChange={e => e.target.value === "" ? c.removeValue("duration_seconds") : c.setValue("duration_seconds", { type: durationField.type as "integer", value: Number(e.target.value) })} />s</label>}
+      {durationIssue && <small className="composer-duration-issue" role="alert">{durationIssue}</small>}
       {aspects.length > 0 && <label className="composer-pick" title="画面比例">▭<select aria-label="画面比例" value={aspect ?? ""} disabled={c.busy} onChange={e => chooseAspect(e.target.value)}>{!aspect && <option value="" disabled>比例</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>}
-      <button type="button" className="composer-submit" aria-label={c.busy ? "正在提交…" : "生成"} title={canSubmit ? "写入生产队列并生成" : "请先完成准备检查"} disabled={!canSubmit} onClick={() => void c.generate()}>↑</button>
+      <button type="button" className="composer-submit" aria-label={c.busy ? "正在提交…" : "生成"} title={canSubmit ? "写入生产队列并生成" : durationIssue ?? "请先完成准备检查"} disabled={!canSubmit} onClick={() => void c.generate()}>↑</button>
     </div>
     <details className="composer-advanced"><summary>高级设置</summary>
       {negativeField && <label>{fieldLabel(negativeField)}<textarea id="create-field-negative_prompt" aria-label={fieldLabel(negativeField)} rows={2} value={c.values.negative_prompt?.type === "string" ? c.values.negative_prompt.value : ""} onChange={e => c.setValue("negative_prompt", { type: "string", value: e.target.value })} /></label>}

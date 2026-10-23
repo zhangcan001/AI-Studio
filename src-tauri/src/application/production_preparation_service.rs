@@ -668,7 +668,17 @@ fn prepare_generation_values(
                 readiness,
                 context,
                 "GENERATION_VALUES_INVALID",
-                format!("输入检查失败：{error}"),
+                match &error {
+                    crate::compiler::CompileError::InputOutOfRange { input, value, .. }
+                        if input == "duration_seconds"
+                            && *value
+                                > crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS =>
+                    {
+                        crate::application::product::h3_resolution::SHOT_DURATION_LIMIT_MESSAGE
+                            .to_owned()
+                    }
+                    _ => format!("输入检查失败：{error}"),
+                },
             ),
             None,
         );
