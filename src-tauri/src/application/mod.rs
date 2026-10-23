@@ -1057,6 +1057,69 @@ pub mod folder_batch_import_service {
             }
             Ok(s.clone())
         }
+        /// One image per reused entity per shot. A reused entity's declared
+        /// package images that are also listed in the row's `references` are the
+        /// same reference as the entity's project image, so they are dropped and
+        /// the project image is used (the caller adds it). This follows the
+        /// existing reuse rule: an existing entity is never modified by an
+        /// import, and @ mapping requires the entity's own image in the formal
+        /// references. When the bytes differ, a non-blocking warning says so.
+        async fn dedupe_existing_entity_reference(
+            &self,
+            root: &Path,
+            manifest: &Manifest,
+            existing: &[StoryEntity],
+            entity: &StoryEntity,
+            row: &mut Row,
+        ) -> Result<(), ImportFailure> {
+            if !existing.iter().any(|e| e.id == entity.id) {
+                return Ok(());
+            }
+            let declared = declared_paths(manifest, &entity.name);
+            let listed: Vec<String> = declared
+                .iter()
+                .filter(|p| row.references.contains(p))
+                .cloned()
+                .collect();
+            let Some(first) = listed.first().cloned() else {
+                return Ok(());
+            };
+            row.references.retain(|p| !listed.contains(p));
+            let managed = entity
+                .cover_asset_id
+                .as_ref()
+                .or_else(|| entity.image_asset_ids.first())
+                .and_then(|id| crate::domain::AssetId::parse(id).ok());
+            let managed_sha = match managed {
+                Some(id) => self
+                    .assets
+                    .find_by_id(&id)
+                    .await
+                    .map_err(|_| failure("IMAGE_INVALID", "无法检查实体素材"))?
+                    .map(|asset| asset.sha256),
+                None => None,
+            };
+            let package_sha = read_file(
+                root,
+                &first,
+                super::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
+            )
+            .ok()
+            .map(|bytes| sha(&bytes));
+            if managed_sha.is_none() || package_sha != managed_sha {
+                row.warnings
+                    .push(crate::application::shot_bulk_service::BulkIssue {
+                        code: "ENTITY_IMAGE_DIFFERS".into(),
+                        message: format!(
+                            "「{}」与项目中已有实体图片不同，已使用项目中已有的图片；如需使用导入包中的图片，请先在资料库中更换该实体的封面",
+                            entity.name
+                        ),
+                        row_number: Some(row.row_number),
+                        shot_id: None,
+                    });
+            }
+            Ok(())
+        }
         async fn build(
             &self,
             project: &str,
@@ -1192,6 +1255,13 @@ pub mod folder_batch_import_service {
                             }
                         }
                         for entity in mentions {
+                            // One image per entity per shot: a reused entity whose
+                            // declared package image is also listed in `references`
+                            // is the same reference, not a second one.
+                            self.dedupe_existing_entity_reference(
+                                root, &manifest, &existing, entity, row,
+                            )
+                            .await?;
                             match entity_image(&manifest, &existing, entity) {
                                 Ok(path) => {
                                     if !reference_paths.contains(&path) {
@@ -1203,6 +1273,8 @@ pub mod folder_batch_import_service {
                         }
                     }
                 }
+                // Paths dropped as duplicates of a project image are not counted.
+                reference_paths.retain(|p| p.starts_with("managed:") || row.references.contains(p));
                 for (label, name) in [
                     ("开场构图", row.opening_composition.clone()),
                     ("结尾构图", row.ending_composition.clone()),
@@ -1508,6 +1580,23 @@ pub mod folder_batch_import_service {
             return Err(failure("STALE_PREVIEW", "文件在读取期间发生变化"));
         }
         Ok(bytes)
+    }
+    /// Cover first, then other declared images of a manifest entity.
+    fn declared_paths(manifest: &Manifest, name: &str) -> Vec<String> {
+        manifest
+            .characters
+            .iter()
+            .find(|e| e.name == name)
+            .map(|e| {
+                let mut paths: Vec<String> = e.cover.iter().cloned().collect();
+                for image in &e.images {
+                    if !paths.contains(image) {
+                        paths.push(image.clone());
+                    }
+                }
+                paths
+            })
+            .unwrap_or_default()
     }
     fn entity_image(
         manifest: &Manifest,
