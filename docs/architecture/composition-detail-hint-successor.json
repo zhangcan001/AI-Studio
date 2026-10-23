@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "COMPOSITION_DETAIL_HINT",
+  "parentHead": "c746efafa9bac63733ac019ee58fb0aed5316925",
+  "planningParentHead": "c746efafa9bac63733ac019ee58fb0aed5316925",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "compositionHintNonBlocking": true,
+    "frozenBatchesUnchanged": true,
+    "noNewDependencies": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "scripts/composition-detail-hint-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "4f3b4102b1c48b4dce7cffc8108df14fa0c950984903660626f63983a0b47c48"
+    },
+    "scripts/folder-import-entity-dedupe-successor-guard.mjs": {
+      "beforeHash": "f62c5c0ea4c464511c2f080accb8bda7d77faf59321556f7e8beba0878d7b7f4",
+      "afterHash": "6ab1ddf7175e4e30135b0e922b87b2fc63a43a4616a15da9129fd0794453297b"
+    },
+    "scripts/testing/composition-detail-hint.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "dae6f0326e1fcfdda7fcdc57aec0d2b329da1d635095e387e12d1db971112f7f"
+    },
+    "src-tauri/src/application/generation_input_preparer.rs": {
+      "beforeHash": "37370559df15f0a9b2b7040dd708f37ebb07a9880718262afa7fa012e7805d25",
+      "afterHash": "e900e8e6e4c1ec0aeb84329b1b95ebca7c0e5a8c117f782f73047cc53416ae33"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "62c640fd7d02333336e57b01f17c1255f4f2f99e0d6d2a730084c45696ae31f1",
+      "afterHash": "28e2c317c1a6296467411e2e45f62d77649ea290515d8c09acc9c6dfa1f31757"
+    },
+    "src-tauri/src/application/shot_context_resolver.rs": {
+      "beforeHash": "7d20f5b1c825d28daaf8b7364fe94c591987071191816e133af5c6a12a60a56f",
+      "afterHash": "6c6387f0ddb255699032c1b2a8cab21b169709c59dfaa21db4e7f9a9554e34c2"
+    },
+    "src-tauri/src/application/shot_video_input_service.rs": {
+      "beforeHash": "4812bfdc132bc9129e4b00ace4e2e7e873fc2ee50df445cf0be8062b4e063e34",
+      "afterHash": "97b548563e9b4b3d1fd2dcc28900b59a7e5675cf12594daeb6579eb60602d3bd"
+    }
+  }
+}
