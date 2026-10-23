@@ -1244,6 +1244,7 @@ pub mod folder_batch_import_service {
                     &entities,
                 );
                 let mut reference_paths = row.references.clone();
+                let listed_before = row.references.clone();
                 match mentions {
                     Err(error) => {
                         row_error(row, failure("ENTITY_REFERENCE_UNKNOWN", error.to_string()))
@@ -1274,7 +1275,8 @@ pub mod folder_batch_import_service {
                     }
                 }
                 // Paths dropped as duplicates of a project image are not counted.
-                reference_paths.retain(|p| p.starts_with("managed:") || row.references.contains(p));
+                reference_paths
+                    .retain(|p| !listed_before.contains(p) || row.references.contains(p));
                 for (label, name) in [
                     ("开场构图", row.opening_composition.clone()),
                     ("结尾构图", row.ending_composition.clone()),

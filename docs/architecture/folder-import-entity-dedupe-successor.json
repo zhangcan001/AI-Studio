@@ -31,7 +31,7 @@
     },
     "src-tauri/src/application/mod.rs": {
       "beforeHash": "28730e4d8479611051fc32e78b02c6f39db863176051d84f6c8b1a68f31db198",
-      "afterHash": "478b0986bb64c2ccb41d05106f1342e109d67bffdaa145b6d33e905b1b1f7664"
+      "afterHash": "51c2bb7d699662e3fc96991343378b08fa8a90569b7083e76c41591ce158357a"
     }
   }
 }
