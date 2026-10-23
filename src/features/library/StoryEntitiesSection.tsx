@@ -3,6 +3,7 @@ import { productClient } from "../../product/client";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
+import { appearanceLanguageHint } from "../../product/promptLanguage";
 import { normalizeProductError } from "../../product/errors";
 
 const KINDS: { id: StoryEntityKind; label: string }[] = [
@@ -149,7 +150,8 @@ export function StoryEntitiesSection({ projectId }: { projectId: string }) {
       <h3>{editing ? `编辑「${editing.name}」` : "新建角色 / 场景 / 物品"}</h3>
       <label>类型<select aria-label="实体类型" value={draftKind} disabled={Boolean(editing)} onChange={e => setDraftKind(e.target.value as StoryEntityKind)}>{KINDS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}</select></label>
       <label>名称<input aria-label="实体名称" value={draftName} onChange={e => setDraftName(e.target.value)} /></label>
-      <label>描述<textarea aria-label="实体描述" value={draftDesc} onChange={e => setDraftDesc(e.target.value)} rows={3} /></label>
+      <label>描述<textarea aria-label="实体描述" value={draftDesc} onChange={e => setDraftDesc(e.target.value)} rows={3} placeholder={draftKind === "composition" ? undefined : "英文外貌/结构描述，会写入生成提示词"} /></label>
+      {draftKind !== "composition" && appearanceLanguageHint(draftDesc) && <p className="muted" aria-label="描述语言建议">{appearanceLanguageHint(draftDesc)}</p>}
       <div className="story-entity-cover-row">
         <span>封面</span>
         {draftCover ? <EntityThumb projectId={projectId} assetId={draftCover} name="封面" /> : <span>未选择</span>}

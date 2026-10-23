@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
-import type { ShotCompositionUsage, StoryEntity, StoryEntityKind } from "../../types/storyEntity";
+import type { ShotCompositionUsage, ShotPromptSections, StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage } from "./CreateMediaPreview";
 import "./CreatePage.css";
@@ -13,7 +13,7 @@ import type { VideoInputView } from "../../types/shotVideoInput";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 import { SHOT_DURATION_LIMIT_MESSAGE, shotDurationIssue, shotDurationMax } from "../../product/shotDuration";
-import { englishPromptHint } from "../../product/promptLanguage";
+import { h3PromptHints } from "../../product/promptLanguage";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品", composition: "构图" };
 const KINDS: StoryEntityKind[] = ["scene", "character", "prop", "composition"];
@@ -159,6 +159,14 @@ function recognize(text: string, entities: StoryEntity[], bound: StoryEntity[], 
   if (parsed.shotNumber !== undefined) labels.push(`镜号 ${parsed.shotNumber}（仅识别，顺序不变）`);
   return { parsed, values, addEntityIds, labels, warnings: settings.warnings };
 }
+
+const EMPTY_SECTIONS: ShotPromptSections = { style: null, summary: null, soundscape: null, music: null };
+const SECTION_FIELDS: [keyof ShotPromptSections, string, string][] = [
+  ["style", "风格", "1–2 句英文：画风、光线、色调、景深"],
+  ["summary", "摘要", "1–2 句英文：谁在哪里做了什么，可用 @名称"],
+  ["soundscape", "环境声", "1 句英文：环境底噪与物理声音"],
+  ["music", "配乐", "1 句英文；没有配乐留空即可"],
+];
 
 function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged }: {
   projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
@@ -409,6 +417,41 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       setNote("构图用途已保存；生成时开场构图只决定开头画面，结尾构图只决定最后画面。");
     });
   };
+  // Writer sections of the H3 prompt (风格/摘要/环境声/配乐); empty uses the software fallback.
+  const [sections, setSections] = useState<ShotPromptSections>(EMPTY_SECTIONS);
+  const savedSections = useRef<ShotPromptSections>(EMPTY_SECTIONS);
+  const sectionsEpoch = useRef(0);
+  useEffect(() => {
+    const token = ++sectionsEpoch.current;
+    setSections(EMPTY_SECTIONS); savedSections.current = EMPTY_SECTIONS;
+    const read = productClient.storyEntities?.promptSections;
+    if (typeof read === "function") {
+      void Promise.resolve().then(() => read(projectId, item.id)).then(next => {
+        if (token !== sectionsEpoch.current || !next) return;
+        const clean = { ...EMPTY_SECTIONS, ...next };
+        savedSections.current = clean; setSections(clean);
+      }).catch(() => undefined);
+    }
+    return () => { ++sectionsEpoch.current; };
+  }, [projectId, item.id]);
+  const saveSections = () => {
+    if (bindingsDisabled || JSON.stringify(sections) === JSON.stringify(savedSections.current)) return;
+    const next = sections;
+    void run(async () => {
+      const token = ++sectionsEpoch.current;
+      const saved = await productClient.storyEntities.setPromptSections(projectId, item.id, next);
+      if (token !== sectionsEpoch.current) return;
+      const clean = { ...EMPTY_SECTIONS, ...saved };
+      savedSections.current = clean; setSections(clean);
+      setNote("提示词分段已保存");
+    });
+  };
+  const promptHints = h3PromptHints({
+    description: prompt,
+    durationSeconds: savedDuration,
+    referenceCount: referenceIds.length,
+    unmentionedNames: bound.filter(e => entityAvatarAssetId(e) && !mentions.entities.some(m => m.id === e.id)).map(e => e.name),
+  });
   const byKind = useMemo(() => Object.fromEntries(KINDS.map(k => [k, bound.filter(e => e.kind === k)])) as Record<StoryEntityKind, StoryEntity[]>, [bound]);
   const chips = (list: StoryEntity[]) => list.length ? list.map(e => <span key={e.id} className="shot-row-inline-chip"><Avatar entity={e} url={(entityAvatarAssetId(e) && urls[entityAvatarAssetId(e)!]) || undefined} />{e.name}</span>) : <span className="muted">未绑定</span>;
   const content = renderPrompt(prompt, entities, urls);
@@ -431,7 +474,13 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         onChange={e => setPrompt(e.target.value)} onBlur={savePrompt} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
-      {englishPromptHint(prompt) && <p className="muted" aria-label="提示词语言建议">{englishPromptHint(prompt)}</p>}
+      {promptHints.length > 0 && <ul className="muted" aria-label="提示词写作建议">{promptHints.map(h => <li key={h}>{h}</li>)}</ul>}
+      <details className="shot-row-sections" aria-label="提示词分段">
+        <summary>风格 / 摘要 / 环境声 / 配乐（英文，可选）</summary>
+        {SECTION_FIELDS.map(([key, label, hint]) => <label key={key}><span>{label}</span>
+          <textarea aria-label={`${item.name} ${label}`} placeholder={hint} value={sections[key] ?? ""} disabled={bindingsDisabled}
+            onChange={e => setSections(s => ({ ...s, [key]: e.target.value }))} onBlur={saveSections} /></label>)}
+      </details>
       {hasMentions && <section aria-label="角色与场景生成引用" className="composer-entity-references">
         <p>{entityIssue ?? "角色与场景已保存到正式参考输入，生成时按以下真实顺序引用。"}</p>
         {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "等待自动应用"}</small>; })}

@@ -1425,4 +1425,42 @@ mod tests {
             .is_empty());
         pool.close().await;
     }
+
+    #[tokio::test]
+    async fn prompt_sections_migration_keeps_shots_and_defaults_to_null() {
+        use sqlx::sqlite::SqliteConnectOptions;
+        let dir = tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join("app.db"))
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = std::borrow::Cow::Owned(
+            old.migrations
+                .iter()
+                .filter(|m| m.version <= 48)
+                .cloned()
+                .collect(),
+        );
+        old.run(&pool).await.unwrap();
+        for sql in [
+            "INSERT INTO projects(id,name,root_path,created_at,updated_at) VALUES ('p1','P','/tmp/p','t','t')",
+            "INSERT INTO shots(id,project_id,name,ordinal,prompt_text,created_at,updated_at) VALUES ('s1','p1','S01',0,'旧提示词','t','t')",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+        super::MIGRATOR.run(&pool).await.unwrap();
+        let row: (String, Option<String>, Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT prompt_text, prompt_style, prompt_summary, prompt_soundscape, prompt_music FROM shots WHERE id='s1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row, ("旧提示词".into(), None, None, None, None));
+        pool.close().await;
+    }
 }

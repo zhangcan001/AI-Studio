@@ -265,6 +265,37 @@ pub mod story_entities {
             )
             .await
     }
+
+    pub async fn product_shot_prompt_sections_get(
+        state: State<'_, AppState>,
+        project_id: String,
+        shot_id: String,
+    ) -> Result<crate::domain::story_entity::ShotPromptSections, AppError> {
+        state
+            .shots
+            .story_entities
+            .prompt_sections_for_shot(&project_id, &shot_id)
+            .await
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ShotPromptSectionsRequest {
+        pub project_id: String,
+        pub shot_id: String,
+        pub sections: crate::domain::story_entity::ShotPromptSections,
+    }
+
+    pub async fn product_shot_prompt_sections_set(
+        state: State<'_, AppState>,
+        request: ShotPromptSectionsRequest,
+    ) -> Result<crate::domain::story_entity::ShotPromptSections, AppError> {
+        state
+            .shots
+            .story_entities
+            .set_prompt_sections(&request.project_id, &request.shot_id, request.sections)
+            .await
+    }
 }
 
 pub mod folder_batch_import {

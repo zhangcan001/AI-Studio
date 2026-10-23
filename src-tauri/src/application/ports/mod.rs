@@ -259,6 +259,22 @@ pub mod story_entity_repository {
         ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
             Err(RepositoryError::integrity("构图用途不可用"))
         }
+        /// Writer prompt sections of one shot; repositories without the columns report none.
+        async fn prompt_sections_for_shot(
+            &self,
+            _project_id: &str,
+            _shot_id: &str,
+        ) -> Result<crate::domain::story_entity::ShotPromptSections, RepositoryError> {
+            Ok(Default::default())
+        }
+        async fn set_prompt_sections(
+            &self,
+            _project_id: &str,
+            _shot_id: &str,
+            _sections: &crate::domain::story_entity::ShotPromptSections,
+        ) -> Result<crate::domain::story_entity::ShotPromptSections, RepositoryError> {
+            Err(RepositoryError::integrity("镜头提示词分段不可用"))
+        }
     }
 }
 pub use story_entity_repository::StoryEntityRepository;

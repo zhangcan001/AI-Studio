@@ -1507,6 +1507,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::product::product_story_entity_bind_shot,
             commands::product::product_story_entity_composition_usage_get,
             commands::product::product_story_entity_composition_usage_set,
+            commands::product::product_shot_prompt_sections_get,
+            commands::product::product_shot_prompt_sections_set,
             commands::consistency_assets::consistency_profile_get,
             commands::consistency_assets::character_profile_create,
             commands::consistency_assets::character_profile_update,

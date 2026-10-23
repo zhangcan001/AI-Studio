@@ -188,6 +188,29 @@ pub mod story_entity_service {
                 .await
                 .map_err(map_repo)
         }
+
+        pub async fn prompt_sections_for_shot(
+            &self,
+            project_id: &str,
+            shot_id: &str,
+        ) -> Result<crate::domain::story_entity::ShotPromptSections, AppError> {
+            self.repo
+                .prompt_sections_for_shot(project_id, shot_id)
+                .await
+                .map_err(map_repo)
+        }
+
+        pub async fn set_prompt_sections(
+            &self,
+            project_id: &str,
+            shot_id: &str,
+            sections: crate::domain::story_entity::ShotPromptSections,
+        ) -> Result<crate::domain::story_entity::ShotPromptSections, AppError> {
+            self.repo
+                .set_prompt_sections(project_id, shot_id, &sections)
+                .await
+                .map_err(map_repo)
+        }
     }
 
     fn map_repo(error: RepositoryError) -> AppError {
@@ -270,7 +293,18 @@ pub mod folder_batch_import_service {
         pub id: Option<String>,
         pub name: Option<String>,
         pub mode: Option<Mode>,
+        /// Shot description (detailed_description body); `description` is accepted as an alias.
+        #[serde(alias = "description")]
         pub prompt: String,
+        /// Optional writer sections of the H3 Ref2VA prompt (English).
+        #[serde(default)]
+        pub style: Option<String>,
+        #[serde(default)]
+        pub summary: Option<String>,
+        #[serde(default)]
+        pub soundscape: Option<String>,
+        #[serde(default)]
+        pub music: Option<String>,
         pub first_frame: Option<String>,
         pub last_frame: Option<String>,
         #[serde(default)]
@@ -295,6 +329,8 @@ pub mod folder_batch_import_service {
     pub struct ManifestEntity {
         pub name: String,
         pub kind: Option<String>,
+        /// Entity appearance text; `appearanceEn` is accepted as an alias.
+        #[serde(alias = "appearanceEn")]
         pub description: Option<String>,
         pub images: Vec<String>,
         pub cover: Option<String>,
@@ -366,6 +402,8 @@ pub mod folder_batch_import_service {
         pub entity_names: Vec<String>,
         pub opening_composition: Option<String>,
         pub ending_composition: Option<String>,
+        #[serde(skip)]
+        pub prompt_sections: crate::domain::story_entity::ShotPromptSections,
         #[serde(skip)]
         pub references: Vec<String>,
         pub errors: Vec<crate::application::shot_bulk_service::BulkIssue>,
@@ -637,6 +675,13 @@ pub mod folder_batch_import_service {
                     name,
                     prompt_preview: shot.prompt.chars().take(240).collect(),
                     prompt: shot.prompt.clone(),
+                    prompt_sections: crate::domain::story_entity::ShotPromptSections {
+                        style: shot.style.clone(),
+                        summary: shot.summary.clone(),
+                        soundscape: shot.soundscape.clone(),
+                        music: shot.music.clone(),
+                    }
+                    .normalized(),
                     duration_seconds: duration,
                     width,
                     height,
@@ -790,6 +835,10 @@ pub mod folder_batch_import_service {
                     name: Some(format!("镜头 {:03}", i + 1)),
                     mode: Some(mode.clone()),
                     prompt,
+                    style: None,
+                    summary: None,
+                    soundscape: None,
+                    music: None,
                     first_frame: first,
                     last_frame: None,
                     references,
@@ -2215,6 +2264,18 @@ pub mod folder_batch_import_service {
                     })
                     .await
                     .map_err(|_| stage_failure("C4", "ENTITY_BIND_FAILED", "镜头实体绑定失败"))?;
+                if !row.prompt_sections.is_empty() {
+                    self.entities
+                        .set_prompt_sections(project, id, row.prompt_sections.clone())
+                        .await
+                        .map_err(|_| {
+                            stage_failure(
+                                "C4",
+                                "PROMPT_SECTIONS_SAVE_FAILED",
+                                "镜头提示词分段保存失败",
+                            )
+                        })?;
+                }
             }
             self.injection("D")?;
             for (row, id) in rows.iter().zip(&result.created_shot_ids) {
@@ -2597,6 +2658,29 @@ pub mod folder_batch_import_service {
                 assert!(!safe_relative_path(p), "{p:?}");
             }
         }
+        #[test]
+        fn manifest_accepts_h3_writer_sections_and_aliases() {
+            let shot: super::ManifestShot = serde_json::from_value(serde_json::json!({
+                "description": "@A walks.",
+                "style": "Warm lamplight.",
+                "summary": "@A walks home.",
+                "soundscape": "Rain.",
+                "music": "N/A"
+            }))
+            .unwrap();
+            assert_eq!(shot.prompt, "@A walks.");
+            assert_eq!(shot.style.as_deref(), Some("Warm lamplight."));
+            assert_eq!(shot.music.as_deref(), Some("N/A"));
+            let old: super::ManifestShot =
+                serde_json::from_value(serde_json::json!({ "prompt": "旧写法" })).unwrap();
+            assert!(old.style.is_none() && old.summary.is_none());
+            let entity: super::ManifestEntity = serde_json::from_value(serde_json::json!({
+                "name": "A", "appearanceEn": "a tall man", "images": []
+            }))
+            .unwrap();
+            assert_eq!(entity.description.as_deref(), Some("a tall man"));
+        }
+
         #[test]
         fn bounds_and_duplicate_names_require_formal_suffix_revalidation() {
             let mut m = manifest();

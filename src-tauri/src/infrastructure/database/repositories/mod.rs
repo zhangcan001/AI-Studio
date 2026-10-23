@@ -895,5 +895,57 @@ pub mod story_entity {
             tx.commit().await.map_err(db)?;
             Ok(saved)
         }
+
+        async fn prompt_sections_for_shot(
+            &self,
+            project_id: &str,
+            shot_id: &str,
+        ) -> Result<crate::domain::story_entity::ShotPromptSections, RepositoryError> {
+            let row = sqlx::query(
+                "SELECT prompt_style, prompt_summary, prompt_soundscape, prompt_music
+                 FROM shots WHERE id = ? AND project_id = ?",
+            )
+            .bind(shot_id)
+            .bind(project_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::database(e.to_string()))?
+            .ok_or_else(|| RepositoryError::integrity("镜头不存在或不属于当前项目"))?;
+            Ok(crate::domain::story_entity::ShotPromptSections {
+                style: row.get("prompt_style"),
+                summary: row.get("prompt_summary"),
+                soundscape: row.get("prompt_soundscape"),
+                music: row.get("prompt_music"),
+            })
+        }
+
+        async fn set_prompt_sections(
+            &self,
+            project_id: &str,
+            shot_id: &str,
+            sections: &crate::domain::story_entity::ShotPromptSections,
+        ) -> Result<crate::domain::story_entity::ShotPromptSections, RepositoryError> {
+            let s = sections.clone().normalized();
+            let now = chrono::Utc::now().to_rfc3339();
+            let done = sqlx::query(
+                "UPDATE shots SET prompt_style = ?, prompt_summary = ?, prompt_soundscape = ?,
+                     prompt_music = ?, updated_at = ?
+                 WHERE id = ? AND project_id = ?",
+            )
+            .bind(&s.style)
+            .bind(&s.summary)
+            .bind(&s.soundscape)
+            .bind(&s.music)
+            .bind(&now)
+            .bind(shot_id)
+            .bind(project_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::database(e.to_string()))?;
+            if done.rows_affected() == 0 {
+                return Err(RepositoryError::integrity("镜头不存在或不属于当前项目"));
+            }
+            self.prompt_sections_for_shot(project_id, shot_id).await
+        }
     }
 }

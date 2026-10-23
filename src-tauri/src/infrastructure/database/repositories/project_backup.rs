@@ -2403,6 +2403,10 @@ struct DbShot {
     prompt_version_id: Option<String>,
     selected_image_asset_id: Option<String>,
     selected_video_asset_id: Option<String>,
+    prompt_style: Option<String>,
+    prompt_summary: Option<String>,
+    prompt_soundscape: Option<String>,
+    prompt_music: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -2452,7 +2456,8 @@ async fn query_shots(
 ) -> Result<Vec<BackupShot>, RepositoryError> {
     let rows = sqlx::query_as::<_, DbShot>(
         "SELECT id, project_id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id,
-                selected_image_asset_id, selected_video_asset_id, created_at, updated_at
+                selected_image_asset_id, selected_video_asset_id, prompt_style, prompt_summary,
+                prompt_soundscape, prompt_music, created_at, updated_at
          FROM shots WHERE project_id = ? ORDER BY ordinal, id",
     )
     .bind(project_id)
@@ -2471,6 +2476,10 @@ async fn query_shots(
             prompt_version_id: row.prompt_version_id,
             selected_image_asset_id: row.selected_image_asset_id,
             selected_video_asset_id: row.selected_video_asset_id,
+            prompt_style: row.prompt_style,
+            prompt_summary: row.prompt_summary,
+            prompt_soundscape: row.prompt_soundscape,
+            prompt_music: row.prompt_music,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -4330,8 +4339,9 @@ async fn restore_rows_in_transaction(
             .map(String::as_str);
         sqlx::query(
             "INSERT INTO shots (id, project_id, ordinal, name, prompt_text, prompt_entry_id,
-             prompt_version_id, selected_image_asset_id, selected_video_asset_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             prompt_version_id, selected_image_asset_id, selected_video_asset_id, prompt_style,
+             prompt_summary, prompt_soundscape, prompt_music, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(shot_id)
         .bind(&project.id)
@@ -4342,6 +4352,10 @@ async fn restore_rows_in_transaction(
         .bind(prompt_version_id)
         .bind(selected_image_asset_id)
         .bind(selected_video_asset_id)
+        .bind(&shot.prompt_style)
+        .bind(&shot.prompt_summary)
+        .bind(&shot.prompt_soundscape)
+        .bind(&shot.prompt_music)
         .bind(&shot.created_at)
         .bind(&shot.updated_at)
         .execute(&mut **transaction)

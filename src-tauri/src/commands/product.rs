@@ -891,6 +891,24 @@ pub async fn product_story_entity_composition_usage_set(
         .await
 }
 
+#[tauri::command]
+pub async fn product_shot_prompt_sections_get(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    project_id: String,
+    shot_id: String,
+) -> Result<crate::domain::story_entity::ShotPromptSections, crate::error::AppError> {
+    crate::commands::story_entities::product_shot_prompt_sections_get(state, project_id, shot_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn product_shot_prompt_sections_set(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    request: crate::commands::story_entities::ShotPromptSectionsRequest,
+) -> Result<crate::domain::story_entity::ShotPromptSections, crate::error::AppError> {
+    crate::commands::story_entities::product_shot_prompt_sections_set(state, request).await
+}
+
 fn row_scalar_values(
     values: Option<std::collections::BTreeMap<String, super::generation::InputValueDto>>,
 ) -> Result<

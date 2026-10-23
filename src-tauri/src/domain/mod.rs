@@ -95,6 +95,38 @@ pub mod story_entity {
         }
     }
 
+    /// Writer-provided Ref2VA sections of one shot (英文风格/摘要/环境声/配乐).
+    /// None or blank means the prompt compiler uses its fallback text.
+    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ShotPromptSections {
+        pub style: Option<String>,
+        pub summary: Option<String>,
+        pub soundscape: Option<String>,
+        pub music: Option<String>,
+    }
+
+    impl ShotPromptSections {
+        /// Trims every section and turns blank text into None.
+        pub fn normalized(self) -> Self {
+            let clean =
+                |v: Option<String>| v.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
+            Self {
+                style: clean(self.style),
+                summary: clean(self.summary),
+                soundscape: clean(self.soundscape),
+                music: clean(self.music),
+            }
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.style.is_none()
+                && self.summary.is_none()
+                && self.soundscape.is_none()
+                && self.music.is_none()
+        }
+    }
+
     /// Per-shot 构图用途: entity ids of the opening and ending compositions.
     #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]

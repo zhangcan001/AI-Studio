@@ -18,6 +18,14 @@ export interface ShotCompositionUsage {
   endingEntityId: string | null;
 }
 
+/** Writer-provided English sections of a shot's H3 prompt; null means the software fallback is used. */
+export interface ShotPromptSections {
+  style: string | null;
+  summary: string | null;
+  soundscape: string | null;
+  music: string | null;
+}
+
 export interface StoryEntityUpsert {
   name: string;
   description: string;

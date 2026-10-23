@@ -8,6 +8,7 @@ import type {
 } from "../../types/productionQueue";
 import type { ProductionBatchRunbookRow, ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
 import { formatUiError } from "../../i18n/errorMessages";
+import { LEGACY_PROMPT_FORMAT_HINT, isLegacyCompiledPrompt } from "../../product/promptLanguage";
 import "./ProductionQueueDrawer.css";
 
 const MAX_VISIBLE_ROWS = 24;
@@ -469,6 +470,7 @@ function ItemRow({
           {data.duration && <span>{data.duration}</span>}
           <StatusChip status={item.status} />
         </div>
+        {isLegacyCompiledPrompt(item.promptText) && <small className="muted" aria-label="提示词格式提示">{LEGACY_PROMPT_FORMAT_HINT}</small>}
       </div>
       {onRetry && retryable && (
         <button

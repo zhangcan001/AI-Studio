@@ -158,7 +158,7 @@ it("binds/unbinds entities, renames via updateShot, deletes with confirm and gen
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
   expect(api.readinessGet.mock.calls[0][0]).toMatchObject({ projectId: "p", shotId: "a", stage: "video", selectionRef: "sel", submissionIdempotencyKey: "readiness-only" });
   expect(api.generate.mock.calls[0][0].values.prompt).toEqual({ type: "string", value: "新的提示词" });
-  expect(within(row).getByLabelText("提示词语言建议").textContent).toBe("镜头描述建议用英文书写（对白可保留中文）");
+  expect(within(row).getByLabelText("提示词写作建议").textContent).toContain("镜头描述建议用英文书写（对白可保留中文）");
   expect(api.generate.mock.calls[0][0].submissionIdempotencyKey).not.toBe("readiness-only");
   await within(row).findByText("已写入生产队列");
   const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);

@@ -2290,6 +2290,15 @@ pub(crate) struct BackupShot {
     pub(crate) prompt_version_id: Option<String>,
     pub(crate) selected_image_asset_id: Option<String>,
     pub(crate) selected_video_asset_id: Option<String>,
+    /// Writer prompt sections (migration 049); omitted when unset so older backups stay valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prompt_style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prompt_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prompt_soundscape: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prompt_music: Option<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }
@@ -6173,6 +6182,10 @@ mod tests {
             prompt_version_id: None,
             selected_image_asset_id: None,
             selected_video_asset_id: None,
+            prompt_style: None,
+            prompt_summary: None,
+            prompt_soundscape: None,
+            prompt_music: None,
             created_at: "2026-01-01T00:00:00Z".to_owned(),
             updated_at: "2026-01-01T00:00:00Z".to_owned(),
         }];
@@ -8802,6 +8815,29 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn shot_prompt_sections_roundtrip_through_backup() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        sqlx::query("UPDATE shots SET prompt_style='Warm lamplight.', prompt_music='N/A' WHERE id='sht_current_v20'")
+            .execute(&pool).await.unwrap();
+        service.export(&project_id, archive.clone()).await.unwrap();
+        let preview = service.inspect(archive.clone()).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let row: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT prompt_style, prompt_summary, prompt_music FROM shots WHERE project_id=?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            row,
+            (Some("Warm lamplight.".into()), None, Some("N/A".into()))
+        );
     }
 
     #[tokio::test]

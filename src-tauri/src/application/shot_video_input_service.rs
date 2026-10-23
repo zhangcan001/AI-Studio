@@ -129,9 +129,28 @@ impl ShotVideoInputService {
             Some(GenerationInputValue::ImageAssets(ids)) => ids.clone(),
             _ => Vec::new(),
         };
+        let sections = match shot_id {
+            Some(shot_id) => repository
+                .prompt_sections_for_shot(project_id, shot_id)
+                .await
+                .map_err(invalid)?,
+            None => Default::default(),
+        };
+        let has_audio = values.values().any(|v| match v {
+            GenerationInputValue::AudioAsset(_) => true,
+            GenerationInputValue::AudioAssets(ids) => !ids.is_empty(),
+            _ => false,
+        });
         let reordered = order_composition_references(&mut references, &entities, &usage);
-        let compiled =
-            compile_entity_prompt_with_usage(prompt, project_id, &entities, &references, &usage)?;
+        let compiled = compile_ref2va_prompt(
+            prompt,
+            project_id,
+            &entities,
+            &references,
+            &usage,
+            &sections,
+            has_audio,
+        )?;
         values.insert("prompt".into(), GenerationInputValue::Text(compiled));
         if reordered {
             values.insert(
@@ -615,6 +634,52 @@ fn has_ref2va_sections(text: &str) -> bool {
     })
 }
 
+/// True when the text is mostly English (Latin letters clearly outnumber Han
+/// characters), so it can be injected into the English prompt as-is.
+pub(crate) fn mostly_english(text: &str) -> bool {
+    let han = text
+        .chars()
+        .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c) || ('\u{3400}'..='\u{4dbf}').contains(c))
+        .count();
+    let latin = text.chars().filter(|c| c.is_ascii_alphabetic()).count();
+    latin >= 3 && latin > han * 4
+}
+
+/// Lines starting with `[Shot N]` mark an already shot-structured body; a
+/// `[Shot 1]` reference inside a sentence (e.g. "(appears in [Shot 1])") does not.
+fn has_shot_markers(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim_start();
+        line.strip_prefix("[Shot ")
+            .and_then(|rest| rest.split_once(']'))
+            .is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    })
+}
+
+/// Shot numbers (from line-leading `[Shot N]` markers) whose text mentions `label`.
+fn shots_mentioning(body: &str, label: &str) -> Vec<String> {
+    let mut current = "1".to_string();
+    let mut found: Vec<String> = Vec::new();
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if let Some((n, _)) = trimmed
+            .strip_prefix("[Shot ")
+            .and_then(|rest| rest.split_once(']'))
+        {
+            if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
+                current = n.to_string();
+            }
+        }
+        if line.contains(label) && !found.contains(&current) {
+            found.push(current.clone());
+        }
+    }
+    if found.is_empty() {
+        found.push("1".into());
+    }
+    found
+}
+
 fn compile_entity_prompt_with_usage(
     prompt: &str,
     project_id: &str,
@@ -622,38 +687,55 @@ fn compile_entity_prompt_with_usage(
     references: &[AssetId],
     usage: &crate::domain::story_entity::ShotCompositionUsage,
 ) -> Result<String, ShotVideoInputError> {
-    use crate::domain::story_entity::StoryEntityKind;
+    compile_ref2va_prompt(
+        prompt,
+        project_id,
+        entities,
+        references,
+        usage,
+        &Default::default(),
+        false,
+    )
+}
 
-    let mut rest = prompt;
+struct SubjectRef<'a> {
+    entity: &'a crate::domain::story_entity::StoryEntity,
+    picture: usize,
+}
+
+struct MentionState<'a> {
+    subjects: Vec<SubjectRef<'a>>,
+    pictures: Vec<(&'a String, usize, Option<(&'static str, &'static str)>)>,
+}
+
+fn substitute_mentions<'a>(
+    text: &str,
+    project_id: &str,
+    entities: &'a [crate::domain::story_entity::StoryEntity],
+    references: &[AssetId],
+    usage: &crate::domain::story_entity::ShotCompositionUsage,
+    state: &mut MentionState<'a>,
+) -> Result<String, ShotVideoInputError> {
+    use crate::domain::story_entity::StoryEntityKind;
+    let mut rest = text;
     let mut output = String::new();
-    let mut subjects = Vec::new();
-    let mut pictures: Vec<&String> = Vec::new();
-    let mut subject_kinds = Vec::new();
-    let mut layout_pictures: Vec<(usize, Option<(&str, &str)>)> = Vec::new();
-    let mut definitions = Vec::new();
-    let mut retention = Vec::new();
     while let Some(at) = rest.find('@') {
         output.push_str(&rest[..at]);
         rest = &rest[at + 1..];
         let entity = match_entity_mention(rest, project_id, entities)?;
-        let asset_id = entity
-            .cover_asset_id
-            .as_ref()
-            .or_else(|| entity.image_asset_ids.first())
-            .ok_or_else(|| {
-                invalid(format!(
-                    "ENTITY_REFERENCE_MISSING_IMAGE: @{} 尚未关联图片",
-                    entity.name
-                ))
-            })?;
+        let asset_id = entity_cover(entity).ok_or_else(|| {
+            invalid(format!(
+                "ENTITY_REFERENCE_MISSING_IMAGE: @{} 尚未关联图片",
+                entity.name
+            ))
+        })?;
         let ordinal = references.iter().position(|id| id.as_str() == asset_id)
             .ok_or_else(|| invalid(format!("ENTITY_REFERENCE_NOT_APPLIED: @{} 的图片尚未加入当前 Recipe 的正式参考图，请点击应用角色与场景参考图", entity.name)))?;
         let picture = ordinal + 1;
         if entity.kind == StoryEntityKind::Composition {
             // Composition pictures are layout references only: a standalone
             // <Picture N>, never a <Subject N> and never a first/last keyframe.
-            if !pictures.contains(&&entity.id) {
-                pictures.push(&entity.id);
+            if !state.pictures.iter().any(|(id, _, _)| *id == &entity.id) {
                 let opening = usage.opening_entity_id.as_deref() == Some(entity.id.as_str());
                 let ending = usage.ending_entity_id.as_deref() == Some(entity.id.as_str());
                 let moment = if opening {
@@ -663,55 +745,115 @@ fn compile_entity_prompt_with_usage(
                 } else {
                     None
                 };
-                layout_pictures.push((picture, moment));
+                state.pictures.push((&entity.id, picture, moment));
             }
             output.push_str(&format!("<Picture {picture}>"));
-            rest = &rest[entity.name.len()..];
-            continue;
+        } else {
+            let subject = match state.subjects.iter().position(|s| s.entity.id == entity.id) {
+                Some(index) => index + 1,
+                None => {
+                    state.subjects.push(SubjectRef { entity, picture });
+                    state.subjects.len()
+                }
+            };
+            output.push_str(&format!("<Subject {subject}>"));
         }
-        let subject = match subjects.iter().position(|id| *id == &entity.id) {
-            Some(index) => index + 1,
-            None => {
-                subjects.push(&entity.id);
-                subject_kinds.push(entity.kind);
-                let subject = subjects.len();
-                let (role, features) = match entity.kind {
-                    StoryEntityKind::Character => (
-                        "character",
-                        "facial features, hairstyle, clothing and overall appearance",
-                    ),
-                    StoryEntityKind::Scene => (
-                        "environment",
-                        "spatial layout, architecture, terrain and environmental structure",
-                    ),
-                    StoryEntityKind::Prop => ("object", "shape, materials and distinctive details"),
-                    StoryEntityKind::Composition => unreachable!("handled above"),
-                };
-                definitions.push(format!(
-                    "<Subject {subject}> is the {role} shown in <Picture {picture}>."
-                ));
-                retention.push(format!(
-                    "<Subject {subject}>: fully_preserved - retain {features} from <Picture {picture}>, except changes explicitly requested in detailed_description."
-                ));
-                subject
-            }
-        };
-        output.push_str(&format!("<Subject {subject}>"));
         rest = &rest[entity.name.len()..];
     }
     output.push_str(rest);
-    if (subjects.is_empty() && pictures.is_empty()) || has_ref2va_sections(&output) {
+    Ok(output)
+}
+
+/// Assembles the official six-section H3 Ref2VA prompt from the shot text
+/// (detailed_description body), the writer sections and the entity
+/// appearances. Missing writer sections fall back to neutral text; nothing
+/// absent from the writer's input is invented.
+pub(crate) fn compile_ref2va_prompt(
+    prompt: &str,
+    project_id: &str,
+    entities: &[crate::domain::story_entity::StoryEntity],
+    references: &[AssetId],
+    usage: &crate::domain::story_entity::ShotCompositionUsage,
+    sections: &crate::domain::story_entity::ShotPromptSections,
+    has_audio_reference: bool,
+) -> Result<String, ShotVideoInputError> {
+    use crate::domain::story_entity::StoryEntityKind;
+    let sections = sections.clone().normalized();
+    let mut state = MentionState {
+        subjects: Vec::new(),
+        pictures: Vec::new(),
+    };
+    let output = substitute_mentions(prompt, project_id, entities, references, usage, &mut state)?;
+    if has_ref2va_sections(&output) {
         return Ok(output);
     }
-    let placed = if subjects.is_empty() {
+    let mut sub = |text: &Option<String>| -> Result<Option<String>, ShotVideoInputError> {
+        text.as_deref()
+            .map(|t| substitute_mentions(t, project_id, entities, references, usage, &mut state))
+            .transpose()
+    };
+    let summary_text = sub(&sections.summary)?;
+    let style_text = sub(&sections.style)?;
+    let soundscape_text = sub(&sections.soundscape)?;
+    let music_text = sub(&sections.music)?;
+    if state.subjects.is_empty() && state.pictures.is_empty() {
+        return Ok(output);
+    }
+    let body = if has_shot_markers(output.trim_start().lines().next().unwrap_or("")) {
+        output.clone()
+    } else {
+        format!("[Shot 1] {output}")
+    };
+    let mut definitions = Vec::new();
+    let mut retention = Vec::new();
+    for (index, subject) in state.subjects.iter().enumerate() {
+        let n = index + 1;
+        let picture = subject.picture;
+        let (role, features) = match subject.entity.kind {
+            StoryEntityKind::Character => (
+                "character",
+                "facial features, hairstyle, clothing and overall appearance",
+            ),
+            StoryEntityKind::Scene => (
+                "environment",
+                "spatial layout, architecture, terrain and environmental structure",
+            ),
+            StoryEntityKind::Prop => ("object", "shape, materials and distinctive details"),
+            StoryEntityKind::Composition => ("composition", "layout"),
+        };
+        let label = format!("<Subject {n}>");
+        let appears = shots_mentioning(&body, &label)
+            .iter()
+            .map(|s| format!("[Shot {s}]"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let appearance = subject.entity.description.trim();
+        if !appearance.is_empty() && mostly_english(appearance) {
+            let appearance = appearance.trim_end_matches(['.', ' ']);
+            definitions.push(format!(
+                "{label} is the {role} in <Picture {picture}>, {appearance}."
+            ));
+            retention.push(format!(
+                "{label} (appears in {appears}): fully_preserved - the {features} from <Picture {picture}> are retained: {appearance}."
+            ));
+        } else {
+            definitions.push(format!(
+                "{label} is the {role} shown in <Picture {picture}>."
+            ));
+            retention.push(format!(
+                "{label} (appears in {appears}): fully_preserved - retain {features} from <Picture {picture}>, except changes explicitly requested in detailed_description."
+            ));
+        }
+    }
+    let placed = if state.subjects.is_empty() {
         "the characters".to_string()
     } else {
-        (1..=subjects.len())
+        (1..=state.subjects.len())
             .map(|n| format!("<Subject {n}>"))
             .collect::<Vec<_>>()
             .join(", ")
     };
-    for (picture, moment) in &layout_pictures {
+    for (_, picture, moment) in &state.pictures {
         let (layout, when) = match moment {
             Some((name, when)) => (format!(" {name} layout"), format!(" {when}")),
             None => (String::new(), String::new()),
@@ -723,53 +865,73 @@ fn compile_entity_prompt_with_usage(
             "<Picture {picture}> (shot-planning reference for [Shot 1]{layout}): partially_preserved - only viewpoint, subject placement, facing and prop positions are retained; the appearance and clothing of people in this picture are not used, identities follow {placed}."
         ));
     }
-    let body = if output.contains("[Shot ") {
-        output.clone()
+    let prefix = if has_audio_reference {
+        "[reference generation + audio reference]"
     } else {
-        format!("[Shot 1] {output}")
+        "[reference generation]"
     };
     // Ref2VA section order follows the official H3 prompt-writing convention.
     // Do not invent camera, motion, dialogue or music absent from the user text.
-    let count = |kind: StoryEntityKind| subject_kinds.iter().filter(|k| **k == kind).count();
-    let mut parts = Vec::new();
-    for (n, one, many) in [
-        (
-            count(StoryEntityKind::Character),
-            "referenced character",
-            "referenced characters",
-        ),
-        (
-            count(StoryEntityKind::Scene),
-            "referenced environment",
-            "referenced environments",
-        ),
-        (
-            count(StoryEntityKind::Prop),
-            "referenced object",
-            "referenced objects",
-        ),
-    ] {
-        if n > 0 {
-            parts.push(format!("{n} {}", if n == 1 { one } else { many }));
+    let summary = match summary_text {
+        Some(text) => format!("{prefix} {text}"),
+        None => {
+            let count = |kind: StoryEntityKind| {
+                state
+                    .subjects
+                    .iter()
+                    .filter(|s| s.entity.kind == kind)
+                    .count()
+            };
+            let mut parts = Vec::new();
+            for (n, one, many) in [
+                (
+                    count(StoryEntityKind::Character),
+                    "referenced character",
+                    "referenced characters",
+                ),
+                (
+                    count(StoryEntityKind::Scene),
+                    "referenced environment",
+                    "referenced environments",
+                ),
+                (
+                    count(StoryEntityKind::Prop),
+                    "referenced object",
+                    "referenced objects",
+                ),
+            ] {
+                if n > 0 {
+                    parts.push(format!("{n} {}", if n == 1 { one } else { many }));
+                }
+            }
+            let mut summary = format!("{prefix} The target video is a single shot");
+            if !parts.is_empty() {
+                summary.push_str(" featuring ");
+                summary.push_str(&parts.join(", "));
+            }
+            summary.push('.');
+            let pictures = state.pictures.len();
+            if pictures > 0 {
+                summary.push_str(&format!(
+                    " {} shot-planning reference picture{} define{} only where the characters, environment and props are placed; appearance comes from the subject references.",
+                    pictures,
+                    if pictures == 1 { "" } else { "s" },
+                    if pictures == 1 { "s" } else { "" },
+                ));
+            }
+            summary.push_str(" Actions follow detailed_description.");
+            summary
         }
-    }
-    let mut summary = String::from("[reference generation] The target video is a single shot");
-    if !parts.is_empty() {
-        summary.push_str(" featuring ");
-        summary.push_str(&parts.join(", "));
-    }
-    summary.push('.');
-    if !pictures.is_empty() {
-        summary.push_str(&format!(
-            " {} shot-planning reference picture{} define{} only where the characters, environment and props are placed; appearance comes from the subject references.",
-            pictures.len(),
-            if pictures.len() == 1 { "" } else { "s" },
-            if pictures.len() == 1 { "s" } else { "" },
-        ));
-    }
-    summary.push_str(" Actions follow detailed_description.");
+    };
+    let style = style_text.unwrap_or_else(|| {
+        "A single continuous shot whose visual style follows the reference pictures.".into()
+    });
+    let soundscape = soundscape_text.unwrap_or_else(|| {
+        "Quiet room tone matching the environment; follow any sound directions in detailed_description.".into()
+    });
+    let music = music_text.unwrap_or_else(|| "N/A".into());
     Ok(format!(
-        "subject_definitions:\n{}\n\nsummary:\n{summary}\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment or layout reference as the character reference.\n\ndetailed_description:\nA single continuous shot whose visual style follows the reference pictures.\n{body}\n\noverall_soundscape:\nFollow any sound directions in detailed_description.\n\nnon_diegetic_music:\nFollow any music directions in detailed_description.",
+        "subject_definitions:\n{}\n\nsummary:\n{summary}\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment or layout reference as the character reference.\n\ndetailed_description:\n{style}\n{body}\n\noverall_soundscape:\n{soundscape}\n\nnon_diegetic_music:\n{music}",
         definitions.join("\n"), retention.join("\n")
     ))
 }
@@ -1264,6 +1426,119 @@ mod tests {
         assert_eq!(c.matches("subject_definitions:").count(), 1);
         assert!(c.starts_with("subject_definitions:\n<Subject 1> 是主角"));
         assert!(c.contains("<Subject 1> 推门，按<Picture 3>"));
+    }
+
+    #[test]
+    fn writer_sections_and_appearance_assemble_the_six_official_sections() {
+        use crate::domain::{
+            story_entity::{
+                ShotCompositionUsage, ShotPromptSections, StoryEntity, StoryEntityKind,
+            },
+            AssetId,
+        };
+        let entity = |id: &str, kind, cover: &str, description: &str| StoryEntity {
+            id: id.into(),
+            project_id: "prj_owned".into(),
+            kind,
+            name: id.into(),
+            description: description.into(),
+            cover_asset_id: Some(cover.into()),
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let entities = [
+            entity("沈簿", StoryEntityKind::Character, "ast_a", "a man in his early 30s with short neat black hair, wearing a dark grey wool long coat."),
+            entity("林舟", StoryEntityKind::Character, "ast_b", "三十岁女性，短发"),
+            entity("书房", StoryEntityKind::Scene, "ast_s", "a dim study with tall dark-wood bookshelves along the left wall"),
+            entity("开场构图", StoryEntityKind::Composition, "ast_open", ""),
+            entity("结尾构图", StoryEntityKind::Composition, "ast_end", ""),
+        ];
+        let id = |v: &str| AssetId::parse(v).unwrap();
+        let refs = [
+            id("ast_a"),
+            id("ast_b"),
+            id("ast_s"),
+            id("ast_open"),
+            id("ast_end"),
+        ];
+        let usage = ShotCompositionUsage {
+            opening_entity_id: Some("开场构图".into()),
+            ending_entity_id: Some("结尾构图".into()),
+        };
+        let sections = ShotPromptSections {
+            style: Some("Realistic period drama style with warm lamplight.".into()),
+            summary: Some("@沈簿 enters @书房 and hands a letter to @林舟.".into()),
+            soundscape: Some("Quiet indoor room tone.".into()),
+            music: Some("  ".into()),
+        };
+        let body = "Positioned as in @开场构图, @沈簿 stands at the door of @书房. @林舟 (S1) says, <d>[Chinese] 你来了。</d>\n[Shot 2] At 00:04.000, the shot cuts to @林舟. By the end, positioned as in @结尾构图.";
+        let c = super::compile_ref2va_prompt(
+            body,
+            "prj_owned",
+            &entities,
+            &refs,
+            &usage,
+            &sections,
+            false,
+        )
+        .unwrap();
+        println!("{c}");
+        assert!(c.contains("<Subject 1> is the character in <Picture 1>, a man in his early 30s with short neat black hair, wearing a dark grey wool long coat."));
+        assert!(c.contains("<Subject 1> (appears in [Shot 1]): fully_preserved - the facial features, hairstyle, clothing and overall appearance from <Picture 1> are retained: a man"));
+        // Mostly Chinese description falls back to the generic line.
+        assert!(c.contains("<Subject 3> is the character shown in <Picture 2>."));
+        assert!(c.contains("<Subject 3> (appears in [Shot 1], [Shot 2]): fully_preserved - retain"));
+        assert!(c.contains("<Subject 2> is the environment in <Picture 3>, a dim study"));
+        assert!(c.contains("summary:\n[reference generation] <Subject 1> enters <Subject 2> and hands a letter to <Subject 3>."));
+        assert!(c.contains("detailed_description:\nRealistic period drama style with warm lamplight.\n[Shot 1] Positioned as in <Picture 4>, <Subject 1>"));
+        assert!(c.contains("\n[Shot 2] At 00:04.000, the shot cuts to <Subject 3>."));
+        assert_eq!(c.matches("\n[Shot 1] ").count(), 1);
+        assert!(c.contains("overall_soundscape:\nQuiet indoor room tone."));
+        assert!(c.ends_with("non_diegetic_music:\nN/A"));
+        assert!(!c.contains('@'));
+        // Audio reference changes the task prefix; missing sections fall back.
+        let c = super::compile_ref2va_prompt(
+            "@沈簿 walks.",
+            "prj_owned",
+            &entities,
+            &refs,
+            &usage,
+            &Default::default(),
+            true,
+        )
+        .unwrap();
+        assert!(c.contains("summary:\n[reference generation + audio reference] The target video is a single shot featuring 1 referenced character."));
+        assert!(c.contains("detailed_description:\nA single continuous shot whose visual style follows the reference pictures.\n[Shot 1] <Subject 1> walks."));
+        assert!(c.contains("overall_soundscape:\nQuiet room tone"));
+        assert!(c.ends_with("non_diegetic_music:\nN/A"));
+        // "[Shot 1]" inside a sentence does not count as a shot marker.
+        let c = super::compile_ref2va_prompt(
+            "@沈簿 (appears in [Shot 1]) walks.",
+            "prj_owned",
+            &entities,
+            &refs,
+            &usage,
+            &Default::default(),
+            false,
+        )
+        .unwrap();
+        assert!(c.contains("\n[Shot 1] <Subject 1> (appears in [Shot 1]) walks."));
+        // Unknown @name in a writer section is rejected like in the body.
+        let bad = ShotPromptSections {
+            summary: Some("@无名 walks".into()),
+            ..Default::default()
+        };
+        assert!(super::compile_ref2va_prompt(
+            "@沈簿 walks.",
+            "prj_owned",
+            &entities,
+            &refs,
+            &usage,
+            &bad,
+            false
+        )
+        .is_err());
     }
 
     fn recipe() -> Recipe {
