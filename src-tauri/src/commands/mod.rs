@@ -226,6 +226,45 @@ pub mod story_entities {
             .replace_shot_bindings(&request.project_id, &request.shot_id, request.entity_ids)
             .await
     }
+
+    pub async fn product_story_entity_composition_usage_get(
+        state: State<'_, AppState>,
+        project_id: String,
+        shot_id: String,
+    ) -> Result<crate::domain::story_entity::ShotCompositionUsage, AppError> {
+        state
+            .shots
+            .story_entities
+            .composition_usage_for_shot(&project_id, &shot_id)
+            .await
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ShotCompositionUsageRequest {
+        pub project_id: String,
+        pub shot_id: String,
+        pub opening_entity_id: Option<String>,
+        pub ending_entity_id: Option<String>,
+    }
+
+    pub async fn product_story_entity_composition_usage_set(
+        state: State<'_, AppState>,
+        request: ShotCompositionUsageRequest,
+    ) -> Result<crate::domain::story_entity::ShotCompositionUsage, AppError> {
+        state
+            .shots
+            .story_entities
+            .set_composition_usage(
+                &request.project_id,
+                &request.shot_id,
+                crate::domain::story_entity::ShotCompositionUsage {
+                    opening_entity_id: request.opening_entity_id,
+                    ending_entity_id: request.ending_entity_id,
+                },
+            )
+            .await
+    }
 }
 
 pub mod folder_batch_import {

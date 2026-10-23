@@ -26,6 +26,8 @@ interface ProductCommands {
   product_story_entity_images_import: { args: { projectId: string }; result: import("../types/storyEntity").StoryEntityImageImportBatch };
   product_story_entity_list_for_shot: { args: { projectId: string; shotId: string }; result: import("../types/storyEntity").StoryEntity[] };
   product_story_entity_bind_shot: { args: { request: { projectId: string; shotId: string; entityIds: string[] } }; result: import("../types/storyEntity").StoryEntity[] };
+  product_story_entity_composition_usage_get: { args: { projectId: string; shotId: string }; result: import("../types/storyEntity").ShotCompositionUsage };
+  product_story_entity_composition_usage_set: { args: { request: { projectId: string; shotId: string; openingEntityId: string | null; endingEntityId: string | null } }; result: import("../types/storyEntity").ShotCompositionUsage };
   product_library_tags_list: { args: { projectId: string }; result: import("./libraryTypes").LibraryTag[] };
   product_library_image_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: number[] };
   product_library_media_verify: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").MediaIntegrityReport };

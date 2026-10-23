@@ -1344,4 +1344,85 @@ mod tests {
         assert_eq!(one("SELECT COUNT(*) FROM assets").await, 1);
         pool.close().await;
     }
+
+    #[tokio::test]
+    async fn composition_usage_migration_keeps_bindings_and_limits_usage() {
+        use sqlx::sqlite::SqliteConnectOptions;
+        let dir = tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join("app.db"))
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = std::borrow::Cow::Owned(
+            old.migrations
+                .iter()
+                .filter(|m| m.version <= 47)
+                .cloned()
+                .collect(),
+        );
+        old.run(&pool).await.unwrap();
+        for sql in [
+            "INSERT INTO projects(id,name,root_path,created_at,updated_at) VALUES ('p1','P','/tmp/p','t','t')",
+            "INSERT INTO shots(id,project_id,name,ordinal,prompt_text,created_at,updated_at) VALUES ('s1','p1','S01',0,'','t','t')",
+            "INSERT INTO story_entities(id,project_id,kind,name,created_at,updated_at) VALUES ('c1','p1','composition','开场','t','t')",
+            "INSERT INTO story_entities(id,project_id,kind,name,created_at,updated_at) VALUES ('c2','p1','composition','结尾','t','t')",
+            "INSERT INTO story_entities(id,project_id,kind,name,created_at,updated_at) VALUES ('c3','p1','composition','中段','t','t')",
+            "INSERT INTO shot_story_entity_bindings(id,project_id,shot_id,entity_id,ordinal,created_at,updated_at) VALUES ('b1','p1','s1','c1',0,'t','t')",
+            "INSERT INTO shot_story_entity_bindings(id,project_id,shot_id,entity_id,ordinal,created_at,updated_at) VALUES ('b2','p1','s1','c2',1,'t','t')",
+            "INSERT INTO shot_story_entity_bindings(id,project_id,shot_id,entity_id,ordinal,created_at,updated_at) VALUES ('b3','p1','s1','c3',2,'t','t')",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+        }
+        super::MIGRATOR.run(&pool).await.unwrap();
+        let one = |sql: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(sql)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(
+            one("SELECT COUNT(*) FROM shot_story_entity_bindings WHERE composition_usage IS NULL")
+                .await,
+            3
+        );
+        let set = |sql: &'static str| {
+            let pool = pool.clone();
+            async move { sqlx::query(sql).execute(&pool).await }
+        };
+        set("UPDATE shot_story_entity_bindings SET composition_usage='opening' WHERE id='b1'")
+            .await
+            .unwrap();
+        set("UPDATE shot_story_entity_bindings SET composition_usage='ending' WHERE id='b2'")
+            .await
+            .unwrap();
+        assert!(set(
+            "UPDATE shot_story_entity_bindings SET composition_usage='opening' WHERE id='b3'"
+        )
+        .await
+        .is_err());
+        assert!(set(
+            "UPDATE shot_story_entity_bindings SET composition_usage='middle' WHERE id='b3'"
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            one("SELECT COUNT(*) FROM shot_story_entity_bindings").await,
+            3
+        );
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+        pool.close().await;
+    }
 }

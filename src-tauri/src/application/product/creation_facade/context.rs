@@ -496,6 +496,7 @@ impl ProductCreationFacade {
                 prompt_text: fields.prompt,
                 config,
                 entity_ids,
+                composition_usage: None,
                 updated_at: chrono::Utc::now(),
             })
             .await

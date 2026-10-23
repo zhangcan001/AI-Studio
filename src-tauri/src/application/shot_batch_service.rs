@@ -195,12 +195,13 @@ impl ShotBatchService {
     pub async fn compile_entity_references(
         &self,
         project_id: &str,
+        shot_id: &str,
         recipe: &Recipe,
         values: &mut BTreeMap<String, GenerationInputValue>,
     ) -> Result<(), ShotBatchServiceError> {
         if let Some(service) = &self.video_inputs {
             service
-                .compile_prompt(project_id, recipe, values)
+                .compile_prompt(project_id, Some(shot_id), recipe, values)
                 .await
                 .map_err(|e| ShotBatchServiceError::InvalidInput(e.to_string()))?;
         } else if matches!(values.get("prompt"), Some(GenerationInputValue::Text(text)) if text.contains('@'))

@@ -165,6 +165,29 @@ pub mod story_entity_service {
                 .await
                 .map_err(map_repo)
         }
+
+        pub async fn composition_usage_for_shot(
+            &self,
+            project_id: &str,
+            shot_id: &str,
+        ) -> Result<crate::domain::story_entity::ShotCompositionUsage, AppError> {
+            self.repo
+                .composition_usage_for_shot(project_id, shot_id)
+                .await
+                .map_err(map_repo)
+        }
+
+        pub async fn set_composition_usage(
+            &self,
+            project_id: &str,
+            shot_id: &str,
+            usage: crate::domain::story_entity::ShotCompositionUsage,
+        ) -> Result<crate::domain::story_entity::ShotCompositionUsage, AppError> {
+            self.repo
+                .set_composition_usage(project_id, shot_id, &usage)
+                .await
+                .map_err(map_repo)
+        }
     }
 
     fn map_repo(error: RepositoryError) -> AppError {
@@ -254,6 +277,12 @@ pub mod folder_batch_import_service {
         pub references: Vec<String>,
         #[serde(default)]
         pub characters: Vec<String>,
+        /// 构图用途: name of the composition entity governing the opening frame.
+        #[serde(default)]
+        pub opening_composition: Option<String>,
+        /// 构图用途: name of the composition entity governing the final frame.
+        #[serde(default)]
+        pub ending_composition: Option<String>,
         pub duration_seconds: Option<i64>,
         pub aspect_ratio: Option<String>,
         pub resolution_preset: Option<String>,
@@ -335,6 +364,8 @@ pub mod folder_batch_import_service {
         pub last_frame: Option<String>,
         pub reference_count: usize,
         pub entity_names: Vec<String>,
+        pub opening_composition: Option<String>,
+        pub ending_composition: Option<String>,
         #[serde(skip)]
         pub references: Vec<String>,
         pub errors: Vec<crate::application::shot_bulk_service::BulkIssue>,
@@ -548,6 +579,24 @@ pub mod folder_batch_import_service {
                         "输入字段与声明模式不一致或缺少必需输入",
                     ));
                 }
+                let has_usage =
+                    shot.opening_composition.is_some() || shot.ending_composition.is_some();
+                if has_usage && mode != Mode::Reference {
+                    errors.push(failure(
+                        "COMPOSITION_USAGE_MODE",
+                        "开场构图/结尾构图仅适用于混合参考模式的镜头",
+                    ));
+                }
+                if let (Some(opening), Some(ending)) =
+                    (&shot.opening_composition, &shot.ending_composition)
+                {
+                    if opening.trim().to_lowercase() == ending.trim().to_lowercase() {
+                        errors.push(failure(
+                            "COMPOSITION_USAGE_SAME",
+                            "开场构图与结尾构图不能是同一构图",
+                        ));
+                    }
+                }
                 if shot
                     .first_frame
                     .iter()
@@ -596,6 +645,8 @@ pub mod folder_batch_import_service {
                     last_frame: shot.last_frame.clone(),
                     reference_count: shot.references.len(),
                     entity_names: shot.characters.clone(),
+                    opening_composition: shot.opening_composition.clone(),
+                    ending_composition: shot.ending_composition.clone(),
                     references: shot.references.clone(),
                     errors: errors
                         .into_iter()
@@ -738,6 +789,8 @@ pub mod folder_batch_import_service {
                     last_frame: None,
                     references,
                     characters: vec![],
+                    opening_composition: None,
+                    ending_composition: None,
                     duration_seconds: None,
                     aspect_ratio: None,
                     resolution_preset: None,
@@ -1092,6 +1145,54 @@ pub mod folder_batch_import_service {
                                     }
                                 }
                                 Err(error) => row_error(row, error),
+                            }
+                        }
+                    }
+                }
+                for (label, name) in [
+                    ("开场构图", row.opening_composition.clone()),
+                    ("结尾构图", row.ending_composition.clone()),
+                ] {
+                    let Some(name) = name else { continue };
+                    let key = name.trim().to_lowercase();
+                    let named: Vec<_> = entities
+                        .iter()
+                        .filter(|e| e.name.trim().to_lowercase() == key)
+                        .collect();
+                    let composition = named.iter().find(|e| {
+                        e.kind == crate::domain::story_entity::StoryEntityKind::Composition
+                    });
+                    match composition {
+                        None if named.is_empty() => row_error(
+                            row,
+                            failure(
+                                "COMPOSITION_USAGE_UNKNOWN",
+                                format!("{label}「{name}」不存在，请在 characters 中声明 kind 为 composition 的实体，或使用项目中已有的构图"),
+                            ),
+                        ),
+                        None => row_error(
+                            row,
+                            failure(
+                                "COMPOSITION_USAGE_WRONG_KIND",
+                                format!("{label}「{name}」不是构图类型，只能选择构图"),
+                            ),
+                        ),
+                        Some(entity) => {
+                            if !row.entity_names.contains(&entity.name) {
+                                row_error(
+                                    row,
+                                    failure(
+                                        "COMPOSITION_USAGE_UNBOUND",
+                                        format!("{label}「{name}」需要在提示词中以 @{} 引用", entity.name),
+                                    ),
+                                );
+                            } else if entity.name != name {
+                                // Store the canonical entity name for commit lookup.
+                                if label == "开场构图" {
+                                    row.opening_composition = Some(entity.name.clone());
+                                } else {
+                                    row.ending_composition = Some(entity.name.clone());
+                                }
                             }
                         }
                     }
@@ -2027,6 +2128,17 @@ pub mod folder_batch_import_service {
                     .iter()
                     .filter_map(|n| entities.get(n).map(|e| e.id.clone()))
                     .collect();
+                let usage_id = |name: &Option<String>| {
+                    name.as_ref()
+                        .and_then(|n| entities.get(n))
+                        .map(|e| e.id.clone())
+                };
+                let composition_usage = (row.opening_composition.is_some()
+                    || row.ending_composition.is_some())
+                .then(|| crate::domain::story_entity::ShotCompositionUsage {
+                    opening_entity_id: usage_id(&row.opening_composition),
+                    ending_entity_id: usage_id(&row.ending_composition),
+                });
                 services
                     .shots
                     .save_row_atomic(ShotRowEditRecord {
@@ -2036,6 +2148,7 @@ pub mod folder_batch_import_service {
                         prompt_text: None,
                         config: None,
                         entity_ids: Some(ids),
+                        composition_usage,
                         updated_at: self.clock.now(),
                     })
                     .await
@@ -3394,6 +3507,93 @@ pub mod folder_batch_import_service {
             assert!(names.contains(&"layout01.png".to_string()), "{names:?}");
             assert_no_execution(&f.pool).await;
             f.pool.close().await;
+        }
+        fn add_composition_usage(f: &PreviewFixture, opening: &str, ending: &str, prompt: &str) {
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            for name in ["开场", "结尾"] {
+                value["characters"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(serde_json::json!({
+                        "name": name, "kind": "composition", "images": [format!("images/{name}.png")]
+                    }));
+                std::fs::copy(
+                    f.root.join("images/a.png"),
+                    f.root.join(format!("images/{name}.png")),
+                )
+                .unwrap();
+            }
+            value["shots"][1]["prompt"] = prompt.into();
+            value["shots"][1]["openingComposition"] = opening.into();
+            value["shots"][1]["endingComposition"] = ending.into();
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        }
+        #[tokio::test]
+        async fn manifest_composition_usage_is_saved_and_invalid_names_rejected() {
+            let f = preview_fixture().await;
+            add_composition_usage(
+                &f,
+                "开场",
+                "结尾",
+                "按 @开场 的构图，@Alice 走近，最后停在 @结尾 的构图",
+            );
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(p.valid_count, 2, "{:?}", p.rows);
+            assert_eq!(p.rows[1].opening_composition.as_deref(), Some("开场"));
+            assert_eq!(p.rows[1].ending_composition.as_deref(), Some("结尾"));
+            let r = f.service.commit(request(&p, false)).await.unwrap();
+            assert_eq!(r.outcome, "completed", "{r:?}");
+            let usage: Vec<(String, String)> = sqlx::query_as("SELECT e.name, b.composition_usage FROM shot_story_entity_bindings b JOIN story_entities e ON e.id=b.entity_id WHERE b.shot_id=? AND b.composition_usage IS NOT NULL ORDER BY b.composition_usage DESC")
+                .bind(&r.created_shot_ids[1]).fetch_all(&f.pool).await.unwrap();
+            assert_eq!(
+                usage,
+                vec![
+                    ("开场".to_string(), "opening".to_string()),
+                    ("结尾".to_string(), "ending".to_string())
+                ]
+            );
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+            for (opening, ending, prompt, code) in [
+                (
+                    "不存在",
+                    "结尾",
+                    "@开场 @Alice @结尾",
+                    "COMPOSITION_USAGE_UNKNOWN",
+                ),
+                (
+                    "Alice",
+                    "结尾",
+                    "@开场 @Alice @结尾",
+                    "COMPOSITION_USAGE_WRONG_KIND",
+                ),
+                (
+                    "开场",
+                    "开场",
+                    "@开场 @Alice @结尾",
+                    "COMPOSITION_USAGE_SAME",
+                ),
+                ("开场", "结尾", "@开场 @Alice", "COMPOSITION_USAGE_UNBOUND"),
+            ] {
+                let f = preview_fixture().await;
+                add_composition_usage(&f, opening, ending, prompt);
+                let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+                assert!(
+                    p.rows[1].errors.iter().any(|e| e.code == code),
+                    "{code}: {:?}",
+                    p.rows[1].errors
+                );
+                assert!(
+                    p.rows[1]
+                        .errors
+                        .iter()
+                        .all(|e| !e.message.contains("角色")
+                            || code == "COMPOSITION_USAGE_WRONG_KIND")
+                );
+                f.pool.close().await;
+            }
         }
         #[tokio::test]
         async fn existing_same_name_entity_with_other_kind_is_rejected_before_writes() {

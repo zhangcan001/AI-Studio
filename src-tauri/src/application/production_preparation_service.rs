@@ -481,7 +481,12 @@ impl ProductionPreparationService {
                     if let Ok(recipe) = RecipeParser::parse(&definition.recipe_yaml) {
                         if let Err(error) = self
                             .shot_batch_service
-                            .compile_entity_references(project_id, &recipe, current)
+                            .compile_entity_references(
+                                project_id,
+                                context.structure.shot.id.as_str(),
+                                &recipe,
+                                current,
+                            )
                             .await
                         {
                             readiness = readiness_with_blocker(

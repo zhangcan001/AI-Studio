@@ -7,10 +7,10 @@ import type { StoryboardShot } from "./storyboardModel";
 import { normalizeProductError } from "../../product/errors";
 import { invalidateVideoInputs } from "../../product/videoInputInvalidation";
 
-const api = vi.hoisted(() => ({ saveShotRow: vi.fn(), updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn() }));
+const api = vi.hoisted(() => ({ saveShotRow: vi.fn(), updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn(), compositionUsage: vi.fn(), setCompositionUsage: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: {
   creation: { saveShotRow: api.saveShotRow, updateShot: api.updateShot, deleteShot: api.deleteShot, readinessGet: api.readinessGet, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, inputsGet: api.inputsGet, inputsSave: api.inputsSave, mediaUrl: (p: string, id: string) => `media://${p}/${id}` },
-  storyEntities: { list: api.list, listForShot: api.listForShot, bindShot: api.bindShot },
+  storyEntities: { list: api.list, listForShot: api.listForShot, bindShot: api.bindShot, compositionUsage: api.compositionUsage, setCompositionUsage: api.setCompositionUsage },
   library: { imageGet: vi.fn(async () => [1]), thumbnailGet: vi.fn(async () => null) },
 } }));
 const hero = { id: "e1", projectId: "p", kind: "character", name: "阿离", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" } as const;
@@ -31,6 +31,8 @@ beforeEach(() => {
   api.inputsSave.mockImplementation(async r => ({ selectionRef: r.selection.selectionRef, token: { instanceId: 'refs', revision: 5 }, inputs: r.inputs, assets: [] }));
   api.saveShotRow.mockImplementation(async (_p: string, req: {entityIds?: string[]}) => ({ shot: shot("a",0).shot, boundEntities: [hero, lane].filter(e => (req.entityIds ?? ["e1"]).includes(e.id)) }));
   api.updateShot.mockResolvedValue({}); api.deleteShot.mockResolvedValue(undefined);
+  api.compositionUsage.mockResolvedValue({ openingEntityId: null, endingEntityId: null });
+  api.setCompositionUsage.mockImplementation(async (_p: string, _s: string, usage: unknown) => usage);
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
 
@@ -570,4 +572,29 @@ it('cancels a pending automatic row reference write on project switch', async ()
   h.rerender(<StoryboardShotRows {...p} projectId='other' items={[item]} />);
   await act(async () => { await new Promise(r => setTimeout(r, 400)); });
   expect(api.inputsSave).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("chooses 构图用途 only among the shot's bound compositions and keeps opening and ending distinct", async () => {
+  const open = { ...hero, id: "c1", kind: "composition", name: "取账前过渡" } as const;
+  const end = { ...hero, id: "c2", kind: "composition", name: "取账尾" } as const;
+  api.list.mockResolvedValue([hero, open, end]);
+  api.listForShot.mockResolvedValue([hero, open, end]);
+  api.compositionUsage.mockResolvedValue({ openingEntityId: "c1", endingEntityId: null });
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const opening = await screen.findByLabelText("镜头1 开场构图") as HTMLSelectElement;
+  const ending = screen.getByLabelText("镜头1 结尾构图") as HTMLSelectElement;
+  await waitFor(() => expect(opening.value).toBe("c1"));
+  expect([...opening.options].map(o => o.textContent)).toEqual(["不指定", "取账前过渡", "取账尾"]);
+  expect([...ending.options].find(o => o.value === "c1")?.disabled).toBe(true);
+  await waitFor(() => expect(ending.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(ending, { target: { value: "c2" } });
+  await waitFor(() => expect(api.setCompositionUsage).toHaveBeenCalledWith("p", "a", { openingEntityId: "c1", endingEntityId: "c2" }));
+  await waitFor(() => expect(ending.value).toBe("c2"));
+  expect(screen.queryByText(/角色用途/)).toBeNull();
+});
+
+it("hides 构图用途 when the shot has no bound composition", async () => {
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  await screen.findByTitle("绑定 场景 · 雨巷");
+  expect(screen.queryByLabelText("镜头1 开场构图")).toBeNull();
 });

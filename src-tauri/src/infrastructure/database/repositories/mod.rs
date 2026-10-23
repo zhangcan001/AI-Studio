@@ -382,6 +382,16 @@ pub mod story_entity {
                 return Err(RepositoryError::integrity("实体不存在或不属于当前项目"));
             }
         }
+        // 构图用途 survives a binding replacement for entities that stay bound.
+        let kept_usage: Vec<(String, String)> = sqlx::query_as(
+            "SELECT entity_id, composition_usage FROM shot_story_entity_bindings
+             WHERE project_id = ? AND shot_id = ? AND composition_usage IS NOT NULL",
+        )
+        .bind(project_id)
+        .bind(shot_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
         sqlx::query("DELETE FROM shot_story_entity_bindings WHERE project_id = ? AND shot_id = ?")
             .bind(project_id)
             .bind(shot_id)
@@ -407,7 +417,123 @@ pub mod story_entity {
                 .await
                 .map_err(|e| RepositoryError::Database { message: e.to_string() })?;
         }
+        for (entity_id, usage) in kept_usage {
+            sqlx::query(
+                "UPDATE shot_story_entity_bindings SET composition_usage = ?
+                 WHERE project_id = ? AND shot_id = ? AND entity_id = ?",
+            )
+            .bind(usage)
+            .bind(project_id)
+            .bind(shot_id)
+            .bind(entity_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?;
+        }
 
+        Ok(())
+    }
+
+    async fn shot_composition_usage_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        project_id: &str,
+        shot_id: &str,
+    ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
+        use crate::domain::story_entity::CompositionUsageKind;
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT entity_id, composition_usage FROM shot_story_entity_bindings
+             WHERE project_id = ? AND shot_id = ? AND composition_usage IS NOT NULL
+             ORDER BY ordinal, entity_id",
+        )
+        .bind(project_id)
+        .bind(shot_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+        let mut usage = crate::domain::story_entity::ShotCompositionUsage::default();
+        for (entity_id, value) in rows {
+            match CompositionUsageKind::parse(&value)
+                .map_err(|message| RepositoryError::Integrity { message })?
+            {
+                CompositionUsageKind::Opening => usage.opening_entity_id = Some(entity_id),
+                CompositionUsageKind::Ending => usage.ending_entity_id = Some(entity_id),
+            }
+        }
+        Ok(usage)
+    }
+
+    /// Replaces the shot's 构图用途. Each named entity must already be bound to
+    /// the shot and be a composition of the same project; one entity cannot be
+    /// both 开场 and 结尾.
+    async fn set_shot_composition_usage_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        project_id: &str,
+        shot_id: &str,
+        usage: &crate::domain::story_entity::ShotCompositionUsage,
+        now: &str,
+    ) -> Result<(), RepositoryError> {
+        use crate::domain::story_entity::CompositionUsageKind;
+        if usage.opening_entity_id.is_some() && usage.opening_entity_id == usage.ending_entity_id {
+            return Err(RepositoryError::integrity(
+                "开场构图与结尾构图不能是同一构图",
+            ));
+        }
+        sqlx::query(
+            "UPDATE shot_story_entity_bindings SET composition_usage = NULL, updated_at = ?
+             WHERE project_id = ? AND shot_id = ? AND composition_usage IS NOT NULL",
+        )
+        .bind(now)
+        .bind(project_id)
+        .bind(shot_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+        for (kind, entity_id) in [
+            (CompositionUsageKind::Opening, &usage.opening_entity_id),
+            (CompositionUsageKind::Ending, &usage.ending_entity_id),
+        ] {
+            let Some(entity_id) = entity_id else { continue };
+            let label = match kind {
+                CompositionUsageKind::Opening => "开场构图",
+                CompositionUsageKind::Ending => "结尾构图",
+            };
+            let entity_kind: Option<String> = sqlx::query_scalar(
+                "SELECT e.kind FROM shot_story_entity_bindings b
+                 JOIN story_entities e ON e.id = b.entity_id AND e.project_id = b.project_id
+                 WHERE b.project_id = ? AND b.shot_id = ? AND b.entity_id = ?",
+            )
+            .bind(project_id)
+            .bind(shot_id)
+            .bind(entity_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?;
+            match entity_kind.as_deref() {
+                None => {
+                    return Err(RepositoryError::integrity(format!(
+                        "{label}必须是当前镜头已绑定的构图"
+                    )))
+                }
+                Some("composition") => {}
+                Some(_) => {
+                    return Err(RepositoryError::integrity(format!(
+                        "{label}只能选择构图类型的实体"
+                    )))
+                }
+            }
+            sqlx::query(
+                "UPDATE shot_story_entity_bindings SET composition_usage = ?, updated_at = ?
+                 WHERE project_id = ? AND shot_id = ? AND entity_id = ?",
+            )
+            .bind(kind.as_str())
+            .bind(now)
+            .bind(project_id)
+            .bind(shot_id)
+            .bind(entity_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))?;
+        }
         Ok(())
     }
 
@@ -426,7 +552,11 @@ pub mod story_entity {
             req: &crate::application::ports::ShotRowEditRecord,
         ) -> Result<Vec<StoryEntity>, RepositoryError> {
             let db = |e: sqlx::Error| RepositoryError::database(e.to_string());
-            if req.prompt_text.is_none() && req.config.is_none() && req.entity_ids.is_none() {
+            if req.prompt_text.is_none()
+                && req.config.is_none()
+                && req.entity_ids.is_none()
+                && req.composition_usage.is_none()
+            {
                 return Err(RepositoryError::integrity("镜头行保存不能为空"));
             }
             let mut tx = self.pool.begin().await.map_err(db)?;
@@ -464,6 +594,10 @@ pub mod story_entity {
             }
             if let Some(ids) = &req.entity_ids {
                 replace_shot_bindings_tx(&mut tx, &req.project_id, &req.shot_id, ids, &now).await?;
+            }
+            if let Some(usage) = &req.composition_usage {
+                set_shot_composition_usage_tx(&mut tx, &req.project_id, &req.shot_id, usage, &now)
+                    .await?;
             }
             // Read the exact committed replacement within the same transaction, not via a racing pool read.
             let rows = sqlx::query("SELECT e.* FROM shot_story_entity_bindings b JOIN story_entities e ON e.id=b.entity_id AND e.project_id=b.project_id
@@ -722,6 +856,44 @@ pub mod story_entity {
                 message: e.to_string(),
             })?;
             self.list_for_shot(project_id, shot_id).await
+        }
+
+        async fn composition_usage_for_shot(
+            &self,
+            project_id: &str,
+            shot_id: &str,
+        ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
+            let db = |e: sqlx::Error| RepositoryError::database(e.to_string());
+            let mut tx = self.pool.begin().await.map_err(db)?;
+            let usage = shot_composition_usage_tx(&mut tx, project_id, shot_id).await?;
+            tx.commit().await.map_err(db)?;
+            Ok(usage)
+        }
+
+        async fn set_composition_usage(
+            &self,
+            project_id: &str,
+            shot_id: &str,
+            usage: &crate::domain::story_entity::ShotCompositionUsage,
+        ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
+            let db = |e: sqlx::Error| RepositoryError::database(e.to_string());
+            let now = chrono::Utc::now().to_rfc3339();
+            let mut tx = self.pool.begin().await.map_err(db)?;
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM shots WHERE id = ? AND project_id = ?)",
+            )
+            .bind(shot_id)
+            .bind(project_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db)?;
+            if exists == 0 {
+                return Err(RepositoryError::integrity("镜头不存在或不属于当前项目"));
+            }
+            set_shot_composition_usage_tx(&mut tx, project_id, shot_id, usage, &now).await?;
+            let saved = shot_composition_usage_tx(&mut tx, project_id, shot_id).await?;
+            tx.commit().await.map_err(db)?;
+            Ok(saved)
         }
     }
 }

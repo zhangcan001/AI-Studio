@@ -243,6 +243,22 @@ pub mod story_entity_repository {
             shot_id: &str,
             entity_ids: &[String],
         ) -> Result<Vec<StoryEntity>, RepositoryError>;
+        /// 构图用途 of one shot; repositories without the column report none.
+        async fn composition_usage_for_shot(
+            &self,
+            _project_id: &str,
+            _shot_id: &str,
+        ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
+            Ok(Default::default())
+        }
+        async fn set_composition_usage(
+            &self,
+            _project_id: &str,
+            _shot_id: &str,
+            _usage: &crate::domain::story_entity::ShotCompositionUsage,
+        ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
+            Err(RepositoryError::integrity("构图用途不可用"))
+        }
     }
 }
 pub use story_entity_repository::StoryEntityRepository;
@@ -260,6 +276,8 @@ pub mod shot_row_edit_repository {
         pub prompt_text: Option<String>,
         pub config: Option<ShotStageConfigRecord>,
         pub entity_ids: Option<Vec<String>>,
+        /// None keeps the saved 构图用途 of still-bound entities.
+        pub composition_usage: Option<crate::domain::story_entity::ShotCompositionUsage>,
         pub updated_at: DateTime<Utc>,
     }
     #[async_trait]

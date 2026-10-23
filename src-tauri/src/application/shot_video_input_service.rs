@@ -89,7 +89,7 @@ impl ShotVideoInputService {
         if let Some(prompt) = prompt {
             values.insert("prompt".into(), GenerationInputValue::Text(prompt.into()));
         }
-        self.compile_prompt(&scope.project_id, recipe, &mut values)
+        self.compile_prompt(&scope.project_id, Some(&scope.shot_id), recipe, &mut values)
             .await?;
         Ok(values)
     }
@@ -98,6 +98,7 @@ impl ShotVideoInputService {
     pub async fn compile_prompt(
         &self,
         project_id: &str,
+        shot_id: Option<&str>,
         recipe: &Recipe,
         values: &mut BTreeMap<String, GenerationInputValue>,
     ) -> Result<(), ShotVideoInputError> {
@@ -117,12 +118,27 @@ impl ShotVideoInputService {
             invalid("ENTITY_REFERENCE_UNAVAILABLE: 角色与场景解析不可用，请刷新后重试")
         })?;
         let entities = repository.list(project_id, None).await.map_err(invalid)?;
-        let references = match values.get("reference_images") {
-            Some(GenerationInputValue::ImageAssets(ids)) => ids.as_slice(),
-            _ => &[],
+        let usage = match shot_id {
+            Some(shot_id) => repository
+                .composition_usage_for_shot(project_id, shot_id)
+                .await
+                .map_err(invalid)?,
+            None => Default::default(),
         };
-        let compiled = compile_entity_prompt(prompt, project_id, &entities, references)?;
+        let mut references = match values.get("reference_images") {
+            Some(GenerationInputValue::ImageAssets(ids)) => ids.clone(),
+            _ => Vec::new(),
+        };
+        let reordered = order_composition_references(&mut references, &entities, &usage);
+        let compiled =
+            compile_entity_prompt_with_usage(prompt, project_id, &entities, &references, &usage)?;
         values.insert("prompt".into(), GenerationInputValue::Text(compiled));
+        if reordered {
+            values.insert(
+                "reference_images".into(),
+                GenerationInputValue::ImageAssets(references),
+            );
+        }
         Ok(())
     }
 
@@ -486,13 +502,95 @@ pub(crate) fn explicit_entity_mentions<'a>(
     Ok(found)
 }
 
+fn entity_cover(entity: &crate::domain::story_entity::StoryEntity) -> Option<&String> {
+    entity
+        .cover_asset_id
+        .as_ref()
+        .or_else(|| entity.image_asset_ids.first())
+}
+
+/// 构图用途 ordering: among the composition pictures already in the formal
+/// references, the opening composition takes the first composition slot and the
+/// ending composition the last one. Other pictures keep their slots. Returns
+/// whether anything moved; without 构图用途 nothing changes.
+pub(crate) fn order_composition_references(
+    references: &mut [AssetId],
+    entities: &[crate::domain::story_entity::StoryEntity],
+    usage: &crate::domain::story_entity::ShotCompositionUsage,
+) -> bool {
+    use crate::domain::story_entity::StoryEntityKind;
+    if usage.opening_entity_id.is_none() && usage.ending_entity_id.is_none() {
+        return false;
+    }
+    let cover_of = |id: &Option<String>| {
+        id.as_ref()
+            .and_then(|id| entities.iter().find(|e| &e.id == id))
+            .and_then(entity_cover)
+            .cloned()
+    };
+    let (opening, ending) = (
+        cover_of(&usage.opening_entity_id),
+        cover_of(&usage.ending_entity_id),
+    );
+    let composition_covers: Vec<&String> = entities
+        .iter()
+        .filter(|e| e.kind == StoryEntityKind::Composition)
+        .filter_map(entity_cover)
+        .collect();
+    let slots: Vec<usize> = references
+        .iter()
+        .enumerate()
+        .filter(|(_, id)| composition_covers.iter().any(|c| c.as_str() == id.as_str()))
+        .map(|(index, _)| index)
+        .collect();
+    let mut ordered: Vec<AssetId> = slots.iter().map(|&i| references[i].clone()).collect();
+    let before = ordered.clone();
+    if let Some(cover) = &opening {
+        if let Some(at) = ordered.iter().position(|id| id.as_str() == cover) {
+            let item = ordered.remove(at);
+            ordered.insert(0, item);
+        }
+    }
+    if let Some(cover) = &ending {
+        if let Some(at) = ordered.iter().position(|id| id.as_str() == cover) {
+            let item = ordered.remove(at);
+            ordered.push(item);
+        }
+    }
+    if ordered == before {
+        return false;
+    }
+    for (slot, id) in slots.into_iter().zip(ordered) {
+        references[slot] = id;
+    }
+    true
+}
+
+#[cfg(test)]
 fn compile_entity_prompt(
     prompt: &str,
     project_id: &str,
     entities: &[crate::domain::story_entity::StoryEntity],
     references: &[AssetId],
 ) -> Result<String, ShotVideoInputError> {
+    compile_entity_prompt_with_usage(
+        prompt,
+        project_id,
+        entities,
+        references,
+        &Default::default(),
+    )
+}
+
+fn compile_entity_prompt_with_usage(
+    prompt: &str,
+    project_id: &str,
+    entities: &[crate::domain::story_entity::StoryEntity],
+    references: &[AssetId],
+    usage: &crate::domain::story_entity::ShotCompositionUsage,
+) -> Result<String, ShotVideoInputError> {
     use crate::domain::story_entity::StoryEntityKind;
+    let mut has_usage = false;
 
     let mut rest = prompt;
     let mut output = String::new();
@@ -539,7 +637,20 @@ fn compile_entity_prompt(
                     "<Subject {subject}> is the {role} shown in <Picture {}>.",
                     ordinal + 1
                 ));
-                retention.push(if entity.kind == StoryEntityKind::Composition {
+                let opening = usage.opening_entity_id.as_deref() == Some(entity.id.as_str());
+                let ending = usage.ending_entity_id.as_deref() == Some(entity.id.as_str());
+                has_usage |= entity.kind == StoryEntityKind::Composition && (opening || ending);
+                retention.push(if entity.kind == StoryEntityKind::Composition && opening {
+                    format!(
+                        "<Subject {subject}>: opening_composition - <Picture {}> defines ONLY the opening frame of the shot: camera framing, angle, subject positions and object placement at the start; it does not govern the rest of the shot or the appearance of its people or setting.",
+                        ordinal + 1
+                    )
+                } else if entity.kind == StoryEntityKind::Composition && ending {
+                    format!(
+                        "<Subject {subject}>: ending_composition - <Picture {}> defines ONLY the final frame of the shot: camera framing, angle, subject positions and object placement at the end; the middle of the shot transitions to it as described in detailed_description, not the appearance of its people or setting.",
+                        ordinal + 1
+                    )
+                } else if entity.kind == StoryEntityKind::Composition {
                     format!(
                         "<Subject {subject}>: composition_reference - <Picture {}> defines the shot composition; follow its {features}, not the appearance of its people or setting, except changes explicitly requested in detailed_description.",
                         ordinal + 1
@@ -562,8 +673,13 @@ fn compile_entity_prompt(
     }
     // Ref2VA section order follows the official H3 prompt-writing convention.
     // Do not invent camera, motion, dialogue or music absent from the user text.
+    let usage_summary = if has_usage {
+        " The opening composition governs only the first frame and the ending composition only the last frame; the shot moves between them as described below."
+    } else {
+        ""
+    };
     Ok(format!(
-        "subject_definitions:\n{}\n\nsummary:\nUse the referenced subjects for the requested video. Pictures define appearance and environment; follow the actions and camera directions below.\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment reference as the character reference.\n\ndetailed_description:\n{output}\n\noverall_soundscape:\nFollow any sound directions in detailed_description.\n\nnon_diegetic_music:\nFollow any music directions in detailed_description.",
+        "subject_definitions:\n{}\n\nsummary:\nUse the referenced subjects for the requested video. Pictures define appearance and environment; follow the actions and camera directions below.{usage_summary}\n\nretention_analysis:\n{}\nDo not replace the referenced environment with a generic setting or use incidental figures in an environment reference as the character reference.\n\ndetailed_description:\n{output}\n\noverall_soundscape:\nFollow any sound directions in detailed_description.\n\nnon_diegetic_music:\nFollow any music directions in detailed_description.",
         definitions.join("\n"), retention.join("\n")
     ))
 }
@@ -823,6 +939,97 @@ mod tests {
             "<Subject 1>: composition_reference - <Picture 1> defines the shot composition"
         ));
         assert!(!compiled.contains("fully_preserved"));
+    }
+
+    #[test]
+    fn composition_usage_marks_opening_and_ending_and_orders_their_pictures() {
+        use crate::domain::{
+            story_entity::{ShotCompositionUsage, StoryEntity, StoryEntityKind},
+            AssetId,
+        };
+        let entity = |id: &str, kind, cover: &str| StoryEntity {
+            id: id.into(),
+            project_id: "prj_owned".into(),
+            kind,
+            name: id.into(),
+            description: String::new(),
+            cover_asset_id: Some(cover.into()),
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let entities = [
+            entity("开场", StoryEntityKind::Composition, "ast_open"),
+            entity("沈簿", StoryEntityKind::Character, "ast_hero"),
+            entity("结尾", StoryEntityKind::Composition, "ast_end"),
+            entity("中段", StoryEntityKind::Composition, "ast_mid"),
+        ];
+        let id = |v: &str| AssetId::parse(v).unwrap();
+        let text = "开场按 @开场 的构图，@沈簿 走过 @中段，最后停在 @结尾 的构图";
+        let usage = ShotCompositionUsage {
+            opening_entity_id: Some("开场".into()),
+            ending_entity_id: Some("结尾".into()),
+        };
+        // Without 构图用途 nothing moves and the output is the historical one.
+        let mut refs = vec![id("ast_end"), id("ast_hero"), id("ast_open"), id("ast_mid")];
+        assert!(!super::order_composition_references(
+            &mut refs,
+            &entities,
+            &Default::default()
+        ));
+        assert_eq!(
+            super::compile_entity_prompt_with_usage(
+                text,
+                "prj_owned",
+                &entities,
+                &refs,
+                &Default::default()
+            )
+            .unwrap(),
+            super::compile_entity_prompt(text, "prj_owned", &entities, &refs).unwrap()
+        );
+        // Opening takes the first composition slot, ending the last; the character keeps its slot.
+        assert!(super::order_composition_references(
+            &mut refs, &entities, &usage
+        ));
+        assert_eq!(
+            refs,
+            vec![id("ast_open"), id("ast_hero"), id("ast_mid"), id("ast_end")]
+        );
+        let compiled =
+            super::compile_entity_prompt_with_usage(text, "prj_owned", &entities, &refs, &usage)
+                .unwrap();
+        assert!(compiled.contains(
+            "<Subject 1>: opening_composition - <Picture 1> defines ONLY the opening frame"
+        ));
+        assert!(compiled.contains(
+            "<Subject 4>: ending_composition - <Picture 4> defines ONLY the final frame"
+        ));
+        assert!(compiled.contains(
+            "<Subject 3>: composition_reference - <Picture 3> defines the shot composition"
+        ));
+        assert!(compiled.contains("the ending composition only the last frame"));
+        // Only an ending: the opening slot is untouched.
+        let mut refs = vec![id("ast_end"), id("ast_open")];
+        let ending = ShotCompositionUsage {
+            opening_entity_id: None,
+            ending_entity_id: Some("结尾".into()),
+        };
+        assert!(super::order_composition_references(
+            &mut refs, &entities, &ending
+        ));
+        assert_eq!(refs, vec![id("ast_open"), id("ast_end")]);
+        let compiled = super::compile_entity_prompt_with_usage(
+            "@开场 到 @结尾",
+            "prj_owned",
+            &entities,
+            &refs,
+            &ending,
+        )
+        .unwrap();
+        assert!(compiled.contains("<Subject 1>: composition_reference"));
+        assert!(compiled.contains("<Subject 2>: ending_composition - <Picture 2>"));
+        assert!(!compiled.contains("opening_composition"));
     }
 
     fn recipe() -> Recipe {

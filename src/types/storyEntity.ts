@@ -12,6 +12,12 @@ export interface StoryEntity {
   updatedAt: string;
 }
 
+/** 构图用途 of a shot: which bound composition governs the opening frame and which the final frame. */
+export interface ShotCompositionUsage {
+  openingEntityId: string | null;
+  endingEntityId: string | null;
+}
+
 export interface StoryEntityUpsert {
   name: string;
   description: string;

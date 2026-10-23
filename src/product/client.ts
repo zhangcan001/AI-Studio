@@ -23,6 +23,10 @@ export const productClient = {
     listForShot: (projectId: string, shotId: string) => productRequest("product_story_entity_list_for_shot", { projectId, shotId }),
     bindShot: (projectId: string, shotId: string, entityIds: string[]) =>
       productRequest("product_story_entity_bind_shot", { request: { projectId, shotId, entityIds } }),
+    compositionUsage: (projectId: string, shotId: string) =>
+      productRequest("product_story_entity_composition_usage_get", { projectId, shotId }),
+    setCompositionUsage: (projectId: string, shotId: string, usage: import("../types/storyEntity").ShotCompositionUsage) =>
+      productRequest("product_story_entity_composition_usage_set", { request: { projectId, shotId, openingEntityId: usage.openingEntityId, endingEntityId: usage.endingEntityId } }),
   },
   library: {
     mediaVerify: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_media_verify", { projectId, resource }),

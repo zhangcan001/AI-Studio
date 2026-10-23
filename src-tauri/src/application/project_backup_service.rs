@@ -1483,6 +1483,9 @@ pub(crate) struct BackupShotStoryEntityBinding {
     pub(crate) shot_id: String,
     pub(crate) entity_id: String,
     pub(crate) ordinal: i64,
+    /// 构图用途 (migration 048); omitted when unset so older backups stay valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) composition_usage: Option<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }
@@ -8799,6 +8802,28 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn composition_usage_roundtrips_through_backup() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+        sqlx::query("INSERT INTO story_entities (id, project_id, kind, name, description, cover_asset_id, created_at, updated_at) VALUES ('ent_comp', ?, 'composition', '开场', '', 'ast_current_v20', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+            .bind(&project_id).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, composition_usage, created_at, updated_at) VALUES ('seb_comp', ?, 'sht_current_v20', 'ent_comp', 0, 'opening', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+            .bind(&project_id).execute(&pool).await.unwrap();
+        service.export(&project_id, archive.clone()).await.unwrap();
+        let preview = service.inspect(archive.clone()).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let usage: Option<String> = sqlx::query_scalar(
+            "SELECT composition_usage FROM shot_story_entity_bindings WHERE project_id=?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(usage.as_deref(), Some("opening"));
     }
 
     #[tokio::test]

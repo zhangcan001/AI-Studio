@@ -70,6 +70,39 @@ pub mod story_entity {
         pub updated_at: String,
     }
 
+    /// 构图用途 of a composition entity bound to one shot: 开场 or 结尾.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub enum CompositionUsageKind {
+        Opening,
+        Ending,
+    }
+
+    impl CompositionUsageKind {
+        pub fn as_str(self) -> &'static str {
+            match self {
+                Self::Opening => "opening",
+                Self::Ending => "ending",
+            }
+        }
+
+        pub fn parse(value: &str) -> Result<Self, String> {
+            match value {
+                "opening" => Ok(Self::Opening),
+                "ending" => Ok(Self::Ending),
+                _ => Err(format!("unsupported composition usage: {value}")),
+            }
+        }
+    }
+
+    /// Per-shot 构图用途: entity ids of the opening and ending compositions.
+    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ShotCompositionUsage {
+        pub opening_entity_id: Option<String>,
+        pub ending_entity_id: Option<String>,
+    }
+
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct StoryEntityUpsert {

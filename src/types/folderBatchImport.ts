@@ -3,7 +3,7 @@ export interface FolderImportIssue { code: string; message: string; rowNumber?: 
 export interface FolderImportRow {
   rowKey: string; rowNumber: number; manifestId: string | null; mode: FolderImportMode; name: string;
   promptPreview: string; durationSeconds: number; width: number; height: number; generatorLabel: string;
-  firstFrame: string | null; lastFrame: string | null; referenceCount: number; entityNames: string[];
+  firstFrame: string | null; lastFrame: string | null; referenceCount: number; entityNames: string[]; openingComposition?: string | null; endingComposition?: string | null;
   errors: FolderImportIssue[]; warnings: FolderImportIssue[];
 }
 export interface FolderImportPreview {

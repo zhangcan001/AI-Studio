@@ -94,6 +94,7 @@ mod story_entity_contract {
                 updated_at: chrono::Utc::now(),
             }),
             entity_ids: ids,
+            composition_usage: None,
             updated_at: chrono::Utc::now(),
         }
     }
@@ -243,6 +244,91 @@ mod story_entity_contract {
         close(db).await;
     }
 
+    #[tokio::test]
+    async fn composition_usage_requires_bound_compositions_and_survives_rebinding() {
+        use ai_studio_lib::domain::story_entity::ShotCompositionUsage;
+        let (db, service) = fixture().await;
+        let open = service
+            .create(
+                "prj_a",
+                StoryEntityKind::Composition,
+                input("开场", None, &[]),
+            )
+            .await
+            .unwrap();
+        let end = service
+            .create(
+                "prj_a",
+                StoryEntityKind::Composition,
+                input("结尾", None, &[]),
+            )
+            .await
+            .unwrap();
+        let hero = service
+            .create(
+                "prj_a",
+                StoryEntityKind::Character,
+                input("hero", None, &[]),
+            )
+            .await
+            .unwrap();
+        service
+            .replace_shot_bindings("prj_a", "sht_a", vec![open.id.clone(), hero.id.clone()])
+            .await
+            .unwrap();
+        let usage = |opening: &str, ending: Option<&str>| ShotCompositionUsage {
+            opening_entity_id: Some(opening.to_string()),
+            ending_entity_id: ending.map(str::to_string),
+        };
+        for (bad, message) in [
+            (usage(&hero.id, None), "只能选择构图类型"),
+            (usage(&open.id, Some(&end.id)), "已绑定的构图"),
+            (usage(&open.id, Some(&open.id)), "不能是同一构图"),
+        ] {
+            let err = service
+                .set_composition_usage("prj_a", "sht_a", bad)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(message), "{err}");
+        }
+        assert_eq!(
+            service
+                .composition_usage_for_shot("prj_a", "sht_a")
+                .await
+                .unwrap(),
+            ShotCompositionUsage::default()
+        );
+        service
+            .replace_shot_bindings(
+                "prj_a",
+                "sht_a",
+                vec![open.id.clone(), hero.id.clone(), end.id.clone()],
+            )
+            .await
+            .unwrap();
+        let saved = service
+            .set_composition_usage("prj_a", "sht_a", usage(&open.id, Some(&end.id)))
+            .await
+            .unwrap();
+        assert_eq!(saved, usage(&open.id, Some(&end.id)));
+        // Rebinding keeps the usage of entities that stay bound and drops removed ones.
+        service
+            .replace_shot_bindings("prj_a", "sht_a", vec![hero.id.clone(), open.id.clone()])
+            .await
+            .unwrap();
+        assert_eq!(
+            service
+                .composition_usage_for_shot("prj_a", "sht_a")
+                .await
+                .unwrap(),
+            ShotCompositionUsage {
+                opening_entity_id: Some(open.id.clone()),
+                ending_entity_id: None
+            }
+        );
+        close(db).await;
+    }
     #[tokio::test]
     async fn create_rejects_foreign_missing_non_image_and_duplicate_assets_atomically() {
         let (db, service) = fixture().await;

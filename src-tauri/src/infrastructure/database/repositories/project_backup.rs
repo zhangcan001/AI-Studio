@@ -2818,8 +2818,9 @@ async fn query_shot_story_entity_bindings(
     Vec<crate::application::project_backup_service::BackupShotStoryEntityBinding>,
     RepositoryError,
 > {
-    let rows = sqlx::query_as::<_, (String, String, String, i64, String, String)>(
-        "SELECT b.id, b.shot_id, b.entity_id, b.ordinal, b.created_at, b.updated_at
+    #[allow(clippy::type_complexity)]
+    let rows = sqlx::query_as::<_, (String, String, String, i64, Option<String>, String, String)>(
+        "SELECT b.id, b.shot_id, b.entity_id, b.ordinal, b.composition_usage, b.created_at, b.updated_at
          FROM shot_story_entity_bindings b
          JOIN shots s ON s.id = b.shot_id AND s.project_id = b.project_id
          JOIN story_entities e ON e.id = b.entity_id AND e.project_id = b.project_id
@@ -2832,12 +2833,13 @@ async fn query_shot_story_entity_bindings(
     Ok(rows
         .into_iter()
         .map(
-            |(id, shot_id, entity_id, ordinal, created_at, updated_at)| {
+            |(id, shot_id, entity_id, ordinal, composition_usage, created_at, updated_at)| {
                 crate::application::project_backup_service::BackupShotStoryEntityBinding {
                     id,
                     shot_id,
                     entity_id,
                     ordinal,
+                    composition_usage,
                     created_at,
                     updated_at,
                 }
@@ -4430,14 +4432,15 @@ async fn restore_rows_in_transaction(
             continue;
         };
         sqlx::query(
-            "INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO shot_story_entity_bindings (id, project_id, shot_id, entity_id, ordinal, composition_usage, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(format!("seb_{}", Uuid::new_v4().simple()))
         .bind(&project.id)
         .bind(shot_id)
         .bind(entity_id)
         .bind(binding.ordinal)
+        .bind(&binding.composition_usage)
         .bind(&binding.created_at)
         .bind(&binding.updated_at)
         .execute(&mut **transaction)

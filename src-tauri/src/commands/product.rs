@@ -870,6 +870,27 @@ pub async fn product_story_entity_bind_shot(
     crate::commands::story_entities::product_story_entity_bind_shot(state, request).await
 }
 
+#[tauri::command]
+pub async fn product_story_entity_composition_usage_get(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    project_id: String,
+    shot_id: String,
+) -> Result<crate::domain::story_entity::ShotCompositionUsage, crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_composition_usage_get(
+        state, project_id, shot_id,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn product_story_entity_composition_usage_set(
+    state: tauri::State<'_, crate::app_state::AppState>,
+    request: crate::commands::story_entities::ShotCompositionUsageRequest,
+) -> Result<crate::domain::story_entity::ShotCompositionUsage, crate::error::AppError> {
+    crate::commands::story_entities::product_story_entity_composition_usage_set(state, request)
+        .await
+}
+
 fn row_scalar_values(
     values: Option<std::collections::BTreeMap<String, super::generation::InputValueDto>>,
 ) -> Result<

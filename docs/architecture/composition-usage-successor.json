@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "COMPOSITION_USAGE",
+  "parentHead": "638ba73e2a845171f09f4f2242025ab1bf25ed35",
+  "planningParentHead": "638ba73e2a845171f09f4f2242025ab1bf25ed35",
+  "contracts": {
+    "schemaChanged": true,
+    "backupFormatChanged": true,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "compositionUsageMigration048": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "docs/architecture/folder-batch-import.md": {
+      "beforeHash": "6cfd18ec95ccf51ee13506a9c6e6c403993e99236aad32d69a5edcca97a16dce",
+      "afterHash": "154e2107a3da952f253b3cd00b5f7fc318aaabdfaf8853e8a542282fda289fdf"
+    },
+    "scripts/composition-usage-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "3cd6a7dfc8943e6f37399560b95db1ed403cee23d2863181347036a63492e9b3"
+    },
+    "scripts/testing/composition-usage.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "fa00c6426c87eeba92d1f1d03a6d2a56bb6b55bc62b50911ed14f48d7cd37428"
+    },
+    "scripts/veda-reference-media-successor-guard.mjs": {
+      "beforeHash": "640aeeac4b0a4cfb3a5bf05751f38d5572cec48f17ba9b413ccf602392d5ca48",
+      "afterHash": "3e2e5aa0f6316c45b809c37332ea27c85fad75d33d0fe4f862523fc3aa3e09e8"
+    },
+    "src-tauri/migrations/048_shot_story_entity_composition_usage.sql": {
+      "beforeHash": null,
+      "afterHash": "d2dcba7c7055ff5a7308cd5491fd8b50f5872f687c78c5afae1be0ef522ee02e"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "07a04db773dde9c4c153f68750385961832085157d9b3d229184d19e40bc1e1d",
+      "afterHash": "277889d0723c8593f017272ef940fc2c07a0b486c331b4be0875ea0554cfad6f"
+    },
+    "src-tauri/src/application/ports/mod.rs": {
+      "beforeHash": "ca2ce6baa4fc9df4d0bb6a122b3ff206d6dd7649325fd2ee32417d0e63f6fd3e",
+      "afterHash": "b42a041bed227c399c0d1327b3fe93f5387bb94ae82e5c2d208f45bd9e88a086"
+    },
+    "src-tauri/src/application/product/creation_facade/context.rs": {
+      "beforeHash": "02e8fe3ef04bb0f18a546b3fe1bb3cee697977a942a68a184663d236d89d3963",
+      "afterHash": "efd9636292e40ffb3fd94b6a43aeebc9fe37037795452d5c7fa8a2341df00fa3"
+    },
+    "src-tauri/src/application/production_preparation_service.rs": {
+      "beforeHash": "758ab8ef8332e7bbb9c6e879f19d8ed319a988e1ff0c441ebd8bda3d42d7da63",
+      "afterHash": "eaf59fc6fcf843b2dc8a6b787215171f1e61eef9000573b7546d138f71248120"
+    },
+    "src-tauri/src/application/project_backup_service.rs": {
+      "beforeHash": "c2cff3d37c0f0d0388a5b3c04b7226ffb72e56f0e5b541e03a14670429643a11",
+      "afterHash": "41d1b2d1b5c4638e438ddd11c9d04513a245e99ddc4e66bff81786ad1e7d3609"
+    },
+    "src-tauri/src/application/shot_batch_service.rs": {
+      "beforeHash": "0072632a533278fd4f4c36e4bb356d2203095b94093bb10b8633ae9d6e685554",
+      "afterHash": "f9ada7c009993487adb53ae4cf50d3a561ca40fcaddebffbe048d509e94b00e5"
+    },
+    "src-tauri/src/application/shot_video_input_service.rs": {
+      "beforeHash": "870bc557af21d8dffbb8f42a4b05d17b05cd158c39bff02393d84ad1c067cf21",
+      "afterHash": "f591fa94a7603f0ed773a8755946c5afa3a98d993e16aed7860ac72dfbe8b0a1"
+    },
+    "src-tauri/src/commands/mod.rs": {
+      "beforeHash": "ed2d8872459734af0fea783920daf9b849defbcaff5e8cc59daba5356e505ca8",
+      "afterHash": "ddb252bd3db28db66d7fb2d28fb3fead2466bf497919814f0d549e2f40a9b86f"
+    },
+    "src-tauri/src/commands/product.rs": {
+      "beforeHash": "6163dd3447e24631811833064318a975bab0efa367f16cef161699ac2ba245a5",
+      "afterHash": "f86f672ee111b5bee85fae2990413891852a9a204920a99cd78f74b5de3e13ac"
+    },
+    "src-tauri/src/domain/mod.rs": {
+      "beforeHash": "99f28e2577ececa434743f8197866fd8cf34ea6735ef688e2989c0e846b2b012",
+      "afterHash": "e7b182518d79432cde85f420162b860b232c62556b0b43c6ac41766b92efa419"
+    },
+    "src-tauri/src/infrastructure/database/dev048_consistency_e2e.rs": {
+      "beforeHash": "6e46d85d6abfe79e281890e0ee934714086f3025f8e7af846931c03257ae9840",
+      "afterHash": "1de6517f138a3819de661080c6af490238e6fbb7410df4a0baa300ca58584ded"
+    },
+    "src-tauri/src/infrastructure/database/pool.rs": {
+      "beforeHash": "0a440018396f62e184541344c07bd32b363f3785148b977b9893947d0e2068e8",
+      "afterHash": "44008499d9ec88ce57a4e1f577d7421737d3ec9c75ceb3e36607a85445f73c47"
+    },
+    "src-tauri/src/infrastructure/database/repositories/mod.rs": {
+      "beforeHash": "386dcd76e7d41819785f428da4a7c9e93de417864e27ad6c41b28cd459bd487f",
+      "afterHash": "cad4d8a58c5359ac27fe34d8008de7ce36a9f79b18a9d170e91f42cc905bf763"
+    },
+    "src-tauri/src/infrastructure/database/repositories/project_backup.rs": {
+      "beforeHash": "b71119027a654106b82fd6dc33b0b3c57a72b28346efaad2004f51551dc41da1",
+      "afterHash": "d6a6747869faff97cc152eec7f0116a74b9a22671db1e0e1484b308f9c3cc4dc"
+    },
+    "src-tauri/src/lib.rs": {
+      "beforeHash": "e88bb6a9f0f75fc7e8634bdb5ab23b28d54702c390fee6852507f8ac3f1a64a6",
+      "afterHash": "db6ebfc67550e99b816e5a5f39d7f934c8c053ef453459f2d4633e715404e080"
+    },
+    "src-tauri/tests/dev040_safety.rs": {
+      "beforeHash": "6df34dbdde93c884b054200dc3641dd455b670bc1af5a731b69edf7e97098981",
+      "afterHash": "bdff60510186c569e94e7b6420f126ef3b20a19e6a2eb99d93eab92d2773f844"
+    },
+    "src-tauri/tests/product_library_contract.rs": {
+      "beforeHash": "6bb5292d45306ef7c719c40d69ddd916b1f109bba9350721cd2c11a93bfa3122",
+      "afterHash": "b219456afe4f410fd9027cbd2ee10624cc625350824a88e1e45b4e6488ea2a72"
+    },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": "7ce690d6a331d79105e680ab3822e064663943eacd074b7234bf50c698b33709",
+      "afterHash": "f510ebd32f4e5e603ceb97e3f5908d08c90b30fdba89e97775f804b21781ce5b"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": "4e5dee27c8ab70f34c95f7eff6d722456bd86b451513e1695e68f08b17b1b045",
+      "afterHash": "27cd4ddad6e9837ee5ce1f0a85a636ca8d3ef1416e907420fbf0bd99959e31f1"
+    },
+    "src/features/shots/FolderBatchImportPanel.test.tsx": {
+      "beforeHash": "f6adc4487d28a89f6e71037dfd3d048cd8b2bc0a87f7bc1b8c53a1dad9b00ced",
+      "afterHash": "7a384ff7ef0275f607c04e0637528db2ca12c472c57b8a1c8c028a75be9cbc7b"
+    },
+    "src/features/shots/FolderBatchImportPanel.tsx": {
+      "beforeHash": "e19e10bb3d66be0370b2823e9c384652fd9478acb7851cd859267978dfe1629a",
+      "afterHash": "0ef725cdaee8c37fb7759b7025aad0f9bb9706b4a9d8a2d3b2513f0641574058"
+    },
+    "src/product/client.ts": {
+      "beforeHash": "126e616c7a30083bd1f9bbc62df31799acde04c37599b1cda05a64e6a6f52cef",
+      "afterHash": "1f8841ece1654e1a4c26ec19f1cfdd491a3ab50144b4b0d2d2435515b6097056"
+    },
+    "src/product/transport.ts": {
+      "beforeHash": "0c68d21b21ea470d82e251077653154efd8cff04cc898611d4e17298bb445428",
+      "afterHash": "17f8c9ae4b161de8a5d73557eba4318eebf2b02b13552ecb4ab1d05ac6966324"
+    },
+    "src/types/folderBatchImport.ts": {
+      "beforeHash": "14732df67ec3426fc252c67e30e1cc5ee5eedb35dc3d9fda2295e8052d5d86df",
+      "afterHash": "d0c045dee211877ef9e088596e070b1b9a5c64e4200db3ef0f9a2933e99552ea"
+    },
+    "src/types/storyEntity.ts": {
+      "beforeHash": "9f4795af3fac917292206e49bdaa301893790b459787100ed6f31e9c002d59f4",
+      "afterHash": "2eed28a465771c47ea49223e3bacee1890f131e8bc3eceba810271b204f1f67e"
+    }
+  }
+}

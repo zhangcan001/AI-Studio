@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
-import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
+import type { ShotCompositionUsage, StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage } from "./CreateMediaPreview";
 import "./CreatePage.css";
@@ -379,6 +379,32 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   });
   const cover = coverAsset(item);
   const percent = item.status === "GENERATING" ? runPercent(item.run) : null;
+  // 构图用途: which bound composition governs the opening frame and which the final frame.
+  const [usage, setUsage] = useState<ShotCompositionUsage>({ openingEntityId: null, endingEntityId: null });
+  const usageEpoch = useRef(0);
+  const boundKey = bound.map(e => e.id).join(",");
+  useEffect(() => {
+    const token = ++usageEpoch.current;
+    setUsage({ openingEntityId: null, endingEntityId: null });
+    const read = productClient.storyEntities?.compositionUsage;
+    if (typeof read === "function" && bindingsReady) {
+      void Promise.resolve().then(() => read(projectId, item.id)).then(next => {
+        if (token === usageEpoch.current && next) setUsage({ openingEntityId: next.openingEntityId ?? null, endingEntityId: next.endingEntityId ?? null });
+      }).catch(cause => { if (token === usageEpoch.current) setError(normalizeProductError(cause).message); });
+    }
+    return () => { ++usageEpoch.current; };
+  }, [projectId, item.id, boundKey, bindingsReady]);
+  const chooseUsage = (slot: "openingEntityId" | "endingEntityId", entityId: string) => {
+    if (bindingsDisabled) return;
+    const next = { ...usage, [slot]: entityId || null };
+    void run(async () => {
+      const token = ++usageEpoch.current;
+      const saved = await productClient.storyEntities.setCompositionUsage(projectId, item.id, next);
+      if (token !== usageEpoch.current) return;
+      setUsage({ openingEntityId: saved.openingEntityId ?? null, endingEntityId: saved.endingEntityId ?? null });
+      setNote("构图用途已保存；生成时开场构图只决定开头画面，结尾构图只决定最后画面。");
+    });
+  };
   const byKind = useMemo(() => Object.fromEntries(KINDS.map(k => [k, bound.filter(e => e.kind === k)])) as Record<StoryEntityKind, StoryEntity[]>, [bound]);
   const chips = (list: StoryEntity[]) => list.length ? list.map(e => <span key={e.id} className="shot-row-inline-chip"><Avatar entity={e} url={(entityAvatarAssetId(e) && urls[entityAvatarAssetId(e)!]) || undefined} />{e.name}</span>) : <span className="muted">未绑定</span>;
   const content = renderPrompt(prompt, entities, urls);
@@ -416,6 +442,13 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         <div><dt>角色</dt><dd>{chips(byKind.character)}</dd></div>
         <div><dt>物品</dt><dd>{chips(byKind.prop)}</dd></div>
         <div><dt>构图</dt><dd>{chips(byKind.composition)}</dd></div>
+        {byKind.composition.length > 0 && <div><dt>构图用途</dt><dd className="shot-row-composition-usage">
+          {([["openingEntityId", "开场构图", "endingEntityId"], ["endingEntityId", "结尾构图", "openingEntityId"]] as const).map(([slot, label, other]) => <label key={slot}>{label}
+            <select aria-label={`${item.name} ${label}`} value={usage[slot] ?? ""} disabled={bindingsDisabled} onChange={e => chooseUsage(slot, e.target.value)}>
+              <option value="">不指定</option>
+              {byKind.composition.map(e => <option key={e.id} value={e.id} disabled={usage[other] === e.id}>{e.name}</option>)}
+            </select></label>)}
+        </dd></div>}
         <div><dt>画面内容</dt><dd>{content}</dd></div>
       </dl>
       <div className="shot-row-toolbar"><button type="button" onClick={onOpen}>编辑</button><button type="button" onClick={onOpen}>详情</button></div>

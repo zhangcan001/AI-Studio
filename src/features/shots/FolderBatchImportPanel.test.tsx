@@ -36,6 +36,11 @@ describe("folder import preview and authority",()=>{
   render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();
   expect(screen.getByText("调阅签 · 道具 · 新建，1 张图")).toBeTruthy();expect(screen.getByText("剧情01 · 构图 · 新建，1 张图")).toBeTruthy();
  });
+ it("shows 构图用途 of each row in the preview",async()=>{
+  const p=preview("usage",false);p.rows[1]={...p.rows[1],entityNames:["取账前过渡","取账尾"],openingComposition:"取账前过渡",endingComposition:"取账尾"};api.pick.mockResolvedValue(p);
+  render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();
+  expect(screen.getByText("开场构图：取账前过渡")).toBeTruthy();expect(screen.getByText("结尾构图：取账尾")).toBeTruthy();
+ });
  it("commits exact valid row keys and starts nothing by default",async()=>{
   const imported=vi.fn();const queue=vi.fn();render(<FolderBatchImportPanel projectId="p" onImported={imported} onCancel={vi.fn()} onOpenQueue={queue}/>);await pick();
   expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("disabled",true);expect(screen.getByText("图片缺失")).toBeTruthy();
