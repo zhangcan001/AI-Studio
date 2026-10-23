@@ -1453,6 +1453,23 @@ export function deleteProductionQueue(projectId: string, batchId: string): Promi
   return invoke<void>("production_queue_delete", { projectId, batchId });
 }
 
+export function cancelProductionQueueItem(projectId: string, batchId: string, itemId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_cancel_item", { projectId, batchId, itemId });
+}
+
+export function cancelProductionQueueBatch(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_cancel_batch", { projectId, batchId });
+}
+
+export function deleteProductionQueueItem(projectId: string, batchId: string, itemId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_delete_item", { projectId, batchId, itemId });
+}
+
+/** Deletes a finished batch (archives it first when needed); tasks, videos and assets are kept. */
+export function discardProductionQueue(projectId: string, batchId: string): Promise<void> {
+  return invoke<void>("production_queue_discard", { projectId, batchId });
+}
+
 export function skipProductionQueueItem(
   projectId: string,
   batchId: string,

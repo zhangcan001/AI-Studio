@@ -804,9 +804,67 @@ pub async fn product_run_cancel(
     project_id: String,
     run_ref: RunRef,
 ) -> Result<ProductRun, ProductError> {
-    runs(&state)
-        .cancel(&project_id, run_ref, &state.tasks.cancellation)
-        .await
+    let is_task = matches!(
+        run_ref.source,
+        crate::application::product::run_facade::RunSource::Task
+    );
+    let task_id = run_ref.id.clone();
+    let run = runs(&state)
+        .cancel(&project_id, run_ref.clone(), &state.tasks.cancellation)
+        .await?;
+    if !is_task || run.status != "RUNNING" && run.status != "QUEUED" {
+        return Ok(run);
+    }
+    // Stale tasks (no live worker after a crash) are reconciled right away.
+    let _ = state.tasks.recovery.reconcile_active().await;
+    if let Ok(id) = crate::domain::TaskId::parse(task_id) {
+        let _ = state
+            .tasks
+            .recovery
+            .finalize_cancel_when_comfy_offline(&id)
+            .await;
+    }
+    runs(&state).get(&project_id, run_ref).await
+}
+
+/// Deletes a finished run record: a task record is hidden, a queue batch
+/// record is removed. Generated videos and library assets are always kept.
+#[tauri::command]
+pub async fn product_run_delete(
+    state: State<'_, AppState>,
+    project_id: String,
+    run_ref: RunRef,
+) -> Result<(), ProductError> {
+    use crate::application::product::run_facade::RunSource;
+    match run_ref.source {
+        RunSource::Task => state
+            .tasks
+            .cancellation
+            .hide_record(&project_id, &run_ref.id)
+            .await
+            .map_err(|error| match error {
+                crate::application::task_cancellation_service::TaskCancellationError::NotCancellable { .. } => {
+                    ProductError::new("RUN_DELETE_ACTIVE", "任务还没结束，请先取消再删除。", None)
+                }
+                other => ProductError::internal(other),
+            }),
+        RunSource::QueueBatch => state
+            .production
+            .queue
+            .discard(&project_id, &run_ref.id)
+            .await
+            .map_err(|error| match error {
+                crate::application::production_queue_service::ProductionQueueError::InvalidState(_) => {
+                    ProductError::new("RUN_DELETE_ACTIVE", "队列里还有未结束的任务，请先取消再删除。", None)
+                }
+                other => ProductError::internal(other),
+            }),
+        RunSource::ProductionRun => Err(ProductError::new(
+            "RUN_DELETE_UNSUPPORTED",
+            "这类运行记录暂不支持删除。",
+            None,
+        )),
+    }
 }
 
 #[tauri::command]

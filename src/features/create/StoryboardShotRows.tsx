@@ -217,6 +217,12 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     void run(() => replaceBindings(bound.some(e => e.id === id) ? bound.filter(e => e.id !== id).map(e => e.id) : [...bound.map(e => e.id), id]));
   };
   const saveName = () => { const next = name.trim(); if (!next || next === item.name) { setName(item.name); return; } void run(async () => { await productClient.creation.updateShot(projectId, { shotId: item.id, name: next }); onChanged(); }); };
+  const cancelGeneration = () => {
+    const active = item.run;
+    if (!active || !active.availableActions.includes("CANCEL")) return;
+    if (!window.confirm(`取消分镜「${item.name}」的生成？正在生成的视频会被中断，已生成的视频和素材会保留。`)) return;
+    void run(async () => { await productClient.run.cancel(projectId, active.ref); setNote("已取消生成"); onChanged(); });
+  };
   const remove = () => { if (!window.confirm(`删除分镜「${item.name}」？此操作不可撤销。`)) return; void run(async () => { await productClient.creation.deleteShot(projectId, item.id); onChanged(); }); };
   const selectionRef = item.shot?.selectionRef ?? null;
   useEffect(() => { if (pendingSelection === selectionRef) setPendingSelection(undefined); }, [pendingSelection, selectionRef]);
@@ -529,6 +535,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <div className="shot-row-field-actions">
         <button type="button" className="success" disabled={disabled} title="新分镜追加到末尾" onClick={onCreate}>新建分镜</button>
         <button type="button" className="danger" disabled={disabled} onClick={remove}>删除分镜</button>
+        {item.status === "GENERATING" && item.run?.availableActions.includes("CANCEL") && <button type="button" className="danger" disabled={busy} onClick={cancelGeneration}>取消生成</button>}
       </div>
       <span className="storyboard-badge">{item.error ? "读取失败" : storyboardStatusLabels[item.status]}</span>
     </div>

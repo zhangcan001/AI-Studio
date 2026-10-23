@@ -50,6 +50,10 @@ export interface ProductionQueueDrawerProps {
   onToggle?: (expanded: boolean) => void;
   onStart?: (batchId: string) => void | Promise<void>;
   onPause?: (batchId: string) => void | Promise<void>;
+  /** Cancels every unfinished item, interrupting the running one. The host confirms. */
+  onCancelBatch?: (batchId: string) => void | Promise<void>;
+  /** Deletes a finished batch record; generated files are kept. The host confirms. */
+  onDeleteBatch?: (batchId: string) => void | Promise<void>;
   onRetry?: (itemId: string) => void | Promise<void>;
   onOpen?: (batchId: string) => void | Promise<void>;
   onCancelQueuedStart?: (batchId: string) => void;
@@ -87,7 +91,7 @@ interface QueueStats {
   failed?: number;
 }
 
-type ActionKind = "start" | "pause" | "retry" | "open" | "cancel-waiting";
+type ActionKind = "start" | "pause" | "retry" | "open" | "cancel-waiting" | "cancel-batch" | "delete-batch";
 
 export function ProductionQueueDrawer({
   overview,
@@ -107,6 +111,8 @@ export function ProductionQueueDrawer({
   onToggle,
   onStart,
   onPause,
+  onCancelBatch,
+  onDeleteBatch,
   onRetry,
   onOpen,
   onCancelQueuedStart,
@@ -205,6 +211,8 @@ export function ProductionQueueDrawer({
                   busyAction={busyAction}
                   onStart={onStart ? (id) => void runAction("start", id, onStart) : undefined}
                   onPause={onPause ? (id) => void runAction("pause", id, onPause) : undefined}
+                  onCancelBatch={onCancelBatch ? (id) => void runAction("cancel-batch", id, onCancelBatch) : undefined}
+                  onDeleteBatch={onDeleteBatch ? (id) => void runAction("delete-batch", id, onDeleteBatch) : undefined}
                   onRetry={onRetry ? (id) => void runAction("retry", id, onRetry) : undefined}
                   onOpen={onOpen ? (id) => void runAction("open", id, onOpen) : undefined}
                   onCancelWaiting={onCancelQueuedStart ? (id) => void runAction("cancel-waiting", id, onCancelQueuedStart) : undefined}
@@ -254,6 +262,8 @@ function BatchRow({
   busyAction,
   onStart,
   onPause,
+  onCancelBatch,
+  onDeleteBatch,
   onRetry,
   onOpen,
   onCancelWaiting,
@@ -266,6 +276,8 @@ function BatchRow({
   busyAction?: string;
   onStart?: (id: string) => void;
   onPause?: (id: string) => void;
+  onCancelBatch?: (id: string) => void;
+  onDeleteBatch?: (id: string) => void;
   onRetry?: (id: string) => void;
   onOpen?: (id: string) => void;
   onCancelWaiting?: (id: string) => void;
@@ -340,6 +352,30 @@ function BatchRow({
             disabled={Boolean(busyAction)}
           >
             暂停
+          </button>
+        )}
+        {onCancelBatch && !row.archivedAt && ["READY", "RUNNING", "PAUSED"].includes(row.status) && (
+          <button
+            type="button"
+            className="quiet"
+            data-action="cancel-batch"
+            aria-label={`取消队列 ${row.shotName ?? row.name}`}
+            onClick={() => onCancelBatch(row.id)}
+            disabled={Boolean(busyAction)}
+          >
+            取消队列
+          </button>
+        )}
+        {onDeleteBatch && row.status === "COMPLETED" && (
+          <button
+            type="button"
+            className="quiet"
+            data-action="delete-batch"
+            aria-label={`删除队列 ${row.shotName ?? row.name}`}
+            onClick={() => onDeleteBatch(row.id)}
+            disabled={Boolean(busyAction)}
+          >
+            删除
           </button>
         )}
         {onRetry && retryable && (

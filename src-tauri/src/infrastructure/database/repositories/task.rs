@@ -431,7 +431,7 @@ impl TaskRepository for SqliteTaskRepository {
                 error_code, error_message, raw_error_json,
                 created_at, queued_at, started_at, finished_at
              FROM tasks
-             WHERE project_id = ?
+             WHERE project_id = ? AND hidden_at IS NULL
              ORDER BY created_at DESC, id DESC LIMIT ?",
         )
         .bind(project_id)
@@ -441,6 +441,26 @@ impl TaskRepository for SqliteTaskRepository {
         .map_err(map_sqlx_error)?;
 
         rows.into_iter().map(TaskRow::try_into_domain).collect()
+    }
+
+    async fn hide_finished(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        hidden_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, RepositoryError> {
+        let result = sqlx::query(
+            "UPDATE tasks SET hidden_at = ?
+             WHERE project_id = ? AND id = ? AND hidden_at IS NULL
+               AND status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')",
+        )
+        .bind(format_datetime(hidden_at))
+        .bind(project_id)
+        .bind(task_id.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() > 0)
     }
 
     async fn list_active(&self) -> Result<Vec<Task>, RepositoryError> {

@@ -56,7 +56,44 @@ pub async fn task_cancel(
         .request_cancel(&project_id, &task_id)
         .await
         .map_err(map_cancellation_error)?;
+    // A task whose worker is gone (app restart, ComfyUI crash) is reconciled
+    // now so it does not stay "cancelling" and keep the project's video lock.
+    let task = if task.status == crate::domain::TaskStatus::CancelRequested {
+        let _ = state.tasks.recovery.reconcile_active().await;
+        match state
+            .tasks
+            .recovery
+            .finalize_cancel_when_comfy_offline(&task.id)
+            .await
+        {
+            Ok(Some(current)) => current,
+            _ => task,
+        }
+    } else {
+        task
+    };
     state.tasks.query.view(task).await.map_err(map_query_error)
+}
+
+/// Deletes (hides) a finished task record; videos and library assets are kept.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn task_delete_record(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> Result<(), AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .tasks
+        .cancellation
+        .hide_record(&project_id, &task_id)
+        .await
+        .map_err(|error| match error {
+            TaskCancellationError::NotCancellable { .. } => {
+                AppError::invalid_input("任务还没结束，请先取消再删除。".to_owned())
+            }
+            other => map_cancellation_error(other),
+        })
 }
 
 #[tauri::command]

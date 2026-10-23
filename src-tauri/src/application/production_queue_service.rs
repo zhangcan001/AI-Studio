@@ -14,6 +14,9 @@ use crate::application::ports::{
     ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
     TaskRepository, TerminalItemTransition,
 };
+use crate::application::task_cancellation_service::{
+    TaskCancellationError, TaskCancellationService,
+};
 use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::compiler::{RecipeParser, RecipeValidator, SeedResolver};
 use crate::domain::{
@@ -280,6 +283,7 @@ pub struct ProductionQueueService {
     recovery_tasks: Arc<Mutex<HashSet<String>>>,
     deferred_start_notify: Arc<Notify>,
     new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
+    task_cancellation: Option<Arc<TaskCancellationService>>,
 }
 
 impl ProductionQueueService {
@@ -306,7 +310,13 @@ impl ProductionQueueService {
             recovery_tasks: Arc::new(Mutex::new(HashSet::new())),
             deferred_start_notify: Arc::new(Notify::new()),
             new_generation_admission: None,
+            task_cancellation: None,
         }
+    }
+
+    pub fn with_task_cancellation(mut self, cancellation: Arc<TaskCancellationService>) -> Self {
+        self.task_cancellation = Some(cancellation);
+        self
     }
 
     pub fn with_new_generation_admission(
@@ -1423,6 +1433,375 @@ impl ProductionQueueService {
             ));
         }
         self.get(project_id, batch_id.as_str()).await
+    }
+
+    /// Cancels one unfinished item. Pending items become `CANCELLED` at once.
+    /// Dispatched items request cancellation of their task, which interrupts
+    /// the ComfyUI prompt (or removes it from the ComfyUI queue); items whose
+    /// worker is gone (for example after a ComfyUI crash) are reconciled
+    /// immediately so stale `DISPATCHED` rows never stay stuck. A cancelled
+    /// item does not pause a running batch: the next item continues.
+    pub async fn cancel_item(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+        item_id: &str,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        let batch_id = parse_batch_id(batch_id)?;
+        let detail = self.require_detail(project_id, &batch_id).await?;
+        let item = detail
+            .items
+            .iter()
+            .find(|item| item.id.as_str() == item_id)
+            .cloned()
+            .ok_or_else(|| ProductionQueueError::NotFound("找不到这个队列项目。".to_owned()))?;
+        if item.status.is_terminal() {
+            return Err(ProductionQueueError::InvalidState(
+                "这个任务已经结束，无需取消。".to_owned(),
+            ));
+        }
+        self.cancel_unfinished_item(&detail, &item).await?;
+        self.settle_if_all_terminal(project_id, &batch_id).await?;
+        self.get(project_id, batch_id.as_str()).await
+    }
+
+    /// Cancels every unfinished item of a batch and stops the batch.
+    pub async fn cancel_batch(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        let batch_id = parse_batch_id(batch_id)?;
+        let detail = self.require_detail(project_id, &batch_id).await?;
+        if detail.batch.archived_at.is_some() {
+            return Err(ProductionQueueError::InvalidState(
+                "已归档的队列请先恢复再取消。".to_owned(),
+            ));
+        }
+        if detail.items.iter().all(|item| item.status.is_terminal()) {
+            return Err(ProductionQueueError::InvalidState(
+                "这个队列没有未完成的任务可以取消。".to_owned(),
+            ));
+        }
+        {
+            let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
+            // Stop further dispatch first, then cancel everything not started.
+            if detail.batch.status != ProductionBatchStatus::Completed {
+                self.repository
+                    .set_batch_status(
+                        project_id,
+                        &batch_id,
+                        ProductionBatchStatus::Paused,
+                        self.clock.now(),
+                    )
+                    .await?;
+            }
+            self.repository
+                .cancel_pending_items(project_id, &batch_id, self.clock.now())
+                .await?;
+        }
+        let detail = self.require_detail(project_id, &batch_id).await?;
+        for item in detail
+            .items
+            .iter()
+            .filter(|item| !item.status.is_terminal())
+        {
+            self.cancel_unfinished_item(&detail, item).await?;
+        }
+        self.settle_if_all_terminal(project_id, &batch_id).await?;
+        self.get(project_id, batch_id.as_str()).await
+    }
+
+    /// Removes one finished item from a batch. Generated videos, library
+    /// assets and the task history are kept.
+    pub async fn delete_item(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+        item_id: &str,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        let batch_id = parse_batch_id(batch_id)?;
+        let detail = self.require_detail(project_id, &batch_id).await?;
+        let item = detail
+            .items
+            .iter()
+            .find(|item| item.id.as_str() == item_id)
+            .ok_or_else(|| ProductionQueueError::NotFound("找不到这个队列项目。".to_owned()))?;
+        if !item.status.is_terminal() {
+            return Err(ProductionQueueError::InvalidState(
+                "任务还没结束，请先取消再删除。".to_owned(),
+            ));
+        }
+        if !self
+            .repository
+            .delete_terminal_item(project_id, &batch_id, &item.id)
+            .await?
+        {
+            return Err(ProductionQueueError::InvalidState(
+                "删除失败：这个任务的状态刚刚发生了变化，请刷新后重试。".to_owned(),
+            ));
+        }
+        self.settle_if_all_terminal(project_id, &batch_id).await?;
+        self.get(project_id, batch_id.as_str()).await
+    }
+
+    /// Deletes a whole batch whose items are all finished, archiving it first
+    /// when needed. Linked tasks, generated videos and library assets are kept.
+    pub async fn discard(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
+        let parsed = parse_batch_id(batch_id)?;
+        let detail = self.require_detail(project_id, &parsed).await?;
+        if detail.batch.status == ProductionBatchStatus::Running
+            || detail.items.iter().any(|item| !item.status.is_terminal())
+        {
+            return Err(ProductionQueueError::InvalidState(
+                "队列里还有未结束的任务，请先取消整个队列再删除。".to_owned(),
+            ));
+        }
+        if detail.batch.archived_at.is_none() {
+            self.archive(project_id, batch_id).await?;
+        }
+        self.delete(project_id, batch_id).await
+    }
+
+    async fn require_detail(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        self.repository
+            .find_detail(project_id, batch_id)
+            .await?
+            .ok_or_else(|| ProductionQueueError::NotFound("找不到这个生产队列。".to_owned()))
+    }
+
+    async fn cancel_unfinished_item(
+        &self,
+        detail: &ProductionBatchDetail,
+        item: &ProductionBatchItem,
+    ) -> Result<(), ProductionQueueError> {
+        let project_id = detail.batch.project_id.as_str();
+        match (item.status, item.task_id.as_deref()) {
+            (ProductionBatchItemStatus::Pending, _) => {
+                let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
+                if !self
+                    .repository
+                    .cancel_pending_item(&item.id, self.clock.now())
+                    .await?
+                {
+                    return Err(ProductionQueueError::InvalidState(
+                        "这个任务刚刚开始提交，请稍后再取消。".to_owned(),
+                    ));
+                }
+                Ok(())
+            }
+            (ProductionBatchItemStatus::Dispatching, None) => {
+                let live = self
+                    .running_batches
+                    .lock()
+                    .expect("production running batch registry mutex poisoned")
+                    .contains(detail.batch.id.as_str());
+                if live && detail.batch.status == ProductionBatchStatus::Running {
+                    return Err(ProductionQueueError::InvalidState(
+                        "这个任务正在提交，请稍后再取消。".to_owned(),
+                    ));
+                }
+                self.finish_cancelled_item(detail, item).await
+            }
+            (_, Some(task_id)) => {
+                let task_id = TaskId::parse(task_id.to_owned())
+                    .map_err(|error| ProductionQueueError::InvalidState(error.to_string()))?;
+                let Some(cancellation) = self.task_cancellation.as_ref() else {
+                    return Err(ProductionQueueError::InvalidState(
+                        "暂时无法取消正在运行的任务，请稍后重试。".to_owned(),
+                    ));
+                };
+                match cancellation
+                    .request_cancel(project_id, task_id.as_str())
+                    .await
+                {
+                    Ok(_) | Err(TaskCancellationError::NotCancellable { .. }) => {}
+                    Err(TaskCancellationError::NotFound(_)) => {
+                        return self.finish_cancelled_item(detail, item).await;
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "production item cancellation failed");
+                        return Err(ProductionQueueError::InvalidState(
+                            "取消失败，请稍后重试。".to_owned(),
+                        ));
+                    }
+                }
+                if self.generation_service.has_live_execution(&task_id) {
+                    // The worker interrupts ComfyUI itself. Watch it in the
+                    // background so the item is settled even if the worker
+                    // exits without finishing the cancellation.
+                    let service = self.clone_for_watch();
+                    let detail = detail.clone();
+                    let item = item.clone();
+                    tokio::spawn(async move {
+                        for _ in 0..3000 {
+                            if !service.generation_service.has_live_execution(&task_id) {
+                                break;
+                            }
+                            sleep(Duration::from_millis(200)).await;
+                        }
+                        if let Err(error) =
+                            service.finish_stale_cancel(&detail, &item, &task_id).await
+                        {
+                            tracing::warn!(%error, "settling cancelled production item failed");
+                        }
+                    });
+                    return Ok(());
+                }
+                self.finish_stale_cancel(detail, item, &task_id).await
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Completes a cancellation that no live worker owns any more (app
+    /// restart, ComfyUI crash, or a worker that exited early), then mirrors
+    /// the task outcome onto the item and releases the project video slot.
+    async fn finish_stale_cancel(
+        &self,
+        detail: &ProductionBatchDetail,
+        item: &ProductionBatchItem,
+        task_id: &TaskId,
+    ) -> Result<(), ProductionQueueError> {
+        if let Err(error) = self.task_recovery_service.reconcile_active().await {
+            tracing::warn!(%error, "reconcile after production cancel failed");
+        }
+        if let Err(error) = self
+            .task_recovery_service
+            .finalize_cancel_when_comfy_offline(task_id)
+            .await
+        {
+            tracing::warn!(%error, "offline cancel finalization failed");
+        }
+        self.settle_item_from_task(detail, item, task_id).await?;
+        self.settle_if_all_terminal(&detail.batch.project_id, &detail.batch.id)
+            .await
+    }
+
+    fn clone_for_watch(&self) -> Self {
+        Self {
+            repository: Arc::clone(&self.repository),
+            task_repository: Arc::clone(&self.task_repository),
+            definition_repository: Arc::clone(&self.definition_repository),
+            generation_service: Arc::clone(&self.generation_service),
+            shot_batch_repository: Arc::clone(&self.shot_batch_repository),
+            task_recovery_service: Arc::clone(&self.task_recovery_service),
+            clock: Arc::clone(&self.clock),
+            running_batches: Arc::clone(&self.running_batches),
+            admission_gate: Arc::clone(&self.admission_gate),
+            idempotency_gate: Arc::clone(&self.idempotency_gate),
+            recovery_tasks: Arc::clone(&self.recovery_tasks),
+            deferred_start_notify: Arc::clone(&self.deferred_start_notify),
+            new_generation_admission: self.new_generation_admission.clone(),
+            task_cancellation: self.task_cancellation.clone(),
+        }
+    }
+
+    async fn finish_cancelled_item(
+        &self,
+        detail: &ProductionBatchDetail,
+        item: &ProductionBatchItem,
+    ) -> Result<(), ProductionQueueError> {
+        self.repository
+            .finish_item_and_settle_batch(
+                &detail.batch.project_id,
+                &detail.batch.id,
+                TerminalItemTransition {
+                    item_id: &item.id,
+                    status: ProductionBatchItemStatus::Cancelled,
+                    error_code: None,
+                    error_message: None,
+                },
+                false,
+                self.clock.now(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Mirrors a finished task onto its dispatched item when no live queue
+    /// worker will do it. A live worker settles the item itself.
+    async fn settle_item_from_task(
+        &self,
+        detail: &ProductionBatchDetail,
+        item: &ProductionBatchItem,
+        task_id: &TaskId,
+    ) -> Result<(), ProductionQueueError> {
+        let live_batch = self
+            .running_batches
+            .lock()
+            .expect("production running batch registry mutex poisoned")
+            .contains(detail.batch.id.as_str());
+        if live_batch && self.generation_service.has_live_execution(task_id) {
+            return Ok(());
+        }
+        let Some(task) = self.task_repository.find_by_id(task_id).await? else {
+            return self.finish_cancelled_item(detail, item).await;
+        };
+        let (status, code, message) = match task.status {
+            TaskStatus::Succeeded => (ProductionBatchItemStatus::Succeeded, None, None),
+            TaskStatus::Failed => (
+                ProductionBatchItemStatus::Failed,
+                normalize_queue_failure_code(
+                    task.error.as_ref().map(|error| error.code.as_str()),
+                    task.error.as_ref().map(|error| error.message.as_str()),
+                ),
+                task.error.as_ref().map(|error| error.message.as_str()),
+            ),
+            TaskStatus::Cancelled => (ProductionBatchItemStatus::Cancelled, None, None),
+            _ => return Ok(()),
+        };
+        self.repository
+            .finish_item_and_settle_batch(
+                &detail.batch.project_id,
+                &detail.batch.id,
+                TerminalItemTransition {
+                    item_id: &item.id,
+                    status,
+                    error_code: code,
+                    error_message: message,
+                },
+                false,
+                self.clock.now(),
+            )
+            .await?;
+        self.recovery_tasks
+            .lock()
+            .expect("production recovery task registry mutex poisoned")
+            .remove(task_id.as_str());
+        Ok(())
+    }
+
+    async fn settle_if_all_terminal(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+    ) -> Result<(), ProductionQueueError> {
+        let detail = self.require_detail(project_id, batch_id).await?;
+        if matches!(
+            detail.batch.status,
+            ProductionBatchStatus::Running | ProductionBatchStatus::Paused
+        ) && !detail.items.is_empty()
+            && detail.items.iter().all(|item| item.status.is_terminal())
+        {
+            self.repository
+                .set_batch_status(
+                    project_id,
+                    batch_id,
+                    ProductionBatchStatus::Completed,
+                    self.clock.now(),
+                )
+                .await?;
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -2803,8 +3182,12 @@ fn should_pause_after_terminal(
     error_code: Option<&str>,
     continue_on_failure: bool,
 ) -> bool {
-    status != ProductionBatchItemStatus::Succeeded
-        && (!continue_on_failure || is_safety_blocking_failure(error_code))
+    // A user cancellation is not a failure: the batch moves on to the next
+    // item instead of pausing.
+    !matches!(
+        status,
+        ProductionBatchItemStatus::Succeeded | ProductionBatchItemStatus::Cancelled
+    ) && (!continue_on_failure || is_safety_blocking_failure(error_code))
 }
 
 fn is_safety_blocking_failure(error_code: Option<&str>) -> bool {
@@ -3899,7 +4282,8 @@ mod tests {
             Some("EXECUTION_ADMISSION_UNAVAILABLE"),
             true,
         ));
-        assert!(should_pause_after_terminal(
+        // A user cancellation is not a failure: the batch moves on.
+        assert!(!should_pause_after_terminal(
             ProductionBatchItemStatus::Cancelled,
             None,
             false,

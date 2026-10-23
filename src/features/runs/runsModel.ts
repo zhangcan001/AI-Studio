@@ -21,7 +21,7 @@ export function coverageMessage(coverage?: string | null) {
 export function actionLabel(action: "START" | "PAUSE" | "CANCEL", status: ProductRun["status"]) {
   if (action === "START") return status === "PAUSED" ? "继续运行" : "启动运行";
   if (action === "PAUSE") return "暂停（不抢占当前推理）";
-  return "取消未开始项（不中断当前推理）";
+  return status === "RUNNING" ? "取消运行（中断正在生成的任务）" : "取消运行";
 }
 export const friendlyGenerator = (name: string) => /(?:^wfl_|^wfv_|\.json$|[\\/]|[0-9a-f]{32})/i.test(name) ? /h3|minimax/i.test(name) ? "H3 视频生成器" : /krea/i.test(name) ? "Krea 图片生成器" : "生成器" : name;
 export function inputText(input: RunInput) { return Object.entries(input.values).map(([key, value]) => ({ key, label: ({ prompt: "提示词", negative_prompt: "负向提示词", duration_seconds: "时长（秒）", width: "宽度", height: "高度", steps: "步数", cfg: "引导强度", seed: "种子" } as Record<string, string>)[key] ?? "参数", value: "assetId" in value ? "1 个参考素材" : "assetIds" in value ? `${value.assetIds.length} 个参考素材` : "value" in value ? String(value.value) : "随机" })); }

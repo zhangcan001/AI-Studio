@@ -633,6 +633,8 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
     resumeSequentialStart: resumeSequentialBatchStart,
     onMonitorBatchChanged,
     pauseBatch: pauseProductionBatch,
+    cancelBatch: cancelProductionBatch,
+    deleteBatch: deleteProductionBatch,
     requeueItem: requeueProductionMonitorItemFromQueue,
   } = queueController;
 
@@ -1654,6 +1656,8 @@ function ScopedShotWorkspace({ projectId, projectName, catalog, initialSelectedS
         onCancelSequentialStart={cancelSequentialBatchStart}
         onOpenSettings={onOpenSettings}
         onPause={pauseProductionBatch}
+        onCancelBatch={cancelProductionBatch}
+        onDeleteBatch={deleteProductionBatch}
         onOpen={mode === "production"
           ? (batchId) => openProductionMonitorBatch(batchId)
           : onOpenProductionQueue ? (batchId) => onOpenProductionQueue(batchId) : undefined}

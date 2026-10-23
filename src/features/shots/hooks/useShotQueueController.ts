@@ -5,6 +5,8 @@ import {
   getProductionQueueOverview,
   listProductionQueues,
   pauseProductionQueue,
+  cancelProductionQueueBatch,
+  discardProductionQueue,
   requeueProductionQueueItem,
   startProductionQueue,
   type ProductionPackageCreateBatchesResult,
@@ -339,6 +341,22 @@ export function useShotQueueController({
     await reloadWorkspace();
   }, [projectId, reloadProductionQueues, reloadWorkspace]);
 
+  const cancelBatch = useCallback(async (batchId: string) => {
+    if (!window.confirm("确定取消整个队列吗？正在生成的视频会被中断，未开始的项目不会再生成。已生成的视频和素材会保留。")) return;
+    await cancelProductionQueueBatch(projectId, batchId);
+    await reloadProductionQueues();
+    await reloadWorkspace();
+    onNotice("队列已取消，已生成的视频和素材已保留。");
+  }, [onNotice, projectId, reloadProductionQueues, reloadWorkspace]);
+
+  const deleteBatch = useCallback(async (batchId: string) => {
+    if (!window.confirm("确定删除这个队列吗？只删除队列记录，已生成的视频和素材会保留。")) return;
+    await discardProductionQueue(projectId, batchId);
+    await reloadProductionQueues();
+    await reloadWorkspace();
+    onNotice("队列已删除，已生成的视频和素材已保留。");
+  }, [onNotice, projectId, reloadProductionQueues, reloadWorkspace]);
+
   const selectedBatchId = useMemo(
     () => selectDefaultProductionBatchId(queues, focusedBatchId),
     [focusedBatchId, queues],
@@ -371,6 +389,8 @@ export function useShotQueueController({
     resumeSequentialStart,
     onMonitorBatchChanged,
     pauseBatch,
+    cancelBatch,
+    deleteBatch,
     requeueItem,
   };
 }

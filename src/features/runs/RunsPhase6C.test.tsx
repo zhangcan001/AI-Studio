@@ -87,9 +87,9 @@ it("C02/C03 Drawer-equivalent Runs actions: list shows shared statuses; start is
   await waitFor(() => expect(api.start).toHaveBeenCalledWith("project-a", production.ref));
 });
 
-it("C04 pause/cancel action labels encode non-preemptive semantics", () => {
+it("C04 pause is non-preemptive; cancel interrupts the running task", () => {
   expect(actionLabel("PAUSE", "RUNNING")).toContain("不抢占");
-  expect(actionLabel("CANCEL", "RUNNING")).toContain("不中断当前推理");
+  expect(actionLabel("CANCEL", "RUNNING")).toContain("中断正在生成的任务");
 });
 
 it("C06 project fence: switching project clears prior list via new list call", async () => {
@@ -123,7 +123,7 @@ it("C09 deep-link context restores RunRef and preserves review independence copy
   const detail = await screen.findByLabelText("运行详情");
   expect(detail.textContent).toContain("队列批次");
   expect(screen.getByRole("button", { name: "暂停（不抢占当前推理）" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "取消未开始项（不中断当前推理）" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^取消运行/ })).toBeTruthy();
   expect(screen.getByText(/不提供完整混合运行历史分页/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /下一页|更多历史/ })).toBeNull();
 });

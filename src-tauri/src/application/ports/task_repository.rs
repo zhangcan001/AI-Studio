@@ -109,5 +109,18 @@ pub trait TaskRepository: Send + Sync {
 
     async fn list_active(&self) -> Result<Vec<Task>, RepositoryError>;
 
+    /// Hides a finished task record from task lists (soft delete). Generated
+    /// files, assets and the audit trail are kept. Returns false when the task
+    /// is not in this project or not finished.
+    async fn hide_finished(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        hidden_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, RepositoryError> {
+        let _ = (project_id, task_id, hidden_at);
+        Ok(false)
+    }
+
     async fn list_events(&self, task_id: &TaskId) -> Result<Vec<StoredTaskEvent>, RepositoryError>;
 }

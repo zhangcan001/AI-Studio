@@ -664,6 +664,49 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         Ok(finished)
     }
 
+    async fn cancel_pending_item(
+        &self,
+        item_id: &ProductionBatchItemId,
+        updated_at: DateTime<Utc>,
+    ) -> Result<bool, RepositoryError> {
+        let result = sqlx::query(
+            "UPDATE production_batch_items
+             SET status = 'CANCELLED', error_code = NULL, error_message = NULL, updated_at = ?
+             WHERE id = ? AND status = 'PENDING'",
+        )
+        .bind(format_datetime(updated_at))
+        .bind(item_id.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn delete_terminal_item(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        item_id: &ProductionBatchItemId,
+    ) -> Result<bool, RepositoryError> {
+        let result = sqlx::query(
+            "DELETE FROM production_batch_items
+             WHERE id = ? AND batch_id = ?
+               AND status IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED')
+               AND EXISTS (
+                   SELECT 1 FROM production_batches
+                   WHERE id = ? AND project_id = ?
+               )",
+        )
+        .bind(item_id.as_str())
+        .bind(batch_id.as_str())
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn set_item_skipped(
         &self,
         item_id: &ProductionBatchItemId,

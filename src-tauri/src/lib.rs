@@ -791,7 +791,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 shot_batch_repository.clone(),
                 task_recovery_service.clone(),
                 clock.clone(),
-            ).with_new_generation_admission(workflow_registry_service.clone()));
+            ).with_new_generation_admission(workflow_registry_service.clone())
+            .with_task_cancellation(task_cancellation_service.clone()));
             let production_start_admission_service = Arc::new(ProductionStartAdmissionService::new(
                 production_queue_service.clone(),
                 comfy_service.clone(),
@@ -1288,6 +1289,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::product::product_run_start,
             commands::product::product_run_pause,
             commands::product::product_run_cancel,
+            commands::product::product_run_delete,
             commands::product::product_run_get,
             commands::product::product_run_results_get,
             commands::product::product_run_result_review,
@@ -1420,6 +1422,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_queue::production_queue_archive,
             commands::production_queue::production_queue_restore,
             commands::production_queue::production_queue_delete,
+            commands::production_queue::production_queue_cancel_item,
+            commands::production_queue::production_queue_cancel_batch,
+            commands::production_queue::production_queue_delete_item,
+            commands::production_queue::production_queue_discard,
             commands::production_queue::production_queue_skip_item,
             commands::production_queue::production_queue_requeue_item,
             commands::production_queue::production_queue_requeue_item_by_item,
@@ -1599,6 +1605,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::task::task_get,
             commands::task::task_list_recent,
             commands::task::task_cancel,
+            commands::task::task_delete_record,
             commands::task::task_reconcile_active,
             commands::task::task_history_page,
             commands::task::task_get_detail,

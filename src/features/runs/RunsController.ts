@@ -77,8 +77,15 @@ export function useRunsController({ route, navigate }: RunsProps) {
   }
   const action = (kind: "START" | "PAUSE" | "CANCEL" | "RETRY") => mutate(async () => {
     if (!detail?.availableActions.includes(kind)) return;
+    if (kind === "CANCEL" && detail.status === "RUNNING" && !window.confirm("确定取消这个运行吗？正在生成的视频会被中断，未开始的项目不会再生成；已生成的视频和素材会保留。")) return;
     if (kind === "RETRY") await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: detail.recoverability.retryItemIds });
     else await productClient.run[kind === "START" ? "start" : kind === "PAUSE" ? "pause" : "cancel"](route.projectId, detail.ref);
+  });
+  const remove = () => mutate(async () => {
+    if (!detail || !["SUCCEEDED", "FAILED", "PARTIAL", "CANCELLED"].includes(detail.status) || detail.ref.source === "production-run") return;
+    if (!window.confirm("确定删除这条运行记录吗？已生成的视频和素材会保留。")) return;
+    await productClient.run.delete(route.projectId, detail.ref);
+    navigate({ ...route, run: undefined });
   });
   const reuse = (input: RunInput) => mutate(async () => {
     if (!input.selectionRef) return;
@@ -111,6 +118,6 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!detail || result.reviewRevision === null) return;
     await productClient.run.resultReview(route.projectId, { runRef: detail.ref, assetId: result.assetId, decision, comment, expectedRevision: result.reviewRevision });
   });
-  return { list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, reuse, review, refresh };
+  return { list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, remove, reuse, review, refresh };
 }
 export type RunsController = ReturnType<typeof useRunsController>;

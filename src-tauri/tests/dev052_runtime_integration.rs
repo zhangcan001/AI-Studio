@@ -42,6 +42,8 @@ use ai_studio_lib::application::{
     shot_context_resolver::ShotContextResolver,
     shot_readiness_service::ShotReadinessService,
     shot_service::{ShotGenerationRequest, ShotService},
+    task_cancellation_service::TaskCancellationService,
+    task_execution_registry::TaskExecutionRegistry,
     task_query_service::TaskQueryService,
     task_recovery_service::TaskRecoveryService,
     workflow_library_service::WorkflowLibraryService,
@@ -527,6 +529,22 @@ impl ComfyAdapter for CountingComfyAdapter {
         Err(ComfyAdapterError::HistoryNotFound(prompt_id.to_owned()))
     }
 
+    async fn cancel_prompt(
+        &self,
+        _prompt_id: &str,
+    ) -> Result<ai_studio_lib::application::ports::CancelPromptResult, ComfyAdapterError> {
+        Ok(ai_studio_lib::application::ports::CancelPromptResult::NotFoundOrAlreadyFinished)
+    }
+
+    async fn get_queue_state(
+        &self,
+    ) -> Result<ai_studio_lib::application::ports::ComfyQueueState, ComfyAdapterError> {
+        Ok(ai_studio_lib::application::ports::ComfyQueueState {
+            running_prompt_ids: Vec::new(),
+            pending_prompt_ids: Vec::new(),
+        })
+    }
+
     async fn download_output(
         &self,
         file: &ComfyOutputFile,
@@ -756,6 +774,7 @@ async fn harness_with_packages(
         .with_stage_prompt_repository(shot_bulk_repository)
         .with_generation_snapshot_repository(snapshot_repository.clone()),
     );
+    let execution_registry = TaskExecutionRegistry::default();
     let generation_service = Arc::new(
         GenerationService::new(
             task_repository.clone(),
@@ -767,27 +786,40 @@ async fn harness_with_packages(
             asset_repository.clone(),
             clock.clone(),
         )
-        .with_workflow_compatibility_service(onboarding_service.clone()),
+        .with_workflow_compatibility_service(onboarding_service.clone())
+        .with_execution_registry(execution_registry.clone()),
     );
-    let recovery_service = Arc::new(TaskRecoveryService::new(
+    let recovery_service = Arc::new(
+        TaskRecoveryService::new(
+            task_repository.clone(),
+            snapshot_repository.clone(),
+            asset_repository.clone(),
+            comfy_adapter.clone(),
+            project_repository.clone(),
+            asset_store,
+            clock.clone(),
+            Arc::new(NoopTaskUpdateSink),
+        )
+        .with_execution_registry(execution_registry.clone()),
+    );
+    let cancellation_service = Arc::new(TaskCancellationService::new(
         task_repository.clone(),
-        snapshot_repository.clone(),
-        asset_repository.clone(),
-        comfy_adapter.clone(),
-        project_repository.clone(),
-        asset_store,
+        execution_registry.clone(),
         clock.clone(),
         Arc::new(NoopTaskUpdateSink),
     ));
-    let queue_service = Arc::new(ProductionQueueService::new(
-        production_queue_repository.clone(),
-        task_repository.clone(),
-        definition_repository.clone(),
-        generation_service,
-        shot_batch_repository.clone(),
-        recovery_service,
-        clock.clone(),
-    ));
+    let queue_service = Arc::new(
+        ProductionQueueService::new(
+            production_queue_repository.clone(),
+            task_repository.clone(),
+            definition_repository.clone(),
+            generation_service,
+            shot_batch_repository.clone(),
+            recovery_service,
+            clock.clone(),
+        )
+        .with_task_cancellation(cancellation_service),
+    );
     let admission = Arc::new(ProductionStartAdmissionService::new(
         queue_service.clone(),
         comfy_service.clone(),
@@ -1573,6 +1605,124 @@ async fn cancelling_active_batch_marks_pending_cancelled_and_prevents_later_disp
     sleep(Duration::from_millis(100)).await;
     assert_eq!(count(&harness.pool, "tasks").await, 1);
     assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn cancelling_one_running_item_interrupts_it_and_batch_continues() {
+    let harness = harness().await;
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(direct_generation_batch_request(&harness, 2))
+        .await
+        .expect("batch should be persisted before queue start");
+    harness.comfy.hold_submission();
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("queue start should dispatch its first item");
+    harness.comfy.wait_for_submission().await;
+    let started = harness
+        .queue
+        .get(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .unwrap();
+    let first = started.items[0].id.as_str().to_owned();
+    harness
+        .queue
+        .cancel_item(PROJECT_ID, batch.batch.id.as_str(), &first)
+        .await
+        .expect("a running item can be cancelled");
+    harness.comfy.release_submission();
+    let settled = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let detail = harness
+                .queue
+                .get(PROJECT_ID, batch.batch.id.as_str())
+                .await
+                .unwrap();
+            if detail.items[0].status.is_terminal()
+                && detail.items[1].status != ProductionBatchItemStatus::Pending
+            {
+                break detail;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the cancelled item settles and the next item is dispatched");
+    assert_eq!(
+        settled.items[0].status,
+        ProductionBatchItemStatus::Cancelled
+    );
+    assert_ne!(settled.batch.status, ProductionBatchStatus::Paused);
+}
+
+#[tokio::test]
+async fn cancelling_whole_batch_interrupts_running_item_and_completes() {
+    let harness = harness().await;
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(direct_generation_batch_request(&harness, 3))
+        .await
+        .expect("batch should be persisted before queue start");
+    harness.comfy.hold_submission();
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("queue start should dispatch its first item");
+    harness.comfy.wait_for_submission().await;
+    harness
+        .queue
+        .cancel_batch(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("a running batch can be cancelled");
+    harness.comfy.release_submission();
+    let completed = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let detail = harness
+                .queue
+                .get(PROJECT_ID, batch.batch.id.as_str())
+                .await
+                .unwrap();
+            if detail.batch.status == ProductionBatchStatus::Completed {
+                break detail;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("cancelled batch completes once the running item stops");
+    assert!(completed
+        .items
+        .iter()
+        .all(|item| item.status == ProductionBatchItemStatus::Cancelled));
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+
+    let first = completed.items[0].id.as_str().to_owned();
+    let after_delete = harness
+        .queue
+        .delete_item(PROJECT_ID, batch.batch.id.as_str(), &first)
+        .await
+        .expect("a finished item can be deleted");
+    assert_eq!(after_delete.items.len(), 2);
+    assert_eq!(
+        count(&harness.pool, "tasks").await,
+        1,
+        "task record is kept"
+    );
+    harness
+        .queue
+        .discard(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("a finished batch can be deleted");
+    assert_eq!(count(&harness.pool, "production_batches").await, 0);
+    assert_eq!(
+        count(&harness.pool, "tasks").await,
+        1,
+        "task record is kept"
+    );
 }
 
 #[tokio::test]

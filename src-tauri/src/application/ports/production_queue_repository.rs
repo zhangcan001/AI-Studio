@@ -262,6 +262,30 @@ pub trait ProductionQueueRepository: Send + Sync {
         Ok(finished)
     }
 
+    /// Cancels one item that has not been dispatched yet. Returns false when
+    /// the item was no longer pending.
+    async fn cancel_pending_item(
+        &self,
+        item_id: &ProductionBatchItemId,
+        updated_at: DateTime<Utc>,
+    ) -> Result<bool, RepositoryError> {
+        let _ = (item_id, updated_at);
+        Ok(false)
+    }
+
+    /// Removes one finished item row from its batch. Linked tasks, generated
+    /// files and library assets are never touched. Only terminal items
+    /// (succeeded, failed, cancelled, skipped) can be removed.
+    async fn delete_terminal_item(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        item_id: &ProductionBatchItemId,
+    ) -> Result<bool, RepositoryError> {
+        let _ = (project_id, batch_id, item_id);
+        Ok(false)
+    }
+
     async fn set_item_skipped(
         &self,
         item_id: &ProductionBatchItemId,

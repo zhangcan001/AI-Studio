@@ -155,6 +155,27 @@ describe("ProductionQueueDrawer", () => {
     expect(html).toContain('data-action="open"');
   });
 
+  it("offers cancel for unfinished batches and delete for finished ones", async () => {
+    const onCancelBatch = vi.fn();
+    const onDeleteBatch = vi.fn();
+    render(
+      <ProductionQueueDrawer
+        details={[detail({ id: "pbt_running", status: "RUNNING" }), detail({ id: "pbt_done", status: "COMPLETED" })]}
+        defaultExpanded
+        onCancelBatch={onCancelBatch}
+        onDeleteBatch={onDeleteBatch}
+      />,
+    );
+    const cancel = document.querySelectorAll('[data-action="cancel-batch"]');
+    const remove = document.querySelectorAll('[data-action="delete-batch"]');
+    expect(cancel).toHaveLength(1);
+    expect(remove).toHaveLength(1);
+    await userEvent.click(cancel[0] as HTMLElement);
+    await waitFor(() => expect(onCancelBatch).toHaveBeenCalledWith("pbt_running"));
+    await userEvent.click(remove[0] as HTMLElement);
+    await waitFor(() => expect(onDeleteBatch).toHaveBeenCalledWith("pbt_done"));
+  });
+
   it("keeps actions item-scoped and does not render a global start control", () => {
     const html = renderToStaticMarkup(
       <ProductionQueueDrawer

@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   archiveProductionQueue,
   cancelPendingProductionQueue,
+  cancelProductionQueueBatch,
+  cancelProductionQueueItem,
+  deleteProductionQueueItem,
+  discardProductionQueue,
   createProductionQueue,
   deleteProductionQueue,
   getProductionQueue,
@@ -425,6 +429,51 @@ export function ProductionQueuePanel({
     });
   }
 
+  async function cancelWholeQueue(batchId: string) {
+    const hasActive = detail?.id === batchId ? detail.running > 0 : queues.some((queue) => queue.id === batchId && queue.status === "RUNNING");
+    const confirmation = hasActive
+      ? "确定取消整个队列吗？正在生成的视频会被中断，未开始的项目不会再生成。已生成的视频和素材会保留。"
+      : "确定取消整个队列吗？未开始的项目不会再生成，已生成的视频和素材会保留。";
+    if (!window.confirm(confirmation)) return;
+    await runMutation(async () => {
+      const updated = await cancelProductionQueueBatch(projectId, batchId);
+      commitDetail(updated, updated.running > 0
+        ? "已发出取消，正在等待当前视频停止。"
+        : "队列已取消，已生成的视频和素材已保留。");
+      try { await onAdmissionChanged(); } catch { /* refreshed on next update */ }
+    });
+  }
+
+  async function discardQueue(batchId: string) {
+    if (!window.confirm("确定删除这个队列吗？只删除队列记录，已生成的视频和素材会保留。")) return;
+    await runMutation(async () => {
+      await discardProductionQueue(projectId, batchId);
+      setQueues((current) => current.filter((queue) => queue.id !== batchId));
+      if (selectedIdRef.current === batchId) setQueueDetail(undefined);
+      setNotice("队列已删除，已生成的视频和素材已保留。");
+      await refreshQueues(false);
+    });
+  }
+
+  async function cancelItem(itemId: string, running: boolean) {
+    if (!detail) return;
+    if (running && !window.confirm("确定取消这个任务吗？正在生成的视频会被中断，队列会继续下一项。")) return;
+    await runMutation(async () => {
+      const updated = await cancelProductionQueueItem(projectId, detail.id, itemId);
+      commitDetail(updated, running ? "已取消该任务，正在生成的视频已中断。" : "已取消该任务。");
+      try { await onAdmissionChanged(); } catch { /* refreshed on next update */ }
+    });
+  }
+
+  async function deleteItem(itemId: string) {
+    if (!detail) return;
+    if (!window.confirm("确定从队列中删除这一项吗？已生成的视频和素材会保留。")) return;
+    await runMutation(async () => {
+      const updated = await deleteProductionQueueItem(projectId, detail.id, itemId);
+      commitDetail(updated, "已从队列中删除该项，已生成的视频和素材已保留。");
+    });
+  }
+
   async function skipItem(itemId: string) {
     if (!detail) return;
     await runMutation(async () => {
@@ -599,9 +648,14 @@ export function ProductionQueuePanel({
                     </button>
                   </>
                 ) : queue.status === "RUNNING" ? (
-                  <button type="button" className="quiet-button" onClick={() => void pauseQueue(queue.id)} disabled={busy} title="仅停止后续派发，已提交任务继续运行到结束">
-                    暂停
-                  </button>
+                  <>
+                    <button type="button" className="quiet-button" onClick={() => void pauseQueue(queue.id)} disabled={busy} title="仅停止后续派发，已提交任务继续运行到结束">
+                      暂停
+                    </button>
+                    <button type="button" className="quiet-button danger-button" onClick={() => void cancelWholeQueue(queue.id)} disabled={busy}>
+                      取消队列
+                    </button>
+                  </>
                 ) : (
                   <>
                     {queue.status !== "COMPLETED" && (
@@ -619,9 +673,19 @@ export function ProductionQueuePanel({
                         {queue.status === "PAUSED" ? "继续生产" : "开始生产"}
                       </button>
                     )}
+                    {queue.status !== "COMPLETED" && (
+                      <button type="button" className="quiet-button danger-button" onClick={() => void cancelWholeQueue(queue.id)} disabled={busy}>
+                        取消队列
+                      </button>
+                    )}
                     <button type="button" className="quiet-button" onClick={() => void archiveQueue(queue.id)} disabled={busy}>
                       归档
                     </button>
+                    {queue.status === "COMPLETED" && (
+                      <button type="button" className="quiet-button danger-button" onClick={() => void discardQueue(queue.id)} disabled={busy}>
+                        删除
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -720,14 +784,23 @@ export function ProductionQueuePanel({
                   {detail.running > 0 ? "取消剩余项" : "取消待启动"}
                 </button>
               )}
-              <small>{detail.id}</small>
+              {!detail.archivedAt && detail.status !== "COMPLETED" && detail.running > 0 && (
+                <button type="button" className="quiet-button danger-button" onClick={() => void cancelWholeQueue(detail.id)} disabled={busy}>
+                  取消整个队列
+                </button>
+              )}
+              {!detail.archivedAt && detail.status === "COMPLETED" && (
+                <button type="button" className="quiet-button danger-button" onClick={() => void discardQueue(detail.id)} disabled={busy}>
+                  删除队列
+                </button>
+              )}
             </div>
           </div>
           {detail.status === "PAUSED" && detail.items.some((item) => item.status === "FAILED" && isComfyNodeIncompatible(item.errorCode, item.errorMessage)) && (
             <p role="alert">工作流与当前 ComfyUI 不兼容，剩余 {detail.pending} 项尚未执行。修复原插件后可继续；若改用兼容工作流，请新建生产任务，原批次和失败记录保留。</p>
           )}
           <div className="production-queue-stats">
-            <p>暂停仅停止后续派发，已提交任务继续运行；取消待执行项不取消当前任务。继续生产会重新检查正式启动资格，不自动重试失败项。</p>
+            <p>暂停仅停止后续派发，已提交任务继续运行；取消会中断正在生成的任务。删除只删除队列记录，已生成的视频和素材会保留。继续生产会重新检查正式启动资格，不自动重试失败项。</p>
             <span>总数 <strong>{detail.total}</strong></span>
             <span>待执行 <strong>{detail.pending}</strong></span>
             <span>运行中 <strong>{detail.running}</strong></span>
@@ -794,6 +867,16 @@ export function ProductionQueuePanel({
                           <button type="button" className="quiet-button" onClick={() => void addResultToCompare(item)} disabled={busy}>加入对比</button>
                         </>}
                       </>
+                    )}
+                    {!detail.archivedAt && ["PENDING", "DISPATCHING", "DISPATCHED"].includes(item.status) && (
+                      <button type="button" className="quiet-button danger-button" onClick={() => void cancelItem(item.id, item.status !== "PENDING")} disabled={busy}>
+                        取消
+                      </button>
+                    )}
+                    {!detail.archivedAt && ["SUCCEEDED", "FAILED", "CANCELLED", "SKIPPED"].includes(item.status) && (
+                      <button type="button" className="quiet-button danger-button" onClick={() => void deleteItem(item.id)} disabled={busy}>
+                        删除
+                      </button>
                     )}
                     {canSkip && (
                       <button type="button" className="quiet-button" onClick={() => void skipItem(item.id)} disabled={busy}>

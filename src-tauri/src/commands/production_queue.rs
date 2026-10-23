@@ -420,6 +420,67 @@ pub async fn production_queue_delete(
 }
 
 #[tauri::command]
+pub async fn production_queue_cancel_item(
+    state: State<'_, AppState>,
+    project_id: String,
+    batch_id: String,
+    item_id: String,
+) -> Result<ProductionBatchDetailView, AppError> {
+    state
+        .production
+        .queue
+        .cancel_item(&project_id, &batch_id, &item_id)
+        .await
+        .map(Into::into)
+        .map_err(map_queue_error)
+}
+
+#[tauri::command]
+pub async fn production_queue_cancel_batch(
+    state: State<'_, AppState>,
+    project_id: String,
+    batch_id: String,
+) -> Result<ProductionBatchDetailView, AppError> {
+    state
+        .production
+        .queue
+        .cancel_batch(&project_id, &batch_id)
+        .await
+        .map(Into::into)
+        .map_err(map_queue_error)
+}
+
+#[tauri::command]
+pub async fn production_queue_delete_item(
+    state: State<'_, AppState>,
+    project_id: String,
+    batch_id: String,
+    item_id: String,
+) -> Result<ProductionBatchDetailView, AppError> {
+    state
+        .production
+        .queue
+        .delete_item(&project_id, &batch_id, &item_id)
+        .await
+        .map(Into::into)
+        .map_err(map_queue_error)
+}
+
+#[tauri::command]
+pub async fn production_queue_discard(
+    state: State<'_, AppState>,
+    project_id: String,
+    batch_id: String,
+) -> Result<(), AppError> {
+    state
+        .production
+        .queue
+        .discard(&project_id, &batch_id)
+        .await
+        .map_err(map_queue_error)
+}
+
+#[tauri::command]
 pub async fn production_queue_skip_item(
     state: State<'_, AppState>,
     project_id: String,

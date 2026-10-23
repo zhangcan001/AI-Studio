@@ -63,6 +63,36 @@ impl TaskCancellationService {
         }
     }
 
+    /// Hides a finished task record (soft delete). Running tasks must be
+    /// cancelled first. Generated files and library assets are never removed.
+    pub async fn hide_record(
+        &self,
+        project_id: &str,
+        task_id: &str,
+    ) -> Result<(), TaskCancellationError> {
+        let task_id = TaskId::parse(task_id.to_owned())
+            .map_err(|error| TaskCancellationError::InvalidTaskId(error.to_string()))?;
+        let Some(task) = self.task_repository.find_by_id(&task_id).await? else {
+            return Err(TaskCancellationError::NotFound(task_id.to_string()));
+        };
+        if task.project_id != project_id {
+            return Err(TaskCancellationError::NotFound(task_id.to_string()));
+        }
+        if !matches!(
+            task.status,
+            TaskStatus::Succeeded | TaskStatus::Failed | TaskStatus::Cancelled
+        ) {
+            return Err(TaskCancellationError::NotCancellable {
+                task_id: task_id.to_string(),
+                status: task.status,
+            });
+        }
+        self.task_repository
+            .hide_finished(project_id, &task_id, self.clock.now())
+            .await?;
+        Ok(())
+    }
+
     async fn persist_request(&self, task: Task) -> Result<Task, TaskCancellationError> {
         let previous_status = task.status;
         let mut next = task;
@@ -188,6 +218,41 @@ mod tests {
             .await
             .unwrap();
         (directory, repository, task)
+    }
+
+    #[tokio::test]
+    async fn hide_record_requires_finished_task_and_hides_it_from_lists() {
+        let (_directory, repository, task) = setup().await;
+        let service = TaskCancellationService::new(
+            repository.clone(),
+            TaskExecutionRegistry::default(),
+            Arc::new(FixedClock),
+            Arc::new(RecordingSink::default()),
+        );
+        assert!(matches!(
+            service.hide_record("project-1", task.id.as_str()).await,
+            Err(TaskCancellationError::NotCancellable { .. })
+        ));
+        let requested = service
+            .request_cancel("project-1", task.id.as_str())
+            .await
+            .unwrap();
+        let mut cancelled = requested.clone();
+        let event = cancelled.cancel(FixedClock.now()).unwrap();
+        repository
+            .persist_transition(&cancelled, &event, TaskStatus::CancelRequested)
+            .await
+            .unwrap();
+        service
+            .hide_record("project-1", task.id.as_str())
+            .await
+            .unwrap();
+        assert!(repository
+            .list_recent("project-1", 10)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(repository.find_by_id(&task.id).await.unwrap().is_some());
     }
 
     #[tokio::test]

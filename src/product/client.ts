@@ -74,6 +74,7 @@ export const productClient = {
     start: (projectId: string, runRef: RunRef) => productRequest("product_run_start", { projectId, runRef }),
     pause: (projectId: string, runRef: RunRef) => productRequest("product_run_pause", { projectId, runRef }),
     cancel: (projectId: string, runRef: RunRef) => productRequest("product_run_cancel", { projectId, runRef }),
+    delete: (projectId: string, runRef: RunRef) => productRequest("product_run_delete", { projectId, runRef }),
     get: (projectId: string, runRef: RunRef) => productRequest("product_run_get", { projectId, runRef }),
     retry: (projectId: string, request: RunRetryRequest) => productRequest("product_run_retry", { projectId, request }),
   },

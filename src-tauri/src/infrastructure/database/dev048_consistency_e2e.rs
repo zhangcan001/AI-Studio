@@ -437,6 +437,10 @@ async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
             .execute(pool)
             .await;
     }
+    // Migration 050 adds tasks.hidden_at; drop it so the fixture can replay it.
+    let _ = sqlx::query("ALTER TABLE tasks DROP COLUMN hidden_at")
+        .execute(pool)
+        .await;
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 24")
         .execute(pool)
         .await
@@ -1619,7 +1623,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 49)
+            .is_some_and(|version| version <= 50)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"2.1.0-personal\""));

@@ -78,7 +78,7 @@ impl TaskHistoryRepository for SqliteTaskHistoryRepository {
         let requested_limit = request.limit.clamp(1, 100);
         let mut query = QueryBuilder::<Sqlite>::new(TASK_HISTORY_SELECT);
         query
-            .push(" WHERE t.project_id = ")
+            .push(" WHERE t.hidden_at IS NULL AND t.project_id = ")
             .push_bind(request.project_id);
 
         if let Some(statuses) = request.filter.statuses() {

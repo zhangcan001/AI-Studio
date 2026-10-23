@@ -48,6 +48,7 @@ interface ProductCommands {
   product_run_start: { args: { projectId: string; runRef: RunRef }; result: ProductRun };
   product_run_pause: { args: { projectId: string; runRef: RunRef }; result: ProductRun };
   product_run_cancel: { args: { projectId: string; runRef: RunRef }; result: ProductRun };
+  product_run_delete: { args: { projectId: string; runRef: RunRef }; result: void };
   product_creation_readiness_get: { args: { request: CreationSubmission }; result: CreationReadiness };
   product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };

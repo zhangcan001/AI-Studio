@@ -248,7 +248,7 @@ impl ProductRunFacade {
         match run_ref.source {
             RunSource::QueueBatch => {
                 self.queue
-                    .cancel_pending(project_id, &run_ref.id)
+                    .cancel_batch(project_id, &run_ref.id)
                     .await
                     .map_err(queue_error)?;
             }

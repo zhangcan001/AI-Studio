@@ -411,6 +411,38 @@ impl TaskRecoveryService {
         }
     }
 
+    /// Finishes a user-requested cancellation that has no live worker when the
+    /// ComfyUI server is confirmed offline (connection refused). A stopped
+    /// ComfyUI process keeps no queue, so the prompt can no longer be running.
+    /// Timeouts are not treated as offline: a busy server may still execute.
+    /// Returns the task after the attempt; it stays `CANCEL_REQUESTED` when the
+    /// server is reachable so normal reconciliation remains authoritative.
+    pub async fn finalize_cancel_when_comfy_offline(
+        &self,
+        task_id: &crate::domain::TaskId,
+    ) -> Result<Option<Task>, TaskRecoveryError> {
+        let _gate = self.gate.lock().await;
+        if self.execution_registry.contains(task_id) {
+            return Ok(self.task_repository.find_by_id(task_id).await?);
+        }
+        let Some(mut task) = self.task_repository.find_by_id(task_id).await? else {
+            return Ok(None);
+        };
+        if task.status != TaskStatus::CancelRequested {
+            return Ok(Some(task));
+        }
+        if task.prompt_id.is_some() {
+            match self.comfy_adapter.health_check().await {
+                Err(ComfyAdapterError::Offline(_)) => {}
+                _ => return Ok(Some(task)),
+            }
+        }
+        self.finish_cancelled(&mut task).await?;
+        self.record_succeeded(&task, "cancelled while ComfyUI was offline")
+            .await?;
+        Ok(Some(task))
+    }
+
     async fn finish_cancelled(&self, task: &mut Task) -> Result<(), TaskRecoveryError> {
         if task.status == TaskStatus::Cancelled {
             return Ok(());
@@ -1702,6 +1734,49 @@ outputs:
             .unwrap();
         assert_eq!(found.status, TaskStatus::Running);
         assert_eq!(harness.adapter.counters.lock().unwrap().submit, 0);
+    }
+
+    #[tokio::test]
+    async fn stale_cancel_request_finishes_when_comfy_is_offline() {
+        let harness = setup(adapter(
+            false,
+            None,
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ))
+        .await;
+        let task = submitted_task(&harness.task_repository, TaskStatus::CancelRequested).await;
+        let found = harness
+            .service
+            .finalize_cancel_when_comfy_offline(&task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.status, TaskStatus::Cancelled);
+        assert_eq!(harness.adapter.counters.lock().unwrap().submit, 0);
+    }
+
+    #[tokio::test]
+    async fn stale_cancel_request_stays_pending_when_comfy_is_online() {
+        let harness = setup(adapter(
+            true,
+            None,
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ))
+        .await;
+        let task = submitted_task(&harness.task_repository, TaskStatus::CancelRequested).await;
+        let found = harness
+            .service
+            .finalize_cancel_when_comfy_offline(&task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.status, TaskStatus::CancelRequested);
     }
 
     #[tokio::test]

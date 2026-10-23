@@ -1020,6 +1020,10 @@ async fn remove_migration_028_schema(pool: &SqlitePool) {
             .execute(pool)
             .await;
     }
+    // Migration 050 adds tasks.hidden_at; drop it so the fixture can replay it.
+    let _ = sqlx::query("ALTER TABLE tasks DROP COLUMN hidden_at")
+        .execute(pool)
+        .await;
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 28")
         .execute(pool)
         .await
@@ -1086,6 +1090,10 @@ async fn remove_migrations_after_021(pool: &SqlitePool) {
             .execute(pool)
             .await;
     }
+    // Migration 050 adds tasks.hidden_at; drop it so the fixture can replay it.
+    let _ = sqlx::query("ALTER TABLE tasks DROP COLUMN hidden_at")
+        .execute(pool)
+        .await;
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 22")
         .execute(pool)
         .await
@@ -1110,6 +1118,10 @@ async fn remove_migrations_after_026(pool: &SqlitePool) {
             .execute(pool)
             .await;
     }
+    // Migration 050 adds tasks.hidden_at; drop it so the fixture can replay it.
+    let _ = sqlx::query("ALTER TABLE tasks DROP COLUMN hidden_at")
+        .execute(pool)
+        .await;
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 27")
         .execute(pool)
         .await
@@ -1363,6 +1375,10 @@ async fn remove_migration_024(pool: &SqlitePool) {
             .execute(pool)
             .await;
     }
+    // Migration 050 adds tasks.hidden_at; drop it so the fixture can replay it.
+    let _ = sqlx::query("ALTER TABLE tasks DROP COLUMN hidden_at")
+        .execute(pool)
+        .await;
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 24")
         .execute(pool)
         .await
@@ -1847,6 +1863,10 @@ async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_039() {
             .execute(&pool)
             .await;
     }
+    // Migration 050 adds tasks.hidden_at; drop it so the fixture can replay it.
+    let _ = sqlx::query("ALTER TABLE tasks DROP COLUMN hidden_at")
+        .execute(&pool)
+        .await;
     sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 32")
         .execute(&pool)
         .await

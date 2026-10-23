@@ -315,8 +315,10 @@ impl ProductRunFacade {
                     ) {
                         available_actions.push("PAUSE".to_owned());
                     }
-                    // Existing batch cancellation cancels pending items, not active tasks.
-                    if pending && !active && detail.batch.status != ProductionBatchStatus::Completed
+                    // Batch cancellation cancels pending items and interrupts the active task.
+                    if (pending || active)
+                        && detail.batch.archived_at.is_none()
+                        && detail.batch.status != ProductionBatchStatus::Completed
                     {
                         available_actions.push("CANCEL".to_owned());
                     }
