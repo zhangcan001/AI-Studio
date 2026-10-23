@@ -9,3 +9,13 @@
 - Discovery/provenance: searched the upstream implementation and reused the local immutable-package/compiler mechanisms. [Veda upstream](https://github.com/veda-sparse/Veda-on-ComfyUI) is MIT-licensed; its executable implementation is not copied or bundled. [Official ComfyUI H3 node contract](https://github.com/Comfy-Org/ComfyUI/blob/master/comfy_extras/nodes_minimax_h3.py) documents ordered reference inputs. No extra library or executor was introduced.
 - New package is additive and does not automatically replace the project's chosen/default generator. MiniMax video authorization stays pinned to the explicit package, exact WorkflowVersion+Recipe and immutable/live bytes. Scheduling remains GPU-heavy and serial, max1.
 - Native/GPU generation is not implied by compiler/registry tests. Acceleration and output quality require a separately authorized real generation test.
+
+## 1.1.0 optional reference video/audio
+
+- Package `minimax_h3_reference_veda_turbo_1_1_0` (same workflow id `wfl_minimax_h3_reference_veda_turbo`, workflow/recipe version 1.1.0, Recipe `rcp_minimax_h3_reference_veda_turbo_1_1_0`) is additive; 1.0.0 stays installed, authorized and byte-identical.
+- Graph = the 1.0.0 Veda graph plus the optional H3 reference loaders copied from `minimax_h3_reference_video_quality_2_2_0`: `LoadVideo` 40/42/44 → `GetVideoComponents` 41/43/45 → `ref_videos.ref_video_0..2` + `ref_video_audios.ref_video_audio_0..2`, and `LoadAudio` 50/51/52 → `ref_audios.ref_audio_0..2` on node 136. All other node bytes are unchanged.
+- Recipe declares `reference_images` (1–8, required), `reference_videos` (0–3) and `reference_audios` (0–3), so Shot compatibility classifies it as REF2VA reference media; folder-batch Reference rows bind it directly.
+- Empty video/audio slots are removed at compile time: the compiler now also drops a dedicated, unreferenced non-output adapter (e.g. `GetVideoComponents`) whose only links point at an unresolved loader, so no `__AI_STUDIO_OPTIONAL__` placeholder reaches the final validator.
+- Catalog: 1.1.0 becomes the workflow's current version through the existing approved-supersession path (`h3_base_supersession`), only when the current version is the untouched, unpromoted, enabled 1.0.0 product package; 1.0.0 stays admitted for exact pinned pairs and history.
+- Scheduling (GPU-heavy, serial, max 1) and product runtime scope are keyed by the unchanged workflow id. Projects keep their existing binding until the user explicitly rebinds to 1.1.0; no migration.
+- Real GPU behaviour of Veda sparse attention with reference video/audio requires the separately authorized Production Queue validation run.

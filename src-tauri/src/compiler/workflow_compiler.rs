@@ -497,7 +497,7 @@ fn apply_bindings(
     for binding in &recipe.bindings {
         let Some(value) = resolved_inputs.get(&binding.source) else {
             clear_binding_targets(workflow, binding)?;
-            clear_unresolved_binding_target(workflow, binding)?;
+            clear_unresolved_binding_target(workflow, recipe, binding)?;
             continue;
         };
 
@@ -516,7 +516,7 @@ fn apply_bindings(
             | (Some(index), ResolvedInputValue::Audios(values)) => {
                 let Some(value) = values.get(index).cloned() else {
                     clear_binding_targets(workflow, binding)?;
-                    clear_unresolved_binding_target(workflow, binding)?;
+                    clear_unresolved_binding_target(workflow, recipe, binding)?;
                     continue;
                 };
                 Value::String(value)
@@ -539,6 +539,7 @@ fn apply_bindings(
 
 fn clear_unresolved_binding_target(
     workflow: &mut WorkflowDocument,
+    recipe: &Recipe,
     binding: &crate::domain::Binding,
 ) -> Result<(), CompileError> {
     let Some(inputs) = workflow.inputs_mut(&binding.target.node) else {
@@ -550,10 +551,45 @@ fn clear_unresolved_binding_target(
         });
     };
     inputs.remove(&binding.target.input);
+    // A dedicated adapter (e.g. LoadVideo -> GetVideoComponents) whose outputs were
+    // all cleared would otherwise keep the unresolved loader alive.
+    for adapter in orphaned_adapters(workflow, recipe, &binding.target.node) {
+        workflow.remove_node(&adapter);
+    }
     if !workflow_references_node(workflow, &binding.target.node) {
         workflow.remove_node(&binding.target.node);
     }
     Ok(())
+}
+
+/// Unreferenced, non-output nodes whose every link input points at `node_id`.
+fn orphaned_adapters(workflow: &WorkflowDocument, recipe: &Recipe, node_id: &str) -> Vec<String> {
+    let Some(nodes) = workflow.value().as_object() else {
+        return Vec::new();
+    };
+    nodes
+        .iter()
+        .filter(|(id, _)| id.as_str() != node_id)
+        .filter(|(id, _)| !recipe.outputs.iter().any(|output| &output.node == *id))
+        .filter(|(id, _)| !workflow_references_node(workflow, id))
+        .filter(|(_, node)| {
+            let links = node
+                .get("inputs")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|inputs| inputs.values())
+                .filter_map(|value| value.as_array())
+                .filter(|array| {
+                    array.len() == 2
+                        && array.first().and_then(Value::as_str).is_some()
+                        && array.get(1).and_then(Value::as_u64).is_some()
+                })
+                .map(|array| array[0].as_str().unwrap_or_default())
+                .collect::<Vec<_>>();
+            !links.is_empty() && links.iter().all(|link| *link == node_id)
+        })
+        .map(|(id, _)| id.clone())
+        .collect()
 }
 
 fn workflow_references_node(workflow: &WorkflowDocument, node_id: &str) -> bool {

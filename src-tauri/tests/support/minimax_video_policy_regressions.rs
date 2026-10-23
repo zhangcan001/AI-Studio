@@ -318,10 +318,20 @@ async fn all_approved_exact_products_admit_and_compile_without_changing_recipe_b
         SqliteGenerationDefinitionRepository::new(f.pool.clone()),
     ))
     .with_new_generation_admission(f.registry.clone());
+    // Both Veda reference versions share one workflow; the catalog lists only
+    // each workflow's current version (approved upgrade 1.1.0), while every exact
+    // pair above, including 1.0.0, stays admitted.
+    let listed = catalog.list().await.unwrap();
+    let veda: Vec<_> = listed
+        .iter()
+        .filter(|v| v.workflow_id == "wfl_minimax_h3_reference_veda_turbo")
+        .collect();
+    assert_eq!(veda.len(), 1);
     assert_eq!(
-        catalog.list().await.unwrap().len(),
-        AUTHORIZED_PACKAGES.len()
+        veda[0].recipe_version, "1.1.0",
+        "approved Veda upgrade is current"
     );
+    assert_eq!(listed.len(), AUTHORIZED_PACKAGES.len() - 1);
     assert_eq!(count(&f.pool, "tasks").await, 0);
     assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);
 }

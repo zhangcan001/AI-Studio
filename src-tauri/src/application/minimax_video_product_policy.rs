@@ -11,13 +11,14 @@ use crate::application::workflow_manifest::WorkflowManifest;
 use sha2::{Digest, Sha256};
 
 pub const REQUIRED: &str = "MINIMAX_VIDEO_PRODUCT_REQUIRED";
-pub const AUTHORIZED_PACKAGES: [&str; 6] = [
+pub const AUTHORIZED_PACKAGES: [&str; 7] = [
     "minimax_h3_fl2va_t2v_quality_2_2_0",
     "minimax_h3_fl2va_i2v_quality_2_2_0",
     "minimax_h3_fl2va_first_last_quality_2_2_0",
     "minimax_h3_reference_video_quality_2_2_0",
     "minimax_h3_reference_standard_1_0_0",
     "minimax_h3_reference_veda_turbo_1_0_0",
+    "minimax_h3_reference_veda_turbo_1_1_0",
 ];
 
 pub fn authorizes(
@@ -49,13 +50,10 @@ pub fn authorizes(
     let recipe_hash = digest(&expected.recipe_yaml);
     let snapshot = serde_json::from_str::<serde_json::Value>(&version.api_workflow_json);
     let graph = serde_json::from_slice::<serde_json::Value>(&expected.workflow_api_json);
-    let approved_version = if matches!(
-        artifact.package_name.as_str(),
-        "minimax_h3_reference_standard_1_0_0" | "minimax_h3_reference_veda_turbo_1_0_0"
-    ) {
-        "1.0.0"
-    } else {
-        "2.2.0"
+    let approved_version = match artifact.package_name.as_str() {
+        "minimax_h3_reference_standard_1_0_0" | "minimax_h3_reference_veda_turbo_1_0_0" => "1.0.0",
+        "minimax_h3_reference_veda_turbo_1_1_0" => "1.1.0",
+        _ => "2.2.0",
     };
     manifest.validate().is_ok()
         && manifest.workflow_version == approved_version
@@ -185,6 +183,7 @@ mod user_video_tests {
         for name in [
             "minimax_h3_reference_standard_1_0_0",
             "minimax_h3_reference_veda_turbo_1_0_0",
+            "minimax_h3_reference_veda_turbo_1_1_0",
         ] {
             let (mut v, mut r, mut a, _) = fixture("video");
             let live =
@@ -196,12 +195,13 @@ mod user_video_tests {
             )
             .unwrap();
             let sha = |bytes: &[u8]| format!("{:x}", Sha256::digest(bytes));
+            let approved = manifest.workflow_version.clone();
             v.workflow_id = manifest.id;
-            v.workflow_version = "1.0.0".into();
+            v.workflow_version = approved.clone();
             v.api_workflow_json = String::from_utf8(live.workflow_api_json.clone()).unwrap();
             v.workflow_sha256 = sha(&live.workflow_api_json);
             r.recipe_id = parsed.id;
-            r.version = "1.0.0".into();
+            r.version = approved;
             r.recipe_yaml = String::from_utf8(live.recipe_yaml.clone()).unwrap();
             r.recipe_sha256 = sha(&live.recipe_yaml);
             a.recipe_id = r.recipe_id.clone();
