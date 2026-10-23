@@ -5,7 +5,7 @@ import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { folderImportEntityDedupeParentReader, FOLDER_IMPORT_ENTITY_DEDUPE_BASE, FOLDER_IMPORT_ENTITY_DEDUPE_PROOF } from '../folder-import-entity-dedupe-successor-guard.mjs';
-import { folderImportEntityDedupeParentReader as parentReader, FOLDER_IMPORT_ENTITY_DEDUPE_PROOF as PARENT_PROOF } from '../task-cancel-delete-successor-guard.mjs';
+import { taskCancelDeleteParentReader as parentReader, TASK_CANCEL_DELETE_PROOF as PARENT_PROOF } from '../task-cancel-delete-successor-guard.mjs';
 import { libraryConfirmCiRaceParentReader } from '../library-confirm-ci-race-successor-guard.mjs';
 import { uiPhase7BR1MetadataParentReader } from '../ui-phase7b-r1-metadata-successor-guard.mjs';
 
