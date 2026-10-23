@@ -25,7 +25,8 @@ export const FOLDER_IMPORT_ENTITY_DEDUPE_CONTRACTS = {
   "gpuExecuted": false,
   "productImplementationChanged": true,
   "oneImagePerEntityPerShot": true,
-  "reusedEntityImagesUnchanged": true,
+  "packageImageReplacesCoverKeepsOldImages": true,
+  "reusedEntityChangesCompensated": true,
   "englishDescriptionsNeverOverwritten": true,
   "pinnedContractStringsPreserved": true
 };

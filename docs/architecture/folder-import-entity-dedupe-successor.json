@@ -12,14 +12,15 @@
     "gpuExecuted": false,
     "productImplementationChanged": true,
     "oneImagePerEntityPerShot": true,
-    "reusedEntityImagesUnchanged": true,
+    "packageImageReplacesCoverKeepsOldImages": true,
+    "reusedEntityChangesCompensated": true,
     "englishDescriptionsNeverOverwritten": true,
     "pinnedContractStringsPreserved": true
   },
   "files": {
     "scripts/folder-import-entity-dedupe-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "39e97defa69c49009bfde32837a62d0c867e1a8a5a6ebf3fd783488dfb473344"
+      "afterHash": "f62c5c0ea4c464511c2f080accb8bda7d77faf59321556f7e8beba0878d7b7f4"
     },
     "scripts/task-cancel-delete-successor-guard.mjs": {
       "beforeHash": "438f2cc546246981d94f2d12cbb7740e6ce24e8ea40f412f01571d99ed79d4f6",
@@ -31,7 +32,7 @@
     },
     "src-tauri/src/application/mod.rs": {
       "beforeHash": "28730e4d8479611051fc32e78b02c6f39db863176051d84f6c8b1a68f31db198",
-      "afterHash": "51c2bb7d699662e3fc96991343378b08fa8a90569b7083e76c41591ce158357a"
+      "afterHash": "62c640fd7d02333336e57b01f17c1255f4f2f99e0d6d2a730084c45696ae31f1"
     }
   }
 }

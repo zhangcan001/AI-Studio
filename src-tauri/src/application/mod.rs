@@ -1058,12 +1058,12 @@ pub mod folder_batch_import_service {
             Ok(s.clone())
         }
         /// One image per reused entity per shot. A reused entity's declared
-        /// package images that are also listed in the row's `references` are the
-        /// same reference as the entity's project image, so they are dropped and
-        /// the project image is used (the caller adds it). This follows the
-        /// existing reuse rule: an existing entity is never modified by an
-        /// import, and @ mapping requires the entity's own image in the formal
-        /// references. When the bytes differ, a non-blocking warning says so.
+        /// package images listed in the row's `references` collapse to one:
+        /// - same bytes as the project cover: the package path is dropped and the
+        ///   existing asset is used (returns `false`, the caller adds it);
+        /// - different bytes: the first declared package path is kept; commit
+        ///   imports it and makes it the entity cover (old images are kept), so
+        ///   the shot binds that new cover once (returns `true`).
         async fn dedupe_existing_entity_reference(
             &self,
             root: &Path,
@@ -1071,9 +1071,9 @@ pub mod folder_batch_import_service {
             existing: &[StoryEntity],
             entity: &StoryEntity,
             row: &mut Row,
-        ) -> Result<(), ImportFailure> {
+        ) -> Result<bool, ImportFailure> {
             if !existing.iter().any(|e| e.id == entity.id) {
-                return Ok(());
+                return Ok(false);
             }
             let declared = declared_paths(manifest, &entity.name);
             let listed: Vec<String> = declared
@@ -1082,9 +1082,8 @@ pub mod folder_batch_import_service {
                 .cloned()
                 .collect();
             let Some(first) = listed.first().cloned() else {
-                return Ok(());
+                return Ok(false);
             };
-            row.references.retain(|p| !listed.contains(p));
             let managed = entity
                 .cover_asset_id
                 .as_ref()
@@ -1106,19 +1105,23 @@ pub mod folder_batch_import_service {
             )
             .ok()
             .map(|bytes| sha(&bytes));
-            if managed_sha.is_none() || package_sha != managed_sha {
-                row.warnings
-                    .push(crate::application::shot_bulk_service::BulkIssue {
-                        code: "ENTITY_IMAGE_DIFFERS".into(),
-                        message: format!(
-                            "「{}」与项目中已有实体图片不同，已使用项目中已有的图片；如需使用导入包中的图片，请先在资料库中更换该实体的封面",
-                            entity.name
-                        ),
-                        row_number: Some(row.row_number),
-                        shot_id: None,
-                    });
+            if managed_sha.is_some() && package_sha == managed_sha {
+                row.references.retain(|p| !listed.contains(p));
+                return Ok(false);
             }
-            Ok(())
+            row.references
+                .retain(|p| p == &first || !listed.contains(p));
+            row.warnings
+                .push(crate::application::shot_bulk_service::BulkIssue {
+                    code: "ENTITY_COVER_FROM_PACKAGE".into(),
+                    message: format!(
+                        "「{}」将使用导入包中的新图片作为封面（原图片保留在资料库中）",
+                        entity.name
+                    ),
+                    row_number: Some(row.row_number),
+                    shot_id: None,
+                });
+            Ok(true)
         }
         async fn build(
             &self,
@@ -1259,10 +1262,16 @@ pub mod folder_batch_import_service {
                             // One image per entity per shot: a reused entity whose
                             // declared package image is also listed in `references`
                             // is the same reference, not a second one.
-                            self.dedupe_existing_entity_reference(
-                                root, &manifest, &existing, entity, row,
-                            )
-                            .await?;
+                            // The package image replaces the cover at commit and is
+                            // already counted once through `row.references`.
+                            if self
+                                .dedupe_existing_entity_reference(
+                                    root, &manifest, &existing, entity, row,
+                                )
+                                .await?
+                            {
+                                continue;
+                            }
                             match entity_image(&manifest, &existing, entity) {
                                 Ok(path) => {
                                     if !reference_paths.contains(&path) {
@@ -1501,7 +1510,7 @@ pub mod folder_batch_import_service {
             for declared in &manifest.characters {
                 if let Some(old) = existing.iter().find(|e| e.name == declared.name) {
                     warnings.push(format!(
-                        "复用实体 {}：使用项目中已有的实体图片，同一镜头内该实体只计一张参考图。",
+                        "复用实体 {}：同一镜头内该实体只计一张参考图；图片与项目中相同时直接复用已有素材。",
                         declared.name
                     ));
                     let given = declared.description.as_deref().unwrap_or("").trim();
@@ -1783,6 +1792,10 @@ pub mod folder_batch_import_service {
         pub auto_started: bool,
         pub residual: Residual,
         pub warnings: Vec<String>,
+        /// Reused entities as they were before this import changed their cover
+        /// or description; compensation writes them back.
+        #[serde(skip)]
+        pub restored_entities: Vec<StoryEntity>,
     }
     /// Test seam for explicit Start only; the product adapter delegates to the existing admission/Queue authority.
     #[async_trait::async_trait]
@@ -2262,26 +2275,41 @@ pub mod folder_batch_import_service {
                         .iter()
                         .find(|e| e.name == *name)
                         .and_then(|e| e.description.as_deref());
-                    match fill_description(&entity.description, given) {
-                        // Only an empty or non-English description is filled;
-                        // name and images of the reused entity stay unchanged.
-                        Some(description) => self
-                            .entities
+                    // Only an empty or non-English description is filled.
+                    let description = fill_description(&entity.description, given);
+                    // A package image that preview kept (different bytes) was
+                    // imported in stage A; it becomes the cover, old images stay.
+                    let new_cover = declared_paths(&plan.manifest, name)
+                        .iter()
+                        .find_map(|p| assets.get(p).cloned())
+                        .filter(|id| entity.cover_asset_id.as_ref() != Some(id));
+                    if description.is_none() && new_cover.is_none() {
+                        entity.clone()
+                    } else {
+                        let mut images = entity.image_asset_ids.clone();
+                        if let Some(id) = &new_cover {
+                            if !images.contains(id) {
+                                images.push(id.clone());
+                            }
+                        }
+                        result.restored_entities.push(entity.clone());
+                        self.entities
                             .update(
                                 project,
                                 &entity.id,
                                 crate::domain::story_entity::StoryEntityUpsert {
                                     name: entity.name.clone(),
-                                    description,
-                                    cover_asset_id: entity.cover_asset_id.clone(),
-                                    image_asset_ids: entity.image_asset_ids.clone(),
+                                    description: description
+                                        .unwrap_or_else(|| entity.description.clone()),
+                                    cover_asset_id: new_cover
+                                        .or_else(|| entity.cover_asset_id.clone()),
+                                    image_asset_ids: images,
                                 },
                             )
                             .await
                             .map_err(|_| {
-                                stage_failure("B", "ENTITY_UPDATE_FAILED", "实体描述更新失败")
-                            })?,
-                        None => entity.clone(),
+                                stage_failure("B", "ENTITY_UPDATE_FAILED", "实体更新失败")
+                            })?
                     }
                 };
                 entities.insert(name.clone(), entity);
@@ -2635,6 +2663,29 @@ pub mod folder_batch_import_service {
                         target: "entity".into(),
                         id: id.clone(),
                         message: "保留仍有关联或未能清理的实体".into(),
+                    });
+                }
+            }
+            for old in result.restored_entities.clone().iter().rev() {
+                let restored = self
+                    .entities
+                    .update(
+                        project,
+                        &old.id,
+                        crate::domain::story_entity::StoryEntityUpsert {
+                            name: old.name.clone(),
+                            description: old.description.clone(),
+                            cover_asset_id: old.cover_asset_id.clone(),
+                            image_asset_ids: old.image_asset_ids.clone(),
+                        },
+                    )
+                    .await;
+                if restored.is_err() {
+                    result.residual.entity_ids.push(old.id.clone());
+                    result.compensation_errors.push(CompensationError {
+                        target: "entity".into(),
+                        id: old.id.clone(),
+                        message: "未能恢复复用实体的原封面/描述".into(),
                     });
                 }
             }
@@ -3628,11 +3679,12 @@ pub mod folder_batch_import_service {
         /// the manifest path), pushing shots past the 8-image limit.
         async fn reimport_with_existing_entity_paths_and_mentions(
             same_bytes: bool,
-        ) -> (PreviewFixture, Preview, ImportResult) {
+        ) -> (PreviewFixture, Preview, ImportResult, String) {
             let f = preview_fixture().await;
             let first = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
             let done = f.service.commit(request(&first, true)).await.unwrap();
             assert_eq!(done.outcome, "completed", "{done:?}");
+            let (old_cover, _) = alice(&f).await;
             let mut m: Manifest =
                 serde_json::from_slice(&std::fs::read(f.root.join("manifest.json")).unwrap())
                     .unwrap();
@@ -3688,7 +3740,7 @@ pub mod folder_batch_import_service {
             assert_eq!(preview.valid_count, 2);
             let result = f.service.commit(request(&preview, true)).await.unwrap();
             assert_eq!(result.outcome, "completed", "{result:?}");
-            (f, preview, result)
+            (f, preview, result, old_cover)
         }
         async fn bound_reference_assets(f: &PreviewFixture, shot: &str) -> Vec<String> {
             sqlx::query_scalar("SELECT asset_id FROM shot_video_input_assets WHERE shot_id=? AND input_key='reference_images' ORDER BY ordinal").bind(shot).fetch_all(&f.pool).await.unwrap()
@@ -3703,34 +3755,98 @@ pub mod folder_batch_import_service {
         }
         #[tokio::test]
         async fn reused_entity_same_bytes_counts_and_binds_one_project_image() {
-            let (f, preview, result) = reimport_with_existing_entity_paths_and_mentions(true).await;
+            let (f, preview, result, old_cover) =
+                reimport_with_existing_entity_paths_and_mentions(true).await;
             let refs = bound_reference_assets(&f, &result.created_shot_ids[1]).await;
             assert_eq!(refs.len(), 8);
             assert_eq!(refs.iter().collect::<BTreeSet<_>>().len(), 8);
             let (cover, description) = alice(&f).await;
+            assert_eq!(cover, old_cover);
             assert_eq!(refs.iter().filter(|r| **r == cover).count(), 1);
             assert_eq!(description, "Tall woman in a red wool coat");
             assert!(!preview.rows[1]
                 .warnings
                 .iter()
-                .any(|w| w.message.contains("已有实体图片不同")));
+                .any(|w| w.message.contains("导入包中的新图片")));
             assert_eq!(count(&f.pool, "story_entities").await, 1);
             assert_no_execution(&f.pool).await;
             f.pool.close().await;
         }
         #[tokio::test]
-        async fn reused_entity_different_bytes_keeps_project_image_and_warns() {
-            let (f, preview, result) =
+        async fn reused_entity_different_bytes_package_image_becomes_cover_once() {
+            let (f, preview, result, old_cover) =
                 reimport_with_existing_entity_paths_and_mentions(false).await;
             assert!(preview.rows[1]
                 .warnings
                 .iter()
-                .any(|w| w.message.contains("「Alice」与项目中已有实体图片不同")));
+                .any(|w| w.message
+                    == "「Alice」将使用导入包中的新图片作为封面（原图片保留在资料库中）"));
             let refs = bound_reference_assets(&f, &result.created_shot_ids[1]).await;
             assert_eq!(refs.len(), 8);
+            assert_eq!(refs.iter().collect::<BTreeSet<_>>().len(), 8);
             let (cover, _) = alice(&f).await;
+            assert_ne!(cover, old_cover);
             assert_eq!(refs.iter().filter(|r| **r == cover).count(), 1);
+            assert!(!refs.contains(&old_cover));
+            let images: Vec<String> = sqlx::query_scalar("SELECT i.asset_id FROM story_entity_images i JOIN story_entities e ON e.id=i.entity_id WHERE e.name='Alice'")
+                .fetch_all(&f.pool)
+                .await
+                .unwrap();
+            assert!(
+                images.contains(&old_cover) && images.contains(&cover),
+                "{images:?}"
+            );
+            assert_eq!(count(&f.pool, "story_entities").await, 1);
             assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn reused_entity_cover_change_is_restored_on_compensation() {
+            let f = preview_fixture().await;
+            let first = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(
+                f.service
+                    .commit(request(&first, true))
+                    .await
+                    .unwrap()
+                    .outcome,
+                "completed"
+            );
+            let before = alice(&f).await;
+            let mut m: Manifest =
+                serde_json::from_slice(&std::fs::read(f.root.join("manifest.json")).unwrap())
+                    .unwrap();
+            m.shots[1].references.push("images/alice.png".into());
+            m.characters[0].description = Some("Tall woman in a red wool coat".into());
+            std::fs::write(
+                f.root.join("manifest.json"),
+                serde_json::to_vec(&m).unwrap(),
+            )
+            .unwrap();
+            let mut other = Vec::new();
+            image::DynamicImage::new_rgb8(40, 40)
+                .write_to(
+                    &mut std::io::Cursor::new(&mut other),
+                    image::ImageFormat::Png,
+                )
+                .unwrap();
+            std::fs::write(f.root.join("images/alice.png"), other).unwrap();
+            let again = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let preview = f
+                .service
+                .rescan(
+                    &again.session_id,
+                    PreviewOptions {
+                        name_suffix: Some(" copy".into()),
+                        legacy: None,
+                    },
+                )
+                .await
+                .unwrap();
+            f.service.faults.lock().unwrap().insert("C1");
+            let r = f.service.commit(request(&preview, true)).await.unwrap();
+            assert_eq!(r.outcome, "compensated", "{r:?}");
+            assert_eq!(alice(&f).await, before);
             f.pool.close().await;
         }
         #[test]
