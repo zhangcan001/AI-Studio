@@ -1,3 +1,4 @@
+import { folderImportEntityDedupeParentReader, folderImportEntityDedupeScopeSince, folderImportEntityDedupeFixtureFiles, FOLDER_IMPORT_ENTITY_DEDUPE_BASE } from './folder-import-entity-dedupe-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -97,10 +98,11 @@ export function taskCancelDeleteScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...TASK_CANCEL_DELETE_CHANGED, ...TASK_CANCEL_DELETE_ADDED, TASK_CANCEL_DELETE_PROOF,
+    ...folderImportEntityDedupeScopeSince(root, FOLDER_IMPORT_ENTITY_DEDUPE_BASE),
   ])].sort();
 }
 export function taskCancelDeleteFixtureFiles(root) {
-  return [...facts(root, TASK_CANCEL_DELETE_BASE).paths, ...TASK_CANCEL_DELETE_ADDED, TASK_CANCEL_DELETE_PROOF];
+  return [...new Set([...facts(root, TASK_CANCEL_DELETE_BASE).paths, ...TASK_CANCEL_DELETE_ADDED, TASK_CANCEL_DELETE_PROOF, ...folderImportEntityDedupeFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -109,10 +111,14 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, TASK_CANCEL_DELETE_BASE);
   const fail = id => violations.push("task-cancel-delete-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  // Only an exact, independently validated successor byte version may be projected.
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(TASK_CANCEL_DELETE_PROOF));
@@ -125,10 +131,10 @@ function validate(root, override) {
     const allowed = [...scope, TASK_CANCEL_DELETE_PROOF].sort();
     const expected = [...parent.paths, ...TASK_CANCEL_DELETE_ADDED, TASK_CANCEL_DELETE_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -148,13 +154,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: TASK_CANCEL_DELETE_CHANGED,
-    addedPaths: [...TASK_CANCEL_DELETE_ADDED, TASK_CANCEL_DELETE_PROOF],
-    afterHashes: Object.fromEntries([...TASK_CANCEL_DELETE_CHANGED, ...TASK_CANCEL_DELETE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...TASK_CANCEL_DELETE_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...TASK_CANCEL_DELETE_ADDED, TASK_CANCEL_DELETE_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...TASK_CANCEL_DELETE_CHANGED, ...TASK_CANCEL_DELETE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => TASK_CANCEL_DELETE_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function taskCancelDeleteParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "taskCancelDeleteParentReader", undefined,
-    () => validate(root, undefined), TASK_CANCEL_DELETE_PROOF);
+  const successor = folderImportEntityDedupeParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "taskCancelDeleteParentReader", undefined, check, TASK_CANCEL_DELETE_PROOF);
 }

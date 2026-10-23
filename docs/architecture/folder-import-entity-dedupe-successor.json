@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "FOLDER_IMPORT_ENTITY_DEDUPE",
+  "parentHead": "ebeec32dd7135a1158fbe314ce07e3841bfa0a1a",
+  "planningParentHead": "ebeec32dd7135a1158fbe314ce07e3841bfa0a1a",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "oneImagePerEntityPerShot": true,
+    "reusedEntityImagesUnchanged": true,
+    "englishDescriptionsNeverOverwritten": true,
+    "pinnedContractStringsPreserved": true
+  },
+  "files": {
+    "scripts/folder-import-entity-dedupe-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "39e97defa69c49009bfde32837a62d0c867e1a8a5a6ebf3fd783488dfb473344"
+    },
+    "scripts/task-cancel-delete-successor-guard.mjs": {
+      "beforeHash": "438f2cc546246981d94f2d12cbb7740e6ce24e8ea40f412f01571d99ed79d4f6",
+      "afterHash": "8aaa92a98123e9f1a4ecb72fdc97d5158991d3bc5aa9589cf0716127c65ef0a5"
+    },
+    "scripts/testing/folder-import-entity-dedupe.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "1a60d57129e215dc4715501bafa6eb83f657115fa7ba215cc4831eff32eaa237"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "28730e4d8479611051fc32e78b02c6f39db863176051d84f6c8b1a68f31db198",
+      "afterHash": "478b0986bb64c2ccb41d05106f1342e109d67bffdaa145b6d33e905b1b1f7664"
+    }
+  }
+}
