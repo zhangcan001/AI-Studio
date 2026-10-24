@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "VEDA_REMOVED_WHITE_FLASH",
+  "parentHead": "181886b36c7ad8867d83b7a74e55af2328f14da6",
+  "planningParentHead": "181886b36c7ad8867d83b7a74e55af2328f14da6",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "migrationAdded": false,
+    "newBuiltinPackage": "minimax_h3_reference_veda_turbo_1_3_0",
+    "onlyVedaNodeRemoved": true,
+    "historicalVedaPackagesUnchanged": true,
+    "guardsRelaxed": false
+  },
+  "files": {
+    "scripts/superseded-import-pin-successor-guard.mjs": {
+      "beforeHash": "000812ea60b74c861e6bf2dec8dee04b7129c54df8c36d37f6b8c283cc50cd12",
+      "afterHash": "07dad28feb618cb191c691e9377a994439cdc81e209f749f475ecb74d45246f7"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "1aace285f4f5656cc84d02f0c2d7471baa98e3f1e913885c8648d2c00e77b3ba"
+    },
+    "scripts/veda-removed-white-flash-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "dfac2802831367f32c94897397319e1b09b3ed6cdd8c578d209431b0209caf1d"
+    },
+    "src-tauri/src/application/builtin_runtime_packages.rs": {
+      "beforeHash": "4d7c02d71301dbf5a8abe31d8847fb26dd9ae6c4f4b180982c871b44b2066660",
+      "afterHash": "6fa8f74addf33342115107b6125133a77e13b6c4101b614e74248a045c00b4ae"
+    },
+    "src-tauri/src/application/minimax_video_product_policy.rs": {
+      "beforeHash": "c4a1f950e65533358e464ce76d99a8fbb4447aa7a1f125765179a1f70c26ec7a",
+      "afterHash": "1b36a06e944e1062d6eab234171eb04db0ac1aa2ecf2c9224bf3beb3d4be2539"
+    },
+    "src-tauri/tests/dev082_unified_workflow_library.rs": {
+      "beforeHash": "15a64541b0a1c11fefa8362a1d80a2e14d9b543288a25c6040fd8e0062f0e238",
+      "afterHash": "999a9909f9a411e9cbb909da75505a65a3b3d34f11596bd8579cf2f941671209"
+    },
+    "src-tauri/tests/support/minimax_video_policy_regressions.rs": {
+      "beforeHash": "d81adf890889b852a6fc0e14414a8535ef2645e681be58aa81dbd8a3ffa7d90c",
+      "afterHash": "e5fd495990910fb5b1f2c8823aeabea5aa3ea6eb3a041317bf9445093b2f4608"
+    }
+  }
+}
