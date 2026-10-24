@@ -1,3 +1,4 @@
+import { vedaVerboseDiagnosticsParentReader, vedaVerboseDiagnosticsScopeSince, vedaVerboseDiagnosticsFixtureFiles, VEDA_VERBOSE_DIAGNOSTICS_BASE } from './veda-verbose-diagnostics-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -108,10 +109,11 @@ export function frontendCiFourShardsScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...FRONTEND_CI_FOUR_SHARDS_CHANGED, ...FRONTEND_CI_FOUR_SHARDS_ADDED, FRONTEND_CI_FOUR_SHARDS_PROOF,
+    ...vedaVerboseDiagnosticsScopeSince(root, VEDA_VERBOSE_DIAGNOSTICS_BASE),
   ])].sort();
 }
 export function frontendCiFourShardsFixtureFiles(root) {
-  return [...facts(root, FRONTEND_CI_FOUR_SHARDS_BASE).paths, ...FRONTEND_CI_FOUR_SHARDS_ADDED, FRONTEND_CI_FOUR_SHARDS_PROOF];
+  return [...new Set([...facts(root, FRONTEND_CI_FOUR_SHARDS_BASE).paths, ...FRONTEND_CI_FOUR_SHARDS_ADDED, FRONTEND_CI_FOUR_SHARDS_PROOF, ...vedaVerboseDiagnosticsFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -120,10 +122,14 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, FRONTEND_CI_FOUR_SHARDS_BASE);
   const fail = id => violations.push("frontend-ci-four-shards-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  // Only an exact, independently validated successor byte version may be projected.
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(FRONTEND_CI_FOUR_SHARDS_PROOF));
@@ -136,10 +142,10 @@ function validate(root, override) {
     const allowed = [...scope, FRONTEND_CI_FOUR_SHARDS_PROOF].sort();
     const expected = [...parent.paths, ...FRONTEND_CI_FOUR_SHARDS_ADDED, FRONTEND_CI_FOUR_SHARDS_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -159,13 +165,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: FRONTEND_CI_FOUR_SHARDS_CHANGED,
-    addedPaths: [...FRONTEND_CI_FOUR_SHARDS_ADDED, FRONTEND_CI_FOUR_SHARDS_PROOF],
-    afterHashes: Object.fromEntries([...FRONTEND_CI_FOUR_SHARDS_CHANGED, ...FRONTEND_CI_FOUR_SHARDS_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...FRONTEND_CI_FOUR_SHARDS_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...FRONTEND_CI_FOUR_SHARDS_ADDED, FRONTEND_CI_FOUR_SHARDS_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...FRONTEND_CI_FOUR_SHARDS_CHANGED, ...FRONTEND_CI_FOUR_SHARDS_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => FRONTEND_CI_FOUR_SHARDS_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function frontendCiFourShardsParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "frontendCiFourShardsParentReader", undefined,
-    () => validate(root, undefined), FRONTEND_CI_FOUR_SHARDS_PROOF);
+  const successor = vedaVerboseDiagnosticsParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "frontendCiFourShardsParentReader", undefined, check, FRONTEND_CI_FOUR_SHARDS_PROOF);
 }

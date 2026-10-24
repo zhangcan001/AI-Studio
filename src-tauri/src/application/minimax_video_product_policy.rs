@@ -11,7 +11,7 @@ use crate::application::workflow_manifest::WorkflowManifest;
 use sha2::{Digest, Sha256};
 
 pub const REQUIRED: &str = "MINIMAX_VIDEO_PRODUCT_REQUIRED";
-pub const AUTHORIZED_PACKAGES: [&str; 7] = [
+pub const AUTHORIZED_PACKAGES: [&str; 8] = [
     "minimax_h3_fl2va_t2v_quality_2_2_0",
     "minimax_h3_fl2va_i2v_quality_2_2_0",
     "minimax_h3_fl2va_first_last_quality_2_2_0",
@@ -19,6 +19,7 @@ pub const AUTHORIZED_PACKAGES: [&str; 7] = [
     "minimax_h3_reference_standard_1_0_0",
     "minimax_h3_reference_veda_turbo_1_0_0",
     "minimax_h3_reference_veda_turbo_1_1_0",
+    "minimax_h3_reference_veda_turbo_1_2_0",
 ];
 
 pub fn authorizes(
@@ -53,6 +54,7 @@ pub fn authorizes(
     let approved_version = match artifact.package_name.as_str() {
         "minimax_h3_reference_standard_1_0_0" | "minimax_h3_reference_veda_turbo_1_0_0" => "1.0.0",
         "minimax_h3_reference_veda_turbo_1_1_0" => "1.1.0",
+        "minimax_h3_reference_veda_turbo_1_2_0" => "1.2.0",
         _ => "2.2.0",
     };
     manifest.validate().is_ok()
@@ -184,6 +186,7 @@ mod user_video_tests {
             "minimax_h3_reference_standard_1_0_0",
             "minimax_h3_reference_veda_turbo_1_0_0",
             "minimax_h3_reference_veda_turbo_1_1_0",
+            "minimax_h3_reference_veda_turbo_1_2_0",
         ] {
             let (mut v, mut r, mut a, _) = fixture("video");
             let live =

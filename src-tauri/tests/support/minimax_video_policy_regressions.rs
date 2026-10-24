@@ -319,7 +319,7 @@ async fn all_approved_exact_products_admit_and_compile_without_changing_recipe_b
     ))
     .with_new_generation_admission(f.registry.clone());
     // Both Veda reference versions share one workflow; the catalog lists only
-    // each workflow's current version (approved upgrade 1.1.0), while every exact
+    // each workflow's current version (approved upgrades 1.1.0 -> 1.2.0), while every exact
     // pair above, including 1.0.0, stays admitted.
     let listed = catalog.list().await.unwrap();
     let veda: Vec<_> = listed
@@ -328,10 +328,10 @@ async fn all_approved_exact_products_admit_and_compile_without_changing_recipe_b
         .collect();
     assert_eq!(veda.len(), 1);
     assert_eq!(
-        veda[0].recipe_version, "1.1.0",
+        veda[0].recipe_version, "1.2.0",
         "approved Veda upgrade is current"
     );
-    assert_eq!(listed.len(), AUTHORIZED_PACKAGES.len() - 1);
+    assert_eq!(listed.len(), AUTHORIZED_PACKAGES.len() - 2);
     assert_eq!(count(&f.pool, "tasks").await, 0);
     assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);
 }

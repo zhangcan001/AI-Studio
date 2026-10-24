@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "VEDA_VERBOSE_DIAGNOSTICS",
+  "parentHead": "88b1657b3fa55bd21186725db8bb4d4efdb53f6b",
+  "planningParentHead": "88b1657b3fa55bd21186725db8bb4d4efdb53f6b",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "newBuiltinPackage": "minimax_h3_reference_veda_turbo_1_2_0",
+    "onlyVedaVerboseChanged": true,
+    "historicalVedaPackagesUnchanged": true,
+    "guardsRelaxed": false
+  },
+  "files": {
+    "scripts/frontend-ci-four-shards-successor-guard.mjs": {
+      "beforeHash": "d97dd7d1e9a396e216e0e11946524c5cb26aacf2532f48b1fc2ae881d69f0744",
+      "afterHash": "889bcef6b5cbd54bec3f8225e94832b94d07241b24ad07cd6e256e87c3aafec8"
+    },
+    "scripts/testing/veda-verbose-diagnostics.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "2ab6df8ce1ae4456dc7a9eaea325b64c005ec44d4fd27f9bca55eb15b9be4ce5"
+    },
+    "scripts/veda-verbose-diagnostics-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "e06abd80a32ed466556548fd8e458be1bda8b2bf576471cedd9d866726614594"
+    },
+    "src-tauri/src/application/builtin_runtime_packages.rs": {
+      "beforeHash": "568756666f6d22bafb34f24bfe31207e8c02b949213d07cf9bdd05643e3d6d1f",
+      "afterHash": "4d7c02d71301dbf5a8abe31d8847fb26dd9ae6c4f4b180982c871b44b2066660"
+    },
+    "src-tauri/src/application/minimax_video_product_policy.rs": {
+      "beforeHash": "b8ea3b88f5019526a54a9403db64bd3934b7db7a720bda6057bedbb009d2ee75",
+      "afterHash": "c4a1f950e65533358e464ce76d99a8fbb4447aa7a1f125765179a1f70c26ec7a"
+    },
+    "src-tauri/tests/dev082_unified_workflow_library.rs": {
+      "beforeHash": "f25d1e09fd4a0474e84f10839b501a59a728b194d12822c6d2fdee4c93ba4217",
+      "afterHash": "15a64541b0a1c11fefa8362a1d80a2e14d9b543288a25c6040fd8e0062f0e238"
+    },
+    "src-tauri/tests/support/minimax_video_policy_regressions.rs": {
+      "beforeHash": "ee053567b2549786386563f056d440d2595f2b6b011f5fcc9686b627cd681d24",
+      "afterHash": "d81adf890889b852a6fc0e14414a8535ef2645e681be58aa81dbd8a3ffa7d90c"
+    }
+  }
+}
