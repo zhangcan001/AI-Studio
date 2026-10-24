@@ -10,6 +10,7 @@ export const FRONTEND_CI_FOUR_SHARDS_CHANGED = [
   ".github/workflows/ci.yml",
   ".github/workflows/frontend-only-ci.yml",
   "scripts/composition-scene-anchor-successor-guard.mjs",
+  "scripts/testing/ui-phase7b-r1-metadata.test.mjs",
   "src/app/UiPhase5ECiShardBoundary.test.ts",
   "src/app/UiPhase5FCiMemoryBoundary.test.ts",
   "src/app/UiPhase5ICiWorkerTeardownBoundary.test.ts",

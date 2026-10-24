@@ -31,11 +31,15 @@
     },
     "scripts/frontend-ci-four-shards-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "f96815129e64f063bc83c8e416aceedf5f5e0a1b7da086e2afc45fb4f1715e99"
+      "afterHash": "e50e65c4387e6e65a0ca19bbf221ba7d481cb99936288a7242b9a02036ac6a51"
     },
     "scripts/testing/frontend-ci-four-shards.test.mjs": {
       "beforeHash": null,
       "afterHash": "5e8d683033990b02e33cd9a8e5bba902129dfd2fcd116a68c8c42f5e1008bb88"
+    },
+    "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
+      "beforeHash": "de895622387ec3512c78ac16a6994fa87a9d90952c2fa3cc4f98502175d39b32",
+      "afterHash": "eb813c33d571da1156c3701de6feeca27bb7b1b56799d0508e59549bb238eae7"
     },
     "src/app/UiPhase5ECiShardBoundary.test.ts": {
       "beforeHash": "e5bca8b5be5e4f8d200d69a79c7a8635e1c82029cf77b95bebc883e05a68dca1",

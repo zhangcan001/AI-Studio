@@ -193,7 +193,8 @@ it("invalidates cached live fixtures on runtime changes, deletion and illegal ad
     const workflow = join(fixture, ".github/workflows/ci.yml"), workflowBytes = readFileSync(workflow);
     try {
       writeFileSync(workflow, Buffer.concat([workflowBytes, Buffer.from("\n# changed after cache hit\n")]));
-      expect(validate()).toContain("ui-phase7b-r1-metadata-changed:.github/workflows/ci.yml");
+      // The newest successor that owns ci.yml bytes rejects post-cache drift first.
+      expect(validate()).toContain("frontend-ci-four-shards-changed:.github/workflows/ci.yml");
     } finally { writeFileSync(workflow, workflowBytes); }
     expect(validate()).toEqual([]);
     try { rmSync(workflow); expect(validate().length).toBeGreaterThan(0); }
