@@ -207,3 +207,21 @@ export function sessionLiveRead(root, path) {
   }
   return readFileSync(join(root, path), 'utf8');
 }
+// Within one outer validation session, every successor in the guard chain asks
+// Git for the same working-tree inventory and the same immutable ancestor ids.
+// Memoize only those exact queries, only for the session's own root, and only
+// while the session is open. The session's closing identity re-reads the tree
+// and Git inventory, so drift during validation is still rejected; outside a
+// session (override probes, other roots) every query goes to Git fresh.
+const sessionGitQueries = args => args.length === 4 && args[0] === 'ls-files' && args[1] === '--cached'
+  && args[2] === '--others' && args[3] === '--exclude-standard'
+  || args.length === 2 && args[0] === 'rev-parse' && /^[a-f0-9]{40}$/.test(args[1]);
+export function sessionGit(root, args, options) {
+  if (!session || session.root !== resolve(root) || !sessionGitQueries(args)
+      || options?.encoding !== 'utf8' || options?.input !== undefined || options?.env !== undefined)
+    return exec('git', args, { cwd: root, ...options });
+  session.git ??= new Map();
+  const key = JSON.stringify(args);
+  if (!session.git.has(key)) session.git.set(key, exec('git', args, { cwd: root, ...options }));
+  return session.git.get(key);
+}

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionGit } from "./boundary-validation-cache.mjs";
 
 export const BACKUP_PACKAGE_BASE = "05abb6e8f3766b5d95c24149a6e706350b1cab37";
 export const BACKUP_PACKAGE_PROOF = "docs/architecture/backup-package-bindings-successor.json";
@@ -30,7 +30,7 @@ export const BACKUP_PACKAGE_CONTRACTS = {
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");
 const relevant = p => p === "vite.config.ts" || /^(\.github\/workflows\/|src\/|src-tauri\/|scripts\/|docs\/architecture\/)/.test(p);
-const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+const git = (root, args) => sessionGit(root, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const factsCache = new Map();
 function facts(root, base) {
   const key = JSON.stringify([immutableGitStoreIdentity(root), base]);

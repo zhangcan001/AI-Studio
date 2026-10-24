@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionLiveRead } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
 
 export const H3_COMPOSITION_LAYOUT_BASE = "ed8ff13ec51febdeb49a84ac9e9ddc1f4869cd88";
 export const H3_COMPOSITION_LAYOUT_PROOF = "docs/architecture/h3-composition-layout-successor.json";
@@ -40,7 +40,7 @@ export const H3_COMPOSITION_LAYOUT_CONTRACTS = {
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");
 const relevant = p => p === "vite.config.ts" || /^(\.github\/workflows\/|src\/|src-tauri\/|scripts\/|docs\/architecture\/)/.test(p);
-const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+const git = (root, args) => sessionGit(root, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const factsCache = new Map();
 function facts(root, base) {
   const key = JSON.stringify([immutableGitStoreIdentity(root), base]);

@@ -14,7 +14,8 @@
     "frontendShardCount": 4,
     "allFrontendTestsStillRun": true,
     "boundaryShardsUnchanged": true,
-    "guardsRelaxed": false
+    "guardsRelaxed": false,
+    "sessionGitMemoizedWithinOneValidation": true
   },
   "files": {
     ".github/workflows/ci.yml": {
@@ -25,21 +26,161 @@
       "beforeHash": "0f3e437ca3d37764a64cfc90687b599cb53fcd7dc1eead9025bffcfc916eb5da",
       "afterHash": "af045019ed4c3a1856e4b0c852b9505ecb15b2d8a0eeec46a5db87b76d65643a"
     },
+    "scripts/backup-package-bindings-successor-guard.mjs": {
+      "beforeHash": "bda0e95454083998ba8b0d1e1a8a1b81613b1273ce257b703972ea47254d4d2b",
+      "afterHash": "f87ef00d13ddc2d9a7b50d5957b328210458e03ce5cbd078465c414ba48fb5b6"
+    },
+    "scripts/batch-create-reason-successor-guard.mjs": {
+      "beforeHash": "62746e04ca9307d361c9fb2d2f32afb2cc4f79cfbfc5a38dd688827e5aaf60ab",
+      "afterHash": "061acc78d3163f7e57f3d4c43f00bccb178e2e5e12ea24615a9054cd5e7e1c44"
+    },
+    "scripts/boundary-validation-cache.mjs": {
+      "beforeHash": "759c228c5a56ec9c8b52bdc3ffaffce39b085ea779f0b7b80f0cbe006c237714",
+      "afterHash": "2ebef4ce91210a9702eebff976342131a4ec9f72e47ff63376a6f1d9ba279c42"
+    },
+    "scripts/composition-detail-hint-successor-guard.mjs": {
+      "beforeHash": "f7b192594f576c254b8e0b8e74795b06332915d3b879a972d5788f1f0b755c7b",
+      "afterHash": "852ca0ca0f1b33ca61e2e8785524051544149f792eeddc86352c97272334c153"
+    },
+    "scripts/composition-kind-successor-guard.mjs": {
+      "beforeHash": "d82c319053a741c8379221d32089dbd9c57e820321414719013b6f5c89cc2fea",
+      "afterHash": "051a1d8b1a2b41681a75a517510c0556f2a7dbe5b2db18471a10fd45eb1d37f0"
+    },
     "scripts/composition-scene-anchor-successor-guard.mjs": {
       "beforeHash": "432b1b3675e8d5bdf58cd14258c3a3b64c07629093e2539e57e07de430f102de",
-      "afterHash": "bea42117c2f7868af6251b312b520751b454da044bfde21123bae4bffc35a965"
+      "afterHash": "9c42b071b24627e480fc9a566ab1522e7f69122ffdf67ff5a9634a9ac00b1de6"
+    },
+    "scripts/composition-usage-successor-guard.mjs": {
+      "beforeHash": "f5bd9b0dd3c4cc7edf122760bcf895f4a4a505e11b117c0435243d69fc3006cc",
+      "afterHash": "576246c8e2ee6c2653630585b4fc52738d226fee04edfd60e06bdb3c0763f78d"
+    },
+    "scripts/default-reference-generator-successor-guard.mjs": {
+      "beforeHash": "9c5176f5d09365265d60b64b07ef8fd5d62f5e6ed6fea7ec5b6e7db2addc4962",
+      "afterHash": "525e5be2202501e80d1304a85c62c14bc35af4639a990432e5812009dc69dd9c"
+    },
+    "scripts/desktop-visual-refinement-successor-guard.mjs": {
+      "beforeHash": "a0ad93e08f720ed34a0912aeb3b345df7142e0580dfc2b68180e638c7c65c691",
+      "afterHash": "c6cbe28f085760fc82aeca74f04b4c5888cba442cd5cef72d2d6b8ee1ec9424a"
+    },
+    "scripts/entity-category-library-successor-guard.mjs": {
+      "beforeHash": "e49ce30f0cfde9def7bdcf61800a194f9bb0e564da2aa53943b69d9a83eb4fb1",
+      "afterHash": "25f0d802cfdcfc1ca42cfd57f63c0e303a2735e9cb14a09a8c8279df82db3034"
+    },
+    "scripts/entity-reference-auto-apply-successor-guard.mjs": {
+      "beforeHash": "682d318cff889f96dcbf889c3e694c0fa7f8c96e6ba9567730920d0422fa0415",
+      "afterHash": "e67974ef519ff8b0e6dc594e7e6de144a3da8d4bedd1643e1fc7623c34f40a60"
+    },
+    "scripts/folder-batch-import-successor-guard.mjs": {
+      "beforeHash": "477d5e2b777b46f2bc098d0eadc4001a4f7cf09b6021d284448c125e0ad0e191",
+      "afterHash": "ce236f807b703edd6d54341f71a55c18e47c99c37f3339d6b844032529ba92ce"
+    },
+    "scripts/folder-import-entity-dedupe-successor-guard.mjs": {
+      "beforeHash": "6ab1ddf7175e4e30135b0e922b87b2fc63a43a4616a15da9129fd0794453297b",
+      "afterHash": "3782c63df6cdd506a2a078aa50ca5e82c24fff3a61024e448565a3e5ae08d87c"
     },
     "scripts/frontend-ci-four-shards-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "e50e65c4387e6e65a0ca19bbf221ba7d481cb99936288a7242b9a02036ac6a51"
+      "afterHash": "d97dd7d1e9a396e216e0e11946524c5cb26aacf2532f48b1fc2ae881d69f0744"
+    },
+    "scripts/generation-progress-refresh-successor-guard.mjs": {
+      "beforeHash": "1fef2ce0bfefcd3e3a717ad2f329c41bb9c44872e04e1a5ea60b3d140ce2bd4f",
+      "afterHash": "cf47cfcb8d203d51898c5181d8872d42a91ddbe99fec474982488d79e19d5dc9"
+    },
+    "scripts/guard-chain-perf-successor-guard.mjs": {
+      "beforeHash": "2f3847eb10ef084dd1f80136ee64074a9e7108fb696d1256f4a9ff0f66b389f9",
+      "afterHash": "2265411e9befa42a5f3d0dcfdb638919f99f97ad6bf8477400991d660ec1e8f3"
+    },
+    "scripts/h3-composition-layout-successor-guard.mjs": {
+      "beforeHash": "c930a8df0296259ef38c76991434d61376478ea1894afdf2bf14afd6569088b9",
+      "afterHash": "7d968d2a6673bc4cbf48bbf931b10ad27fc4dfd14f8cb07ee62bfa48bd7cc0c7"
+    },
+    "scripts/h3-prompt-sections-successor-guard.mjs": {
+      "beforeHash": "b934ba28fe90ae53e06fee8adbb2e407e862519f5515733b6c1767c1ecda50b1",
+      "afterHash": "e9b9f3eeb51080a0c1f53112a4b66dc386ba2057b6bf7036b1320801a5771475"
+    },
+    "scripts/h3-standard-reference-successor-guard.mjs": {
+      "beforeHash": "201bb3d72b42c65e5286badd61497d82d7a7431136b2eced58d645f11eb3f93c",
+      "afterHash": "3a217a7c349adb4b3b0ef58a1c041c9124d4fc9e7a9e92fbe2dee13fdc2c4f33"
+    },
+    "scripts/h3-veda-reference-successor-guard.mjs": {
+      "beforeHash": "1d78cf6987ebd3b79a1e971412ea2fe26c6af35d049143b4a86c421b74b79d1e",
+      "afterHash": "26e71aec757b4bb749afde0a1aedc7a2f2df783e4d16f070966419345dc3f5f1"
+    },
+    "scripts/library-confirm-ci-race-successor-guard.mjs": {
+      "beforeHash": "fce65bff60b4e52089f179e1e1ff9306df7e01c19edf666a12717b6048ce2505",
+      "afterHash": "0a73d47293bec373964ee593340f8ca46ed4555383bd26cbf0a267c55f01d077"
+    },
+    "scripts/prop-kind-import-successor-guard.mjs": {
+      "beforeHash": "05c11b8e2862aaf9bba28c607ffa67e39141982b70e258da8bebebed27e847ef",
+      "afterHash": "2a9e3e29351f6d12b300a5f95d1a6d5409088b691ef5985d8fcc194312ac31bb"
+    },
+    "scripts/reference-draft-recovery-successor-guard.mjs": {
+      "beforeHash": "5190098aaa454ce29fdd4e04c2823cdf08f16ce4054ab1c3fca4c7e2cb530aa5",
+      "afterHash": "11f8e634cd7b84453ae566135cf800377dac7ed77397b6327a4f4d6295e3c00a"
+    },
+    "scripts/reference-images-import-successor-guard.mjs": {
+      "beforeHash": "d3e08c8b356e60f75ca1a97504d1474ec357a5a9b3b38e84c0d378502567d6db",
+      "afterHash": "9ac0d539f8d361d92b764f14c9eb9d5d2eda8b6e38b20a35a8f3aa868ed8eb7d"
+    },
+    "scripts/retired-ui-code-cleanup-successor-guard.mjs": {
+      "beforeHash": "f77bd22905577771f066ab1466d193d214a1359faf9634bfc8bd823241888529",
+      "afterHash": "9c9db192083ae703f60c171be8d78e2b202850d950637b20e61745d1945886bf"
+    },
+    "scripts/shot-duration-cap-successor-guard.mjs": {
+      "beforeHash": "fd3cc3335d7b9679b8c7138d9d84790af0accddbe7d58533b977b6bb4644611c",
+      "afterHash": "e1ff2299e1f18351c10f63a0ad50b0f01d7b53afd8baed78c348ae17809c5867"
+    },
+    "scripts/storyboard-atomic-row-successor-guard.mjs": {
+      "beforeHash": "d6284587034d86cc445f08400e822685ce916cdd46028d15ffd8ca57378c1bcd",
+      "afterHash": "869feb70115c8a8b0dba733e131716ccd7c7b0c062123d3c79fb651168cf37b9"
+    },
+    "scripts/storyboard-load-recovery-successor-guard.mjs": {
+      "beforeHash": "067a8752663247696a653995ed74e0cd2621226bbcbba37e6c35318f9f87f3c3",
+      "afterHash": "2bd8f2d83f5e380785676eb527d568b893bb4d790997fb4bee105de4fc37ed0e"
+    },
+    "scripts/task-cancel-delete-successor-guard.mjs": {
+      "beforeHash": "8aaa92a98123e9f1a4ecb72fdc97d5158991d3bc5aa9589cf0716127c65ef0a5",
+      "afterHash": "af035de585bbd3653c6b61dd90e9254567eeba68e53b9390a8823550dc24b67f"
     },
     "scripts/testing/frontend-ci-four-shards.test.mjs": {
       "beforeHash": null,
-      "afterHash": "5e8d683033990b02e33cd9a8e5bba902129dfd2fcd116a68c8c42f5e1008bb88"
+      "afterHash": "62242f13d98ef56a66c4cacb1bf125237cf5d4f6fc7d7e8294b5ea4a02c1afca"
     },
     "scripts/testing/ui-phase7b-r1-metadata.test.mjs": {
       "beforeHash": "de895622387ec3512c78ac16a6994fa87a9d90952c2fa3cc4f98502175d39b32",
       "afterHash": "eb813c33d571da1156c3701de6feeca27bb7b1b56799d0508e59549bb238eae7"
+    },
+    "scripts/ui-phase7b-backup-prompt-successor-guard.mjs": {
+      "beforeHash": "4fa20b6eeb77b4306b3bbe84061bd26dc758f2cebc79f46e27c406911650a02a",
+      "afterHash": "965caf43af53c89a128998a7fa688a46ac16e66931c09742fa8b72973b1a9f90"
+    },
+    "scripts/ui-phase7b-r1-metadata-successor-guard.mjs": {
+      "beforeHash": "275cf2fd6de0866defd7b1d719e46ac4342a18b6f508b204e539861a57c6cb51",
+      "afterHash": "5da6ab9241a838631183be56d930dda5a38c6733eee9e0855495cb09d70d4525"
+    },
+    "scripts/ui-phase7c-frontend-ci-budget-successor-guard.mjs": {
+      "beforeHash": "ac3e20089acf07fa94cd02f1a23662cff16035b778e74dd3e2cd8e3b5e3f86bc",
+      "afterHash": "8763152ded869fdfdb20bce3a3a7deaeebfa5c015307d892f187bc9e7c1978af"
+    },
+    "scripts/user-copy-cleanup-successor-guard.mjs": {
+      "beforeHash": "4daefcd204bf8a11e54267f7c91a586c17a472ff36cb52ace130982fd55359af",
+      "afterHash": "5a1517002e67c785b43f007927d138bc9615ade9473444e7b7d102dd16571cd0"
+    },
+    "scripts/veda-reference-media-successor-guard.mjs": {
+      "beforeHash": "3e2e5aa0f6316c45b809c37332ea27c85fad75d33d0fe4f862523fc3aa3e09e8",
+      "afterHash": "9853a21b8d1c159c3df681886ffdf930d6d46549e6a9507928757704c860b0e6"
+    },
+    "scripts/workbench-poll-clock-successor-guard.mjs": {
+      "beforeHash": "348922361942fe24f7f3237d41dd9ae1215ab6412d36bcaec0fa2b45472fc408",
+      "afterHash": "dbdbbe9a73c7ef0df4ad8671e4a822dea3835ae9638cf7db2cf9b7e39f44658a"
+    },
+    "scripts/workbench-visual-refinement-successor-guard.mjs": {
+      "beforeHash": "fa1023f2912166b8988a7e40a31c8991d8c0b8485bab95fa3def1b30ba441205",
+      "afterHash": "2b2d2b19ea839eb64bca0c2a44650de4c29715dbf08435d250dd799ee195ff7c"
+    },
+    "scripts/workflow-authoring-retirement-successor-guard.mjs": {
+      "beforeHash": "3aa7770281f9b5f78a505f99a87e631336402f9f0308bf33f7e4c401227e6902",
+      "afterHash": "ec969467198f494eedf709258be6a0f0aba6b4e2f4d6f3574c521b4a7a0517b5"
     },
     "src/app/UiPhase5ECiShardBoundary.test.ts": {
       "beforeHash": "e5bca8b5be5e4f8d200d69a79c7a8635e1c82029cf77b95bebc883e05a68dca1",

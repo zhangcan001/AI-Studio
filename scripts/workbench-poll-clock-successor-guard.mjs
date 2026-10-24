@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionGit } from "./boundary-validation-cache.mjs";
 
 export const WORKBENCH_POLL_CLOCK_BASE = "d765ce73f2fa4c90042b7fc4d08bce4f03b5bdd0";
 export const WORKBENCH_POLL_CLOCK_PROOF = "docs/architecture/workbench-poll-clock-successor.json";
@@ -29,7 +29,7 @@ export const WORKBENCH_POLL_CLOCK_CONTRACTS = {
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");
 const relevant = p => p === "vite.config.ts" || /^(\.github\/workflows\/|src\/|src-tauri\/|scripts\/|docs\/architecture\/)/.test(p);
-const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+const git = (root, args) => sessionGit(root, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const factsCache = new Map();
 function facts(root, base) {
   const key = JSON.stringify([immutableGitStoreIdentity(root), base]);

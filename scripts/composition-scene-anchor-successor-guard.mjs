@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionLiveRead } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
 
 export const COMPOSITION_SCENE_ANCHOR_BASE = "eeec3ba300716c1be3b61b033b1cc1255bf54365";
 export const COMPOSITION_SCENE_ANCHOR_PROOF = "docs/architecture/composition-scene-anchor-successor.json";
@@ -33,7 +33,7 @@ export const COMPOSITION_SCENE_ANCHOR_CONTRACTS = {
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");
 const relevant = p => p === "vite.config.ts" || /^(\.github\/workflows\/|src\/|src-tauri\/|scripts\/|docs\/architecture\/)/.test(p);
-const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+const git = (root, args) => sessionGit(root, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const factsCache = new Map();
 function facts(root, base) {
   const key = JSON.stringify([immutableGitStoreIdentity(root), base]);

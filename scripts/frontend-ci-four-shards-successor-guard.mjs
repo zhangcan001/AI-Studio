@@ -2,15 +2,52 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionLiveRead } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
 
 export const FRONTEND_CI_FOUR_SHARDS_BASE = "89f9ec15968a62bb7fa175d86352244cb2ddaa8b";
 export const FRONTEND_CI_FOUR_SHARDS_PROOF = "docs/architecture/frontend-ci-four-shards-successor.json";
 export const FRONTEND_CI_FOUR_SHARDS_CHANGED = [
+  // Session-scoped memoization of identical Git inventory/ancestor queries
+  // across the guard chain (boundary-validation-cache sessionGit). No check removed.
   ".github/workflows/ci.yml",
   ".github/workflows/frontend-only-ci.yml",
+  "scripts/backup-package-bindings-successor-guard.mjs",
+  "scripts/batch-create-reason-successor-guard.mjs",
+  "scripts/boundary-validation-cache.mjs",
+  "scripts/composition-detail-hint-successor-guard.mjs",
+  "scripts/composition-kind-successor-guard.mjs",
   "scripts/composition-scene-anchor-successor-guard.mjs",
+  "scripts/composition-usage-successor-guard.mjs",
+  "scripts/default-reference-generator-successor-guard.mjs",
+  "scripts/desktop-visual-refinement-successor-guard.mjs",
+  "scripts/entity-category-library-successor-guard.mjs",
+  "scripts/entity-reference-auto-apply-successor-guard.mjs",
+  "scripts/folder-batch-import-successor-guard.mjs",
+  "scripts/folder-import-entity-dedupe-successor-guard.mjs",
+  "scripts/generation-progress-refresh-successor-guard.mjs",
+  "scripts/guard-chain-perf-successor-guard.mjs",
+  "scripts/h3-composition-layout-successor-guard.mjs",
+  "scripts/h3-prompt-sections-successor-guard.mjs",
+  "scripts/h3-standard-reference-successor-guard.mjs",
+  "scripts/h3-veda-reference-successor-guard.mjs",
+  "scripts/library-confirm-ci-race-successor-guard.mjs",
+  "scripts/prop-kind-import-successor-guard.mjs",
+  "scripts/reference-draft-recovery-successor-guard.mjs",
+  "scripts/reference-images-import-successor-guard.mjs",
+  "scripts/retired-ui-code-cleanup-successor-guard.mjs",
+  "scripts/shot-duration-cap-successor-guard.mjs",
+  "scripts/storyboard-atomic-row-successor-guard.mjs",
+  "scripts/storyboard-load-recovery-successor-guard.mjs",
+  "scripts/task-cancel-delete-successor-guard.mjs",
   "scripts/testing/ui-phase7b-r1-metadata.test.mjs",
+  "scripts/ui-phase7b-backup-prompt-successor-guard.mjs",
+  "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
+  "scripts/ui-phase7c-frontend-ci-budget-successor-guard.mjs",
+  "scripts/user-copy-cleanup-successor-guard.mjs",
+  "scripts/veda-reference-media-successor-guard.mjs",
+  "scripts/workbench-poll-clock-successor-guard.mjs",
+  "scripts/workbench-visual-refinement-successor-guard.mjs",
+  "scripts/workflow-authoring-retirement-successor-guard.mjs",
   "src/app/UiPhase5ECiShardBoundary.test.ts",
   "src/app/UiPhase5FCiMemoryBoundary.test.ts",
   "src/app/UiPhase5ICiWorkerTeardownBoundary.test.ts",
@@ -33,12 +70,13 @@ export const FRONTEND_CI_FOUR_SHARDS_CONTRACTS = {
   "frontendShardCount": 4,
   "allFrontendTestsStillRun": true,
   "boundaryShardsUnchanged": true,
-  "guardsRelaxed": false
+  "guardsRelaxed": false,
+  "sessionGitMemoizedWithinOneValidation": true
 };
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");
 const relevant = p => p === "vite.config.ts" || /^(\.github\/workflows\/|src\/|src-tauri\/|scripts\/|docs\/architecture\/)/.test(p);
-const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+const git = (root, args) => sessionGit(root, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const factsCache = new Map();
 function facts(root, base) {
   const key = JSON.stringify([immutableGitStoreIdentity(root), base]);

@@ -76,3 +76,30 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     expect(validate()).toEqual([]);
   } finally { rmSync(root, {recursive:true, force:true}); }
 }, 120000);
+
+it('memoizes Git inventory only inside one validation session and still rejects mid-session drift', async () => {
+  const { cachedBoundary, sessionGit } = await import('../boundary-validation-cache.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'frontend-ci-four-shards-session-git-'));
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src/a.ts'), 'one');
+    const inventory = () => sessionGit(root, ['ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8' });
+    expect(inventory()).toBe('src/a.ts\n');
+    writeFileSync(join(root, 'src/b.ts'), 'two');
+    expect(inventory()).toBe('src/a.ts\nsrc/b.ts\n');
+    let seen = [];
+    const drift = cachedBoundary(root, 'session-git-drift', undefined, () => {
+      seen.push(inventory());
+      writeFileSync(join(root, 'src/c.ts'), 'three');
+      seen.push(inventory());
+      return { violations: [], read: () => '' };
+    });
+    expect(seen[0]).toBe(seen[1]);
+    expect(drift.violations).toEqual(['boundary-live-drift-during-validation']);
+    seen = [];
+    const fresh = cachedBoundary(root, 'session-git-fresh', undefined, () => { seen.push(inventory()); return { violations: [], read: () => '' }; });
+    expect(fresh.violations).toEqual([]);
+    expect(seen[0]).toBe('src/a.ts\nsrc/b.ts\nsrc/c.ts\n');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
