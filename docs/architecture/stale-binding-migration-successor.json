@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "STALE_BINDING_MIGRATION",
+  "parentHead": "81e7010e2ab5bb06a048bfc2a94b3ed639f6bf51",
+  "planningParentHead": "81e7010e2ab5bb06a048bfc2a94b3ed639f6bf51",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "migrationAdded": false,
+    "sameWorkflowOnly": true,
+    "frozenBatchesAndRunsUnchanged": true,
+    "oldVersionsAndRecipesKept": true,
+    "guardsRelaxed": false
+  },
+  "files": {
+    "scripts/stale-binding-migration-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "b84bf28041104a6faece27fa61861f568debd51e6689a0b4f7d35f502ea498cc"
+    },
+    "scripts/testing/stale-binding-migration.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "c488c78e85dd727ac595d85feefb4a8136fc6f9a9aefc63c027acd7d17bc9707"
+    },
+    "scripts/veda-verbose-diagnostics-successor-guard.mjs": {
+      "beforeHash": "9a4dc1a52e3581a11a198322980320b2bd73fbab33fd3c560e84d45f8d4af774",
+      "afterHash": "ac6425511720fd5b8bbf7702581c3ddbe9ec4fee15c0aab74540a713e7a439fa"
+    },
+    "src-tauri/src/infrastructure/database/repositories/workflow_library.rs": {
+      "beforeHash": "f3f50e1abf5a9af00de7596cfba67cfe4f6518b0588d629f97ad4e75e87b1ec3",
+      "afterHash": "30c10d56b4859ef9c4f82c84cb21876d1f9c2656d498b3b45c4eed905de45464"
+    }
+  }
+}

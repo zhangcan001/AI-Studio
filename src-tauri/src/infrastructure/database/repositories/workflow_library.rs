@@ -198,7 +198,170 @@ async fn register_package(
     .map_err(map_sqlx_error)?;
 
     register_runtime_artifact(transaction, package, &workflow_version_id, &recipe_id).await?;
+    if package.source_kind == "PRODUCT" {
+        migrate_stale_bindings(transaction, &package.workflow_id, package.created_at).await?;
+    }
     Ok(registration)
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StaleBindingMigration {
+    pub project_bindings: u64,
+    pub shot_stage_configs: u64,
+    pub shot_video_input_sets: u64,
+    pub project_templates: u64,
+}
+
+/// Editable selections (project bindings, shot stage configs, project templates)
+/// that still name a non-current version of this PRODUCT workflow follow it to
+/// the current version and its single recipe, in the registering transaction.
+/// Idempotent; old versions/recipes, shot input sets of the old pair, frozen
+/// batches and run/task history are never touched. Other workflows never move.
+pub(crate) async fn migrate_stale_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    workflow_id: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<StaleBindingMigration, RepositoryError> {
+    let mut report = StaleBindingMigration::default();
+    let current = sqlx::query_scalar::<_, String>(
+        "SELECT w.current_version_id FROM workflows w
+         WHERE w.id = ? AND w.source_kind = 'PRODUCT' AND w.library_state = 'ACTIVE'
+           AND w.current_version_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM workflow_runtime_states s
+             WHERE s.workflow_version_id = w.current_version_id
+               AND (s.enabled = 0 OR s.archived = 1))",
+    )
+    .bind(workflow_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    let Some(current) = current else {
+        return Ok(report);
+    };
+    let recipes = sqlx::query_scalar::<_, String>(
+        "SELECT id FROM recipes WHERE workflow_version_id = ? ORDER BY id",
+    )
+    .bind(&current)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    let [recipe] = recipes.as_slice() else {
+        return Ok(report);
+    };
+    let stamp = format_datetime(now);
+    const STALE: &str = "workflow_version_id IN (SELECT id FROM workflow_versions
+        WHERE workflow_id = ? AND id <> ?)";
+
+    report.project_bindings = sqlx::query(&format!(
+        "UPDATE project_workflow_bindings
+         SET workflow_version_id = ?, recipe_id = ?, revision = revision + 1, updated_at = ?
+         WHERE {STALE}"
+    ))
+    .bind(&current)
+    .bind(recipe)
+    .bind(&stamp)
+    .bind(workflow_id)
+    .bind(&current)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?
+    .rows_affected();
+
+    let stale_configs = sqlx::query_as::<_, (String, String, String, String)>(&format!(
+        "SELECT c.shot_id, s.project_id, c.workflow_version_id, c.recipe_id
+         FROM shot_stage_configs c INNER JOIN shots s ON s.id = c.shot_id
+         WHERE c.{STALE}"
+    ))
+    .bind(workflow_id)
+    .bind(&current)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    for (shot_id, project_id, old_version, old_recipe) in &stale_configs {
+        // The shot keeps its chosen reference media: a copy of the old pair's
+        // input set is created for the new pair unless one already exists.
+        let copied = sqlx::query(
+            "INSERT INTO shot_video_input_sets
+             (project_id, shot_id, workflow_version_id, recipe_id, instance_id, revision, updated_at)
+             SELECT project_id, shot_id, ?, ?, ?, revision, ?
+             FROM shot_video_input_sets
+             WHERE project_id = ? AND shot_id = ? AND workflow_version_id = ? AND recipe_id = ?
+             ON CONFLICT(project_id, shot_id, workflow_version_id, recipe_id) DO NOTHING",
+        )
+        .bind(&current)
+        .bind(recipe)
+        .bind(format!("vin_{}", Uuid::new_v4()))
+        .bind(&stamp)
+        .bind(project_id)
+        .bind(shot_id)
+        .bind(old_version)
+        .bind(old_recipe)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected();
+        if copied > 0 {
+            sqlx::query(
+                "INSERT INTO shot_video_input_assets
+                 (project_id, shot_id, workflow_version_id, recipe_id, input_key, ordinal, asset_id)
+                 SELECT project_id, shot_id, ?, ?, input_key, ordinal, asset_id
+                 FROM shot_video_input_assets
+                 WHERE project_id = ? AND shot_id = ? AND workflow_version_id = ? AND recipe_id = ?",
+            )
+            .bind(&current)
+            .bind(recipe)
+            .bind(project_id)
+            .bind(shot_id)
+            .bind(old_version)
+            .bind(old_recipe)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+            report.shot_video_input_sets += copied;
+        }
+        report.shot_stage_configs += sqlx::query(
+            "UPDATE shot_stage_configs SET workflow_version_id = ?, recipe_id = ?, updated_at = ?
+             WHERE shot_id = ? AND workflow_version_id = ? AND recipe_id = ?",
+        )
+        .bind(&current)
+        .bind(recipe)
+        .bind(&stamp)
+        .bind(shot_id)
+        .bind(old_version)
+        .bind(old_recipe)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected();
+    }
+
+    report.project_templates = sqlx::query(&format!(
+        "UPDATE project_templates SET workflow_version_id = ?, recipe_id = ?, updated_at = ?
+         WHERE {STALE}"
+    ))
+    .bind(&current)
+    .bind(recipe)
+    .bind(&stamp)
+    .bind(workflow_id)
+    .bind(&current)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?
+    .rows_affected();
+
+    if report != StaleBindingMigration::default() {
+        tracing::info!(
+            workflow_id,
+            current_version_id = %current,
+            recipe_id = %recipe,
+            project_bindings = report.project_bindings,
+            shot_stage_configs = report.shot_stage_configs,
+            shot_video_input_sets = report.shot_video_input_sets,
+            project_templates = report.project_templates,
+            "workflow library: migrated stale selections to the current workflow version"
+        );
+    }
+    Ok(report)
 }
 
 async fn register_runtime_artifact(
@@ -336,6 +499,175 @@ mod tests {
             recipe_sha256: recipe_hash.to_owned(),
             created_at: Utc::now(),
         }
+    }
+
+    async fn exec(pool: &SqlitePool, sql: &str) {
+        sqlx::query(sql).execute(pool).await.expect(sql);
+    }
+
+    async fn pair(pool: &SqlitePool, sql: &str) -> (String, String) {
+        sqlx::query_as::<_, (String, String)>(sql)
+            .fetch_one(pool)
+            .await
+            .expect(sql)
+    }
+
+    /// PRODUCT workflow `wfl_a` with v1/v2/v3 (v3 current) plus an unrelated
+    /// workflow `wfl_b`, one shot per selection and a frozen batch on v1.
+    async fn stale_fixture(pool: &SqlitePool) {
+        let t = "2026-10-01T00:00:00Z";
+        exec(pool, &format!("INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at) VALUES ('prj_default', 'default', 'C:/default', '{t}', '{t}')")).await;
+        for (w, kind, current) in [("wfl_a", "PRODUCT", "wv_a3"), ("wfl_b", "PRODUCT", "wv_b1")] {
+            exec(pool, &format!("INSERT INTO workflows (id, name, category, mode, current_version_id, source_kind, created_at, updated_at) VALUES ('{w}', '{w}', 'video', 'video', '{current}', '{kind}', '{t}', '{t}')")).await;
+        }
+        for (v, w) in [
+            ("wv_a1", "wfl_a"),
+            ("wv_a2", "wfl_a"),
+            ("wv_a3", "wfl_a"),
+            ("wv_b1", "wfl_b"),
+        ] {
+            exec(pool, &format!("INSERT INTO workflow_versions (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at) VALUES ('{v}', '{w}', '{v}', '{{}}', 'sha', '{t}')")).await;
+            exec(pool, &format!("INSERT INTO recipes (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at) VALUES ('r_{v}', '{v}', '1', 1, 'x', 'sha', '{t}')")).await;
+        }
+        for (shot, v) in [
+            ("sh_1", "wv_a1"),
+            ("sh_2", "wv_a2"),
+            ("sh_3", "wv_a3"),
+            ("sh_b", "wv_b1"),
+        ] {
+            exec(pool, &format!("INSERT INTO shots (id, project_id, ordinal, name, prompt_text, created_at, updated_at) VALUES ('{shot}', 'prj_default', {}, '{shot}', '', '{t}', '{t}')", &shot[3..].len() + shot.as_bytes()[3] as usize)).await;
+            exec(pool, &format!("INSERT INTO shot_stage_configs (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at) VALUES ('{shot}', 'video', '{v}', 'r_{v}', '{{\"seed\":1}}', '{t}')")).await;
+        }
+        exec(pool, &format!("INSERT INTO assets (id, project_id, type, category, name, original_name, storage_path, sha256, mime_type, width, height, file_size, metadata_json, created_at, updated_at) VALUES ('ast_1', 'prj_default', 'image', 'source_image', 'a', 'a', 'assets/a.png', 'sha', 'image/png', 1, 1, 1, '{{}}', '{t}', '{t}')")).await;
+        exec(pool, &format!("INSERT INTO shot_video_input_sets (project_id, shot_id, workflow_version_id, recipe_id, instance_id, revision, updated_at) VALUES ('prj_default', 'sh_2', 'wv_a2', 'r_wv_a2', 'vin_old', 4, '{t}')")).await;
+        exec(pool, "INSERT INTO shot_video_input_assets (project_id, shot_id, workflow_version_id, recipe_id, input_key, ordinal, asset_id) VALUES ('prj_default', 'sh_2', 'wv_a2', 'r_wv_a2', 'reference_images', 0, 'ast_1')").await;
+        exec(pool, &format!("INSERT INTO project_workflow_bindings (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at, revision) VALUES ('prj_default', 'VIDEO', 'DEFAULT', 'wv_a1', 'r_wv_a1', '{t}', '{t}', 3), ('prj_default', 'VIDEO', 'REF2VA_IMAGE', 'wv_a2', 'r_wv_a2', '{t}', '{t}', 1), ('prj_default', 'VIDEO', 'REF2VA_AUDIO', 'wv_b1', 'r_wv_b1', '{t}', '{t}', 1)")).await;
+        exec(pool, &format!("INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, created_at, updated_at) VALUES ('pbt_frozen', 'prj_default', 'frozen', 'READY', 0, '{t}', '{t}')")).await;
+        exec(pool, &format!("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, created_at, updated_at) VALUES ('pbi_frozen', 'pbt_frozen', 0, 'wv_a1', 'r_wv_a1', '{{}}', 'PENDING', '{t}', '{t}')")).await;
+    }
+
+    async fn migrate(pool: &SqlitePool, workflow: &str) -> super::StaleBindingMigration {
+        let mut tx = pool.begin().await.unwrap();
+        let report = super::migrate_stale_bindings(&mut tx, workflow, Utc::now())
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        report
+    }
+
+    #[tokio::test]
+    async fn stale_product_selections_follow_the_current_version_idempotently() {
+        let (_directory, pool, _repository) = setup().await;
+        stale_fixture(&pool).await;
+        let first = migrate(&pool, "wfl_a").await;
+        assert_eq!(
+            first,
+            super::StaleBindingMigration {
+                project_bindings: 2,
+                shot_stage_configs: 2,
+                shot_video_input_sets: 1,
+                project_templates: 0,
+            }
+        );
+        for mode in ["DEFAULT", "REF2VA_IMAGE"] {
+            assert_eq!(
+                pair(&pool, &format!("SELECT workflow_version_id, recipe_id FROM project_workflow_bindings WHERE mode = '{mode}'")).await,
+                ("wv_a3".to_owned(), "r_wv_a3".to_owned())
+            );
+        }
+        let revisions: Vec<(String, i64)> =
+            sqlx::query_as("SELECT mode, revision FROM project_workflow_bindings ORDER BY mode")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            revisions,
+            vec![
+                ("DEFAULT".to_owned(), 4),
+                ("REF2VA_AUDIO".to_owned(), 1),
+                ("REF2VA_IMAGE".to_owned(), 2)
+            ]
+        );
+        for shot in ["sh_1", "sh_2", "sh_3"] {
+            assert_eq!(
+                pair(&pool, &format!("SELECT workflow_version_id, recipe_id FROM shot_stage_configs WHERE shot_id = '{shot}'")).await,
+                ("wv_a3".to_owned(), "r_wv_a3".to_owned())
+            );
+        }
+        // Reference media travel with the shot; the old pair's set is kept.
+        let sets: Vec<(String, i64)> = sqlx::query_as("SELECT workflow_version_id, revision FROM shot_video_input_sets WHERE shot_id = 'sh_2' ORDER BY workflow_version_id")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(sets, vec![("wv_a2".to_owned(), 4), ("wv_a3".to_owned(), 4)]);
+        assert_eq!(
+            pair(&pool, "SELECT workflow_version_id, asset_id FROM shot_video_input_assets WHERE workflow_version_id = 'wv_a3'").await,
+            ("wv_a3".to_owned(), "ast_1".to_owned())
+        );
+        // Cross-workflow selections and frozen batch items never move.
+        assert_eq!(
+            pair(&pool, "SELECT workflow_version_id, recipe_id FROM project_workflow_bindings WHERE mode = 'REF2VA_AUDIO'").await,
+            ("wv_b1".to_owned(), "r_wv_b1".to_owned())
+        );
+        assert_eq!(
+            pair(&pool, "SELECT workflow_version_id, recipe_id FROM shot_stage_configs WHERE shot_id = 'sh_b'").await,
+            ("wv_b1".to_owned(), "r_wv_b1".to_owned())
+        );
+        assert_eq!(
+            pair(&pool, "SELECT workflow_version_id, recipe_id FROM production_batch_items WHERE id = 'pbi_frozen'").await,
+            ("wv_a1".to_owned(), "r_wv_a1".to_owned())
+        );
+        // Old versions and recipes remain.
+        let kept: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM recipes WHERE workflow_version_id IN ('wv_a1', 'wv_a2')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(kept, 2);
+        // Idempotent: a second pass changes nothing, including revisions.
+        assert_eq!(
+            migrate(&pool, "wfl_a").await,
+            super::StaleBindingMigration::default()
+        );
+        let again: i64 = sqlx::query_scalar(
+            "SELECT revision FROM project_workflow_bindings WHERE mode = 'DEFAULT'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(again, 4);
+        assert_eq!(
+            migrate(&pool, "wfl_b").await,
+            super::StaleBindingMigration::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn user_and_disabled_workflows_keep_their_selected_versions() {
+        let (_directory, pool, _repository) = setup().await;
+        stale_fixture(&pool).await;
+        exec(
+            &pool,
+            "UPDATE workflows SET source_kind = 'USER' WHERE id = 'wfl_a'",
+        )
+        .await;
+        assert_eq!(
+            migrate(&pool, "wfl_a").await,
+            super::StaleBindingMigration::default()
+        );
+        exec(
+            &pool,
+            "UPDATE workflows SET source_kind = 'PRODUCT' WHERE id = 'wfl_a'",
+        )
+        .await;
+        exec(&pool, "INSERT INTO workflow_runtime_states (workflow_version_id, enabled, archived, updated_at) VALUES ('wv_a3', 0, 0, '2026-10-01T00:00:00Z')").await;
+        assert_eq!(
+            migrate(&pool, "wfl_a").await,
+            super::StaleBindingMigration::default()
+        );
+        assert_eq!(
+            pair(&pool, "SELECT workflow_version_id, recipe_id FROM shot_stage_configs WHERE shot_id = 'sh_1'").await,
+            ("wv_a1".to_owned(), "r_wv_a1".to_owned())
+        );
     }
 
     #[tokio::test]
