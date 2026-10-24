@@ -17,7 +17,8 @@ it('keeps forks without singleFork and a dedicated Boundary CI job after long pr
  const ci=readFileSync('.github/workflows/ci.yml','utf8');
  expect(ci).toContain('timeout-minutes: 35');
  expect(ci).toContain('matrix:\n        shard: [1, 2, 3]');
- expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/3');
+ expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/4');
+ expect(ci).toContain('matrix:\n        shard: [1, 2, 3, 4]');
  expect(ci).toContain('--exclude src/app/**/*Boundary*.test.ts');
  expect(ci).toContain('name: Frontend Boundary probes');
  expect(ci).toContain('NODE_OPTIONS: --max-old-space-size=8192');

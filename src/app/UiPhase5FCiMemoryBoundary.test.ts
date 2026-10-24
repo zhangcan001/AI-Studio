@@ -11,7 +11,8 @@ it('keeps three shards, raises the frontend heap ceiling, and leaves individual 
  const ci=readFileSync('.github/workflows/ci.yml','utf8');
  expect(ci).toContain('NODE_OPTIONS: --max-old-space-size=8192');
  expect(ci).toContain('matrix:\n        shard: [1, 2, 3]');
- expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/3');
+ expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/4');
+ expect(ci).toContain('matrix:\n        shard: [1, 2, 3, 4]');
  expect(ci).toContain('name: Frontend source checks');
  const cache=readFileSync('scripts/boundary-validation-cache.mjs','utf8');
  expect(cache).toContain('staged: new Map()');

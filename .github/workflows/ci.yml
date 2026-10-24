@@ -55,14 +55,14 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1
 
   frontend_tests:
-    name: Frontend tests (${{ matrix.shard }}/3)
+    name: Frontend tests (${{ matrix.shard }}/4)
     runs-on: windows-latest
     # Ordinary unit/UI shards stay free of multi-minute Boundary probes so the
     # vitest worker RPC channel is not held open across a 7–17 minute sync run.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     timeout-minutes: 35
     env:
       # Historical successor probes retain immutable blobs; raise the heap ceiling
@@ -94,7 +94,7 @@ jobs:
         # (run in frontend_boundary_tests). Each file still uses a fresh forks
         # worker because vite.config disables singleFork.
         run: >-
-          pnpm test --maxWorkers=1 --shard=${{ matrix.shard }}/3
+          pnpm test --maxWorkers=1 --shard=${{ matrix.shard }}/4
           --exclude src/app/**/*Boundary*.test.ts
           --exclude src/app/**/*Boundary*.test.tsx
           --exclude scripts/testing/**/*[Bb]oundary*.test.ts
@@ -168,4 +168,4 @@ jobs:
             echo "Frontend shard or Boundary probes did not succeed: shards=$SHARD_RESULT boundary=$BOUNDARY_RESULT"
             exit 1
           fi
-          echo "All three shards, Boundary probes, architecture, TypeScript and Vite succeeded."
+          echo "All four frontend shards, Boundary probes, architecture, TypeScript and Vite succeeded."

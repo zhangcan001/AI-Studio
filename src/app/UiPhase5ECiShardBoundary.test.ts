@@ -18,7 +18,8 @@ it('gates all three complete Vitest shards and mandatory architecture, TypeScrip
  expect(ci).toContain('--exclude src/app/**/*Boundary*.test.ts');
  expect(ci).toContain('matrix:\n        shard: [1, 2, 3]');
  expect(ci).toContain('fail-fast: false');
- expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/3');
+ expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/4');
+ expect(ci).toContain('matrix:\n        shard: [1, 2, 3, 4]');
  expect(ci).toContain('fetch-depth: 0');
  expect(ci).toContain('pnpm test:architecture');
  expect(ci).toContain('pnpm exec tsc --noEmit');

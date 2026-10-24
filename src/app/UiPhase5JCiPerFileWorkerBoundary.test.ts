@@ -15,7 +15,8 @@ it('uses per-file forks workers and a dedicated Boundary job instead of singleFo
  expect(vite).toContain('isolate: true');
  expect(vite).toContain('teardownTimeout: 120_000');
  const ci=readFileSync('.github/workflows/ci.yml','utf8');
- expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/3');
+ expect(ci).toContain('--maxWorkers=1 --shard=${{ matrix.shard }}/4');
+ expect(ci).toContain('matrix:\n        shard: [1, 2, 3, 4]');
  expect(ci).toContain('--exclude src/app/**/*Boundary*.test.ts');
  expect(ci).toContain('name: Frontend Boundary probes');
  expect(ci).toContain('needs: [frontend_tests, frontend_boundary_tests]');

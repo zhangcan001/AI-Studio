@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "FRONTEND_CI_FOUR_SHARDS",
+  "parentHead": "89f9ec15968a62bb7fa175d86352244cb2ddaa8b",
+  "planningParentHead": "89f9ec15968a62bb7fa175d86352244cb2ddaa8b",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": false,
+    "frontendShardCount": 4,
+    "allFrontendTestsStillRun": true,
+    "boundaryShardsUnchanged": true,
+    "guardsRelaxed": false
+  },
+  "files": {
+    ".github/workflows/ci.yml": {
+      "beforeHash": "85f973977829bd31f7233e64a30be031067cd050aac6ea2383ac8840e4199c11",
+      "afterHash": "6257ef874b6622a1f598db8e60af78ed835efb5572bde0d62824c084e3539d65"
+    },
+    ".github/workflows/frontend-only-ci.yml": {
+      "beforeHash": "0f3e437ca3d37764a64cfc90687b599cb53fcd7dc1eead9025bffcfc916eb5da",
+      "afterHash": "af045019ed4c3a1856e4b0c852b9505ecb15b2d8a0eeec46a5db87b76d65643a"
+    },
+    "scripts/composition-scene-anchor-successor-guard.mjs": {
+      "beforeHash": "432b1b3675e8d5bdf58cd14258c3a3b64c07629093e2539e57e07de430f102de",
+      "afterHash": "bea42117c2f7868af6251b312b520751b454da044bfde21123bae4bffc35a965"
+    },
+    "scripts/frontend-ci-four-shards-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "f96815129e64f063bc83c8e416aceedf5f5e0a1b7da086e2afc45fb4f1715e99"
+    },
+    "scripts/testing/frontend-ci-four-shards.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "5e8d683033990b02e33cd9a8e5bba902129dfd2fcd116a68c8c42f5e1008bb88"
+    },
+    "src/app/UiPhase5ECiShardBoundary.test.ts": {
+      "beforeHash": "e5bca8b5be5e4f8d200d69a79c7a8635e1c82029cf77b95bebc883e05a68dca1",
+      "afterHash": "5567cc727aeb359ec10f48f02ff7850ca25f60780c75afd22c7d26a26e73836a"
+    },
+    "src/app/UiPhase5FCiMemoryBoundary.test.ts": {
+      "beforeHash": "4af5cbe231a3809e9de23b39bddd154f9b0d5a00a281709b31f7683341552c06",
+      "afterHash": "f62c95f4729ee2797f9622da58ab05780be71b5a521ab26757564fb7ef0f5f25"
+    },
+    "src/app/UiPhase5ICiWorkerTeardownBoundary.test.ts": {
+      "beforeHash": "f7a8cde2ffb49ba94f239b726515b104a79664dfb2ed8c16ae9bb68bb74f54e0",
+      "afterHash": "5dc430a730fecf673a6ebeafa7124a65806a0e2b3d2ad88b46fe0d198d2277c7"
+    },
+    "src/app/UiPhase5JCiPerFileWorkerBoundary.test.ts": {
+      "beforeHash": "6d35230a3034d46265a074ff93c8172e7469feb2372f247adf82b41b5da7b32d",
+      "afterHash": "4936e1565c0760a94a1a9a04aaf50078017c3ec5a73ed31456b3cd352e0e49c4"
+    }
+  }
+}

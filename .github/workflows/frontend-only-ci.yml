@@ -10,12 +10,12 @@ permissions:
 
 jobs:
   frontend_tests:
-    name: Frontend tests (${{ matrix.shard }}/3)
+    name: Frontend tests (${{ matrix.shard }}/4)
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     timeout-minutes: 35
     env:
       NODE_OPTIONS: --max-old-space-size=8192
@@ -37,7 +37,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Frontend tests (non-Boundary shard)
         run: >-
-          pnpm test --maxWorkers=1 --shard=${{ matrix.shard }}/3
+          pnpm test --maxWorkers=1 --shard=${{ matrix.shard }}/4
           --exclude src/app/**/*Boundary*.test.ts
           --exclude src/app/**/*Boundary*.test.tsx
           --exclude scripts/testing/**/*[Bb]oundary*.test.ts
@@ -100,4 +100,4 @@ jobs:
             echo "Frontend shard or Boundary probes did not succeed: shards=$SHARD_RESULT boundary=$BOUNDARY_RESULT"
             exit 1
           fi
-          echo "All three frontend shards, Boundary probes, architecture, TypeScript and Vite succeeded."
+          echo "All four frontend shards, Boundary probes, architecture, TypeScript and Vite succeeded."
