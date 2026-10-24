@@ -99,6 +99,7 @@ pub use external_production_handoff_repository::{
 };
 pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
+    SupersededGenerationPair,
 };
 pub use generation_snapshot_repository::GenerationSnapshotRepository;
 pub use model_repository::ModelRepository;

@@ -29,6 +29,15 @@ pub struct AvailableGenerationDefinition {
     pub recipe_yaml: String,
 }
 
+/// A superseded built-in pair resolved to its workflow's current version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SupersededGenerationPair {
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub workflow_name: String,
+    pub current_version: String,
+}
+
 #[async_trait]
 pub trait GenerationDefinitionRepository: Send + Sync {
     async fn find(
@@ -74,4 +83,16 @@ pub trait GenerationDefinitionRepository: Send + Sync {
     }
 
     async fn list_available(&self) -> Result<Vec<AvailableGenerationDefinition>, RepositoryError>;
+
+    /// When `workflow_version_id`/`recipe_id` name a non-current version (or
+    /// its recipe) of one enabled, unarchived PRODUCT workflow, returns that
+    /// workflow's current version and its single recipe. Anything else
+    /// (current pair, unknown ids, USER workflows, cross-workflow pairs) is None.
+    async fn resolve_superseded_pair(
+        &self,
+        _workflow_version_id: &str,
+        _recipe_id: &str,
+    ) -> Result<Option<SupersededGenerationPair>, RepositoryError> {
+        Ok(None)
+    }
 }

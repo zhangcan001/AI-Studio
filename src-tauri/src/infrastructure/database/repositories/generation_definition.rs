@@ -1,7 +1,7 @@
 use super::{map_sqlx_error, parse_json};
 use crate::application::ports::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
-    RepositoryError,
+    RepositoryError, SupersededGenerationPair,
 };
 use async_trait::async_trait;
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
@@ -90,6 +90,52 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
             return Ok(None);
         }
         self.find(workflow_version_id, recipe_id).await
+    }
+
+    async fn resolve_superseded_pair(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<Option<SupersededGenerationPair>, RepositoryError> {
+        // Same conditions as the registration-time stale selection migration.
+        let row = sqlx::query_as::<_, (String, String, String, String)>(
+            "SELECT w.current_version_id, w.name, cv.version, w.id
+             FROM workflow_versions old
+             INNER JOIN workflows w ON w.id = old.workflow_id
+             INNER JOIN workflow_versions cv ON cv.id = w.current_version_id
+             INNER JOIN recipes r ON r.id = ?
+             INNER JOIN workflow_versions rv ON rv.id = r.workflow_version_id
+             WHERE old.id = ? AND rv.workflow_id = w.id
+               AND w.source_kind = 'PRODUCT' AND w.library_state = 'ACTIVE'
+               AND (old.id <> w.current_version_id OR rv.id <> w.current_version_id)
+               AND NOT EXISTS (SELECT 1 FROM workflow_runtime_states s
+                 WHERE s.workflow_version_id = w.current_version_id
+                   AND (s.enabled = 0 OR s.archived = 1))",
+        )
+        .bind(recipe_id)
+        .bind(workflow_version_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        let Some((current, name, version, _workflow_id)) = row else {
+            return Ok(None);
+        };
+        let recipes = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM recipes WHERE workflow_version_id = ? ORDER BY id",
+        )
+        .bind(&current)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        let [recipe] = recipes.as_slice() else {
+            return Ok(None);
+        };
+        Ok(Some(SupersededGenerationPair {
+            workflow_version_id: current,
+            recipe_id: recipe.clone(),
+            workflow_name: name,
+            current_version: version,
+        }))
     }
 
     async fn workflow_version_is_active(

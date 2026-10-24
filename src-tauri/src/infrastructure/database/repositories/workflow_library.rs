@@ -671,6 +671,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn import_pins_to_superseded_product_versions_resolve_to_current() {
+        use crate::application::ports::{GenerationDefinitionRepository, SupersededGenerationPair};
+        use crate::infrastructure::database::repositories::SqliteGenerationDefinitionRepository;
+        let (_directory, pool, _repository) = setup().await;
+        stale_fixture(&pool).await;
+        let definitions = SqliteGenerationDefinitionRepository::new(pool.clone());
+        let current = Some(SupersededGenerationPair {
+            workflow_version_id: "wv_a3".into(),
+            recipe_id: "r_wv_a3".into(),
+            workflow_name: "wfl_a".into(),
+            current_version: "wv_a3".into(),
+        });
+        for (v, r) in [
+            ("wv_a1", "r_wv_a1"),
+            ("wv_a2", "r_wv_a2"),
+            ("wv_a1", "r_wv_a2"),
+            ("wv_a3", "r_wv_a1"),
+        ] {
+            assert_eq!(
+                definitions.resolve_superseded_pair(v, r).await.unwrap(),
+                current,
+                "{v}/{r}"
+            );
+        }
+        // Current, unknown and cross-workflow pairs are left to the normal checks.
+        for (v, r) in [
+            ("wv_a3", "r_wv_a3"),
+            ("wv_missing", "r_wv_a1"),
+            ("wv_a1", "r_missing"),
+            ("wv_a1", "r_wv_b1"),
+            ("wv_b1", "r_wv_a1"),
+        ] {
+            assert_eq!(
+                definitions.resolve_superseded_pair(v, r).await.unwrap(),
+                None,
+                "{v}/{r}"
+            );
+        }
+        // Ambiguous recipes, USER, disabled or archived current versions never resolve.
+        exec(&pool, "INSERT INTO recipes (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at) VALUES ('r_extra', 'wv_a3', '2', 1, 'x', 'sha', '2026-10-01T00:00:00Z')").await;
+        assert_eq!(
+            definitions
+                .resolve_superseded_pair("wv_a1", "r_wv_a1")
+                .await
+                .unwrap(),
+            None
+        );
+        exec(
+            &pool,
+            "UPDATE recipes SET workflow_version_id = 'wv_b1' WHERE id = 'r_extra'",
+        )
+        .await;
+        exec(
+            &pool,
+            "UPDATE workflows SET source_kind = 'USER' WHERE id = 'wfl_a'",
+        )
+        .await;
+        assert_eq!(
+            definitions
+                .resolve_superseded_pair("wv_a1", "r_wv_a1")
+                .await
+                .unwrap(),
+            None
+        );
+        exec(
+            &pool,
+            "UPDATE workflows SET source_kind = 'PRODUCT' WHERE id = 'wfl_a'",
+        )
+        .await;
+        exec(&pool, "INSERT INTO workflow_runtime_states (workflow_version_id, enabled, archived, updated_at) VALUES ('wv_a3', 1, 1, '2026-10-01T00:00:00Z')").await;
+        assert_eq!(
+            definitions
+                .resolve_superseded_pair("wv_a1", "r_wv_a1")
+                .await
+                .unwrap(),
+            None
+        );
+        exec(&pool, "UPDATE workflow_runtime_states SET enabled = 0, archived = 0 WHERE workflow_version_id = 'wv_a3'").await;
+        assert_eq!(
+            definitions
+                .resolve_superseded_pair("wv_a1", "r_wv_a1")
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
     async fn registers_then_reuses_same_package() {
         let (_directory, pool, repository) = setup().await;
         let package = package("workflow-hash", "recipe-hash");

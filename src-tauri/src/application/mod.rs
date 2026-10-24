@@ -1165,7 +1165,7 @@ pub mod folder_batch_import_service {
                 }
             };
             let bytes = read_file(root, filename, 1024 * 1024)?;
-            let manifest = if modern {
+            let mut manifest = if modern {
                 if options.legacy.is_some() {
                     return Err(failure(
                         "INVALID_MANIFEST",
@@ -1184,6 +1184,29 @@ pub mod folder_batch_import_service {
                 .is_none()
             {
                 return Err(failure("PROJECT_UNAVAILABLE", "项目不存在"));
+            }
+            // A package written for an older version of a built-in workflow
+            // follows that workflow's current version (same rule as the
+            // registration-time selection migration); anything else is
+            // validated exactly as written below.
+            let mut generator_warnings: Vec<String> = Vec::new();
+            for generator in manifest.generators.values_mut() {
+                if let Some(current) = self
+                    .definitions
+                    .resolve_superseded_pair(&generator.workflow_version_id, &generator.recipe_id)
+                    .await
+                    .map_err(|_| failure("GENERATOR_UNAVAILABLE", "无法读取生成器"))?
+                {
+                    generator.workflow_version_id = current.workflow_version_id;
+                    generator.recipe_id = current.recipe_id;
+                    let warning = format!(
+                        "导入包指定的工作流「{}」版本已更新，已改用最新版本 {}",
+                        current.workflow_name, current.current_version
+                    );
+                    if !generator_warnings.contains(&warning) {
+                        generator_warnings.push(warning);
+                    }
+                }
             }
             let names = self
                 .shots
@@ -1507,6 +1530,7 @@ pub mod folder_batch_import_service {
             } else {
                 vec![]
             };
+            warnings.extend(generator_warnings);
             // Non-blocking: a composition picture from the package that looks
             // like a rendered scene may fight the scene picture's background.
             for entity in entities
@@ -3006,6 +3030,29 @@ pub mod folder_batch_import_service {
         struct PreviewDefinitions(Vec<crate::application::ports::GenerationDefinition>);
         #[async_trait::async_trait]
         impl crate::application::ports::GenerationDefinitionRepository for PreviewDefinitions {
+            async fn resolve_superseded_pair(
+                &self,
+                version: &str,
+                recipe: &str,
+            ) -> Result<
+                Option<crate::application::ports::SupersededGenerationPair>,
+                crate::application::ports::RepositoryError,
+            > {
+                // Mirrors the built-in Veda 1.1.0 pins carried by older packages.
+                if version != SUPERSEDED_VEDA_VERSION || recipe != SUPERSEDED_VEDA_RECIPE {
+                    return Ok(None);
+                }
+                Ok(self
+                    .0
+                    .iter()
+                    .find(|d| d.workflow_version_id == "ref-version")
+                    .map(|d| crate::application::ports::SupersededGenerationPair {
+                        workflow_version_id: d.workflow_version_id.clone(),
+                        recipe_id: d.recipe_id.clone(),
+                        workflow_name: "Veda".into(),
+                        current_version: "1.2.0".into(),
+                    }))
+            }
             async fn find(
                 &self,
                 version: &str,
@@ -3211,6 +3258,66 @@ pub mod folder_batch_import_service {
                 assert_eq!(count, 0, "{table}");
             }
             fixture.pool.close().await;
+        }
+        const SUPERSEDED_VEDA_VERSION: &str = "wfv_e087c778-e559-490b-a0aa-90b8210e6d86";
+        const SUPERSEDED_VEDA_RECIPE: &str = "rcp_54473f3e-2831-4011-afa0-cbb2a2754da2";
+        #[test]
+        fn expression_test_v0_2_manifest_parses_with_its_pinned_generator() {
+            let m = parse_manifest(r#"{"format":"ai-studio-shot-batch","version":1,"name":"第一集｜人物表情测试V0.2","generators":{"reference":{"workflowVersionId":"wfv_e087c778-e559-490b-a0aa-90b8210e6d86","recipeId":"rcp_54473f3e-2831-4011-afa0-cbb2a2754da2"}},"defaults":{"durationSeconds":8,"aspectRatio":"16:9","resolutionPreset":"0.98"},"characters":[{"name":"沈簿","kind":"character","images":["images/人物/沈簿.png"],"cover":"images/人物/沈簿.png","appearanceEn":"A lean middle-aged man."},{"name":"躲手与收手","kind":"composition","images":["images/构图/躲手与收手.png"],"cover":"images/构图/躲手与收手.png"}],"shots":[{"id":"E01-023","name":"E01-023 躲手与收手 表情测试V0.2","mode":"reference","durationSeconds":8,"references":["images/构图/躲手与收手.png","images/人物/沈簿.png"],"openingComposition":"躲手与收手","style":"natural","summary":"@沈簿 withdraws.","description":"[Shot 1] Positioned as in @躲手与收手, @沈簿 withdraws his hand.","soundscape":"Uneven breathing.","music":"N/A"}],"queue":{"create":false,"name":"第一集人物表情测试V0.2","autoStart":false}}"#.as_bytes()).unwrap();
+            let g = &m.generators[&Mode::Reference];
+            assert_eq!(
+                (g.workflow_version_id.as_str(), g.recipe_id.as_str()),
+                (SUPERSEDED_VEDA_VERSION, SUPERSEDED_VEDA_RECIPE)
+            );
+        }
+        #[tokio::test]
+        async fn superseded_builtin_pin_follows_current_version_with_a_warning() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["generators"]["reference"] = serde_json::json!({
+                "workflowVersionId": SUPERSEDED_VEDA_VERSION,
+                "recipeId": SUPERSEDED_VEDA_RECIPE
+            });
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!((p.valid_count, p.error_count), (2, 0), "{:?}", p.rows);
+            let warning = "导入包指定的工作流「Veda」版本已更新，已改用最新版本 1.2.0";
+            assert_eq!(
+                p.warnings.iter().filter(|w| *w == warning).count(),
+                1,
+                "{:?}",
+                p.warnings
+            );
+            let r = f.service.commit(request(&p, false)).await.unwrap();
+            assert_eq!(r.outcome, "completed", "{r:?}");
+            let pinned: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT workflow_version_id FROM shot_stage_configs WHERE shot_id = ?",
+            )
+            .bind(&r.created_shot_ids[1])
+            .fetch_all(&f.pool)
+            .await
+            .unwrap();
+            assert_eq!(pinned, vec!["ref-version".to_string()]);
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn unknown_pins_keep_failing_without_a_version_warning() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["generators"]["reference"]["workflowVersionId"] = SUPERSEDED_VEDA_VERSION.into();
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!(p.error_count, 1, "{:?}", p.rows);
+            assert!(
+                !p.warnings.iter().any(|w| w.contains("版本已更新")),
+                "{:?}",
+                p.warnings
+            );
+            f.pool.close().await;
         }
         #[tokio::test]
         async fn rescan_has_versioned_suffix_and_discard_or_expiry_cannot_reopen() {

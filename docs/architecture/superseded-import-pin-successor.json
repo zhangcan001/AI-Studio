@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "SUPERSEDED_IMPORT_PIN",
+  "parentHead": "0471525468d2f69b38843ac086fa29e631fab012",
+  "planningParentHead": "0471525468d2f69b38843ac086fa29e631fab012",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "migrationAdded": false,
+    "sameWorkflowOnly": true,
+    "productWorkflowsOnly": true,
+    "importPackagesUnmodified": true,
+    "precheckRelaxed": false,
+    "guardsRelaxed": false
+  },
+  "files": {
+    "scripts/stale-binding-migration-successor-guard.mjs": {
+      "beforeHash": "b84bf28041104a6faece27fa61861f568debd51e6689a0b4f7d35f502ea498cc",
+      "afterHash": "964bed379729c1ae2976d58ea3870ba8203ac991301dbc71d7ed1fbdb35ea64b"
+    },
+    "scripts/superseded-import-pin-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "000812ea60b74c861e6bf2dec8dee04b7129c54df8c36d37f6b8c283cc50cd12"
+    },
+    "scripts/testing/superseded-import-pin.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "4a8ed721f218ac0507373beff11bbcb9d1e61c056b771fb31678794006f61923"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "28e2c317c1a6296467411e2e45f62d77649ea290515d8c09acc9c6dfa1f31757",
+      "afterHash": "01505bcb4b04a484c5b8675520054b35b765eae1b3b66a1e2a3512e80a2aea5d"
+    },
+    "src-tauri/src/application/ports/generation_definition_repository.rs": {
+      "beforeHash": "cf5c5a0073588ee3005d5e62ca5dbb37f9ed5db88ec135600bbfaef877494245",
+      "afterHash": "6e23e257c2a8adb317934e2f708cd546ef72cfb1d8e1cb0a4dd41fba12a05242"
+    },
+    "src-tauri/src/application/ports/mod.rs": {
+      "beforeHash": "affb43cd911bcc69356969304f9b2b6b86b863be7491d01f88517f20c04d2803",
+      "afterHash": "0411380f6e21888c112f850140ec7b57ad52580b4cee80b5601551d4b10d5c9e"
+    },
+    "src-tauri/src/infrastructure/database/repositories/generation_definition.rs": {
+      "beforeHash": "627789dc82c8813d9c7c52d1e30d282603cd481cac03c9adeab8000908fdbb83",
+      "afterHash": "11e83aa15d9ef26a08078f3612cec0608363d273879711ece2b44898596d5ab6"
+    },
+    "src-tauri/src/infrastructure/database/repositories/workflow_library.rs": {
+      "beforeHash": "30c10d56b4859ef9c4f82c84cb21876d1f9c2656d498b3b45c4eed905de45464",
+      "afterHash": "3df6aeda9d569a543fb70710eae90d000782f4ba223158c5db402facaaf8514f"
+    }
+  }
+}

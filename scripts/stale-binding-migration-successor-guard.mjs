@@ -1,3 +1,4 @@
+import { supersededImportPinParentReader, supersededImportPinScopeSince, supersededImportPinFixtureFiles, SUPERSEDED_IMPORT_PIN_BASE } from './superseded-import-pin-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -68,10 +69,11 @@ export function staleBindingMigrationScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...STALE_BINDING_MIGRATION_CHANGED, ...STALE_BINDING_MIGRATION_ADDED, STALE_BINDING_MIGRATION_PROOF,
+    ...supersededImportPinScopeSince(root, SUPERSEDED_IMPORT_PIN_BASE),
   ])].sort();
 }
 export function staleBindingMigrationFixtureFiles(root) {
-  return [...facts(root, STALE_BINDING_MIGRATION_BASE).paths, ...STALE_BINDING_MIGRATION_ADDED, STALE_BINDING_MIGRATION_PROOF];
+  return [...new Set([...facts(root, STALE_BINDING_MIGRATION_BASE).paths, ...STALE_BINDING_MIGRATION_ADDED, STALE_BINDING_MIGRATION_PROOF, ...supersededImportPinFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -80,10 +82,14 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, STALE_BINDING_MIGRATION_BASE);
   const fail = id => violations.push("stale-binding-migration-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  // Only an exact, independently validated successor byte version may be projected.
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(STALE_BINDING_MIGRATION_PROOF));
@@ -96,10 +102,10 @@ function validate(root, override) {
     const allowed = [...scope, STALE_BINDING_MIGRATION_PROOF].sort();
     const expected = [...parent.paths, ...STALE_BINDING_MIGRATION_ADDED, STALE_BINDING_MIGRATION_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -119,13 +125,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: STALE_BINDING_MIGRATION_CHANGED,
-    addedPaths: [...STALE_BINDING_MIGRATION_ADDED, STALE_BINDING_MIGRATION_PROOF],
-    afterHashes: Object.fromEntries([...STALE_BINDING_MIGRATION_CHANGED, ...STALE_BINDING_MIGRATION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...STALE_BINDING_MIGRATION_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...STALE_BINDING_MIGRATION_ADDED, STALE_BINDING_MIGRATION_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...STALE_BINDING_MIGRATION_CHANGED, ...STALE_BINDING_MIGRATION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => STALE_BINDING_MIGRATION_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function staleBindingMigrationParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "staleBindingMigrationParentReader", undefined,
-    () => validate(root, undefined), STALE_BINDING_MIGRATION_PROOF);
+  const successor = supersededImportPinParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "staleBindingMigrationParentReader", undefined, check, STALE_BINDING_MIGRATION_PROOF);
 }
