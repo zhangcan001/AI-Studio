@@ -216,7 +216,19 @@ export function sessionLiveRead(root, path) {
 const sessionGitQueries = args => args.length === 4 && args[0] === 'ls-files' && args[1] === '--cached'
   && args[2] === '--others' && args[3] === '--exclude-standard'
   || args.length === 2 && args[0] === 'rev-parse' && /^[a-f0-9]{40}$/.test(args[1]);
+// `rev-parse <40-hex>` names an immutable object id; like the ls-tree/cat-file
+// queries above, a SUCCESSFUL answer is shared per immutable object store (each
+// guard asks for its own frozen base once per validation, ~40 Git spawns per
+// chain). Failures are never cached, so a missing ancestor still fails every time.
+const immutableRevParses = new Map();
 export function sessionGit(root, args, options) {
+  if (args.length === 2 && args[0] === 'rev-parse' && /^[a-f0-9]{40}$/.test(args[1])
+      && options?.encoding === 'utf8' && options?.input === undefined && options?.env === undefined
+      && Object.keys(options).every(k => k === 'encoding' || k === 'maxBuffer')) {
+    const key = JSON.stringify([immutableObjectStore(root, process.env), args[1]]);
+    if (!immutableRevParses.has(key)) immutableRevParses.set(key, exec('git', args, { cwd: root, ...options }));
+    return immutableRevParses.get(key);
+  }
   if (!session || session.root !== resolve(root) || !sessionGitQueries(args)
       || options?.encoding !== 'utf8' || options?.input !== undefined || options?.env !== undefined)
     return exec('git', args, { cwd: root, ...options });

@@ -9,6 +9,9 @@ export const VEDA_VERBOSE_DIAGNOSTICS_PROOF = "docs/architecture/veda-verbose-di
 export const VEDA_VERBOSE_DIAGNOSTICS_CHANGED = [
   // Built-in Veda reference 1.2.0: byte-identical to 1.1.0 except Veda node 147
   // verbose=true (diagnostic console output only); approved supersession 1.1.0 -> 1.2.0.
+  // Successful full-SHA rev-parse answers shared per immutable object store
+  // (boundary-validation-cache); every ancestor check still runs.
+  "scripts/boundary-validation-cache.mjs",
   "scripts/frontend-ci-four-shards-successor-guard.mjs",
   "src-tauri/src/application/builtin_runtime_packages.rs",
   "src-tauri/src/application/minimax_video_product_policy.rs",
@@ -32,7 +35,8 @@ export const VEDA_VERBOSE_DIAGNOSTICS_CONTRACTS = {
   "newBuiltinPackage": "minimax_h3_reference_veda_turbo_1_2_0",
   "onlyVedaVerboseChanged": true,
   "historicalVedaPackagesUnchanged": true,
-  "guardsRelaxed": false
+  "guardsRelaxed": false,
+  "immutableRevParseSharedPerObjectStore": true
 };
 const canonical = v => v.replaceAll("\r\n", "\n");
 const sha = v => createHash("sha256").update(v).digest("hex");

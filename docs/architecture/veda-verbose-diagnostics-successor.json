@@ -14,9 +14,14 @@
     "newBuiltinPackage": "minimax_h3_reference_veda_turbo_1_2_0",
     "onlyVedaVerboseChanged": true,
     "historicalVedaPackagesUnchanged": true,
-    "guardsRelaxed": false
+    "guardsRelaxed": false,
+    "immutableRevParseSharedPerObjectStore": true
   },
   "files": {
+    "scripts/boundary-validation-cache.mjs": {
+      "beforeHash": "2ebef4ce91210a9702eebff976342131a4ec9f72e47ff63376a6f1d9ba279c42",
+      "afterHash": "4f79c832c1eb39b2bd1fa8a0a59e2c069333b9de02eb83203aef04e40ebff11c"
+    },
     "scripts/frontend-ci-four-shards-successor-guard.mjs": {
       "beforeHash": "d97dd7d1e9a396e216e0e11946524c5cb26aacf2532f48b1fc2ae881d69f0744",
       "afterHash": "889bcef6b5cbd54bec3f8225e94832b94d07241b24ad07cd6e256e87c3aafec8"
@@ -27,7 +32,7 @@
     },
     "scripts/veda-verbose-diagnostics-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "e06abd80a32ed466556548fd8e458be1bda8b2bf576471cedd9d866726614594"
+      "afterHash": "9a4dc1a52e3581a11a198322980320b2bd73fbab33fd3c560e84d45f8d4af774"
     },
     "src-tauri/src/application/builtin_runtime_packages.rs": {
       "beforeHash": "568756666f6d22bafb34f24bfe31207e8c02b949213d07cf9bdd05643e3d6d1f",
