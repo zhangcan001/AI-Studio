@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { RunsPage } from "./RunsPage";
 import { CreatePage } from "../create/CreatePage";
+import { setPrompt } from "../create/composerTestUtils";
 import { normalRuns } from "./runsModel";
 import { overviewAction } from "../../app/v3/ProjectOverviewPage";
 import { resolveResume } from "../../app/routes/resumeAdapter";
@@ -217,4 +218,74 @@ it("ordinary Runs exposes recent coverage and project-scoped existing complete t
  const navigate=vi.fn();render(<RunsPage route={{kind:"runs",projectId:"project-a"}} navigate={navigate}/>);
  expect(screen.getByRole("heading",{name:"近期运行"})).toBeTruthy();expect(screen.getByText(/当前覆盖最近 50 个任务/)).toBeTruthy();
  fireEvent.click(screen.getByRole("button",{name:"查看完整任务历史"}));expect(navigate).toHaveBeenCalledWith({kind:"project-settings",projectId:"project-a",section:"advanced-tasks"});
+});
+
+it("folder batch inputs edit only their linked Shot instead of reopening the whole package", async () => {
+  const inputs = ["a", "b"].map(id => ({ ...run.detail!.inputs[0], taskId: `task-${id}`, itemId: `item-${id}`, shotId: `shot-${id}`, shotName: `镜头${id}`, values: { prompt: { type: "string" as const, value: `仅修改${id}` } } }));
+  api.get.mockResolvedValue({ ...run, ref: { source: "queue-batch", id: "imported-batch" }, detail: { sources: ["a", "b"].map(id => ({ id: `shot-${id}`, name: `镜头${id}`, stage: "video" })), inputs } });
+  const navigate = vi.fn(); render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: { source: "queue-batch", id: "imported-batch" } }} navigate={navigate} />);
+  const buttons = await screen.findAllByRole("button", { name: "编辑这些输入并创建新运行" });
+  fireEvent.click(buttons[1]);
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "project-a", stage: "video", shotId: "shot-b" }));
+  expect(useStudioStore.getState().pendingRunIntent?.values.prompt).toEqual({ type: "string", value: "仅修改b" });
+  expect(api.retry).not.toHaveBeenCalled(); expect(api.start).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("folder batch retries only the explicitly chosen eligible item and preserves siblings", async () => {
+  const batchRef = { source: "queue-batch", id: "imported-batch" } as const;
+  api.get.mockResolvedValue({ ...run, ref: batchRef, availableActions: ["RETRY"], recoverability: { retryItemIds: ["item-a", "item-b"], reviewRequired: 0 }, detail: { sources: [], inputs: ["a", "b"].map(id => ({ ...run.detail!.inputs[0], itemId: `item-${id}`, taskId: `task-${id}` })) } });
+  api.retry.mockResolvedValue(run);
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: batchRef }} navigate={vi.fn()} />);
+  await screen.findAllByRole("button", { name: "编辑这些输入并创建新运行" });
+  const articles = document.querySelectorAll<HTMLElement>(".run-input");
+  fireEvent.click(within(articles[1]).getByRole("button", { name: "仅重试此镜头" }));
+  await waitFor(() => expect(api.retry).toHaveBeenCalledWith("project-a", { ref: batchRef, selectedItemIds: ["item-b"] }));
+  expect(api.retry).toHaveBeenCalledTimes(1); expect(api.start).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("per-input current editing keeps current draft authority and never starts the imported batch", async () => {
+  const navigate = vi.fn();
+  api.get.mockResolvedValue({ ...run, detail: { sources: run.detail!.sources, inputs: [{ ...run.detail!.inputs[0], shotId: "shot-a", shotName: "镜头一" }] } });
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={navigate} />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑此镜头" }));
+  expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "project-a", stage: "video", shotId: "shot-a" });
+  expect(useStudioStore.getState().pendingRunIntent).toBeUndefined(); expect(api.retry).not.toHaveBeenCalled(); expect(api.start).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("explicit unresolved Shot never falls back to another batch input's sole source", async () => {
+  api.get.mockResolvedValue({ ...run, detail: { ...run.detail, inputs: [{ ...run.detail!.inputs[0], shotId: null }] } });
+  const navigate = vi.fn(); render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={navigate} />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑这些输入并创建新运行" }));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "project-a", stage: "video", shotId: undefined }));
+  expect(useStudioStore.getState().pendingRunIntent?.target?.shotId).toBeNull(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("rejects an input's forged Shot locator rather than binding it across sources", async () => {
+  api.get.mockResolvedValue({ ...run, detail: { ...run.detail, inputs: [{ ...run.detail!.inputs[0], shotId: "foreign-shot" }] } });
+  const navigate = vi.fn(); render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={navigate} />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑这些输入并创建新运行" }));
+  await screen.findByRole("alert"); expect(navigate).not.toHaveBeenCalled(); expect(useStudioStore.getState().pendingRunIntent).toBeUndefined(); expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("never offers original-snapshot retry for a completed or ineligible sibling", async () => {
+  const batchRef = { source: "queue-batch", id: "imported-batch" } as const;
+  api.get.mockResolvedValue({ ...run, ref: batchRef, availableActions: ["RETRY"], recoverability: { retryItemIds: ["item-b"], reviewRequired: 0 }, detail: { sources: [], inputs: ["a", "b"].map(id => ({ ...run.detail!.inputs[0], itemId: `item-${id}`, taskId: `task-${id}` })) } });
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: batchRef }} navigate={vi.fn()} />);
+  await screen.findAllByRole("button", { name: "编辑这些输入并创建新运行" });
+  expect(within(document.querySelectorAll<HTMLElement>(".run-input")[0]).queryByRole("button", { name: "仅重试此镜头" })).toBeNull();
+  expect(screen.getAllByRole("button", { name: "仅重试此镜头" })).toHaveLength(1); expect(api.retry).not.toHaveBeenCalled();
+});
+
+it("editing the second imported input generates one new Shot run and never restarts the original batch", async () => {
+  const batchRef = { source: "queue-batch", id: "imported-batch" } as const;
+  api.get.mockResolvedValue({ ...run, ref: batchRef, detail: { sources: [{ id: "shot-a", name: "镜头一", stage: "video" }, { id: "shot-b", name: "镜头二", stage: "video" }], inputs: ["a", "b"].map(id => ({ ...run.detail!.inputs[0], itemId: `item-${id}`, taskId: `task-${id}`, shotId: `shot-${id}`, values: { prompt: { type: "string" as const, value: `原输入${id}` } } })) } });
+  api.creationGet.mockResolvedValue({ ...context, shots: [...context.shots, { id: "shot-b", name: "镜头二", ordinal: 2 }], selectedShot: { ...context.selectedShot!, summary: { id: "shot-b", name: "镜头二", ordinal: 2 } } });
+  api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "new-single-shot-run" }, startOutcome: "QUEUED", startIssue: null });
+  function Harness() { const [route,setRoute]=useState<AppRoute>({kind:"runs",projectId:"project-a",run:batchRef}); return route.kind==="create"?<CreatePage runtime={{status:"CONNECTED",endpoint:"http://fixture.invalid",devices:[],runtimeGeneration:1}} route={route} navigate={setRoute}/>:route.kind==="runs"?<RunsPage route={route} navigate={setRoute}/>:null; }
+  render(<Harness/>);fireEvent.click((await screen.findAllByRole("button",{name:"编辑这些输入并创建新运行"}))[1]);
+  await screen.findByRole("button",{name:"生成"});setPrompt("只重做镜头二的新提示词");
+  await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(false));fireEvent.click(screen.getByRole("button",{name:"生成"}));
+  await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+  expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({projectId:"project-a",shotId:"shot-b",selectionRef:"exact-pair",values:expect.objectContaining({prompt:{type:"string",value:"只重做镜头二的新提示词"}})}));
+  expect(api.start).not.toHaveBeenCalled();expect(api.retry).not.toHaveBeenCalled();expect(api.cancel).not.toHaveBeenCalled();
 });

@@ -28,6 +28,8 @@ pub struct RunShotContext {
 pub struct RunInput {
     pub task_id: Option<String>,
     pub item_id: Option<String>,
+    pub shot_id: Option<String>,
+    pub shot_name: Option<String>,
     pub generator_name: String,
     pub selection_ref: Option<String>,
     pub values: BTreeMap<String, DraftValueView>,
@@ -191,7 +193,7 @@ impl ProductRunFacade {
             .await
             .map_err(ProductError::internal)?;
         let mut sources = Vec::new();
-        for shot in shots {
+        for shot in &shots {
             let mut stages = BTreeSet::new();
             for link in &shot.generation_links {
                 if link
@@ -212,6 +214,26 @@ impl ProductRunFacade {
                 stage,
             }));
         }
+        // Only formal links within this project identify an input's Shot. A
+        // shared/ambiguous historical link must never pick the first source.
+        let input_shot = |task: Option<&str>, item: Option<&str>| {
+            let mut owners = shots.iter().filter(|shot| {
+                shot.generation_links.iter().any(|link| {
+                    link.stage == "video"
+                        && ((task.is_some() && link.task_id.as_deref() == task)
+                            || (item.is_some() && link.production_batch_item_id.as_deref() == item))
+                })
+            });
+            match (owners.next(), owners.next()) {
+                (Some(shot), None) => (Some(shot.id.clone()), Some(shot.name.clone())),
+                _ => (None, None),
+            }
+        };
+        let item_order: BTreeMap<_, _> = batch_items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.id.as_str().to_owned(), index))
+            .collect();
         let mut inputs = Vec::new();
         for id in task_ids {
             let task = services
@@ -243,9 +265,19 @@ impl ProductRunFacade {
             let values = reusable
                 .map(|draft| draft.values.clone())
                 .unwrap_or_default();
+            let mut item_ids = batch_items
+                .iter()
+                .filter(|item| item.task_id.as_deref() == Some(id.as_str()));
+            let item_id = match (item_ids.next(), item_ids.next()) {
+                (Some(item), None) => Some(item.id.as_str().to_owned()),
+                _ => None,
+            };
+            let (shot_id, shot_name) = input_shot(Some(&id), item_id.as_deref());
             inputs.push(RunInput {
                 task_id: Some(id),
-                item_id: None,
+                item_id,
+                shot_id,
+                shot_name,
                 generator_name: task.workflow_name,
                 selection_ref,
                 values,
@@ -272,9 +304,12 @@ impl ProductRunFacade {
                 recipe_id: item.recipe_id,
             }
             .encode()?;
+            let (shot_id, shot_name) = input_shot(None, Some(item.id.as_str()));
             inputs.push(RunInput {
                 task_id: None,
                 item_id: Some(item.id.as_str().to_owned()),
+                shot_id,
+                shot_name,
                 generator_name: "待启动生成器".to_owned(),
                 selection_ref: Some(selection_ref),
                 values: values
@@ -287,6 +322,15 @@ impl ProductRunFacade {
                     .map(|_| "此项未启动，请检查输入与运行环境。".to_owned()),
             });
         }
+        // A completed item's random Task ID must not reorder imported Shots.
+        inputs.sort_by_key(|input| {
+            input
+                .item_id
+                .as_ref()
+                .and_then(|id| item_order.get(id))
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         run.detail = Some(RunDetail { sources, inputs });
         Ok(run)
     }

@@ -257,3 +257,15 @@ it("folder import opens in the workbench, preserves navigation and reuses the ex
   await screen.findByRole("article",{name:"镜头01"});fireEvent.click(screen.getByRole("button",{name:"导入分镜脚本"}));expect(screen.getByRole("region",{name:"folder pane"})).toBeTruthy();expect(navigate).not.toHaveBeenCalled();
   expect(renderFolderImport.mock.calls[0][0]).toMatchObject({projectId:"p"});fireEvent.click(screen.getByRole("button",{name:"查看新批次"}));expect(screen.getByText("prepared")).toBeTruthy();expect(screen.queryByRole("region",{name:"folder pane"})).toBeNull();expect(api.generate).not.toHaveBeenCalled();
 });
+
+it.each([true,false])("import receipt opens the exact Shot through guarded navigation (allowed=%s)", async allowed => {
+  api.get.mockImplementation(async (_p:string,id:string|null)=>context(id));api.runGet.mockResolvedValue(run("SUCCEEDED",1,1));
+  const navigate=vi.fn(()=>allowed);
+  const renderFolderImport=(props:{onOpenShot:(id:string)=>unknown})=><section aria-label="per-shot receipt"><button onClick={()=>void props.onOpenShot("s2")}>编辑导入镜头</button></section>;
+  render(<StoryboardWorkbench route={route} navigate={navigate} renderFolderImport={renderFolderImport}/>);
+  await screen.findByRole("article",{name:"镜头01"});fireEvent.click(screen.getByRole("button",{name:"导入分镜脚本"}));
+  fireEvent.click(screen.getByRole("button",{name:"编辑导入镜头"}));
+  expect(navigate).toHaveBeenCalledWith({kind:"create",projectId:"p",stage:"video",shotId:"s2"});
+  await waitFor(()=>expect(Boolean(screen.queryByRole("region",{name:"per-shot receipt"}))).toBe(!allowed));
+  expect(api.generate).not.toHaveBeenCalled();
+});

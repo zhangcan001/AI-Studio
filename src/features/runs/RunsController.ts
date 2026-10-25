@@ -87,17 +87,31 @@ export function useRunsController({ route, navigate }: RunsProps) {
     await productClient.run.delete(route.projectId, detail.ref);
     navigate({ ...route, run: undefined });
   });
+  const retryInput = (input: RunInput) => mutate(async () => {
+    if (!detail || detail.projectId !== route.projectId || detail.ref.source !== "queue-batch"
+      || detail.ref.id !== route.run?.id || route.run?.source !== "queue-batch"
+      || !detail.availableActions.includes("RETRY") || !input.itemId
+      || !detail.recoverability.retryItemIds.includes(input.itemId)
+      || !detail.detail?.inputs.some(item => item.itemId === input.itemId && item.taskId === input.taskId)) return;
+    await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: [input.itemId] });
+  });
+  const openShot = (input: RunInput) => {
+    if (!input.shotId || detail?.projectId !== route.projectId || detail.ref.id !== route.run?.id || detail.ref.source !== route.run?.source
+      || !detail.detail?.sources.some(source => source.id === input.shotId && source.stage === "video")) return;
+    return navigate({ kind: "create", projectId: route.projectId, stage: "video", shotId: input.shotId });
+  };
   const reuse = (input: RunInput) => mutate(async () => {
-    if (!input.selectionRef) return;
+    if (!input.selectionRef || detail?.projectId !== route.projectId || detail.ref.id !== route.run?.id || detail.ref.source !== route.run?.source) return;
     // Video-only product: reuse never opens the legacy image/studio stage.
     const video = await productClient.creation.generatorsList(route.projectId, "video");
     if (!mounted.current || scope !== liveScope.current) return;
     const option = video.find(option => option.selectionRef === input.selectionRef);
     if (!option || option.mediaKind !== "video" || !option.availability) throw { code: "GENERATOR_UNAVAILABLE" };
     const sources = detail?.detail?.sources.filter(source => source.stage === "video") ?? [];
-    // RunInput has no per-input Shot locator. Mixed batches must ask for a
-    // target instead of guessing that every input belongs to the first source.
-    const shotId = sources.length === 1 ? sources[0].id : null;
+    // New readers provide a formal per-input locator. Explicit null means
+    // unresolved; only older readers without this field retain the single-source fallback.
+    if (input.shotId && !sources.some(source => source.id === input.shotId)) throw { code: "PROJECT_SCOPE_VIOLATION" };
+    const shotId = input.shotId !== undefined ? input.shotId : sources.length === 1 ? sources[0].id : null;
     const requestId = crypto.randomUUID();
     const store = useStudioStore.getState();
     store.setPendingRunIntent({ projectId: route.projectId, stage: "video", selectionRef: input.selectionRef, values: input.values,
@@ -118,6 +132,6 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!detail || result.reviewRevision === null) return;
     await productClient.run.resultReview(route.projectId, { runRef: detail.ref, assetId: result.assetId, decision, comment, expectedRevision: result.reviewRevision });
   });
-  return { list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, remove, reuse, review, refresh };
+  return { list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, remove, retryInput, openShot, reuse, review, refresh };
 }
 export type RunsController = ReturnType<typeof useRunsController>;

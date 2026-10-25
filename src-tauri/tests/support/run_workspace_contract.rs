@@ -827,3 +827,139 @@ async fn phase6c_run_sources_dedupe_and_locate_without_display_name_ids() {
         ));
     }
 }
+
+#[tokio::test]
+async fn imported_batch_inputs_keep_exact_shot_and_item_locators_before_and_after_execution() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("per-shot.db")).await.unwrap();
+    seed_database(&pool, dir.path()).await;
+    let services = build_services(
+        &pool,
+        Arc::new(ControlledComfy::new(ComfyBehavior::Success)),
+        dir.path(),
+    );
+    let (facade, _) = run_facade(&pool, services.queue.clone());
+    let authorities = details(&pool, services.queue.clone());
+    let batch = batch(&services.queue, 2).await;
+    let first = authorities.shots.create(PROJECT_ID).await.unwrap();
+    let second = authorities.shots.create(PROJECT_ID).await.unwrap();
+    for (index, shot) in [&first, &second].into_iter().enumerate() {
+        sqlx::query("INSERT INTO shot_generation_links (id,shot_id,stage,production_batch_item_id,created_at) VALUES (?,?,'video',?,?)")
+            .bind(format!("per-shot-{index}"))
+            .bind(&shot.id).bind(batch.items[index].id.as_str()).bind(CREATED_AT).execute(&pool).await.unwrap();
+    }
+    let assert_mapping = |detail: ai_studio_lib::application::product::run_facade::RunDetail| {
+        assert_eq!(detail.inputs.len(), 2);
+        assert_eq!(
+            detail
+                .inputs
+                .iter()
+                .map(|input| input.item_id.as_deref())
+                .collect::<Vec<_>>(),
+            batch
+                .items
+                .iter()
+                .map(|item| Some(item.id.as_str()))
+                .collect::<Vec<_>>()
+        );
+        for (index, shot) in [&first, &second].into_iter().enumerate() {
+            let input = detail
+                .inputs
+                .iter()
+                .find(|input| input.item_id.as_deref() == Some(batch.items[index].id.as_str()))
+                .unwrap();
+            assert_eq!(input.shot_id.as_deref(), Some(shot.id.as_str()));
+            assert_eq!(input.shot_name.as_deref(), Some(shot.name.as_str()));
+            assert_eq!(serde_json::to_value(input).unwrap()["shotId"], shot.id);
+        }
+    };
+    assert_mapping(
+        facade
+            .get_detail(PROJECT_ID, reference(&batch), &authorities.projection())
+            .await
+            .unwrap()
+            .detail
+            .unwrap(),
+    );
+    assert!(facade
+        .get_detail(
+            "not-the-project",
+            reference(&batch),
+            &authorities.projection()
+        )
+        .await
+        .is_err());
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 0,
+        "reading/edit navigation must not dispatch any item"
+    );
+    services
+        .queue
+        .start_for_test(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .unwrap();
+    wait_for_batch_status(
+        &pool,
+        batch.batch.id.as_str(),
+        ProductionBatchStatus::Completed,
+    )
+    .await;
+    let finished = facade
+        .get_detail(PROJECT_ID, reference(&batch), &authorities.projection())
+        .await
+        .unwrap()
+        .detail
+        .unwrap();
+    assert!(finished.inputs.iter().all(|input| input.task_id.is_some()));
+    assert_mapping(finished);
+    let unchanged = services
+        .queue
+        .get(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .unwrap();
+    for (old, current) in batch.items.iter().zip(unchanged.items.iter()) {
+        assert_eq!(
+            old.values_json, current.values_json,
+            "source snapshots remain frozen"
+        );
+    }
+}
+
+#[tokio::test]
+async fn imported_batch_ambiguous_and_unlinked_inputs_never_guess_a_shot() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("ambiguous-shot.db"))
+        .await
+        .unwrap();
+    seed_database(&pool, dir.path()).await;
+    let services = build_services(
+        &pool,
+        Arc::new(ControlledComfy::new(ComfyBehavior::Success)),
+        dir.path(),
+    );
+    let (facade, _) = run_facade(&pool, services.queue.clone());
+    let authorities = details(&pool, services.queue.clone());
+    let batch = batch(&services.queue, 2).await;
+    for index in 0..2 {
+        let shot = authorities.shots.create(PROJECT_ID).await.unwrap();
+        sqlx::query("INSERT INTO shot_generation_links (id,shot_id,stage,production_batch_item_id,created_at) VALUES (?,?,'video',?,?)")
+            .bind(format!("ambiguous-{index}"))
+            .bind(&shot.id).bind(batch.items[0].id.as_str()).bind(CREATED_AT).execute(&pool).await.unwrap();
+    }
+    let projected = facade
+        .get_detail(PROJECT_ID, reference(&batch), &authorities.projection())
+        .await
+        .unwrap()
+        .detail
+        .unwrap();
+    assert_eq!(projected.sources.len(), 2);
+    assert_eq!(projected.inputs.len(), 2);
+    assert!(projected
+        .inputs
+        .iter()
+        .all(|input| input.shot_id.is_none() && input.shot_name.is_none()));
+}
