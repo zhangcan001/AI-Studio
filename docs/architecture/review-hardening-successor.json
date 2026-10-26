@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "REVIEW_HARDENING",
+  "parentHead": "f0aaf27a282b903475b104674bfb95cda5c795e1",
+  "planningParentHead": "f0aaf27a282b903475b104674bfb95cda5c795e1",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "manifestErrorsNameField": true,
+    "migrationUsesCurrentTime": true,
+    "migrationDropsUndeclaredInputs": true,
+    "openShotFailureShownInChinese": true,
+    "timeLimitsRaised": false,
+    "guardsRelaxed": false
+  },
+  "files": {
+    "scripts/review-hardening-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "3f57f6c8a962c863983345f65b0f65221b14baf692ea7bdedf78602b0c6b8dc3"
+    },
+    "scripts/single-shot-batch-control-successor-guard.mjs": {
+      "beforeHash": "ec935b07f9701daecb24c51db6e651c213235959ac23a26248c8e439b50513c5",
+      "afterHash": "498fd3c44d26fcd9c6023ecc4ae70c1198013ae235be6b3addaa459492aff51f"
+    },
+    "scripts/testing/review-hardening.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "e8f4f6b7eeff7f2a7f55ca80e88cefa262c3140ebaea65120881cea4a1ff45d7"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "01505bcb4b04a484c5b8675520054b35b765eae1b3b66a1e2a3512e80a2aea5d",
+      "afterHash": "fabdbe6f04be2dc10a89308337fe7205d608770847758052e3215fdf88da0e48"
+    },
+    "src-tauri/src/infrastructure/database/repositories/workflow_library.rs": {
+      "beforeHash": "3df6aeda9d569a543fb70710eae90d000782f4ba223158c5db402facaaf8514f",
+      "afterHash": "94118f924d97e12b77094721f3704dc56786352f728f5821cec25f82a88f286a"
+    },
+    "src/features/create/StoryboardWorkbench.test.tsx": {
+      "beforeHash": "1c101e304feb0b23f4dda93f24ae117f406e680c6bb9c8795eb3876da592e4ae",
+      "afterHash": "abf5f4b57399882e0a95a9873f3e76b5cce6f58352f8212b5072f602690e3b59"
+    },
+    "src/features/create/StoryboardWorkbench.tsx": {
+      "beforeHash": "88900d278d1e8ee210ace5064448efa6b7eca9e8b98463a8ce71bbd3dff4304d",
+      "afterHash": "578f2872d6a3330813007cd81c155cc561d6ae909db40da4437c62dd3d75fa60"
+    }
+  }
+}

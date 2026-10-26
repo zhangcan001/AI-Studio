@@ -223,7 +223,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       </aside>
     </div>}
     {reviewItem && <ReviewPanel key={`${projectId}:${reviewItem.id}:${reviewItem.run?.ref.id}`} projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} />}
-    {folderImportOpen && renderFolderImport?.({projectId,onImported:()=>load(),onCancel:()=>setFolderImportOpen(false),onOpenShot:async(id)=>{const owner=projectId;const accepted=await openShot(id);if(accepted!==false&&mounted.current&&scope.current===owner)setFolderImportOpen(false);},onOpenQueue:(id)=>{setFolderImportOpen(false);setRunRoute({kind:"runs",projectId,run:{source:"queue-batch",id}});},onOpenLegacy:()=>{setFolderImportOpen(false);void navigate({kind:"project-settings",projectId,section:"advanced-production"});}})}
+    {folderImportOpen && renderFolderImport?.({projectId,onImported:()=>load(),onCancel:()=>setFolderImportOpen(false),onOpenShot:async(id)=>{const owner=projectId;try{const accepted=await openShot(id);if(accepted!==false&&mounted.current&&scope.current===owner)setFolderImportOpen(false);}catch(cause){if(mounted.current&&scope.current===owner)setError(`无法打开镜头：${normalizeProductError(cause).message}`);}},onOpenQueue:(id)=>{setFolderImportOpen(false);setRunRoute({kind:"runs",projectId,run:{source:"queue-batch",id}});},onOpenLegacy:()=>{setFolderImportOpen(false);void navigate({kind:"project-settings",projectId,section:"advanced-production"});}})}
     {runRoute && <WorkbenchRuns route={runRoute} navigate={navigateInline} renderRuns={renderRuns} onClose={() => setRunRoute(undefined)} />}
   </div></ThumbnailProjectContext.Provider></MediaLightboxScope>;
 }

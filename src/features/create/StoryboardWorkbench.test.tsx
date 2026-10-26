@@ -269,3 +269,14 @@ it.each([true,false])("import receipt opens the exact Shot through guarded navig
   await waitFor(()=>expect(Boolean(screen.queryByRole("region",{name:"per-shot receipt"}))).toBe(!allowed));
   expect(api.generate).not.toHaveBeenCalled();
 });
+
+it("a failed import receipt Shot navigation keeps the receipt open and shows a Chinese error", async () => {
+  api.get.mockImplementation(async (_p:string,id:string|null)=>context(id));api.runGet.mockResolvedValue(run("SUCCEEDED",1,1));
+  const navigate=vi.fn(async()=>{throw {code:"PROJECT_SCOPE_VIOLATION",message:"镜头不属于当前项目"};});
+  const renderFolderImport=(props:{onOpenShot:(id:string)=>unknown})=><section aria-label="per-shot receipt"><button onClick={()=>void props.onOpenShot("s2")}>编辑导入镜头</button></section>;
+  render(<StoryboardWorkbench route={route} navigate={navigate} renderFolderImport={renderFolderImport}/>);
+  await screen.findByRole("article",{name:"镜头01"});fireEvent.click(screen.getByRole("button",{name:"导入分镜脚本"}));
+  fireEvent.click(screen.getByRole("button",{name:"编辑导入镜头"}));
+  expect((await screen.findByRole("alert")).textContent).toMatch(/^无法打开镜头：/);
+  expect(screen.getByRole("region",{name:"per-shot receipt"})).toBeTruthy();expect(api.generate).not.toHaveBeenCalled();
+});

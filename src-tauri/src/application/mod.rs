@@ -420,12 +420,37 @@ pub mod folder_batch_import_service {
                 .split('/')
                 .all(|p| !p.is_empty() && p != "." && p != "..")
     }
+    /// Names the offending manifest field and its position; validation is unchanged.
+    pub(crate) fn manifest_error_message(error: &serde_json::Error) -> String {
+        let text = error.to_string();
+        let field = |marker: &str| {
+            text.split_once(marker)
+                .and_then(|(_, rest)| rest.split_once('`'))
+                .map(|(name, _)| name.to_owned())
+        };
+        let position = if error.line() > 0 {
+            format!("（第 {} 行第 {} 列）", error.line(), error.column())
+        } else {
+            String::new()
+        };
+        if let Some(name) = field("missing field `") {
+            format!("清单缺少必填字段 {name}{position}")
+        } else if let Some(name) = field("unknown field `") {
+            format!("清单含未知字段 {name}{position}")
+        } else if let Some(name) = field("unknown variant `") {
+            format!("清单含无法识别的取值 {name}{position}")
+        } else if error.is_syntax() || error.is_eof() {
+            format!("清单不是有效的 JSON{position}")
+        } else {
+            format!("清单字段类型或取值不正确{position}")
+        }
+    }
     pub(crate) fn parse_manifest(bytes: &[u8]) -> Result<Manifest, ImportFailure> {
         if bytes.len() > 1024 * 1024 {
             return Err(failure("SCAN_LIMIT_EXCEEDED", "manifest 最大为 1 MB"));
         }
         let manifest: Manifest = serde_json::from_slice(bytes)
-            .map_err(|_| failure("INVALID_MANIFEST", "清单格式错误或含未知字段"))?;
+            .map_err(|error| failure("INVALID_MANIFEST", manifest_error_message(&error)))?;
         if manifest.format != "ai-studio-shot-batch" || manifest.version != 1 {
             return Err(failure(
                 "UNSUPPORTED_VERSION",
@@ -2768,6 +2793,37 @@ pub mod folder_batch_import_service {
 
     #[cfg(test)]
     mod tests {
+        #[test]
+        fn manifest_errors_name_the_offending_field_and_position() {
+            let missing = parse_manifest(br#"{"format":"ai-studio-shot-batch","version":1,"name":"x",
+"defaults":{"durationSeconds":8,"aspectRatio":"16:9","resolutionPreset":"0.98"},"characters":[],"shots":[],"queue":{"create":false,"autoStart":false}}"#)
+                .err()
+                .unwrap();
+            assert_eq!(missing.code, "INVALID_MANIFEST");
+            assert!(
+                missing
+                    .message
+                    .starts_with("清单缺少必填字段 generators（第 2 行"),
+                "{}",
+                missing.message
+            );
+            let unknown = parse_manifest(br#"{"format":"ai-studio-shot-batch","bogusField":1}"#)
+                .err()
+                .unwrap();
+            assert!(
+                unknown
+                    .message
+                    .starts_with("清单含未知字段 bogusField（第 1 行"),
+                "{}",
+                unknown.message
+            );
+            let syntax = parse_manifest(b"{").err().unwrap();
+            assert!(
+                syntax.message.starts_with("清单不是有效的 JSON"),
+                "{}",
+                syntax.message
+            );
+        }
         use super::*;
         fn multi_image_definition(key: &str) -> crate::application::ports::GenerationDefinition {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -3039,7 +3095,12 @@ pub mod folder_batch_import_service {
                 crate::application::ports::RepositoryError,
             > {
                 // Mirrors the built-in Veda 1.1.0 pins carried by older packages.
-                if version != SUPERSEDED_VEDA_VERSION || recipe != SUPERSEDED_VEDA_RECIPE {
+                if ![
+                    (SUPERSEDED_VEDA_VERSION, SUPERSEDED_VEDA_RECIPE),
+                    (SUPERSEDED_VEDA_V1_2_VERSION, SUPERSEDED_VEDA_V1_2_RECIPE),
+                ]
+                .contains(&(version, recipe))
+                {
                     return Ok(None);
                 }
                 Ok(self
@@ -3050,7 +3111,7 @@ pub mod folder_batch_import_service {
                         workflow_version_id: d.workflow_version_id.clone(),
                         recipe_id: d.recipe_id.clone(),
                         workflow_name: "Veda".into(),
-                        current_version: "1.2.0".into(),
+                        current_version: "1.3.0".into(),
                     }))
             }
             async fn find(
@@ -3261,6 +3322,8 @@ pub mod folder_batch_import_service {
         }
         const SUPERSEDED_VEDA_VERSION: &str = "wfv_e087c778-e559-490b-a0aa-90b8210e6d86";
         const SUPERSEDED_VEDA_RECIPE: &str = "rcp_54473f3e-2831-4011-afa0-cbb2a2754da2";
+        const SUPERSEDED_VEDA_V1_2_VERSION: &str = "wfv_ca037b72-864a-4863-95cf-62d2bc819ebb";
+        const SUPERSEDED_VEDA_V1_2_RECIPE: &str = "rcp_d3ee526b-3341-4409-b8cb-083fa27f1eb6";
         #[test]
         fn expression_test_v0_2_manifest_parses_with_its_pinned_generator() {
             let m = parse_manifest(r#"{"format":"ai-studio-shot-batch","version":1,"name":"第一集｜人物表情测试V0.2","generators":{"reference":{"workflowVersionId":"wfv_e087c778-e559-490b-a0aa-90b8210e6d86","recipeId":"rcp_54473f3e-2831-4011-afa0-cbb2a2754da2"}},"defaults":{"durationSeconds":8,"aspectRatio":"16:9","resolutionPreset":"0.98"},"characters":[{"name":"沈簿","kind":"character","images":["images/人物/沈簿.png"],"cover":"images/人物/沈簿.png","appearanceEn":"A lean middle-aged man."},{"name":"躲手与收手","kind":"composition","images":["images/构图/躲手与收手.png"],"cover":"images/构图/躲手与收手.png"}],"shots":[{"id":"E01-023","name":"E01-023 躲手与收手 表情测试V0.2","mode":"reference","durationSeconds":8,"references":["images/构图/躲手与收手.png","images/人物/沈簿.png"],"openingComposition":"躲手与收手","style":"natural","summary":"@沈簿 withdraws.","description":"[Shot 1] Positioned as in @躲手与收手, @沈簿 withdraws his hand.","soundscape":"Uneven breathing.","music":"N/A"}],"queue":{"create":false,"name":"第一集人物表情测试V0.2","autoStart":false}}"#.as_bytes()).unwrap();
@@ -3283,7 +3346,39 @@ pub mod folder_batch_import_service {
             std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
             let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
             assert_eq!((p.valid_count, p.error_count), (2, 0), "{:?}", p.rows);
-            let warning = "导入包指定的工作流「Veda」版本已更新，已改用最新版本 1.2.0";
+            let warning = "导入包指定的工作流「Veda」版本已更新，已改用最新版本 1.3.0";
+            assert_eq!(
+                p.warnings.iter().filter(|w| *w == warning).count(),
+                1,
+                "{:?}",
+                p.warnings
+            );
+            let r = f.service.commit(request(&p, false)).await.unwrap();
+            assert_eq!(r.outcome, "completed", "{r:?}");
+            let pinned: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT workflow_version_id FROM shot_stage_configs WHERE shot_id = ?",
+            )
+            .bind(&r.created_shot_ids[1])
+            .fetch_all(&f.pool)
+            .await
+            .unwrap();
+            assert_eq!(pinned, vec!["ref-version".to_string()]);
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn superseded_v1_2_pin_follows_current_1_3_0_with_a_warning() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["generators"]["reference"] = serde_json::json!({
+                "workflowVersionId": SUPERSEDED_VEDA_V1_2_VERSION,
+                "recipeId": SUPERSEDED_VEDA_V1_2_RECIPE
+            });
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert_eq!((p.valid_count, p.error_count), (2, 0), "{:?}", p.rows);
+            let warning = "导入包指定的工作流「Veda」版本已更新，已改用最新版本 1.3.0";
             assert_eq!(
                 p.warnings.iter().filter(|w| *w == warning).count(),
                 1,

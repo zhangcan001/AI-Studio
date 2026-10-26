@@ -199,7 +199,7 @@ async fn register_package(
 
     register_runtime_artifact(transaction, package, &workflow_version_id, &recipe_id).await?;
     if package.source_kind == "PRODUCT" {
-        migrate_stale_bindings(transaction, &package.workflow_id, package.created_at).await?;
+        migrate_stale_bindings(transaction, &package.workflow_id, chrono::Utc::now()).await?;
     }
     Ok(registration)
 }
@@ -238,15 +238,34 @@ pub(crate) async fn migrate_stale_bindings(
     let Some(current) = current else {
         return Ok(report);
     };
-    let recipes = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM recipes WHERE workflow_version_id = ? ORDER BY id",
+    let recipes = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, recipe_yaml FROM recipes WHERE workflow_version_id = ? ORDER BY id",
     )
     .bind(&current)
     .fetch_all(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
-    let [recipe] = recipes.as_slice() else {
+    let [(recipe, recipe_yaml)] = recipes.as_slice() else {
         return Ok(report);
+    };
+    // Values for inputs the current recipe no longer declares are dropped so a
+    // stale key can never reach the new workflow. An unreadable recipe keeps the
+    // values unchanged (the precheck still validates them).
+    let declared: Option<std::collections::BTreeSet<String>> =
+        crate::compiler::RecipeParser::parse(recipe_yaml)
+            .ok()
+            .map(|parsed| parsed.inputs.into_keys().collect());
+    let keep_values = |json: &str| -> String {
+        let Some(declared) = &declared else {
+            return json.to_owned();
+        };
+        match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json) {
+            Ok(mut values) => {
+                values.retain(|key, _| declared.contains(key));
+                serde_json::Value::Object(values).to_string()
+            }
+            Err(_) => json.to_owned(),
+        }
     };
     let stamp = format_datetime(now);
     const STALE: &str = "workflow_version_id IN (SELECT id FROM workflow_versions
@@ -267,8 +286,8 @@ pub(crate) async fn migrate_stale_bindings(
     .map_err(map_sqlx_error)?
     .rows_affected();
 
-    let stale_configs = sqlx::query_as::<_, (String, String, String, String)>(&format!(
-        "SELECT c.shot_id, s.project_id, c.workflow_version_id, c.recipe_id
+    let stale_configs = sqlx::query_as::<_, (String, String, String, String, String, String)>(&format!(
+        "SELECT c.shot_id, s.project_id, c.workflow_version_id, c.recipe_id, c.stage, c.scalar_values_json
          FROM shot_stage_configs c INNER JOIN shots s ON s.id = c.shot_id
          WHERE c.{STALE}"
     ))
@@ -277,7 +296,7 @@ pub(crate) async fn migrate_stale_bindings(
     .fetch_all(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
-    for (shot_id, project_id, old_version, old_recipe) in &stale_configs {
+    for (shot_id, project_id, old_version, old_recipe, stage, scalar_values) in &stale_configs {
         // The shot keeps its chosen reference media: a copy of the old pair's
         // input set is created for the new pair unless one already exists.
         let copied = sqlx::query(
@@ -306,7 +325,8 @@ pub(crate) async fn migrate_stale_bindings(
                  (project_id, shot_id, workflow_version_id, recipe_id, input_key, ordinal, asset_id)
                  SELECT project_id, shot_id, ?, ?, input_key, ordinal, asset_id
                  FROM shot_video_input_assets
-                 WHERE project_id = ? AND shot_id = ? AND workflow_version_id = ? AND recipe_id = ?",
+                 WHERE project_id = ? AND shot_id = ? AND workflow_version_id = ? AND recipe_id = ?
+                   AND (? = 0 OR input_key IN (SELECT value FROM json_each(?)))",
             )
             .bind(&current)
             .bind(recipe)
@@ -314,19 +334,24 @@ pub(crate) async fn migrate_stale_bindings(
             .bind(shot_id)
             .bind(old_version)
             .bind(old_recipe)
+            .bind(i64::from(declared.is_some()))
+            .bind(serde_json::json!(declared).to_string())
             .execute(&mut **transaction)
             .await
             .map_err(map_sqlx_error)?;
             report.shot_video_input_sets += copied;
         }
         report.shot_stage_configs += sqlx::query(
-            "UPDATE shot_stage_configs SET workflow_version_id = ?, recipe_id = ?, updated_at = ?
-             WHERE shot_id = ? AND workflow_version_id = ? AND recipe_id = ?",
+            "UPDATE shot_stage_configs
+             SET workflow_version_id = ?, recipe_id = ?, scalar_values_json = ?, updated_at = ?
+             WHERE shot_id = ? AND stage = ? AND workflow_version_id = ? AND recipe_id = ?",
         )
         .bind(&current)
         .bind(recipe)
+        .bind(keep_values(scalar_values))
         .bind(&stamp)
         .bind(shot_id)
+        .bind(stage)
         .bind(old_version)
         .bind(old_recipe)
         .execute(&mut **transaction)
@@ -553,6 +578,45 @@ mod tests {
             .unwrap();
         tx.commit().await.unwrap();
         report
+    }
+
+    #[tokio::test]
+    async fn stale_selections_drop_inputs_the_current_recipe_no_longer_declares() {
+        let (_directory, pool, _repository) = setup().await;
+        stale_fixture(&pool).await;
+        let recipe = "schema_version: 1\nid: r_wv_a3\nname: a3\nworkflow:\n  file: workflow_api.json\ninputs:\n  seed:\n    type: seed\n    label: Seed\n    default: random\n    min: 0\n    max: 10\n  reference_images:\n    type: images\n    label: Refs\n    required: true\n    min_items: 1\n    max_items: 8\nbindings: []\noutputs:\n  - id: generated_video\n    type: video\n    node: \"92\"\n    required: true\n";
+        sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'r_wv_a3'")
+            .bind(recipe)
+            .execute(&pool)
+            .await
+            .unwrap();
+        exec(&pool, "UPDATE shot_stage_configs SET scalar_values_json = '{\"seed\":1,\"veda_steps\":\"0,1\"}' WHERE shot_id = 'sh_2'").await;
+        exec(&pool, "INSERT INTO shot_video_input_assets (project_id, shot_id, workflow_version_id, recipe_id, input_key, ordinal, asset_id) VALUES ('prj_default', 'sh_2', 'wv_a2', 'r_wv_a2', 'first_frame', 0, 'ast_1')").await;
+        let before = super::format_datetime(Utc::now());
+        let first = migrate(&pool, "wfl_a").await;
+        assert_eq!(first.shot_stage_configs, 2);
+        let (values, updated): (String, String) = sqlx::query_as(
+            "SELECT scalar_values_json, updated_at FROM shot_stage_configs WHERE shot_id = 'sh_2'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(values, "{\"seed\":1}");
+        assert!(updated >= before, "{updated} < {before}");
+        let keys: Vec<String> = sqlx::query_scalar("SELECT input_key FROM shot_video_input_assets WHERE shot_id = 'sh_2' AND workflow_version_id = 'wv_a3' ORDER BY input_key")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(keys, vec!["reference_images".to_owned()]);
+        let old: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shot_video_input_assets WHERE shot_id = 'sh_2' AND workflow_version_id = 'wv_a2'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(old, 2, "old pair keeps its input history");
+        assert_eq!(
+            migrate(&pool, "wfl_a").await,
+            super::StaleBindingMigration::default()
+        );
     }
 
     #[tokio::test]
