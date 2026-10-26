@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
 
 export const VEDA_VERBOSE_DIAGNOSTICS_BASE = "88b1657b3fa55bd21186725db8bb4d4efdb53f6b";
 export const VEDA_VERBOSE_DIAGNOSTICS_PROOF = "docs/architecture/veda-verbose-diagnostics-successor.json";
@@ -52,18 +52,18 @@ function facts(root, base) {
     const bytes = immutableGit("git", ["cat-file", "--batch"], {
       cwd: root, input: paths.map(p => base + ":" + p + "\n").join(""), maxBuffer: 64 * 1024 * 1024,
     });
-    const blobs = new Map(); let offset = 0;
+    const blobs = new Map(), blobIds = new Map(); let offset = 0;
     for (const p of paths) {
       const end = bytes.indexOf(10, offset), header = /^([a-f0-9]{40}) blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
       if (!header) throw Error("immutable blob header");
       const start = end + 1, size = Number(header[2]);
       if (bytes[start + size] !== 10) throw Error("immutable blob boundary");
-      blobs.set(p, bytes.subarray(start, start + size)); offset = start + size + 1;
+      blobs.set(p, bytes.subarray(start, start + size)); blobIds.set(p, header[1]); offset = start + size + 1;
     }
     if (offset !== bytes.length) throw Error("immutable trailing bytes");
     const text = new Map();
     factsCache.set(key, { paths, raw: p => blobs.get(p), read: p => {
-      if (!text.has(p)) text.set(p, canonical(blobs.get(p).toString("utf8")));
+      if (!text.has(p)) text.set(p, immutableBlobText(blobIds.get(p), () => blobs.get(p)));
       return text.get(p);
     } });
   }

@@ -2,14 +2,54 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
 
 export const REVIEW_HARDENING_BASE = "f0aaf27a282b903475b104674bfb95cda5c795e1";
 export const REVIEW_HARDENING_PROOF = "docs/architecture/review-hardening-successor.json";
 export const REVIEW_HARDENING_CHANGED = [
+  "scripts/backup-package-bindings-successor-guard.mjs",
+  "scripts/batch-create-reason-successor-guard.mjs",
+  "scripts/boundary-validation-cache.mjs",
+  "scripts/composition-detail-hint-successor-guard.mjs",
+  "scripts/composition-kind-successor-guard.mjs",
+  "scripts/composition-scene-anchor-successor-guard.mjs",
+  "scripts/composition-usage-successor-guard.mjs",
+  "scripts/default-reference-generator-successor-guard.mjs",
+  "scripts/desktop-visual-refinement-successor-guard.mjs",
+  "scripts/entity-category-library-successor-guard.mjs",
+  "scripts/entity-reference-auto-apply-successor-guard.mjs",
+  "scripts/folder-batch-import-successor-guard.mjs",
+  "scripts/folder-import-entity-dedupe-successor-guard.mjs",
+  "scripts/frontend-ci-four-shards-successor-guard.mjs",
+  "scripts/generation-progress-refresh-successor-guard.mjs",
+  "scripts/guard-chain-perf-successor-guard.mjs",
+  "scripts/h3-composition-layout-successor-guard.mjs",
+  "scripts/h3-prompt-sections-successor-guard.mjs",
+  "scripts/h3-standard-reference-successor-guard.mjs",
+  "scripts/h3-veda-reference-successor-guard.mjs",
+  "scripts/library-confirm-ci-race-successor-guard.mjs",
+  "scripts/prop-kind-import-successor-guard.mjs",
+  "scripts/reference-draft-recovery-successor-guard.mjs",
+  "scripts/reference-images-import-successor-guard.mjs",
+  "scripts/retired-ui-code-cleanup-successor-guard.mjs",
+  "scripts/shot-duration-cap-successor-guard.mjs",
   "scripts/single-shot-batch-control-successor-guard.mjs",
+  "scripts/stale-binding-migration-successor-guard.mjs",
+  "scripts/storyboard-atomic-row-successor-guard.mjs",
+  "scripts/storyboard-load-recovery-successor-guard.mjs",
+  "scripts/superseded-import-pin-successor-guard.mjs",
+  "scripts/task-cancel-delete-successor-guard.mjs",
   "scripts/testing/stale-binding-migration.test.mjs",
   "scripts/testing/veda-removed-white-flash.test.mjs",
+  "scripts/ui-phase7b-backup-prompt-successor-guard.mjs",
+  "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
+  "scripts/user-copy-cleanup-successor-guard.mjs",
+  "scripts/veda-reference-media-successor-guard.mjs",
+  "scripts/veda-removed-white-flash-successor-guard.mjs",
+  "scripts/veda-verbose-diagnostics-successor-guard.mjs",
+  "scripts/workbench-poll-clock-successor-guard.mjs",
+  "scripts/workbench-visual-refinement-successor-guard.mjs",
+  "scripts/workflow-authoring-retirement-successor-guard.mjs",
   "src-tauri/src/application/mod.rs",
   "src-tauri/src/infrastructure/database/repositories/workflow_library.rs",
   "src/features/create/StoryboardWorkbench.test.tsx",
@@ -33,6 +73,7 @@ export const REVIEW_HARDENING_CONTRACTS = {
   "migrationUsesCurrentTime": true,
   "migrationDropsUndeclaredInputs": true,
   "openShotFailureShownInChinese": true,
+  "sharedImmutableBlobTextCache": true,
   "timeLimitsRaised": false,
   "guardsRelaxed": false
 };
@@ -49,18 +90,18 @@ function facts(root, base) {
     const bytes = immutableGit("git", ["cat-file", "--batch"], {
       cwd: root, input: paths.map(p => base + ":" + p + "\n").join(""), maxBuffer: 64 * 1024 * 1024,
     });
-    const blobs = new Map(); let offset = 0;
+    const blobs = new Map(), blobIds = new Map(); let offset = 0;
     for (const p of paths) {
       const end = bytes.indexOf(10, offset), header = /^([a-f0-9]{40}) blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
       if (!header) throw Error("immutable blob header");
       const start = end + 1, size = Number(header[2]);
       if (bytes[start + size] !== 10) throw Error("immutable blob boundary");
-      blobs.set(p, bytes.subarray(start, start + size)); offset = start + size + 1;
+      blobs.set(p, bytes.subarray(start, start + size)); blobIds.set(p, header[1]); offset = start + size + 1;
     }
     if (offset !== bytes.length) throw Error("immutable trailing bytes");
     const text = new Map();
     factsCache.set(key, { paths, raw: p => blobs.get(p), read: p => {
-      if (!text.has(p)) text.set(p, canonical(blobs.get(p).toString("utf8")));
+      if (!text.has(p)) text.set(p, immutableBlobText(blobIds.get(p), () => blobs.get(p)));
       return text.get(p);
     } });
   }

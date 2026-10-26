@@ -237,3 +237,12 @@ export function sessionGit(root, args, options) {
   if (!session.git.has(key)) session.git.set(key, exec('git', args, { cwd: root, ...options }));
   return session.git.get(key);
 }
+// Immutable Git blob text keyed by its verified object id: historical readers
+// share one canonical decode per blob instead of re-decoding it per checkpoint.
+const blobTexts = new Map();
+export function immutableBlobText(id, bytes) {
+  if (!/^[a-f0-9]{40}$/.test(id ?? '')) return bytes().toString('utf8').replaceAll('\r\n', '\n');
+  let text = blobTexts.get(id);
+  if (text === undefined) blobTexts.set(id, text = bytes().toString('utf8').replaceAll('\r\n', '\n'));
+  return text;
+}
