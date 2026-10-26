@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { vedaRemovedWhiteFlashParentReader, VEDA_REMOVED_WHITE_FLASH_BASE, VEDA_REMOVED_WHITE_FLASH_PROOF } from '../veda-removed-white-flash-successor-guard.mjs';
 import { supersededImportPinParentReader as parentReader, SUPERSEDED_IMPORT_PIN_PROOF as PARENT_PROOF } from '../superseded-import-pin-successor-guard.mjs';
+import { singleShotBatchControlParentReader } from '../single-shot-batch-control-successor-guard.mjs';
 import { uiPhase7BR1MetadataParentReader } from '../ui-phase7b-r1-metadata-successor-guard.mjs';
 
 const builtin = 'src-tauri/src/application/builtin_runtime_packages.rs';
@@ -31,7 +32,9 @@ it('ships Veda reference 1.3.0 that is 1.2.0 with the Veda node bypassed', () =>
   expect(readFileSync(policy, 'utf8')).toContain('"minimax_h3_reference_veda_turbo_1_3_0" => "1.3.0"');
   // Existing bindings and package pins follow the current version via the
   // unchanged stale-binding migration and import remap.
-  expect(readFileSync(migration, 'utf8')).toBe(execFileSync('git', ['show', `${VEDA_REMOVED_WHITE_FLASH_BASE}:${migration}`], { encoding: 'utf8' }));
+  // Later successor checkpoints own these bytes; compare this checkpoint's validated projection.
+  expect(singleShotBatchControlParentReader('.').violations).toEqual([]);
+  expect(singleShotBatchControlParentReader('.').read(migration)).toBe(execFileSync('git', ['show', `${VEDA_REMOVED_WHITE_FLASH_BASE}:${migration}`], { encoding: 'utf8' }));
   expect(execFileSync('git', ['ls-files', 'src-tauri/migrations'], { encoding: 'utf8' }))
     .toBe(execFileSync('git', ['ls-tree', '-r', '--name-only', VEDA_REMOVED_WHITE_FLASH_BASE, 'src-tauri/migrations'], { encoding: 'utf8' }));
 });

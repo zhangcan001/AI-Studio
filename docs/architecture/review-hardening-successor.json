@@ -21,7 +21,7 @@
   "files": {
     "scripts/review-hardening-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "3f57f6c8a962c863983345f65b0f65221b14baf692ea7bdedf78602b0c6b8dc3"
+      "afterHash": "a044c7ea0b5c767f1e0c670339afb083f694ee3dad894e887df03184ddf6448f"
     },
     "scripts/single-shot-batch-control-successor-guard.mjs": {
       "beforeHash": "ec935b07f9701daecb24c51db6e651c213235959ac23a26248c8e439b50513c5",
@@ -30,6 +30,14 @@
     "scripts/testing/review-hardening.test.mjs": {
       "beforeHash": null,
       "afterHash": "e8f4f6b7eeff7f2a7f55ca80e88cefa262c3140ebaea65120881cea4a1ff45d7"
+    },
+    "scripts/testing/stale-binding-migration.test.mjs": {
+      "beforeHash": "c488c78e85dd727ac595d85feefb4a8136fc6f9a9aefc63c027acd7d17bc9707",
+      "afterHash": "d27a7a0488e92e7a87929f738ad901735b2dd5a4c2cb32359c4c0470864c9eda"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "1aace285f4f5656cc84d02f0c2d7471baa98e3f1e913885c8648d2c00e77b3ba",
+      "afterHash": "06c945d0efdc491ac38e5d599730a5fefd35bcbd3e98fd3ded2aeb65edd27f6b"
     },
     "src-tauri/src/application/mod.rs": {
       "beforeHash": "01505bcb4b04a484c5b8675520054b35b765eae1b3b66a1e2a3512e80a2aea5d",

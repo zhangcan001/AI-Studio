@@ -8,6 +8,8 @@ export const REVIEW_HARDENING_BASE = "f0aaf27a282b903475b104674bfb95cda5c795e1";
 export const REVIEW_HARDENING_PROOF = "docs/architecture/review-hardening-successor.json";
 export const REVIEW_HARDENING_CHANGED = [
   "scripts/single-shot-batch-control-successor-guard.mjs",
+  "scripts/testing/stale-binding-migration.test.mjs",
+  "scripts/testing/veda-removed-white-flash.test.mjs",
   "src-tauri/src/application/mod.rs",
   "src-tauri/src/infrastructure/database/repositories/workflow_library.rs",
   "src/features/create/StoryboardWorkbench.test.tsx",
