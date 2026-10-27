@@ -80,7 +80,7 @@ mod native_acceptance {
         fn only_read_only_getters_and_bounded_delay_are_accepted() {
             for name in [
                 "product_creation_get",
-            "product_creation_workbench_get",
+                "product_creation_workbench_get",
                 "product_creation_inputs_get",
                 "product_run_get",
                 "product_run_results_get",

@@ -1702,7 +1702,9 @@ pub(crate) mod tests {
             false,
         )
         .unwrap();
-        assert!(compiled.contains("summary:\n[reference generation] A quiet walk through the hall."));
+        assert!(
+            compiled.contains("summary:\n[reference generation] A quiet walk through the hall.")
+        );
         assert!(compiled.contains(
             "detailed_description:\nCinematic realism.\n[Shot 1] A person walks across the room."
         ));

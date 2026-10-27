@@ -1,3 +1,4 @@
+import { cancelCorrectnessParentReader } from './cancel-correctness-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -124,10 +125,14 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, REVIEW_HARDENING_BASE);
   const fail = id => violations.push("review-hardening-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  // Project only independently validated successor bytes; forged overrides still fail.
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(REVIEW_HARDENING_PROOF));
@@ -140,10 +145,10 @@ function validate(root, override) {
     const allowed = [...scope, REVIEW_HARDENING_PROOF].sort();
     const expected = [...parent.paths, ...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -163,13 +168,14 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: REVIEW_HARDENING_CHANGED,
-    addedPaths: [...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF],
-    afterHashes: Object.fromEntries([...REVIEW_HARDENING_CHANGED, ...REVIEW_HARDENING_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...REVIEW_HARDENING_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...REVIEW_HARDENING_CHANGED, ...REVIEW_HARDENING_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: p => REVIEW_HARDENING_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function reviewHardeningParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "reviewHardeningParentReader", undefined,
-    () => validate(root, undefined), REVIEW_HARDENING_PROOF);
+  const successor = cancelCorrectnessParentReader(root);
+  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "reviewHardeningParentReader", undefined, check, REVIEW_HARDENING_PROOF);
 }

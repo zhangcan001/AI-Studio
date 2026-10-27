@@ -2,9 +2,9 @@ use crate::{
     app_state::AppState,
     application::product::{
         creation_facade::{
-            CreationAccepted, CreationContext, CreationReadiness, CreationShot, CreationShotFields, CreationWorkbench,
+            CreationAccepted, CreationContext, CreationReadiness, CreationShot, CreationShotFields,
             CreationShotSummary, CreationShotUpdate, CreationStartDisposition, CreationSubmission,
-            GeneratorOption, ProductCreationFacade,
+            CreationWorkbench, GeneratorOption, ProductCreationFacade,
         },
         error::ProductError,
         project_facade::{
@@ -502,7 +502,6 @@ fn creation(state: &AppState) -> ProductCreationFacade {
     )
 }
 
-
 #[tauri::command(rename_all = "camelCase")]
 pub async fn product_creation_workbench_get(
     state: State<'_, AppState>,
@@ -575,7 +574,11 @@ pub async fn product_creation_shot_update(
     let facade = creation(&state);
     let (update, fields) = request.into_parts()?;
     let summary = match fields {
-        Some(fields) => facade.update_shot_with_fields(&project_id, update, fields).await?,
+        Some(fields) => {
+            facade
+                .update_shot_with_fields(&project_id, update, fields)
+                .await?
+        }
         None => facade.update_shot(&project_id, update).await?,
     };
     Ok(summary)

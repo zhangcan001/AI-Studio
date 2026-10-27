@@ -321,7 +321,6 @@ impl ProductCreationFacade {
         })
     }
 
-
     /// One list + per-shot candidate projection for the storyboard workbench.
     /// Avoids N round-trips that each re-list every shot.
     pub async fn workbench(
@@ -363,10 +362,7 @@ impl ProductCreationFacade {
                     .map_err(ProductError::internal)?
                 {
                     if asset.asset_type == requested_stage && seen.insert(asset.id.clone()) {
-                        candidates.push(candidate(
-                            asset,
-                            projected.selected_result_id.as_deref(),
-                        ));
+                        candidates.push(candidate(asset, projected.selected_result_id.as_deref()));
                     }
                 }
             }

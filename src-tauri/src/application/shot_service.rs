@@ -315,7 +315,8 @@ impl ShotService {
         shot.prompt_entry_id = request.prompt_entry_id;
         shot.prompt_version_id = request.prompt_version_id;
         shot.updated_at = self.clock.now();
-        let inherited_updates = if let Some(stage_prompt_repository) = &self.stage_prompt_repository {
+        let inherited_updates = if let Some(stage_prompt_repository) = &self.stage_prompt_repository
+        {
             stage_prompt_repository
                 .find_bulk_data(&shot.project_id, &shot.id)
                 .await?
