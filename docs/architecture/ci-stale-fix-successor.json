@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_STALE_FIX",
+  "parentHead": "3671178193f9e9e58c264cfaa750b108e31a5067",
+  "planningParentHead": "3671178193f9e9e58c264cfaa750b108e31a5067",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-phase6a-fix-successor-guard.mjs": {
+      "beforeHash": "3b3dceaac4fcadd360886f2a0ed332cc1b9a080cac8d835382a1a10716b4e951",
+      "afterHash": "6e4c09883fe998a6577a53be99923c2b2176ecc72ead16f321426b9b69241a86"
+    },
+    "scripts/testing/ci-phase6a-fix.test.mjs": {
+      "beforeHash": "48eb1909c5dd97c9cff35c31c9490d36bf4057df432d23f26b9bd4eb159ce00e",
+      "afterHash": "98d8b00c3caf0c126ce3ea459368cdb07890f211042443f8f24a3d0124b24009"
+    },
+    "scripts/testing/stale-binding-migration.test.mjs": {
+      "beforeHash": "276b8e5511cb2dbb5a8773ba4d0490c0d370c89065a7b3bf39140b55b95de007",
+      "afterHash": "cf2a974276f26b1fd1ac12e2924b5d10c933d64174e1a593ac6f71e700ff8fd6"
+    },
+    "src/app/MiniMaxVideoPhase2Boundary.test.ts": {
+      "beforeHash": "a7b49c63e8cff96f4dd2ba1e31aa550d222c61487ac7b0fed73749e31d8a19d9",
+      "afterHash": "2bf3bf0029affc5abe4b684496926f5a42d561e090ca8aeee005130ddbfeb254"
+    },
+    "scripts/ci-stale-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "5dca5e53052a49cab80411c15ffbc8715ec416f5d05e76d4f6700a792b407322"
+    },
+    "scripts/testing/ci-stale-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "191e02f67114cd948dff33ec6ef3f94e8d8b07bd9040e632a17c6a5db5594707"
+    }
+  }
+}

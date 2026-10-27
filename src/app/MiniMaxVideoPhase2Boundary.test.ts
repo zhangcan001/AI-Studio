@@ -55,21 +55,20 @@ it('selects raw-byte baselines explicitly and never accepts the other representa
   }
 }, 90000);
 
-it('rejects individual undeclared source, design and migration drift', () => {
-  // Live working-tree mutate — tip-inflated FixtureFiles blow the 90s Boundary budget.
-  for (const p of ['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
-    MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/migrations/042_project_workflow_binding_revision.sql','src-tauri/tauri.conf.json']) {
-    const original=readFileSync(p,'utf8');
-    try {
-      writeFileSync(p,original+'\n# drift\n');
-      const rejected=minimaxVideoPhase2ParentReader('.');
-      expect(rejected.violations.length,p).toBeGreaterThan(0);
-      expect(rejected.addedPaths,p).toEqual([]);
-      expect(rejected.backendAggregateSha256,p).toBeUndefined();
-    } finally {writeFileSync(p,original);}
-    expect(minimaxVideoPhase2ParentReader('.').violations,p).toEqual([]);
-  }
-}, 90000);
+it.each(['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
+ MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/migrations/042_project_workflow_binding_revision.sql','src-tauri/tauri.conf.json'])(
+ 'rejects individual undeclared source, design and migration drift: %s', p => {
+  // Live working-tree mutate — one path per it keeps each under the 90s Boundary budget.
+  const original=readFileSync(p,'utf8');
+  try {
+    writeFileSync(p,original+'\n# drift\n');
+    const rejected=minimaxVideoPhase2ParentReader('.');
+    expect(rejected.violations.length,p).toBeGreaterThan(0);
+    expect(rejected.addedPaths,p).toEqual([]);
+    expect(rejected.backendAggregateSha256,p).toBeUndefined();
+  } finally {writeFileSync(p,original);}
+  expect(minimaxVideoPhase2ParentReader('.').violations).toEqual([]);
+ }, 90000);
 
 it('rejects literal Runtime Package line endings and new source files', () => {
   const packagePath='src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml';

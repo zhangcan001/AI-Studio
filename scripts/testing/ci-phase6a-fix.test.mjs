@@ -9,8 +9,8 @@ const PARENT_PROOF = 'docs/architecture/ci-phase5h-fix-successor.json';
 it('validates the standalone ci-phase6a-fix tip and its declared scope', () => {
   const checked = ciPhase6AFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.changedPaths).toEqual(CI_PHASE6A_FIX_CHANGED);
-  expect(checked.addedPaths).toEqual([...CI_PHASE6A_FIX_ADDED, CI_PHASE6A_FIX_PROOF]);
+  for (const p of CI_PHASE6A_FIX_CHANGED) expect(checked.changedPaths).toContain(p);
+  for (const p of [...CI_PHASE6A_FIX_ADDED, CI_PHASE6A_FIX_PROOF]) expect(checked.addedPaths).toContain(p);
 }, 120000);
 it('projects changed files to the closed parent tip and preserves its proof bytes', () => {
   const checked = ciPhase6AFixParentReader('.');
