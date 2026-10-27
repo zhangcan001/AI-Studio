@@ -1,14 +1,9 @@
-import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
-import {minimaxVideoPhase2FixtureFiles,} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
-import {tmpdir} from 'node:os';
-import {join,dirname} from 'node:path';
-import {queueLifecycleParentReader,queueLifecycleParentFacts,QUEUE_LIFECYCLE_PARENT} from '../../scripts/queue-lifecycle-repair-successor-guard.mjs';
+import {queueLifecycleParentReader,QUEUE_LIFECYCLE_PARENT} from '../../scripts/queue-lifecycle-repair-successor-guard.mjs';
 const manifest='docs/architecture/queue-lifecycle-repair.json';
-const successorManifest='docs/architecture/readiness-lifecycle-fix.json';
 
 it('accepts only the reviewed lifecycle repair before replaying immutable source',()=>{
  const proof=JSON.parse(readFileSync(manifest,'utf8'));
@@ -32,37 +27,32 @@ it('accepts only the reviewed lifecycle repair before replaying immutable source
  }
 }, 90000);
 
-function withQueueFixture(run:(root:string)=>void){
- const root=mkdtempSync(join(tmpdir(),'ai-studio-queue-boundary-'));
- try {
-  const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
-  execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-  writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  const proof=JSON.parse(readFileSync(manifest,'utf8'));
-  const successorProof=JSON.parse(readFileSync(successorManifest,'utf8'));
-  for(const p of new Set([...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...queueLifecycleParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(successorProof.paths),successorManifest,'docs/architecture/readiness-post-run-fix.json']) as Set<string>){
-   mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
+it('denies queue drift in repaired sources, untouched backend and historical proofs',()=>{
+  // Live working-tree mutate keeps fail-closed drift asserts without copying the tip-inflated Phase2 fixture set.
+  for(const p of ['src-tauri/src/application/production_queue_service.rs','src-tauri/src/domain/asset.rs',
+   'docs/architecture/h3-release-closeout-phase1.json']){
+   const original=readFileSync(p);
+   try{
+    writeFileSync(p, original.toString() + '\n# drift\n');
+    const denied=queueLifecycleParentReader('.');expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
+   }finally{writeFileSync(p,original);}
+   expect(queueLifecycleParentReader('.').violations).toEqual([]);
   }
-  expect(queueLifecycleParentReader(root).violations).toEqual([]);
-  run(root);
- }finally{rmSync(root,{recursive:true,force:true});}
-}
+},90000);
 
-it('denies queue drift in repaired sources, untouched backend and historical proofs',()=>withQueueFixture(root=>{
- for(const p of ['src-tauri/src/application/production_queue_service.rs','src-tauri/src/domain/asset.rs',
-  'docs/architecture/h3-release-closeout-phase1.json']){
-  const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-  const denied=queueLifecycleParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
-  writeFileSync(path,original);expect(queueLifecycleParentReader(root).violations).toEqual([]);
- }
-}),90000);
-
-it('denies queue drift in packages, frozen configs and illegal backend additions',()=>withQueueFixture(root=>{
- for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
-  const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n# drift\n');
-  const denied=queueLifecycleParentReader(root);expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
-  writeFileSync(path,original);expect(queueLifecycleParentReader(root).violations).toEqual([]);
- }
- writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
- expect(queueLifecycleParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
-}),90000);
+it('denies queue drift in packages, frozen configs and illegal backend additions',()=>{
+  for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
+   const original=readFileSync(p);
+   try{
+    writeFileSync(p, original.toString() + '\n# drift\n');
+    const denied=queueLifecycleParentReader('.');expect(denied.violations.length).toBeGreaterThan(0);expect(denied.addedPaths).toEqual([]);
+   }finally{writeFileSync(p,original);}
+   expect(queueLifecycleParentReader('.').violations).toEqual([]);
+  }
+  const extra='src-tauri/src/unreviewed.rs';
+  try{
+   writeFileSync(extra,'// unreviewed');
+   expect(queueLifecycleParentReader('.').violations).toContain('minimax-video-phase2-backend-files');
+  }finally{rmSync(extra);}
+  expect(queueLifecycleParentReader('.').violations).toEqual([]);
+},90000);

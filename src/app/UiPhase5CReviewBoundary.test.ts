@@ -49,9 +49,9 @@ it('keeps live freshness for review source and shell bytes with parent fail-clos
 
 it('keeps live freshness for frozen proofs, Runtime raw bytes and manifest deletion', () => {
   const runtime = readdirSync('src-tauri/runtime_packages', { withFileTypes: true })
-    .filter(e => e.isDirectory())
-    .map(e => join('src-tauri/runtime_packages', e.name, 'workflow_api.json'))
-    .find(p => { try { readFileSync(p); return true; } catch { return false; } })!;
+    .filter((e: { isDirectory(): boolean; name: string }) => e.isDirectory())
+    .map((e: { name: string }) => join('src-tauri/runtime_packages', e.name, 'workflow_api.json'))
+    .find((p: string) => { try { readFileSync(p); return true; } catch { return false; } })!;
   // Keep full assertion semantics (mutate → deny → restore) on the tip-owned paths; older frozen proofs stay covered by proof-bytes contracts.
   for (const p of [PHASE5C_MANIFEST, runtime]) {
     const bytes = readFileSync(p);

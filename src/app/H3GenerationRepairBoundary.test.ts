@@ -1,6 +1,6 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
@@ -23,7 +23,7 @@ it('rejects fresh live drift and extra files without hiding it behind cached evi
   // Live working-tree mutate keeps fail-closed drift/illegal asserts without copying the tip-inflated Phase2 fixture set.
   const p='src/features/create/CreateInputs.tsx', original=readFileSync(p);
   try{
-   writeFileSync(p,Buffer.concat([original, Buffer.from('\n// unauthorized drift\n')]));
+   writeFileSync(p, original.toString() + '\n// unauthorized drift\n');
    const rejected=h3RepairParentReader('.');expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);
   }finally{writeFileSync(p,original);}
   expect(h3RepairParentReader('.').violations).toEqual([]);

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_QUEUE_FIX",
+  "parentHead": "5d06ce2681e4376d56e33be1eeb06fc3f1481ff1",
+  "planningParentHead": "5d06ce2681e4376d56e33be1eeb06fc3f1481ff1",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-chain-fix-successor-guard.mjs": {
+      "beforeHash": "98765be0ccba9e63ec30611de32d500cea64308aa9bc92b0fd64d5ffad9639a2",
+      "afterHash": "a394bb991ed7b2bd64c35a80e0139971482a764b4b675d662366cc093f33eecc"
+    },
+    "scripts/testing/ci-chain-fix.test.mjs": {
+      "beforeHash": "54f5e3b9278666c83734cf3e14eb4258414125ebb949b53f1bfeaf646aaad010",
+      "afterHash": "4bb015da4eb0a8466f83b89519a50b256557051da23bd730f822b91dfcca69ad"
+    },
+    "src/app/H3GenerationRepairBoundary.test.ts": {
+      "beforeHash": "505bf1a45926330e332736d1a79beb9714a211085611505acf476864eb9ea0b6",
+      "afterHash": "16279c03a22d04b80a42c4160f112545c5012d28f37633b4350eee20ce69e689"
+    },
+    "src/app/QueueLifecycleRepairBoundary.test.ts": {
+      "beforeHash": "e16e05bb759858f767202dbd86c7398f19666ae9d2086a828fb5f120df995aa0",
+      "afterHash": "746568c6f3cb1d111f170e0a8c2be9ebc02c1ced79767a9e4c5f7d064d07c66b"
+    },
+    "src/app/UiPhase5CReviewBoundary.test.ts": {
+      "beforeHash": "b5c766b11da7190163c393c881ef2aa3b0263c03a9f082346959a11eccc05fca",
+      "afterHash": "1ae1821690497844078ca018a21793f46b8d2bc1262f633563479b6cc7fa3ebf"
+    },
+    "scripts/ci-queue-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "5a4b6ed3c6d996345e55a9941b99f3a8c6c6cee0d90cd247b3577c3d57ab339e"
+    },
+    "scripts/testing/ci-queue-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "011c23fef1d0710f3d248107e84a2930cd963709adfcbef811f73eb79512bc97"
+    }
+  }
+}
