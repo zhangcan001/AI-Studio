@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "PROMPT_SECTION_LOAD",
+  "parentHead": "649b014ec8e9578f570c3bf915b5b7c14cac02d1",
+  "planningParentHead": "649b014ec8e9578f570c3bf915b5b7c14cac02d1",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true
+  },
+  "files": {
+    "scripts/testing/cancel-correctness.test.mjs": {
+      "beforeHash": "e7f574e1013d37b0eb7d96352683d4f7bf7ab64821df8630708e3268539e07ba",
+      "afterHash": "99bbc6165b4bd33563531008d9763e98356b59d5b65b53b361cb81dfd89e0b11"
+    },
+    "scripts/testing/delete-integrity.test.mjs": {
+      "beforeHash": "af4187026a4c310fe3ab93f485900d493c2e742388edb51cb1a95fe2a410bd59",
+      "afterHash": "1fb449dab6614f5b54ef7a4a26b0a90e3c125302a1e7d2ce287e2e55e4fddeeb"
+    },
+    "scripts/testing/review-hardening.test.mjs": {
+      "beforeHash": "4b0bfe16d0235a7e7aa8338316f46d6382354d2919e57e0a2287dad29f8f8342",
+      "afterHash": "6c32c11b1df16036c1a8ede164837863e2bb7b14cb791f7d3a14c58c951df796"
+    },
+    "scripts/testing/single-shot-batch-control.test.mjs": {
+      "beforeHash": "57f8a255d33a307d7c019db9c7674c903c13f27636b596fac83fc12cb2be5b3b",
+      "afterHash": "cbaaaf054350982f60cbef443148f04f5a1b6e73f5176070a0660ee56a550758"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "960d59f108caa072718d6f7e43a595d3c87f284ef4851b4a719bf436c72220af",
+      "afterHash": "09d5717876e0dc7da5e7d2d118a9da80750fb854518ba1600bc16f236ff0c757"
+    },
+    "src/features/create/StoryboardSafety.test.tsx": {
+      "beforeHash": "b3591481c9fa5dadd48a1c6c281ae781e41f5314ad2321d2cdddb0df11531d39",
+      "afterHash": "531f8d9ddb1b529cff9f2631a65a99342368dfa3363f64109d126cc3e4f47f8b"
+    },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": "b895603f0444629e92cd38e56fa7ade6ee63ca86ae796e4b201a6c342a1d2713",
+      "afterHash": "eefb417357d04406b6d89ac4fd1885a00de3c690e4f5584f0824da982973a931"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": "8b50a3cb1b1273f6ff9cfc78ca14ac9521849fe4065662642202edfbadb632ed",
+      "afterHash": "b914836deb17e857d52989219eeed28ea00dffd61ab063fb7da265ed6f65baf3"
+    },
+    "scripts/prompt-section-load-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "fc4cc727085c805b3ec8cea0a703d3573c5fc552e38ad65acbb643b889bcaf5d"
+    },
+    "scripts/testing/prompt-section-load.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "759255e24b8a9e497fd5e6c76f985b5f8b77a49683828940041cd4442dd61c70"
+    }
+  }
+}

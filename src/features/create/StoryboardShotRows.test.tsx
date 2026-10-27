@@ -7,10 +7,10 @@ import type { StoryboardShot } from "./storyboardModel";
 import { normalizeProductError } from "../../product/errors";
 import { invalidateVideoInputs } from "../../product/videoInputInvalidation";
 
-const api = vi.hoisted(() => ({ saveShotRow: vi.fn(), updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn(), compositionUsage: vi.fn(), setCompositionUsage: vi.fn() }));
+const api = vi.hoisted(() => ({ saveShotRow: vi.fn(), updateShot: vi.fn(), deleteShot: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), selectResult: vi.fn(), list: vi.fn(), listForShot: vi.fn(), bindShot: vi.fn(), generatorsList: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn(), compositionUsage: vi.fn(), setCompositionUsage: vi.fn(), promptSections: vi.fn(), setPromptSections: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: {
   creation: { saveShotRow: api.saveShotRow, updateShot: api.updateShot, deleteShot: api.deleteShot, readinessGet: api.readinessGet, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, inputsGet: api.inputsGet, inputsSave: api.inputsSave, mediaUrl: (p: string, id: string) => `media://${p}/${id}` },
-  storyEntities: { list: api.list, listForShot: api.listForShot, bindShot: api.bindShot, compositionUsage: api.compositionUsage, setCompositionUsage: api.setCompositionUsage },
+  storyEntities: { list: api.list, listForShot: api.listForShot, bindShot: api.bindShot, compositionUsage: api.compositionUsage, setCompositionUsage: api.setCompositionUsage, promptSections: api.promptSections, setPromptSections: api.setPromptSections },
   library: { imageGet: vi.fn(async () => [1]), thumbnailGet: vi.fn(async () => null) },
 } }));
 const hero = { id: "e1", projectId: "p", kind: "character", name: "阿离", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" } as const;
@@ -32,6 +32,8 @@ beforeEach(() => {
   api.saveShotRow.mockImplementation(async (_p: string, req: {entityIds?: string[]}) => ({ shot: shot("a",0).shot, boundEntities: [hero, lane].filter(e => (req.entityIds ?? ["e1"]).includes(e.id)) }));
   api.updateShot.mockResolvedValue({}); api.deleteShot.mockResolvedValue(undefined);
   api.compositionUsage.mockResolvedValue({ openingEntityId: null, endingEntityId: null });
+  api.promptSections.mockResolvedValue({ style: null, summary: null, soundscape: null, music: null });
+  api.setPromptSections.mockImplementation(async (_p: string, _s: string, sections: unknown) => sections);
   api.setCompositionUsage.mockImplementation(async (_p: string, _s: string, usage: unknown) => usage);
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
@@ -612,4 +614,40 @@ it("blocks over-limit (11 s) shots: existing value kept, error shown, generation
   fireEvent.change(input, { target: { value: "13" } }); fireEvent.blur(input);
   await new Promise(r => setTimeout(r, 20));
   expect(api.updateShot).not.toHaveBeenCalled();
+});
+
+it("waits for prompt sections before saving and merges a late read without overwriting edited fields", async () => {
+  const pending = deferred<{ style: string; summary: string; soundscape: string; music: string }>();
+  api.promptSections.mockReturnValueOnce(pending.promise);
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const style = screen.getByLabelText("镜头1 风格");
+  await waitFor(() => expect(style.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(style, { target: { value: "new style" } }); fireEvent.blur(style);
+  expect(api.setPromptSections).not.toHaveBeenCalled();
+  await act(async () => pending.resolve({ style: "old style", summary: "saved summary", soundscape: "saved sound", music: "saved music" }));
+  expect((style as HTMLTextAreaElement).value).toBe("new style");
+  expect((screen.getByLabelText("镜头1 摘要") as HTMLTextAreaElement).value).toBe("saved summary");
+  fireEvent.blur(style);
+  await waitFor(() => expect(api.setPromptSections).toHaveBeenCalledWith("p", "a", { style: "new style", summary: "saved summary", soundscape: "saved sound", music: "saved music" }));
+});
+
+it("shows a Chinese prompt-section read error and blocks saves after a failed read", async () => {
+  api.promptSections.mockRejectedValueOnce({ code: "PROJECT_READ_FAILED" });
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  expect((await screen.findByRole("alert")).textContent).toContain("提示词分段读取失败");
+  const style = screen.getByLabelText("镜头1 风格");
+  await waitFor(() => expect(style.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(style, { target: { value: "new style" } }); fireEvent.blur(style);
+  expect(api.setPromptSections).not.toHaveBeenCalled();
+});
+
+it("ignores a late prompt-section read after switching projects", async () => {
+  const pending = deferred<{ style: string; summary: null; soundscape: null; music: null }>();
+  api.promptSections.mockReturnValueOnce(pending.promise);
+  const p = props(); const view = render(<StoryboardShotRows {...p} items={[shot("a", 0)]} />);
+  await waitFor(() => expect(api.promptSections).toHaveBeenCalledWith("p", "a"));
+  view.rerender(<StoryboardShotRows {...p} projectId="other" items={[shot("a", 0)]} />);
+  await waitFor(() => expect(api.promptSections).toHaveBeenCalledWith("other", "a"));
+  await act(async () => pending.resolve({ style: "old project", summary: null, soundscape: null, music: null }));
+  expect((screen.getByLabelText("镜头1 风格") as HTMLTextAreaElement).value).toBe("");
 });

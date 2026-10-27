@@ -427,21 +427,29 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const [sections, setSections] = useState<ShotPromptSections>(EMPTY_SECTIONS);
   const savedSections = useRef<ShotPromptSections>(EMPTY_SECTIONS);
   const sectionsEpoch = useRef(0);
+  const [sectionsReady, setSectionsReady] = useState(false);
+  const [sectionsError, setSectionsError] = useState<string>();
+  const editedSections = useRef(new Set<keyof ShotPromptSections>());
   useEffect(() => {
     const token = ++sectionsEpoch.current;
-    setSections(EMPTY_SECTIONS); savedSections.current = EMPTY_SECTIONS;
-    const read = productClient.storyEntities?.promptSections;
-    if (typeof read === "function") {
-      void Promise.resolve().then(() => read(projectId, item.id)).then(next => {
-        if (token !== sectionsEpoch.current || !next) return;
-        const clean = { ...EMPTY_SECTIONS, ...next };
-        savedSections.current = clean; setSections(clean);
-      }).catch(() => undefined);
-    }
+    setSectionsReady(false); setSectionsError(undefined);
+    editedSections.current.clear();
+    void productClient.storyEntities.promptSections(projectId, item.id).then(next => {
+      if (token !== sectionsEpoch.current) return;
+      savedSections.current = next;
+      setSections(current => {
+        const merged = { ...next };
+        for (const [key] of SECTION_FIELDS) if (editedSections.current.has(key)) merged[key] = current[key];
+        return merged;
+      });
+      setSectionsReady(true);
+    }).catch(cause => {
+      if (token === sectionsEpoch.current) setSectionsError(`提示词分段读取失败：${normalizeProductError(cause).message}`);
+    });
     return () => { ++sectionsEpoch.current; };
   }, [projectId, item.id]);
   const saveSections = () => {
-    if (bindingsDisabled || JSON.stringify(sections) === JSON.stringify(savedSections.current)) return;
+    if (bindingsDisabled || !sectionsReady || JSON.stringify(sections) === JSON.stringify(savedSections.current)) return;
     const next = sections;
     void run(async () => {
       const token = ++sectionsEpoch.current;
@@ -483,9 +491,11 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       {promptHints.length > 0 && <ul className="muted" aria-label="提示词写作建议">{promptHints.map(h => <li key={h}>{h}</li>)}</ul>}
       <details className="shot-row-sections" aria-label="提示词分段">
         <summary>风格 / 摘要 / 环境声 / 配乐（英文，可选）</summary>
+        {!sectionsReady && !sectionsError && <p role="status">正在读取提示词分段，读取完成后可保存。</p>}
+        {sectionsError && <p role="alert" className="storyboard-error">{sectionsError}</p>}
         {SECTION_FIELDS.map(([key, label, hint]) => <label key={key}><span>{label}</span>
           <textarea aria-label={`${item.name} ${label}`} placeholder={hint} value={sections[key] ?? ""} disabled={bindingsDisabled}
-            onChange={e => setSections(s => ({ ...s, [key]: e.target.value }))} onBlur={saveSections} /></label>)}
+            onChange={e => { editedSections.current.add(key); setSections(s => ({ ...s, [key]: e.target.value })); }} onBlur={saveSections} /></label>)}
       </details>
       {hasMentions && <section aria-label="角色与场景生成引用" className="composer-entity-references">
         <p>{entityIssue ?? "角色与场景已保存到正式参考输入，生成时按以下真实顺序引用。"}</p>
