@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_ASSERT_FIX",
+  "parentHead": "ef70f54b64f928345f1b45ad917e3409d201e307",
+  "planningParentHead": "ef70f54b64f928345f1b45ad917e3409d201e307",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-green-fix-successor-guard.mjs": {
+      "beforeHash": "56f66fadf79dd8cbbaf4e4262afb2a9e8e7d86f1e469ec85d1c0772ada096b9b",
+      "afterHash": "d9b8fbba0a88685df7cb643e75c55c425bab8d33c8148be0e651fde9a39afba2"
+    },
+    "scripts/testing/ci-probe-fix.test.mjs": {
+      "beforeHash": "0a780f1570b840f3b18fa87715d4da22802e72f88d95430b01c8a4f15c426211",
+      "afterHash": "e8bb1994229d61846671fc78a939ecd3fa49404d722b4f8d95fb4937e87385dd"
+    },
+    "scripts/testing/folder-batch-import.test.mjs": {
+      "beforeHash": "997be4137ddee3a7d82af252a43655ce1803ba1de34e34c352a66dd8f81493d9",
+      "afterHash": "89b4d32ed7b031eeb39f8acfd2de61a5a657ba7491ff239ab50b5f4c6837235e"
+    },
+    "scripts/testing/stale-binding-migration.test.mjs": {
+      "beforeHash": "b982a0d6d84533dbb7004e39441533f816aed497a648a597a44c058aa0d31700",
+      "afterHash": "276b8e5511cb2dbb5a8773ba4d0490c0d370c89065a7b3bf39140b55b95de007"
+    },
+    "scripts/ui-phase5c-review-successor-guard.mjs": {
+      "beforeHash": "02c54009378bae8b19d7654846e8726adbebb322798ddf78e006d6267be4dc0d",
+      "afterHash": "9718925220687b5b93d3b661a4836a2ed5f36cda5f93fe73b224c5e3ce9133fc"
+    },
+    "src/app/UiPhase5CReviewBoundary.test.ts": {
+      "beforeHash": "b252835d2163dda6358f354bc35eb223d988060527d37d6a3377d53c4569fe98",
+      "afterHash": "b5c766b11da7190163c393c881ef2aa3b0263c03a9f082346959a11eccc05fca"
+    },
+    "scripts/ci-assert-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "e9a80f176fd89d140a0b89d92492a4d315024070824a10bd5aa3f8a581236211"
+    },
+    "scripts/testing/ci-assert-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "84978809222eae813e492df16d09f8e99a9819b5306cf651ae4e5cfa31ec1b6c"
+    }
+  }
+}

@@ -10,8 +10,9 @@ const safety = 'src/features/create/StoryboardSafety.test.tsx';
 it('validates the standalone ci-probe-fix tip and its declared scope', () => {
   const checked = ciProbeFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.changedPaths).toEqual(CI_PROBE_FIX_CHANGED);
-  expect(checked.addedPaths).toEqual([...CI_PROBE_FIX_ADDED, CI_PROBE_FIX_PROOF]);
+  // Successor tips extend changed/addedPaths; this closed tip still owns its declared scope.
+  for (const p of CI_PROBE_FIX_CHANGED) expect(checked.changedPaths).toContain(p);
+  for (const p of [...CI_PROBE_FIX_ADDED, CI_PROBE_FIX_PROOF]) expect(checked.addedPaths).toContain(p);
 }, 120000);
 it('projects changed files to the closed parent tip and preserves its proof bytes', () => {
   const checked = ciProbeFixParentReader('.');

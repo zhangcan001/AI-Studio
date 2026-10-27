@@ -1,7 +1,6 @@
 // Validate review/selection closure before replaying immutable Phase5B and older bytes.
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
 import { uiPhase5DParentReader, phase5DFixtureFiles } from './ui-phase5d-ci-timeout-successor-guard.mjs';
-import { ciProbeFixFixtureFiles } from './ci-probe-fix-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -60,7 +59,7 @@ function files(root, dir) {
     return entry.isDirectory() ? files(root, p) : [p];
   }).sort();
 }
-export const phase5CFixtureFiles = root => [...new Set([...PHASE5C_FILES, PHASE5C_MANIFEST, ...ciProbeFixFixtureFiles(root)])];
+export const phase5CFixtureFiles = root => [...new Set([...phase5CParentFacts(root).paths, ...PHASE5C_FILES, ...phase5DFixtureFiles(root)])];
 function validate(root, override) {
   const successor = uiPhase5DParentReader(root);
   const violations = [...successor.violations], fail = name => violations.push('ui-phase5c-review-' + name);

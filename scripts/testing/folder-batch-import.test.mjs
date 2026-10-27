@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { folderBatchImportParentReader, FOLDER_BATCH_IMPORT_BASE, FOLDER_BATCH_IMPORT_PROOF } from '../folder-batch-import-successor-guard.mjs';
 import { libraryConfirmCiRaceParentReader, LIBRARY_CONFIRM_CI_RACE_PROOF } from '../library-confirm-ci-race-successor-guard.mjs';
 import { uiPhase7BR1MetadataParentReader } from '../ui-phase7b-r1-metadata-successor-guard.mjs';
+import { ciAssertFixParentReader } from '../ci-assert-fix-successor-guard.mjs';
 
 it('validates folder-batch-import changes and projects original bytes through historical readers', () => {
   const checked = folderBatchImportParentReader('.');
@@ -41,7 +42,7 @@ it('invalidates cached evidence on deletion, live source mutation, raw runtime d
     execFileSync('git',['init','-q',root]);
     const objects=resolve(execFileSync('git',['rev-parse','--git-path','objects'],{encoding:'utf8'}).trim());
     writeFileSync(join(root,'.git/objects/info/alternates'),objects.replaceAll('\\','/')+'\n');
-    const validate=()=>uiPhase7BR1MetadataParentReader(root).violations;
+    const validate=()=>ciAssertFixParentReader(root).violations;
     expect(validate()).toEqual([]);
     for(const p of [FOLDER_BATCH_IMPORT_PROOF,LIBRARY_CONFIRM_CI_RACE_PROOF,
       'scripts/library-confirm-ci-race-successor-guard.mjs','src/features/create/StoryboardShotRows.test.tsx']) {
