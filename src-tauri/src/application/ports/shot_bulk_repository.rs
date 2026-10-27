@@ -63,6 +63,13 @@ pub trait ShotBulkRepository: Send + Sync {
         updates: &[ShotStagePromptRecord],
     ) -> Result<(), RepositoryError>;
 
+    /// Persist a shot row and any inherited stage prompt snapshots in one transaction.
+    async fn update_shot_with_stage_prompts(
+        &self,
+        shot: &ShotRecord,
+        stage_prompts: &[ShotStagePromptRecord],
+    ) -> Result<bool, RepositoryError>;
+
     /// Upsert all stage configs and any accompanying prompt snapshots in one
     /// database transaction.  The prompt slice is intentionally optional at
     /// the call site so a config-only operation cannot clear a prompt.

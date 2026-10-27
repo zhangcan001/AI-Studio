@@ -84,6 +84,7 @@ mod story_entity_contract {
             project_id: "prj_a".into(),
             shot_id: "sht_a".into(),
             stage: ShotStage::Video,
+            name: None,
             prompt_text: Some("new prompt".into()),
             config: Some(ShotStageConfigRecord {
                 shot_id: "sht_a".into(),

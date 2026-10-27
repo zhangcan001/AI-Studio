@@ -2497,6 +2497,7 @@ pub mod folder_batch_import_service {
                         project_id: project.clone(),
                         shot_id: id.clone(),
                         stage: ShotStage::Video,
+                        name: None,
                         prompt_text: None,
                         config: None,
                         entity_ids: Some(ids),

@@ -371,6 +371,90 @@ impl ProductCreationFacade {
             .map_err(shot_error)
     }
 
+    pub async fn update_shot_with_fields(
+        &self,
+        project_id: &str,
+        request: CreationShotUpdate,
+        fields: CreationShotFields,
+    ) -> Result<CreationShotSummary, ProductError> {
+        if fields.shot_id != request.shot_id {
+            return Err(ProductError::new(
+                "INVALID_INPUT",
+                "镜头标识不一致。",
+                Some("EDIT_INPUT"),
+            ));
+        }
+        let stage = stage(&fields.stage)?;
+        self.bindings
+            .get(project_id)
+            .await
+            .map_err(ProductError::binding)?;
+        let name = crate::domain::canonical_shot_name(&request.name).map_err(|_| {
+            ProductError::new(
+                "INVALID_INPUT",
+                "镜头名称必须是 1–120 个字符的单行文本",
+                Some("EDIT_INPUT"),
+            )
+        })?;
+        let config = if let Some(values) = fields.values {
+            let selection = ExactGeneratorSelection::decode(
+                fields
+                    .selection_ref
+                    .as_deref()
+                    .ok_or_else(ProductError::invalid_selection)?,
+            )?;
+            if !self
+                .bindings
+                .is_workflow_available_for_recipe(
+                    &selection.workflow_version_id,
+                    &selection.recipe_id,
+                )
+                .await
+                .map_err(ProductError::binding)?
+            {
+                return Err(ProductError::invalid_selection());
+            }
+            Some(
+                self.shots
+                    .prepare_row_config(ShotStageConfigRequest {
+                        project_id: project_id.to_owned(),
+                        shot_id: fields.shot_id.clone(),
+                        stage,
+                        workflow_version_id: selection.workflow_version_id,
+                        recipe_id: selection.recipe_id,
+                        values,
+                    })
+                    .await
+                    .map_err(shot_error)?,
+            )
+        } else {
+            None
+        };
+        if fields.prompt.is_none() && config.is_none() {
+            return Err(ProductError::new(
+                "INVALID_INPUT",
+                "镜头行保存不能为空。",
+                Some("EDIT_INPUT"),
+            ));
+        }
+        let (shot, _) = self
+            .shots
+            .save_row_atomic(crate::application::ports::ShotRowEditRecord {
+                project_id: project_id.into(),
+                shot_id: fields.shot_id,
+                stage,
+                name: Some(name),
+                prompt_text: fields.prompt,
+                config,
+                entity_ids: None,
+                composition_usage: None,
+                updated_at: chrono::Utc::now(),
+            })
+            .await
+            .map_err(shot_error)?;
+        Ok(summary(&shot))
+    }
+
     pub async fn save_shot_fields(
         &self,
         project_id: &str,
@@ -493,6 +577,7 @@ impl ProductCreationFacade {
                 project_id: project_id.into(),
                 shot_id: fields.shot_id,
                 stage,
+                name: None,
                 prompt_text: fields.prompt,
                 config,
                 entity_ids,

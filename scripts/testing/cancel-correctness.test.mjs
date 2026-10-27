@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSy
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { promptSectionsWithoutAtParentReader } from '../prompt-sections-without-at-successor-guard.mjs';
+import { shotSaveAtomicParentReader } from '../shot-save-atomic-successor-guard.mjs';
 import { DELETE_INTEGRITY_BASE } from '../delete-integrity-successor-guard.mjs';
 import { CANCEL_CORRECTNESS_BASE, CANCEL_CORRECTNESS_PROOF } from '../cancel-correctness-successor-guard.mjs';
 import { REVIEW_HARDENING_PROOF as PARENT_PROOF } from '../review-hardening-successor-guard.mjs';
@@ -20,11 +20,11 @@ it('run cancel cancels unfinished child batches and dispatching cancel waits for
   expect(orchSrc).not.toMatch(/if batch\.status == "READY"[\s\S]{0,120}cancel_pending/);
   expect(readFileSync(queue, 'utf8')).toContain('while item.status == ProductionBatchItemStatus::Dispatching && item.task_id.is_none()');
   expect(readFileSync(repo, 'utf8')).toContain("AND (? <> 'CANCELLED' OR task_id IS NULL)");
-  expect(promptSectionsWithoutAtParentReader('.').violations).toEqual([]);
+  expect(shotSaveAtomicParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('preserves the frozen review-hardening proof bytes', () => {
-  const checked = promptSectionsWithoutAtParentReader('.');
+  const checked = shotSaveAtomicParentReader('.');
   expect(checked.violations).toEqual([]);
   expect(checked.read(orch)).toBe(execFileSync('git', ['show', `${DELETE_INTEGRITY_BASE}:${orch}`], { encoding: 'utf8' }));
   expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${CANCEL_CORRECTNESS_BASE}:${PARENT_PROOF}`]));
@@ -40,8 +40,8 @@ it('rejects forged proof identity/hash, source drift, migrations and undeclared 
     { 'src-tauri/src/application/shot_video_input_service.rs': 'changed compiler' },
     { 'src/unapproved-default.ts': 'unapproved' },
     { 'src-tauri/migrations/051_unapproved.sql': 'SELECT 1;' },
-  ]) expect(promptSectionsWithoutAtParentReader('.', override).violations.length).toBeGreaterThan(0);
-  expect(promptSectionsWithoutAtParentReader('.').violations).toEqual([]);
+  ]) expect(shotSaveAtomicParentReader('.', override).violations.length).toBeGreaterThan(0);
+  expect(shotSaveAtomicParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('invalidates warm-cache fixtures on live mutations, deletion and illegal files; restoration passes', () => {
@@ -52,7 +52,7 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     execFileSync('git', ['init', '-q', root]);
     const objects = resolve(execFileSync('git', ['rev-parse', '--git-path', 'objects'], { encoding: 'utf8' }).trim());
     writeFileSync(join(root, '.git/objects/info/alternates'), objects.replaceAll('\\', '/') + '\n');
-    const validate = () => promptSectionsWithoutAtParentReader(root).violations;
+    const validate = () => shotSaveAtomicParentReader(root).violations;
     expect(validate()).toEqual([]);
     for (const p of [CANCEL_CORRECTNESS_PROOF, PARENT_PROOF, orch]) {
       const file = join(root, p), original = readFileSync(file);

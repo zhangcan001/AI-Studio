@@ -681,6 +681,40 @@ impl ShotBulkRepository for SqliteShotRepository {
         transaction.commit().await.map_err(map_sqlx_error)
     }
 
+    async fn update_shot_with_stage_prompts(
+        &self,
+        shot: &ShotRecord,
+        stage_prompts: &[ShotStagePromptRecord],
+    ) -> Result<bool, RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let result = sqlx::query(
+            "UPDATE shots SET name = ?, prompt_text = ?, prompt_entry_id = ?,
+                    prompt_version_id = ?, selected_image_asset_id = ?,
+                    selected_video_asset_id = ?, updated_at = ?
+             WHERE id = ? AND project_id = ?",
+        )
+        .bind(&shot.name)
+        .bind(&shot.prompt_text)
+        .bind(&shot.prompt_entry_id)
+        .bind(&shot.prompt_version_id)
+        .bind(&shot.selected_image_asset_id)
+        .bind(&shot.selected_video_asset_id)
+        .bind(format_datetime(shot.updated_at))
+        .bind(&shot.id)
+        .bind(&shot.project_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if result.rows_affected() != 1 {
+            return Ok(false);
+        }
+        if !stage_prompts.is_empty() {
+            insert_stage_prompts(&mut transaction, &shot.project_id, stage_prompts).await?;
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(true)
+    }
+
     async fn upsert_stage_configs_atomic(
         &self,
         project_id: &str,

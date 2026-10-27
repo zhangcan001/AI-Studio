@@ -552,7 +552,8 @@ pub mod story_entity {
             req: &crate::application::ports::ShotRowEditRecord,
         ) -> Result<Vec<StoryEntity>, RepositoryError> {
             let db = |e: sqlx::Error| RepositoryError::database(e.to_string());
-            if req.prompt_text.is_none()
+            if req.name.is_none()
+                && req.prompt_text.is_none()
                 && req.config.is_none()
                 && req.entity_ids.is_none()
                 && req.composition_usage.is_none()
@@ -572,6 +573,21 @@ pub mod story_entity {
                 return Err(RepositoryError::not_found("shot", &req.shot_id));
             }
             let now = req.updated_at.to_rfc3339();
+            if let Some(name) = &req.name {
+                let result = sqlx::query(
+                    "UPDATE shots SET name = ?, updated_at = ? WHERE id = ? AND project_id = ?",
+                )
+                .bind(name)
+                .bind(&now)
+                .bind(&req.shot_id)
+                .bind(&req.project_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db)?;
+                if result.rows_affected() != 1 {
+                    return Err(RepositoryError::not_found("shot", &req.shot_id));
+                }
+            }
             // Keep SQL aligned with shot.rs::insert_stage_prompts; edited text clears provenance.
             if let Some(prompt) = &req.prompt_text {
                 sqlx::query("INSERT INTO shot_stage_prompts (shot_id, stage, prompt_text, prompt_entry_id, prompt_version_id, updated_at)

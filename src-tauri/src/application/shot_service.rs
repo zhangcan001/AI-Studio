@@ -315,11 +315,8 @@ impl ShotService {
         shot.prompt_entry_id = request.prompt_entry_id;
         shot.prompt_version_id = request.prompt_version_id;
         shot.updated_at = self.clock.now();
-        if !self.repository.update(&shot).await? {
-            return Err(ShotServiceError::NotFound(request.shot_id));
-        }
-        if let Some(stage_prompt_repository) = &self.stage_prompt_repository {
-            let inherited_updates = stage_prompt_repository
+        let inherited_updates = if let Some(stage_prompt_repository) = &self.stage_prompt_repository {
+            stage_prompt_repository
                 .find_bulk_data(&shot.project_id, &shot.id)
                 .await?
                 .into_iter()
@@ -337,12 +334,19 @@ impl ShotService {
                     prompt_version_id: shot.prompt_version_id.clone(),
                     updated_at: shot.updated_at,
                 })
-                .collect::<Vec<_>>();
-            if !inherited_updates.is_empty() {
-                stage_prompt_repository
-                    .update_stage_prompts_atomic(&shot.project_id, &inherited_updates)
-                    .await?;
-            }
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let updated = if let Some(stage_prompt_repository) = &self.stage_prompt_repository {
+            stage_prompt_repository
+                .update_shot_with_stage_prompts(&shot, &inherited_updates)
+                .await?
+        } else {
+            self.repository.update(&shot).await?
+        };
+        if !updated {
+            return Err(ShotServiceError::NotFound(request.shot_id));
         }
         self.get(&shot.project_id, &shot.id).await
     }

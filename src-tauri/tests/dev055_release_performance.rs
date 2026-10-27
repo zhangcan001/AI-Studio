@@ -491,6 +491,14 @@ impl ShotBulkRepository for CountingShotRepository {
         Err(unsupported())
     }
 
+    async fn update_shot_with_stage_prompts(
+        &self,
+        _: &ShotRecord,
+        _: &[ai_studio_lib::application::ports::ShotStagePromptRecord],
+    ) -> Result<bool, RepositoryError> {
+        Err(unsupported())
+    }
+
     async fn upsert_stage_configs_atomic(
         &self,
         _: &str,

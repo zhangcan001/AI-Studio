@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "SHOT_SAVE_ATOMIC",
+  "parentHead": "7933beddd1c64a6bb63e2455502748e283ccddeb",
+  "planningParentHead": "7933beddd1c64a6bb63e2455502748e283ccddeb",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true
+  },
+  "files": {
+    "scripts/testing/cancel-correctness.test.mjs": {
+      "beforeHash": "eff1a88a1d8805fe4638605e286c7a160cf53c9d82069426bbea2709aff66c96",
+      "afterHash": "cd8661c29900f4042f6913cb1c2580b4a06eea44b47a60475a505f0e469d4978"
+    },
+    "scripts/testing/delete-integrity.test.mjs": {
+      "beforeHash": "40a5a3bdb79159beed2786230eda880fbead933af769c5e505f81c03da244e86",
+      "afterHash": "1a6d17eac29e6fc06a6cce55c7f1a69b1bc1c37f772cab708900bb21d3665346"
+    },
+    "scripts/testing/prompt-section-load.test.mjs": {
+      "beforeHash": "d8113b1a17fc6d69ce32869022a6e7f7b24c2b7171ac65fff1ff6cd8e012bec4",
+      "afterHash": "21cd0d2156cafc27cc7f29e30c595af9c737cbcc80ef49a2607aced78c48af44"
+    },
+    "scripts/testing/prompt-sections-without-at.test.mjs": {
+      "beforeHash": "4ce6262ef1fc56aba7a63926d25e91492eb36795e2a5c43d660659591b2a76e6",
+      "afterHash": "7ee8e58a5bbf76b8a1bc22b7c7981062728c21daf38ae9b953df0173b062f3fc"
+    },
+    "scripts/testing/review-hardening.test.mjs": {
+      "beforeHash": "640cdedb4d24c27230c59f1e0c52bf306cfc1eaedf089b8dada9cc546213c9ec",
+      "afterHash": "357a10d4c55a64e75093aead03fb745b2b53049ae0bcfa32f03bf5287a2e0cc7"
+    },
+    "scripts/testing/single-shot-batch-control.test.mjs": {
+      "beforeHash": "b93959871b94b3c9bc2afb49c119cb9b5e48ab0c10a24df0ec4515360091bc6f",
+      "afterHash": "35fdc112ba7c3c5d7515390dddd002276ab1c73fbd140eb55ceceda7607cf80d"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "8122ee22cce327f4ce7a917aea4caebc4edda1d044f87faa8257d2e1b28cc858",
+      "afterHash": "2610c6e521b008afc1b3517b9e9a4ab3ae471ccc8562280df79422550ebd4f59"
+    },
+    "src-tauri/src/application/mod.rs": {
+      "beforeHash": "fabdbe6f04be2dc10a89308337fe7205d608770847758052e3215fdf88da0e48",
+      "afterHash": "5cf98c586a305e19f04d027bc491bda5f11dcecdd3c2a97aa2d904dc00ce2e8c"
+    },
+    "src-tauri/src/application/ports/mod.rs": {
+      "beforeHash": "0411380f6e21888c112f850140ec7b57ad52580b4cee80b5601551d4b10d5c9e",
+      "afterHash": "0bb492593bf89d949bbe7c6109ebe982c13401921cc4fd26860cc15de0a1e2da"
+    },
+    "src-tauri/src/application/ports/shot_bulk_repository.rs": {
+      "beforeHash": "25a6420f43ce0fbc426703ab84551683abb3cc264e1d7e0eb3f4983ae8cc7761",
+      "afterHash": "d48d900aaf378323140028e08d28408f12ae363ecf4daa2c86c2824925f98a6b"
+    },
+    "src-tauri/src/application/product/creation_facade/context.rs": {
+      "beforeHash": "efd9636292e40ffb3fd94b6a43aeebc9fe37037795452d5c7fa8a2341df00fa3",
+      "afterHash": "7d3a2d80a5e5dace790aeaf29b65935dd1315168f08c77ef173dc1b9ae97ad01"
+    },
+    "src-tauri/src/application/shot_service.rs": {
+      "beforeHash": "57b62c4a1073af0a53c1df3f26b70d79be10f5486e4dad83f28ca06b687bcb6f",
+      "afterHash": "466c6407bfb8409dec96ef0754fafdfd046599b723fcd14a9b3cb0a6ac15eb64"
+    },
+    "src-tauri/src/commands/product.rs": {
+      "beforeHash": "ff121b803be0815a954a779c1cd239d978aca3a41c1ea3827a1b83d55adf30e4",
+      "afterHash": "761664aaa56959f2f064c62c7ad3c26d036e04eb2597dbfe817584a9fe3183e5"
+    },
+    "src-tauri/src/infrastructure/database/repositories/mod.rs": {
+      "beforeHash": "9763c24f2fe7a2cb28201d188c1d6c1dd9e9c4fadce5024aec307895bcba2e72",
+      "afterHash": "f679a91757d446c1d15631967e8b1289d81448566c17b412bf8974deec513c55"
+    },
+    "src-tauri/src/infrastructure/database/repositories/shot.rs": {
+      "beforeHash": "8c5a0ea06c49a9ace5cf9b648dcb46336250c08fc532e76a66739684d33c4ef9",
+      "afterHash": "ed3d60dce42582d9213c4f74389681eb8b5e374cad7225d7dff7db307ddd552a"
+    },
+    "src-tauri/tests/dev055_release_performance.rs": {
+      "beforeHash": "990ab65db9421eaa416ceccbe15470e9973d4bb92137bd8443686f610fa708c2",
+      "afterHash": "9eef3ec92fc6009588d714ffa4ea5a8844d6755d063470aaedb13fc96ef90ef8"
+    },
+    "src-tauri/tests/product_library_contract.rs": {
+      "beforeHash": "b219456afe4f410fd9027cbd2ee10624cc625350824a88e1e45b4e6488ea2a72",
+      "afterHash": "1f2c9b2d94d41bac3d9edc115aa38c219fdb36a4c87d53cda29da8fd39eea1d7"
+    },
+    "scripts/shot-save-atomic-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "6372a3330a08b91e8540eb05b60967391be99f71ebd96c369eeb5b91fb73a216"
+    },
+    "scripts/testing/shot-save-atomic.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "36be100b00e2ca435aaf4ba66277dc4edab847508a9bd431fd23b9667028fd5f"
+    }
+  }
+}

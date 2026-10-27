@@ -555,10 +555,10 @@ pub async fn product_creation_shot_update(
 ) -> Result<CreationShotSummary, ProductError> {
     let facade = creation(&state);
     let (update, fields) = request.into_parts()?;
-    let summary = facade.update_shot(&project_id, update).await?;
-    if let Some(fields) = fields {
-        facade.save_shot_fields(&project_id, fields).await?;
-    }
+    let summary = match fields {
+        Some(fields) => facade.update_shot_with_fields(&project_id, update, fields).await?,
+        None => facade.update_shot(&project_id, update).await?,
+    };
     Ok(summary)
 }
 

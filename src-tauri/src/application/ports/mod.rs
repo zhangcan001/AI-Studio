@@ -290,6 +290,7 @@ pub mod shot_row_edit_repository {
         pub project_id: String,
         pub shot_id: String,
         pub stage: ShotStage,
+        pub name: Option<String>,
         pub prompt_text: Option<String>,
         pub config: Option<ShotStageConfigRecord>,
         pub entity_ids: Option<Vec<String>>,
