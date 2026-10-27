@@ -590,13 +590,15 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         let result = sqlx::query(
             "UPDATE production_batch_items
              SET status = ?, error_code = ?, error_message = ?, updated_at = ?
-             WHERE id = ? AND status IN ('DISPATCHING', 'DISPATCHED')",
+             WHERE id = ? AND status IN ('DISPATCHING', 'DISPATCHED')
+               AND (? <> 'CANCELLED' OR task_id IS NULL)",
         )
         .bind(status.as_str())
         .bind(error_code)
         .bind(error_message)
         .bind(format_datetime(updated_at))
         .bind(item_id.as_str())
+        .bind(status.as_str())
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;

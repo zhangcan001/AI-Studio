@@ -711,13 +711,21 @@ fn build_services_with_admission(
             clock.clone(),
             Arc::new(NoopTaskUpdateSink),
         )
-        .with_execution_registry(execution_registry),
+        .with_execution_registry(execution_registry.clone()),
     );
 
     let queue_repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
     let production_queue_repository: Arc<dyn ProductionQueueRepository> =
         repository.unwrap_or_else(|| queue_repository.clone());
     let shot_batch_repository: Arc<dyn ShotBatchRepository> = queue_repository.clone();
+    let cancellation = Arc::new(
+        ai_studio_lib::application::task_cancellation_service::TaskCancellationService::new(
+            task_repository.clone(),
+            execution_registry,
+            clock.clone(),
+            Arc::new(NoopTaskUpdateSink),
+        ),
+    );
     let queue = ProductionQueueService::new(
         production_queue_repository,
         task_repository,
@@ -726,7 +734,8 @@ fn build_services_with_admission(
         shot_batch_repository,
         task_recovery_service.clone(),
         clock.clone(),
-    );
+    )
+    .with_task_cancellation(cancellation);
     let queue = Arc::new(match admission {
         Some(admission) => queue.with_new_generation_admission(admission),
         None => queue,

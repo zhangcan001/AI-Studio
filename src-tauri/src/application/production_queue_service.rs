@@ -1584,6 +1584,36 @@ impl ProductionQueueService {
         item: &ProductionBatchItem,
     ) -> Result<(), ProductionQueueError> {
         let project_id = detail.batch.project_id.as_str();
+        let mut item = item.clone();
+        while item.status == ProductionBatchItemStatus::Dispatching && item.task_id.is_none() {
+            let live = self
+                .running_batches
+                .lock()
+                .expect("production running batch registry mutex poisoned")
+                .contains(detail.batch.id.as_str());
+            if live {
+                sleep(Duration::from_millis(200)).await;
+            } else if self
+                .repository
+                .finish_item(
+                    &item.id,
+                    ProductionBatchItemStatus::Cancelled,
+                    None,
+                    None,
+                    self.clock.now(),
+                )
+                .await?
+            {
+                return Ok(());
+            }
+            item = self
+                .require_detail(project_id, &detail.batch.id)
+                .await?
+                .items
+                .into_iter()
+                .find(|latest| latest.id == item.id)
+                .ok_or_else(|| ProductionQueueError::NotFound("找不到这个队列项目。".to_owned()))?;
+        }
         match (item.status, item.task_id.as_deref()) {
             (ProductionBatchItemStatus::Pending, _) => {
                 let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
@@ -1597,19 +1627,6 @@ impl ProductionQueueService {
                     ));
                 }
                 Ok(())
-            }
-            (ProductionBatchItemStatus::Dispatching, None) => {
-                let live = self
-                    .running_batches
-                    .lock()
-                    .expect("production running batch registry mutex poisoned")
-                    .contains(detail.batch.id.as_str());
-                if live && detail.batch.status == ProductionBatchStatus::Running {
-                    return Err(ProductionQueueError::InvalidState(
-                        "这个任务正在提交，请稍后再取消。".to_owned(),
-                    ));
-                }
-                self.finish_cancelled_item(detail, item).await
             }
             (_, Some(task_id)) => {
                 let task_id = TaskId::parse(task_id.to_owned())
@@ -1625,7 +1642,7 @@ impl ProductionQueueService {
                 {
                     Ok(_) | Err(TaskCancellationError::NotCancellable { .. }) => {}
                     Err(TaskCancellationError::NotFound(_)) => {
-                        return self.finish_cancelled_item(detail, item).await;
+                        return self.finish_cancelled_item(detail, &item).await;
                     }
                     Err(error) => {
                         tracing::warn!(%error, "production item cancellation failed");
@@ -1656,7 +1673,7 @@ impl ProductionQueueService {
                     });
                     return Ok(());
                 }
-                self.finish_stale_cancel(detail, item, &task_id).await
+                self.finish_stale_cancel(detail, &item, &task_id).await
             }
             _ => Ok(()),
         }

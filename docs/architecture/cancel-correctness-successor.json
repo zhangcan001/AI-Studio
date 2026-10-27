@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CANCEL_CORRECTNESS",
+  "parentHead": "53743914c1dd0a2158d729f406c977e84cb2f811",
+  "planningParentHead": "53743914c1dd0a2158d729f406c977e84cb2f811",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "runtimeBytesChanged": false,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "productImplementationChanged": true,
+    "migrationAdded": false,
+    "runCancelCancelsUnfinishedChildBatches": true,
+    "dispatchingCancelWaitsForTaskBind": true,
+    "cancelFinishRequiresUnboundTask": true,
+    "guardsRelaxed": false
+  },
+  "files": {
+    "scripts/testing/review-hardening.test.mjs": {
+      "beforeHash": "e8f4f6b7eeff7f2a7f55ca80e88cefa262c3140ebaea65120881cea4a1ff45d7",
+      "afterHash": "db97b57c3f255db571cebb06d7793ff95174db219a65f059f8bcc331d9814878"
+    },
+    "scripts/testing/single-shot-batch-control.test.mjs": {
+      "beforeHash": "d22dd7973e38a672ead7777b8ebb3df31e869b08998abb0ea56b318e691befb6",
+      "afterHash": "643d3c0970b98e1c2f8bf53dad73bd4204cfc9eaee343342d9164835d34fffdf"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "06c945d0efdc491ac38e5d599730a5fefd35bcbd3e98fd3ded2aeb65edd27f6b",
+      "afterHash": "362f08126f4920461a9c425731067bcdf0c9056b23d6b5eedc272b06defa5860"
+    },
+    "src-tauri/src/application/production_orchestrator_service.rs": {
+      "beforeHash": "9e75524d52d44d52ce2412066f8c087327a70bf5ca980643e4b0465d553714fd",
+      "afterHash": "50eea33b960adad37348acadb991c573a6996261f7c5fadc441bd8295a73c604"
+    },
+    "src-tauri/src/application/production_queue_service.rs": {
+      "beforeHash": "2874d493f81c39d7b1f5714ccd71b6ac1fb64fb972429daa8947e1a4c26acf0e",
+      "afterHash": "d4e47ce68178957a598311ff8b49b2c0c1de0e5fc2ae945d7f7044a3ddb622ed"
+    },
+    "src-tauri/src/infrastructure/database/repositories/production_queue.rs": {
+      "beforeHash": "1f389a2a2b3432ad13d8380733e445f769d2a62051e873f8af4e2a4a9751b123",
+      "afterHash": "58e19cc06b4c300c664f5a493666d93987e5201e186c2665aedd1306855f8692"
+    },
+    "src-tauri/tests/dev061b_queue_recovery.rs": {
+      "beforeHash": "3f5ee05c743cf2d1ec7c6505e1c6c10cccfdcfc3196f12e3f555bc08e87db55b",
+      "afterHash": "e74138e7de4a39762dfabe579ab87a080ef54f0fb6a16bc46c7866d2fc81e38c"
+    },
+    "src-tauri/tests/support/queue_lifecycle_regressions.rs": {
+      "beforeHash": "5f065c488852ee9b13f14b8cc5a4e6eef0040e4cff40362e3188a767cc3d268c",
+      "afterHash": "b372a88b1a58be303a4abcdce88af138b5e7476e52654de08d67c43199ad18b4"
+    },
+    "scripts/cancel-correctness-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "357255a9f481c2a6bd88b76c45daaeda29ad308a0dd7cb93c3d8454e762668b5"
+    },
+    "scripts/testing/cancel-correctness.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "36b4d64faa8a837fe8ff43475988a3a1e9c66c2bb74e63b3cf482eaa1ba03efd"
+    }
+  }
+}

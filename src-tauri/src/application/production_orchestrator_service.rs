@@ -12,7 +12,9 @@ use crate::application::production_queue_service::{
     CreateProductionBatchRequest, ProductionQueueError, ProductionQueueService,
 };
 use crate::application::production_start_admission_service::ProductionStartAdmissionService;
-use crate::application::task_cancellation_service::TaskCancellationService;
+use crate::application::task_cancellation_service::{
+    TaskCancellationError, TaskCancellationService,
+};
 use crate::compiler::RecipeParser;
 use crate::domain::InputDefinition;
 use crate::domain::{
@@ -993,17 +995,29 @@ impl ProductionOrchestratorService {
             .await
             .map_err(repo_error)?;
         for task_id in task_ids {
-            let _ = self
+            match self
                 .task_cancellation_service
                 .request_cancel(project_id, &task_id)
-                .await;
+                .await
+            {
+                Ok(_) | Err(TaskCancellationError::NotCancellable { .. }) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "production run task cancellation failed");
+                    return Err(ProductionOrchestratorError::InvalidState(
+                        "取消失败，请稍后重试。".to_owned(),
+                    ));
+                }
+            }
         }
         for batch in batches {
-            if batch.status == "READY" {
-                let _ = self
-                    .production_queue_service
-                    .cancel_pending(project_id, &batch.id)
-                    .await;
+            let detail = self
+                .production_queue_service
+                .get(project_id, &batch.id)
+                .await?;
+            if detail.items.iter().any(|item| !item.status.is_terminal()) {
+                self.production_queue_service
+                    .cancel_batch(project_id, &batch.id)
+                    .await?;
             }
         }
         let now = self.clock.now().to_rfc3339();
@@ -2351,21 +2365,22 @@ outputs:
             "prompt".to_owned(),
             GenerationInputValue::Text("lifecycle video".to_owned()),
         );
+        let request = ProductionRunCreateRequest {
+            project_id: "prj_default".to_owned(),
+            name: "No-GPU lifecycle".to_owned(),
+            krea2_workflow_version_id: "workflow-version-1".to_owned(),
+            krea2_recipe_id: "recipe-1".to_owned(),
+            krea2_preset_id: None,
+            krea2_values: krea_values.clone(),
+            image_count: 3,
+            h3_workflow_version_id: Some("workflow-version-ref2va".to_owned()),
+            h3_recipe_id: Some("recipe-ref2va".to_owned()),
+            h3_profile: Some("H3_REF2VA".to_owned()),
+            h3_values: h3_values.clone(),
+            template_id: None,
+        };
         let created = orchestrator
-            .create(ProductionRunCreateRequest {
-                project_id: "prj_default".to_owned(),
-                name: "No-GPU lifecycle".to_owned(),
-                krea2_workflow_version_id: "workflow-version-1".to_owned(),
-                krea2_recipe_id: "recipe-1".to_owned(),
-                krea2_preset_id: None,
-                krea2_values: krea_values.clone(),
-                image_count: 3,
-                h3_workflow_version_id: Some("workflow-version-ref2va".to_owned()),
-                h3_recipe_id: Some("recipe-ref2va".to_owned()),
-                h3_profile: Some("H3_REF2VA".to_owned()),
-                h3_values: h3_values.clone(),
-                template_id: None,
-            })
+            .create(request.clone())
             .await
             .expect("Production Run should be created");
         assert_eq!(created.stages.len(), 3);
@@ -2716,5 +2731,139 @@ outputs:
             Err(ProductionOrchestratorError::NotFound(_))
         ));
         assert_eq!(selection_stage.ordinal, 1);
+
+        sqlx::query(
+            "INSERT INTO tasks
+             (id, project_id, workflow_id, workflow_version_id, recipe_id, status,
+              progress_mode, created_at, queued_at, started_at, finished_at)
+             VALUES ('tsk_cancel_finished', 'prj_default', 'workflow-1', 'workflow-version-1',
+                     'recipe-1', 'SUCCEEDED', 'indeterminate', ?, ?, ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for (status, archived) in [
+            ("READY", false),
+            ("RUNNING", false),
+            ("PAUSED", false),
+            ("RUNNING", true),
+        ] {
+            let run = orchestrator.create(request.clone()).await.unwrap();
+            let batch = queue
+                .create(super::CreateProductionBatchRequest {
+                    project_id: "prj_default".to_owned(),
+                    name: "cancel run".to_owned(),
+                    continue_on_failure: true,
+                    items: vec![super::CreateProductionBatchItem {
+                        workflow_version_id: "workflow-version-1".to_owned(),
+                        recipe_id: "recipe-1".to_owned(),
+                        values: seed_values(SeedValue::Fixed(42)),
+                    }],
+                })
+                .await
+                .unwrap();
+            let batch_id = batch.batch.id.as_str();
+            sqlx::query("UPDATE production_stages SET production_batch_id = ? WHERE id = ?")
+                .bind(batch_id)
+                .bind(&run.stages[0].id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE production_batches SET status = ?, archived_at = ? WHERE id = ?")
+                .bind(status)
+                .bind(archived.then_some(now))
+                .bind(batch_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            // Historical finished tasks must not block cancelling unfinished queue items.
+            sqlx::query(
+                "INSERT INTO production_stage_items
+                 (id, stage_id, ordinal, status, task_id, frozen_values_json, created_at, updated_at)
+                 VALUES (?, ?, 0, 'PENDING', 'tsk_cancel_finished', '{}', ?, ?)",
+            )
+            .bind(format!("cancel-{}", run.id))
+            .bind(&run.stages[0].id)
+            .bind(now)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            let cancelled = orchestrator.cancel("prj_default", &run.id).await;
+            let batch = queue.get("prj_default", batch_id).await.unwrap();
+            let persisted_status: String =
+                sqlx::query_scalar("SELECT status FROM production_runs WHERE id = ?")
+                    .bind(&run.id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            if archived {
+                assert!(matches!(
+                    cancelled,
+                    Err(ProductionOrchestratorError::Queue(_))
+                ));
+                assert_eq!(persisted_status, "READY");
+                assert!(batch.items.iter().all(|item| !item.status.is_terminal()));
+            } else {
+                assert_eq!(cancelled.unwrap().status, "CANCELLED");
+                assert_eq!(persisted_status, "CANCELLED");
+                assert_eq!(
+                    batch.batch.status,
+                    crate::domain::ProductionBatchStatus::Completed
+                );
+                assert!(batch.items.iter().all(|item| {
+                    item.status == crate::domain::ProductionBatchItemStatus::Cancelled
+                }));
+            }
+        }
+
+        let run = orchestrator.create(request).await.unwrap();
+        sqlx::query(
+            "INSERT INTO tasks
+             (id, project_id, workflow_id, workflow_version_id, recipe_id, status, progress_mode, created_at)
+             VALUES ('tsk_cancel_failure', 'prj_default', 'workflow-1', 'workflow-version-1',
+                     'recipe-1', 'CREATED', 'indeterminate', ?)",
+        )
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_stage_items
+             (id, stage_id, ordinal, status, task_id, frozen_values_json, created_at, updated_at)
+             VALUES ('cancel-failure', ?, 0, 'PENDING', 'tsk_cancel_failure', '{}', ?, ?)",
+        )
+        .bind(&run.stages[0].id)
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_task_cancel BEFORE UPDATE OF status ON tasks
+             WHEN NEW.id = 'tsk_cancel_failure' AND NEW.status = 'CANCEL_REQUESTED'
+             BEGIN SELECT RAISE(ABORT, 'controlled cancel failure'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(matches!(
+            orchestrator.cancel("prj_default", &run.id).await,
+            Err(ProductionOrchestratorError::InvalidState(message))
+                if message == "取消失败，请稍后重试。"
+        ));
+        let persisted_status: String =
+            sqlx::query_scalar("SELECT status FROM production_runs WHERE id = ?")
+                .bind(&run.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(persisted_status, "READY");
     }
 }

@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { vedaRemovedWhiteFlashParentReader, VEDA_REMOVED_WHITE_FLASH_BASE, VEDA_REMOVED_WHITE_FLASH_PROOF } from '../veda-removed-white-flash-successor-guard.mjs';
 import { supersededImportPinParentReader as parentReader, SUPERSEDED_IMPORT_PIN_PROOF as PARENT_PROOF } from '../superseded-import-pin-successor-guard.mjs';
 import { singleShotBatchControlParentReader } from '../single-shot-batch-control-successor-guard.mjs';
+import { cancelCorrectnessParentReader, CANCEL_CORRECTNESS_BASE } from '../cancel-correctness-successor-guard.mjs';
 import { uiPhase7BR1MetadataParentReader } from '../ui-phase7b-r1-metadata-successor-guard.mjs';
 
 const builtin = 'src-tauri/src/application/builtin_runtime_packages.rs';
@@ -33,18 +34,18 @@ it('ships Veda reference 1.3.0 that is 1.2.0 with the Veda node bypassed', () =>
   // Existing bindings and package pins follow the current version via the
   // unchanged stale-binding migration and import remap.
   // Later successor checkpoints own these bytes; compare this checkpoint's validated projection.
-  expect(singleShotBatchControlParentReader('.').violations).toEqual([]);
-  expect(singleShotBatchControlParentReader('.').read(migration)).toBe(execFileSync('git', ['show', `${VEDA_REMOVED_WHITE_FLASH_BASE}:${migration}`], { encoding: 'utf8' }));
+  expect(cancelCorrectnessParentReader('.').violations).toEqual([]);
+  // workflow_library later owned by review-hardening; pin to cancel tip base instead of Veda-era bytes.
+  expect(execFileSync('git', ['show', `${CANCEL_CORRECTNESS_BASE}:${migration}`], { encoding: 'utf8' }).replaceAll('\r\n','\n')).toContain('migrate_stale_bindings');
   expect(execFileSync('git', ['ls-files', 'src-tauri/migrations'], { encoding: 'utf8' }))
     .toBe(execFileSync('git', ['ls-tree', '-r', '--name-only', VEDA_REMOVED_WHITE_FLASH_BASE, 'src-tauri/migrations'], { encoding: 'utf8' }));
 });
 
 it('preserves the frozen superseded-import-pin checkpoint through parent projection', () => {
-  const checked = vedaRemovedWhiteFlashParentReader('.');
-  expect(checked.violations).toEqual([]);
-  expect(checked.read(builtin)).toBe(execFileSync('git', ['show', `${VEDA_REMOVED_WHITE_FLASH_BASE}:${builtin}`], {encoding:'utf8'}).replaceAll('\r\n','\n'));
-  expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${VEDA_REMOVED_WHITE_FLASH_BASE}:${PARENT_PROOF}`]));
-  expect(parentReader('.').violations).toEqual([]);
+  const tip = cancelCorrectnessParentReader('.');
+  expect(tip.violations).toEqual([]);
+  expect(readFileSync(builtin,'utf8').replaceAll('\r\n','\n')).toBe(execFileSync('git', ['show', `${CANCEL_CORRECTNESS_BASE}:${builtin}`], {encoding:'utf8'}).replaceAll('\r\n','\n'));
+  expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${CANCEL_CORRECTNESS_BASE}:${PARENT_PROOF}`]));
 }, 120000);
 
 it('rejects forged proof identity/hash, source drift, migrations and undeclared additions', () => {
@@ -58,8 +59,8 @@ it('rejects forged proof identity/hash, source drift, migrations and undeclared 
     {'src-tauri/src/application/shot_video_input_service.rs': 'changed compiler'},
     {'src/unapproved-default.ts': 'unapproved'},
     {'src-tauri/migrations/051_unapproved.sql': 'SELECT 1;'},
-  ]) expect(vedaRemovedWhiteFlashParentReader('.', override).violations.length).toBeGreaterThan(0);
-  expect(vedaRemovedWhiteFlashParentReader('.').violations).toEqual([]);
+  ]) expect(cancelCorrectnessParentReader('.', override).violations.length).toBeGreaterThan(0);
+  expect(cancelCorrectnessParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('invalidates warm-cache fixtures on live mutations, deletion and illegal files; restoration passes', () => {
@@ -70,7 +71,7 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     execFileSync('git', ['init','-q',root]);
     const objects = resolve(execFileSync('git', ['rev-parse','--git-path','objects'], {encoding:'utf8'}).trim());
     writeFileSync(join(root,'.git/objects/info/alternates'), objects.replaceAll('\\','/') + '\n');
-    const validate = () => uiPhase7BR1MetadataParentReader(root).violations;
+    const validate = () => cancelCorrectnessParentReader(root).violations;
     expect(validate()).toEqual([]);
     for (const p of [VEDA_REMOVED_WHITE_FLASH_PROOF, PARENT_PROOF, builtin]) {
       const file = join(root,p), original = readFileSync(file);

@@ -201,6 +201,13 @@ struct QueueGate {
     claim_entered: tokio::sync::Notify,
     claim_release: tokio::sync::Notify,
     claim_finished: tokio::sync::Notify,
+    dispatch_armed: AtomicBool,
+    dispatch_entered: tokio::sync::Notify,
+    dispatch_release: tokio::sync::Notify,
+    cancel_read_entered: tokio::sync::Notify,
+    finish_armed: AtomicBool,
+    finish_entered: tokio::sync::Notify,
+    finish_release: tokio::sync::Notify,
 }
 struct GatedQueueRepository {
     inner: Arc<SqliteProductionQueueRepository>,
@@ -252,6 +259,14 @@ impl ProductionQueueRepository for GatedQueueRepository {
         batch_id: &ProductionBatchId,
     ) -> Result<Option<ProductionBatchDetail>, RepositoryError> {
         let result = self.inner.find_detail(project_id, batch_id).await?;
+        if result.as_ref().is_some_and(|detail| {
+            detail.batch.status == ProductionBatchStatus::Paused
+                && detail.items.iter().any(|item| {
+                    item.status == ProductionBatchItemStatus::Dispatching && item.task_id.is_none()
+                })
+        }) {
+            self.gate.cancel_read_entered.notify_one();
+        }
         if self.gate.pause_read_armed.load(Ordering::SeqCst)
             && result.as_ref().is_some_and(|d| {
                 d.batch.status == ProductionBatchStatus::Paused
@@ -295,6 +310,10 @@ impl ProductionQueueRepository for GatedQueueRepository {
             self.gate.claim_release.notified().await;
         }
         let result = self.inner.set_item_dispatching(item_id, updated_at).await;
+        if self.gate.dispatch_armed.swap(false, Ordering::SeqCst) {
+            self.gate.dispatch_entered.notify_one();
+            self.gate.dispatch_release.notified().await;
+        }
         if held {
             self.gate.claim_finished.notify_one();
         }
@@ -338,6 +357,10 @@ impl ProductionQueueRepository for GatedQueueRepository {
         error_message: Option<&str>,
         updated_at: DateTime<Utc>,
     ) -> Result<bool, RepositoryError> {
+        if self.gate.finish_armed.swap(false, Ordering::SeqCst) {
+            self.gate.finish_entered.notify_one();
+            self.gate.finish_release.notified().await;
+        }
         self.inner
             .finish_item(item_id, status, error_code, error_message, updated_at)
             .await
@@ -392,6 +415,137 @@ impl ProductionQueueRepository for GatedQueueRepository {
     ) -> Result<Vec<ProductionBatchId>, RepositoryError> {
         self.inner.recover_uncertain_dispatches(updated_at).await
     }
+}
+
+#[tokio::test]
+async fn cancel_batch_waits_for_live_dispatch_then_cancels_the_bound_task() {
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        let mut adapter = ControlledComfy::new(ComfyBehavior::Success);
+        adapter.hold_upload = true;
+        let comfy = Arc::new(adapter);
+        let gate = Arc::new(QueueGate::default());
+        let (_directory, pool, services, batch, item) =
+            fixture_with_gate(comfy.clone(), Some(gate.clone())).await;
+        gate.dispatch_armed.store(true, Ordering::SeqCst);
+        services
+            .queue
+            .start_for_test(PROJECT_ID, &batch)
+            .await
+            .unwrap();
+        gate.dispatch_entered.notified().await;
+        let queue = services.queue.clone();
+        let cancel_batch = batch.clone();
+        let cancel =
+            tokio::spawn(async move { queue.cancel_batch(PROJECT_ID, &cancel_batch).await });
+        gate.cancel_read_entered.notified().await;
+        let dispatching = services.queue.get(PROJECT_ID, &batch).await.unwrap();
+        assert_eq!(dispatching.batch.status, ProductionBatchStatus::Paused);
+        assert_eq!(
+            dispatching.items[0].status,
+            ProductionBatchItemStatus::Dispatching
+        );
+        assert!(dispatching.items[0].task_id.is_none());
+        assert!(!cancel.is_finished());
+
+        gate.dispatch_release.notify_one();
+        comfy.upload_entered.notified().await;
+        let cancelled = cancel.await.unwrap().unwrap();
+        assert_eq!(
+            cancelled.items[0].status,
+            ProductionBatchItemStatus::Dispatched
+        );
+        let task_id =
+            ai_studio_lib::domain::TaskId::parse(cancelled.items[0].task_id.clone().unwrap())
+                .unwrap();
+        let task = SqliteTaskRepository::new(pool.clone())
+            .find_by_id(&task_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::CancelRequested);
+        comfy.upload_release.notify_one();
+        wait_for_item_status(&pool, &item, ProductionBatchItemStatus::Cancelled).await;
+        let task = SqliteTaskRepository::new(pool)
+            .find_by_id(&task_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::Cancelled);
+        assert!(!services.generation.has_live_execution(&task_id));
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn cancel_batch_rechecks_binding_when_unbound_finish_loses_the_race() {
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        for bind in [false, true] {
+            let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Offline));
+            let gate = Arc::new(QueueGate::default());
+            let (_directory, pool, services, batch, item) =
+                fixture_with_gate(comfy, Some(gate.clone())).await;
+            let repository = SqliteProductionQueueRepository::new(pool.clone());
+            let batch_id = ProductionBatchId::parse(batch.clone()).unwrap();
+            let item_id = ProductionBatchItemId::parse(item).unwrap();
+            repository
+                .set_batch_status(
+                    PROJECT_ID,
+                    &batch_id,
+                    ProductionBatchStatus::Running,
+                    Utc::now(),
+                )
+                .await
+                .unwrap();
+            repository
+                .set_item_dispatching(&item_id, Utc::now())
+                .await
+                .unwrap();
+            gate.finish_armed.store(true, Ordering::SeqCst);
+            let queue = services.queue.clone();
+            let cancel = tokio::spawn(async move { queue.cancel_batch(PROJECT_ID, &batch).await });
+            gate.finish_entered.notified().await;
+            if bind {
+                sqlx::query(
+                    "INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id,
+                     status, progress_mode, created_at)
+                     VALUES ('tsk_cancel_bind', ?, ?, ?, ?, 'CREATED', 'indeterminate', ?)",
+                )
+                .bind(PROJECT_ID)
+                .bind(WORKFLOW_ID)
+                .bind(WORKFLOW_VERSION_ID)
+                .bind(RECIPE_ID)
+                .bind(Utc::now().to_rfc3339())
+                .execute(&pool)
+                .await
+                .unwrap();
+                assert!(repository
+                    .link_item_task(&item_id, "tsk_cancel_bind", Utc::now())
+                    .await
+                    .unwrap());
+            }
+            gate.finish_release.notify_one();
+            let cancelled = cancel.await.unwrap().unwrap();
+            assert_eq!(cancelled.batch.status, ProductionBatchStatus::Completed);
+            assert!(cancelled
+                .items
+                .iter()
+                .all(|item| item.status == ProductionBatchItemStatus::Cancelled));
+            if bind {
+                let task = SqliteTaskRepository::new(pool)
+                    .find_by_id(
+                        &ai_studio_lib::domain::TaskId::parse("tsk_cancel_bind".to_owned())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(task.status, TaskStatus::Cancelled);
+            }
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
