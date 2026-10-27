@@ -1,4 +1,4 @@
-import { promptSectionLoadParentReader } from './prompt-section-load-successor-guard.mjs';
+import { promptSectionLoadParentReader, promptSectionLoadScopeSince, promptSectionLoadFixtureFiles, PROMPT_SECTION_LOAD_BASE } from './prompt-section-load-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -63,6 +63,17 @@ function facts(root, base) {
     } });
   }
   return factsCache.get(key);
+}
+export function deleteIntegrityScopeSince(root, base) {
+  const tip = facts(root, DELETE_INTEGRITY_BASE), old = facts(root, base);
+  return [...new Set([
+    ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
+    ...DELETE_INTEGRITY_CHANGED, ...DELETE_INTEGRITY_ADDED, DELETE_INTEGRITY_PROOF,
+    ...promptSectionLoadScopeSince(root, PROMPT_SECTION_LOAD_BASE),
+  ])].sort();
+}
+export function deleteIntegrityFixtureFiles(root) {
+  return [...new Set([...facts(root, DELETE_INTEGRITY_BASE).paths, ...DELETE_INTEGRITY_ADDED, DELETE_INTEGRITY_PROOF, ...promptSectionLoadFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {

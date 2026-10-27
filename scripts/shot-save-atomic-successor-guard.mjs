@@ -1,4 +1,4 @@
-import { packageImportLockParentReader } from './package-import-lock-successor-guard.mjs';
+import { packageImportLockParentReader, packageImportLockScopeSince, packageImportLockFixtureFiles, PACKAGE_IMPORT_LOCK_BASE } from './package-import-lock-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -71,10 +71,11 @@ export function shotSaveAtomicScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...SHOT_SAVE_ATOMIC_CHANGED, ...SHOT_SAVE_ATOMIC_ADDED, SHOT_SAVE_ATOMIC_PROOF,
+    ...packageImportLockScopeSince(root, PACKAGE_IMPORT_LOCK_BASE),
   ])].sort();
 }
 export function shotSaveAtomicFixtureFiles(root) {
-  return [...facts(root, SHOT_SAVE_ATOMIC_BASE).paths, ...SHOT_SAVE_ATOMIC_ADDED, SHOT_SAVE_ATOMIC_PROOF];
+  return [...new Set([...facts(root, SHOT_SAVE_ATOMIC_BASE).paths, ...SHOT_SAVE_ATOMIC_ADDED, SHOT_SAVE_ATOMIC_PROOF, ...packageImportLockFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {

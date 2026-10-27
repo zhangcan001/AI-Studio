@@ -10,8 +10,8 @@ mod native_acceptance {
     fn allowed(command: &str, milliseconds: u64) -> bool {
         matches!(
             command,
-            "product_creation_get",
-            "product_creation_workbench_get"
+            "product_creation_get"
+                | "product_creation_workbench_get"
                 | "product_creation_inputs_get"
                 | "product_run_get"
                 | "product_run_results_get"

@@ -1,4 +1,4 @@
-import { deleteIntegrityParentReader } from './delete-integrity-successor-guard.mjs';
+import { deleteIntegrityParentReader, deleteIntegrityScopeSince, deleteIntegrityFixtureFiles, DELETE_INTEGRITY_BASE } from './delete-integrity-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -71,10 +71,11 @@ export function cancelCorrectnessScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...CANCEL_CORRECTNESS_CHANGED, ...CANCEL_CORRECTNESS_ADDED, CANCEL_CORRECTNESS_PROOF,
+    ...deleteIntegrityScopeSince(root, DELETE_INTEGRITY_BASE),
   ])].sort();
 }
 export function cancelCorrectnessFixtureFiles(root) {
-  return [...facts(root, CANCEL_CORRECTNESS_BASE).paths, ...CANCEL_CORRECTNESS_ADDED, CANCEL_CORRECTNESS_PROOF];
+  return [...new Set([...facts(root, CANCEL_CORRECTNESS_BASE).paths, ...CANCEL_CORRECTNESS_ADDED, CANCEL_CORRECTNESS_PROOF, ...deleteIntegrityFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {

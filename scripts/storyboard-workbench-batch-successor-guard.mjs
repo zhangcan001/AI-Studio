@@ -1,4 +1,4 @@
-import { successorChainParentReader } from './successor-chain-successor-guard.mjs';
+import { successorChainParentReader, successorChainScopeSince, successorChainFixtureFiles, SUCCESSOR_CHAIN_BASE } from './successor-chain-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -71,10 +71,11 @@ export function storyboardWorkbenchBatchScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...STORYBOARD_WORKBENCH_BATCH_CHANGED, ...STORYBOARD_WORKBENCH_BATCH_ADDED, STORYBOARD_WORKBENCH_BATCH_PROOF,
+    ...successorChainScopeSince(root, SUCCESSOR_CHAIN_BASE),
   ])].sort();
 }
 export function storyboardWorkbenchBatchFixtureFiles(root) {
-  return [...facts(root, STORYBOARD_WORKBENCH_BATCH_BASE).paths, ...STORYBOARD_WORKBENCH_BATCH_ADDED, STORYBOARD_WORKBENCH_BATCH_PROOF];
+  return [...new Set([...facts(root, STORYBOARD_WORKBENCH_BATCH_BASE).paths, ...STORYBOARD_WORKBENCH_BATCH_ADDED, STORYBOARD_WORKBENCH_BATCH_PROOF, ...successorChainFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {

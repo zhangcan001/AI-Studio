@@ -1,4 +1,4 @@
-import { cancelCorrectnessParentReader } from './cancel-correctness-successor-guard.mjs';
+import { cancelCorrectnessParentReader, cancelCorrectnessScopeSince, cancelCorrectnessFixtureFiles, CANCEL_CORRECTNESS_BASE } from './cancel-correctness-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -113,10 +113,11 @@ export function reviewHardeningScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...REVIEW_HARDENING_CHANGED, ...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF,
+    ...cancelCorrectnessScopeSince(root, CANCEL_CORRECTNESS_BASE),
   ])].sort();
 }
 export function reviewHardeningFixtureFiles(root) {
-  return [...facts(root, REVIEW_HARDENING_BASE).paths, ...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF];
+  return [...new Set([...facts(root, REVIEW_HARDENING_BASE).paths, ...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF, ...cancelCorrectnessFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {

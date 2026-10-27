@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "SCOPE_SINCE_CHAIN",
+  "parentHead": "6e03d5b8f096dc8a0df84cbf0bf13cb9d2498e47",
+  "planningParentHead": "6e03d5b8f096dc8a0df84cbf0bf13cb9d2498e47",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true
+  },
+  "files": {
+    "scripts/cancel-correctness-successor-guard.mjs": {
+      "beforeHash": "9e31ff591da3877185c9becdd7d0d5b177da8ef3a5eb01968343b0ef2a8493ff",
+      "afterHash": "4a4a02f93903c675ee470f1c1aec12b383ba714ccad5e6d55fe88b02bd6949b1"
+    },
+    "scripts/delete-integrity-successor-guard.mjs": {
+      "beforeHash": "0d90487e6eb416e21fd52b40bb34a1a248c8cbe3b49a3efc2fb92b7039285320",
+      "afterHash": "4f17a801e1eca97b8068d89c60f6a1bfb102af538fee94fb9b65a0aa5316889a"
+    },
+    "scripts/package-import-lock-successor-guard.mjs": {
+      "beforeHash": "b39e38b0aff3e0c9b055821fdb71508e5ee04a8c5a0483a20216e928f0c29691",
+      "afterHash": "7d71695ac87a2104ed0209495779b081847ed2114a950fd0845693ea29086aa8"
+    },
+    "scripts/prompt-section-load-successor-guard.mjs": {
+      "beforeHash": "4c5576b4b263489c82ab119094557382e4e67354b80397216e1594cb1a22112d",
+      "afterHash": "c1319aa0ad8b2428d5f015a26f8d0aaa208aff8510ac46f603fc1bfb12d7c9b3"
+    },
+    "scripts/prompt-sections-without-at-successor-guard.mjs": {
+      "beforeHash": "4ccf8ddfea661b1c918121beeb3d785c3a467e90b216a3bfe0f25d377089f8ca",
+      "afterHash": "3f85d32d9794f64e403aa218059ee8b49c5853c757f95d66679f20043fe4c48b"
+    },
+    "scripts/review-hardening-successor-guard.mjs": {
+      "beforeHash": "8d2a307653c87c424c17c30177066d4fd6e75a1c797abe15446c8a73781ba12c",
+      "afterHash": "e3b4e3943f56182cbb85ffc84259b182e6300e0dc7ac9223f16f810b67aa7b05"
+    },
+    "scripts/scope-since-chain-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "f915793f2dc28f2b0b2e8b1ea9b8858cdf1183579a78d5009e1a7c8fd6088ef2"
+    },
+    "scripts/shot-save-atomic-successor-guard.mjs": {
+      "beforeHash": "3dab4bcd8a1249b145746cf35c981b3f6403f3799899b756b5a3362cd1e7fa4b",
+      "afterHash": "aaf246fb6e8c5eb7d867775cb116d2e1c9b85c3507b6920940b9ee47b04e56c6"
+    },
+    "scripts/storyboard-workbench-batch-successor-guard.mjs": {
+      "beforeHash": "43c75ad136a79f87e1b64e0bf36c9291839644876879e088c4de72ebbde75cd8",
+      "afterHash": "9562acf9d05295d851f4d156278a7019d0e125fef7601771259e8ddfc3a4d55e"
+    },
+    "scripts/successor-chain-successor-guard.mjs": {
+      "beforeHash": "751f54b1ea8dedffc055467cc07f349da107c841f971fb4224ffa4a91ae901c3",
+      "afterHash": "43cbb99c2c91295ec891213b0b4db24c7d1b00afce6e9550c925901d6a9ea34a"
+    },
+    "scripts/testing/cancel-correctness.test.mjs": {
+      "beforeHash": "370ca3ce88cf0e12821db81a48fc10065657896972196e414220de785e078b93",
+      "afterHash": "298962b01e729c26dd2a77feb6508afe2cdad0e7197a0686b65e8b255f382fa2"
+    },
+    "scripts/testing/delete-integrity.test.mjs": {
+      "beforeHash": "127b60cc2be8e668df8333d798aed177e91bc31d4e6be32ff905fc4fbe18b17a",
+      "afterHash": "02eed58f1c20641e333867c572b5431cbf399de79c298372214faa478e8c75be"
+    },
+    "scripts/testing/package-import-lock.test.mjs": {
+      "beforeHash": "ba66ad4853bd82ad8beec63d780e3cb72ee305430ce4dcb7e2b661ff2adbe61d",
+      "afterHash": "0ded825380e0349268d2f0c4076f0990d67c2218c1c1d7f1436931bcba61f42b"
+    },
+    "scripts/testing/prompt-section-load.test.mjs": {
+      "beforeHash": "ca5c5a2a3c4d9945490d52e5850b95a6e635ff87951bcba7906c210bf86fa9b0",
+      "afterHash": "7276e4ac617bd3734011d8bc1a2476a25e1b8d8f29ead88cfeda95a4fc493a88"
+    },
+    "scripts/testing/prompt-sections-without-at.test.mjs": {
+      "beforeHash": "9f959e00d65110457e954ef6c0596aac76d455b2b576fd151e3f9eba255d0ce9",
+      "afterHash": "2060258803b2e436186aa1e6ff58d0fc77502cf71f71dea82d6a08121c550eda"
+    },
+    "scripts/testing/review-hardening.test.mjs": {
+      "beforeHash": "56cbbf1b69b2518804d8788d56897d59357ba85755fdcfcdba2aaa0de201bd7f",
+      "afterHash": "9c83acb763d0044bbed6e07229c1d0b6a86f2124f3e583998ce93037f83e8575"
+    },
+    "scripts/testing/scope-since-chain.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "774bcd8920466b8681d1132575ba8f9d290f616273421978fd3d21f0911d8013"
+    },
+    "scripts/testing/shot-save-atomic.test.mjs": {
+      "beforeHash": "53b49128e1797488d2e43148455bfc19853798299f53e9f240b5d8465ef4a3aa",
+      "afterHash": "cb7e91e9bc12198c195329a51bc05bc7b6323a67e8cd07c2a04b3f87867b52f6"
+    },
+    "scripts/testing/single-shot-batch-control.test.mjs": {
+      "beforeHash": "0fbb44242acb06b9df10a4dc45f36f3a93a4df8de8c43952e6c5f3cea9915b5a",
+      "afterHash": "c3a34e3762448553cd82ec5e38ebfc32a92c136a726ba95c5556371f6c9087b3"
+    },
+    "scripts/testing/storyboard-workbench-batch.test.mjs": {
+      "beforeHash": "b8758d312ae0a4d603ee271a17df38034aaa02847a2c4d03cde3e9ecda18107a",
+      "afterHash": "026fb8822ec8a7c0a7314bb77e23c4560f3730614673b2c464f9a2d589832799"
+    },
+    "scripts/testing/successor-chain.test.mjs": {
+      "beforeHash": "04050c78a7ad3db8047f8d1aad43b404318f94b94c0e24245f15756e5b38b316",
+      "afterHash": "e125917663e972bba7ea98bbec297bd901001348a67da93d598fd7b8f2cff330"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "429a73ddbddcf8b4f58278249cb76336a3370c3fecf142800ea48ffc9d22b6d2",
+      "afterHash": "0096295bdfe47acd0ffb8398c4d4b40df8072682ba1ff7dc8a486df49a77fa0f"
+    },
+    "src-tauri/src/lib.rs": {
+      "beforeHash": "e0aee3aa0f04e6a374daba4f29e11135ed7e8fee113eca5cdf7cf16c40437cb2",
+      "afterHash": "15414b53bec2b365f40dbbddc5e130ae7712d15559dc57f3bdcc89ddc4c85ebb"
+    }
+  }
+}

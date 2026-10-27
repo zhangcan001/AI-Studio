@@ -1,4 +1,4 @@
-import { promptSectionsWithoutAtParentReader } from './prompt-sections-without-at-successor-guard.mjs';
+import { promptSectionsWithoutAtParentReader, promptSectionsWithoutAtScopeSince, promptSectionsWithoutAtFixtureFiles, PROMPT_SECTIONS_WITHOUT_AT_BASE } from './prompt-sections-without-at-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -62,10 +62,11 @@ export function promptSectionLoadScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...PROMPT_SECTION_LOAD_CHANGED, ...PROMPT_SECTION_LOAD_ADDED, PROMPT_SECTION_LOAD_PROOF,
+    ...promptSectionsWithoutAtScopeSince(root, PROMPT_SECTIONS_WITHOUT_AT_BASE),
   ])].sort();
 }
 export function promptSectionLoadFixtureFiles(root) {
-  return [...facts(root, PROMPT_SECTION_LOAD_BASE).paths, ...PROMPT_SECTION_LOAD_ADDED, PROMPT_SECTION_LOAD_PROOF];
+  return [...new Set([...facts(root, PROMPT_SECTION_LOAD_BASE).paths, ...PROMPT_SECTION_LOAD_ADDED, PROMPT_SECTION_LOAD_PROOF, ...promptSectionsWithoutAtFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {

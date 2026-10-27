@@ -1,4 +1,4 @@
-import { shotSaveAtomicParentReader } from './shot-save-atomic-successor-guard.mjs';
+import { shotSaveAtomicParentReader, shotSaveAtomicScopeSince, shotSaveAtomicFixtureFiles, SHOT_SAVE_ATOMIC_BASE } from './shot-save-atomic-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -61,10 +61,11 @@ export function promptSectionsWithoutAtScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...PROMPT_SECTIONS_WITHOUT_AT_CHANGED, ...PROMPT_SECTIONS_WITHOUT_AT_ADDED, PROMPT_SECTIONS_WITHOUT_AT_PROOF,
+    ...shotSaveAtomicScopeSince(root, SHOT_SAVE_ATOMIC_BASE),
   ])].sort();
 }
 export function promptSectionsWithoutAtFixtureFiles(root) {
-  return [...facts(root, PROMPT_SECTIONS_WITHOUT_AT_BASE).paths, ...PROMPT_SECTIONS_WITHOUT_AT_ADDED, PROMPT_SECTIONS_WITHOUT_AT_PROOF];
+  return [...new Set([...facts(root, PROMPT_SECTIONS_WITHOUT_AT_BASE).paths, ...PROMPT_SECTIONS_WITHOUT_AT_ADDED, PROMPT_SECTIONS_WITHOUT_AT_PROOF, ...shotSaveAtomicFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {

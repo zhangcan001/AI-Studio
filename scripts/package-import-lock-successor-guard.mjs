@@ -1,4 +1,4 @@
-import { storyboardWorkbenchBatchParentReader } from './storyboard-workbench-batch-successor-guard.mjs';
+import { storyboardWorkbenchBatchParentReader, storyboardWorkbenchBatchScopeSince, storyboardWorkbenchBatchFixtureFiles, STORYBOARD_WORKBENCH_BATCH_BASE } from './storyboard-workbench-batch-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -63,10 +63,11 @@ export function packageImportLockScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...PACKAGE_IMPORT_LOCK_CHANGED, ...PACKAGE_IMPORT_LOCK_ADDED, PACKAGE_IMPORT_LOCK_PROOF,
+    ...storyboardWorkbenchBatchScopeSince(root, STORYBOARD_WORKBENCH_BATCH_BASE),
   ])].sort();
 }
 export function packageImportLockFixtureFiles(root) {
-  return [...facts(root, PACKAGE_IMPORT_LOCK_BASE).paths, ...PACKAGE_IMPORT_LOCK_ADDED, PACKAGE_IMPORT_LOCK_PROOF];
+  return [...new Set([...facts(root, PACKAGE_IMPORT_LOCK_BASE).paths, ...PACKAGE_IMPORT_LOCK_ADDED, PACKAGE_IMPORT_LOCK_PROOF, ...storyboardWorkbenchBatchFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
