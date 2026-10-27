@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSy
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { shotSaveAtomicParentReader } from '../shot-save-atomic-successor-guard.mjs';
+import { packageImportLockParentReader } from '../package-import-lock-successor-guard.mjs';
 import { PROMPT_SECTIONS_WITHOUT_AT_BASE, PROMPT_SECTIONS_WITHOUT_AT_PROOF } from '../prompt-sections-without-at-successor-guard.mjs';
 import { PROMPT_SECTION_LOAD_PROOF as PARENT_PROOF } from '../prompt-section-load-successor-guard.mjs';
 
@@ -15,11 +15,11 @@ it('applies writer sections on REF2VA even when the main prompt has no @', () =>
   expect(src).toContain('has_mention');
   expect(src).toContain('writer_sections_apply_without_at_mentions');
   expect(src).toContain('sections.is_empty()');
-  expect(shotSaveAtomicParentReader('.').violations).toEqual([]);
+  expect(packageImportLockParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('preserves the frozen prompt-section-load proof bytes', () => {
-  const checked = shotSaveAtomicParentReader('.');
+  const checked = packageImportLockParentReader('.');
   expect(checked.violations).toEqual([]);
   expect(checked.read(source)).toBe(execFileSync('git', ['show', `${PROMPT_SECTIONS_WITHOUT_AT_BASE}:${source}`], { encoding: 'utf8' }).replaceAll('\r\n', '\n'));
   expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${PROMPT_SECTIONS_WITHOUT_AT_BASE}:${PARENT_PROOF}`]));
@@ -35,8 +35,8 @@ it('rejects forged proof identity/hash, source drift, migrations and undeclared 
     { 'src/features/create/StoryboardShotRows.tsx': 'changed frontend' },
     { 'src/unapproved-without-at.ts': 'unapproved' },
     { 'src-tauri/migrations/051_unapproved.sql': 'SELECT 1;' },
-  ]) expect(shotSaveAtomicParentReader('.', override).violations.length).toBeGreaterThan(0);
-  expect(shotSaveAtomicParentReader('.').violations).toEqual([]);
+  ]) expect(packageImportLockParentReader('.', override).violations.length).toBeGreaterThan(0);
+  expect(packageImportLockParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('invalidates warm-cache fixtures on live mutations, deletion and illegal files; restoration passes', () => {
@@ -47,7 +47,7 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     execFileSync('git', ['init', '-q', root]);
     const objects = resolve(execFileSync('git', ['rev-parse', '--git-path', 'objects'], { encoding: 'utf8' }).trim());
     writeFileSync(join(root, '.git/objects/info/alternates'), objects.replaceAll('\\', '/') + '\n');
-    const validate = () => shotSaveAtomicParentReader(root).violations;
+    const validate = () => packageImportLockParentReader(root).violations;
     expect(validate()).toEqual([]);
     for (const p of [PROMPT_SECTIONS_WITHOUT_AT_PROOF, PARENT_PROOF, source]) {
       const file = join(root, p), original = readFileSync(file);

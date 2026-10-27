@@ -307,6 +307,9 @@ pub struct ProductionPackageService {
     h3_config: ProductionPackageH3Config,
     clock: Arc<dyn Clock>,
     sessions: Arc<Mutex<HashMap<String, PackageSession>>>,
+    /// Serializes create_batches so two sessions for the same package cannot
+    /// both pass the already_created check before either persists bindings.
+    import_gate: Mutex<()>,
 }
 
 impl ProductionPackageService {
@@ -327,6 +330,7 @@ impl ProductionPackageService {
             h3_config,
             clock,
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            import_gate: Mutex::new(()),
         }
     }
 
@@ -435,6 +439,7 @@ impl ProductionPackageService {
             current_selected.push(current_item.clone());
         }
 
+        let _import_guard = self.import_gate.lock().await;
         let package_root = normalize_package_root(&current.package_root);
         let package_key = production_package_source_key(&package_root, &current.manifest_sha256);
         let persisted_bindings = self
