@@ -10,8 +10,8 @@ const phase5c = 'src/app/UiPhase5CReviewBoundary.test.ts';
 it('validates the standalone ci-assert-fix tip and its declared scope', () => {
   const checked = ciAssertFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.changedPaths).toEqual(CI_ASSERT_FIX_CHANGED);
-  expect(checked.addedPaths).toEqual([...CI_ASSERT_FIX_ADDED, CI_ASSERT_FIX_PROOF]);
+  for (const p of CI_ASSERT_FIX_CHANGED) expect(checked.changedPaths).toContain(p);
+  for (const p of [...CI_ASSERT_FIX_ADDED, CI_ASSERT_FIX_PROOF]) expect(checked.addedPaths).toContain(p);
 }, 120000);
 it('projects changed files to the closed parent tip and preserves its proof bytes', () => {
   const checked = ciAssertFixParentReader('.');

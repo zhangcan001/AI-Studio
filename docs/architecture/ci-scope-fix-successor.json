@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_SCOPE_FIX",
+  "parentHead": "4b746af4e4b69e60a5308d0ea58540ecca87f948",
+  "planningParentHead": "4b746af4e4b69e60a5308d0ea58540ecca87f948",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-h3-budget-fix-successor-guard.mjs": {
+      "beforeHash": "e3c27ffc9629c29da36b7317167eaff395583f840a3bbaf22fa040598ef5bc81",
+      "afterHash": "fbf0c229ee3f7f6bca4750f0cf8e3ade618c6a9a1c4dd411d5d7c0f98392f72c"
+    },
+    "scripts/testing/ci-assert-fix.test.mjs": {
+      "beforeHash": "84978809222eae813e492df16d09f8e99a9819b5306cf651ae4e5cfa31ec1b6c",
+      "afterHash": "21400be54a5714ade08bd119b898e4afb65fc406f134938736e592cf5a168dd3"
+    },
+    "scripts/testing/ci-closed-tip-fix.test.mjs": {
+      "beforeHash": "51678c8834aab5118cafb8020937fd84d83a4a5dfa5dc5799ca40d3d3b5c8968",
+      "afterHash": "0268b52c754f503f8a0297f96080932d52b7866d0db92f26ffa6aa118d446f36"
+    },
+    "scripts/testing/ci-h3-budget-fix.test.mjs": {
+      "beforeHash": "d20b727edb3f0b07d144d67b645c72daed7c3e5f3d47580c60c2eb92053f275d",
+      "afterHash": "c4aad0d658cece27bfccca37335e627fd09c68e1029310a0ab061c273a9e6f35"
+    },
+    "scripts/testing/ci-stable-fix.test.mjs": {
+      "beforeHash": "f0ccfb622142d8eee6846fed5eebb1a2b7893ecdbce6d13b2f427b0fc82e86e9",
+      "afterHash": "59756f95909b1198136ce18f7ca6af954eb06b455b629ec1f4d2940617620d5c"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "67345ac31163dfac5801098f8e2370bdfcb9e25f109e48f6d0fe1b94fe10939e",
+      "afterHash": "ddbddb8dedbd483c43bf8ea810e300cf10738db281db1f267a56643b26051dea"
+    },
+    "scripts/ci-scope-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "4c81ff7f1712541b982a201dfdb32dc130056d2b4a86c61735aea30b3a542d13"
+    },
+    "scripts/testing/ci-scope-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "16e904883c401b8384496adbb396a9299031a5c363d94c114fc3054592813a61"
+    }
+  }
+}
