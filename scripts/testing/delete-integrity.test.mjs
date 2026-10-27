@@ -4,7 +4,8 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSy
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { promptSectionLoadParentReader, PROMPT_SECTION_LOAD_BASE } from '../prompt-section-load-successor-guard.mjs';
+import { promptSectionsWithoutAtParentReader } from '../prompt-sections-without-at-successor-guard.mjs';
+import { PROMPT_SECTION_LOAD_BASE } from '../prompt-section-load-successor-guard.mjs';
 import { DELETE_INTEGRITY_BASE, DELETE_INTEGRITY_PROOF } from '../delete-integrity-successor-guard.mjs';
 import { CANCEL_CORRECTNESS_PROOF as PARENT_PROOF } from '../cancel-correctness-successor-guard.mjs';
 
@@ -15,11 +16,11 @@ it('blocks story-entity asset refs, refuses retry-parent delete, and deletes sho
   expect(readFileSync(asset, 'utf8')).toContain('story_entity_cover_names');
   expect(readFileSync('src-tauri/src/infrastructure/database/repositories/production_queue.rs', 'utf8')).toContain('delete_terminal_item_refuses_retry_parents_in_every_retry_state');
   expect(readFileSync(shot, 'utf8')).toContain('DELETE FROM shots WHERE project_id = ? AND id = ?');
-  expect(promptSectionLoadParentReader('.').violations).toEqual([]);
+  expect(promptSectionsWithoutAtParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('preserves the frozen cancel-correctness proof bytes', () => {
-  const checked = promptSectionLoadParentReader('.');
+  const checked = promptSectionsWithoutAtParentReader('.');
   expect(checked.violations).toEqual([]);
   expect(checked.read(shot)).toBe(execFileSync('git', ['show', `${PROMPT_SECTION_LOAD_BASE}:${shot}`], { encoding: 'utf8' }).replaceAll('\r\n', '\n'));
   expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${DELETE_INTEGRITY_BASE}:${PARENT_PROOF}`]));
@@ -35,8 +36,8 @@ it('rejects forged proof identity/hash, source drift, migrations and undeclared 
     { 'src-tauri/src/application/shot_video_input_service.rs': 'changed compiler' },
     { 'src/unapproved-delete.ts': 'unapproved' },
     { 'src-tauri/migrations/051_unapproved.sql': 'SELECT 1;' },
-  ]) expect(promptSectionLoadParentReader('.', override).violations.length).toBeGreaterThan(0);
-  expect(promptSectionLoadParentReader('.').violations).toEqual([]);
+  ]) expect(promptSectionsWithoutAtParentReader('.', override).violations.length).toBeGreaterThan(0);
+  expect(promptSectionsWithoutAtParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('invalidates warm-cache fixtures on live mutations, deletion and illegal files; restoration passes', () => {
@@ -47,7 +48,7 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     execFileSync('git', ['init', '-q', root]);
     const objects = resolve(execFileSync('git', ['rev-parse', '--git-path', 'objects'], { encoding: 'utf8' }).trim());
     writeFileSync(join(root, '.git/objects/info/alternates'), objects.replaceAll('\\', '/') + '\n');
-    const validate = () => promptSectionLoadParentReader(root).violations;
+    const validate = () => promptSectionsWithoutAtParentReader(root).violations;
     expect(validate()).toEqual([]);
     for (const p of [DELETE_INTEGRITY_PROOF, PARENT_PROOF, shot]) {
       const file = join(root, p), original = readFileSync(file);

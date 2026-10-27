@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "PROMPT_SECTIONS_WITHOUT_AT",
+  "parentHead": "43afa3ae9cb36e4ed3c0cc424837c8e0155acf41",
+  "planningParentHead": "43afa3ae9cb36e4ed3c0cc424837c8e0155acf41",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true
+  },
+  "files": {
+    "scripts/testing/cancel-correctness.test.mjs": {
+      "beforeHash": "99bbc6165b4bd33563531008d9763e98356b59d5b65b53b361cb81dfd89e0b11",
+      "afterHash": "eff1a88a1d8805fe4638605e286c7a160cf53c9d82069426bbea2709aff66c96"
+    },
+    "scripts/testing/delete-integrity.test.mjs": {
+      "beforeHash": "1fb449dab6614f5b54ef7a4a26b0a90e3c125302a1e7d2ce287e2e55e4fddeeb",
+      "afterHash": "40a5a3bdb79159beed2786230eda880fbead933af769c5e505f81c03da244e86"
+    },
+    "scripts/testing/prompt-section-load.test.mjs": {
+      "beforeHash": "759255e24b8a9e497fd5e6c76f985b5f8b77a49683828940041cd4442dd61c70",
+      "afterHash": "d8113b1a17fc6d69ce32869022a6e7f7b24c2b7171ac65fff1ff6cd8e012bec4"
+    },
+    "scripts/testing/review-hardening.test.mjs": {
+      "beforeHash": "6c32c11b1df16036c1a8ede164837863e2bb7b14cb791f7d3a14c58c951df796",
+      "afterHash": "640cdedb4d24c27230c59f1e0c52bf306cfc1eaedf089b8dada9cc546213c9ec"
+    },
+    "scripts/testing/single-shot-batch-control.test.mjs": {
+      "beforeHash": "cbaaaf054350982f60cbef443148f04f5a1b6e73f5176070a0660ee56a550758",
+      "afterHash": "b93959871b94b3c9bc2afb49c119cb9b5e48ab0c10a24df0ec4515360091bc6f"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "09d5717876e0dc7da5e7d2d118a9da80750fb854518ba1600bc16f236ff0c757",
+      "afterHash": "8122ee22cce327f4ce7a917aea4caebc4edda1d044f87faa8257d2e1b28cc858"
+    },
+    "src-tauri/src/application/shot_video_input_service.rs": {
+      "beforeHash": "71064f580f0f0bbba5829ff9a0a9f57d85f2bb47c7df477cfc45444eb2610e6f",
+      "afterHash": "f88746aeda8e2e9c8ab1093b490be4cb3a45dac9a73a44eb20114fd9ee3cd26f"
+    },
+    "scripts/prompt-sections-without-at-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "78c93bb427aa41262d59f6f68588a3623b510536c0aa36b8049369e926c10980"
+    },
+    "scripts/testing/prompt-sections-without-at.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "4ce6262ef1fc56aba7a63926d25e91492eb36795e2a5c43d660659591b2a76e6"
+    }
+  }
+}

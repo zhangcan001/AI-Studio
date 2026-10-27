@@ -175,30 +175,20 @@ impl ShotVideoInputService {
         let Some(GenerationInputValue::Text(prompt)) = values.get("prompt") else {
             return Ok(());
         };
-        if !prompt.contains('@') {
-            return Ok(());
-        }
-        if !matches!(
+        let has_mention = prompt.contains('@');
+        let is_ref2va = matches!(
             recipe.inputs.get("reference_images"),
             Some(InputDefinition::Images { .. })
-        ) {
+        );
+        if has_mention && !is_ref2va {
             return Err(invalid("ENTITY_REFERENCE_MODE: @角色/场景需要混合参考 REF2VA；不会替换已有首尾帧，请明确选择兼容生成器"));
+        }
+        if !has_mention && !is_ref2va {
+            return Ok(());
         }
         let repository = self.story_entities.as_ref().ok_or_else(|| {
             invalid("ENTITY_REFERENCE_UNAVAILABLE: 角色与场景解析不可用，请刷新后重试")
         })?;
-        let entities = repository.list(project_id, None).await.map_err(invalid)?;
-        let usage = match shot_id {
-            Some(shot_id) => repository
-                .composition_usage_for_shot(project_id, shot_id)
-                .await
-                .map_err(invalid)?,
-            None => Default::default(),
-        };
-        let mut references = match values.get("reference_images") {
-            Some(GenerationInputValue::ImageAssets(ids)) => ids.clone(),
-            _ => Vec::new(),
-        };
         let sections = match shot_id {
             Some(shot_id) => repository
                 .prompt_sections_for_shot(project_id, shot_id)
@@ -206,12 +196,39 @@ impl ShotVideoInputService {
                 .map_err(invalid)?,
             None => Default::default(),
         };
+        if !has_mention && sections.clone().normalized().is_empty() {
+            return Ok(());
+        }
+        let entities = if has_mention {
+            repository.list(project_id, None).await.map_err(invalid)?
+        } else {
+            Vec::new()
+        };
+        let usage = if has_mention {
+            match shot_id {
+                Some(shot_id) => repository
+                    .composition_usage_for_shot(project_id, shot_id)
+                    .await
+                    .map_err(invalid)?,
+                None => Default::default(),
+            }
+        } else {
+            Default::default()
+        };
+        let mut references = match values.get("reference_images") {
+            Some(GenerationInputValue::ImageAssets(ids)) => ids.clone(),
+            _ => Vec::new(),
+        };
         let has_audio = values.values().any(|v| match v {
             GenerationInputValue::AudioAsset(_) => true,
             GenerationInputValue::AudioAssets(ids) => !ids.is_empty(),
             _ => false,
         });
-        let reordered = order_composition_references(&mut references, &entities, &usage);
+        let reordered = if has_mention {
+            order_composition_references(&mut references, &entities, &usage)
+        } else {
+            false
+        };
         let compiled = compile_ref2va_prompt(
             prompt,
             project_id,
@@ -910,7 +927,7 @@ pub(crate) fn compile_ref2va_prompt(
     let style_text = sub(&sections.style)?;
     let soundscape_text = sub(&sections.soundscape)?;
     let music_text = sub(&sections.music)?;
-    if state.subjects.is_empty() && state.pictures.is_empty() {
+    if state.subjects.is_empty() && state.pictures.is_empty() && sections.is_empty() {
         return Ok(output);
     }
     let body = if has_shot_markers(output.trim_start().lines().next().unwrap_or("")) {
@@ -1667,6 +1684,43 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn writer_sections_apply_without_at_mentions() {
+        use crate::domain::story_entity::ShotPromptSections;
+        let sections = ShotPromptSections {
+            style: Some("Cinematic realism.".into()),
+            summary: Some("A quiet walk through the hall.".into()),
+            soundscape: Some("Soft footsteps and room tone.".into()),
+            music: Some("N/A".into()),
+        };
+        let compiled = super::compile_ref2va_prompt(
+            "A person walks across the room.",
+            "prj_owned",
+            &[],
+            &[],
+            &Default::default(),
+            &sections,
+            false,
+        )
+        .unwrap();
+        assert!(compiled.contains("summary:\n[reference generation] A quiet walk through the hall."));
+        assert!(compiled.contains(
+            "detailed_description:\nCinematic realism.\n[Shot 1] A person walks across the room."
+        ));
+        assert!(compiled.contains("overall_soundscape:\nSoft footsteps and room tone."));
+        assert!(compiled.ends_with("non_diegetic_music:\nN/A"));
+        let plain = super::compile_ref2va_prompt(
+            "A person walks across the room.",
+            "prj_owned",
+            &[],
+            &[],
+            &Default::default(),
+            &Default::default(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(plain, "A person walks across the room.");
+    }
+
     fn writer_sections_and_appearance_assemble_the_six_official_sections() {
         use crate::domain::{
             story_entity::{
