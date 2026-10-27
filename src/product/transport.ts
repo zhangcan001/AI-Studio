@@ -52,6 +52,7 @@ interface ProductCommands {
   product_creation_readiness_get: { args: { request: CreationSubmission }; result: CreationReadiness };
   product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };
+  product_creation_workbench_get: { args: { projectId: string; stage: "image" | "video"; limit: number }; result: import("./types").CreationWorkbench };
   product_creation_shot_create: { args: { projectId: string }; result: CreationShotSummary };
   product_creation_shot_row_save: { args: { projectId: string; request: import("./types").CreationShotRowSave }; result: import("./types").CreationShotRowSaveResult };
   product_creation_shot_update: { args: { projectId: string; request: CreationShotUpdate }; result: CreationShotSummary };

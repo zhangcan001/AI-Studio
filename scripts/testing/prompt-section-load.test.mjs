@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSy
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { packageImportLockParentReader } from '../package-import-lock-successor-guard.mjs';
+import { storyboardWorkbenchBatchParentReader } from '../storyboard-workbench-batch-successor-guard.mjs';
 import { PROMPT_SECTION_LOAD_BASE, PROMPT_SECTION_LOAD_PROOF } from '../prompt-section-load-successor-guard.mjs';
 import { DELETE_INTEGRITY_PROOF as PARENT_PROOF } from '../delete-integrity-successor-guard.mjs';
 
@@ -15,11 +15,11 @@ it('keeps prompt sections until read succeeds and blocks save on read failure', 
   expect(src).toContain('sectionsReady');
   expect(src).toContain('提示词分段读取失败');
   expect(src).not.toMatch(/\.catch\(\(\) => undefined\)/);
-  expect(packageImportLockParentReader('.').violations).toEqual([]);
+  expect(storyboardWorkbenchBatchParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('preserves the frozen delete-integrity proof bytes', () => {
-  const checked = packageImportLockParentReader('.');
+  const checked = storyboardWorkbenchBatchParentReader('.');
   expect(checked.violations).toEqual([]);
   expect(checked.read(shot)).toBe(execFileSync('git', ['show', `${PROMPT_SECTION_LOAD_BASE}:${shot}`], { encoding: 'utf8' }).replaceAll('\r\n', '\n'));
   expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${PROMPT_SECTION_LOAD_BASE}:${PARENT_PROOF}`]));
@@ -35,8 +35,8 @@ it('rejects forged proof identity/hash, source drift, migrations and undeclared 
     { 'src-tauri/src/application/shot_video_input_service.rs': 'changed compiler' },
     { 'src/unapproved-section.ts': 'unapproved' },
     { 'src-tauri/migrations/051_unapproved.sql': 'SELECT 1;' },
-  ]) expect(packageImportLockParentReader('.', override).violations.length).toBeGreaterThan(0);
-  expect(packageImportLockParentReader('.').violations).toEqual([]);
+  ]) expect(storyboardWorkbenchBatchParentReader('.', override).violations.length).toBeGreaterThan(0);
+  expect(storyboardWorkbenchBatchParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('invalidates warm-cache fixtures on live mutations, deletion and illegal files; restoration passes', () => {
@@ -47,7 +47,7 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     execFileSync('git', ['init', '-q', root]);
     const objects = resolve(execFileSync('git', ['rev-parse', '--git-path', 'objects'], { encoding: 'utf8' }).trim());
     writeFileSync(join(root, '.git/objects/info/alternates'), objects.replaceAll('\\', '/') + '\n');
-    const validate = () => packageImportLockParentReader(root).violations;
+    const validate = () => storyboardWorkbenchBatchParentReader(root).violations;
     expect(validate()).toEqual([]);
     for (const p of [PROMPT_SECTION_LOAD_PROOF, PARENT_PROOF, shot]) {
       const file = join(root, p), original = readFileSync(file);

@@ -10,7 +10,8 @@ mod native_acceptance {
     fn allowed(command: &str, milliseconds: u64) -> bool {
         matches!(
             command,
-            "product_creation_get"
+            "product_creation_get",
+            "product_creation_workbench_get"
                 | "product_creation_inputs_get"
                 | "product_run_get"
                 | "product_run_results_get"
@@ -79,6 +80,7 @@ mod native_acceptance {
         fn only_read_only_getters_and_bounded_delay_are_accepted() {
             for name in [
                 "product_creation_get",
+            "product_creation_workbench_get",
                 "product_creation_inputs_get",
                 "product_run_get",
                 "product_run_results_get",
@@ -1259,6 +1261,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
         .invoke_handler(tauri::generate_handler![
             commands::product::product_project_overview,
             commands::product::product_creation_get,
+            commands::product::product_creation_workbench_get,
             commands::product::product_creation_inputs_get,
             commands::product::product_creation_inputs_save,
             commands::product::product_creation_assets_import,

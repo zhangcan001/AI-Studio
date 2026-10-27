@@ -7,7 +7,7 @@ import { subscribeRunInvalidation } from "../../product/runInvalidation";
 import type { AppRoute } from "../../app/routes/types";
 import type { RunResult } from "../../product/types";
 import { AssetImageThumb, CandidateThumbnail, MediaLightboxScope, ThumbnailProjectContext } from "./CreateMediaPreview";
-import { coverAsset, deriveStoryboardStatus, runPercent, shotDuration, shotResolution, storyboardStats, storyboardStatusLabels, videoCandidates, type StoryboardShot } from "./storyboardModel";
+import { coverAsset, deriveStoryboardStatus, runPercent, shotDuration, shotResolution, storyboardStats, storyboardStatusLabels, type StoryboardShot } from "./storyboardModel";
 import "./CreatePage.css";
 import { CreatePage } from "./CreatePage";
 import type { CreateProps } from "./CreateController";
@@ -15,7 +15,6 @@ import { useStudioStore } from "../../stores/studioStore";
 
 /** Bounded per-shot reads keep the workbench responsive on large projects. */
 export const STORYBOARD_MAX_DETAIL_SHOTS = 60;
-const CONCURRENCY = 4;
 const POLL_MS = 8000;
 const EVENT_REFRESH_MS = 500;
 
@@ -68,27 +67,25 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       // Formal Queue/Run read model: a waiting item may have no Task yet, so
       // shot.recentRun alone cannot tell us whether a refresh is still needed.
       const activeRuns = Promise.resolve().then(() => productClient.run.list(projectId, "active", null)).catch(() => null);
-      const base = await productClient.creation.get(projectId, null, "video");
-      const summaries = [...base.shots].sort((a, b) => a.ordinal - b.ordinal);
-      const bounded = summaries.slice(0, STORYBOARD_MAX_DETAIL_SHOTS);
-      const result: StoryboardShot[] = bounded.map(s => ({ id: s.id, name: s.name, ordinal: s.ordinal, shot: null, candidates: [], run: null, status: "TODO" }));
-      let next = 0;
-      const worker = async () => {
-        while (next < bounded.length) {
-          const index = next++; const summary = bounded[index];
-          try {
-            const context = await productClient.creation.get(projectId, summary.id, "video");
-            const shot = context.selectedShot; const candidates = videoCandidates(context);
-            const run = shot?.recentRun ? await productClient.run.get(projectId, shot.recentRun).catch(() => null) : null;
-            result[index] = { ...result[index], shot, candidates, run, status: deriveStoryboardStatus(shot, candidates, run) };
-          } catch (cause) { result[index] = { ...result[index], error: normalizeProductError(cause).message }; }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, bounded.length) }, worker));
+      const workbench = await productClient.creation.workbench(projectId, "video", STORYBOARD_MAX_DETAIL_SHOTS);
+      const runKeys = new Map<string, NonNullable<(typeof workbench.items)[number]["shot"]["recentRun"]>>();
+      for (const item of workbench.items) {
+        const ref = item.shot.recentRun;
+        if (ref) runKeys.set(`${ref.source}:${ref.id}`, ref);
+      }
+      const runs = new Map<string, Awaited<ReturnType<typeof productClient.run.get>>>();
+      await Promise.all([...runKeys.entries()].map(async ([key, ref]) => {
+        try { runs.set(key, await productClient.run.get(projectId, ref)); } catch { /* keep null */ }
+      }));
+      const result: StoryboardShot[] = workbench.items.map(({ shot, candidates }) => {
+        const video = candidates.filter(asset => asset.mediaKind === "video");
+        const run = shot.recentRun ? runs.get(`${shot.recentRun.source}:${shot.recentRun.id}`) ?? null : null;
+        return { id: shot.summary.id, name: shot.summary.name, ordinal: shot.summary.ordinal, shot, candidates: video, run, status: deriveStoryboardStatus(shot, video, run) };
+      });
       const active = await activeRuns;
       if (token !== epoch.current) return;
       setQueueActive(Boolean(active?.items?.length));
-      setItems(result); setTruncated(Math.max(0, summaries.length - bounded.length)); setError(undefined);
+      setItems(result); setTruncated(workbench.truncated); setError(undefined);
     } catch (cause) { if (token === epoch.current) setError(normalizeProductError(cause).message); }
     finally { if (token === epoch.current) { inFlight.current = false; setBusy(false); } }
   }, [projectId]);

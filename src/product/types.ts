@@ -76,6 +76,15 @@ export interface CreationContext {
   mediaInputs: CreationAsset[];
   promptChoices: CreationPromptChoice[];
 }
+export interface CreationWorkbenchShot { shot: CreationShot; candidates: CreationAsset[] }
+export interface CreationWorkbench {
+  projectId: string;
+  projectName: string;
+  stage: "image" | "video";
+  shots: CreationShotSummary[];
+  items: CreationWorkbenchShot[];
+  truncated: number;
+}
 export interface CreationPromptChoice { promptId: string; promptVersionId: string; name: string; version: number; text: string }
 export interface CreationPromptProvenance { promptId: string; promptVersionId: string }
 /** Name edit; optional inline row fields persist the stage prompt and generator scalar values. */

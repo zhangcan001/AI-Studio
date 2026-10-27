@@ -2,7 +2,7 @@ use crate::{
     app_state::AppState,
     application::product::{
         creation_facade::{
-            CreationAccepted, CreationContext, CreationReadiness, CreationShot, CreationShotFields,
+            CreationAccepted, CreationContext, CreationReadiness, CreationShot, CreationShotFields, CreationWorkbench,
             CreationShotSummary, CreationShotUpdate, CreationStartDisposition, CreationSubmission,
             GeneratorOption, ProductCreationFacade,
         },
@@ -500,6 +500,25 @@ fn creation(state: &AppState) -> ProductCreationFacade {
         state.shots.shot.clone(),
         state.workflow.registry.clone(),
     )
+}
+
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_creation_workbench_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    stage: String,
+    limit: usize,
+) -> Result<CreationWorkbench, ProductError> {
+    creation(&state)
+        .workbench(
+            &state.projects.command_center,
+            &state.assets.query,
+            &project_id,
+            &stage,
+            limit,
+        )
+        .await
 }
 
 #[tauri::command(rename_all = "camelCase")]

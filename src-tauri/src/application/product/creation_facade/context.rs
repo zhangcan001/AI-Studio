@@ -48,6 +48,24 @@ pub struct CreationAsset {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreationWorkbenchShot {
+    pub shot: CreationShot,
+    pub candidates: Vec<CreationAsset>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreationWorkbench {
+    pub project_id: String,
+    pub project_name: String,
+    pub stage: String,
+    pub shots: Vec<CreationShotSummary>,
+    pub items: Vec<CreationWorkbenchShot>,
+    pub truncated: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreationContext {
     pub project_id: String,
     pub project_name: String,
@@ -300,6 +318,83 @@ impl ProductCreationFacade {
             candidates,
             media_inputs,
             prompt_choices: Vec::new(),
+        })
+    }
+
+
+    /// One list + per-shot candidate projection for the storyboard workbench.
+    /// Avoids N round-trips that each re-list every shot.
+    pub async fn workbench(
+        &self,
+        projects: &ProjectCommandCenterService,
+        assets: &AssetQueryService,
+        project_id: &str,
+        requested_stage: &str,
+        limit: usize,
+    ) -> Result<CreationWorkbench, ProductError> {
+        let stage = stage(requested_stage)?;
+        self.bindings
+            .get(project_id)
+            .await
+            .map_err(ProductError::binding)?;
+        let project = projects
+            .get(project_id)
+            .await
+            .map_err(ProductError::internal)?
+            .project;
+        let mut shots = self.shots.list(project_id).await.map_err(shot_error)?;
+        shots.sort_by_key(|shot| (shot.ordinal, shot.id.clone()));
+        let summaries: Vec<_> = shots.iter().map(summary).collect();
+        let truncated = i64::try_from(shots.len().saturating_sub(limit)).unwrap_or(0);
+        let mut items = Vec::with_capacity(limit.min(shots.len()));
+        for shot in shots.into_iter().take(limit) {
+            let projected = project_shot(&shot, stage)?;
+            let mut candidates = Vec::new();
+            let mut seen = HashSet::new();
+            for task_id in shot
+                .generation_links
+                .iter()
+                .filter(|link| link.stage == stage.as_str())
+                .filter_map(|link| link.task_id.as_deref())
+            {
+                for asset in assets
+                    .list_by_task(project_id, task_id)
+                    .await
+                    .map_err(ProductError::internal)?
+                {
+                    if asset.asset_type == requested_stage && seen.insert(asset.id.clone()) {
+                        candidates.push(candidate(
+                            asset,
+                            projected.selected_result_id.as_deref(),
+                        ));
+                    }
+                }
+            }
+            for item in candidates
+                .iter_mut()
+                .filter(|item| {
+                    crate::application::product::run_facade::has_thumbnail_preview(&item.media_kind)
+                })
+                .take(12)
+            {
+                if let Ok(binary) = assets.read_thumbnail(project_id, &item.id).await {
+                    if binary.bytes.len() <= 256 * 1024 {
+                        item.thumbnail_bytes = Some(binary.bytes);
+                    }
+                }
+            }
+            items.push(CreationWorkbenchShot {
+                shot: projected,
+                candidates,
+            });
+        }
+        Ok(CreationWorkbench {
+            project_id: project.id,
+            project_name: project.name,
+            stage: requested_stage.to_owned(),
+            shots: summaries,
+            items,
+            truncated,
         })
     }
 

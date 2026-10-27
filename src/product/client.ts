@@ -59,6 +59,7 @@ export const productClient = {
     readinessGet: (request: CreationSubmission) => productRequest("product_creation_readiness_get", { request }),
     generate: (request: CreationSubmission) => productRequest("product_creation_generate", { request }),
     get: (projectId: string, shotId: string | null, stage: "image" | "video") => productRequest("product_creation_get", { projectId, shotId, stage }),
+    workbench: (projectId: string, stage: "image" | "video", limit: number) => productRequest("product_creation_workbench_get", { projectId, stage, limit }),
     createShot: (projectId: string) => productRequest("product_creation_shot_create", { projectId }),
     saveShotRow: (projectId: string, request: import("./types").CreationShotRowSave) => productRequest("product_creation_shot_row_save", { projectId, request }),
     updateShot: (projectId: string, request: CreationShotUpdate) => productRequest("product_creation_shot_update", { projectId, request }),

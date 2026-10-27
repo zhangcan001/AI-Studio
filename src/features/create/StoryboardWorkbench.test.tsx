@@ -6,14 +6,16 @@ import type { CreationContext, ProductRun } from "../../product/types";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview } } }));
+const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
 // Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
 beforeEach(() => {
   window.localStorage.setItem("ai-studio.storyboard.view", "grid");
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   api.runList.mockResolvedValue({ items: [], nextCursor: null, coverage: "" });
+  api.workbench.mockImplementation(async () => workbenchFromContexts());
+  api.get.mockImplementation(async (_p: string, shotId: string | null) => context(shotId));
 });
 
 const shots = [{ id: "s1", name: "镜头01", ordinal: 1 }, { id: "s2", name: "镜头02", ordinal: 2 }, { id: "s3", name: "镜头03", ordinal: 3 }];
@@ -24,9 +26,20 @@ function context(shotId: string | null): CreationContext {
     selectedShot: shot ? { summary: shot, prompt: `${shot.name} prompt`, selectionRef: null, values: { duration_seconds: { type: "integer", value: 5 } }, referenceAssetIds: [], selectedResultId: shot.id === "s1" ? "a1" : null, recentRun: shot.id === "s2" ? { source: "production-run", id: "r" } : null } : null,
     candidates: shot?.id === "s1" ? [{ id: "a1", name: "a1", mediaKind: "video", selected: true }] : [] };
 }
+
+function workbenchFrom(shotFn: (id: string | null) => CreationContext = context, projectId = "p") {
+  const base = shotFn(null);
+  const items = (base.shots.length ? base.shots : shots).map(s => {
+    const ctx = shotFn(s.id);
+    return { shot: ctx.selectedShot!, candidates: ctx.candidates };
+  }).filter(item => item.shot);
+  return { projectId, projectName: "P", stage: "video" as const, shots: base.shots, items, truncated: 0 };
+}
+function workbenchFromContexts() { return workbenchFrom(context); }
 const route = { kind: "create" as const, projectId: "p", stage: "video" as const };
 
 it("UI restore: workbench derives real shot status/stats from the product facade and never generates", async () => {
+  api.workbench.mockResolvedValue(workbenchFromContexts());
   api.get.mockImplementation(async (_p: string, shotId: string | null) => context(shotId));
   api.runGet.mockResolvedValue(run("RUNNING", 17, 25));
   const navigate = vi.fn();
@@ -45,6 +58,7 @@ it("UI restore: workbench derives real shot status/stats from the product facade
 });
 
 it("UI restore: empty project shows honest empty state without demo data", async () => {
+  api.workbench.mockResolvedValue({ projectId: "p", projectName: "P", stage: "video", shots: [], items: [], truncated: 0 });
   api.get.mockResolvedValue({ ...context(null), shots: [] });
   render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
   expect(await screen.findByText("开始你的第一个镜头")).toBeTruthy();
@@ -85,6 +99,7 @@ it("UI restore: grid and list modes render distinct layouts and the choice persi
 });
 
 it("UI restore: review panel approves, rejects with comment and selects via existing run/creation IPC", async () => {
+  api.workbench.mockResolvedValue(workbenchFrom(reviewContext));
   api.get.mockImplementation(async (_p: string, shotId: string | null) => reviewContext(shotId));
   api.runGet.mockResolvedValue(run("SUCCEEDED", 1, 1));
   api.resultsGet.mockResolvedValue([{ assetId: "v1", name: "v1", mediaKind: "video", assetExists: true, availability: "available", reviewState: "PENDING", reviewRevision: 3, selectedShotIds: [], thumbnailBytes: null }]);
@@ -119,21 +134,19 @@ it("D3: a waiting queue item without a Task keeps a bounded poll until the Task 
   const interval = vi.spyOn(window, "setInterval");
   try {
     let task = false;
-    api.get.mockImplementation(async (_p: string, shotId: string | null) => idleContext(shotId, task));
+    api.workbench.mockImplementation(async () => workbenchFrom(id => idleContext(id, task)));
     api.runList.mockResolvedValue({ items: [run("QUEUED", 0, 1)], nextCursor: null, coverage: "" });
     api.runGet.mockResolvedValue(run("RUNNING", 0, 1));
-    // Flush initial reads and their passive polling effect before advancing the clock.
-    // A rendered card alone is not a barrier for setInterval installation.
     await act(async () => { render(<StoryboardWorkbench route={route} navigate={vi.fn()} />); });
     expect(screen.getByRole("article", { name: "镜头03" })).toBeTruthy();
     expect(interval).toHaveBeenCalledWith(expect.any(Function), 8000);
     expect(api.runGet).not.toHaveBeenCalled();
     task = true;
-    const before = api.get.mock.calls.length;
+    const before = api.workbench.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(7999); });
-    expect(api.get.mock.calls.length).toBe(before);
+    expect(api.workbench.mock.calls.length).toBe(before);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(api.get.mock.calls.length).toBeGreaterThan(before);
+    expect(api.workbench.mock.calls.length).toBeGreaterThan(before);
     expect(api.runGet).toHaveBeenCalledWith("p", { source: "production-run", id: "t1" });
     expect(api.generate).not.toHaveBeenCalled();
   } finally { interval.mockRestore(); }
@@ -141,7 +154,7 @@ it("D3: a waiting queue item without a Task keeps a bounded poll until the Task 
 
 it("D3: run invalidation for this project refreshes the workbench without any GENERATING shot", async () => {
   let task = false;
-  api.get.mockImplementation(async (_p: string, shotId: string | null) => idleContext(shotId, task));
+  api.workbench.mockImplementation(async () => workbenchFrom(id => idleContext(id, task)));
   api.runList.mockResolvedValue({ items: [], nextCursor: null, coverage: "" });
   api.runGet.mockResolvedValue(run("RUNNING", 0, 1));
   render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
@@ -154,7 +167,7 @@ it("D3: run invalidation for this project refreshes the workbench without any GE
 });
 
 it("D4: a late createShot reply never navigates after the workbench unmounted", async () => {
-  api.get.mockImplementation(async (_p: string, shotId: string | null) => idleContext(shotId, false));
+  api.workbench.mockResolvedValue(workbenchFrom(id => idleContext(id, false)));
   api.runList.mockResolvedValue({ items: [], nextCursor: null, coverage: "" });
   let resolve!: (value: { id: string }) => void;
   api.createShot.mockReturnValue(new Promise(r => { resolve = r; }));
@@ -169,10 +182,10 @@ it("D4: a late createShot reply never navigates after the workbench unmounted", 
 
 it("defaults to the shot-row editing view with search, status filters and task queue entry", async () => {
   window.localStorage.clear();
-  api.get.mockImplementation(async (_p: string, shotId: string | null) => context(shotId));
+  api.workbench.mockResolvedValue(workbenchFromContexts());
   api.runGet.mockResolvedValue(run("SUCCEEDED", 1, 1));
   const navigate = vi.fn();
-  render(<StoryboardWorkbench route={route} navigate={navigate} />);
+  render(<StoryboardWorkbench route={route} navigate={navigate} renderRuns={() => <p>runs</p>} />);
   const rows = await screen.findByRole("region", { name: "分镜编辑" });
   expect(within(rows).getByRole("article", { name: /镜头01/ })).toBeTruthy();
   expect(within(rows).getByLabelText("搜索分镜")).toBeTruthy();
@@ -187,35 +200,36 @@ it("background polling preserves existing buttons while manual refresh still loc
   window.localStorage.setItem("ai-studio.storyboard.view", "shots");
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   const current = (id: string | null) => { const c = context(id); return c.selectedShot ? { ...c, selectedShot: { ...c.selectedShot, selectionRef: "video-selection" } } : c; };
-  api.get.mockImplementation(async (_p: string, id: string | null) => current(id));
+  const board = () => workbenchFrom(current);
+  api.workbench.mockResolvedValue(board());
   api.runList.mockResolvedValue({ items: [run("RUNNING", 0, 1)], nextCursor: null, coverage: "" });
   api.runGet.mockResolvedValue(run("RUNNING", 0, 1));
   await act(async () => { render(<StoryboardWorkbench route={route} navigate={vi.fn()} />); });
   const button = screen.getAllByRole<HTMLButtonElement>("button", { name: "生成视频" })[0];
   const create = screen.getByRole<HTMLButtonElement>("button", { name: "+ 新建镜头" });
   expect(button.disabled).toBe(false);
-  let release!: (value: CreationContext) => void;
-  const hold = () => { const pending = new Promise<CreationContext>(r => { release = r; }); api.get.mockImplementation(async (_p: string, id: string | null) => id === null ? pending : current(id)); };
+  let release!: (value: ReturnType<typeof board>) => void;
+  const hold = () => { const pending = new Promise<ReturnType<typeof board>>(r => { release = r; }); api.workbench.mockReturnValue(pending); };
   hold();
   await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
   expect(button.disabled).toBe(false); expect(create.disabled).toBe(false);
   expect(button).toBe(screen.getAllByRole("button", { name: "生成视频" })[0]);
-  await act(async () => { release(current(null)); });
+  await act(async () => { release(board()); });
   hold(); fireEvent.click(screen.getByRole("button", { name: "刷新" }));
   expect(button.disabled).toBe(true); expect(create.disabled).toBe(true);
-  await act(async () => { release(current(null)); });
+  await act(async () => { release(board()); });
   expect(button.disabled).toBe(false);
   expect(api.generate).not.toHaveBeenCalled();
 });
 
 it("coalesces progress reads, retains invalidation during slow IPC, and disposes pending reads on unmount", async () => {
   vi.useFakeTimers();
-  api.get.mockImplementation(async (_p: string, id: string | null) => idleContext(id, false));
+  api.workbench.mockResolvedValue(workbenchFrom(id => idleContext(id, false)));
   await act(async () => { render(<StoryboardWorkbench route={route} navigate={vi.fn()} />); });
-  const reads = () => api.get.mock.calls.filter(([, id]) => id === null).length;
+  const reads = () => api.workbench.mock.calls.length;
   const create = screen.getByRole<HTMLButtonElement>("button", { name: "+ 新建镜头" });
-  let release!: (value: CreationContext) => void;
-  api.get.mockImplementation((_p: string, id: string | null) => id === null ? new Promise<CreationContext>(r => { release = r; }) : Promise.resolve(idleContext(id, false)));
+  let release!: (value: ReturnType<typeof workbenchFrom>) => void;
+  api.workbench.mockImplementation(() => new Promise(r => { release = r; }));
   act(() => { invalidateRuns("other"); for (let i = 0; i < 20; i++) invalidateRuns("p"); });
   expect(reads()).toBe(1);
   await act(async () => { await vi.advanceTimersByTimeAsync(500); });
@@ -223,9 +237,9 @@ it("coalesces progress reads, retains invalidation during slow IPC, and disposes
   act(() => { for (let i = 0; i < 20; i++) invalidateRuns("p"); });
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(reads()).toBe(2);
-  api.get.mockImplementation(async (_p: string, id: string | null) => idleContext(id, false));
-  await act(async () => { release(idleContext(null, false)); await vi.advanceTimersByTimeAsync(500); });
-  expect(reads()).toBe(3); // Final invalidation is not swallowed by the in-flight read.
+  api.workbench.mockResolvedValue(workbenchFrom(id => idleContext(id, false)));
+  await act(async () => { release(workbenchFrom(id => idleContext(id, false))); await vi.advanceTimersByTimeAsync(500); });
+  expect(reads()).toBe(3);
   act(() => { invalidateRuns("p"); });
   cleanup();
   await act(async () => { await vi.advanceTimersByTimeAsync(10000); invalidateRuns("p"); });
@@ -235,18 +249,20 @@ it("coalesces progress reads, retains invalidation during slow IPC, and disposes
 
 it("old-project completion cannot release the new project's read lock or overwrite its shots", async () => {
   vi.useFakeTimers();
-  let oldRelease!: (value: CreationContext) => void;
-  let nextRelease!: (value: CreationContext) => void;
-  api.get.mockImplementation((p: string, id: string | null) => id !== null ? Promise.resolve({ ...context(id), projectId: p }) : new Promise<CreationContext>(r => { if (p === "p") oldRelease = r; else nextRelease = r; }));
+  let oldRelease!: (value: ReturnType<typeof workbenchFrom>) => void;
+  let nextRelease!: (value: ReturnType<typeof workbenchFrom>) => void;
+  api.workbench.mockImplementation((projectId: string) => new Promise(r => { if (projectId === "p") oldRelease = r; else nextRelease = r; }));
+  // workbench(projectId, stage, limit) — match client signature via mockImplementation args
+  api.workbench.mockImplementation((projectId: string) => new Promise(r => { if (projectId === "p") oldRelease = r; else nextRelease = r; }) as any);
   const view = render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
   view.rerender(<StoryboardWorkbench route={{ ...route, projectId: "next" }} navigate={vi.fn()} />);
   act(() => invalidateRuns("next"));
-  await act(async () => { oldRelease({ ...context(null), shots: [] }); await vi.advanceTimersByTimeAsync(1000); });
-  expect(api.get.mock.calls.filter(([p, id]) => p === "next" && id === null)).toHaveLength(1);
-  api.get.mockImplementation(async (p: string, id: string | null) => ({ ...context(id), projectId: p }));
-  await act(async () => { nextRelease({ ...context(null), projectId: "next" }); await vi.advanceTimersByTimeAsync(500); });
+  await act(async () => { oldRelease(workbenchFrom(context, "p")); await vi.advanceTimersByTimeAsync(1000); });
+  expect(api.workbench.mock.calls.filter(([p]) => p === "next")).toHaveLength(1);
+  api.workbench.mockImplementation(async (projectId: string) => workbenchFrom(context, projectId));
+  await act(async () => { nextRelease(workbenchFrom(context, "next")); await vi.advanceTimersByTimeAsync(500); });
   expect(screen.getByRole("article", { name: "镜头01" })).toBeTruthy();
-  expect(api.get.mock.calls.filter(([p, id]) => p === "next" && id === null)).toHaveLength(2);
+  expect(api.workbench.mock.calls.filter(([p]) => p === "next")).toHaveLength(2);
   expect(api.generate).not.toHaveBeenCalled();
 });
 
