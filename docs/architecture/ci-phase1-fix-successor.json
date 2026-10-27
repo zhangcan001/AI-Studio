@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_PHASE1_FIX",
+  "parentHead": "0a4bbf959273cccbc6d4e1384c0df40eb837efc0",
+  "planningParentHead": "0a4bbf959273cccbc6d4e1384c0df40eb837efc0",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-queue-fix-successor-guard.mjs": {
+      "beforeHash": "5a4b6ed3c6d996345e55a9941b99f3a8c6c6cee0d90cd247b3577c3d57ab339e",
+      "afterHash": "715717bda506d43996417c377ae736ada8e5e34d05f8a31dcf2c1b9ad3dfb0ba"
+    },
+    "scripts/testing/ci-queue-fix.test.mjs": {
+      "beforeHash": "011c23fef1d0710f3d248107e84a2930cd963709adfcbef811f73eb79512bc97",
+      "afterHash": "0574ac5fdae9a831ae788ac4ac14820ea0c0e104877ce24ca11192e5353437e5"
+    },
+    "src/app/MiniMaxVideoPhase1Boundary.test.ts": {
+      "beforeHash": "f771a699b4bbbb9328ac5b493f87c36fec79f4f132be116daa9f92e2d3a72679",
+      "afterHash": "9976d5c66811e89822228a28c4c8dfe1f24b0329416233af113ee91077040c29"
+    },
+    "scripts/ci-phase1-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "7108fe13a8377eadf5c3bedafbda11f504f8b51bfbb56d3ba92fc37bfbb6f7e1"
+    },
+    "scripts/testing/ci-phase1-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "d13d61bf0b6597f0b7e248ef04703ede3598b22eb7cb921ef8fc29e48a2b9e7e"
+    }
+  }
+}
