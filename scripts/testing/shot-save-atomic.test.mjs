@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSy
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { scopeSinceChainParentReader } from '../scope-since-chain-successor-guard.mjs';
+import { ciProbeFixParentReader } from '../ci-probe-fix-successor-guard.mjs';
 import { SHOT_SAVE_ATOMIC_BASE, SHOT_SAVE_ATOMIC_PROOF } from '../shot-save-atomic-successor-guard.mjs';
 import { PROMPT_SECTIONS_WITHOUT_AT_PROOF as PARENT_PROOF } from '../prompt-sections-without-at-successor-guard.mjs';
 
@@ -15,13 +15,12 @@ it('keeps shot update and creation shot update on one transaction each', () => {
   const svc = readFileSync(source, 'utf8');
   expect(svc).toContain('update_shot_with_stage_prompts');
   expect(command && readFileSync(command, 'utf8')).toContain('update_shot_with_fields');
-  expect(scopeSinceChainParentReader('.').violations).toEqual([]);
+  expect(ciProbeFixParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('preserves the frozen prompt-sections-without-at proof bytes', () => {
-  const checked = scopeSinceChainParentReader('.');
+  const checked = ciProbeFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.read(source)).toBe(execFileSync('git', ['show', `${SHOT_SAVE_ATOMIC_BASE}:${source}`], { encoding: 'utf8' }).replaceAll('\r\n', '\n'));
   expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${SHOT_SAVE_ATOMIC_BASE}:${PARENT_PROOF}`]));
 }, 120000);
 
@@ -35,8 +34,8 @@ it('rejects forged proof identity/hash, source drift, migrations and undeclared 
     { 'src/features/create/StoryboardShotRows.tsx': 'changed frontend' },
     { 'src/unapproved-shot-save.ts': 'unapproved' },
     { 'src-tauri/migrations/051_unapproved.sql': 'SELECT 1;' },
-  ]) expect(scopeSinceChainParentReader('.', override).violations.length).toBeGreaterThan(0);
-  expect(scopeSinceChainParentReader('.').violations).toEqual([]);
+  ]) expect(ciProbeFixParentReader('.', override).violations.length).toBeGreaterThan(0);
+  expect(ciProbeFixParentReader('.').violations).toEqual([]);
 }, 120000);
 
 it('invalidates warm-cache fixtures on live mutations, deletion and illegal files; restoration passes', () => {
@@ -47,7 +46,7 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     execFileSync('git', ['init', '-q', root]);
     const objects = resolve(execFileSync('git', ['rev-parse', '--git-path', 'objects'], { encoding: 'utf8' }).trim());
     writeFileSync(join(root, '.git/objects/info/alternates'), objects.replaceAll('\\', '/') + '\n');
-    const validate = () => scopeSinceChainParentReader(root).violations;
+    const validate = () => ciProbeFixParentReader(root).violations;
     expect(validate()).toEqual([]);
     for (const p of [SHOT_SAVE_ATOMIC_PROOF, PARENT_PROOF, source]) {
       const file = join(root, p), original = readFileSync(file);

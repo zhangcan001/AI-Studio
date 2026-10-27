@@ -14,7 +14,7 @@ import { normalCreate, mediaValue, modeLabel, draftFor, defaultGenerator } from 
 import { fromLegacyLocation, toLegacyLocation } from "../../app/routes/legacyAdapter";
 import { resolveCreateReadinessAction, focusCreateInput } from "./createReadinessAction";
 import { promptText, setPrompt } from "./composerTestUtils";
-const api = vi.hoisted(() => ({ get: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), libraryGet: vi.fn(), bindingSet: vi.fn(), runList: vi.fn(), resultsGet: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), generatorsList: vi.fn(), createShot: vi.fn(), referencesSet: vi.fn(), selectResult: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), runGet: vi.fn(), retry: vi.fn(), libraryGet: vi.fn(), bindingSet: vi.fn(), runList: vi.fn(), resultsGet: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: {storyEntities:{list:vi.fn(async()=>[]),listForShot:vi.fn(async()=>[]),bindShot:vi.fn(async()=>[]),create:vi.fn(),update:vi.fn(),delete:vi.fn(),get:vi.fn()}, creation: { ...api, mediaUrl: (_p: string, _id: string) => "http://fixture.invalid/video" }, run: { get: api.runGet, retry: api.retry, list: api.runList, resultsGet: api.resultsGet }, library: {get: api.libraryGet, imageGet: vi.fn(async () => [137, 80, 78, 71]), list: vi.fn(async () => ({ items: [], nextCursor: null, coverage: "complete-category", coverageMessage: "" })), tagsList: vi.fn(async () => [])}, project: { generatorBindingSet: api.bindingSet } } }));
 const prompt = { type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" } as const;
 const negative = { ...prompt, key: "negative_prompt", label: "Negative prompt", required: false };
@@ -25,6 +25,15 @@ const videos = [option("t2v-opaque", [prompt, ...params]), option("i2v-opaque", 
 const inputs: CreationAsset[] = [{ id: "img1", name: "首帧素材", mediaKind: "image", selected: false }, { id: "img2", name: "尾帧素材", mediaKind: "image", selected: false }, { id: "vid1", name: "参考视频素材", mediaKind: "video", selected: false }];
 let candidates: CreationAsset[];
 function context(stage: "image" | "video", shotId: string | null = "shot1"): CreationContext { return { projectId: "project", projectName: "Project", stage, shots: [{ id: "shot1", name: "镜头一", ordinal: 0 }, { id: "shot2", name: "镜头二", ordinal: 1 }], selectedShot: shotId ? { summary: { id: shotId, name: "镜头", ordinal: 0 }, prompt: `${stage} prompt`, selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null } : null, candidates: [...candidates], mediaInputs: inputs, promptChoices: [{ promptId: "prm-choice", promptVersionId: "prv-choice", name: "我的提示词", text: "chosen prompt", version: 2 }] }; }
+function workbenchFrom(stage: "image" | "video" = "video", limit = 60) {
+  const base = context(stage, null);
+  const all = base.shots.map(s => {
+    const ctx = context(stage, s.id);
+    return { shot: ctx.selectedShot!, candidates: ctx.candidates };
+  }).filter(item => item.shot);
+  const truncated = Math.max(0, all.length - limit);
+  return { projectId: "project", projectName: "Project", stage, shots: base.shots, items: all.slice(0, limit), truncated };
+}
 function run(status: ProductRun["status"] = "QUEUED", actions: string[] = []): ProductRun { return { ref: { source: "queue-batch", id: "run" }, projectId: "project", title: "run", status, phase: status, createdAt: "", updatedAt: "", progress: { total: 1, succeeded: status === "SUCCEEDED" ? 1 : 0, failed: status === "FAILED" ? 1 : 0, cancelled: 0 }, recoverability: { retryItemIds: ["old-item"], reviewRequired: 0 }, resultsSummary: [], errorSummary: null, preferredParent: null, availableActions: actions }; }
 const navigations = vi.fn(); const dirty = vi.fn();
 
@@ -43,6 +52,7 @@ function Host({ initialStage = "video", initialShot = "shot1" }: { initialStage?
 beforeEach(() => {
   vi.clearAllMocks(); useStudioStore.getState().resetDraft(); candidates = [];
   api.get.mockImplementation((_p: string, shot: string | null, stage: "image" | "video") => Promise.resolve(context(stage, shot)));
+  api.workbench.mockImplementation(async (_p: string, stage: "image" | "video" = "video", limit = 60) => workbenchFrom(stage, limit));
   api.generatorsList.mockImplementation((_p: string, stage: string) => Promise.resolve(stage === "image" ? [image] : videos));
   api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
   api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "run" }, startOutcome: "STARTED", startIssue: null });

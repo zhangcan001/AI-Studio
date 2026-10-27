@@ -6,16 +6,17 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { STORYBOARD_WORKBENCH_BATCH_BASE, STORYBOARD_WORKBENCH_BATCH_PROOF, STORYBOARD_WORKBENCH_BATCH_CHANGED, STORYBOARD_WORKBENCH_BATCH_ADDED, STORYBOARD_WORKBENCH_BATCH_CONTRACTS } from '../storyboard-workbench-batch-successor-guard.mjs';
 import { SUCCESSOR_CHAIN_BASE, SUCCESSOR_CHAIN_PROOF, SUCCESSOR_CHAIN_CHANGED, SUCCESSOR_CHAIN_ADDED, SUCCESSOR_CHAIN_CONTRACTS } from '../successor-chain-successor-guard.mjs';
-import { scopeSinceChainParentReader, SCOPE_SINCE_CHAIN_BASE, SCOPE_SINCE_CHAIN_PROOF, SCOPE_SINCE_CHAIN_CHANGED, SCOPE_SINCE_CHAIN_ADDED, SCOPE_SINCE_CHAIN_CONTRACTS } from '../scope-since-chain-successor-guard.mjs';
+import { SCOPE_SINCE_CHAIN_BASE, SCOPE_SINCE_CHAIN_PROOF, SCOPE_SINCE_CHAIN_CHANGED, SCOPE_SINCE_CHAIN_ADDED, SCOPE_SINCE_CHAIN_CONTRACTS } from '../scope-since-chain-successor-guard.mjs';
+import { ciProbeFixParentReader, CI_PROBE_FIX_BASE, CI_PROBE_FIX_PROOF, CI_PROBE_FIX_CHANGED, CI_PROBE_FIX_ADDED, CI_PROBE_FIX_CONTRACTS } from '../ci-probe-fix-successor-guard.mjs';
 const PARENT_PROOF = 'docs/architecture/package-import-lock-successor.json';
 const ui = 'src/features/create/StoryboardWorkbench.tsx';
 const facade = 'src-tauri/src/application/product/creation_facade/context.rs';
 it('projects through the successor-chain tip with a clean boundary', () => {
-  const checked = scopeSinceChainParentReader('.');
+  const checked = ciProbeFixParentReader('.');
   expect(checked.violations).toEqual([]);
 }, 120000);
 it('preserves the frozen package-import-lock proof bytes via the tip', () => {
-  const checked = scopeSinceChainParentReader('.');
+  const checked = ciProbeFixParentReader('.');
   expect(checked.violations).toEqual([]);
   expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${STORYBOARD_WORKBENCH_BATCH_BASE}:${PARENT_PROOF}`]));
 }, 120000);
@@ -23,7 +24,7 @@ it('loads the storyboard through one workbench IPC instead of per-shot creation.
   expect(readFileSync(ui, 'utf8')).toContain('creation.workbench');
   expect(readFileSync(ui, 'utf8')).not.toMatch(/creation\.get\(projectId, summary\.id/);
   expect(readFileSync(facade, 'utf8')).toContain('pub async fn workbench(');
-  expect(scopeSinceChainParentReader('.').violations).toEqual([]);
+  expect(ciProbeFixParentReader('.').violations).toEqual([]);
 }, 120000);
 it('rejects forged proof identity, contracts, scope, hashes and undeclared changes', () => {
   const proof = JSON.parse(readFileSync(STORYBOARD_WORKBENCH_BATCH_PROOF, 'utf8'));
@@ -35,8 +36,8 @@ it('rejects forged proof identity, contracts, scope, hashes and undeclared chang
     ...[...STORYBOARD_WORKBENCH_BATCH_CHANGED, ...STORYBOARD_WORKBENCH_BATCH_ADDED, PARENT_PROOF].map(p => ({ [p]: readFileSync(p, 'utf8') + '\n// forged' })),
     { 'src-tauri/src/application/production_package_service.rs': 'changed import' },
     { 'src-tauri/migrations/051_unapproved.sql': 'SELECT 1;' },
-  ]) expect(scopeSinceChainParentReader('.', override).violations.length).toBeGreaterThan(0);
-  expect(scopeSinceChainParentReader('.').violations).toEqual([]);
+  ]) expect(ciProbeFixParentReader('.', override).violations.length).toBeGreaterThan(0);
+  expect(ciProbeFixParentReader('.').violations).toEqual([]);
 }, 120000);
 it('invalidates warm-cache fixtures on mutation, deletion and ignored additions; restoration passes', () => {
   const root = mkdtempSync(join(tmpdir(), 'storyboard-workbench-batch-proof-'));
@@ -46,7 +47,7 @@ it('invalidates warm-cache fixtures on mutation, deletion and ignored additions;
     execFileSync('git', ['init', '-q', root]);
     const objects = resolve(execFileSync('git', ['rev-parse', '--git-path', 'objects'], { encoding: 'utf8' }).trim());
     writeFileSync(join(root, '.git/objects/info/alternates'), objects.replaceAll('\\', '/') + '\n');
-    const validate = () => scopeSinceChainParentReader(root).violations;
+    const validate = () => ciProbeFixParentReader(root).violations;
     expect(validate()).toEqual([]);
     for (const p of [STORYBOARD_WORKBENCH_BATCH_PROOF, PARENT_PROOF, ui, ...STORYBOARD_WORKBENCH_BATCH_ADDED]) {
       const file = join(root, p), original = readFileSync(file);

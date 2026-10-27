@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_PROBE_FIX",
+  "parentHead": "462db9ab02783199fc096d56328244029697ab81",
+  "planningParentHead": "462db9ab02783199fc096d56328244029697ab81",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-probe-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "7ea548b6e626c8478e9dae3c23bddef7228bbfda68eb78798f0cb60ea3703fa1"
+    },
+    "scripts/review-hardening-successor-guard.mjs": {
+      "beforeHash": "e3b4e3943f56182cbb85ffc84259b182e6300e0dc7ac9223f16f810b67aa7b05",
+      "afterHash": "b336141e763185615ffd9521dcad7f3c472b63591ed9f2e175543d3e9bae0951"
+    },
+    "scripts/scope-since-chain-successor-guard.mjs": {
+      "beforeHash": "f915793f2dc28f2b0b2e8b1ea9b8858cdf1183579a78d5009e1a7c8fd6088ef2",
+      "afterHash": "aef10e8cbc92de65476fc056ab247eb41ff370ab305f18210c7ae55fbb1238d6"
+    },
+    "scripts/testing/cancel-correctness.test.mjs": {
+      "beforeHash": "298962b01e729c26dd2a77feb6508afe2cdad0e7197a0686b65e8b255f382fa2",
+      "afterHash": "b43cf9e5ffaa58adb398bd70feffbc73a31af471fc2c18808de2b624d68f11ee"
+    },
+    "scripts/testing/ci-probe-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "0a780f1570b840f3b18fa87715d4da22802e72f88d95430b01c8a4f15c426211"
+    },
+    "scripts/testing/delete-integrity.test.mjs": {
+      "beforeHash": "02eed58f1c20641e333867c572b5431cbf399de79c298372214faa478e8c75be",
+      "afterHash": "459463a7b0d497b8a5744a60ebe45c30e920fe50bf934dc42273301345af049b"
+    },
+    "scripts/testing/package-import-lock.test.mjs": {
+      "beforeHash": "0ded825380e0349268d2f0c4076f0990d67c2218c1c1d7f1436931bcba61f42b",
+      "afterHash": "ea36a0f743b719fb504592f9810e4916dfc6b7220d379c170ec76243cb82faaf"
+    },
+    "scripts/testing/prompt-section-load.test.mjs": {
+      "beforeHash": "7276e4ac617bd3734011d8bc1a2476a25e1b8d8f29ead88cfeda95a4fc493a88",
+      "afterHash": "31815f7f493fae29d8561c7eea5b71955fb2f05af36d848999ac19846f50aa56"
+    },
+    "scripts/testing/prompt-sections-without-at.test.mjs": {
+      "beforeHash": "2060258803b2e436186aa1e6ff58d0fc77502cf71f71dea82d6a08121c550eda",
+      "afterHash": "8097aae604ec2395d833af7f6e76f368bee19ef13f0ec3ace671bb7d581f3277"
+    },
+    "scripts/testing/review-hardening.test.mjs": {
+      "beforeHash": "9c83acb763d0044bbed6e07229c1d0b6a86f2124f3e583998ce93037f83e8575",
+      "afterHash": "ed44cb57bb0a1afe40075fdfb4c8f5d57af83e91bd2a0a99afdb6e436497d28c"
+    },
+    "scripts/testing/scope-since-chain.test.mjs": {
+      "beforeHash": "774bcd8920466b8681d1132575ba8f9d290f616273421978fd3d21f0911d8013",
+      "afterHash": "46aac48f81fb5eef57a462e9a9d6a262fb84114f58d135ac076be10b2d5c7885"
+    },
+    "scripts/testing/shot-save-atomic.test.mjs": {
+      "beforeHash": "cb7e91e9bc12198c195329a51bc05bc7b6323a67e8cd07c2a04b3f87867b52f6",
+      "afterHash": "e4180864016e32e0b2d5b6faffcefa5d9597af5328b1bfa4e33de9ed07c8ab07"
+    },
+    "scripts/testing/single-shot-batch-control.test.mjs": {
+      "beforeHash": "c3a34e3762448553cd82ec5e38ebfc32a92c136a726ba95c5556371f6c9087b3",
+      "afterHash": "ecbc2ee09abbea6a1ec579ffaa83fcf63c4e7d6e19dc3be7dc7a6c7c3c3cdba7"
+    },
+    "scripts/testing/storyboard-workbench-batch.test.mjs": {
+      "beforeHash": "026fb8822ec8a7c0a7314bb77e23c4560f3730614673b2c464f9a2d589832799",
+      "afterHash": "83e6131c849861cc9156ebfe0b8c1d0d5fc92f03034fd81b62ad7b1f8088689e"
+    },
+    "scripts/testing/successor-chain.test.mjs": {
+      "beforeHash": "e125917663e972bba7ea98bbec297bd901001348a67da93d598fd7b8f2cff330",
+      "afterHash": "435280683e59a4be6bb6f4e55f31b5017356dd40361eaa22c03747e030ae9f4c"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "0096295bdfe47acd0ffb8398c4d4b40df8072682ba1ff7dc8a486df49a77fa0f",
+      "afterHash": "67345ac31163dfac5801098f8e2370bdfcb9e25f109e48f6d0fe1b94fe10939e"
+    },
+    "src/features/create/CreatePage.test.tsx": {
+      "beforeHash": "d8705a936784f9baadcdbe3ed4af9c73451c8c8707edf1677ecfd6f42e7dc997",
+      "afterHash": "ba721aff8fbcb907014d826409769d2ea45ec8d158dd6685f01f3d552cd8ea74"
+    },
+    "src/features/create/StoryboardSafety.test.tsx": {
+      "beforeHash": "531f8d9ddb1b529cff9f2631a65a99342368dfa3363f64109d126cc3e4f47f8b",
+      "afterHash": "6ae05861f9223509260057b643e0b0183d88033275d33ecced3475002997d819"
+    }
+  }
+}

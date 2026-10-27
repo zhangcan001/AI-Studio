@@ -1,3 +1,4 @@
+import { scopeSinceChainScopeSince, scopeSinceChainFixtureFiles, SCOPE_SINCE_CHAIN_BASE } from './scope-since-chain-successor-guard.mjs';
 import { cancelCorrectnessParentReader, cancelCorrectnessScopeSince, cancelCorrectnessFixtureFiles, CANCEL_CORRECTNESS_BASE } from './cancel-correctness-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -113,11 +114,12 @@ export function reviewHardeningScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...REVIEW_HARDENING_CHANGED, ...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF,
-    ...cancelCorrectnessScopeSince(root, CANCEL_CORRECTNESS_BASE),
+    // Jump to the live tip ScopeSince (covers cancel…scope-since-chain) to keep Boundary probes fast.
+    ...scopeSinceChainScopeSince(root, REVIEW_HARDENING_BASE),
   ])].sort();
 }
 export function reviewHardeningFixtureFiles(root) {
-  return [...new Set([...facts(root, REVIEW_HARDENING_BASE).paths, ...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF, ...cancelCorrectnessFixtureFiles(root)])];
+  return [...new Set([...facts(root, REVIEW_HARDENING_BASE).paths, ...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF, ...scopeSinceChainFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
