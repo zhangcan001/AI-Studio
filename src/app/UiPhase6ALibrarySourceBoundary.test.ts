@@ -1,10 +1,7 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
-import {dirname,join,resolve} from 'node:path';
-import {tmpdir} from 'node:os';
-import {uiPhase6AParentReader,phase6AParentFacts,phase6AFixtureFiles,PHASE6A_MANIFEST,PHASE6A_PARENT,PHASE6A_EXISTING} from '../../scripts/ui-phase6a-library-source-successor-guard.mjs';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {uiPhase6AParentReader,phase6AParentFacts,PHASE6A_MANIFEST,PHASE6A_PARENT,PHASE6A_EXISTING} from '../../scripts/ui-phase6a-library-source-successor-guard.mjs';
 import {uiPhase5JParentReader} from '../../scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs';
 import {m3LibraryParentReader} from '../../scripts/m3-library-findability-boundary-guard.mjs';
 import {uiPhase6BParentReader} from '../../scripts/ui-phase6b-library-shot-bind-successor-guard.mjs';
@@ -63,34 +60,29 @@ it('denies forged metadata, proof hashes and weakened Phase6A gates without auth
 }, 90000);
 
 it('refuses edited library source wiring, A08 regression and Runtime package drift in isolated fixture',()=>{
- const workspace=resolve('.'),root=mkdtempSync(join(tmpdir(),'ai-studio-phase6a-library-'));
- try{
-  const git=execFileSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'}).trim();
-  execFileSync('git',['init','--quiet',root]);
-  mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-  writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of phase6AFixtureFiles(workspace)){
-   mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(join(workspace,p),join(root,p));
-  }
-  expect(uiPhase6AParentReader(root).violations).toEqual([]);
+  // Live working-tree mutate — tip-inflated FixtureFiles blow the 90s Boundary budget.
+  expect(uiPhase6AParentReader('.').violations).toEqual([]);
   for(const p of [
    'src-tauri/src/application/product/library_facade/list.rs',
    'src/features/library/LibraryDetail.tsx',
    'src/features/library/LibraryController.ts',
   ]){
-   const file=join(root,p),before=readFileSync(file);
-   writeFileSync(file,Uint8Array.from([...before,10]));
-   expect(uiPhase6AParentReader(root).violations.length,p).toBeGreaterThan(0);
-   writeFileSync(file,before);
+   const before=readFileSync(p);
+   try{
+    writeFileSync(p,Uint8Array.from([...before,10]));
+    expect(uiPhase6AParentReader('.').violations.length,p).toBeGreaterThan(0);
+   }finally{writeFileSync(p,before);}
   }
-  const detail=join(root,'src/features/library/LibraryDetail.tsx');
+  const detail='src/features/library/LibraryDetail.tsx';
   const detailBefore=readFileSync(detail,'utf8');
-  writeFileSync(detail,detailBefore.replace('用于视频创作','用于图片创作'));
-  expect(uiPhase6AParentReader(root).violations.length).toBeGreaterThan(0);
-  writeFileSync(detail,detailBefore);
-  const pkg=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml');
-  const before=readFileSync(pkg);writeFileSync(pkg,Uint8Array.from([...before,10]));
-  expect(uiPhase6AParentReader(root).violations.length).toBeGreaterThan(0);
-  writeFileSync(pkg,before);
- }finally{rmSync(root,{recursive:true,force:true});}
+  try{
+   writeFileSync(detail,detailBefore.replace('用于视频创作','用于图片创作'));
+   expect(uiPhase6AParentReader('.').violations.length).toBeGreaterThan(0);
+  }finally{writeFileSync(detail,detailBefore);}
+  const pkg='src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml';
+  const before=readFileSync(pkg);
+  try{
+   writeFileSync(pkg,Uint8Array.from([...before,10]));
+   expect(uiPhase6AParentReader('.').violations.length).toBeGreaterThan(0);
+  }finally{writeFileSync(pkg,before);}
 }, 90000);

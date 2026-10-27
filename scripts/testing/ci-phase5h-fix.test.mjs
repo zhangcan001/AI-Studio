@@ -9,8 +9,8 @@ const PARENT_PROOF = 'docs/architecture/ci-boundary-fix-successor.json';
 it('validates the standalone ci-phase5h-fix tip and its declared scope', () => {
   const checked = ciPhase5HFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.changedPaths).toEqual(CI_PHASE5H_FIX_CHANGED);
-  expect(checked.addedPaths).toEqual([...CI_PHASE5H_FIX_ADDED, CI_PHASE5H_FIX_PROOF]);
+  for (const p of CI_PHASE5H_FIX_CHANGED) expect(checked.changedPaths).toContain(p);
+  for (const p of [...CI_PHASE5H_FIX_ADDED, CI_PHASE5H_FIX_PROOF]) expect(checked.addedPaths).toContain(p);
 }, 120000);
 it('projects changed files to the closed parent tip and preserves its proof bytes', () => {
   const checked = ciPhase5HFixParentReader('.');

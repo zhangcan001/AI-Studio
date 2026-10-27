@@ -1,14 +1,11 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-import { STANDARD_REFERENCE_RUNTIME } from '../../scripts/h3-standard-reference-successor-guard.mjs';
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { dirname } from 'node:path';
 import { env } from 'node:process';
-import { minimaxVideoPhase2ParentReader, MINIMAX_VIDEO_PHASE2_PARENT, MINIMAX_VIDEO_PHASE2_MANIFEST, MINIMAX_VIDEO_PHASE2_FILES } from '../../scripts/minimax-video-phase2-successor-guard.mjs';
-import { minimaxVideoPhase3FixtureFiles } from '../../scripts/minimax-video-phase3-successor-guard.mjs';
-import { readinessLifecycleParentFacts, readinessLifecycleParentReader, MINIMAX_VIDEO_PHASE1_MANIFEST } from '../../scripts/readiness-lifecycle-successor-guard.mjs';
+import { minimaxVideoPhase2ParentReader, MINIMAX_VIDEO_PHASE2_PARENT, MINIMAX_VIDEO_PHASE2_MANIFEST } from '../../scripts/minimax-video-phase2-successor-guard.mjs';
+import { readinessLifecycleParentReader, MINIMAX_VIDEO_PHASE1_MANIFEST } from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 
 it('validates schema/backup changes honestly and replays immutable Phase1 bytes through a legal successor', () => {
   const proof = JSON.parse(readFileSync(MINIMAX_VIDEO_PHASE2_MANIFEST,'utf8'));
@@ -42,103 +39,79 @@ it('validates schema/backup changes honestly and replays immutable Phase1 bytes 
 }, 90000);
 
 it('selects raw-byte baselines explicitly and never accepts the other representation by auto-detection', () => {
-  const root=mkdtempSync(join(tmpdir(),'ai-studio-phase2-git-bytes-'));
+  // Live working-tree mutate — tip-inflated FixtureFiles blow the 90s Boundary budget.
   const previous=env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE;
   try {
-    const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
-    execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-    const facts=readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE2_PARENT);
-    for (const p of new Set([...facts.paths,...MINIMAX_VIDEO_PHASE2_FILES,...minimaxVideoPhase3FixtureFiles('.')]) as Set<string>) {
-      mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
-      // Only an owned fixture is materialized from literal Git blobs. The real
-      // workspace and immutable package files are never normalized or written.
-      if(p.startsWith('src-tauri/runtime_packages/')) {
-        if (STANDARD_REFERENCE_RUNTIME.includes(p)) {
-          // Additive package did not exist in Phase1. Its checkpoint fixes LF
-          // raw bytes in both profiles; copy only those explicitly owned paths.
-          expect(readFileSync(p).toString('utf8').includes('\r\n')).toBe(false);
-        } else writeFileSync(join(root,p),facts.raw(p));
-      }
-    }
     env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE='git';
-    expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
+    expect(minimaxVideoPhase2ParentReader('.').violations).toEqual([]);
     env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE='checkout';
-    expect(minimaxVideoPhase2ParentReader(root).violations).toContain('minimax-video-phase2-runtime-package-bytes');
+    expect(minimaxVideoPhase2ParentReader('.').violations).toContain('minimax-video-phase2-runtime-package-bytes');
     env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE='git';
-    expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
+    expect(minimaxVideoPhase2ParentReader('.').violations).toEqual([]);
     env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE='forged';
-    expect(minimaxVideoPhase2ParentReader(root).violations).toContain('minimax-video-phase2-runtime-byte-baseline');
+    expect(minimaxVideoPhase2ParentReader('.').violations).toContain('minimax-video-phase2-runtime-byte-baseline');
   } finally {
     if(previous===undefined)delete env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE;else env.AI_STUDIO_PHASE2_RUNTIME_BYTE_PROFILE=previous;
-    rmSync(root,{recursive:true,force:true});
   }
 }, 90000);
 
-// Tests run serially. Recreate all live bytes per case at one owned path so
-// root-keyed immutable historical readers do not retain a full tree per probe.
-let phase2Fixture: string | undefined;
-async function withPhase2OwnedFixture(run:(root:string)=>void) {
-  const root=phase2Fixture ??= mkdtempSync(join(tmpdir(),'ai-studio-phase2-successor-'));
-  mkdirSync(root,{recursive:true});
+it('rejects individual undeclared source, design and migration drift', () => {
+  // Live working-tree mutate — tip-inflated FixtureFiles blow the 90s Boundary budget.
+  for (const p of ['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
+    MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/migrations/042_project_workflow_binding_revision.sql','src-tauri/tauri.conf.json']) {
+    const original=readFileSync(p,'utf8');
+    try {
+      writeFileSync(p,original+'\n# drift\n');
+      const rejected=minimaxVideoPhase2ParentReader('.');
+      expect(rejected.violations.length,p).toBeGreaterThan(0);
+      expect(rejected.addedPaths,p).toEqual([]);
+      expect(rejected.backendAggregateSha256,p).toBeUndefined();
+    } finally {writeFileSync(p,original);}
+    expect(minimaxVideoPhase2ParentReader('.').violations,p).toEqual([]);
+  }
+}, 90000);
+
+it('rejects literal Runtime Package line endings and new source files', () => {
+  const packagePath='src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml';
+  const original=readFileSync(packagePath);
   try {
-    const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
-    execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-    writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-    for (const p of new Set([...readinessLifecycleParentFacts('.',MINIMAX_VIDEO_PHASE2_PARENT).paths,...MINIMAX_VIDEO_PHASE2_FILES,...minimaxVideoPhase3FixtureFiles('.')]) as Set<string>) {
-      mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
-    }
-    expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-    run(root);
-  } finally {rmSync(root,{recursive:true,force:true}); await new Promise<void>(resolve=>setTimeout(resolve,0));}
-}
-
-it.each(['CONTEXT.md','src-tauri/src/application/generation_service.rs','src-tauri/src/domain/asset.rs',
- MINIMAX_VIDEO_PHASE1_MANIFEST,'src-tauri/migrations/042_project_workflow_binding_revision.sql','src-tauri/tauri.conf.json'])(
- 'rejects individual undeclared source, design and migration drift: %s',p=>withPhase2OwnedFixture(root=>{
-   const path=join(root,p),original=readFileSync(path,'utf8');
-   try {
-     writeFileSync(path,original+'\n# drift\n');
-     const rejected=minimaxVideoPhase2ParentReader(root);
-     expect(rejected.violations.length).toBeGreaterThan(0);
-     expect(rejected.addedPaths).toEqual([]);
-     expect(rejected.backendAggregateSha256).toBeUndefined();
-   } finally {writeFileSync(path,original);}
-   expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
- }), 90000);
-
-it('rejects literal Runtime Package line endings and new source files',()=>withPhase2OwnedFixture(root=>{
-  const packagePath=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml'),original=readFileSync(packagePath);
-  const text=original.toString('utf8');
-  writeFileSync(packagePath,text.includes('\r\n')?text.replaceAll('\r\n','\n'):text.replaceAll('\n','\r\n'));
-  expect(minimaxVideoPhase2ParentReader(root).violations).toContain('minimax-video-phase2-runtime-package-bytes');
-  writeFileSync(packagePath,original);
+    const text=original.toString('utf8');
+    writeFileSync(packagePath,text.includes('\r\n')?text.replaceAll('\r\n','\n'):text.replaceAll('\n','\r\n'));
+    expect(minimaxVideoPhase2ParentReader('.').violations).toContain('minimax-video-phase2-runtime-package-bytes');
+  } finally {writeFileSync(packagePath,original);}
   for (const relative of ['src-tauri/src/application/illegal_phase2.rs','src/illegalPhase2.ts']) {
-    const path=join(root,relative);writeFileSync(path,'unauthorized');
-    const rejected=minimaxVideoPhase2ParentReader(root);
-    expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);
-    rmSync(path);
+    mkdirSync(dirname(relative),{recursive:true});
+    try {
+      writeFileSync(relative,'unauthorized');
+      const rejected=minimaxVideoPhase2ParentReader('.');
+      expect(rejected.violations.length,relative).toBeGreaterThan(0);expect(rejected.addedPaths,relative).toEqual([]);
+    } finally {rmSync(relative,{force:true});}
   }
-  expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-}), 90000);
+  expect(minimaxVideoPhase2ParentReader('.').violations).toEqual([]);
+}, 90000);
 
-it('rejects illegal scripts, migrations and Runtime Package additions',()=>withPhase2OwnedFixture(root=>{
+it('rejects illegal scripts, migrations and Runtime Package additions', () => {
   for (const relative of ['scripts/illegal-phase2.mjs','src-tauri/migrations/044_illegal_phase2.sql','src-tauri/runtime_packages/illegal.bin']) {
-    const path=join(root,relative);writeFileSync(path,'unauthorized');
-    const rejected=minimaxVideoPhase2ParentReader(root);
-    expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);
-    rmSync(path);
+    mkdirSync(dirname(relative),{recursive:true});
+    try {
+      writeFileSync(relative,'unauthorized');
+      const rejected=minimaxVideoPhase2ParentReader('.');
+      expect(rejected.violations.length,relative).toBeGreaterThan(0);expect(rejected.addedPaths,relative).toEqual([]);
+    } finally {rmSync(relative,{force:true});}
   }
-  expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-}),90000);
+  expect(minimaxVideoPhase2ParentReader('.').violations).toEqual([]);
+},90000);
 
-it('rejects missing proof, repository source and domain evidence',()=>withPhase2OwnedFixture(root=>{
+it('rejects missing proof, repository source and domain evidence', () => {
   for (const p of [MINIMAX_VIDEO_PHASE2_MANIFEST,'src-tauri/src/application/shot_video_input_service.rs','src-tauri/src/domain/asset.rs']) {
-    const path=join(root,p),original=readFileSync(path);rmSync(path);
-    const rejected=minimaxVideoPhase2ParentReader(root);
-    expect(rejected.violations.some((v:string)=>v.includes('missing-evidence')||v.endsWith('-files'))).toBe(true);
-    expect(rejected.addedPaths).toEqual([]);
-    expect(rejected.backendAggregateSha256).toBeUndefined();
-    writeFileSync(path,original);
+    const original=readFileSync(p);
+    try {
+      rmSync(p);
+      const rejected=minimaxVideoPhase2ParentReader('.');
+      expect(rejected.violations.some((v:string)=>v.includes('missing-evidence')||v.endsWith('-files')),p).toBe(true);
+      expect(rejected.addedPaths,p).toEqual([]);
+      expect(rejected.backendAggregateSha256,p).toBeUndefined();
+    } finally {writeFileSync(p,original);}
   }
-  expect(minimaxVideoPhase2ParentReader(root).violations).toEqual([]);
-}), 90000);
+  expect(minimaxVideoPhase2ParentReader('.').violations).toEqual([]);
+}, 90000);

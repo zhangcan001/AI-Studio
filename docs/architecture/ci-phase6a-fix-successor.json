@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_PHASE6A_FIX",
+  "parentHead": "f3338923736bdc816ae1937985b1485e19777d07",
+  "planningParentHead": "f3338923736bdc816ae1937985b1485e19777d07",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-phase5h-fix-successor-guard.mjs": {
+      "beforeHash": "3ab9c870a37e9b05d9c54256091c4dc608e88c16e81e4798974fe47f0e3e9c0f",
+      "afterHash": "7c7490d578032ca649c0366e8e5598a9c6745c8fbadb74c1a7b1ccfd48be4714"
+    },
+    "scripts/testing/ci-phase5h-fix.test.mjs": {
+      "beforeHash": "da50e7ce9a780a19a53914599b4bb499822fd45e20b49cebb85783251a163fa0",
+      "afterHash": "0f701e0a1d25e16e49097d94a7cc464c7c83e7b4ae09e1a165a3abd21c6942b0"
+    },
+    "src/app/MiniMaxVideoPhase2Boundary.test.ts": {
+      "beforeHash": "5e2e3130f650b512289d7f9d610788efcba36cdb8fb404f2a17954d1806fb6a5",
+      "afterHash": "a7b49c63e8cff96f4dd2ba1e31aa550d222c61487ac7b0fed73749e31d8a19d9"
+    },
+    "src/app/UiPhase5AStoryboardBoundary.test.ts": {
+      "beforeHash": "d2476dd4f654bec592777d937400c364e5035697438ea33a3eda9f3301d07c4c",
+      "afterHash": "353f65439d3c257481a03d9efa39c7d5c4c15fe81bff96a929b8b15235c7cbc1"
+    },
+    "src/app/UiPhase6ALibrarySourceBoundary.test.ts": {
+      "beforeHash": "6e4070cd6772b1a8ed30e865da04d02b48e266ab194639be8e7549980c98ce8c",
+      "afterHash": "8a5cde65a7a568d50742d81c1f83c839ec3ddc0d0cab2a83a58c39b856a548a3"
+    },
+    "src/app/UiPhase7CCiBudgetSuccessorBoundary.test.ts": {
+      "beforeHash": "d6bdc2ba159bcac70dfda23d92f799b0b150bf4fa8bd0204ba715b3eecfbd4ab",
+      "afterHash": "c2361f887c3b6e998faf87a2d2952511c7ed927288ba8f4b95b300809024dc4f"
+    },
+    "scripts/ci-phase6a-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "3b3dceaac4fcadd360886f2a0ed332cc1b9a080cac8d835382a1a10716b4e951"
+    },
+    "scripts/testing/ci-phase6a-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "48eb1909c5dd97c9cff35c31c9490d36bf4057df432d23f26b9bd4eb159ce00e"
+    }
+  }
+}

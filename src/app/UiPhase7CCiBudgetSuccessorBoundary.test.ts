@@ -17,7 +17,7 @@ it("authorizes the frontend CI budget repair while projecting frozen historical 
   expect(budgets.length).toBeGreaterThanOrEqual(tests.length);
   expect(readiness).not.toContain("360000");
   const ciRepair = readFileSync("src/app/UiPhase5CiRepairBoundary.test.ts", "utf8");
-  expect(ciRepair).toMatch(/keeps live freshness for frozen proofs, Runtime raw bytes and manifest deletion[\s\S]*?\}\),\s*300000\);/);
+  expect(ciRepair).toMatch(/keeps live freshness for frozen proofs, Runtime raw bytes and manifest deletion[\s\S]*?\},\s*90000\);/);
   expect(reader.read("src/app/ReadinessLifecycleBoundary.test.ts")).toBe(
     execFileSync("git", ["show", `${PHASE7C_PARENT}:src/app/ReadinessLifecycleBoundary.test.ts`], { encoding: "utf8" }).replaceAll("\r\n", "\n"),
   );
