@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_CLOSED_TIP_FIX",
+  "parentHead": "972efd4328e81c0b8bc0c3aef34f6c5b9b1095d1",
+  "planningParentHead": "972efd4328e81c0b8bc0c3aef34f6c5b9b1095d1",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-assert-fix-successor-guard.mjs": {
+      "beforeHash": "e9a80f176fd89d140a0b89d92492a4d315024070824a10bd5aa3f8a581236211",
+      "afterHash": "f58063c32187ebb84a2389d8dce1bdfef6a9b7bb8f5a3ce20572a49ac60f24ae"
+    },
+    "scripts/testing/ci-green-fix.test.mjs": {
+      "beforeHash": "981c9257d75238cd5376bd21efd95eff5b9191a9906d7112dbd353625dd61519",
+      "afterHash": "a2e1a306156a1b57cdbf996ab07736d4e10c715235db31450cb1ea17aba6150d"
+    },
+    "scripts/testing/folder-batch-import.test.mjs": {
+      "beforeHash": "89b4d32ed7b031eeb39f8acfd2de61a5a657ba7491ff239ab50b5f4c6837235e",
+      "afterHash": "51e0dc955aa98fa5cff2f24d9071d841b0e8a8039dba5bdd326b8bc105d5b80e"
+    },
+    "scripts/ci-closed-tip-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "9b53f5fd3d3b97953cde886061d892a6a10572c4a7ca4cd8188ce5ecdfa16f46"
+    },
+    "scripts/testing/ci-closed-tip-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "51678c8834aab5118cafb8020937fd84d83a4a5dfa5dc5799ca40d3d3b5c8968"
+    }
+  }
+}

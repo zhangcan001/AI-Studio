@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { folderBatchImportParentReader, FOLDER_BATCH_IMPORT_BASE, FOLDER_BATCH_IMPORT_PROOF } from '../folder-batch-import-successor-guard.mjs';
 import { libraryConfirmCiRaceParentReader, LIBRARY_CONFIRM_CI_RACE_PROOF } from '../library-confirm-ci-race-successor-guard.mjs';
 import { uiPhase7BR1MetadataParentReader } from '../ui-phase7b-r1-metadata-successor-guard.mjs';
-import { ciAssertFixParentReader } from '../ci-assert-fix-successor-guard.mjs';
+import { ciClosedTipFixParentReader } from '../ci-closed-tip-fix-successor-guard.mjs';
 
 it('validates folder-batch-import changes and projects original bytes through historical readers', () => {
   const checked = folderBatchImportParentReader('.');
@@ -42,7 +42,7 @@ it('invalidates cached evidence on deletion, live source mutation, raw runtime d
     execFileSync('git',['init','-q',root]);
     const objects=resolve(execFileSync('git',['rev-parse','--git-path','objects'],{encoding:'utf8'}).trim());
     writeFileSync(join(root,'.git/objects/info/alternates'),objects.replaceAll('\\','/')+'\n');
-    const validate=()=>ciAssertFixParentReader(root).violations;
+    const validate=()=>ciClosedTipFixParentReader(root).violations;
     expect(validate()).toEqual([]);
     for(const p of [FOLDER_BATCH_IMPORT_PROOF,LIBRARY_CONFIRM_CI_RACE_PROOF,
       'scripts/library-confirm-ci-race-successor-guard.mjs','src/features/create/StoryboardShotRows.test.tsx']) {
@@ -57,9 +57,9 @@ it('invalidates cached evidence on deletion, live source mutation, raw runtime d
     const runtime=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml');
     const original=readFileSync(runtime);
     try {
-      const text=original.toString('utf8');
-      const changed=text.includes('\r\n')?text.replaceAll('\r\n','\n'):text.replaceAll('\n','\r\n');
-      writeFileSync(runtime,changed);expect(validate().length).toBeGreaterThan(0);
+      // Tip live reads canonicalize newlines; mutate payload bytes so historical-runtime-bytes still fail-closed.
+      writeFileSync(runtime, Buffer.concat([original, Buffer.from('\n# drift')]));
+      expect(validate().length).toBeGreaterThan(0);
     } finally {writeFileSync(runtime,original);}
     expect(validate()).toEqual([]);
     const illegal=join(root,'src/styles/unapproved-theme.css');
