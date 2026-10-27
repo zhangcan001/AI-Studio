@@ -24,7 +24,11 @@ const image = option("image-opaque", [prompt, negative, ...params.filter(f => f.
 const videos = [option("t2v-opaque", [prompt, ...params]), option("i2v-opaque", [prompt, ...params, { type: "image", key: "first_frame", label: "First frame", required: true }]), option("fl-opaque", [prompt, ...params, { type: "image", key: "first_frame", label: "First", required: true }, { type: "image", key: "last_frame", label: "Last", required: true }]), option("ref-opaque", [prompt, ...params, { type: "video", key: "reference_video", label: "Reference video", required: true }])];
 const inputs: CreationAsset[] = [{ id: "img1", name: "首帧素材", mediaKind: "image", selected: false }, { id: "img2", name: "尾帧素材", mediaKind: "image", selected: false }, { id: "vid1", name: "参考视频素材", mediaKind: "video", selected: false }];
 let candidates: CreationAsset[];
-function context(stage: "image" | "video", shotId: string | null = "shot1"): CreationContext { return { projectId: "project", projectName: "Project", stage, shots: [{ id: "shot1", name: "镜头一", ordinal: 0 }, { id: "shot2", name: "镜头二", ordinal: 1 }], selectedShot: shotId ? { summary: { id: shotId, name: "镜头", ordinal: 0 }, prompt: `${stage} prompt`, selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null } : null, candidates: [...candidates], mediaInputs: inputs, promptChoices: [{ promptId: "prm-choice", promptVersionId: "prv-choice", name: "我的提示词", text: "chosen prompt", version: 2 }] }; }
+function context(stage: "image" | "video", shotId: string | null = "shot1"): CreationContext {
+  const shots = [{ id: "shot1", name: "镜头一", ordinal: 0 }, { id: "shot2", name: "镜头二", ordinal: 1 }];
+  const summary = shotId ? shots.find(s => s.id === shotId) ?? { id: shotId, name: "镜头", ordinal: 0 } : null;
+  return { projectId: "project", projectName: "Project", stage, shots, selectedShot: summary ? { summary, prompt: `${stage} prompt`, selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null } : null, candidates: [...candidates], mediaInputs: inputs, promptChoices: [{ promptId: "prm-choice", promptVersionId: "prv-choice", name: "我的提示词", text: "chosen prompt", version: 2 }] };
+}
 function workbenchFrom(stage: "image" | "video" = "video", limit = 60) {
   const base = context(stage, null);
   const all = base.shots.map(s => {

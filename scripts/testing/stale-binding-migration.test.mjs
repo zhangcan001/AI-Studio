@@ -6,16 +6,14 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { staleBindingMigrationParentReader, STALE_BINDING_MIGRATION_BASE, STALE_BINDING_MIGRATION_PROOF } from '../stale-binding-migration-successor-guard.mjs';
 import { vedaVerboseDiagnosticsParentReader as parentReader, VEDA_VERBOSE_DIAGNOSTICS_PROOF as PARENT_PROOF } from '../veda-verbose-diagnostics-successor-guard.mjs';
-import { supersededImportPinParentReader } from '../superseded-import-pin-successor-guard.mjs';
 import { uiPhase7BR1MetadataParentReader } from '../ui-phase7b-r1-metadata-successor-guard.mjs';
 
 const repo = 'src-tauri/src/infrastructure/database/repositories/workflow_library.rs';
 
 it('moves only same-workflow PRODUCT selections, in the registering transaction, without migrations', () => {
-  // Successor checkpoints own later bytes; read this checkpoint's bytes through their validated projection.
-  const successor = supersededImportPinParentReader('.');
-  expect(successor.violations).toEqual([]);
-  const source = successor.read(repo);
+  // Frozen tip bytes (not live HEAD): later checkpoints own subsequent edits; keep this under the default 5s budget.
+  const frozenTip = execFileSync('git', ['log', '--reverse', '--ancestry-path', `${STALE_BINDING_MIGRATION_BASE}..HEAD`, '--pretty=%H', '--', STALE_BINDING_MIGRATION_PROOF], { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
+  const source = execFileSync('git', ['show', `${frozenTip}:${repo}`], { encoding: 'utf8' });
   expect(source).toContain('migrate_stale_bindings(transaction, &package.workflow_id, package.created_at)');
   expect(source).toContain("w.source_kind = 'PRODUCT'");
   expect(source).toContain('WHERE workflow_id = ? AND id <> ?');

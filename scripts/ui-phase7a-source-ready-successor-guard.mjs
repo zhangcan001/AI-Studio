@@ -192,7 +192,7 @@ function files(root,dir) {
     return entry.isDirectory()?files(root,p):[p];
   }).sort();
 }
-export const phase7AFixtureFiles = root => [...new Set([...phase7AParentFacts(root).paths,...PHASE7A_FILES,...uiPhase7BParentReader(root).addedPaths,...phase7BHydrationFixtureFiles(root)])];
+export const phase7AFixtureFiles = root => [...new Set([...PHASE7A_FILES,...uiPhase7BParentReader(root).addedPaths,...phase7BHydrationFixtureFiles(root)])];
 function validate(root,override) {
   const successor=uiPhase7BParentReader(root);
   const violations=[...successor.violations],fail=name=>violations.push('ui-phase7a-source-ready-'+name);
