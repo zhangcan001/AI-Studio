@@ -1,12 +1,8 @@
-import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
-import {minimaxVideoPhase2FixtureFiles,} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
-import {tmpdir} from 'node:os';
-import {join,dirname} from 'node:path';
-import {readinessLifecycleParentReader,readinessLifecycleParentFacts,READINESS_LIFECYCLE_PARENT,postRunReadinessParentReader,POST_RUN_READINESS_PARENT} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
+import {readinessLifecycleParentReader,READINESS_LIFECYCLE_PARENT,postRunReadinessParentReader,POST_RUN_READINESS_PARENT} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
 const manifest='docs/architecture/readiness-lifecycle-fix.json';
 const postRunManifest='docs/architecture/readiness-post-run-fix.json';
 
@@ -55,80 +51,62 @@ it('accepts only the exact-parent post-run readiness repair without rewriting ol
  }
 }, 90000);
 
-async function withPostRunFixture(run:(root:string)=>void|Promise<void>){
- const root=mkdtempSync(join(tmpdir(),'ai-studio-post-run-boundary-'));
- try {
-  const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
-  execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-  writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of new Set<string>([...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...readinessLifecycleParentFacts('.',POST_RUN_READINESS_PARENT).paths,postRunManifest])){
-   mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
+function expectDriftDenied(reader:(root:string)=> {violations:string[];addedPaths:string[]},relative:string){
+ const original=readFileSync(relative);
+ try{
+  writeFileSync(relative, original.toString()+'\n# drift\n');
+  const denied=reader('.');
+  expect(denied.violations.length).toBeGreaterThan(0);
+  expect(denied.addedPaths).toEqual([]);
+ }finally{writeFileSync(relative,original);}
+ expect(reader('.').violations).toEqual([]);
+}
+
+it('denies post-run drift in controller, readiness test and previous readiness proof',()=>{
+  // Live working-tree mutate — Phase2 FixtureFiles grew past 5k and blows the 90s Boundary budget.
+  const invalidOld=JSON.parse(readFileSync(manifest,'utf8'));
+  const controller='src/features/create/CreateController.ts';invalidOld.paths[controller].afterHash='0'.repeat(64);
+  const deniedOld=readinessLifecycleParentReader('.',invalidOld);
+  expect(deniedOld.violations.length).toBeGreaterThan(0);expect(deniedOld.addedPaths).toEqual([]);
+  expect(deniedOld.read(controller)).toBe(readFileSync(controller,'utf8').replaceAll('\r\n','\n'));
+  for(const p of ['src/features/create/CreateController.ts','src/features/create/CreateReadinessLifecycle.test.tsx',manifest]){
+   expectDriftDenied(postRunReadinessParentReader,p);
   }
-  expect(postRunReadinessParentReader(root).violations).toEqual([]);
-  await run(root);
- }finally{rmSync(root,{recursive:true,force:true}); await new Promise<void>(r=>setTimeout(r,0));}
-}
+},90000);
 
-async function withReadinessFixture(run:(root:string)=>void|Promise<void>){
- const root=mkdtempSync(join(tmpdir(),'ai-studio-readiness-boundary-'));
- try {
-  const git=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
-  execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-  writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  const proof=JSON.parse(readFileSync(manifest,'utf8'));
-  for(const p of new Set([...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.'),...readinessLifecycleParentFacts('.').paths,...Object.keys(proof.paths),manifest,postRunManifest]) as Set<string>){
-   mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));
-  }
-  expect(readinessLifecycleParentReader(root).violations).toEqual([]);
-  await run(root);
- }finally{rmSync(root,{recursive:true,force:true}); await new Promise<void>(r=>setTimeout(r,0));}
-}
-
-async function expectDriftDenied(root:string,reader:(root:string)=> {violations:string[];addedPaths:string[]},relative:string){
- const path=join(root,relative),original=readFileSync(path,'utf8');
- writeFileSync(path,original+'\n# drift\n');
- const denied=reader(root);
- expect(denied.violations.length).toBeGreaterThan(0);
- expect(denied.addedPaths).toEqual([]);
- writeFileSync(path,original);
- expect(reader(root).violations).toEqual([]);
- await new Promise<void>(r=>setTimeout(r,0));
-}
-
-it('denies post-run drift in controller, readiness test and previous readiness proof',()=>withPostRunFixture(async root=>{
- // A rejected old proof must not leak the accepted successor's parent projection.
- const invalidOld=JSON.parse(readFileSync(join(root,manifest),'utf8'));
- const controller='src/features/create/CreateController.ts';invalidOld.paths[controller].afterHash='0'.repeat(64);
- const deniedOld=readinessLifecycleParentReader(root,invalidOld);
- expect(deniedOld.violations.length).toBeGreaterThan(0);expect(deniedOld.addedPaths).toEqual([]);
- expect(deniedOld.read(controller)).toBe(readFileSync(join(root,controller),'utf8').replaceAll('\r\n','\n'));
- for(const p of ['src/features/create/CreateController.ts','src/features/create/CreateReadinessLifecycle.test.tsx',manifest]){
-  await expectDriftDenied(root,postRunReadinessParentReader,p);
- }
-}),90000);
-
-it('denies post-run drift in runtime packages, frozen configs, missing evidence and illegal additions',()=>withPostRunFixture(async root=>{
+it('denies post-run drift in runtime packages, frozen configs, missing evidence and illegal additions',()=>{
  for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
-  await expectDriftDenied(root,postRunReadinessParentReader,p);
+  expectDriftDenied(postRunReadinessParentReader,p);
  }
- const path=join(root,postRunManifest),original=readFileSync(path,'utf8');rmSync(path);
- expect(postRunReadinessParentReader(root).violations).toContain('post-run-readiness-missing-evidence');
- writeFileSync(path,original);expect(postRunReadinessParentReader(root).violations).toEqual([]);
- writeFileSync(join(root,'src/unreviewed.ts'),'// unreviewed');
- expect(postRunReadinessParentReader(root).violations).toContain('minimax-video-phase2-frontend-files');
-}),90000);
+ const original=readFileSync(postRunManifest);
+ try{
+  rmSync(postRunManifest);
+  expect(postRunReadinessParentReader('.').violations).toContain('post-run-readiness-missing-evidence');
+ }finally{writeFileSync(postRunManifest,original);}
+ expect(postRunReadinessParentReader('.').violations).toEqual([]);
+ const extra='src/unreviewed.ts';
+ try{
+  writeFileSync(extra,'// unreviewed');
+  expect(postRunReadinessParentReader('.').violations).toContain('minimax-video-phase2-frontend-files');
+ }finally{rmSync(extra);}
+ expect(postRunReadinessParentReader('.').violations).toEqual([]);
+},90000);
 
-it('denies readiness drift in repaired sources, untouched backend and historical proofs',()=>withReadinessFixture(async root=>{
+it('denies readiness drift in repaired sources, untouched backend and historical proofs',()=>{
  for(const p of ['src/features/create/CreateController.ts','src-tauri/src/domain/asset.rs',
   'docs/architecture/h3-release-closeout-phase1.json']){
-  await expectDriftDenied(root,readinessLifecycleParentReader,p);
+  expectDriftDenied(readinessLifecycleParentReader,p);
  }
-}),90000);
+},90000);
 
-it('denies readiness drift in packages, frozen configs and illegal backend additions',()=>withReadinessFixture(async root=>{
+it('denies readiness drift in packages, frozen configs and illegal backend additions',()=>{
  for(const p of ['src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml','src-tauri/tauri.conf.json']){
-  await expectDriftDenied(root,readinessLifecycleParentReader,p);
+  expectDriftDenied(readinessLifecycleParentReader,p);
  }
- writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// unreviewed');
- expect(readinessLifecycleParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
-}),90000);
+ const extra='src-tauri/src/unreviewed.rs';
+ try{
+  writeFileSync(extra,'// unreviewed');
+  expect(readinessLifecycleParentReader('.').violations).toContain('minimax-video-phase2-backend-files');
+ }finally{rmSync(extra);}
+ expect(readinessLifecycleParentReader('.').violations).toEqual([]);
+},90000);

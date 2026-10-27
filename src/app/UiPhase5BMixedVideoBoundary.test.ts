@@ -1,9 +1,8 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { uiPhase5BParentReader, PHASE5B_MANIFEST, PHASE5B_PARENT, PHASE5B_EXISTING, phase5BParentFacts, phase5BFixtureFiles } from '../../scripts/ui-phase5b-mixed-video-successor-guard.mjs';
+import { readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { uiPhase5BParentReader, PHASE5B_MANIFEST, PHASE5B_PARENT, PHASE5B_EXISTING, phase5BParentFacts } from '../../scripts/ui-phase5b-mixed-video-successor-guard.mjs';
 import { uiPhase5AParentReader } from '../../scripts/ui-phase5a-storyboard-successor-guard.mjs';
 
 it('validates Phase5B live changes before projecting the exact frozen CI checkpoint and Phase5A history', () => {
@@ -33,54 +32,51 @@ it('rejects forged parent, scope, blob verification and freshness declarations w
   }
 }, 90000);
 
-function withPhase5BFixture(run: (root: string, paths: string[]) => void) {
-  const workspace = resolve('.'), root = mkdtempSync(join(workspace, '.codex-phase5b-probe-'));
-  try {
-    const git = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim();
-    execFileSync('git', ['init', '--quiet', root]); mkdirSync(join(root, '.git/objects/info'), { recursive: true });
-    writeFileSync(join(root, '.git/objects/info/alternates'), join(git, 'objects') + '\n');
-    const paths: string[] = phase5BFixtureFiles(workspace);
-    for (const p of paths) { mkdirSync(dirname(join(root, p)), { recursive: true }); copyFileSync(join(workspace, p), join(root, p)); }
-    expect(uiPhase5BParentReader(root).violations).toEqual([]);
-    run(root, paths);
-  } finally {
-    if ((!root.startsWith(workspace + '/') && !root.startsWith(workspace + '\\')) || !root.includes('.codex-phase5b-probe-')) throw Error('Unsafe fixture cleanup');
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-
-it('keeps live freshness for source and shell bytes with parent fail-closed checked once', () => withPhase5BFixture((root) => {
+it('keeps live freshness for source and shell bytes with parent fail-closed checked once', () => {
+  // Live working-tree mutate — tip-inflated FixtureFiles blow the 90s Boundary budget.
   let parentChecked = false;
   for (const p of ['src-tauri/src/application/production_preparation_service.rs', 'src/app/ShellHost.tsx']) {
-    const path = join(root, p), bytes = readFileSync(path);
-    writeFileSync(path, bytes.toString() + '\n');
-    const denied = uiPhase5BParentReader(root);
-    expect(denied.violations.length, p).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
-    if (!parentChecked) { expect(uiPhase5AParentReader(root).violations.length, p).toBeGreaterThan(0); parentChecked = true; }
-    writeFileSync(path, bytes); expect(uiPhase5BParentReader(root).violations, p).toEqual([]);
+    const bytes = readFileSync(p);
+    try {
+      writeFileSync(p, bytes.toString() + '\n');
+      const denied = uiPhase5BParentReader('.');
+      expect(denied.violations.length, p).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
+      if (!parentChecked) { expect(uiPhase5AParentReader('.').violations.length, p).toBeGreaterThan(0); parentChecked = true; }
+    } finally { writeFileSync(p, bytes); }
+    expect(uiPhase5BParentReader('.').violations, p).toEqual([]);
   }
-}), 90000);
+}, 90000);
 
-it('keeps live freshness for frozen proofs, Runtime raw bytes and manifest deletion', () => withPhase5BFixture((root, paths) => {
-  const runtime = paths.find(p => p.startsWith('src-tauri/runtime_packages/') && p.endsWith('.json'))!;
+it('keeps live freshness for frozen proofs, Runtime raw bytes and manifest deletion', () => {
+  const runtime = readdirSync('src-tauri/runtime_packages', { withFileTypes: true })
+    .filter((e: { isDirectory(): boolean; name: string }) => e.isDirectory())
+    .map((e: { name: string }) => join('src-tauri/runtime_packages', e.name, 'workflow_api.json'))
+    .find((p: string) => { try { readFileSync(p); return true; } catch { return false; } })!;
   let parentChecked = false;
   for (const p of ['docs/architecture/ui-phase5a-storyboard-successor.json', 'docs/architecture/ui-phase5-ci-repair-successor.json', PHASE5B_MANIFEST, runtime]) {
-    const path = join(root, p), bytes = readFileSync(path);
-    writeFileSync(path, bytes.toString() + '\n');
-    const denied = uiPhase5BParentReader(root);
-    expect(denied.violations.length, p).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
-    if (!parentChecked) { expect(uiPhase5AParentReader(root).violations.length, p).toBeGreaterThan(0); parentChecked = true; }
-    writeFileSync(path, bytes); expect(uiPhase5BParentReader(root).violations, p).toEqual([]);
+    const bytes = readFileSync(p);
+    try {
+      writeFileSync(p, bytes.toString() + '\n');
+      const denied = uiPhase5BParentReader('.');
+      expect(denied.violations.length, p).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
+      if (!parentChecked) { expect(uiPhase5AParentReader('.').violations.length, p).toBeGreaterThan(0); parentChecked = true; }
+    } finally { writeFileSync(p, bytes); }
+    expect(uiPhase5BParentReader('.').violations, p).toEqual([]);
   }
-  const path = join(root, PHASE5B_MANIFEST), bytes = readFileSync(path);
-  rmSync(path); expect(uiPhase5BParentReader(root).violations.length).toBeGreaterThan(0);
-  writeFileSync(path, bytes); expect(uiPhase5BParentReader(root).violations).toEqual([]);
-}), 90000);
+  const bytes = readFileSync(PHASE5B_MANIFEST);
+  try {
+    rmSync(PHASE5B_MANIFEST); expect(uiPhase5BParentReader('.').violations.length).toBeGreaterThan(0);
+  } finally { writeFileSync(PHASE5B_MANIFEST, bytes); }
+  expect(uiPhase5BParentReader('.').violations).toEqual([]);
+}, 90000);
 
-it('keeps live freshness for illegal additions across owned inventories', () => withPhase5BFixture((root) => {
+it('keeps live freshness for illegal additions across owned inventories', () => {
   for (const [dir, name] of [['src', 'IllegalOwner.js'], ['.github', 'illegal.yml'], ['docs', 'IllegalOwner.js'], ['src-tauri/examples', 'IllegalOwner.rs']]) {
-    const extra = join(root, dir, name); writeFileSync(extra, 'unreviewed bytes');
-    expect(uiPhase5BParentReader(root).violations).toContain(`ui-phase5b-mixed-video-inventory:${dir}`);
-    rmSync(extra); expect(uiPhase5BParentReader(root).violations).toEqual([]);
+    const extra = join(dir, name);
+    try {
+      writeFileSync(extra, 'unreviewed bytes');
+      expect(uiPhase5BParentReader('.').violations).toContain(`ui-phase5b-mixed-video-inventory:${dir}`);
+    } finally { rmSync(extra); }
+    expect(uiPhase5BParentReader('.').violations).toEqual([]);
   }
-}), 90000);
+}, 90000);
