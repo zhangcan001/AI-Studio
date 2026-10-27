@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_H3_BUDGET_FIX",
+  "parentHead": "804c1352ae0bc77f307be6f7b1a76cff138b3239",
+  "planningParentHead": "804c1352ae0bc77f307be6f7b1a76cff138b3239",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-stable-fix-successor-guard.mjs": {
+      "beforeHash": "f784f44231b232acb5e931691ea6608c07b3d47660289fe536a7b18bd0822574",
+      "afterHash": "789b2c0b976de9529f7cd7ce4c2e8f61f02def7dd6fc1cecb796a3a359151643"
+    },
+    "src/app/H3GenerationRepairBoundary.test.ts": {
+      "beforeHash": "03a2f455167a01a226d64ed165c493596b4506a1c7be7a28280fbe5fb0ea2d1c",
+      "afterHash": "505bf1a45926330e332736d1a79beb9714a211085611505acf476864eb9ea0b6"
+    },
+    "scripts/ci-h3-budget-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "e3c27ffc9629c29da36b7317167eaff395583f840a3bbaf22fa040598ef5bc81"
+    },
+    "scripts/testing/ci-h3-budget-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "d20b727edb3f0b07d144d67b645c72daed7c3e5f3d47580c60c2eb92053f275d"
+    }
+  }
+}

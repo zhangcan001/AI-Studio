@@ -1,12 +1,10 @@
-import {MINIMAX_VIDEO_PHASE1_FILES} from '../../scripts/readiness-lifecycle-successor-guard.mjs';
-import {minimaxVideoPhase2FixtureFiles,} from '../../scripts/minimax-video-phase2-successor-guard.mjs';
 // @vitest-environment node
 import {expect,it} from 'vitest';
 import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
-import {h3RepairParentReader,H3_REPAIR_PARENT,h3ParentFacts} from '../../scripts/h3-generation-repair-successor-guard.mjs';
+import {h3RepairParentReader,H3_REPAIR_PARENT} from '../../scripts/h3-generation-repair-successor-guard.mjs';
 const manifest='docs/architecture/h3-generation-repair-successor.json';
 it('validates the exact runtime repair before projecting immutable publication history',()=>{
  const accepted=h3RepairParentReader('.');expect(accepted.violations).toEqual([]);
@@ -22,29 +20,19 @@ it('validates the exact runtime repair before projecting immutable publication h
   expect(rejected.read(p)).toBe(readFileSync(p,'utf8').replaceAll('\r\n','\n'));}
 }, 90000);
 it('rejects fresh live drift and extra files without hiding it behind cached evidence',()=>{
- const root=mkdtempSync(join(tmpdir(),'ai-studio-h3-repair-'));
- try{
-  const gitDir=execFileSync('git',['rev-parse','--absolute-git-dir'],{encoding:'utf8'}).trim();
-  execFileSync('git',['init','--quiet',root]);mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-  writeFileSync(join(root,'.git/objects/info/alternates'),join(gitDir,'objects')+'\n');
-  const proof=JSON.parse(readFileSync(manifest,'utf8'));
-  const closeout=JSON.parse(readFileSync('docs/architecture/h3-release-closeout-phase1.json','utf8'));
-  const packages=execFileSync('git',['ls-files','src-tauri/runtime_packages'],{encoding:'utf8'}).trim().split(/\r?\n/);
-  const paths=[...packages,...h3ParentFacts('.').paths,...Object.keys(proof.paths),manifest,...Object.keys(closeout.paths),'docs/architecture/h3-release-closeout-phase1.json'];
-  const queue=JSON.parse(readFileSync('docs/architecture/queue-lifecycle-repair.json','utf8'));
-  paths.push(...Object.keys(queue.paths),'docs/architecture/queue-lifecycle-repair.json');
-  const readiness=JSON.parse(readFileSync('docs/architecture/readiness-lifecycle-fix.json','utf8'));
-  paths.push(...Object.keys(readiness.paths),'docs/architecture/readiness-lifecycle-fix.json','docs/architecture/readiness-post-run-fix.json');
-  for(const p of new Set([...paths,...MINIMAX_VIDEO_PHASE1_FILES,...minimaxVideoPhase2FixtureFiles('.')]) as Set<string>){mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(p,join(root,p));}
-  expect(h3RepairParentReader(root).violations).toEqual([]);
-  for(const p of ['src/features/create/CreateInputs.tsx','src-tauri/src/domain/asset.rs','src-tauri/tauri.conf.json']){
-   const path=join(root,p),original=readFileSync(path,'utf8');writeFileSync(path,original+'\n// unauthorized drift\n');
-   const rejected=h3RepairParentReader(root);expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);
-   writeFileSync(path,original);expect(h3RepairParentReader(root).violations).toEqual([]);
-  }
-  writeFileSync(join(root,'src-tauri/src/unreviewed.rs'),'// extra source');
-  expect(h3RepairParentReader(root).violations).toContain('minimax-video-phase2-backend-files');
- }finally{rmSync(root,{recursive:true,force:true});}
+  // Live working-tree mutate keeps fail-closed drift/illegal asserts without copying the tip-inflated Phase2 fixture set.
+  const p='src/features/create/CreateInputs.tsx', original=readFileSync(p);
+  try{
+   writeFileSync(p,Buffer.concat([original, Buffer.from('\n// unauthorized drift\n')]));
+   const rejected=h3RepairParentReader('.');expect(rejected.violations.length).toBeGreaterThan(0);expect(rejected.addedPaths).toEqual([]);
+  }finally{writeFileSync(p,original);}
+  expect(h3RepairParentReader('.').violations).toEqual([]);
+  const extra='src-tauri/src/unreviewed.rs';
+  try{
+   writeFileSync(extra,'// extra source');
+   expect(h3RepairParentReader('.').violations).toContain('minimax-video-phase2-backend-files');
+  }finally{rmSync(extra);}
+  expect(h3RepairParentReader('.').violations).toEqual([]);
 }, 90000);
 
 import {m2ReuseParentReader} from '../../scripts/m2-create-library-reuse-boundary-guard.mjs';
