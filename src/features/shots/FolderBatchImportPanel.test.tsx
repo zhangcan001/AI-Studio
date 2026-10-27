@@ -98,6 +98,7 @@ it("bounds committed Shot controls to 50 and preserves exact IDs when paging", a
   const openShot=vi.fn();render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenShot={openShot}/>);
   await pick();fireEvent.click(screen.getByRole("checkbox",{name:"创建待启动批次"}));fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");
   expect(screen.getAllByRole("button",{name:/编辑导入镜头/})).toHaveLength(50);fireEvent.click(screen.getByRole("button",{name:"下一组镜头"}));
+  await waitFor(() => expect(screen.getByRole("button",{name:"编辑导入镜头 51"})).toBeTruthy());
   fireEvent.click(screen.getByRole("button",{name:"编辑导入镜头 51"}));expect(openShot).toHaveBeenCalledExactlyOnceWith("shot-50");
   expect(screen.getAllByRole("button",{name:/编辑导入镜头/})).toHaveLength(50);
 });

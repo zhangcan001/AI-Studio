@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_STABLE_FIX",
+  "parentHead": "bc2bccb917566196ef6158b602e81c9f27e801ff",
+  "planningParentHead": "bc2bccb917566196ef6158b602e81c9f27e801ff",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-closed-tip-fix-successor-guard.mjs": {
+      "beforeHash": "9b53f5fd3d3b97953cde886061d892a6a10572c4a7ca4cd8188ce5ecdfa16f46",
+      "afterHash": "dbd6d9cc521b74a5e5519c9621ed6daa0c5daf8fe1ab04e00d7b477838757576"
+    },
+    "scripts/testing/ci-green-fix.test.mjs": {
+      "beforeHash": "a2e1a306156a1b57cdbf996ab07736d4e10c715235db31450cb1ea17aba6150d",
+      "afterHash": "d146fad3bca0cfd77944392cf8eb5e6983e5d396ae59a5433205303aa58f7287"
+    },
+    "src/features/shots/FolderBatchImportPanel.test.tsx": {
+      "beforeHash": "7d2180c0d18566bcf11429822136bcd3d1b1cf87ab62c63e9f6e6924af1eaab2",
+      "afterHash": "c7fc7728a79bebdd36676c25a88b980c654d3e7972ac6b3dea180985629ec7c5"
+    },
+    "scripts/ci-stable-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "f784f44231b232acb5e931691ea6608c07b3d47660289fe536a7b18bd0822574"
+    },
+    "scripts/testing/ci-stable-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "f0ccfb622142d8eee6846fed5eebb1a2b7893ecdbce6d13b2f427b0fc82e86e9"
+    }
+  }
+}

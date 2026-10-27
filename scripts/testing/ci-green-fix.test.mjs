@@ -23,7 +23,7 @@ it('projects changed files to the closed parent tip and preserves its proof byte
 }, 120000);
 it('keeps CreatePage workbench shot names and real Phase5C live-mutate freshness without raising timeouts', () => {
   expect(readFileSync(createPage, 'utf8')).toContain('shots.find(s => s.id === shotId)');
-  expect(readFileSync('src/app/UiPhase5CReviewBoundary.test.ts', 'utf8')).toContain("writeFileSync(p, bytes.toString() + '\n')");
+  expect(readFileSync('src/app/UiPhase5CReviewBoundary.test.ts', 'utf8')).toContain("writeFileSync(p, bytes.toString() + '\\n')");
   expect(readFileSync('src/app/UiPhase5CReviewBoundary.test.ts', 'utf8')).toContain('ui-phase5c-review-inventory:${dir}');
   expect(readFileSync('scripts/testing/stale-binding-migration.test.mjs', 'utf8')).toContain('frozenTip');
   expect(CI_GREEN_FIX_CONTRACTS.timeoutsRaised).toBe(false);
