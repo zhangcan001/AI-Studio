@@ -1,10 +1,7 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
-import {dirname,join,resolve} from 'node:path';
-import {tmpdir} from 'node:os';
-import {uiPhase5FParentReader,phase5FParentFacts,phase5FFixtureFiles,PHASE5F_MANIFEST,PHASE5F_PARENT,PHASE5F_EXISTING} from '../../scripts/ui-phase5f-ci-memory-successor-guard.mjs';
+import {readFileSync,writeFileSync,rmSync} from 'node:fs';
+import {uiPhase5FParentReader,phase5FParentFacts,PHASE5F_MANIFEST,PHASE5F_PARENT,PHASE5F_EXISTING} from '../../scripts/ui-phase5f-ci-memory-successor-guard.mjs';
 import {uiPhase5EParentReader} from '../../scripts/ui-phase5e-ci-shard-successor-guard.mjs';
 
 it('keeps three shards, raises the frontend heap ceiling, and leaves individual bounded probes in force',()=>{
@@ -56,32 +53,25 @@ it('denies forged metadata, proof hashes and weakened memory gates without autho
 }, 90000);
 
 it('refuses edited CI heap, cache staging, readiness probes and Runtime package drift in isolated fixture',()=>{
- const workspace=resolve('.'),root=mkdtempSync(join(tmpdir(),'ai-studio-phase5f-ci-'));
- try{
-  const git=execFileSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'}).trim();
-  execFileSync('git',['init','--quiet',root]);
-  mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-  writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of phase5FFixtureFiles(workspace)){
-   mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(join(workspace,p),join(root,p));
-  }
-  expect(uiPhase5FParentReader(root).violations).toEqual([]);
+  // Live working-tree mutate — tip-inflated FixtureFiles blow the 90s Boundary budget.
+  expect(uiPhase5FParentReader('.').violations).toEqual([]);
   for(const p of ['.github/workflows/ci.yml','scripts/boundary-validation-cache.mjs','src/app/ReadinessLifecycleBoundary.test.ts']){
-   const file=join(root,p),before=readFileSync(file);
-   writeFileSync(file,Uint8Array.from([...before,10]));
-   expect(uiPhase5FParentReader(root).violations.length,p).toBeGreaterThan(0);
-   writeFileSync(file,before);
+   const before=readFileSync(p);
+   try{
+    writeFileSync(p,Uint8Array.from([...before,10]));
+    expect(uiPhase5FParentReader('.').violations.length,p).toBeGreaterThan(0);
+   }finally{writeFileSync(p,before);}
   }
-  const pkg=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml');
-  const before=readFileSync(pkg);writeFileSync(pkg,Uint8Array.from([...before,10]));
-  expect(uiPhase5FParentReader(root).violations).toContain('ui-phase5f-ci-memory-runtime-package-bytes');
-  writeFileSync(pkg,before);
-  const illegal=join(root,'src/IllegalMemoryOwner.js');writeFileSync(illegal,'unreviewed');
-  expect(uiPhase5FParentReader(root).violations).toContain('ui-phase5f-ci-memory-inventory:src');
-  rmSync(illegal);
-  expect(uiPhase5FParentReader(root).violations).toEqual([]);
- }finally{
-  if(!root.startsWith(resolve(tmpdir())+'\\')&&!root.startsWith(resolve(tmpdir())+'/'))throw Error('Fixture outside owned temp');
-  rmSync(root,{recursive:true,force:true,maxRetries:3,retryDelay:100});
- }
+  const pkg='src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml';
+  const before=readFileSync(pkg);
+  try{
+   writeFileSync(pkg,Uint8Array.from([...before,10]));
+   expect(uiPhase5FParentReader('.').violations).toContain('ui-phase5f-ci-memory-runtime-package-bytes');
+  }finally{writeFileSync(pkg,before);}
+  const illegal='src/IllegalMemoryOwner.js';
+  try{
+   writeFileSync(illegal,'unreviewed');
+   expect(uiPhase5FParentReader('.').violations).toContain('ui-phase5f-ci-memory-inventory:src');
+  }finally{rmSync(illegal);}
+  expect(uiPhase5FParentReader('.').violations).toEqual([]);
 }, 90000);

@@ -1,10 +1,7 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
-import {dirname,join,resolve} from 'node:path';
-import {tmpdir} from 'node:os';
-import {uiPhase5JParentReader,phase5JParentFacts,phase5JFixtureFiles,PHASE5J_MANIFEST,PHASE5J_PARENT,PHASE5J_EXISTING} from '../../scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs';
+import {readFileSync,writeFileSync,rmSync} from 'node:fs';
+import {uiPhase5JParentReader,phase5JParentFacts,PHASE5J_MANIFEST,PHASE5J_PARENT,PHASE5J_EXISTING} from '../../scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs';
 import {uiPhase5IParentReader} from '../../scripts/ui-phase5i-ci-worker-teardown-successor-guard.mjs';
 
 it('uses per-file forks workers and a dedicated Boundary job instead of singleFork',()=>{
@@ -55,32 +52,25 @@ it('denies forged metadata, proof hashes and weakened per-file worker gates with
 }, 90000);
 
 it('refuses edited per-file worker config, Boundary job wiring and Runtime package drift in isolated fixture',()=>{
- const workspace=resolve('.'),root=mkdtempSync(join(tmpdir(),'ai-studio-phase5j-ci-'));
- try{
-  const git=execFileSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'}).trim();
-  execFileSync('git',['init','--quiet',root]);
-  mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-  writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of phase5JFixtureFiles(workspace)){
-   mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(join(workspace,p),join(root,p));
-  }
-  expect(uiPhase5JParentReader(root).violations).toEqual([]);
+  // Live working-tree mutate — tip-inflated FixtureFiles blow the 90s Boundary budget.
+  expect(uiPhase5JParentReader('.').violations).toEqual([]);
   for(const p of ['vite.config.ts','.github/workflows/ci.yml','src/app/UiPhase5ICiWorkerTeardownBoundary.test.ts']){
-   const file=join(root,p),before=readFileSync(file);
-   writeFileSync(file,Uint8Array.from([...before,10]));
-   expect(uiPhase5JParentReader(root).violations.length,p).toBeGreaterThan(0);
-   writeFileSync(file,before);
+   const before=readFileSync(p);
+   try{
+    writeFileSync(p,Uint8Array.from([...before,10]));
+    expect(uiPhase5JParentReader('.').violations.length,p).toBeGreaterThan(0);
+   }finally{writeFileSync(p,before);}
   }
-  const pkg=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml');
-  const before=readFileSync(pkg);writeFileSync(pkg,Uint8Array.from([...before,10]));
-  expect(uiPhase5JParentReader(root).violations).toContain('ui-phase5j-ci-per-file-worker-runtime-package-bytes');
-  writeFileSync(pkg,before);
-  const illegal=join(root,'src/IllegalPerFileWorkerOwner.js');writeFileSync(illegal,'unreviewed');
-  expect(uiPhase5JParentReader(root).violations).toContain('ui-phase5j-ci-per-file-worker-inventory:src');
-  rmSync(illegal);
-  expect(uiPhase5JParentReader(root).violations).toEqual([]);
- }finally{
-  if(!root.startsWith(resolve(tmpdir())+'\\')&&!root.startsWith(resolve(tmpdir())+'/'))throw Error('Fixture outside owned temp');
-  rmSync(root,{recursive:true,force:true,maxRetries:3,retryDelay:100});
- }
+  const pkg='src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml';
+  const before=readFileSync(pkg);
+  try{
+   writeFileSync(pkg,Uint8Array.from([...before,10]));
+   expect(uiPhase5JParentReader('.').violations).toContain('ui-phase5j-ci-per-file-worker-runtime-package-bytes');
+  }finally{writeFileSync(pkg,before);}
+  const illegal='src/IllegalPerFileWorkerOwner.js';
+  try{
+   writeFileSync(illegal,'unreviewed');
+   expect(uiPhase5JParentReader('.').violations).toContain('ui-phase5j-ci-per-file-worker-inventory:src');
+  }finally{rmSync(illegal);}
+  expect(uiPhase5JParentReader('.').violations).toEqual([]);
 }, 90000);

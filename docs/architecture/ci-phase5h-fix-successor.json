@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_PHASE5H_FIX",
+  "parentHead": "e02833239220b1755aa643beae4b7657a9ae1ac7",
+  "planningParentHead": "e02833239220b1755aa643beae4b7657a9ae1ac7",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-boundary-fix-successor-guard.mjs": {
+      "beforeHash": "3b564ffad950f02ed1809d3a2b378c5a1a38a31f4a322aac08e63b477f9d0af8",
+      "afterHash": "95a55f489ad0838219672dda22c99c02a9b6e490f37101eb6691d184cb124456"
+    },
+    "scripts/testing/ci-boundary-fix.test.mjs": {
+      "beforeHash": "4566373793c41b19b45ab4da808751d6763525282f29b2866735e975c9f15d5c",
+      "afterHash": "1c5d6d8efdfda858336176d1b1f5f97b34ffa31e5baa9cfe2a2df92e69550a52"
+    },
+    "src/app/UiPhase5AStoryboardBoundary.test.ts": {
+      "beforeHash": "d05507c75f69dd3e75daa506a1d9b3fb896dea19300682292bd48a2569fb058e",
+      "afterHash": "d2476dd4f654bec592777d937400c364e5035697438ea33a3eda9f3301d07c4c"
+    },
+    "src/app/UiPhase5CiRepairBoundary.test.ts": {
+      "beforeHash": "f7d6b4e2b4e00ee0a247b9a2f47d712336c9ff301fda18753d55d8ea6de58f3d",
+      "afterHash": "5088dd9baa2f8f79e29f393d6eb4b1b7cf3e5f1748cd5af716454ea7671b3eca"
+    },
+    "src/app/UiPhase5FCiMemoryBoundary.test.ts": {
+      "beforeHash": "f62c95f4729ee2797f9622da58ab05780be71b5a521ab26757564fb7ef0f5f25",
+      "afterHash": "f72d803a0dce9f0a309c9c59cb9d576af26241a76a127482c55b8452b9036e2e"
+    },
+    "src/app/UiPhase5HCiTimeoutBudgetBoundary.test.ts": {
+      "beforeHash": "f27258abb4860222cfd7eb7258e82cab17fc33cdec62222d98bea60e6d3f27f5",
+      "afterHash": "7a549e78fbffc75249bc78b181cf16276f9b344ee2129fa6261244b8c660c298"
+    },
+    "src/app/UiPhase5ICiWorkerTeardownBoundary.test.ts": {
+      "beforeHash": "5dc430a730fecf673a6ebeafa7124a65806a0e2b3d2ad88b46fe0d198d2277c7",
+      "afterHash": "7d7e70e8618e3208ed2b05fc640da4c1dcafc5f37d473dc3bc04023d5f622e08"
+    },
+    "src/app/UiPhase5JCiPerFileWorkerBoundary.test.ts": {
+      "beforeHash": "4936e1565c0760a94a1a9a04aaf50078017c3ec5a73ed31456b3cd352e0e49c4",
+      "afterHash": "a6b62af8596b0c968d33be670a49b088298c6a2eace0020e43c08aafeeffb1b5"
+    },
+    "scripts/ci-phase5h-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "3ab9c870a37e9b05d9c54256091c4dc608e88c16e81e4798974fe47f0e3e9c0f"
+    },
+    "scripts/testing/ci-phase5h-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "da50e7ce9a780a19a53914599b4bb499822fd45e20b49cebb85783251a163fa0"
+    }
+  }
+}

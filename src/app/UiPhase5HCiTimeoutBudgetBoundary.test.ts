@@ -1,10 +1,7 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {readFileSync,writeFileSync,copyFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
-import {dirname,join,resolve} from 'node:path';
-import {tmpdir} from 'node:os';
-import {uiPhase5HParentReader,phase5HParentFacts,phase5HFixtureFiles,PHASE5H_MANIFEST,PHASE5H_PARENT,PHASE5H_EXISTING} from '../../scripts/ui-phase5h-ci-timeout-budget-successor-guard.mjs';
+import {readFileSync,writeFileSync,rmSync} from 'node:fs';
+import {uiPhase5HParentReader,phase5HParentFacts,PHASE5H_MANIFEST,PHASE5H_PARENT,PHASE5H_EXISTING} from '../../scripts/ui-phase5h-ci-timeout-budget-successor-guard.mjs';
 import {uiPhase5GParentReader} from '../../scripts/ui-phase5g-ci-timeout-successor-guard.mjs';
 
 it('budgets every Boundary successor/drift it() at a fail-closed 90s Windows ceiling',()=>{
@@ -59,32 +56,25 @@ it('denies forged metadata, proof hashes and weakened timeout-budget gates witho
 }, 90000);
 
 it('refuses edited timeout budgets, Phase5G wiring and Runtime package drift in isolated fixture',()=>{
- const workspace=resolve('.'),root=mkdtempSync(join(tmpdir(),'ai-studio-phase5h-ci-'));
- try{
-  const git=execFileSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'}).trim();
-  execFileSync('git',['init','--quiet',root]);
-  mkdirSync(join(root,'.git/objects/info'),{recursive:true});
-  writeFileSync(join(root,'.git/objects/info/alternates'),join(git,'objects')+'\n');
-  for(const p of phase5HFixtureFiles(workspace)){
-   mkdirSync(dirname(join(root,p)),{recursive:true});copyFileSync(join(workspace,p),join(root,p));
-  }
-  expect(uiPhase5HParentReader(root).violations).toEqual([]);
+  // Live working-tree mutate — tip-inflated FixtureFiles blow the 90s Boundary budget.
+  expect(uiPhase5HParentReader('.').violations).toEqual([]);
   for(const p of ['scripts/ui-phase5g-ci-timeout-successor-guard.mjs','src/app/H3GenerationRepairBoundary.test.ts','src/app/UiPhase4SerialQueueBoundary.test.ts']){
-   const file=join(root,p),before=readFileSync(file);
-   writeFileSync(file,Uint8Array.from([...before,10]));
-   expect(uiPhase5HParentReader(root).violations.length,p).toBeGreaterThan(0);
-   writeFileSync(file,before);
+   const before=readFileSync(p);
+   try{
+    writeFileSync(p,Uint8Array.from([...before,10]));
+    expect(uiPhase5HParentReader('.').violations.length,p).toBeGreaterThan(0);
+   }finally{writeFileSync(p,before);}
   }
-  const pkg=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml');
-  const before=readFileSync(pkg);writeFileSync(pkg,Uint8Array.from([...before,10]));
-  expect(uiPhase5HParentReader(root).violations).toContain('ui-phase5h-ci-timeout-budget-runtime-package-bytes');
-  writeFileSync(pkg,before);
-  const illegal=join(root,'src/IllegalTimeoutBudgetOwner.js');writeFileSync(illegal,'unreviewed');
-  expect(uiPhase5HParentReader(root).violations).toContain('ui-phase5h-ci-timeout-budget-inventory:src');
-  rmSync(illegal);
-  expect(uiPhase5HParentReader(root).violations).toEqual([]);
- }finally{
-  if(!root.startsWith(resolve(tmpdir())+'\\')&&!root.startsWith(resolve(tmpdir())+'/'))throw Error('Fixture outside owned temp');
-  rmSync(root,{recursive:true,force:true,maxRetries:3,retryDelay:100});
- }
+  const pkg='src-tauri/runtime_packages/minimax_h3_fl2va_t2v_quality_2_2_0/recipe.yaml';
+  const before=readFileSync(pkg);
+  try{
+   writeFileSync(pkg,Uint8Array.from([...before,10]));
+   expect(uiPhase5HParentReader('.').violations).toContain('ui-phase5h-ci-timeout-budget-runtime-package-bytes');
+  }finally{writeFileSync(pkg,before);}
+  const illegal='src/IllegalTimeoutBudgetOwner.js';
+  try{
+   writeFileSync(illegal,'unreviewed');
+   expect(uiPhase5HParentReader('.').violations).toContain('ui-phase5h-ci-timeout-budget-inventory:src');
+  }finally{rmSync(illegal);}
+  expect(uiPhase5HParentReader('.').violations).toEqual([]);
 }, 90000);
