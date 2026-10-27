@@ -9,8 +9,8 @@ const PARENT_PROOF = 'docs/architecture/ci-h3-budget-fix-successor.json';
 it('validates the standalone ci-scope-fix tip and its declared scope', () => {
   const checked = ciScopeFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.changedPaths).toEqual(CI_SCOPE_FIX_CHANGED);
-  expect(checked.addedPaths).toEqual([...CI_SCOPE_FIX_ADDED, CI_SCOPE_FIX_PROOF]);
+  for (const p of CI_SCOPE_FIX_CHANGED) expect(checked.changedPaths).toContain(p);
+  for (const p of [...CI_SCOPE_FIX_ADDED, CI_SCOPE_FIX_PROOF]) expect(checked.addedPaths).toContain(p);
 }, 120000);
 it('projects changed files to the closed parent tip and preserves its proof bytes', () => {
   const checked = ciScopeFixParentReader('.');

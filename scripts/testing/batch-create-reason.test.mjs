@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { batchCreateReasonParentReader as compositionUsageParentReader, BATCH_CREATE_REASON_BASE as COMPOSITION_USAGE_BASE, BATCH_CREATE_REASON_PROOF as COMPOSITION_USAGE_PROOF } from '../batch-create-reason-successor-guard.mjs';
 import { compositionUsageParentReader as parentReader, COMPOSITION_USAGE_PROOF as PARENT_PROOF } from '../composition-usage-successor-guard.mjs';
 import { libraryConfirmCiRaceParentReader } from '../library-confirm-ci-race-successor-guard.mjs';
-import { uiPhase7BR1MetadataParentReader } from '../ui-phase7b-r1-metadata-successor-guard.mjs';
+import { ciChainFixParentReader } from '../ci-chain-fix-successor-guard.mjs';
 
 it('preserves the frozen composition-usage checkpoint and validates exact current-byte overrides through parent projection', () => {
   const checked = compositionUsageParentReader('.');
@@ -45,7 +45,7 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     execFileSync('git',['init','-q',root]);
     const objects=resolve(execFileSync('git',['rev-parse','--git-path','objects'],{encoding:'utf8'}).trim());
     writeFileSync(join(root,'.git/objects/info/alternates'),objects.replaceAll('\\','/')+'\n');
-    const validate=()=>uiPhase7BR1MetadataParentReader(root).violations;
+    const validate=()=>ciChainFixParentReader(root).violations;
     expect(validate()).toEqual([]);
     for(const p of [COMPOSITION_USAGE_PROOF,PARENT_PROOF,'src/features/create/CreateController.ts']) {
       const file=join(root,p),original=readFileSync(file);
@@ -57,8 +57,11 @@ it('invalidates warm-cache fixtures on live mutations, deletion and illegal file
     }
     const runtime=join(root,'src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml');
     const original=readFileSync(runtime);
-    try {const text=original.toString('utf8');writeFileSync(runtime,text.includes('\r\n')?text.replaceAll('\r\n','\n'):text.replaceAll('\n','\r\n'));expect(validate().length).toBeGreaterThan(0);}
-    finally {writeFileSync(runtime,original);}
+    try {
+      // Tip live reads canonicalize newlines; mutate payload bytes so historical-runtime-bytes still fail-closed.
+      writeFileSync(runtime, Buffer.concat([original, Buffer.from('\n# drift')]));
+      expect(validate().length).toBeGreaterThan(0);
+    } finally {writeFileSync(runtime,original);}
     expect(validate()).toEqual([]);
     const illegal=join(root,'src/unapproved-default.ts');
     try {writeFileSync(illegal,'unapproved');expect(validate().length).toBeGreaterThan(0);}

@@ -5,7 +5,7 @@ import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { SCOPE_SINCE_CHAIN_BASE, SCOPE_SINCE_CHAIN_PROOF, SCOPE_SINCE_CHAIN_CHANGED, SCOPE_SINCE_CHAIN_ADDED, SCOPE_SINCE_CHAIN_CONTRACTS } from '../scope-since-chain-successor-guard.mjs';
-import { ciProbeFixParentReader, CI_PROBE_FIX_BASE, CI_PROBE_FIX_PROOF, CI_PROBE_FIX_CHANGED, CI_PROBE_FIX_ADDED, CI_PROBE_FIX_CONTRACTS } from '../ci-probe-fix-successor-guard.mjs';
+import { ciChainFixParentReader as ciProbeFixParentReader } from '../ci-chain-fix-successor-guard.mjs';
 const PARENT_PROOF = 'docs/architecture/successor-chain-successor.json';
 const chainGuard = 'scripts/review-hardening-successor-guard.mjs';
 it('projects through the ci-probe-fix tip with a clean boundary', () => {
@@ -17,8 +17,9 @@ it('preserves the frozen successor-chain proof bytes via the tip', () => {
 }, 120000);
 it('extends review-hardening ScopeSince through cancel…successor-chain so older probes see tip files', () => {
   const src = readFileSync(chainGuard, 'utf8');
-  expect(src).toContain('cancelCorrectnessScopeSince');
-  expect(src).toContain('...cancelCorrectnessScopeSince(root, CANCEL_CORRECTNESS_BASE)');
+  expect(src).toContain('scopeSinceChainScopeSince');
+  expect(src).toContain('...scopeSinceChainScopeSince(root, REVIEW_HARDENING_BASE)');
+  expect(src).toContain('cancelCorrectnessParentReader');
   expect(ciProbeFixParentReader('.').violations).toEqual([]);
 }, 120000);
 it('rejects forged proof identity, contracts, scope, hashes and undeclared changes', () => {
