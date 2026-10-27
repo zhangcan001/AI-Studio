@@ -697,6 +697,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
                AND EXISTS (
                    SELECT 1 FROM production_batches
                    WHERE id = ? AND project_id = ?
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM production_batch_items retry
+                   WHERE retry.batch_id = production_batch_items.batch_id
+                     AND retry.retry_of_item_id = production_batch_items.id
                )",
         )
         .bind(item_id.as_str())
@@ -4171,6 +4176,78 @@ mod tests {
                 .unwrap(),
             0
         );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn delete_terminal_item_refuses_retry_parents_in_every_retry_state() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("retry-delete.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let batch_id = ProductionBatchId::new();
+        let source = fixture_item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Failed,
+            None,
+            json!({}),
+        );
+        let retry = fixture_item(
+            &batch_id,
+            1,
+            ProductionBatchItemStatus::Pending,
+            Some(source.id.as_str()),
+            json!({}),
+        );
+        repository
+            .insert(
+                &fixture_batch(&batch_id, ProductionBatchStatus::Paused, Utc::now()),
+                &[source.clone(), retry.clone()],
+            )
+            .await
+            .unwrap();
+
+        for status in [
+            "PENDING",
+            "DISPATCHING",
+            "DISPATCHED",
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED",
+            "SKIPPED",
+        ] {
+            sqlx::query("UPDATE production_batch_items SET status = ? WHERE id = ?")
+                .bind(status)
+                .bind(retry.id.as_str())
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(!repository
+                .delete_terminal_item("project-1", &batch_id, &source.id)
+                .await
+                .unwrap());
+        }
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.items.len(), 2);
+        assert_eq!(
+            detail.items[1].retry_of_item_id.as_deref(),
+            Some(source.id.as_str())
+        );
+        assert!(repository
+            .delete_terminal_item("project-1", &batch_id, &retry.id)
+            .await
+            .unwrap());
+        assert!(repository
+            .delete_terminal_item("project-1", &batch_id, &source.id)
+            .await
+            .unwrap());
         pool.close().await;
     }
 

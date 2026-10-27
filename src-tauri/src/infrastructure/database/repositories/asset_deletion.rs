@@ -308,6 +308,53 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
         }
 
         let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT cover_asset_id, name FROM story_entities WHERE project_id = ",
+        );
+        query.push_bind(project_id).push(" AND cover_asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(") ORDER BY id");
+        let rows = query
+            .build_query_as::<(String, String)>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        for (asset_id, name) in rows {
+            push_unique(
+                &mut references
+                    .get_mut(&asset_id)
+                    .expect("selected asset reference")
+                    .story_entity_cover_names,
+                name,
+            );
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT images.asset_id, entities.name
+             FROM story_entity_images images
+             JOIN story_entities entities ON entities.id = images.entity_id
+             WHERE entities.project_id = ",
+        );
+        query
+            .push_bind(project_id)
+            .push(" AND images.asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(") ORDER BY entities.id");
+        let rows = query
+            .build_query_as::<(String, String)>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        for (asset_id, name) in rows {
+            push_unique(
+                &mut references
+                    .get_mut(&asset_id)
+                    .expect("selected asset reference")
+                    .story_entity_image_names,
+                name,
+            );
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT aa.asset_id, a.id AS reference_anchor_id
              FROM reference_anchor_assets aa
              INNER JOIN reference_anchors a ON a.id = aa.anchor_id
@@ -606,6 +653,85 @@ mod tests {
             vec!["pbi_delete_test"]
         );
         assert!(references[0].active_task_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reports_story_entity_covers_and_images_with_project_isolation() {
+        let (_directory, pool) = setup_queue().await;
+        let now = "2026-01-01T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('prj_default', '其他项目', 'C:/other', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        for id in ["ast_cover", "ast_image", "ast_free"] {
+            sqlx::query(
+                "INSERT INTO assets
+                 (id, project_id, type, category, name, original_name, storage_path,
+                  sha256, mime_type, file_size, metadata_json, created_at, updated_at)
+                 VALUES (?, 'project-1', 'image', 'source_image', ?, 'image.png',
+                         'C:/project/image.png', ?, 'image/png', 1, '{}', ?, ?)",
+            )
+            .bind(id)
+            .bind(id)
+            .bind(id)
+            .bind(now)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO story_entities
+             (id, project_id, kind, name, cover_asset_id, created_at, updated_at)
+             VALUES ('ent_cover', 'project-1', 'character', '小明', 'ast_cover', ?, ?),
+                    ('ent_image', 'project-1', 'scene', '客厅', NULL, ?, ?),
+                    ('ent_other', 'prj_default', 'prop', '其他项目', 'ast_cover', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO story_entity_images (entity_id, asset_id, ordinal, created_at)
+             VALUES ('ent_image', 'ast_image', 0, ?),
+                    ('ent_other', 'ast_image', 0, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let repository = SqliteAssetDeletionRepository::new(pool);
+        let asset_ids =
+            ["ast_cover", "ast_image", "ast_free"].map(|id| AssetId::parse(id).unwrap());
+        let references = repository
+            .references_for("project-1", &asset_ids)
+            .await
+            .unwrap();
+        assert_eq!(references[0].story_entity_cover_names, vec!["小明"]);
+        assert!(references[0].story_entity_image_names.is_empty());
+        assert!(references[1].story_entity_cover_names.is_empty());
+        assert_eq!(references[1].story_entity_image_names, vec!["客厅"]);
+        assert!(references[2].story_entity_cover_names.is_empty());
+        assert!(references[2].story_entity_image_names.is_empty());
+
+        let references = repository
+            .references_for("prj_default", &asset_ids)
+            .await
+            .unwrap();
+        assert_eq!(references[0].story_entity_cover_names, vec!["其他项目"]);
+        assert_eq!(references[1].story_entity_image_names, vec!["其他项目"]);
     }
 
     #[tokio::test]

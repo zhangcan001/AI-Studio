@@ -284,12 +284,21 @@ impl ShotRepository for SqliteShotRepository {
     }
 
     async fn delete(&self, project_id: &str, shot_id: &str) -> Result<bool, RepositoryError> {
-        let result = sqlx::query("DELETE FROM shots WHERE project_id = ? AND id = ?")
-            .bind(project_id)
-            .bind(shot_id)
-            .execute(&self.pool)
-            .await
-            .map_err(map_sqlx_error)?;
+        let result = sqlx::query(
+            "DELETE FROM shots WHERE project_id = ? AND id = ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM shot_generation_links l
+                   JOIN production_batch_items i ON i.id = l.production_batch_item_id
+                   JOIN production_batches b ON b.id = i.batch_id
+                   WHERE l.shot_id = shots.id AND b.project_id = shots.project_id
+                     AND i.status IN ('PENDING', 'DISPATCHING', 'DISPATCHED')
+               )",
+        )
+        .bind(project_id)
+        .bind(shot_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
         Ok(result.rows_affected() == 1)
     }
 
@@ -968,10 +977,13 @@ fn legacy_stage_prompts(shot: &ShotRecord) -> Vec<ShotStagePromptRecord> {
 mod tests {
     use super::SqliteShotRepository;
     use crate::application::ports::{
-        ShotBulkRepository, ShotRecord, ShotRepository, ShotStageConfigRecord,
+        ShotBatchRepository, ShotBulkRepository, ShotRecord, ShotRepository, ShotStageConfigRecord,
     };
     use crate::domain::ShotStage;
-    use crate::infrastructure::database::{initialize, repositories::test_support};
+    use crate::infrastructure::database::{
+        initialize,
+        repositories::{test_support, SqliteProductionQueueRepository},
+    };
     use chrono::Utc;
     use serde_json::json;
     use tempfile::tempdir;
@@ -1100,6 +1112,72 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn conditional_delete_preserves_shot_when_an_active_binding_appears() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let repository = SqliteShotRepository::new(pool.clone());
+        repository
+            .insert(&shot("sht-delete", "project-1", 0))
+            .await
+            .unwrap();
+        let queue = SqliteProductionQueueRepository::new(pool.clone());
+        assert!(!queue
+            .has_active_shot_binding("project-1", "sht-delete")
+            .await
+            .unwrap());
+        sqlx::query(
+            "INSERT INTO production_batches
+             (id, project_id, name, status, continue_on_failure, created_at, updated_at)
+             VALUES ('pbt_delete', 'project-1', '删除测试', 'READY', 0, ?, ?)",
+        )
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_batch_items
+             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, created_at, updated_at)
+             VALUES ('pbi_delete', 'pbt_delete', 0, 'workflow-version-1', 'recipe-1', '{}', 'PENDING', ?, ?)",
+        )
+        .bind("2026-01-01T00:00:00Z").bind("2026-01-01T00:00:00Z")
+        .execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO shot_generation_links (id, shot_id, stage, production_batch_item_id, created_at)
+             VALUES ('sgl_delete', 'sht-delete', 'image', 'pbi_delete', ?)",
+        )
+        .bind("2026-01-01T00:00:00Z").execute(&pool).await.unwrap();
+
+        for status in ["PENDING", "DISPATCHING", "DISPATCHED"] {
+            sqlx::query("UPDATE production_batch_items SET status = ? WHERE id = 'pbi_delete'")
+                .bind(status)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(!repository.delete("project-1", "sht-delete").await.unwrap());
+            let data = repository
+                .find("project-1", "sht-delete")
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(data.generation_links.len(), 1);
+        }
+        sqlx::query(
+            "UPDATE production_batch_items SET status = 'SUCCEEDED' WHERE id = 'pbi_delete'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(!repository
+            .delete("prj_default", "sht-delete")
+            .await
+            .unwrap());
+        assert!(repository.delete("project-1", "sht-delete").await.unwrap());
+        assert!(!repository.delete("project-1", "sht-delete").await.unwrap());
     }
 
     #[tokio::test]

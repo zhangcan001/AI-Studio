@@ -349,16 +349,17 @@ impl ShotService {
 
     pub async fn delete(&self, project_id: &str, shot_id: &str) -> Result<(), ShotServiceError> {
         validate_project(project_id)?;
-        if self
-            .shot_batch_repository
-            .has_active_shot_binding(project_id, shot_id)
-            .await?
-        {
-            return Err(ShotServiceError::InvalidInput(
-                "该镜头已绑定待处理或运行中的生产队列，必须等待队列项进入终态后才能删除".to_owned(),
-            ));
-        }
         if !self.repository.delete(project_id, shot_id).await? {
+            if self
+                .shot_batch_repository
+                .has_active_shot_binding(project_id, shot_id)
+                .await?
+            {
+                return Err(ShotServiceError::InvalidInput(
+                    "该镜头已绑定待处理或运行中的生产队列，必须等待队列项进入终态后才能删除"
+                        .to_owned(),
+                ));
+            }
             return Err(ShotServiceError::NotFound(shot_id.to_owned()));
         }
         Ok(())

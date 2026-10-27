@@ -27,6 +27,8 @@ pub struct AssetDeletionReferences {
     pub reference_set_ids: Vec<String>,
     pub reference_anchor_ids: Vec<String>,
     pub shot_reference_ids: Vec<String>,
+    pub story_entity_cover_names: Vec<String>,
+    pub story_entity_image_names: Vec<String>,
     pub shot_video_input_ids: Vec<String>,
     pub selected_by_shot_ids: Vec<String>,
     pub selected_image_by_shot_ids: Vec<String>,

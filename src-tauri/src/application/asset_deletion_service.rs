@@ -173,6 +173,18 @@ impl AssetDeletionService {
                     ),
                 );
             }
+            for name in &reference.story_entity_cover_names {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!("该素材仍被故事实体“{name}”用作封面，请先更换或移除实体封面。"),
+                );
+            }
+            for name in &reference.story_entity_image_names {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!("该素材仍被故事实体“{name}”用作参考图片，请先从实体中移除该图片。"),
+                );
+            }
             for shot_id in &reference.shot_reference_ids {
                 push_unique_reason(
                     &mut blocking_reasons,
@@ -733,6 +745,8 @@ mod tests {
                 reference_set_ids: vec!["rs_character".to_owned()],
                 reference_anchor_ids: vec!["anc_character".to_owned()],
                 shot_reference_ids: vec!["shot_1".to_owned()],
+                story_entity_cover_names: vec!["小明".to_owned()],
+                story_entity_image_names: vec!["客厅".to_owned()],
                 selected_by_shot_ids: vec!["shot_2".to_owned()],
                 selected_image_by_shot_ids: vec!["shot_image".to_owned()],
                 selected_video_by_shot_ids: vec!["shot_video".to_owned()],
@@ -747,7 +761,13 @@ mod tests {
             .await
             .expect("semantic usage should inspect");
         let reasons = &inspection.items[0].blocking_reasons;
-        assert_eq!(reasons.len(), 7);
+        assert_eq!(reasons.len(), 9);
+        assert!(reasons
+            .iter()
+            .any(|reason| reason.contains("小明") && reason.contains("封面")));
+        assert!(reasons
+            .iter()
+            .any(|reason| reason.contains("客厅") && reason.contains("参考图片")));
         assert!(reasons.iter().any(|reason| reason.contains("gav_lineage")));
         assert!(reasons.iter().any(|reason| reason.contains("rs_character")));
         assert!(reasons

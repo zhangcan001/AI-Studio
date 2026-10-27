@@ -1532,6 +1532,15 @@ impl ProductionQueueService {
                 "任务还没结束，请先取消再删除。".to_owned(),
             ));
         }
+        if detail
+            .items
+            .iter()
+            .any(|candidate| candidate.retry_of_item_id.as_deref() == Some(item.id.as_str()))
+        {
+            return Err(ProductionQueueError::InvalidState(
+                "该队列项目仍被重试项目引用，请先删除对应的重试项目。".to_owned(),
+            ));
+        }
         if !self
             .repository
             .delete_terminal_item(project_id, &batch_id, &item.id)

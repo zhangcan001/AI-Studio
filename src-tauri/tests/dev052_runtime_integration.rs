@@ -1726,6 +1726,61 @@ async fn cancelling_whole_batch_interrupts_running_item_and_completes() {
 }
 
 #[tokio::test]
+async fn deleting_retry_parent_is_refused_until_retry_is_deleted() {
+    let harness = harness().await;
+    let batch_id = create_runtime_batch(&harness, 2).await;
+    let detail = harness.queue.get(PROJECT_ID, &batch_id).await.unwrap();
+    let source = detail.items[0].id.as_str();
+    let retry = detail.items[1].id.as_str();
+    sqlx::query("UPDATE production_batch_items SET status = 'FAILED' WHERE id = ?")
+        .bind(source)
+        .execute(&harness.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE production_batch_items SET retry_of_item_id = ? WHERE id = ?")
+        .bind(source)
+        .bind(retry)
+        .execute(&harness.pool)
+        .await
+        .unwrap();
+
+    let error = harness
+        .queue
+        .delete_item(PROJECT_ID, &batch_id, source)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ProductionQueueError::InvalidState(message)
+        if message == "该队列项目仍被重试项目引用，请先删除对应的重试项目。"));
+    assert_eq!(
+        harness
+            .queue
+            .get(PROJECT_ID, &batch_id)
+            .await
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+
+    sqlx::query("UPDATE production_batch_items SET status = 'CANCELLED' WHERE id = ?")
+        .bind(retry)
+        .execute(&harness.pool)
+        .await
+        .unwrap();
+    harness
+        .queue
+        .delete_item(PROJECT_ID, &batch_id, retry)
+        .await
+        .unwrap();
+    let detail = harness
+        .queue
+        .delete_item(PROJECT_ID, &batch_id, source)
+        .await
+        .unwrap();
+    assert!(detail.items.is_empty());
+}
+
+#[tokio::test]
 async fn shot_generation_submission_keeps_linkage_pending_until_queue_start() {
     let harness = harness().await;
     let prepared = harness
@@ -1782,6 +1837,15 @@ async fn shot_generation_submission_keeps_linkage_pending_until_queue_start() {
     assert_eq!(pending_task_id, None);
     assert_eq!(pending_item_id, batch.items[0].id.as_str());
     assert_eq!(pending_stage, "image");
+    let error = harness
+        .shot_service
+        .delete(PROJECT_ID, READY_SHOT_ID)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, ai_studio_lib::application::shot_service::ShotServiceError::InvalidInput(message)
+        if message == "该镜头已绑定待处理或运行中的生产队列，必须等待队列项进入终态后才能删除")
+    );
     assert_eq!(count(&harness.pool, "tasks").await, 0);
     assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
 

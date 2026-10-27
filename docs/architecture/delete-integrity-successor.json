@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "DELETE_INTEGRITY",
+  "parentHead": "6866df4b76c5566a51abdd583c2af2f5c90c3d3a",
+  "planningParentHead": "6866df4b76c5566a51abdd583c2af2f5c90c3d3a",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "storyEntityAssetsBlockDeletion": true,
+    "retryParentsBlockDeletion": true,
+    "shotDeleteChecksActiveBindingsAtomically": true
+  },
+  "files": {
+    "scripts/testing/cancel-correctness.test.mjs": {
+      "beforeHash": "36b4d64faa8a837fe8ff43475988a3a1e9c66c2bb74e63b3cf482eaa1ba03efd",
+      "afterHash": "e7f574e1013d37b0eb7d96352683d4f7bf7ab64821df8630708e3268539e07ba"
+    },
+    "scripts/testing/review-hardening.test.mjs": {
+      "beforeHash": "db97b57c3f255db571cebb06d7793ff95174db219a65f059f8bcc331d9814878",
+      "afterHash": "4b0bfe16d0235a7e7aa8338316f46d6382354d2919e57e0a2287dad29f8f8342"
+    },
+    "scripts/testing/single-shot-batch-control.test.mjs": {
+      "beforeHash": "643d3c0970b98e1c2f8bf53dad73bd4204cfc9eaee343342d9164835d34fffdf",
+      "afterHash": "57f8a255d33a307d7c019db9c7674c903c13f27636b596fac83fc12cb2be5b3b"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "362f08126f4920461a9c425731067bcdf0c9056b23d6b5eedc272b06defa5860",
+      "afterHash": "960d59f108caa072718d6f7e43a595d3c87f284ef4851b4a719bf436c72220af"
+    },
+    "src-tauri/src/application/asset_deletion_service.rs": {
+      "beforeHash": "606b37371fdd5aa04b4ee594eafaecea64b2afccb80b0deac3d23d55732af552",
+      "afterHash": "c2efe3466a2793213a1a538c464e79fd4cf65fad9e9c92bee304e1f828741b47"
+    },
+    "src-tauri/src/application/ports/asset_deletion_repository.rs": {
+      "beforeHash": "cbb92311b1460e2c72e222373f9f42cc0438935d53213a5424251ab7fbf277bf",
+      "afterHash": "f86e99bc631f697ec6bc1ed599cb8595eeebfeeba64352ac5cd3e83dd086cb8f"
+    },
+    "src-tauri/src/application/production_queue_service.rs": {
+      "beforeHash": "d4e47ce68178957a598311ff8b49b2c0c1de0e5fc2ae945d7f7044a3ddb622ed",
+      "afterHash": "33e69079893f9e0b45b48b9ef2773289ca7902816304616a09158233ef0628db"
+    },
+    "src-tauri/src/application/shot_service.rs": {
+      "beforeHash": "69e94aa446aee8ca0a0c1697c036ccd9512ed8d38e61e6cd6a4ccba037bca04b",
+      "afterHash": "57b62c4a1073af0a53c1df3f26b70d79be10f5486e4dad83f28ca06b687bcb6f"
+    },
+    "src-tauri/src/infrastructure/database/repositories/asset_deletion.rs": {
+      "beforeHash": "46a7f1d484e62bea602c8b3c62bd1d6cbb2fd3e3d8dbe5cd5b04004400eaca75",
+      "afterHash": "07fa7d836ddd6f2f976997461fd73bb1ae8bcd3b879380fab2c978f540d8da80"
+    },
+    "src-tauri/src/infrastructure/database/repositories/production_queue.rs": {
+      "beforeHash": "58e19cc06b4c300c664f5a493666d93987e5201e186c2665aedd1306855f8692",
+      "afterHash": "24a216ad11e70aee67c559b7fb83b82a00ca0c879cae067d94c6547fac4845f7"
+    },
+    "src-tauri/src/infrastructure/database/repositories/shot.rs": {
+      "beforeHash": "b760829cea95efbd3e7558e3fa7e67b7eb622320063f5484e9b738876a89a2ed",
+      "afterHash": "8c5a0ea06c49a9ace5cf9b648dcb46336250c08fc532e76a66739684d33c4ef9"
+    },
+    "src-tauri/tests/dev052_runtime_integration.rs": {
+      "beforeHash": "0f38e64037a7138620ebe3b5706c6b50d16b3cb2cf84f43833d50037e8a29439",
+      "afterHash": "6110055af3619de46a78e648eb0929379fe7f8a9309d2bfe2fdda4ad71c83bbc"
+    },
+    "scripts/delete-integrity-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "4f07ddb4d1acb5e02aab85c62ff5043423885d627a72f36f053ac7f9651bafee"
+    },
+    "scripts/testing/delete-integrity.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "af4187026a4c310fe3ab93f485900d493c2e742388edb51cb1a95fe2a410bd59"
+    }
+  }
+}
