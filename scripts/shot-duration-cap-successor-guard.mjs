@@ -140,8 +140,7 @@ function validate(root, override, successor) {
     read: p => SHOT_DURATION_CAP_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function shotDurationCapParentReader(root, override = undefined) {
-  const successor = h3CompositionLayoutParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = h3CompositionLayoutParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "shotDurationCapParentReader", undefined, check, SHOT_DURATION_CAP_PROOF);
 }

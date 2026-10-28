@@ -135,8 +135,7 @@ function validate(root, override, successor) {
     read: p => SUCCESSOR_CHAIN_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function successorChainParentReader(root, override = undefined) {
-  const successor = scopeSinceChainParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = scopeSinceChainParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "successorChainParentReader", undefined, check, SUCCESSOR_CHAIN_PROOF);
 }

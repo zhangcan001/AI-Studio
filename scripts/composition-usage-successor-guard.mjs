@@ -151,8 +151,7 @@ function validate(root, override, successor) {
     read: p => COMPOSITION_USAGE_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function compositionUsageParentReader(root, override = undefined) {
-  const successor = batchCreateReasonParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = batchCreateReasonParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "compositionUsageParentReader", undefined, check, COMPOSITION_USAGE_PROOF);
 }

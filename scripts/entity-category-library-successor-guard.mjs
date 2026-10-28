@@ -132,8 +132,7 @@ function validate(root, override, successor) {
     read: p => ENTITY_CATEGORY_LIBRARY_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function entityCategoryLibraryParentReader(root, override = undefined) {
-  const successor = h3VedaReferenceParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = h3VedaReferenceParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "entityCategoryLibraryParentReader", undefined, check, ENTITY_CATEGORY_LIBRARY_PROOF);
 }

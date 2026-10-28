@@ -134,8 +134,7 @@ function validate(root, override, successor) {
     read: p => USER_COPY_CLEANUP_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function userCopyCleanupParentReader(root, override = undefined) {
-  const successor = propKindImportParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = propKindImportParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "userCopyCleanupParentReader", undefined, check, USER_COPY_CLEANUP_PROOF);
 }

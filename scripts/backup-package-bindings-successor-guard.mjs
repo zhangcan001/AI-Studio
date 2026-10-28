@@ -120,8 +120,7 @@ function validate(root, override, successor) {
     read: p => BACKUP_PACKAGE_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function backupPackageParentReader(root, override = undefined) {
-  const successor = referenceDraftParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = referenceDraftParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "backupPackageParentReader", undefined, check, BACKUP_PACKAGE_PROOF);
 }

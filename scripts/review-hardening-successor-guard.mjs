@@ -177,8 +177,7 @@ function validate(root, override, successor) {
     read: p => REVIEW_HARDENING_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function reviewHardeningParentReader(root, override = undefined) {
-  const successor = cancelCorrectnessParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = cancelCorrectnessParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "reviewHardeningParentReader", undefined, check, REVIEW_HARDENING_PROOF);
 }

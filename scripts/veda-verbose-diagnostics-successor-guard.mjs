@@ -136,8 +136,7 @@ function validate(root, override, successor) {
     read: p => VEDA_VERBOSE_DIAGNOSTICS_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function vedaVerboseDiagnosticsParentReader(root, override = undefined) {
-  const successor = staleBindingMigrationParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = staleBindingMigrationParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "vedaVerboseDiagnosticsParentReader", undefined, check, VEDA_VERBOSE_DIAGNOSTICS_PROOF);
 }

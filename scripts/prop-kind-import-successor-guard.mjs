@@ -127,8 +127,7 @@ function validate(root, override, successor) {
     read: p => PROP_KIND_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function propKindImportParentReader(root, override = undefined) {
-  const successor = guardChainPerfParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = guardChainPerfParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "propKindImportParentReader", undefined, check, PROP_KIND_IMPORT_PROOF);
 }

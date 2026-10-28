@@ -114,8 +114,7 @@ function validate(root, override, successor) {
     read: p => CI_H3_BUDGET_FIX_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function ciH3BudgetFixParentReader(root, override = undefined) {
-  const successor = ciScopeFixParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = ciScopeFixParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "ciH3BudgetFixParentReader", undefined, check, CI_H3_BUDGET_FIX_PROOF);
 }

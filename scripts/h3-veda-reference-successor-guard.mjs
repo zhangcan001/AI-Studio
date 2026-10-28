@@ -128,8 +128,7 @@ function validate(root, override, successor) {
     read: p => H3_VEDA_REFERENCE_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function h3VedaReferenceParentReader(root, override = undefined) {
-  const successor = workflowAuthoringRetirementParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = workflowAuthoringRetirementParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "h3VedaReferenceParentReader", undefined, check, H3_VEDA_REFERENCE_PROOF);
 }

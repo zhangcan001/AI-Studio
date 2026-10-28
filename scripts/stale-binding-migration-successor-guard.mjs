@@ -131,8 +131,7 @@ function validate(root, override, successor) {
     read: p => STALE_BINDING_MIGRATION_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function staleBindingMigrationParentReader(root, override = undefined) {
-  const successor = supersededImportPinParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = supersededImportPinParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "staleBindingMigrationParentReader", undefined, check, STALE_BINDING_MIGRATION_PROOF);
 }

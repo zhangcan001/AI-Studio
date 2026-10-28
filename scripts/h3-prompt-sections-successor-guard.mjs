@@ -157,8 +157,7 @@ function validate(root, override, successor) {
     read: p => H3_PROMPT_SECTIONS_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function h3PromptSectionsParentReader(root, override = undefined) {
-  const successor = taskCancelDeleteParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = taskCancelDeleteParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "h3PromptSectionsParentReader", undefined, check, H3_PROMPT_SECTIONS_PROOF);
 }

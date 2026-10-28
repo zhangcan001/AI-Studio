@@ -136,8 +136,7 @@ function validate(root, override, successor) {
     read: p => SUPERSEDED_IMPORT_PIN_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function supersededImportPinParentReader(root, override = undefined) {
-  const successor = vedaRemovedWhiteFlashParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = vedaRemovedWhiteFlashParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "supersededImportPinParentReader", undefined, check, SUPERSEDED_IMPORT_PIN_PROOF);
 }

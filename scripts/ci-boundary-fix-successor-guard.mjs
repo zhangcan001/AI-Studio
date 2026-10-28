@@ -117,8 +117,7 @@ function validate(root, override, successor) {
     read: p => CI_BOUNDARY_FIX_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function ciBoundaryFixParentReader(root, override = undefined) {
-  const successor = ciPhase5HFixParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = ciPhase5HFixParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "ciBoundaryFixParentReader", undefined, check, CI_BOUNDARY_FIX_PROOF);
 }

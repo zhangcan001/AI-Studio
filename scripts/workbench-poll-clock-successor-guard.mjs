@@ -119,8 +119,7 @@ function validate(root, override, successor) {
     read: p => WORKBENCH_POLL_CLOCK_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function workbenchPollClockParentReader(root, override = undefined) {
-  const successor = entityCategoryLibraryParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = entityCategoryLibraryParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "workbenchPollClockParentReader", undefined, check, WORKBENCH_POLL_CLOCK_PROOF);
 }

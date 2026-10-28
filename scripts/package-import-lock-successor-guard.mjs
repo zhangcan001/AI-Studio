@@ -120,8 +120,7 @@ function validate(root, override, successor) {
     read: p => PACKAGE_IMPORT_LOCK_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function packageImportLockParentReader(root, override = undefined) {
-  const successor = storyboardWorkbenchBatchParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = storyboardWorkbenchBatchParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "packageImportLockParentReader", undefined, check, PACKAGE_IMPORT_LOCK_PROOF);
 }

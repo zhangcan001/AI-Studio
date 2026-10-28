@@ -160,8 +160,7 @@ function validate(root, override, successor) {
     read: p => TASK_CANCEL_DELETE_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function taskCancelDeleteParentReader(root, override = undefined) {
-  const successor = folderImportEntityDedupeParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = folderImportEntityDedupeParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "taskCancelDeleteParentReader", undefined, check, TASK_CANCEL_DELETE_PROOF);
 }

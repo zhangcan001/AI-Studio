@@ -130,8 +130,7 @@ function validate(root, override, successor) {
     read: p => COMPOSITION_DETAIL_HINT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function compositionDetailHintParentReader(root, override = undefined) {
-  const successor = compositionSceneAnchorParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = compositionSceneAnchorParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "compositionDetailHintParentReader", undefined, check, COMPOSITION_DETAIL_HINT_PROOF);
 }

@@ -147,8 +147,7 @@ function validate(root, override, successor) {
     read: p => FOLDER_BATCH_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function folderBatchImportParentReader(root, override = undefined) {
-  const successor = defaultReferenceGeneratorParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = defaultReferenceGeneratorParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "folderBatchImportParentReader", undefined, check, FOLDER_BATCH_IMPORT_PROOF);
 }

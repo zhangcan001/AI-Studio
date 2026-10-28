@@ -134,8 +134,7 @@ function validate(root, override, successor) {
     read: p => VEDA_REMOVED_WHITE_FLASH_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function vedaRemovedWhiteFlashParentReader(root, override = undefined) {
-  const successor = singleShotBatchControlParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = singleShotBatchControlParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "vedaRemovedWhiteFlashParentReader", undefined, check, VEDA_REMOVED_WHITE_FLASH_PROOF);
 }

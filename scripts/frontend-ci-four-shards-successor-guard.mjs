@@ -171,8 +171,7 @@ function validate(root, override, successor) {
     read: p => FRONTEND_CI_FOUR_SHARDS_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function frontendCiFourShardsParentReader(root, override = undefined) {
-  const successor = vedaVerboseDiagnosticsParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = vedaVerboseDiagnosticsParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "frontendCiFourShardsParentReader", undefined, check, FRONTEND_CI_FOUR_SHARDS_PROOF);
 }

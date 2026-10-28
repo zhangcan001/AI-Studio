@@ -115,8 +115,7 @@ function validate(root, override, successor) {
     read: p => CI_CLOSED_TIP_FIX_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function ciClosedTipFixParentReader(root, override = undefined) {
-  const successor = ciStableFixParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = ciStableFixParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "ciClosedTipFixParentReader", undefined, check, CI_CLOSED_TIP_FIX_PROOF);
 }

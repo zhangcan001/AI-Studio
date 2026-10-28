@@ -130,8 +130,7 @@ function validate(root, override, successor) {
     read: p => VEDA_REFERENCE_MEDIA_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function vedaReferenceMediaParentReader(root, override = undefined) {
-  const successor = compositionUsageParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = compositionUsageParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "vedaReferenceMediaParentReader", undefined, check, VEDA_REFERENCE_MEDIA_PROOF);
 }

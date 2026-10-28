@@ -132,8 +132,7 @@ function validate(root, override, successor) {
     read: p => CANCEL_CORRECTNESS_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function cancelCorrectnessParentReader(root, override = undefined) {
-  const successor = deleteIntegrityParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = deleteIntegrityParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "cancelCorrectnessParentReader", undefined, check, CANCEL_CORRECTNESS_PROOF);
 }

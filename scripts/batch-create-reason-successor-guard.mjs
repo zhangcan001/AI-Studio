@@ -126,8 +126,7 @@ function validate(root, override, successor) {
     read: p => BATCH_CREATE_REASON_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function batchCreateReasonParentReader(root, override = undefined) {
-  const successor = shotDurationCapParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = shotDurationCapParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "batchCreateReasonParentReader", undefined, check, BATCH_CREATE_REASON_PROOF);
 }

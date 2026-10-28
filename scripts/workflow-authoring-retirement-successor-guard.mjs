@@ -138,8 +138,7 @@ function validate(root, override, successor) {
     read: p => WORKFLOW_AUTHORING_RETIREMENT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function workflowAuthoringRetirementParentReader(root, override = undefined) {
-  const successor = generationProgressRefreshParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = generationProgressRefreshParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "workflowAuthoringRetirementParentReader", undefined, check, WORKFLOW_AUTHORING_RETIREMENT_PROOF);
 }

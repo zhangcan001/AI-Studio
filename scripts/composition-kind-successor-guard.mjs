@@ -143,8 +143,7 @@ function validate(root, override, successor) {
     read: p => COMPOSITION_KIND_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function compositionKindParentReader(root, override = undefined) {
-  const successor = referenceImagesImportParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = referenceImagesImportParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "compositionKindParentReader", undefined, check, COMPOSITION_KIND_PROOF);
 }

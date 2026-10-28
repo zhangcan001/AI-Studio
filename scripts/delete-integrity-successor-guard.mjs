@@ -126,8 +126,7 @@ function validate(root, override, successor) {
     read: p => DELETE_INTEGRITY_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function deleteIntegrityParentReader(root, override = undefined) {
-  const successor = promptSectionLoadParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = promptSectionLoadParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "deleteIntegrityParentReader", undefined, check, DELETE_INTEGRITY_PROOF);
 }

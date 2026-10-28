@@ -125,8 +125,7 @@ function validate(root, override, successor) {
     read: p => GENERATION_PROGRESS_REFRESH_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function generationProgressRefreshParentReader(root, override = undefined) {
-  const successor = retiredUiCodeCleanupParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = retiredUiCodeCleanupParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "generationProgressRefreshParentReader", undefined, check, GENERATION_PROGRESS_REFRESH_PROOF);
 }

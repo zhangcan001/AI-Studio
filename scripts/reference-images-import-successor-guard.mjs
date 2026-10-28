@@ -125,8 +125,7 @@ function validate(root, override, successor) {
     read: p => REFERENCE_IMAGES_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function referenceImagesImportParentReader(root, override = undefined) {
-  const successor = vedaReferenceMediaParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = vedaReferenceMediaParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "referenceImagesImportParentReader", undefined, check, REFERENCE_IMAGES_IMPORT_PROOF);
 }

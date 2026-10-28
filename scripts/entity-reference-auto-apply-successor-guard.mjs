@@ -126,8 +126,7 @@ function validate(root, override, successor) {
     read: p => ENTITY_REFERENCE_AUTO_APPLY_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function entityReferenceAutoApplyParentReader(root, override = undefined) {
-  const successor = libraryConfirmCiRaceParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = libraryConfirmCiRaceParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "entityReferenceAutoApplyParentReader", undefined, check, ENTITY_REFERENCE_AUTO_APPLY_PROOF);
 }

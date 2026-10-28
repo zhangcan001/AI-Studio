@@ -127,8 +127,7 @@ function validate(root, override, successor) {
     read: p => LIBRARY_CONFIRM_CI_RACE_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function libraryConfirmCiRaceParentReader(root, override = undefined) {
-  const successor = folderBatchImportParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = folderBatchImportParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "libraryConfirmCiRaceParentReader", undefined, check, LIBRARY_CONFIRM_CI_RACE_PROOF);
 }

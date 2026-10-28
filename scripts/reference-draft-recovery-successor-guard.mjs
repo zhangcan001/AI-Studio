@@ -119,8 +119,7 @@ function validate(root, override, successor) {
     read: p => REFERENCE_DRAFT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function referenceDraftParentReader(root, override = undefined) {
-  const successor = workbenchPollClockParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = workbenchPollClockParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "referenceDraftParentReader", undefined, check, REFERENCE_DRAFT_PROOF);
 }

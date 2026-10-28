@@ -119,8 +119,7 @@ function validate(root, override, successor) {
     read: p => PROMPT_SECTION_LOAD_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function promptSectionLoadParentReader(root, override = undefined) {
-  const successor = promptSectionsWithoutAtParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = promptSectionsWithoutAtParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "promptSectionLoadParentReader", undefined, check, PROMPT_SECTION_LOAD_PROOF);
 }

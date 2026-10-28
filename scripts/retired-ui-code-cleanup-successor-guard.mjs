@@ -134,8 +134,7 @@ function validate(root, override, successor) {
     read: p => RETIRED_UI_CODE_CLEANUP_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function retiredUiCodeCleanupParentReader(root, override = undefined) {
-  const successor = entityReferenceAutoApplyParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = entityReferenceAutoApplyParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "retiredUiCodeCleanupParentReader", undefined, check, RETIRED_UI_CODE_CLEANUP_PROOF);
 }

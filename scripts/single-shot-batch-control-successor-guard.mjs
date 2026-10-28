@@ -137,8 +137,7 @@ function validate(root, override, successor) {
     read: p => SINGLE_SHOT_BATCH_CONTROL_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function singleShotBatchControlParentReader(root, override = undefined) {
-  const successor = reviewHardeningParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = reviewHardeningParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "singleShotBatchControlParentReader", undefined, check, SINGLE_SHOT_BATCH_CONTROL_PROOF);
 }

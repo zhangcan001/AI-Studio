@@ -130,8 +130,7 @@ function validate(root, override, successor) {
     read: p => STORYBOARD_ATOMIC_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function storyboardAtomicParentReader(root, override = undefined) {
-  const successor = backupPackageParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = backupPackageParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "storyboardAtomicParentReader", undefined, check, STORYBOARD_ATOMIC_PROOF);
 }

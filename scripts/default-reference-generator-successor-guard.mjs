@@ -133,8 +133,7 @@ function validate(root, override, successor) {
     read: p => DEFAULT_REFERENCE_GENERATOR_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function defaultReferenceGeneratorParentReader(root, override = undefined) {
-  const successor = userCopyCleanupParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = userCopyCleanupParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "defaultReferenceGeneratorParentReader", undefined, check, DEFAULT_REFERENCE_GENERATOR_PROOF);
 }

@@ -134,8 +134,7 @@ function validate(root, override, successor) {
     read: p => H3_COMPOSITION_LAYOUT_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function h3CompositionLayoutParentReader(root, override = undefined) {
-  const successor = h3PromptSectionsParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = h3PromptSectionsParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "h3CompositionLayoutParentReader", undefined, check, H3_COMPOSITION_LAYOUT_PROOF);
 }

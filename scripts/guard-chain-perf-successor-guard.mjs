@@ -125,8 +125,7 @@ function validate(root, override, successor) {
     read: p => GUARD_CHAIN_PERF_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function guardChainPerfParentReader(root, override = undefined) {
-  const successor = compositionKindParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = compositionKindParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "guardChainPerfParentReader", undefined, check, GUARD_CHAIN_PERF_PROOF);
 }

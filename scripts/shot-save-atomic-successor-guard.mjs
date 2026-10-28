@@ -128,8 +128,7 @@ function validate(root, override, successor) {
     read: p => SHOT_SAVE_ATOMIC_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function shotSaveAtomicParentReader(root, override = undefined) {
-  const successor = packageImportLockParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = packageImportLockParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "shotSaveAtomicParentReader", undefined, check, SHOT_SAVE_ATOMIC_PROOF);
 }

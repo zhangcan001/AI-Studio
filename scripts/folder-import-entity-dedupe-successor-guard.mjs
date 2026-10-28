@@ -128,8 +128,7 @@ function validate(root, override, successor) {
     read: p => FOLDER_IMPORT_ENTITY_DEDUPE_CHANGED.includes(p) ? parent.read(p) : live(p) };
 }
 export function folderImportEntityDedupeParentReader(root, override = undefined) {
-  const successor = compositionDetailHintParentReader(root);
-  const check = () => { const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  const check = () => { const successor = compositionDetailHintParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
   if (override) return check();
   return cachedBoundary(root, "folderImportEntityDedupeParentReader", undefined, check, FOLDER_IMPORT_ENTITY_DEDUPE_PROOF);
 }
