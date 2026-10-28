@@ -2,7 +2,7 @@ import { ciConsolidateFixParentReader, ciConsolidateFixScopeSince, ciConsolidate
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const CI_SHARD_FIX_BASE = "b913a77160fa5d18fe0d239c70f3f04bc46524cb";
 export const CI_SHARD_FIX_PROOF = "docs/architecture/ci-shard-fix-successor.json";
@@ -114,7 +114,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...CI_SHARD_FIX_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...CI_SHARD_FIX_ADDED, CI_SHARD_FIX_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...CI_SHARD_FIX_CHANGED, ...CI_SHARD_FIX_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => CI_SHARD_FIX_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => CI_SHARD_FIX_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function ciShardFixParentReader(root, override = undefined) {
   const check = () => { const successor = ciConsolidateFixParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

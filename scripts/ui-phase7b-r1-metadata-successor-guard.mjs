@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 import { standardReferenceParentReader, standardReferenceFixtureFiles, standardReferenceScopeSince, STANDARD_REFERENCE_BASE } from "./h3-standard-reference-successor-guard.mjs";
 
@@ -220,7 +220,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...R1_METADATA_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...R1_METADATA_ADDED, R1_METADATA_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...R1_METADATA_CHANGED, ...R1_METADATA_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => R1_METADATA_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => R1_METADATA_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function uiPhase7BR1MetadataParentReader(root, override = undefined) {
   const successor = standardReferenceParentReader(root);

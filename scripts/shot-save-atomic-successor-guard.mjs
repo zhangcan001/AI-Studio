@@ -2,7 +2,7 @@ import { packageImportLockParentReader, packageImportLockScopeSince, packageImpo
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const SHOT_SAVE_ATOMIC_BASE = "7933beddd1c64a6bb63e2455502748e283ccddeb";
 export const SHOT_SAVE_ATOMIC_PROOF = "docs/architecture/shot-save-atomic-successor.json";
@@ -125,7 +125,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...SHOT_SAVE_ATOMIC_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...SHOT_SAVE_ATOMIC_ADDED, SHOT_SAVE_ATOMIC_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...SHOT_SAVE_ATOMIC_CHANGED, ...SHOT_SAVE_ATOMIC_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => SHOT_SAVE_ATOMIC_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => SHOT_SAVE_ATOMIC_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function shotSaveAtomicParentReader(root, override = undefined) {
   const check = () => { const successor = packageImportLockParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

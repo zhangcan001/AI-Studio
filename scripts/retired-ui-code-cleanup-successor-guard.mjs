@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const RETIRED_UI_CODE_CLEANUP_BASE = "bf6c4708c1de1d28ed59608d0a48bf7443373b57";
 export const RETIRED_UI_CODE_CLEANUP_PROOF = "docs/architecture/retired-ui-code-cleanup-successor.json";
@@ -131,7 +131,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...RETIRED_UI_CODE_CLEANUP_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...RETIRED_UI_CODE_CLEANUP_ADDED, RETIRED_UI_CODE_CLEANUP_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...RETIRED_UI_CODE_CLEANUP_CHANGED, ...RETIRED_UI_CODE_CLEANUP_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => RETIRED_UI_CODE_CLEANUP_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => RETIRED_UI_CODE_CLEANUP_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function retiredUiCodeCleanupParentReader(root, override = undefined) {
   const check = () => { const successor = entityReferenceAutoApplyParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

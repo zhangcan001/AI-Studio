@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const VEDA_REMOVED_WHITE_FLASH_BASE = "181886b36c7ad8867d83b7a74e55af2328f14da6";
 export const VEDA_REMOVED_WHITE_FLASH_PROOF = "docs/architecture/veda-removed-white-flash-successor.json";
@@ -131,7 +131,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...VEDA_REMOVED_WHITE_FLASH_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...VEDA_REMOVED_WHITE_FLASH_ADDED, VEDA_REMOVED_WHITE_FLASH_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...VEDA_REMOVED_WHITE_FLASH_CHANGED, ...VEDA_REMOVED_WHITE_FLASH_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => VEDA_REMOVED_WHITE_FLASH_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => VEDA_REMOVED_WHITE_FLASH_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function vedaRemovedWhiteFlashParentReader(root, override = undefined) {
   const check = () => { const successor = singleShotBatchControlParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

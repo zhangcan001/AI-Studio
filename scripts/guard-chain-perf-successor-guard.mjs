@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const GUARD_CHAIN_PERF_BASE = "86cd696723c03dd46ec97abcf7e650e5a1672dab";
 export const GUARD_CHAIN_PERF_PROOF = "docs/architecture/guard-chain-perf-successor.json";
@@ -122,7 +122,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...GUARD_CHAIN_PERF_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...GUARD_CHAIN_PERF_ADDED, GUARD_CHAIN_PERF_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...GUARD_CHAIN_PERF_CHANGED, ...GUARD_CHAIN_PERF_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => GUARD_CHAIN_PERF_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => GUARD_CHAIN_PERF_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function guardChainPerfParentReader(root, override = undefined) {
   const check = () => { const successor = compositionKindParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

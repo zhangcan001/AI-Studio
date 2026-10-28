@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const LIBRARY_CONFIRM_CI_RACE_BASE = "719de4986385fd9b9c25944267f16453689f9921";
 export const LIBRARY_CONFIRM_CI_RACE_PROOF = "docs/architecture/library-confirm-ci-race-successor.json";
@@ -124,7 +124,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...LIBRARY_CONFIRM_CI_RACE_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...LIBRARY_CONFIRM_CI_RACE_ADDED, LIBRARY_CONFIRM_CI_RACE_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...LIBRARY_CONFIRM_CI_RACE_CHANGED, ...LIBRARY_CONFIRM_CI_RACE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => LIBRARY_CONFIRM_CI_RACE_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => LIBRARY_CONFIRM_CI_RACE_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function libraryConfirmCiRaceParentReader(root, override = undefined) {
   const check = () => { const successor = folderBatchImportParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const DEFAULT_REFERENCE_GENERATOR_BASE = "f5c56313078c696a480ff296339909439ab9e083";
 export const DEFAULT_REFERENCE_GENERATOR_PROOF = "docs/architecture/default-reference-generator-successor.json";
@@ -130,7 +130,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...DEFAULT_REFERENCE_GENERATOR_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...DEFAULT_REFERENCE_GENERATOR_ADDED, DEFAULT_REFERENCE_GENERATOR_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...DEFAULT_REFERENCE_GENERATOR_CHANGED, ...DEFAULT_REFERENCE_GENERATOR_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => DEFAULT_REFERENCE_GENERATOR_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => DEFAULT_REFERENCE_GENERATOR_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function defaultReferenceGeneratorParentReader(root, override = undefined) {
   const check = () => { const successor = userCopyCleanupParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const GENERATION_PROGRESS_REFRESH_BASE = "ec26f20564ecbc15fd95beb3bf60b0f56e32f5a3";
 export const GENERATION_PROGRESS_REFRESH_PROOF = "docs/architecture/generation-progress-refresh-successor.json";
@@ -122,7 +122,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...GENERATION_PROGRESS_REFRESH_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...GENERATION_PROGRESS_REFRESH_ADDED, GENERATION_PROGRESS_REFRESH_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...GENERATION_PROGRESS_REFRESH_CHANGED, ...GENERATION_PROGRESS_REFRESH_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => GENERATION_PROGRESS_REFRESH_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => GENERATION_PROGRESS_REFRESH_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function generationProgressRefreshParentReader(root, override = undefined) {
   const check = () => { const successor = retiredUiCodeCleanupParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

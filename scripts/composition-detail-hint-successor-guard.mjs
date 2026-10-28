@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const COMPOSITION_DETAIL_HINT_BASE = "c746efafa9bac63733ac019ee58fb0aed5316925";
 export const COMPOSITION_DETAIL_HINT_PROOF = "docs/architecture/composition-detail-hint-successor.json";
@@ -127,7 +127,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...COMPOSITION_DETAIL_HINT_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...COMPOSITION_DETAIL_HINT_ADDED, COMPOSITION_DETAIL_HINT_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...COMPOSITION_DETAIL_HINT_CHANGED, ...COMPOSITION_DETAIL_HINT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => COMPOSITION_DETAIL_HINT_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => COMPOSITION_DETAIL_HINT_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function compositionDetailHintParentReader(root, override = undefined) {
   const check = () => { const successor = compositionSceneAnchorParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const COMPOSITION_SCENE_ANCHOR_BASE = "eeec3ba300716c1be3b61b033b1cc1255bf54365";
 export const COMPOSITION_SCENE_ANCHOR_PROOF = "docs/architecture/composition-scene-anchor-successor.json";
@@ -124,7 +124,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...COMPOSITION_SCENE_ANCHOR_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...COMPOSITION_SCENE_ANCHOR_ADDED, COMPOSITION_SCENE_ANCHOR_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...COMPOSITION_SCENE_ANCHOR_CHANGED, ...COMPOSITION_SCENE_ANCHOR_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => COMPOSITION_SCENE_ANCHOR_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => COMPOSITION_SCENE_ANCHOR_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function compositionSceneAnchorParentReader(root, override = undefined) {
   const check = () => { const successor = frontendCiFourShardsParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

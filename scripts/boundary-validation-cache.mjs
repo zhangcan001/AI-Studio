@@ -246,3 +246,22 @@ export function immutableBlobText(id, bytes) {
   if (text === undefined) blobTexts.set(id, text = bytes().toString('utf8').replaceAll('\r\n', '\n'));
   return text;
 }
+// Within one outer validation session, every guard reads its successor's
+// projection for the same paths, so an unmemoized read walks the whole chain
+// for each path again. Memoize a reader's answers only while the session for
+// its root is open; the closing identity still rejects mid-session drift, and
+// outside a session (override probes, later reads) every call stays fresh.
+const sessionReads = new WeakMap();
+export function sessionMemoRead(root, read) {
+  root = resolve(root);
+  const wrapped = p => {
+    if (!session || session.root !== root) return read(p);
+    let readers = sessionReads.get(session);
+    if (!readers) sessionReads.set(session, readers = new Map());
+    let memo = readers.get(wrapped);
+    if (!memo) readers.set(wrapped, memo = new Map());
+    if (!memo.has(p)) memo.set(p, read(p));
+    return memo.get(p);
+  };
+  return wrapped;
+}

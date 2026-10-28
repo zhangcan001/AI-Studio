@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const BACKUP_PACKAGE_BASE = "05abb6e8f3766b5d95c24149a6e706350b1cab37";
 export const BACKUP_PACKAGE_PROOF = "docs/architecture/backup-package-bindings-successor.json";
@@ -117,7 +117,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...BACKUP_PACKAGE_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...BACKUP_PACKAGE_ADDED, BACKUP_PACKAGE_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...BACKUP_PACKAGE_CHANGED, ...BACKUP_PACKAGE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => BACKUP_PACKAGE_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => BACKUP_PACKAGE_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function backupPackageParentReader(root, override = undefined) {
   const check = () => { const successor = referenceDraftParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

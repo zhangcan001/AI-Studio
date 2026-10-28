@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const WORKFLOW_AUTHORING_RETIREMENT_BASE = "448f0f079f3234084163225d0e16eed70dbba836";
 export const WORKFLOW_AUTHORING_RETIREMENT_PROOF = "docs/architecture/workflow-authoring-retirement-successor.json";
@@ -135,7 +135,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...WORKFLOW_AUTHORING_RETIREMENT_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...WORKFLOW_AUTHORING_RETIREMENT_ADDED, WORKFLOW_AUTHORING_RETIREMENT_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...WORKFLOW_AUTHORING_RETIREMENT_CHANGED, ...WORKFLOW_AUTHORING_RETIREMENT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => WORKFLOW_AUTHORING_RETIREMENT_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => WORKFLOW_AUTHORING_RETIREMENT_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function workflowAuthoringRetirementParentReader(root, override = undefined) {
   const check = () => { const successor = generationProgressRefreshParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

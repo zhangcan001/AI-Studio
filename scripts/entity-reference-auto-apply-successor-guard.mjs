@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const ENTITY_REFERENCE_AUTO_APPLY_BASE = "d183d7c711ac2aa516a182dbcb5e12d8a58665f3";
 export const ENTITY_REFERENCE_AUTO_APPLY_PROOF = "docs/architecture/entity-reference-auto-apply-successor.json";
@@ -123,7 +123,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...ENTITY_REFERENCE_AUTO_APPLY_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...ENTITY_REFERENCE_AUTO_APPLY_ADDED, ENTITY_REFERENCE_AUTO_APPLY_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...ENTITY_REFERENCE_AUTO_APPLY_CHANGED, ...ENTITY_REFERENCE_AUTO_APPLY_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => ENTITY_REFERENCE_AUTO_APPLY_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => ENTITY_REFERENCE_AUTO_APPLY_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function entityReferenceAutoApplyParentReader(root, override = undefined) {
   const check = () => { const successor = libraryConfirmCiRaceParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

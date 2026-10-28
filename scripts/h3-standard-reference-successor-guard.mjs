@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 import { desktopVisualParentReader, desktopVisualFixtureFiles, desktopVisualScopeSince, DESKTOP_VISUAL_BASE } from './desktop-visual-refinement-successor-guard.mjs';
 
@@ -134,7 +134,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...STANDARD_REFERENCE_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...STANDARD_REFERENCE_ADDED, STANDARD_REFERENCE_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...STANDARD_REFERENCE_CHANGED, ...STANDARD_REFERENCE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => STANDARD_REFERENCE_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => STANDARD_REFERENCE_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function standardReferenceParentReader(root, override = undefined) {
   const successor = desktopVisualParentReader(root);

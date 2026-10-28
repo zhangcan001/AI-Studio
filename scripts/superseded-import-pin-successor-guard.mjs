@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const SUPERSEDED_IMPORT_PIN_BASE = "0471525468d2f69b38843ac086fa29e631fab012";
 export const SUPERSEDED_IMPORT_PIN_PROOF = "docs/architecture/superseded-import-pin-successor.json";
@@ -133,7 +133,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...SUPERSEDED_IMPORT_PIN_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...SUPERSEDED_IMPORT_PIN_ADDED, SUPERSEDED_IMPORT_PIN_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...SUPERSEDED_IMPORT_PIN_CHANGED, ...SUPERSEDED_IMPORT_PIN_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => SUPERSEDED_IMPORT_PIN_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => SUPERSEDED_IMPORT_PIN_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function supersededImportPinParentReader(root, override = undefined) {
   const check = () => { const successor = vedaRemovedWhiteFlashParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

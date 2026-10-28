@@ -2,7 +2,7 @@ import { promptSectionLoadParentReader, promptSectionLoadScopeSince, promptSecti
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const DELETE_INTEGRITY_BASE = "6866df4b76c5566a51abdd583c2af2f5c90c3d3a";
 export const DELETE_INTEGRITY_PROOF = "docs/architecture/delete-integrity-successor.json";
@@ -123,7 +123,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...DELETE_INTEGRITY_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...DELETE_INTEGRITY_ADDED, DELETE_INTEGRITY_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...DELETE_INTEGRITY_CHANGED, ...DELETE_INTEGRITY_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => DELETE_INTEGRITY_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => DELETE_INTEGRITY_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function deleteIntegrityParentReader(root, override = undefined) {
   const check = () => { const successor = promptSectionLoadParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -2,7 +2,7 @@ import { ciStableFixParentReader, ciStableFixScopeSince, ciStableFixFixtureFiles
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const CI_CLOSED_TIP_FIX_BASE = "972efd4328e81c0b8bc0c3aef34f6c5b9b1095d1";
 export const CI_CLOSED_TIP_FIX_PROOF = "docs/architecture/ci-closed-tip-fix-successor.json";
@@ -112,7 +112,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...CI_CLOSED_TIP_FIX_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...CI_CLOSED_TIP_FIX_ADDED, CI_CLOSED_TIP_FIX_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...CI_CLOSED_TIP_FIX_CHANGED, ...CI_CLOSED_TIP_FIX_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => CI_CLOSED_TIP_FIX_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => CI_CLOSED_TIP_FIX_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function ciClosedTipFixParentReader(root, override = undefined) {
   const check = () => { const successor = ciStableFixParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

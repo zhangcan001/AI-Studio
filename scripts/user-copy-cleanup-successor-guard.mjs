@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const USER_COPY_CLEANUP_BASE = "d7f4ec7d46b6395df072eec69a834f03d8409cab";
 export const USER_COPY_CLEANUP_PROOF = "docs/architecture/user-copy-cleanup-successor.json";
@@ -131,7 +131,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...USER_COPY_CLEANUP_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...USER_COPY_CLEANUP_ADDED, USER_COPY_CLEANUP_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...USER_COPY_CLEANUP_CHANGED, ...USER_COPY_CLEANUP_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => USER_COPY_CLEANUP_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => USER_COPY_CLEANUP_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function userCopyCleanupParentReader(root, override = undefined) {
   const check = () => { const successor = propKindImportParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const VEDA_REFERENCE_MEDIA_BASE = "4eef703764821eb5884b86a920dfa63cb8926ead";
 export const VEDA_REFERENCE_MEDIA_PROOF = "docs/architecture/veda-reference-media-successor.json";
@@ -127,7 +127,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...VEDA_REFERENCE_MEDIA_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...VEDA_REFERENCE_MEDIA_ADDED, VEDA_REFERENCE_MEDIA_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...VEDA_REFERENCE_MEDIA_CHANGED, ...VEDA_REFERENCE_MEDIA_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => VEDA_REFERENCE_MEDIA_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => VEDA_REFERENCE_MEDIA_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function vedaReferenceMediaParentReader(root, override = undefined) {
   const check = () => { const successor = compositionUsageParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

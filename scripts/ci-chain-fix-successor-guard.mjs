@@ -2,7 +2,7 @@ import { ciQueueFixParentReader, ciQueueFixScopeSince, ciQueueFixFixtureFiles, C
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const CI_CHAIN_FIX_BASE = "a4bf4411cf6e9aa9865c199cc901866cd53b5ae2";
 export const CI_CHAIN_FIX_PROOF = "docs/architecture/ci-chain-fix-successor.json";
@@ -113,7 +113,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...CI_CHAIN_FIX_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...CI_CHAIN_FIX_ADDED, CI_CHAIN_FIX_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...CI_CHAIN_FIX_CHANGED, ...CI_CHAIN_FIX_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => CI_CHAIN_FIX_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => CI_CHAIN_FIX_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function ciChainFixParentReader(root, override = undefined) {
   const check = () => { const successor = ciQueueFixParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const REVIEW_HARDENING_BASE = "f0aaf27a282b903475b104674bfb95cda5c795e1";
 export const REVIEW_HARDENING_PROOF = "docs/architecture/review-hardening-successor.json";
@@ -174,7 +174,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...REVIEW_HARDENING_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...REVIEW_HARDENING_ADDED, REVIEW_HARDENING_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...REVIEW_HARDENING_CHANGED, ...REVIEW_HARDENING_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => REVIEW_HARDENING_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => REVIEW_HARDENING_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function reviewHardeningParentReader(root, override = undefined) {
   const check = () => { const successor = cancelCorrectnessParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -2,7 +2,7 @@ import { storyboardWorkbenchBatchParentReader, storyboardWorkbenchBatchScopeSinc
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const PACKAGE_IMPORT_LOCK_BASE = "17face23725fbc2d3fdbec64948c73188a7dffb1";
 export const PACKAGE_IMPORT_LOCK_PROOF = "docs/architecture/package-import-lock-successor.json";
@@ -117,7 +117,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...PACKAGE_IMPORT_LOCK_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...PACKAGE_IMPORT_LOCK_ADDED, PACKAGE_IMPORT_LOCK_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...PACKAGE_IMPORT_LOCK_CHANGED, ...PACKAGE_IMPORT_LOCK_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => PACKAGE_IMPORT_LOCK_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => PACKAGE_IMPORT_LOCK_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function packageImportLockParentReader(root, override = undefined) {
   const check = () => { const successor = storyboardWorkbenchBatchParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

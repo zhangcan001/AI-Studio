@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const COMPOSITION_KIND_BASE = "ecb180018fcf475c4a78ed7003f91d3dc23435a1";
 export const COMPOSITION_KIND_PROOF = "docs/architecture/composition-kind-successor.json";
@@ -140,7 +140,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...COMPOSITION_KIND_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...COMPOSITION_KIND_ADDED, COMPOSITION_KIND_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...COMPOSITION_KIND_CHANGED, ...COMPOSITION_KIND_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => COMPOSITION_KIND_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => COMPOSITION_KIND_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function compositionKindParentReader(root, override = undefined) {
   const check = () => { const successor = referenceImagesImportParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

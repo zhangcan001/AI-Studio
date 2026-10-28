@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const REFERENCE_DRAFT_BASE = "524794bc6d361e82427d81df54b4fbc3407cb40a";
 export const REFERENCE_DRAFT_PROOF = "docs/architecture/reference-draft-recovery-successor.json";
@@ -116,7 +116,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...REFERENCE_DRAFT_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...REFERENCE_DRAFT_ADDED, REFERENCE_DRAFT_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...REFERENCE_DRAFT_CHANGED, ...REFERENCE_DRAFT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => REFERENCE_DRAFT_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => REFERENCE_DRAFT_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function referenceDraftParentReader(root, override = undefined) {
   const check = () => { const successor = workbenchPollClockParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

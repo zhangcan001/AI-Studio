@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const STALE_BINDING_MIGRATION_BASE = "81e7010e2ab5bb06a048bfc2a94b3ed639f6bf51";
 export const STALE_BINDING_MIGRATION_PROOF = "docs/architecture/stale-binding-migration-successor.json";
@@ -128,7 +128,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...STALE_BINDING_MIGRATION_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...STALE_BINDING_MIGRATION_ADDED, STALE_BINDING_MIGRATION_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...STALE_BINDING_MIGRATION_CHANGED, ...STALE_BINDING_MIGRATION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => STALE_BINDING_MIGRATION_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => STALE_BINDING_MIGRATION_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function staleBindingMigrationParentReader(root, override = undefined) {
   const check = () => { const successor = supersededImportPinParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

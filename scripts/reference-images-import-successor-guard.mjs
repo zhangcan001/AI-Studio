@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const REFERENCE_IMAGES_IMPORT_BASE = "46739ad12c951f05c841075ccdf7e3941dfce3b7";
 export const REFERENCE_IMAGES_IMPORT_PROOF = "docs/architecture/reference-images-import-successor.json";
@@ -122,7 +122,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...REFERENCE_IMAGES_IMPORT_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...REFERENCE_IMAGES_IMPORT_ADDED, REFERENCE_IMAGES_IMPORT_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...REFERENCE_IMAGES_IMPORT_CHANGED, ...REFERENCE_IMAGES_IMPORT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => REFERENCE_IMAGES_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => REFERENCE_IMAGES_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function referenceImagesImportParentReader(root, override = undefined) {
   const check = () => { const successor = vedaReferenceMediaParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

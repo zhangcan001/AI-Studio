@@ -2,7 +2,7 @@ import { ciProbeFixParentReader, ciProbeFixScopeSince, ciProbeFixFixtureFiles, C
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const SCOPE_SINCE_CHAIN_BASE = "6e03d5b8f096dc8a0df84cbf0bf13cb9d2498e47";
 export const SCOPE_SINCE_CHAIN_PROOF = "docs/architecture/scope-since-chain-successor.json";
@@ -130,7 +130,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...SCOPE_SINCE_CHAIN_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...SCOPE_SINCE_CHAIN_ADDED, SCOPE_SINCE_CHAIN_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...SCOPE_SINCE_CHAIN_CHANGED, ...SCOPE_SINCE_CHAIN_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => SCOPE_SINCE_CHAIN_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => SCOPE_SINCE_CHAIN_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function scopeSinceChainParentReader(root, override = undefined) {
   const check = () => { const successor = ciProbeFixParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

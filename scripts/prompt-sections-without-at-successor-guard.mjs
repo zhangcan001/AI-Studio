@@ -2,7 +2,7 @@ import { shotSaveAtomicParentReader, shotSaveAtomicScopeSince, shotSaveAtomicFix
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const PROMPT_SECTIONS_WITHOUT_AT_BASE = "43afa3ae9cb36e4ed3c0cc424837c8e0155acf41";
 export const PROMPT_SECTIONS_WITHOUT_AT_PROOF = "docs/architecture/prompt-sections-without-at-successor.json";
@@ -115,7 +115,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...PROMPT_SECTIONS_WITHOUT_AT_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...PROMPT_SECTIONS_WITHOUT_AT_ADDED, PROMPT_SECTIONS_WITHOUT_AT_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...PROMPT_SECTIONS_WITHOUT_AT_CHANGED, ...PROMPT_SECTIONS_WITHOUT_AT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => PROMPT_SECTIONS_WITHOUT_AT_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => PROMPT_SECTIONS_WITHOUT_AT_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function promptSectionsWithoutAtParentReader(root, override = undefined) {
   const check = () => { const successor = shotSaveAtomicParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const H3_COMPOSITION_LAYOUT_BASE = "ed8ff13ec51febdeb49a84ac9e9ddc1f4869cd88";
 export const H3_COMPOSITION_LAYOUT_PROOF = "docs/architecture/h3-composition-layout-successor.json";
@@ -131,7 +131,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...H3_COMPOSITION_LAYOUT_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...H3_COMPOSITION_LAYOUT_ADDED, H3_COMPOSITION_LAYOUT_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...H3_COMPOSITION_LAYOUT_CHANGED, ...H3_COMPOSITION_LAYOUT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => H3_COMPOSITION_LAYOUT_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => H3_COMPOSITION_LAYOUT_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function h3CompositionLayoutParentReader(root, override = undefined) {
   const check = () => { const successor = h3PromptSectionsParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

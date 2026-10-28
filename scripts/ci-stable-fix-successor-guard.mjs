@@ -2,7 +2,7 @@ import { ciH3BudgetFixParentReader, ciH3BudgetFixScopeSince, ciH3BudgetFixFixtur
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const CI_STABLE_FIX_BASE = "bc2bccb917566196ef6158b602e81c9f27e801ff";
 export const CI_STABLE_FIX_PROOF = "docs/architecture/ci-stable-fix-successor.json";
@@ -112,7 +112,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...CI_STABLE_FIX_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...CI_STABLE_FIX_ADDED, CI_STABLE_FIX_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...CI_STABLE_FIX_CHANGED, ...CI_STABLE_FIX_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => CI_STABLE_FIX_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => CI_STABLE_FIX_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function ciStableFixParentReader(root, override = undefined) {
   const check = () => { const successor = ciH3BudgetFixParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

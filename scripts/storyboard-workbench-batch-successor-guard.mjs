@@ -2,7 +2,7 @@ import { successorChainParentReader, successorChainScopeSince, successorChainFix
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const STORYBOARD_WORKBENCH_BATCH_BASE = "bff74b7400732c8feee9612e7105d3d46ef37d1c";
 export const STORYBOARD_WORKBENCH_BATCH_PROOF = "docs/architecture/storyboard-workbench-batch-successor.json";
@@ -125,7 +125,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...STORYBOARD_WORKBENCH_BATCH_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...STORYBOARD_WORKBENCH_BATCH_ADDED, STORYBOARD_WORKBENCH_BATCH_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...STORYBOARD_WORKBENCH_BATCH_CHANGED, ...STORYBOARD_WORKBENCH_BATCH_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => STORYBOARD_WORKBENCH_BATCH_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => STORYBOARD_WORKBENCH_BATCH_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function storyboardWorkbenchBatchParentReader(root, override = undefined) {
   const check = () => { const successor = successorChainParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

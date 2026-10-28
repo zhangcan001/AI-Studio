@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const CANCEL_CORRECTNESS_BASE = "53743914c1dd0a2158d729f406c977e84cb2f811";
 export const CANCEL_CORRECTNESS_PROOF = "docs/architecture/cancel-correctness-successor.json";
@@ -129,7 +129,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...CANCEL_CORRECTNESS_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...CANCEL_CORRECTNESS_ADDED, CANCEL_CORRECTNESS_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...CANCEL_CORRECTNESS_CHANGED, ...CANCEL_CORRECTNESS_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => CANCEL_CORRECTNESS_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => CANCEL_CORRECTNESS_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function cancelCorrectnessParentReader(root, override = undefined) {
   const check = () => { const successor = deleteIntegrityParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

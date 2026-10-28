@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const ENTITY_CATEGORY_LIBRARY_BASE = "3ad01c3191716c70ba3c2d99ac1eb4d210447679";
 export const ENTITY_CATEGORY_LIBRARY_PROOF = "docs/architecture/entity-category-library-successor.json";
@@ -129,7 +129,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...ENTITY_CATEGORY_LIBRARY_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...ENTITY_CATEGORY_LIBRARY_ADDED, ENTITY_CATEGORY_LIBRARY_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...ENTITY_CATEGORY_LIBRARY_CHANGED, ...ENTITY_CATEGORY_LIBRARY_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => ENTITY_CATEGORY_LIBRARY_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => ENTITY_CATEGORY_LIBRARY_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function entityCategoryLibraryParentReader(root, override = undefined) {
   const check = () => { const successor = h3VedaReferenceParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

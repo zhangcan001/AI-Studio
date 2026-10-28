@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const PROP_KIND_IMPORT_BASE = "0c4c208ac8e1b4559bea60cfb200661d38e18117";
 export const PROP_KIND_IMPORT_PROOF = "docs/architecture/prop-kind-import-successor.json";
@@ -124,7 +124,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...PROP_KIND_IMPORT_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...PROP_KIND_IMPORT_ADDED, PROP_KIND_IMPORT_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...PROP_KIND_IMPORT_CHANGED, ...PROP_KIND_IMPORT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => PROP_KIND_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => PROP_KIND_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function propKindImportParentReader(root, override = undefined) {
   const check = () => { const successor = guardChainPerfParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

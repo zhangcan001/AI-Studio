@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const CI_CONSOLIDATE_FIX_BASE = "58265717a4126251ffdba89afa55227ebdbda754";
 export const CI_CONSOLIDATE_FIX_PROOF = "docs/architecture/ci-consolidate-fix-successor.json";
 export const CI_CONSOLIDATE_FIX_CHANGED = [
   "scripts/backup-package-bindings-successor-guard.mjs",
   "scripts/batch-create-reason-successor-guard.mjs",
+  "scripts/boundary-validation-cache.mjs",
   "scripts/cancel-correctness-successor-guard.mjs",
   "scripts/ci-assert-fix-successor-guard.mjs",
   "scripts/ci-boundary-fix-successor-guard.mjs",
@@ -30,6 +31,7 @@ export const CI_CONSOLIDATE_FIX_CHANGED = [
   "scripts/composition-usage-successor-guard.mjs",
   "scripts/default-reference-generator-successor-guard.mjs",
   "scripts/delete-integrity-successor-guard.mjs",
+  "scripts/desktop-visual-refinement-successor-guard.mjs",
   "scripts/entity-category-library-successor-guard.mjs",
   "scripts/entity-reference-auto-apply-successor-guard.mjs",
   "scripts/folder-batch-import-successor-guard.mjs",
@@ -39,6 +41,7 @@ export const CI_CONSOLIDATE_FIX_CHANGED = [
   "scripts/guard-chain-perf-successor-guard.mjs",
   "scripts/h3-composition-layout-successor-guard.mjs",
   "scripts/h3-prompt-sections-successor-guard.mjs",
+  "scripts/h3-standard-reference-successor-guard.mjs",
   "scripts/h3-veda-reference-successor-guard.mjs",
   "scripts/library-confirm-ci-race-successor-guard.mjs",
   "scripts/package-import-lock-successor-guard.mjs",
@@ -75,6 +78,8 @@ export const CI_CONSOLIDATE_FIX_CHANGED = [
   "scripts/testing/ci-shard-fix.test.mjs",
   "scripts/testing/ci-stable-fix.test.mjs",
   "scripts/testing/ci-stale-fix.test.mjs",
+  "scripts/ui-phase7b-backup-prompt-successor-guard.mjs",
+  "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
   "scripts/user-copy-cleanup-successor-guard.mjs",
   "scripts/veda-reference-media-successor-guard.mjs",
   "scripts/veda-removed-white-flash-successor-guard.mjs",
@@ -180,7 +185,7 @@ function validate(root, override) {
   return { violations, changedPaths: CI_CONSOLIDATE_FIX_CHANGED,
     addedPaths: [...CI_CONSOLIDATE_FIX_ADDED, CI_CONSOLIDATE_FIX_PROOF],
     afterHashes: Object.fromEntries([...CI_CONSOLIDATE_FIX_CHANGED, ...CI_CONSOLIDATE_FIX_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
-    read: p => CI_CONSOLIDATE_FIX_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => CI_CONSOLIDATE_FIX_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function ciConsolidateFixParentReader(root, override = undefined) {
   if (override) return validate(root, override);

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const FOLDER_BATCH_IMPORT_BASE = "ebc5e087585e38c70156a7f05f41615cc84affdf";
 export const FOLDER_BATCH_IMPORT_PROOF = "docs/architecture/folder-batch-import-successor.json";
@@ -144,7 +144,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...FOLDER_BATCH_IMPORT_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...FOLDER_BATCH_IMPORT_ADDED, FOLDER_BATCH_IMPORT_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...FOLDER_BATCH_IMPORT_CHANGED, ...FOLDER_BATCH_IMPORT_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => FOLDER_BATCH_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => FOLDER_BATCH_IMPORT_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function folderBatchImportParentReader(root, override = undefined) {
   const check = () => { const successor = defaultReferenceGeneratorParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

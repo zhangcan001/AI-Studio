@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 import { workbenchVisualParentReader, workbenchVisualFixtureFiles, workbenchVisualScopeSince, WORKBENCH_VISUAL_BASE } from './workbench-visual-refinement-successor-guard.mjs';
 
@@ -115,7 +115,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...DESKTOP_VISUAL_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...DESKTOP_VISUAL_ADDED, DESKTOP_VISUAL_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...DESKTOP_VISUAL_CHANGED, ...DESKTOP_VISUAL_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => DESKTOP_VISUAL_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => DESKTOP_VISUAL_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function desktopVisualParentReader(root, override = undefined) {
   const successor = workbenchVisualParentReader(root);

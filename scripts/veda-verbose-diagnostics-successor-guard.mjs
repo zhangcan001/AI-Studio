@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const VEDA_VERBOSE_DIAGNOSTICS_BASE = "88b1657b3fa55bd21186725db8bb4d4efdb53f6b";
 export const VEDA_VERBOSE_DIAGNOSTICS_PROOF = "docs/architecture/veda-verbose-diagnostics-successor.json";
@@ -133,7 +133,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...VEDA_VERBOSE_DIAGNOSTICS_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...VEDA_VERBOSE_DIAGNOSTICS_ADDED, VEDA_VERBOSE_DIAGNOSTICS_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...VEDA_VERBOSE_DIAGNOSTICS_CHANGED, ...VEDA_VERBOSE_DIAGNOSTICS_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => VEDA_VERBOSE_DIAGNOSTICS_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => VEDA_VERBOSE_DIAGNOSTICS_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function vedaVerboseDiagnosticsParentReader(root, override = undefined) {
   const check = () => { const successor = staleBindingMigrationParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const SHOT_DURATION_CAP_BASE = "565512140cecf146d6b6f39e1f09318cf5cad042";
 export const SHOT_DURATION_CAP_PROOF = "docs/architecture/shot-duration-cap-successor.json";
@@ -137,7 +137,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...SHOT_DURATION_CAP_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...SHOT_DURATION_CAP_ADDED, SHOT_DURATION_CAP_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...SHOT_DURATION_CAP_CHANGED, ...SHOT_DURATION_CAP_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => SHOT_DURATION_CAP_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => SHOT_DURATION_CAP_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function shotDurationCapParentReader(root, override = undefined) {
   const check = () => { const successor = h3CompositionLayoutParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const H3_VEDA_REFERENCE_BASE = "4adf15d2ad4ff0f54f57eb9356d1ebca745832e0";
 export const H3_VEDA_REFERENCE_PROOF = "docs/architecture/h3-veda-reference-successor.json";
@@ -125,7 +125,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...H3_VEDA_REFERENCE_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...H3_VEDA_REFERENCE_ADDED, H3_VEDA_REFERENCE_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...H3_VEDA_REFERENCE_CHANGED, ...H3_VEDA_REFERENCE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => H3_VEDA_REFERENCE_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => H3_VEDA_REFERENCE_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function h3VedaReferenceParentReader(root, override = undefined) {
   const check = () => { const successor = workflowAuthoringRetirementParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };

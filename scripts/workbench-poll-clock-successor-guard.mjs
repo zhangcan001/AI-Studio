@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
 
 export const WORKBENCH_POLL_CLOCK_BASE = "d765ce73f2fa4c90042b7fc4d08bce4f03b5bdd0";
 export const WORKBENCH_POLL_CLOCK_PROOF = "docs/architecture/workbench-poll-clock-successor.json";
@@ -116,7 +116,7 @@ function validate(root, override, successor) {
   return { violations, changedPaths: [...new Set([...WORKBENCH_POLL_CLOCK_CHANGED, ...successor.changedPaths])].sort(),
     addedPaths: [...new Set([...WORKBENCH_POLL_CLOCK_ADDED, WORKBENCH_POLL_CLOCK_PROOF, ...successor.addedPaths])].sort(),
     afterHashes: { ...Object.fromEntries([...WORKBENCH_POLL_CLOCK_CHANGED, ...WORKBENCH_POLL_CLOCK_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
-    read: p => WORKBENCH_POLL_CLOCK_CHANGED.includes(p) ? parent.read(p) : live(p) };
+    read: sessionMemoRead(workspace, p => WORKBENCH_POLL_CLOCK_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function workbenchPollClockParentReader(root, override = undefined) {
   const check = () => { const successor = entityCategoryLibraryParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
