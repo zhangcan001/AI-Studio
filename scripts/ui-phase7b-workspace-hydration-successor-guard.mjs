@@ -45,7 +45,7 @@ function parentFacts(root, base) {
       if (!header) throw Error("immutable blob header");
       const start = end + 1, length = Number(header[2]);
       if (bytes[start + length] !== 10) throw Error("immutable blob boundary");
-      blobs.set(p, bytes.subarray(start, start + length)); offset = start + length + 1;
+      blobs.set(p, Buffer.from(bytes.subarray(start, start + length))); offset = start + length + 1;
     }
     if (offset !== bytes.length) throw Error("immutable trailing bytes");
     const texts = new Map();

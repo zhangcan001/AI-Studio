@@ -78,6 +78,10 @@ export const CI_CONSOLIDATE_FIX_CHANGED = [
   "scripts/testing/ci-shard-fix.test.mjs",
   "scripts/testing/ci-stable-fix.test.mjs",
   "scripts/testing/ci-stale-fix.test.mjs",
+  "scripts/ui-phase5-ci-repair-successor-guard.mjs",
+  "scripts/ui-phase5a-storyboard-successor-guard.mjs",
+  "scripts/ui-phase5b-mixed-video-successor-guard.mjs",
+  "scripts/ui-phase5c-review-successor-guard.mjs",
   "scripts/ui-phase5d-ci-timeout-successor-guard.mjs",
   "scripts/ui-phase5e-ci-shard-successor-guard.mjs",
   "scripts/ui-phase5f-ci-memory-successor-guard.mjs",
@@ -92,6 +96,8 @@ export const CI_CONSOLIDATE_FIX_CHANGED = [
   "scripts/ui-phase7a-source-ready-successor-guard.mjs",
   "scripts/ui-phase7b-backup-prompt-successor-guard.mjs",
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
+  "scripts/ui-phase7b-workspace-hydration-successor-guard.mjs",
+  "scripts/ui-phase7c-frontend-ci-budget-successor-guard.mjs",
   "scripts/user-copy-cleanup-successor-guard.mjs",
   "scripts/veda-reference-media-successor-guard.mjs",
   "scripts/veda-removed-white-flash-successor-guard.mjs",
@@ -133,7 +139,7 @@ function facts(root, base) {
       if (!header) throw Error("immutable blob header");
       const start = end + 1, size = Number(header[2]);
       if (bytes[start + size] !== 10) throw Error("immutable blob boundary");
-      blobs.set(p, immutableBlobBytes(header[1], () => bytes.subarray(start, start + size))); blobIds.set(p, header[1]); offset = start + size + 1;
+      blobs.set(p, immutableBlobBytes(header[1], bytes.subarray(start, start + size))); blobIds.set(p, header[1]); offset = start + size + 1;
     }
     if (offset !== bytes.length) throw Error("immutable trailing bytes");
     const text = new Map();

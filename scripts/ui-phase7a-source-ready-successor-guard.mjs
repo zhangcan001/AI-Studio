@@ -179,7 +179,7 @@ export function phase7AParentFacts(root) {
     if (!match) throw Error('Phase7A immutable parent missing');
     const start = end+1, length = Number(match[2]);
     if (bytes[start+length] !== 10) throw Error('Phase7A immutable blob boundary');
-    blobIds.set(p,match[1]);blobs.set(p,immutableBlobBytes(match[1],()=>bytes.subarray(start,start+length)));offset=start+length+1;
+    blobIds.set(p,match[1]);blobs.set(p,immutableBlobBytes(match[1],bytes.subarray(start,start+length)));offset=start+length+1;
   }
   if (offset !== bytes.length) throw Error('Phase7A immutable trailing bytes');
   const facts={paths,read:(texts=>p=>{if(!texts.has(p))texts.set(p,immutableBlobText(blobIds.get(p),()=>blobs.get(p)));return texts.get(p);})(new Map()),raw:p=>blobs.get(p)};

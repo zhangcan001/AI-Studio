@@ -270,9 +270,11 @@ export function sessionMemoRead(root, read) {
 // for the process lifetime (one snapshot per checkpoint). Ids are git-verified
 // by the batch reader; an id-less blob is never shared.
 const blobBytes = new Map();
+// Callers pass the subarray itself, not a closure over the batch: a closure
+// would capture the batch in the caller's scope context and pin it anyway.
 export function immutableBlobBytes(id, bytes) {
-  if (!/^[a-f0-9]{40}$/.test(id ?? '')) return bytes();
+  if (!/^[a-f0-9]{40}$/.test(id ?? '')) return Buffer.from(bytes);
   let value = blobBytes.get(id);
-  if (value === undefined) blobBytes.set(id, value = Buffer.from(bytes()));
+  if (value === undefined) blobBytes.set(id, value = Buffer.from(bytes));
   return value;
 }

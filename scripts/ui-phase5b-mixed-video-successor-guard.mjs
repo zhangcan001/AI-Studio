@@ -46,7 +46,7 @@ export function phase5BParentFacts(root) {
     if (!match) throw Error('Phase5B immutable parent missing');
     const start = end + 1, length = Number(match[1]);
     if (bytes[start + length] !== 10) throw Error('Phase5B immutable blob boundary');
-    blobs.set(p, bytes.subarray(start, start + length)); offset = start + length + 1;
+    blobs.set(p, Buffer.from(bytes.subarray(start, start + length))); offset = start + length + 1;
   }
   if (offset !== bytes.length) throw Error('Phase5B immutable trailing bytes');
   const facts = { paths, read: (texts => p => { if (!texts.has(p)) texts.set(p, normalize(blobs.get(p).toString('utf8'))); return texts.get(p); })(new Map()), raw: p => blobs.get(p) };

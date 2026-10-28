@@ -86,7 +86,7 @@ function facts(root, base) {
       if (!header) throw Error("Phase7C immutable blob header");
       const start = end + 1, size = Number(header[2]);
       if (bytes[start + size] !== 10) throw Error("Phase7C immutable blob boundary");
-      blobs.set(path, bytes.subarray(start, start + size)); offset = start + size + 1;
+      blobs.set(path, Buffer.from(bytes.subarray(start, start + size))); offset = start + size + 1;
     }
     if (offset !== bytes.length) throw Error("Phase7C immutable trailing bytes");
     const text = new Map();
