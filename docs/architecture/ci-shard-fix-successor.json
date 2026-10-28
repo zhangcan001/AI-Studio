@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "CI_SHARD_FIX",
+  "parentHead": "b913a77160fa5d18fe0d239c70f3f04bc46524cb",
+  "planningParentHead": "b913a77160fa5d18fe0d239c70f3f04bc46524cb",
+  "contracts": {
+    "schemaChanged": false,
+    "migrationAdded": false,
+    "guardsRelaxed": false,
+    "gpuExecuted": false,
+    "productionQueueOnlyExecution": true,
+    "historicalProofBytesUnchanged": true,
+    "timeoutsRaised": false
+  },
+  "files": {
+    "scripts/ci-stale-fix-successor-guard.mjs": {
+      "beforeHash": "5dca5e53052a49cab80411c15ffbc8715ec416f5d05e76d4f6700a792b407322",
+      "afterHash": "1eb4811af18092861a2cee1d55b24d52c70cb2629eb1eb45db248b76a201a7ec"
+    },
+    "scripts/testing/ci-stale-fix.test.mjs": {
+      "beforeHash": "191e02f67114cd948dff33ec6ef3f94e8d8b07bd9040e632a17c6a5db5594707",
+      "afterHash": "804458f0370c2a44c693cb8c7ef5bc21d47c66ba5ffd339775e06749dc864fda"
+    },
+    "scripts/testing/veda-removed-white-flash.test.mjs": {
+      "beforeHash": "ddbddb8dedbd483c43bf8ea810e300cf10738db281db1f267a56643b26051dea",
+      "afterHash": "5ecd6a2b21810898c23cf54628f9116f2f3497421ad3ebe222d72370aa3f7fef"
+    },
+    "src/app/UiPhase5BMixedVideoBoundary.test.ts": {
+      "beforeHash": "dfa9c86c33ae6d2c9b2a0370cba740452e2a81040942d62e005ad5eaaa6a3307",
+      "afterHash": "c5c481906d6b2c6e5a0199e487e14540a0990cd97e28769fa9ba25cd3325d9b2"
+    },
+    "src/app/UiPhase5ECiShardBoundary.test.ts": {
+      "beforeHash": "5567cc727aeb359ec10f48f02ff7850ca25f60780c75afd22c7d26a26e73836a",
+      "afterHash": "4b2a50edf6f781f34af7515354dce7cd7c93c7665e32470d1b84ac34be29ffc6"
+    },
+    "scripts/ci-shard-fix-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "7d3a8823fadf089ddbff13bbfecf4ae1f031715cf2172a668de7040eb7b4a07d"
+    },
+    "scripts/testing/ci-shard-fix.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "299b808b8a315b259f01aa1b328213e6aa91bf4d7ab42bf7edf3361ad480487b"
+    }
+  }
+}

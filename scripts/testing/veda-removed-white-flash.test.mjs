@@ -35,8 +35,7 @@ it('ships Veda reference 1.3.0 that is 1.2.0 with the Veda node bypassed', () =>
   expect(readFileSync(policy, 'utf8')).toContain('"minimax_h3_reference_veda_turbo_1_3_0" => "1.3.0"');
   // Existing bindings and package pins follow the current version via the
   // unchanged stale-binding migration and import remap.
-  // Later successor checkpoints own these bytes; compare this checkpoint's validated projection.
-  expect(ciScopeFixParentReader('.').violations).toEqual([]);
+  // Tip ParentReader fail-closed check lives in the 120s projection it below (chain grew past the 5s default).
   // workflow_library later owned by review-hardening; pin to cancel tip base instead of Veda-era bytes.
   expect(execFileSync('git', ['show', `${CANCEL_CORRECTNESS_BASE}:${migration}`], { encoding: 'utf8' }).replaceAll('\r\n','\n')).toContain('migrate_stale_bindings');
   expect(execFileSync('git', ['ls-files', 'src-tauri/migrations'], { encoding: 'utf8' }))

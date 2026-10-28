@@ -47,22 +47,25 @@ it('keeps live freshness for source and shell bytes with parent fail-closed chec
   }
 }, 90000);
 
-it('keeps live freshness for frozen proofs, Runtime raw bytes and manifest deletion', () => {
-  const runtime = readdirSync('src-tauri/runtime_packages', { withFileTypes: true })
-    .filter((e: { isDirectory(): boolean; name: string }) => e.isDirectory())
-    .map((e: { name: string }) => join('src-tauri/runtime_packages', e.name, 'workflow_api.json'))
-    .find((p: string) => { try { readFileSync(p); return true; } catch { return false; } })!;
-  let parentChecked = false;
-  for (const p of ['docs/architecture/ui-phase5a-storyboard-successor.json', 'docs/architecture/ui-phase5-ci-repair-successor.json', PHASE5B_MANIFEST, runtime]) {
-    const bytes = readFileSync(p);
-    try {
-      writeFileSync(p, bytes.toString() + '\n');
-      const denied = uiPhase5BParentReader('.');
-      expect(denied.violations.length, p).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
-      if (!parentChecked) { expect(uiPhase5AParentReader('.').violations.length, p).toBeGreaterThan(0); parentChecked = true; }
-    } finally { writeFileSync(p, bytes); }
-    expect(uiPhase5BParentReader('.').violations, p).toEqual([]);
-  }
+const phase5BRuntime = () => readdirSync('src-tauri/runtime_packages', { withFileTypes: true })
+  .filter((e: { isDirectory(): boolean; name: string }) => e.isDirectory())
+  .map((e: { name: string }) => join('src-tauri/runtime_packages', e.name, 'workflow_api.json'))
+  .find((p: string) => { try { readFileSync(p); return true; } catch { return false; } })!;
+it.each(['docs/architecture/ui-phase5a-storyboard-successor.json', 'docs/architecture/ui-phase5-ci-repair-successor.json', PHASE5B_MANIFEST, 'runtime'])(
+  'keeps live freshness for frozen proofs, Runtime raw bytes: %s', (name: string) => {
+  // Live working-tree mutate — one path per it keeps each under the 90s Boundary budget.
+  const p = name === 'runtime' ? phase5BRuntime() : name;
+  const bytes = readFileSync(p);
+  try {
+    writeFileSync(p, bytes.toString() + '\n');
+    const denied = uiPhase5BParentReader('.');
+    expect(denied.violations.length, p).toBeGreaterThan(0); expect(denied.addedPaths).toEqual([]);
+    if (name === 'docs/architecture/ui-phase5a-storyboard-successor.json') expect(uiPhase5AParentReader('.').violations.length, p).toBeGreaterThan(0);
+  } finally { writeFileSync(p, bytes); }
+  expect(uiPhase5BParentReader('.').violations, p).toEqual([]);
+}, 90000);
+
+it('keeps live freshness for manifest deletion', () => {
   const bytes = readFileSync(PHASE5B_MANIFEST);
   try {
     rmSync(PHASE5B_MANIFEST); expect(uiPhase5BParentReader('.').violations.length).toBeGreaterThan(0);

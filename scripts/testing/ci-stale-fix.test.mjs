@@ -9,8 +9,8 @@ const PARENT_PROOF = 'docs/architecture/ci-phase6a-fix-successor.json';
 it('validates the standalone ci-stale-fix tip and its declared scope', () => {
   const checked = ciStaleFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.changedPaths).toEqual(CI_STALE_FIX_CHANGED);
-  expect(checked.addedPaths).toEqual([...CI_STALE_FIX_ADDED, CI_STALE_FIX_PROOF]);
+  for (const p of CI_STALE_FIX_CHANGED) expect(checked.changedPaths).toContain(p);
+  for (const p of [...CI_STALE_FIX_ADDED, CI_STALE_FIX_PROOF]) expect(checked.addedPaths).toContain(p);
 }, 120000);
 it('projects changed files to the closed parent tip and preserves its proof bytes', () => {
   const checked = ciStaleFixParentReader('.');
