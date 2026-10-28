@@ -7,7 +7,8 @@ import {uiPhase5FParentReader} from '../../scripts/ui-phase5f-ci-memory-successo
 it('splits live freshness probes, checks parent fail-closed once, and bounds Windows drift probes at 90s',()=>{
  const phase5b=readFileSync('src/app/UiPhase5BMixedVideoBoundary.test.ts','utf8');
  expect(phase5b).toContain("it('keeps live freshness for source and shell bytes with parent fail-closed checked once'");
- expect(phase5b).toContain("it('keeps live freshness for frozen proofs, Runtime raw bytes and manifest deletion'");
+ expect(phase5b).toContain("'keeps live freshness for frozen proofs, Runtime raw bytes: %s'");
+ expect(phase5b).toContain("it('keeps live freshness for manifest deletion'");
  expect(phase5b).toContain("it('keeps live freshness for illegal additions across owned inventories'");
  expect(phase5b).toContain('parentChecked');
  expect((phase5b.match(/90000\)/g) ?? []).length).toBeGreaterThanOrEqual(3);
