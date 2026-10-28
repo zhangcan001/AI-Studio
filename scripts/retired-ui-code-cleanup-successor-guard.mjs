@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
 
 export const RETIRED_UI_CODE_CLEANUP_BASE = "bf6c4708c1de1d28ed59608d0a48bf7443373b57";
 export const RETIRED_UI_CODE_CLEANUP_PROOF = "docs/architecture/retired-ui-code-cleanup-successor.json";
@@ -60,7 +60,7 @@ function facts(root, base) {
       if (!header) throw Error("immutable blob header");
       const start = end + 1, size = Number(header[2]);
       if (bytes[start + size] !== 10) throw Error("immutable blob boundary");
-      blobs.set(p, bytes.subarray(start, start + size)); blobIds.set(p, header[1]); offset = start + size + 1;
+      blobs.set(p, immutableBlobBytes(header[1], () => bytes.subarray(start, start + size))); blobIds.set(p, header[1]); offset = start + size + 1;
     }
     if (offset !== bytes.length) throw Error("immutable trailing bytes");
     const text = new Map();

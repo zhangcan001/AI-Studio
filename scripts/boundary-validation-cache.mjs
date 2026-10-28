@@ -265,3 +265,14 @@ export function sessionMemoRead(root, read) {
   };
   return wrapped;
 }
+// One retained copy per verified immutable blob id. Historical readers parse
+// whole-snapshot batches; keeping a subarray would pin each batch's full buffer
+// for the process lifetime (one snapshot per checkpoint). Ids are git-verified
+// by the batch reader; an id-less blob is never shared.
+const blobBytes = new Map();
+export function immutableBlobBytes(id, bytes) {
+  if (!/^[a-f0-9]{40}$/.test(id ?? '')) return bytes();
+  let value = blobBytes.get(id);
+  if (value === undefined) blobBytes.set(id, value = Buffer.from(bytes()));
+  return value;
+}

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
 
 export const TASK_CANCEL_DELETE_BASE = "b57cc14bd33825e1fdc3e5e3a18f43b0b4327319";
 export const TASK_CANCEL_DELETE_PROOF = "docs/architecture/task-cancel-delete-successor.json";
@@ -82,7 +82,7 @@ function facts(root, base) {
       if (!header) throw Error("immutable blob header");
       const start = end + 1, size = Number(header[2]);
       if (bytes[start + size] !== 10) throw Error("immutable blob boundary");
-      blobs.set(p, bytes.subarray(start, start + size)); blobIds.set(p, header[1]); offset = start + size + 1;
+      blobs.set(p, immutableBlobBytes(header[1], () => bytes.subarray(start, start + size))); blobIds.set(p, header[1]); offset = start + size + 1;
     }
     if (offset !== bytes.length) throw Error("immutable trailing bytes");
     const text = new Map();

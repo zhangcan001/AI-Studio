@@ -1,6 +1,6 @@
 // Authorize the Phase5I vitest worker teardown fix before replaying Phase5H or older proofs.
 // Nothing in the historical manifests or Runtime Package bytes may be rewritten.
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity } from './boundary-validation-cache.mjs';
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobBytes, immutableBlobText} from './boundary-validation-cache.mjs';
 import { uiPhase5JParentReader, phase5JFixtureFiles } from './ui-phase5j-ci-per-file-worker-successor-guard.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -62,16 +62,16 @@ export function phase5IParentFacts(root) {
   const bytes = immutableGit('git',['cat-file','--batch'],{
     cwd:root,input:paths.map(p => `${PHASE5I_PARENT}:${p}\n`).join(''),maxBuffer:64*1024*1024,
   });
-  const blobs = new Map(); let offset = 0;
+  const blobs = new Map(), blobIds = new Map(); let offset = 0;
   for (const p of paths) {
     const end = bytes.indexOf(10,offset), match = /^([a-f0-9]{40}) blob (\d+)$/.exec(bytes.subarray(offset,end).toString());
     if (!match) throw Error('Phase5I immutable parent missing');
     const start = end+1, length = Number(match[2]);
     if (bytes[start+length] !== 10) throw Error('Phase5I immutable blob boundary');
-    blobs.set(p,bytes.subarray(start,start+length));offset=start+length+1;
+    blobIds.set(p,match[1]);blobs.set(p,immutableBlobBytes(match[1],()=>bytes.subarray(start,start+length)));offset=start+length+1;
   }
   if (offset !== bytes.length) throw Error('Phase5I immutable trailing bytes');
-  const facts={paths,read:(texts=>p=>{if(!texts.has(p))texts.set(p,normalize(blobs.get(p).toString('utf8')));return texts.get(p);})(new Map()),raw:p=>blobs.get(p)};
+  const facts={paths,read:(texts=>p=>{if(!texts.has(p))texts.set(p,immutableBlobText(blobIds.get(p),()=>blobs.get(p)));return texts.get(p);})(new Map()),raw:p=>blobs.get(p)};
   parents.set(store,facts);return facts;
 }
 function files(root,dir) {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
 
 export const CI_CONSOLIDATE_FIX_BASE = "58265717a4126251ffdba89afa55227ebdbda754";
 export const CI_CONSOLIDATE_FIX_PROOF = "docs/architecture/ci-consolidate-fix-successor.json";
@@ -78,6 +78,18 @@ export const CI_CONSOLIDATE_FIX_CHANGED = [
   "scripts/testing/ci-shard-fix.test.mjs",
   "scripts/testing/ci-stable-fix.test.mjs",
   "scripts/testing/ci-stale-fix.test.mjs",
+  "scripts/ui-phase5d-ci-timeout-successor-guard.mjs",
+  "scripts/ui-phase5e-ci-shard-successor-guard.mjs",
+  "scripts/ui-phase5f-ci-memory-successor-guard.mjs",
+  "scripts/ui-phase5g-ci-timeout-successor-guard.mjs",
+  "scripts/ui-phase5h-ci-timeout-budget-successor-guard.mjs",
+  "scripts/ui-phase5i-ci-worker-teardown-successor-guard.mjs",
+  "scripts/ui-phase5j-ci-per-file-worker-successor-guard.mjs",
+  "scripts/ui-phase6a-library-source-successor-guard.mjs",
+  "scripts/ui-phase6b-library-shot-bind-successor-guard.mjs",
+  "scripts/ui-phase6c-runs-queue-unify-successor-guard.mjs",
+  "scripts/ui-phase6d-scale-integrity-successor-guard.mjs",
+  "scripts/ui-phase7a-source-ready-successor-guard.mjs",
   "scripts/ui-phase7b-backup-prompt-successor-guard.mjs",
   "scripts/ui-phase7b-r1-metadata-successor-guard.mjs",
   "scripts/user-copy-cleanup-successor-guard.mjs",
@@ -85,6 +97,7 @@ export const CI_CONSOLIDATE_FIX_CHANGED = [
   "scripts/veda-removed-white-flash-successor-guard.mjs",
   "scripts/veda-verbose-diagnostics-successor-guard.mjs",
   "scripts/workbench-poll-clock-successor-guard.mjs",
+  "scripts/workbench-visual-refinement-successor-guard.mjs",
   "scripts/workflow-authoring-retirement-successor-guard.mjs",
   "src/app/UiPhase5GCiTimeoutBoundary.test.ts"
 ].sort();
@@ -120,7 +133,7 @@ function facts(root, base) {
       if (!header) throw Error("immutable blob header");
       const start = end + 1, size = Number(header[2]);
       if (bytes[start + size] !== 10) throw Error("immutable blob boundary");
-      blobs.set(p, bytes.subarray(start, start + size)); blobIds.set(p, header[1]); offset = start + size + 1;
+      blobs.set(p, immutableBlobBytes(header[1], () => bytes.subarray(start, start + size))); blobIds.set(p, header[1]); offset = start + size + 1;
     }
     if (offset !== bytes.length) throw Error("immutable trailing bytes");
     const text = new Map();
