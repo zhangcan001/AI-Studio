@@ -45,7 +45,7 @@ it('ships Veda reference 1.3.0 that is 1.2.0 with the Veda node bypassed', () =>
 it('preserves the frozen superseded-import-pin checkpoint through parent projection', () => {
   const tip = ciScopeFixParentReader('.');
   expect(tip.violations).toEqual([]);
-  expect(readFileSync(builtin,'utf8').replaceAll('\r\n','\n')).toBe(execFileSync('git', ['show', `${CANCEL_CORRECTNESS_BASE}:${builtin}`], {encoding:'utf8'}).replaceAll('\r\n','\n'));
+  expect(tip.read(builtin).replaceAll('\r\n','\n')).toBe(execFileSync('git', ['show', `${CANCEL_CORRECTNESS_BASE}:${builtin}`], {encoding:'utf8'}).replaceAll('\r\n','\n'));
   expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${CANCEL_CORRECTNESS_BASE}:${PARENT_PROOF}`]));
 }, 120000);
 

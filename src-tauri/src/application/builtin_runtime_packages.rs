@@ -13,6 +13,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[path = "builtin_pika_reference.rs"]
+mod pika_reference;
+
 struct BuiltinPackage {
     directory: &'static str,
     manifest: &'static str,
@@ -3210,6 +3213,12 @@ const VEDA_REFERENCE_V1_3_WORKFLOW: &str = r####"{
 
 const PACKAGES: &[BuiltinPackage] = &[
     BuiltinPackage {
+        directory: "minimax_h3_reference_pika_8step_1_0_0",
+        manifest: pika_reference::MANIFEST,
+        recipe: pika_reference::RECIPE,
+        workflow: pika_reference::WORKFLOW,
+    },
+    BuiltinPackage {
         directory: "minimax_h3_reference_veda_turbo_1_0_0",
         manifest: VEDA_REFERENCE_MANIFEST,
         recipe: VEDA_REFERENCE_RECIPE,
@@ -4120,9 +4129,9 @@ mod tests {
         );
         let first = service.sync().await.unwrap();
         assert_eq!(first.invalid, 0, "{:?}", first.errors);
-        assert_eq!(first.inserted, 9);
+        assert_eq!(first.inserted, 10);
         let second = service.sync().await.unwrap();
-        assert_eq!(second.reused, 9);
+        assert_eq!(second.reused, 10);
         assert_eq!(second.inserted, 0);
         let versions = SqliteWorkflowRuntimeRepository::new(pool.clone())
             .list_versions_for_workflow("wfl_minimax_h3_reference_standard")
@@ -4423,8 +4432,8 @@ mod tests {
         ensure_installed(directory.path()).unwrap();
         let installed = std::fs::read_dir(directory.path()).unwrap().count();
         assert_eq!(
-            installed, 9,
-            "four quality modes plus the approved standard and all four Veda reference packages install"
+            installed, 10,
+            "four quality modes plus the approved standard all four Veda and the Pika reference packages install"
         );
         assert!(!directory
             .path()

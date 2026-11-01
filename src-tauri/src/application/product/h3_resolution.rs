@@ -305,11 +305,16 @@ pub fn validate_resolved(
             }
         }
         // The generic H3 reference node also powers legacy text-only T2V
-        // workflows. Only the exact approved REF2VA recipe requires reference
+        // workflows. Only the exact approved REF2VA recipes require reference
         // media; retaining the audio-only denial for other reference graphs.
         // Empty input drafts may save, but production admission must fail.
         if images + videos == 0
-            && (audios > 0 || recipe.id == "rcp_minimax_h3_reference_video_quality_2_2_0")
+            && (audios > 0
+                || matches!(
+                    recipe.id.as_str(),
+                    "rcp_minimax_h3_reference_video_quality_2_2_0"
+                        | "rcp_minimax_h3_reference_pika_8step_1_0_0"
+                ))
         {
             return Err(CompileError::InputRequired {
                 input: "reference_images_or_videos".into(),

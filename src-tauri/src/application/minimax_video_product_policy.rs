@@ -11,11 +11,12 @@ use crate::application::workflow_manifest::WorkflowManifest;
 use sha2::{Digest, Sha256};
 
 pub const REQUIRED: &str = "MINIMAX_VIDEO_PRODUCT_REQUIRED";
-pub const AUTHORIZED_PACKAGES: [&str; 9] = [
+pub const AUTHORIZED_PACKAGES: [&str; 10] = [
     "minimax_h3_fl2va_t2v_quality_2_2_0",
     "minimax_h3_fl2va_i2v_quality_2_2_0",
     "minimax_h3_fl2va_first_last_quality_2_2_0",
     "minimax_h3_reference_video_quality_2_2_0",
+    "minimax_h3_reference_pika_8step_1_0_0",
     "minimax_h3_reference_standard_1_0_0",
     "minimax_h3_reference_veda_turbo_1_0_0",
     "minimax_h3_reference_veda_turbo_1_1_0",
@@ -53,7 +54,9 @@ pub fn authorizes(
     let snapshot = serde_json::from_str::<serde_json::Value>(&version.api_workflow_json);
     let graph = serde_json::from_slice::<serde_json::Value>(&expected.workflow_api_json);
     let approved_version = match artifact.package_name.as_str() {
-        "minimax_h3_reference_standard_1_0_0" | "minimax_h3_reference_veda_turbo_1_0_0" => "1.0.0",
+        "minimax_h3_reference_standard_1_0_0"
+        | "minimax_h3_reference_pika_8step_1_0_0"
+        | "minimax_h3_reference_veda_turbo_1_0_0" => "1.0.0",
         "minimax_h3_reference_veda_turbo_1_1_0" => "1.1.0",
         "minimax_h3_reference_veda_turbo_1_2_0" => "1.2.0",
         "minimax_h3_reference_veda_turbo_1_3_0" => "1.3.0",
@@ -185,6 +188,7 @@ mod user_video_tests {
     #[test]
     fn standard_reference_requires_exact_product_identity_and_immutable_bytes() {
         for name in [
+            "minimax_h3_reference_pika_8step_1_0_0",
             "minimax_h3_reference_standard_1_0_0",
             "minimax_h3_reference_veda_turbo_1_0_0",
             "minimax_h3_reference_veda_turbo_1_1_0",
