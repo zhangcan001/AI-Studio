@@ -24,7 +24,7 @@
     },
     "scripts/pika-reference-successor-guard.mjs": {
       "beforeHash": null,
-      "afterHash": "8f8ef66809853622aa8478f35d7cb4db2e5af2b523719c507dcf55f03cd7ff42"
+      "afterHash": "389f6adf5b68f4b4cdadaca0c33f9762480d12a6d39603bdf99936a4469af55b"
     },
     "scripts/testing/ci-chain-consolidated.test.mjs": {
       "beforeHash": "bec211c186199b60ccee21fe5230fb5162ad1dce5992fb46bd841d5095d1b4f2",
@@ -57,6 +57,10 @@
     "src-tauri/tests/dev082_unified_workflow_library.rs": {
       "beforeHash": "999a9909f9a411e9cbb909da75505a65a3b3d34f11596bd8579cf2f941671209",
       "afterHash": "c993defc6709b9c3cae82febad125f745f5e6f35a5159043a609feb8e63a1aad"
+    },
+    "src/app/BackendBoundary.test.ts": {
+      "beforeHash": "daa66b681aae638cf9574c63de09bc35c09c0f0eb2afb11a4b1fd3a400ff66ac",
+      "afterHash": "bc08c0764bca676b34bf7ee4c734bac89b8c9f45f60e5ec4603353da4d6ffdf9"
     },
     "src/app/Phase7Retirement.test.tsx": {
       "beforeHash": "d6a0637f52355c17c0735116e73e0d5ff0de7bfdf6511c4e605752c09c48e250",

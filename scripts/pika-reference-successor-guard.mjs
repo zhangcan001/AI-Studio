@@ -7,6 +7,7 @@ export const PIKA_REFERENCE_BASE = "948afd5c73fc395a1742fe60c317ab2d62cdce5d";
 export const PIKA_REFERENCE_PROOF = "docs/architecture/pika-reference-successor.json";
 export const PIKA_REFERENCE_CHANGED = [
   "src-tauri/tests/dev082_unified_workflow_library.rs",
+  "src/app/BackendBoundary.test.ts",
   "src/app/Phase7Retirement.test.tsx",
   "src/features/shots/FolderBatchImportPanel.test.tsx",
   "scripts/testing/veda-removed-white-flash.test.mjs",
