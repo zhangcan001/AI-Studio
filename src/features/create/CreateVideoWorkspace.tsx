@@ -6,7 +6,8 @@ import type { CreateController } from "./CreateController";
 import type { CreateRoute } from "./createModel";
 import { AssetImageThumb, CandidateThumbnail, CreateMediaPreview } from "./CreateMediaPreview";
 import { RunStatusCard } from "./CreateResults";
-import { modeLabel } from "../../product/generatorPresentation";
+import { modeLabel, packageKind } from "../../product/generatorPresentation";
+import { resolutionTierPresets } from "./CreateInputs";
 
 const emptyRunMessages: Record<ProductRun["status"], string> = {
   RUNNING: "视频正在生成，请等待真实结果。可打开运行查看详情，无需重复提交。",
@@ -40,6 +41,15 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
       : c.accepted.startOutcome === "QUEUED" ? "已入队，正在读取运行状态" : "已提交，正在读取运行状态"
     : c.runRef ? "正在读取运行状态"
     : undefined;
+  const presets = c.generator?.resolutionPresets ?? [];
+  const w = c.values.width; const h = c.values.height;
+  const currentPreset = presets.find(p => w?.type === "integer" && h?.type === "integer" && p.width === w.value && p.height === h.value);
+  const tiers = resolutionTierPresets(presets, currentPreset);
+  const canUpgradeFinal = Boolean(tiers.final && currentPreset && tiers.final.id !== currentPreset.id && (tiers.final.width * tiers.final.height) > (currentPreset.width * currentPreset.height));
+  const standardPackage = c.generator
+    ? c.generators.find(g => g.availability && modeLabel(g) === modeLabel(c.generator!) && packageKind(g) === "standard")
+    : undefined;
+  const canSwitchStandard = Boolean(standardPackage && standardPackage.selectionRef !== c.selection);
   const runMessage = c.run ? emptyRunMessages[c.run.status]
     : c.accepted?.accepted ? "运行已保存，请在运行详情查看正式状态；接收回执不代表生成成功。"
     : c.runRef ? "正在读取此运行的正式状态，请在运行详情查看；不会自动重复提交。"
@@ -57,6 +67,8 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
         <div className="create-action-row" aria-label="结果操作">
           <button type="button" disabled={c.busy || !c.run?.availableActions.includes("RETRY")} title="使用原运行快照重新生成" onClick={() => void c.retry()}>重新生成</button>
           <button type="button" disabled={c.busy || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} title="按当前草稿新建一次运行" onClick={() => void c.generate()}>继续生成</button>
+          <button type="button" disabled={c.busy || !canUpgradeFinal || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} title="保持当前输入，升到成片分辨率后新建一次运行（仍为高质量工作流）" onClick={() => tiers.final && void c.generateWithResolution(tiers.final.id)}>升成片分辨率再生成</button>
+          <button type="button" disabled={c.busy || !canSwitchStandard || !c.videoInputs.ready} title="切换到 Standard 20步高质量包并新建运行；不恢复已退役的快速预览" onClick={() => void c.generateWithStandardPackage()}>换 Standard 重跑</button>
           <button type="button" onClick={() => c.openLibrary("videos")}>在资源库查看</button>
           <button type="button" className="primary" disabled={!c.runRef} onClick={c.openRun}>打开运行</button>
         </div>

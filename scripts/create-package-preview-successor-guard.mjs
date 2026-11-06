@@ -1,0 +1,132 @@
+import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
+
+export const CREATE_PACKAGE_PREVIEW_BASE = "4f8840c98c3a6c2665240871a6749d52cc6d7bca";
+export const CREATE_PACKAGE_PREVIEW_PROOF = "docs/architecture/create-package-preview-successor.json";
+export const CREATE_PACKAGE_PREVIEW_CHANGED = [
+  "scripts/pika-reference-successor-guard.mjs",
+  "scripts/testing/ci-chain-consolidated.test.mjs",
+  "src/features/create/CreateComposer.test.tsx",
+  "src/features/create/CreateComposer.tsx",
+  "src/features/create/CreateController.ts",
+  "src/features/create/CreateInputs.tsx",
+  "src/features/create/CreateMediaPreview.hooks.test.tsx",
+  "src/features/create/CreatePage.css",
+  "src/features/create/CreateVideoWorkspace.test.tsx",
+  "src/features/create/CreateVideoWorkspace.tsx",
+  "src/features/create/createModel.ts",
+  "src/product/generatorPresentation.ts",
+].sort();
+export const CREATE_PACKAGE_PREVIEW_ADDED = [
+  "scripts/create-package-preview-successor-guard.mjs",
+  "scripts/testing/create-package-preview.test.mjs",
+  "src/product/generatorPresentation.test.ts",
+].sort();
+export const CREATE_PACKAGE_PREVIEW_CONTRACTS = {
+  "schemaChanged": false,
+  "backupFormatChanged": false,
+  "historicalRuntimeBytesUnchanged": true,
+  "historicalProofBytesUnchanged": true,
+  "productionQueueOnlyExecution": true,
+  "gpuExecuted": false,
+  "guardsRelaxed": false,
+  "timeoutsRaised": false,
+  "migrationAdded": false,
+  "packageVariantSelect": true,
+  "previewFinalResolutionTiers": true,
+  "vedaWhiteFlashLabel": true,
+  "fastPreviewNotRestored": true,
+};
+const canonical = v => v.replaceAll("\r\n", "\n");
+const sha = v => createHash("sha256").update(v).digest("hex");
+const relevant = p => p === "vite.config.ts" || /^(\.github\/workflows\/|src\/|src-tauri\/|scripts\/|docs\/architecture\/)/.test(p);
+const git = (root, args) => sessionGit(root, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+const factsCache = new Map();
+function facts(root, base) {
+  const key = JSON.stringify([immutableGitStoreIdentity(root), base]);
+  if (!factsCache.has(key)) {
+    const paths = immutableGit("git", ["ls-tree", "-r", "--name-only", base], { cwd: root, encoding: "utf8" })
+      .trim().split(/\r?\n/).filter(relevant).sort();
+    const bytes = immutableGit("git", ["cat-file", "--batch"], {
+      cwd: root, input: paths.map(p => base + ":" + p + "\n").join(""), maxBuffer: 64 * 1024 * 1024,
+    });
+    const blobs = new Map(), blobIds = new Map(); let offset = 0;
+    for (const p of paths) {
+      const end = bytes.indexOf(10, offset), header = /^([a-f0-9]{40}) blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
+      if (!header) throw Error("immutable blob header");
+      const start = end + 1, size = Number(header[2]);
+      if (bytes[start + size] !== 10) throw Error("immutable blob boundary");
+      blobs.set(p, immutableBlobBytes(header[1], bytes.subarray(start, start + size))); blobIds.set(p, header[1]); offset = start + size + 1;
+    }
+    if (offset !== bytes.length) throw Error("immutable trailing bytes");
+    const text = new Map();
+    factsCache.set(key, { paths, read: p => {
+      if (!text.has(p)) text.set(p, immutableBlobText(blobIds.get(p), () => blobs.get(p)));
+      return text.get(p);
+    } });
+  }
+  return factsCache.get(key);
+}
+export function createPackagePreviewScopeSince(root, base) {
+  const tip = facts(root, CREATE_PACKAGE_PREVIEW_BASE), old = facts(root, base);
+  return [...new Set([
+    ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
+    ...CREATE_PACKAGE_PREVIEW_CHANGED, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF,
+  ])].sort();
+}
+export function createPackagePreviewFixtureFiles(root) {
+  return [...facts(root, CREATE_PACKAGE_PREVIEW_BASE).paths, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF];
+}
+function files(root, dir) {
+  return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
+    const p = dir + "/" + e.name;
+    if (e.isSymbolicLink()) throw Error("symbolic source: " + p);
+    return e.isDirectory() ? files(root, p) : [p];
+  });
+}
+function validate(root, override) {
+  const workspace = resolve(root), violations = [], parent = facts(workspace, CREATE_PACKAGE_PREVIEW_BASE);
+  const fail = id => violations.push("create-package-preview-" + id);
+  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  let proof;
+  try {
+    proof = JSON.parse(live(CREATE_PACKAGE_PREVIEW_PROOF));
+    const scope = [...CREATE_PACKAGE_PREVIEW_CHANGED, ...CREATE_PACKAGE_PREVIEW_ADDED].sort();
+    if (proof.schemaVersion !== 1 || proof.checkpoint !== "CREATE_PACKAGE_PREVIEW"
+        || proof.parentHead !== CREATE_PACKAGE_PREVIEW_BASE || proof.planningParentHead !== CREATE_PACKAGE_PREVIEW_BASE
+        || JSON.stringify(proof.contracts) !== JSON.stringify(CREATE_PACKAGE_PREVIEW_CONTRACTS)
+        || JSON.stringify(Object.keys(proof.files ?? {}).sort()) !== JSON.stringify(scope)) fail("proof-contract");
+    if (git(workspace, ["rev-parse", CREATE_PACKAGE_PREVIEW_BASE]).trim() !== CREATE_PACKAGE_PREVIEW_BASE) fail("ancestor");
+    const allowed = [...scope, CREATE_PACKAGE_PREVIEW_PROOF].sort();
+    const expected = [...parent.paths, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF].sort();
+    const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
+      .trim().split(/\r?\n/).filter(relevant);
+    if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
+    const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
+    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    const changed = parent.paths.filter(p => live(p) !== parent.read(p));
+    const added = inventory.filter(p => !parent.paths.includes(p));
+    if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
+    if (changed.some(p => p.startsWith("src-tauri/runtime_packages/"))) fail("historical-runtime-bytes");
+    for (const p of CREATE_PACKAGE_PREVIEW_CHANGED) {
+      if (proof.files?.[p]?.beforeHash !== sha(parent.read(p)) || proof.files?.[p]?.afterHash !== sha(live(p))) fail("changed:" + p);
+    }
+    for (const p of CREATE_PACKAGE_PREVIEW_ADDED) {
+      if (parent.paths.includes(p) || proof.files?.[p]?.beforeHash !== null || proof.files?.[p]?.afterHash !== sha(live(p))) fail("added:" + p);
+    }
+    for (const p of Object.keys(override ?? {}).filter(p => relevant(p) && !allowed.includes(p))) {
+      if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
+    }
+  } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
+  return { violations, changedPaths: CREATE_PACKAGE_PREVIEW_CHANGED,
+    addedPaths: [...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF],
+    afterHashes: Object.fromEntries([...CREATE_PACKAGE_PREVIEW_CHANGED, ...CREATE_PACKAGE_PREVIEW_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+    read: sessionMemoRead(workspace, p => CREATE_PACKAGE_PREVIEW_CHANGED.includes(p) ? parent.read(p) : live(p)) };
+}
+export function createPackagePreviewParentReader(root, override = undefined) {
+  if (override) return validate(root, override);
+  return cachedBoundary(root, "createPackagePreviewParentReader", undefined,
+    () => validate(root, undefined), CREATE_PACKAGE_PREVIEW_PROOF);
+}

@@ -562,3 +562,9 @@
 .composer-ref:has(.composer-ref-order) { margin-bottom:28px; }
 .storyboard-shot-rows :focus-visible { outline:2px solid var(--studio-accent); outline-offset:3px; }
 .storyboard-runs-dialog > header { align-items:center; flex-wrap:wrap; }
+
+.composer-resolution-group { display: inline-flex; align-items: center; gap: 0.25rem; }
+.composer-tier { font-size: 0.75rem; padding: 0.15rem 0.4rem; }
+.composer-package { max-width: 14rem; }
+.composer-package select { max-width: 14rem; }
+.composer-package-hint { opacity: 0.75; font-size: 0.75rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

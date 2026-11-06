@@ -13,7 +13,7 @@ export function defaultGenerator(generators: GeneratorOption[], recentSelection?
     ?? available.find(generator => generator.recommended) ?? available[0];
 }
 export function normalCreate(route: AppRoute) { return route.kind === "create" && route.surface !== "batch"; }
-export { modeLabel, generatorLabel, fieldLabel } from "../../product/generatorPresentation";
+export { modeLabel, generatorLabel, fieldLabel, packageKind, packageVariantHint, packageOptionLabel } from "../../product/generatorPresentation";
 export function mediaKind(field: RecipeField): CreationAsset["mediaKind"] | null {
   if (field.type === "image" || field.type === "images") return "image";
   if (field.type === "video" || field.type === "videos") return "video";

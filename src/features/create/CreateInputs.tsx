@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CreationContext } from "../../product/types";
 import type { RecipeField } from "../../types/generation";
 import type { CreateController } from "./CreateController";
-import { fieldLabel, generatorLabel } from "./createModel";
+import { fieldLabel, packageOptionLabel } from "./createModel";
 import { AssetImageThumb } from "./CreateMediaPreview";
 import { modeLabel } from "../../product/generatorPresentation";
 const VIDEO_MODE_CARDS = [
@@ -25,7 +25,7 @@ export function GeneratorPanel({ controller: c }: { controller: CreateController
         <span aria-hidden="true" className="create-mode-icon">{card.icon}</span><strong>{card.label}</strong><small>{available ? card.hint : "暂无可用生成器"}</small></button>;
     })}</div>
     <label className="create-generator-select">生成器<select id="create-field-selectionRef" aria-label="选择生成器" value={c.selection} disabled={c.busy || c.videoInputs.busy} onChange={e => c.chooseGenerator(e.target.value)}>
-    <option value="">请选择</option>{c.generators.filter(item => item.mediaKind === "video" || item.selectionRef === c.selection).map((item, index) => <option key={item.selectionRef} value={item.selectionRef} disabled={!item.availability}>{generatorLabel(item, index)}{!item.availability ? "（不可用）" : ""}</option>)}
+    <option value="">请选择</option>{c.generators.filter(item => item.mediaKind === "video" || item.selectionRef === c.selection).map((item, index) => <option key={item.selectionRef} value={item.selectionRef} disabled={!item.availability}>{packageOptionLabel(item, index)}{!item.availability ? "（不可用）" : ""}</option>)}
   </select></label>{c.generator?.availabilityReason && <p>{c.generator.availabilityReason}</p>}</section>;
 }
 /** Recent prompt picker (moved from the old prompt panel). Applies through the existing prompt-choice path. */
@@ -68,11 +68,35 @@ export function presetAspectKey(preset: Pick<ResolutionPreset, "id" | "width" | 
   const m = /-(\d+)x(\d+)$/.exec(preset.id);
   return m ? `${m[1]}:${m[2]}` : undefined;
 }
+/** Megapixel tag from preset id like mp-0_5-16x9; null when not an MP ladder id. */
+export function presetMegapixels(preset: Pick<ResolutionPreset, "id">): number | null {
+  const m = /^mp-(\d+(?:_\d+)?)-/.exec(preset.id);
+  return m ? Number(m[1].replace("_", ".")) : null;
+}
+const PREVIEW_MP = 0.5;
+const FINAL_MP = 0.98;
+/** Pick preview (~0.5MP) / final (~0.98MP) presets for the current aspect without changing the ladder. */
+export function resolutionTierPresets(presets: readonly ResolutionPreset[], current?: ResolutionPreset) {
+  const aspect = current ? presetAspectKey(current) : undefined;
+  const pool = aspect ? presets.filter(p => presetAspectKey(p) === aspect) : [...presets];
+  const list = pool.length ? pool : [...presets];
+  const nearest = (target: number) => list
+    .map(p => ({ p, mp: presetMegapixels(p) }))
+    .filter((x): x is { p: ResolutionPreset; mp: number } => x.mp != null)
+    .sort((a, b) => Math.abs(a.mp - target) - Math.abs(b.mp - target) || a.mp - b.mp)[0]?.p;
+  return { preview: nearest(PREVIEW_MP), final: nearest(FINAL_MP) };
+}
 export function ResolutionPicker({ controller: c, presets, current }: { controller: CreateController; presets: ResolutionPreset[]; current?: ResolutionPreset }) {
   // Show megapixel options for the current nominal aspect from the preset table.
   const currentKey = current ? presetAspectKey(current) : undefined;
   const scoped = currentKey ? presets.filter(p => presetAspectKey(p) === currentKey) : presets;
   const base = scoped.length ? scoped : presets;
   const list = current && !base.some(p => p.id === current.id) ? [current, ...base] : base;
-  return <label className="composer-pick" title="分辨率">▣<select id="create-field-resolution" aria-label="视频分辨率" value={current?.id ?? ""} disabled={c.busy} onChange={e => c.chooseResolution(e.target.value)}>{!current && <option value="" disabled>自定义</option>}{list.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label>;
+  const tiers = resolutionTierPresets(presets, current);
+  const currentMp = current ? presetMegapixels(current) : null;
+  return <span className="composer-resolution-group">
+    <label className="composer-pick" title="分辨率">▣<select id="create-field-resolution" aria-label="视频分辨率" value={current?.id ?? ""} disabled={c.busy} onChange={e => c.chooseResolution(e.target.value)}>{!current && <option value="" disabled>自定义</option>}{list.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label>
+    {tiers.preview && <button type="button" className="composer-tier" aria-pressed={current?.id === tiers.preview.id || currentMp === PREVIEW_MP} disabled={c.busy || current?.id === tiers.preview.id} title={`预览约 ${PREVIEW_MP}MP（仍为高质量工作流，不是已退役的快速预览包）`} onClick={() => c.chooseResolution(tiers.preview!.id)}>预览</button>}
+    {tiers.final && <button type="button" className="composer-tier" aria-pressed={current?.id === tiers.final.id || currentMp === FINAL_MP} disabled={c.busy || current?.id === tiers.final.id} title={`成片约 ${FINAL_MP}MP`} onClick={() => c.chooseResolution(tiers.final!.id)}>成片</button>}
+  </span>;
 }

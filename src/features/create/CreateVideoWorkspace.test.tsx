@@ -150,3 +150,30 @@ it("labels a saved run whose Start was rejected as 无法启动, never as queued
   expect(queueRunLabel({ status: "PAUSED", errorSummary: null })).toBe("暂停");
   expect(queueRunLabel({ status: "QUEUED", errorSummary: null })).toBe("排队中");
 });
+
+it("offers upgrade-to-final and Standard rerun actions without restoring fast preview", async () => {
+  const presets = [
+    { id: "mp-0_5-16x9", label: "0.5MP · 960×544", width: 960, height: 544 },
+    { id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 },
+  ];
+  const pika = { ...options[3], selectionRef: "opaque-pika", name: "MiniMax H3 Pika 全能参考 · 8步", recommended: true, resolutionPresets: presets };
+  const standard = { ...pika, selectionRef: "opaque-std", name: "MiniMax H3 Standard 全能参考 · 20步", recommended: false };
+  api.generatorsList.mockResolvedValue([options[0], options[1], options[2], pika, standard]);
+  render(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={nav}/>);
+  await screen.findByLabelText("选择生成器");
+  await waitFor(() => expect(screen.getByRole("button", { name: "生成" }).hasAttribute("disabled")).toBe(false));
+  fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "opaque-pika" } });
+  await waitFor(() => expect(api.inputsGet).toHaveBeenLastCalledWith({ projectId: "owned", shotId: "one", selectionRef: "opaque-pika" }));
+  await waitFor(() => expect(composerInputs()).toBe("saved"));
+  await readyToGenerate();
+  useStudioStore.getState().loadCreationDraft({ prompt: { type: "string", value: "test" }, width: { type: "integer", value: 960 }, height: { type: "integer", value: 544 } }, true);
+  await readyToGenerate();
+  await waitFor(() => expect(screen.getByRole("button", { name: "升成片分辨率再生成" }).hasAttribute("disabled")).toBe(false));
+  expect(screen.getByRole("button", { name: "换 Standard 重跑" }).hasAttribute("disabled")).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "升成片分辨率再生成" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalled());
+  const last = api.generate.mock.calls[api.generate.mock.calls.length - 1][0];
+  expect(last.values.width).toEqual({ type: "integer", value: 1344 });
+  expect(last.values.height).toEqual({ type: "integer", value: 768 });
+  expect(last.selectionRef).toBe("opaque-pika");
+});

@@ -3,7 +3,7 @@ import { shotDurationIssue, shotDurationMax } from "../../product/shotDuration";
 import type { RecipeField } from "../../types/generation";
 import type { CreateController } from "./CreateController";
 import { assetIds, fieldLabel, mediaKind, mediaValue } from "./createModel";
-import { modeLabel } from "../../product/generatorPresentation";
+import { modeLabel, packageOptionLabel, packageVariantHint } from "../../product/generatorPresentation";
 import { AssetImageThumb, CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage, useMediaLightbox } from "./CreateMediaPreview";
 import { useShotEntityBindings } from "./ShotEntityChips";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
@@ -241,6 +241,8 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     const next = options.find(g => g.selectionRef === c.selection) ?? options.find(g => g.availability && g.recommended) ?? options.find(g => g.availability);
     if (next && next.selectionRef !== c.selection) c.chooseGenerator(next.selectionRef);
   };
+  const modeVariants = c.generators.filter(g => g.mediaKind === "video" && modeLabel(g) === currentMode);
+  const packageHint = c.generator ? packageVariantHint(c.generator) : "";
   const presets = c.generator?.resolutionPresets ?? [];
   const pickerPresets = presets;
   const w = c.values.width, h = c.values.height;
@@ -382,6 +384,12 @@ export function CreateComposer({ controller: c }: { controller: CreateController
           {modes.map(m => <option key={m} value={m} disabled={!c.generators.some(g => g.mediaKind === "video" && g.availability && modeLabel(g) === m)}>{m}</option>)}
         </select>
       </div>
+      {modeVariants.length > 1 && <label className="composer-pick composer-package" title={packageHint || "同模式下的工作流包"}>
+        <select aria-label="包变体" value={c.selection} disabled={c.busy || vi.busy} onChange={e => c.chooseGenerator(e.target.value)}>
+          {modeVariants.map((g, index) => <option key={g.selectionRef} value={g.selectionRef} disabled={!g.availability}>{packageOptionLabel(g, index)}{!g.availability ? "（不可用）" : ""}</option>)}
+        </select>
+      </label>}
+      {packageHint && <small className="composer-package-hint" title={packageHint}>{packageHint}</small>}
       {promptField && <button type="button" className="composer-text" onClick={() => setPromptPicker(true)}>选择提示词</button>}
       <span className="composer-spacer" />
       {presets.length > 0 && <ResolutionPicker controller={c} presets={pickerPresets} current={current} />}

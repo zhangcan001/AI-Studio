@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { presetAspectKey, ResolutionPicker } from "./CreateInputs";
+import { presetAspectKey, ResolutionPicker, resolutionTierPresets, presetMegapixels } from "./CreateInputs";
 import { loadLibraryImageUrl, retainLibraryImage, useLibraryImageUrl } from "./CreateMediaPreview";
 import type { CreateController } from "./CreateController";
 
@@ -110,4 +110,32 @@ it("clears the previous image URL immediately when the asset identity changes", 
   await waitFor(() => expect(screen.getByTestId("url").textContent).toBe("blob:img-a"));
   view.rerender(<Probe projectId="p" assetId="b" />);
   expect(screen.getByTestId("url").textContent).toBe("loading");
+});
+
+it("maps preview and final resolution tiers from the existing MP ladder", () => {
+  const presets = [
+    { id: "mp-0_5-16x9", label: "0.5MP · 960×544", width: 960, height: 544 },
+    { id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 },
+    { id: "mp-0_5-9x16", label: "0.5MP · 544×960", width: 544, height: 960 },
+    { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 },
+  ];
+  expect(presetMegapixels(presets[0])).toBe(0.5);
+  const landscape = resolutionTierPresets(presets, presets[0]);
+  expect(landscape.preview?.id).toBe("mp-0_5-16x9");
+  expect(landscape.final?.id).toBe("mp-0_98-16x9");
+  const portrait = resolutionTierPresets(presets, presets[2]);
+  expect(portrait.preview?.id).toBe("mp-0_5-9x16");
+  expect(portrait.final?.id).toBe("mp-0_98-9x16");
+});
+
+it("exposes preview and final quick actions next to the resolution picker", () => {
+  const presets = [
+    { id: "mp-0_5-16x9", label: "0.5MP · 960×544", width: 960, height: 544 },
+    { id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 },
+  ];
+  const c = { busy: false, chooseResolution: vi.fn() } as unknown as CreateController;
+  render(<ResolutionPicker controller={c} presets={presets} current={presets[0]} />);
+  fireEvent.click(screen.getByRole("button", { name: "成片" }));
+  expect(c.chooseResolution).toHaveBeenCalledWith("mp-0_98-16x9");
+  expect((screen.getByRole("button", { name: "预览" }) as HTMLButtonElement).disabled).toBe(true);
 });

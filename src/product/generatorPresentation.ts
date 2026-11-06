@@ -14,9 +14,40 @@ export function modeLabel(generator: GeneratorOption): string {
 }
 export function generatorLabel(generator: GeneratorOption, index: number) {
   const technical = /(?:^wfl_|^wfv_|\.json$|\.yaml$|[\\/]|[0-9a-f]{32})/i.test(generator.name);
-  const name = technical ? /h3|minimax/i.test(generator.name) ? "H3 高质量" : /krea/i.test(generator.name) ? "Krea 图片" : `生成器 ${index + 1}` : generator.name;
+  const name = technical
+    ? /veda/i.test(generator.name) ? "H3 Veda"
+      : /pika/i.test(generator.name) ? "H3 Pika"
+      : /h3|minimax/i.test(generator.name) ? "H3 高质量"
+      : /krea/i.test(generator.name) ? "Krea 图片"
+      : `生成器 ${index + 1}`
+    : generator.name;
   return `${name} · ${modeLabel(generator)} · 版本 ${generator.version}`;
 }
+
+/** Product package family for Create UI copy; never drives selectionRef identity. */
+export type PackageKind = "pika" | "veda" | "standard" | "other";
+export function packageKind(generator: Pick<GeneratorOption, "name">): PackageKind {
+  const name = generator.name;
+  if (/veda/i.test(name)) return "veda";
+  if (/pika|8\s*步/i.test(name)) return "pika";
+  if (/standard|标准|20\s*步/i.test(name)) return "standard";
+  return "other";
+}
+/** Short Chinese hint shown next to a package option. */
+export function packageVariantHint(generator: Pick<GeneratorOption, "name">): string {
+  switch (packageKind(generator)) {
+    case "pika": return "Pika · 8步加速参考";
+    case "veda": return "Veda · 易白闪，成片慎用";
+    case "standard": return "Standard · 20步高质量";
+    default: return "";
+  }
+}
+export function packageOptionLabel(generator: GeneratorOption, index: number): string {
+  const hint = packageVariantHint(generator);
+  const base = generatorLabel(generator, index);
+  return hint ? `${base}（${hint}）` : base;
+}
+
 export function fieldLabel(field: RecipeField) {
   return ({ prompt: "提示词", negative_prompt: "负向提示词", first_frame: "首帧", last_frame: "尾帧", reference_images: "参考图片", reference_audios: "参考音频", reference_video: "参考视频", reference_videos: "参考视频", duration_seconds: "时长（秒）", width: "宽度", height: "高度" } as Record<string, string>)[field.key] ?? field.label;
 }

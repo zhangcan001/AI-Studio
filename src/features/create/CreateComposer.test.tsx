@@ -480,3 +480,38 @@ it("preserves the prompt caret while automatically adding mentioned entity image
   expect(selection.anchorNode).toBe(text); expect(selection.anchorOffset).toBe(3);
   expect(api.generate).not.toHaveBeenCalled();
 });
+
+it("shows same-mode package variants and resolution preview/final shortcuts", async () => {
+  const shared = options[2];
+  const variants = [
+    { ...shared, selectionRef: "opaque-pika", name: "MiniMax H3 Pika 全能参考 · 8步", recommended: true, resolutionPresets: [
+      { id: "mp-0_5-16x9", label: "0.5MP · 960×544", width: 960, height: 544 },
+      { id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 },
+    ]},
+    { ...shared, selectionRef: "opaque-std", name: "MiniMax H3 Standard 全能参考 · 20步", recommended: false, resolutionPresets: [
+      { id: "mp-0_5-16x9", label: "0.5MP · 960×544", width: 960, height: 544 },
+      { id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 },
+    ]},
+    { ...shared, selectionRef: "opaque-veda", name: "MiniMax H3 Veda Turbo", recommended: false, resolutionPresets: [
+      { id: "mp-0_5-16x9", label: "0.5MP · 960×544", width: 960, height: 544 },
+      { id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 },
+    ]},
+  ];
+  api.generatorsList.mockResolvedValue([...options.filter(o => o.mode !== "REF2VA"), ...variants]);
+  render(<CreatePage route={route} runtime={{...runtime,devices:[]}} navigate={nav}/>);
+  await screen.findByLabelText("选择生成器");
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "opaque-pika" } });
+  await waitFor(() => expect(api.inputsGet).toHaveBeenLastCalledWith({ projectId: "owned", shotId: "one", selectionRef: "opaque-pika" }));
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  const pack = screen.getByLabelText("包变体") as HTMLSelectElement;
+  expect([...pack.options].map(o => o.value)).toEqual(["opaque-pika", "opaque-std", "opaque-veda"]);
+  expect(screen.getAllByText(/8步加速参考/).length).toBeGreaterThan(0);
+  fireEvent.change(pack, { target: { value: "opaque-veda" } });
+  await waitFor(() => expect(api.inputsGet).toHaveBeenLastCalledWith({ projectId: "owned", shotId: "one", selectionRef: "opaque-veda" }));
+  expect(screen.getAllByText(/易白闪，成片慎用/).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole("button", { name: "预览" }));
+  await waitFor(() => expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 960 }));
+  fireEvent.click(screen.getByRole("button", { name: "成片" }));
+  await waitFor(() => expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1344 }));
+});
