@@ -378,27 +378,15 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       submissionIdempotencyKey: attempt.current,
     };
     const ready = await productClient.creation.readinessGet(request);
-    const stillSameScope = mounted.current && token === epoch.current && draft.key === currentDraft.current.key
-      && draft.selection === (overrides?.selectionRef ?? selection)
-      && draft.values === (overrides?.values ?? useStudioStore.getState().values)
-      && draft.provenance === useStudioStore.getState().creationPromptProvenance
-      && draft.runtimeStatus === runtimeStatus
-      && draft.runtimeEndpoint === runtimeEndpoint
-      && draft.runtimeGeneration === runtimeGeneration
-      && draft.inputRevision === inputRevision;
-    if (!stillSameScope) return;
+    // Compare against live currentDraft, not the closed-over render locals — otherwise
+    // a runtimeGeneration/status change during readiness cannot invalidate the submit.
+    if (!mounted.current || token !== epoch.current || !matchesDraft(draft)) return;
     setReadinessCheck({ result: ready, draft }); if (!ready.ready || draft.runtimeStatus !== "CONNECTED") return;
     const ack = await productClient.creation.generate(request);
     if (!mounted.current || token !== epoch.current || draft.key !== currentDraft.current.key) return;
     // A committed run belongs to this scope even if runtime/input evidence changed
     // in flight. Keep its locator without accepting or overwriting a newer draft.
-    const unchanged = draft.selection === (overrides?.selectionRef ?? selection)
-      && draft.values === (overrides?.values ?? useStudioStore.getState().values)
-      && draft.provenance === useStudioStore.getState().creationPromptProvenance
-      && draft.runtimeStatus === runtimeStatus
-      && draft.runtimeEndpoint === runtimeEndpoint
-      && draft.runtimeGeneration === runtimeGeneration
-      && draft.inputRevision === inputRevision;
+    const unchanged = matchesDraft(draft);
     setAccepted(unchanged ? ack : null); setRunRef(ack.runRef); setRun(undefined);
     // Runs must see the new batch immediately; Library thrash waits for task://updated assets.
     invalidateRuns(route.projectId, { library: false });
