@@ -36,7 +36,7 @@ export function packageKind(generator: Pick<GeneratorOption, "name">): PackageKi
 /** Short Chinese hint shown next to a package option. */
 export function packageVariantHint(generator: Pick<GeneratorOption, "name">): string {
   switch (packageKind(generator)) {
-    case "pika": return "Pika · 8步加速参考";
+    case "pika": return /\bflex\s+6\s*步/i.test(generator.name) ? "Pika Flex · 6步混合参考" : "Pika · 8步加速参考";
     case "veda": return "Veda · 易白闪，成片慎用";
     case "standard": return "Standard · 20步高质量";
     default: return "";

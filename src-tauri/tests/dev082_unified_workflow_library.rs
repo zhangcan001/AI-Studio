@@ -1275,7 +1275,7 @@ mod lifecycle_e2e {
         );
         let fresh = environment.services(CapabilityFixture::Ready, None);
         let fresh_sync = fresh.library_service.sync().await.unwrap();
-        assert_eq!(fresh_sync.packages_found, 10);
+        assert_eq!(fresh_sync.packages_found, 11);
         assert_eq!(fresh_sync.invalid, 0);
         let mut installed = fresh
             .runtime_repository
@@ -1321,8 +1321,8 @@ mod lifecycle_e2e {
             .sync()
             .await
             .expect("fresh runtime package discovery should sync");
-        // Existing installations retain historical Krea2 plus ten approved video packages.
-        assert_eq!(first_sync.packages_found, 11);
+        // Existing installations retain historical Krea2 plus eleven approved video packages.
+        assert_eq!(first_sync.packages_found, 12);
         assert_eq!(first_sync.invalid, 0, "{:?}", first_sync.errors);
 
         let versions = services
@@ -1348,6 +1348,7 @@ mod lifecycle_e2e {
             ("wfl_minimax_h3_reference_video_quality", "2.2.0"),
             ("wfl_minimax_h3_reference_standard", "1.0.0"),
             ("wfl_minimax_h3_reference_pika_8step", "1.0.0"),
+            ("wfl_minimax_h3_reference_pika_flex_6step", "1.0.0"),
             ("wfl_minimax_h3_reference_veda_turbo", "1.0.0"),
             ("wfl_minimax_h3_reference_veda_turbo", "1.1.0"),
             ("wfl_minimax_h3_reference_veda_turbo", "1.2.0"),
@@ -1389,19 +1390,51 @@ mod lifecycle_e2e {
             .with_registry_repository(Arc::new(ai_studio_lib::infrastructure::database::SqliteWorkflowRegistryRepository::new(environment.pool.clone())))
             .with_runtime_artifact_repository(Arc::new(ai_studio_lib::infrastructure::database::SqliteWorkflowRuntimeArtifactRepository::new(environment.pool.clone())))
             .with_package_store(services.package_store.clone()));
-        let catalog =
+        let catalog_service =
             ai_studio_lib::application::generation_catalog_service::GenerationCatalogService::new(
                 services.generation_repository.clone(),
             )
-            .with_new_generation_admission(registry.clone())
-            .list()
+            .with_new_generation_admission(registry.clone());
+        let catalog = catalog_service.list().await.unwrap();
+        assert_eq!(catalog.len(), 8);
+        let old_pika = catalog
+            .iter()
+            .position(|v| {
+                v.workflow_id == "wfl_minimax_h3_reference_pika_8step"
+                    && v.recipe_version == "1.0.0"
+            })
+            .expect("the original Pika package remains available");
+        let flex = versions
+            .iter()
+            .find(|v| v.workflow_id == "wfl_minimax_h3_reference_pika_flex_6step")
+            .unwrap();
+        assert_eq!(flex.recipes.len(), 1);
+        let flex_recipe = &flex.recipes[0];
+        assert_eq!(
+            ai_studio_lib::compiler::RecipeParser::parse(&flex_recipe.recipe_yaml)
+                .unwrap()
+                .id,
+            "rcp_minimax_h3_reference_pika_flex_6step_1_0_0"
+        );
+        // Catalog identity uses the registered pair, not the logical ID in recipe.yaml.
+        let flex_index = catalog
+            .iter()
+            .position(|v| {
+                v.workflow_version_id == flex.workflow_version_id
+                    && v.recipe_id == flex_recipe.recipe_id
+            })
+            .expect("the exact Flex pair is selectable");
+        assert!(
+            old_pika < flex_index,
+            "keep the original Pika fallback ahead of Flex"
+        );
+        assert!(catalog[flex_index].mode.eq_ignore_ascii_case("ref2va"));
+        let presets = catalog_service
+            .video_resolution_presets(&flex.workflow_version_id, &flex_recipe.recipe_id)
             .await
             .unwrap();
-        assert_eq!(catalog.len(), 7);
-        assert!(catalog
-            .iter()
-            .any(|v| v.workflow_id == "wfl_minimax_h3_reference_pika_8step"
-                && v.recipe_version == "1.0.0"));
+        assert!(presets.iter().any(|p| p.width == 1344 && p.height == 768));
+        assert!(presets.iter().any(|p| p.width == 544 && p.height == 960));
         assert!(!catalog.iter().any(|v| v.workflow_id == KERA2_WORKFLOW_ID));
         let binding_service = ProjectWorkflowBindingService::new(
             services.binding_repository.clone(),
@@ -1493,7 +1526,7 @@ mod lifecycle_e2e {
             .sync()
             .await
             .expect("second runtime package sync should complete");
-        assert_eq!(second_sync.packages_found, 11);
+        assert_eq!(second_sync.packages_found, 12);
         assert_eq!(second_sync.invalid, 0, "{:?}", second_sync.errors);
         let repeated_versions = services
             .runtime_repository

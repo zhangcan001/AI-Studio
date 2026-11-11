@@ -1,3 +1,4 @@
+import { PIKA_FLEX_REFERENCE_CHANGED, PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF } from '../pika-flex-reference-successor-guard.mjs';
 import { PIKA_REFERENCE_CHANGED, PIKA_REFERENCE_ADDED, PIKA_REFERENCE_PROOF } from '../pika-reference-successor-guard.mjs';
 import { CREATE_PACKAGE_PREVIEW_CHANGED, CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF } from '../create-package-preview-successor-guard.mjs';
 // @vitest-environment node
@@ -902,8 +903,8 @@ const PARENT_PROOF = 'docs/architecture/ci-shard-fix-successor.json';
 it('validates the standalone ci-consolidate-fix tip and its declared scope', () => {
   const checked = ciConsolidateFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.changedPaths).toEqual([...new Set([...CI_CONSOLIDATE_FIX_CHANGED, ...PIKA_REFERENCE_CHANGED, ...CREATE_PACKAGE_PREVIEW_CHANGED])].sort());
-  expect(checked.addedPaths).toEqual([...new Set([...CI_CONSOLIDATE_FIX_ADDED, CI_CONSOLIDATE_FIX_PROOF, ...PIKA_REFERENCE_ADDED, PIKA_REFERENCE_PROOF, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF])].sort());
+  expect(checked.changedPaths).toEqual([...new Set([...CI_CONSOLIDATE_FIX_CHANGED, ...PIKA_REFERENCE_CHANGED, ...CREATE_PACKAGE_PREVIEW_CHANGED, ...PIKA_FLEX_REFERENCE_CHANGED])].sort());
+  expect(checked.addedPaths).toEqual([...new Set([...CI_CONSOLIDATE_FIX_ADDED, CI_CONSOLIDATE_FIX_PROOF, ...PIKA_REFERENCE_ADDED, PIKA_REFERENCE_PROOF, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF, ...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF])].sort());
 }, 120000);
 it('projects changed files to the closed parent tip and preserves its proof bytes', () => {
   const checked = ciConsolidateFixParentReader('.');

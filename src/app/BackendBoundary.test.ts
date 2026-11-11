@@ -8,7 +8,6 @@ import { m1ParentReader } from "../../scripts/m1-readiness-boundary-guard.mjs";
 import { m3LibraryParentReader } from "../../scripts/m3-library-findability-boundary-guard.mjs";
 import { minimaxVideoPhase2ParentReader } from "../../scripts/minimax-video-phase2-successor-guard.mjs";
 import { minimaxVideoPhase3ParentReader } from "../../scripts/minimax-video-phase3-successor-guard.mjs";
-import { PIKA_REFERENCE_ADDED } from "../../scripts/pika-reference-successor-guard.mjs";
 const read=(p:string):string=>readFileSync(p,"utf8");
 const manifest=JSON.parse(read("docs/architecture/phase8-backend-decomposition.json"));
 const phase13=JSON.parse(read("docs/architecture/phase13-observability.json"));
@@ -51,8 +50,8 @@ it("target2 preserves registered IPC signatures and frozen Phase7 consumers",()=
  expect(reviewed.files).toBe(backend.length);
  // Phase 3 projects the Phase 2 checkpoint. Later Rust edits stay outside that frozen aggregate.
  const phase3=minimaxVideoPhase3ParentReader('.');expect(phase3.violations).toEqual([]);
- // Rust sources added after that checkpoint are byte-pinned by their own successor proof.
- expect(createHash("sha256").update(backend.filter((p:string)=>!PIKA_REFERENCE_ADDED.includes(p)).map((p:string)=>p+'\n'+phase3.read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(reviewed.sha256);
+ // Exclude only later additions proven by the reader; keep the historical hash exact.
+ expect(createHash("sha256").update(backend.filter((p:string)=>!phase3.addedPaths.includes(p)).map((p:string)=>p+'\n'+phase3.read(p).replace(/\r\n/g,"\n")).join('\n')).digest("hex")).toBe(reviewed.sha256);
   expect(manifest.rows.map((r:{path:string})=>r.path).sort()).toEqual(backend.filter((p:string)=>!phase13.backend.addedPaths.includes(p)&&!successor.addedPaths.includes(p)));
 }, 90000);
 it("target2 preserves frozen Phase7 consumers through the validated successor",()=>{

@@ -1,3 +1,4 @@
+import { pikaFlexReferenceParentReader, pikaFlexReferenceScopeSince, pikaFlexReferenceFixtureFiles, PIKA_FLEX_REFERENCE_BASE } from './pika-flex-reference-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -74,10 +75,11 @@ export function createPackagePreviewScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...CREATE_PACKAGE_PREVIEW_CHANGED, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF,
+    ...pikaFlexReferenceScopeSince(root, PIKA_FLEX_REFERENCE_BASE),
   ])].sort();
 }
 export function createPackagePreviewFixtureFiles(root) {
-  return [...facts(root, CREATE_PACKAGE_PREVIEW_BASE).paths, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF];
+  return [...new Set([...facts(root, CREATE_PACKAGE_PREVIEW_BASE).paths, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF, ...pikaFlexReferenceFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -86,10 +88,13 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, CREATE_PACKAGE_PREVIEW_BASE);
   const fail = id => violations.push("create-package-preview-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(CREATE_PACKAGE_PREVIEW_PROOF));
@@ -102,10 +107,10 @@ function validate(root, override) {
     const allowed = [...scope, CREATE_PACKAGE_PREVIEW_PROOF].sort();
     const expected = [...parent.paths, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -120,13 +125,13 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: CREATE_PACKAGE_PREVIEW_CHANGED,
-    addedPaths: [...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF],
-    afterHashes: Object.fromEntries([...CREATE_PACKAGE_PREVIEW_CHANGED, ...CREATE_PACKAGE_PREVIEW_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...CREATE_PACKAGE_PREVIEW_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...CREATE_PACKAGE_PREVIEW_CHANGED, ...CREATE_PACKAGE_PREVIEW_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: sessionMemoRead(workspace, p => CREATE_PACKAGE_PREVIEW_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function createPackagePreviewParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "createPackagePreviewParentReader", undefined,
-    () => validate(root, undefined), CREATE_PACKAGE_PREVIEW_PROOF);
+  const check = () => { const successor = pikaFlexReferenceParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "createPackagePreviewParentReader", undefined, check, CREATE_PACKAGE_PREVIEW_PROOF);
 }

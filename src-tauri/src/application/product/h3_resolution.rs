@@ -314,6 +314,7 @@ pub fn validate_resolved(
                     recipe.id.as_str(),
                     "rcp_minimax_h3_reference_video_quality_2_2_0"
                         | "rcp_minimax_h3_reference_pika_8step_1_0_0"
+                        | "rcp_minimax_h3_reference_pika_flex_6step_1_0_0"
                 ))
         {
             return Err(CompileError::InputRequired {

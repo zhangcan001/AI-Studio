@@ -515,3 +515,58 @@ it("shows same-mode package variants and resolution preview/final shortcuts", as
   fireEvent.click(screen.getByRole("button", { name: "成片" }));
   await waitFor(() => expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1344 }));
 });
+
+it("edits Flex six-step resolution, duration and mixed references without changing its selection", async () => {
+  const flex: GeneratorOption = {
+    ...options[2],
+    selectionRef: "opaque-pika-flex",
+    name: "MiniMax H3 Pika 全能参考 · Flex 6步",
+    fields: [
+      ...options[2].fields,
+      { ...duration, min: 5, max: 11 },
+      { type: "integer", key: "width", label: "Width", required: true, default: 1344 },
+      { type: "integer", key: "height", label: "Height", required: true, default: 768 },
+      { type: "videos", key: "reference_videos", label: "Videos", required: false, minItems: 0, maxItems: 3 },
+      { type: "audios", key: "reference_audios", label: "Audios", required: false, minItems: 0, maxItems: 3 },
+    ],
+    resolutionPresets: [
+      { id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 },
+      { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 },
+      { id: "mp-0_5-9x16", label: "0.5MP · 544×960", width: 544, height: 960 },
+    ],
+  };
+  api.generatorsList.mockResolvedValue([...options, flex]);
+  saved.set(flex.selectionRef, { ...view(flex.selectionRef), assets: [...assets,
+    { id: "motion", name: "动作参考", mediaKind: "video" }, { id: "voice", name: "声音参考", mediaKind: "audio" },
+  ] });
+  await start(flex.selectionRef);
+  expect(screen.getByText("Pika Flex · 6步混合参考", { selector: "small" })).toBeTruthy();
+  const seconds = screen.getByLabelText("时长（秒）");
+  expect(seconds.getAttribute("min")).toBe("5");
+  expect(seconds.getAttribute("max")).toBe("11");
+  fireEvent.change(seconds, { target: { value: "9" } });
+  fireEvent.change(screen.getByLabelText("画面比例"), { target: { value: "9:16" } });
+  fireEvent.change(screen.getByLabelText("视频分辨率"), { target: { value: "mp-0_5-9x16" } });
+  expect(useStudioStore.getState().values).toMatchObject({
+    width: { type: "integer", value: 544 }, height: { type: "integer", value: 960 }, duration_seconds: { type: "integer", value: 9 },
+  });
+
+  fireEvent.click(screen.getByLabelText("参考图片"));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "添加参考图片" })).getByRole("option", { name: /外部首帧/ }));
+  fireEvent.change(screen.getByLabelText("参考视频"), { target: { value: "motion" } });
+  fireEvent.change(screen.getByLabelText("参考音频"), { target: { value: "voice" } });
+  const picture = { inputKey: "reference_images", ordinal: 0, assetId: "first" };
+  const video = { inputKey: "reference_videos", ordinal: 0, assetId: "motion" };
+  const audio = { inputKey: "reference_audios", ordinal: 0, assetId: "voice" };
+  await waitFor(() => expect(persisted()).toEqual(expect.arrayContaining([picture, video, audio])));
+  expect(persisted()).toHaveLength(3);
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  fireEvent.click(screen.getByRole("button", { name: "参考音频移除第1项" }));
+  await waitFor(() => {
+    expect(persisted()).toHaveLength(2);
+    expect(persisted()).toEqual(expect.arrayContaining([picture, video]));
+  });
+  expect(api.inputsSave.mock.lastCall?.[0].selection.selectionRef).toBe(flex.selectionRef);
+  expect(screen.getByLabelText("包变体")).toHaveProperty("value", flex.selectionRef);
+  expect(api.generate).not.toHaveBeenCalled();
+});

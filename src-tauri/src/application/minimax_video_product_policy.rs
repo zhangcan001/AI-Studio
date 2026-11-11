@@ -11,12 +11,13 @@ use crate::application::workflow_manifest::WorkflowManifest;
 use sha2::{Digest, Sha256};
 
 pub const REQUIRED: &str = "MINIMAX_VIDEO_PRODUCT_REQUIRED";
-pub const AUTHORIZED_PACKAGES: [&str; 10] = [
+pub const AUTHORIZED_PACKAGES: [&str; 11] = [
     "minimax_h3_fl2va_t2v_quality_2_2_0",
     "minimax_h3_fl2va_i2v_quality_2_2_0",
     "minimax_h3_fl2va_first_last_quality_2_2_0",
     "minimax_h3_reference_video_quality_2_2_0",
     "minimax_h3_reference_pika_8step_1_0_0",
+    "minimax_h3_reference_pika_flex_6step_1_0_0",
     "minimax_h3_reference_standard_1_0_0",
     "minimax_h3_reference_veda_turbo_1_0_0",
     "minimax_h3_reference_veda_turbo_1_1_0",
@@ -56,6 +57,7 @@ pub fn authorizes(
     let approved_version = match artifact.package_name.as_str() {
         "minimax_h3_reference_standard_1_0_0"
         | "minimax_h3_reference_pika_8step_1_0_0"
+        | "minimax_h3_reference_pika_flex_6step_1_0_0"
         | "minimax_h3_reference_veda_turbo_1_0_0" => "1.0.0",
         "minimax_h3_reference_veda_turbo_1_1_0" => "1.1.0",
         "minimax_h3_reference_veda_turbo_1_2_0" => "1.2.0",
@@ -189,6 +191,7 @@ mod user_video_tests {
     fn standard_reference_requires_exact_product_identity_and_immutable_bytes() {
         for name in [
             "minimax_h3_reference_pika_8step_1_0_0",
+            "minimax_h3_reference_pika_flex_6step_1_0_0",
             "minimax_h3_reference_standard_1_0_0",
             "minimax_h3_reference_veda_turbo_1_0_0",
             "minimax_h3_reference_veda_turbo_1_1_0",

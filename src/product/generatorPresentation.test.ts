@@ -29,4 +29,10 @@ describe("package presentation", () => {
     expect(generatorLabel(opt("wfl_minimax_h3_reference_pika_8step"), 0)).toContain("H3 Pika");
     expect(generatorLabel(opt("wfl_minimax_h3_reference_veda_turbo"), 0)).toContain("H3 Veda");
   });
+
+  it("distinguishes the Flex six-step variant from the eight-step variant", () => {
+    const flex = opt("MiniMax H3 Pika 全能参考 · Flex 6步");
+    expect(packageOptionLabel(flex, 0)).toContain("Pika Flex · 6步混合参考");
+    expect(packageOptionLabel(flex, 0)).not.toContain("8步加速参考");
+  });
 });
