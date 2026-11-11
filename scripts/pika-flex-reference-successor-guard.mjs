@@ -1,3 +1,4 @@
+import { createRerunSafetyParentReader, createRerunSafetyScopeSince, createRerunSafetyFixtureFiles, CREATE_RERUN_SAFETY_BASE } from './create-rerun-safety-successor-guard.mjs';
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -70,10 +71,11 @@ export function pikaFlexReferenceScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...PIKA_FLEX_REFERENCE_CHANGED, ...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF,
+    ...createRerunSafetyScopeSince(root, CREATE_RERUN_SAFETY_BASE),
   ])].sort();
 }
 export function pikaFlexReferenceFixtureFiles(root) {
-  return [...facts(root, PIKA_FLEX_REFERENCE_BASE).paths, ...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF];
+  return [...new Set([...facts(root, PIKA_FLEX_REFERENCE_BASE).paths, ...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF, ...createRerunSafetyFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -82,10 +84,13 @@ function files(root, dir) {
     return e.isDirectory() ? files(root, p) : [p];
   });
 }
-function validate(root, override) {
+function validate(root, override, successor) {
   const workspace = resolve(root), violations = [], parent = facts(workspace, PIKA_FLEX_REFERENCE_BASE);
   const fail = id => violations.push("pika-flex-reference-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => {
+    const value = override && Object.hasOwn(override, p) ? canonical(override[p]) : undefined;
+    return value !== undefined && !(successor.violations.length === 0 && sha(value) === successor.afterHashes[p]) ? value : canonical(successor.read(p));
+  };
   let proof;
   try {
     proof = JSON.parse(live(PIKA_FLEX_REFERENCE_PROOF));
@@ -98,10 +103,10 @@ function validate(root, override) {
     const allowed = [...scope, PIKA_FLEX_REFERENCE_PROOF].sort();
     const expected = [...parent.paths, ...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -116,13 +121,13 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: PIKA_FLEX_REFERENCE_CHANGED,
-    addedPaths: [...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF],
-    afterHashes: Object.fromEntries([...PIKA_FLEX_REFERENCE_CHANGED, ...PIKA_FLEX_REFERENCE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...PIKA_FLEX_REFERENCE_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...PIKA_FLEX_REFERENCE_CHANGED, ...PIKA_FLEX_REFERENCE_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: sessionMemoRead(workspace, p => PIKA_FLEX_REFERENCE_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function pikaFlexReferenceParentReader(root, override = undefined) {
-  if (override) return validate(root, override);
-  return cachedBoundary(root, "pikaFlexReferenceParentReader", undefined,
-    () => validate(root, undefined), PIKA_FLEX_REFERENCE_PROOF);
+  const check = () => { const successor = createRerunSafetyParentReader(root); const historical = validate(root, override, successor); return { ...historical, violations: [...successor.violations, ...historical.violations] }; };
+  if (override) return check();
+  return cachedBoundary(root, "pikaFlexReferenceParentReader", undefined, check, PIKA_FLEX_REFERENCE_PROOF);
 }

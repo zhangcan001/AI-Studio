@@ -13,6 +13,7 @@ import {
 } from '../pika-flex-reference-successor-guard.mjs';
 import { createPackagePreviewParentReader, CREATE_PACKAGE_PREVIEW_PROOF } from '../create-package-preview-successor-guard.mjs';
 import { uiPhase7BR1MetadataParentReader } from '../ui-phase7b-r1-metadata-successor-guard.mjs';
+import { CREATE_RERUN_SAFETY_CHANGED, CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF } from '../create-rerun-safety-successor-guard.mjs';
 
 const source = 'src-tauri/src/application/builtin_pika_flex_reference.rs';
 const runtime = 'src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/recipe.yaml';
@@ -20,8 +21,8 @@ const runtime = 'src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/r
 it('verifies the additive Flex scope and projects the exact parent checkpoint', () => {
   const result = pikaFlexReferenceParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(PIKA_FLEX_REFERENCE_CHANGED);
-  expect(result.addedPaths).toEqual([...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...PIKA_FLEX_REFERENCE_CHANGED, ...CREATE_RERUN_SAFETY_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF, ...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF])].sort());
   for (const p of PIKA_FLEX_REFERENCE_CHANGED) {
     expect(result.read(p)).toBe(execFileSync('git', ['show', `${PIKA_FLEX_REFERENCE_BASE}:${p}`], { encoding: 'utf8' }).replaceAll('\r\n', '\n'));
   }

@@ -177,3 +177,88 @@ it("offers upgrade-to-final and Standard rerun actions without restoring fast pr
   expect(last.values.height).toEqual({ type: "integer", value: 768 });
   expect(last.selectionRef).toBe("opaque-pika");
 });
+
+it("a confirmed generation lets the next explicit unchanged generation use a new key", async () => {
+  api.runGet.mockResolvedValue(run("SUCCEEDED"));
+  await start();
+  fireEvent.click(screen.getByRole("button", { name: "生成" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByRole("button", { name: "继续生成" }).hasAttribute("disabled")).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "继续生成" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2));
+  expect(api.generate.mock.calls[1][0].values).toEqual(api.generate.mock.calls[0][0].values);
+  expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});
+
+it("an uncertain generation response retains the same key for a safe retry", async () => {
+  api.generate.mockRejectedValueOnce(new Error("response lost"));
+  await start();
+  fireEvent.click(screen.getByRole("button", { name: "生成" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByRole("button", { name: "生成" }).hasAttribute("disabled")).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "生成" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2));
+  expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});
+
+function standardRerunFixture() {
+  const pika = { ...options[3], selectionRef: "opaque-pika", name: "MiniMax H3 Pika 全能参考 · 8步", recommended: true };
+  const standard = { ...pika, selectionRef: "opaque-std", name: "MiniMax H3 Standard 全能参考 · 20步", recommended: false };
+  api.generatorsList.mockResolvedValue([pika, standard]);
+  api.get.mockImplementation((p, s) => {
+    const c = context(p, s);
+    return Promise.resolve({ ...c, selectedShot: c.selectedShot ? { ...c.selectedShot, selectionRef: pika.selectionRef } : null });
+  });
+  saved.set(pika.selectionRef, { selectionRef: pika.selectionRef, token: { instanceId: "pika-inputs", revision: 1 }, inputs: [{ inputKey: "reference_images", ordinal: 0, assetId: "first" }], assets });
+  saved.set(standard.selectionRef, { selectionRef: standard.selectionRef, token: { instanceId: "standard-inputs", revision: 3 }, inputs: [{ inputKey: "reference_images", ordinal: 0, assetId: "last" }], assets });
+  return { pika, standard };
+}
+
+it("Standard rerun waits for its own saved Recipe inputs then submits once with fresh evidence", async () => {
+  const { standard } = standardRerunFixture();
+  api.readinessGet.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ ready: true, issues: [], fieldErrors: [], actions: [] }), 30)));
+  await start();
+  fireEvent.click(screen.getByRole("button", { name: "换 Standard 重跑" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
+  expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({ selectionRef: standard.selectionRef, values: expect.objectContaining({ reference_images: { type: "image_assets", assetIds: ["last"] } }) }));
+  expect(api.inputsSave).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getByRole("button", { name: "生成" }).hasAttribute("disabled")).toBe(false));
+  expect(api.generate).toHaveBeenCalledTimes(1);
+});
+
+it("Standard rerun does not submit after changing Shot while its target inputs are in flight", async () => {
+  const { standard } = standardRerunFixture();
+  let release!: (value: VideoInputView) => void;
+  api.inputsGet.mockImplementation(s => s.selectionRef === standard.selectionRef ? new Promise<VideoInputView>(resolve => { release = resolve; }) : Promise.resolve(view(s.selectionRef)));
+  const page = await start();
+  fireEvent.click(screen.getByRole("button", { name: "换 Standard 重跑" }));
+  await waitFor(() => expect(release).toBeTypeOf("function"));
+  page.rerender(<CreatePage route={{ ...route, shotId: "two" }} runtime={{ ...runtime, devices: [] }} navigate={nav} />);
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith("owned", "two", "video"));
+  await act(async () => { release(view(standard.selectionRef)); });
+  await readyToGenerate();
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("a failed Standard input load releases the action without copying inputs or generating", async () => {
+  const { standard } = standardRerunFixture();
+  api.inputsGet.mockImplementation(s => s.selectionRef === standard.selectionRef ? Promise.reject(new Error("target inputs unavailable")) : Promise.resolve(view(s.selectionRef)));
+  await start();
+  fireEvent.click(screen.getByRole("button", { name: "换 Standard 重跑" }));
+  await waitFor(() => expect(screen.getByLabelText<HTMLSelectElement>("选择生成器").value).toBe(standard.selectionRef));
+  await waitFor(() => expect(screen.getByLabelText("包变体").hasAttribute("disabled")).toBe(false));
+  expect(api.generate).not.toHaveBeenCalled();
+  expect(api.inputsSave).not.toHaveBeenCalled();
+  // Recipe defaults represent an unbound plural input as an empty asset list.
+  expect(useStudioStore.getState().values.reference_images).toEqual({ type: "image_assets", assetIds: [] });
+});
+
+it("Standard rerun obeys a negative fresh preflight and does not automatically retry it", async () => {
+  const { standard } = standardRerunFixture();
+  await start();
+  api.readinessGet.mockResolvedValue({ ready: false, issues: [], fieldErrors: [], actions: [] });
+  fireEvent.click(screen.getByRole("button", { name: "换 Standard 重跑" }));
+  await waitFor(() => expect(api.readinessGet).toHaveBeenCalledWith(expect.objectContaining({ selectionRef: standard.selectionRef })));
+  await waitFor(() => expect(screen.getByLabelText("包变体").hasAttribute("disabled")).toBe(false));
+  expect(api.generate).not.toHaveBeenCalled();
+});

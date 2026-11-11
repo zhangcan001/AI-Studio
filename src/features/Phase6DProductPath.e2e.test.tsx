@@ -206,7 +206,8 @@ it("phase6d mock path: import → library source → bind ordinal → explicit s
   render(<CreatePage route={{ kind: "create", projectId: "project-a", shotId: "shot-b", stage: "video" }} navigate={navigate} />);
   const apply = await screen.findByRole("button", { name: "应用到参考视频" });
   expect(apply.hasAttribute("disabled")).toBe(true);
-  fireEvent.click(screen.getByRole("checkbox", { name: /确认将生成视频仅作为视频参考/ }));
+  // Slot buttons precede the asynchronous source metadata; wait for its real confirmation UI.
+  fireEvent.click(await screen.findByRole("checkbox", { name: /确认将生成视频仅作为视频参考/ }));
   await waitFor(() => expect(screen.getByRole("button", { name: "应用到参考视频" }).hasAttribute("disabled")).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "应用到参考视频" }));
   await waitFor(() => expect(api.inputsSave).toHaveBeenCalled());

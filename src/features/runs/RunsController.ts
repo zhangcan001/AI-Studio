@@ -85,7 +85,7 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!detail || !["SUCCEEDED", "FAILED", "PARTIAL", "CANCELLED"].includes(detail.status) || detail.ref.source === "production-run") return;
     if (!window.confirm("确定删除这条运行记录吗？已生成的视频和素材会保留。")) return;
     await productClient.run.delete(route.projectId, detail.ref);
-    navigate({ ...route, run: undefined });
+    if (mounted.current && scope === liveScope.current) navigate({ ...route, run: undefined });
   });
   const retryInput = (input: RunInput) => mutate(async () => {
     if (!detail || detail.projectId !== route.projectId || detail.ref.source !== "queue-batch"

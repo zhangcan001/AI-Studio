@@ -41,6 +41,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [pendingStandardRun, setPendingStandardRun] = useState<{ scope: string; selectionRef: string }>();
   const [libraryAssetMeta, setLibraryAssetMeta] = useState<{assetId:string;category:string;sourceTaskId?:string|null;mediaKind:string}>();
   const [libraryMetaFailed, setLibraryMetaFailed] = useState(false);
   const [generatedVideoConfirm, setGeneratedVideoConfirm] = useState(false);
@@ -79,7 +80,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (previousOwner.current !== owner) { snapshots.current.clear(); previousOwner.current = owner; }
     const token = ++epoch.current;
     let cancelled = false; let initialized = false;
-    setLoading(true); setContext(undefined); setReadinessCheck(undefined); setRun(undefined); setError(undefined);
+    setLoading(true); setContext(undefined); setReadinessCheck(undefined); setRun(undefined); setError(undefined); setPendingStandardRun(undefined);
     attempt.current = null;
     const store = useStudioStore.getState();
     const labReturn = store.creationLabReturn?.scope === key ? { ...store.creationLabReturn, values: store.values, dirty: store.draftDirty, provenance: store.creationPromptProvenance } : undefined;
@@ -119,6 +120,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       || intent.projectId !== route.projectId || intent.stage !== route.stage
       || (intent.target.shotId !== null && intent.target.shotId !== route.shotId)) return;
     const option = generators.find(item => item.selectionRef === intent.selectionRef && item.availability);
+    setPendingStandardRun(undefined);
     if (!option) {
       setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
     } else {
@@ -315,18 +317,18 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       setGeneratedVideoConfirm(false);
     });
   }
-  function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
-  function removeValue(field: string) { attempt.current = null; setAccepted(null); useStudioStore.getState().removeValue(field); }
+  function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); setPendingStandardRun(undefined); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
+  function removeValue(field: string) { setPendingStandardRun(undefined); attempt.current = null; setAccepted(null); useStudioStore.getState().removeValue(field); }
   function chooseResolution(id: string) {
     const preset = generator?.resolutionPresets?.find(item => item.id === id);
     if (!preset || busy) return;
-    attempt.current = null; setAccepted(null);
+    setPendingStandardRun(undefined); attempt.current = null; setAccepted(null);
     const store = useStudioStore.getState();
     store.loadCreationDraft({ ...store.values, width: { type: "integer", value: preset.width }, height: { type: "integer", value: preset.height } }, true, store.creationPromptProvenance);
   }
   function applyPromptChoice(choice: CreationPromptChoice | (CreationPromptProvenance & {text:string})) {
     if (!context?.selectedShot || !generator?.fields.some(field=>field.key==="prompt" && field.type==="textarea")) return;
-    attempt.current=null; setAccepted(null); useStudioStore.getState().applyCreationPrompt(choice);
+    setPendingStandardRun(undefined); attempt.current=null; setAccepted(null); useStudioStore.getState().applyCreationPrompt(choice);
   }
   function openLibrary(filter: "prompts" | "images" | "videos" | "audio" | "media") {
     useStudioStore.getState().setCreationLabReturn({scope:key, route, selectionRef:selection, runRef, accepted});
@@ -337,7 +339,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     const stripsMedia = option.persistentInputs && Object.values(values).some(value => "assetId" in value || "assetIds" in value);
     if ((videoInputs.dirty || stripsMedia) && typeof window !== "undefined" && !window.confirm("切换生成器会丢弃当前未保存的媒体输入草稿，已保存的正式输入仍按 Recipe 保留。确定继续？")) return;
     useStudioStore.getState().setPendingRunIntent(undefined);
-    attempt.current = null; setSelection(ref); writeLastGenerator(route.projectId, route.stage, ref); setAccepted(null); setRestoredDraft(undefined);
+    setPendingStandardRun(undefined); attempt.current = null; setSelection(ref); writeLastGenerator(route.projectId, route.stage, ref); setAccepted(null); setRestoredDraft(undefined);
     const previous = option.persistentInputs ? Object.fromEntries(Object.entries(values).filter(([,v]) => !("assetId" in v || "assetIds" in v))) : values;
     useStudioStore.getState().loadCreationDraft(draftFor(option, context?.selectedShot ?? null, previous), true, option.fields.some(field=>field.key==="prompt" && field.type==="textarea") ? useStudioStore.getState().creationPromptProvenance : undefined);
   }
@@ -383,6 +385,9 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (!mounted.current || token !== epoch.current || !matchesDraft(draft)) return;
     setReadinessCheck({ result: ready, draft }); if (!ready.ready || draft.runtimeStatus !== "CONNECTED") return;
     const ack = await productClient.creation.generate(request);
+    // A lost response must retain its key; a confirmed acceptance ends this attempt.
+    // The next explicit generation is a new intent, even if its values are unchanged.
+    if (ack.accepted && attempt.current === request.submissionIdempotencyKey) attempt.current = null;
     if (!mounted.current || token !== epoch.current || draft.key !== currentDraft.current.key) return;
     // A committed run belongs to this scope even if runtime/input evidence changed
     // in flight. Keep its locator without accepting or overwriting a newer draft.
@@ -393,7 +398,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (!unchanged) return;
     useStudioStore.getState().loadCreationDraft(request.values, false, request.promptId && request.promptVersionId ? {promptId:request.promptId,promptVersionId:request.promptVersionId} : undefined);
   }
-  function generate() { return mutate(() => commitGenerate()); }
+  function generate() { setPendingStandardRun(undefined); return mutate(() => commitGenerate()); }
   function generateWithResolution(presetId: string) {
     return mutate(async () => {
       const preset = generator?.resolutionPresets?.find(item => item.id === presetId);
@@ -422,14 +427,31 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       const previous = standard.persistentInputs ? Object.fromEntries(Object.entries(values).filter(([, v]) => !("assetId" in v || "assetIds" in v))) : values;
       const nextValues = draftFor(standard, context?.selectedShot ?? null, previous);
       useStudioStore.getState().loadCreationDraft(nextValues, true, standard.fields.some(field => field.key === "prompt" && field.type === "textarea") ? useStudioStore.getState().creationPromptProvenance : undefined);
-      await commitGenerate({ values: nextValues, selectionRef: standard.selectionRef });
+      // Only the target Recipe's own saved inputs may authorize this rerun.
+      // Its input hook must settle before the current-render submit closure is used.
+      setPendingStandardRun({ scope: key, selectionRef: standard.selectionRef });
     });
   }
+  useEffect(() => {
+    if (!pendingStandardRun) return;
+    if (pendingStandardRun.scope !== key || pendingStandardRun.selectionRef !== selection) {
+      setPendingStandardRun(undefined);
+      return;
+    }
+    if (loading || busy || videoInputs.loading || videoInputs.busy || actionLock.current
+      || (videoInputs.enabled && !videoInputs.view && !videoInputs.error)) return;
+    setPendingStandardRun(undefined);
+    if (!generator?.availability || !videoInputs.ready) {
+      setError(videoInputs.error ?? "请先加载并保存 Standard 生成器自己的视频输入，再明确点击生成。");
+      return;
+    }
+    void mutate(() => commitGenerate());
+  }, [pendingStandardRun, key, selection, loading, busy, generator, videoInputs.enabled, videoInputs.view, videoInputs.loading, videoInputs.busy, videoInputs.ready, videoInputs.error]);
   const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); if (token === epoch.current) navigate({ ...route, shotId: shot.id }); });
   const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const token = epoch.current; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); if (!mounted.current || token !== epoch.current) return; setRun(next); setRunRef(next.ref); setAccepted(null); });
-  return { videoInputs, libraryIntent, librarySlots, libraryRejectReason, libraryNeedsGeneratedVideoConfirm, libraryApplyReady, generatedVideoConfirm, setGeneratedVideoConfirm, libraryAssetMeta, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy,
+  return { videoInputs, libraryIntent, librarySlots, libraryRejectReason, libraryNeedsGeneratedVideoConfirm, libraryApplyReady, generatedVideoConfirm, setGeneratedVideoConfirm, libraryAssetMeta, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy: busy || Boolean(pendingStandardRun),
     setValue, removeValue, chooseResolution, applyPromptChoice, openLibrary, chooseGenerator, generate, generateWithResolution, generateWithStandardPackage, createShot, selectResult, setReferences, retry, recheckReadiness,
     openRuntimeSettings: () => {
       useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });

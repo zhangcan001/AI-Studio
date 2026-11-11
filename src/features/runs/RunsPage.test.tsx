@@ -13,7 +13,7 @@ import { invalidateRuns } from "../../product/runInvalidation";
 import { useStudioStore } from "../../stores/studioStore";
 import type { AppRoute } from "../../app/routes/types";
 import type { ProductRun, GeneratorOption, CreationContext, RunResult } from "../../product/types";
-const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), resultsGet: vi.fn(), start: vi.fn(), pause: vi.fn(), cancel: vi.fn(), retry: vi.fn(), resultReview: vi.fn(), creationGet: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), generate: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), resultsGet: vi.fn(), start: vi.fn(), pause: vi.fn(), cancel: vi.fn(), retry: vi.fn(), resultReview: vi.fn(), creationGet: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), delete: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { run: api, creation: { get: api.creationGet, generatorsList: api.generatorsList, readinessGet: api.readinessGet, generate: api.generate, mediaUrl: () => "http://fixture.invalid/video" } } }));
 const ref = { source: "task", id: "task-secret" } as const;
 const run: ProductRun = { ref, projectId: "project-a", title: "生成视频", status: "FAILED", phase: "FAILED", createdAt: "2026-10-02T00:00:00Z", updatedAt: "2026-10-02T00:00:00Z", progress: { total: 1, succeeded: 0, failed: 1, cancelled: 0 }, recoverability: { retryItemIds: [], reviewRequired: 1 }, resultsSummary: [], errorSummary: "请修改输入", preferredParent: null, availableActions: ["EDIT_INPUT"], detail: { sources: [{ id: "shot-a", name: "镜头一", stage: "video" }], inputs: [{ taskId: "task-secret", generatorName: "H3 高质量", selectionRef: "exact-pair", values: { prompt: { type: "string", value: "原始提示词" }, duration_seconds: { type: "integer", value: 5 } }, errorMessage: "时长超出范围", reuseUnavailableReason: null }] } };
@@ -288,4 +288,53 @@ it("editing the second imported input generates one new Shot run and never resta
   await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
   expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({projectId:"project-a",shotId:"shot-b",selectionRef:"exact-pair",values:expect.objectContaining({prompt:{type:"string",value:"只重做镜头二的新提示词"}})}));
   expect(api.start).not.toHaveBeenCalled();expect(api.retry).not.toHaveBeenCalled();expect(api.cancel).not.toHaveBeenCalled();
+});
+
+it("a delayed deletion does not navigate away from the next Run in the same project", async () => {
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    const a = { ...run, ref: { source: "queue-batch" as const, id: "a" }, title: "运行A", status: "SUCCEEDED" as const, availableActions: [] };
+    const b = { ...a, ref: { ...a.ref, id: "b" }, title: "运行B" };
+    api.list.mockResolvedValue({ items: [a, b], nextCursor: null, coverage: "FINITE" });
+    api.get.mockImplementation((_p, ref) => Promise.resolve(ref.id === "a" ? a : b));
+    let finish!: () => void;
+    api.delete.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    const navigate = vi.fn();
+    const page = render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: a.ref }} navigate={navigate} />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除记录" }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith("project-a", a.ref));
+    page.rerender(<RunsPage route={{ kind: "runs", projectId: "project-a", run: b.ref }} navigate={navigate} />);
+    await screen.findByRole("heading", { name: "运行B" });
+    await act(async () => { finish(); });
+    expect(navigate).not.toHaveBeenCalled();
+  } finally { confirm.mockRestore(); }
+});
+
+it("a delayed deletion does not navigate after leaving Runs", async () => {
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    let finish!: () => void;
+    api.delete.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    api.get.mockResolvedValue({ ...run, status: "SUCCEEDED", availableActions: [] });
+    const navigate = vi.fn();
+    const page = render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={navigate} />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除记录" }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledTimes(1));
+    page.unmount();
+    await act(async () => { finish(); });
+    expect(navigate).not.toHaveBeenCalled();
+  } finally { confirm.mockRestore(); }
+});
+
+it("a confirmed deletion still navigates to the list when its scope is current", async () => {
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    api.delete.mockResolvedValue(undefined);
+    api.get.mockResolvedValue({ ...run, status: "SUCCEEDED", availableActions: [] });
+    const navigate = vi.fn();
+    render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={navigate} />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除记录" }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: "runs", projectId: "project-a", run: undefined }));
+    expect(api.delete).toHaveBeenCalledWith("project-a", ref);
+  } finally { confirm.mockRestore(); }
 });
