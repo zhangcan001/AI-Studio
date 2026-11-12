@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
+import { useProjectSessionState } from "../../hooks/useProjectSessionState";
 import { StoryEntityCategorySection } from "./StoryEntityCategorySection";
 import type { StoryEntityKind } from "../../types/storyEntity";
 import { ProjectMediaInspection } from "./MediaIntegrityPanel";
@@ -14,8 +15,11 @@ const ICONS: Record<string, string> = { all: "◷", media: "▦", images: "▣",
 export function LibraryPage(props:LibraryProps) {
   const c=useLibraryController(props);
   // Character, scene, and prop libraries are separate views over project story entities.
-  const [entityKind,setEntityKind]=useState<StoryEntityKind|null>(null);
-  useEffect(()=>{setEntityKind(null);},[props.route.projectId,c.category]);
+  const [entityKind,setEntityKind]=useProjectSessionState<StoryEntityKind|null>(props.route.projectId, "library.entity-kind", null, (v): v is StoryEntityKind|null => v === null || (typeof v === "string" && ["character","scene","prop","composition"].includes(v)));
+  const previousCategory=useRef({projectId:props.route.projectId,category:c.category});
+  useEffect(()=>{const old=previousCategory.current;previousCategory.current={projectId:props.route.projectId,category:c.category};if(old.projectId===props.route.projectId&&old.category!==c.category)setEntityKind(null);},[props.route.projectId,c.category]);
+  // An explicit deep link wins over remembered navigation, never hide its detail.
+  useEffect(()=>{if(props.route.resource)setEntityKind(null);},[props.route.projectId,props.route.resource?.kind,props.route.resource?.id]);
   const showDetail=!entityKind&&Boolean(props.route.resource);
   const pager=c.list?.coverage==="keyset-page"&&(c.canPrevious||c.list.nextCursor)&&<nav className="library-pagination" aria-label="资源分页"><button type="button" disabled={!c.canPrevious||c.loading} onClick={c.previousPage}>上一页</button><span>第 {c.pageIndex+1} 页</span><button type="button" disabled={!c.list.nextCursor||c.loading} onClick={c.nextPage}>下一页</button></nav>;
   return <div className="library-page">

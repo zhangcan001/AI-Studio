@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "USABILITY_COMPLETION",
+  "parentHead": "dd6a9923c69ce38868bbcd73f757dfaa47bb5496",
+  "planningParentHead": "dd6a9923c69ce38868bbcd73f757dfaa47bb5496",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "historicalRuntimeBytesUnchanged": true,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "guardsRelaxed": false,
+    "draftRecovery": true,
+    "saveBeforeGenerate": true,
+    "boundedFullProjectSearch": true,
+    "projectScopedNavigation": true
+  },
+  "files": {
+    "scripts/storyboard-usage-successor-guard.mjs": {
+      "beforeHash": "f2941843673d4cef5f019c354a6860a43592490432aacc76e667a9ae7dd28be5",
+      "afterHash": "d312c3f53de8784b866ec988c8712ea02f305ed44ea26cf50fb5bca83fda47b4"
+    },
+    "scripts/testing/ci-chain-consolidated.test.mjs": {
+      "beforeHash": "24ff522e9d3b0cb8e956b0f22770437d7f47420411c7264e2beb43fdaadb93e2",
+      "afterHash": "5c99fdb2a4e536f80d1bc3ee457714010a1e0afb22c985991909a0260f4a8052"
+    },
+    "scripts/testing/create-rerun-safety.test.mjs": {
+      "beforeHash": "70218fa20165fc12f933aca45e5334cd354d50cc5c72139ad18b66cecb67c4b9",
+      "afterHash": "268f526a2a9ac529bc4da6cbd57a03aac8b3d829cea9eac0d7825417d097488b"
+    },
+    "scripts/testing/input-refresh-safety.test.mjs": {
+      "beforeHash": "31d124d5b38a1cddbce74281ecb23605324dccf70d50710e8995828dfa71e433",
+      "afterHash": "5a7fcce64c705af09e5d0a81b9d1e516d0cb2c4e23d1057563feb06957e89015"
+    },
+    "scripts/testing/pika-flex-reference.test.mjs": {
+      "beforeHash": "3b7956c410ac3074aa307e3ec0c05d67a4f9cd5d300e1c5e75c14699df4c46ee",
+      "afterHash": "c512a7d90b079eee47a657174cd54b6a6acf5a2f61e4529059b01a4ab1b03d8e"
+    },
+    "scripts/testing/reference-authority.test.mjs": {
+      "beforeHash": "cf7fbe4247d81c87d9109685827c6636b8710b057932338da0b3695970fe0be2",
+      "afterHash": "799e98751e00772aeb8a20ca74314cf703efe5850cf03c9f85e2423a19dae5ff"
+    },
+    "scripts/testing/storyboard-usage.test.mjs": {
+      "beforeHash": "ef91b75bc4f02f1efe07a06da71749cbb4c1748f98c2d85c50c296cbaba22b76",
+      "afterHash": "7531830230e86ce8e3ac84c3dbf5b49d4fdfaa2b2e9798ad14b16f6868230f6b"
+    },
+    "scripts/testing/usability-completion.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "773b36cb15c4639328bf8174a313c4845c886a7bc1c15669ea4cae1c99c30cfb"
+    },
+    "scripts/usability-completion-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "d71a2bcf817d3fda0ee5506219998c62a447e13bc20318107fba5aa0df67decc"
+    },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": "9141749fee9ccda144539532dd46097d16820c1ae473b5d8ed654994f925574f",
+      "afterHash": "9e2e2bbe4ecca57bf18605c1ab872438793cbcae4faf82b5cefbfa1ef9d32829"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": "6012bfcb8a726bda1e2a8a51cef4ebe67c59674df988701438e4966e21e3b404",
+      "afterHash": "07cce49b5f8e29bb22aab213bea8ebd9681701f3d0a42da49cb80858f2048621"
+    },
+    "src/features/create/StoryboardWorkbench.test.tsx": {
+      "beforeHash": "6db63e5b037ec5dc24491ef1e3d5765bfb24ea27d9036c5a80942134a66a7bb8",
+      "afterHash": "d3d98fe2663a9539f9311d58322f7be6576e993f9ebe2f1dd503e704b9c4e81b"
+    },
+    "src/features/create/StoryboardWorkbench.tsx": {
+      "beforeHash": "8616a30642de7ae8eaa19c9eee986f6a7a95eee6f6eecc770c4a73009f98a748",
+      "afterHash": "f747e75786ab5ed2f51f5b1f65ff9344ab9f96eb057d9e0acd6c8b6d725a7e9b"
+    },
+    "src/features/library/LibraryPage.test.tsx": {
+      "beforeHash": "0e725ce437c0caa26afb51220c296e44de436503c02e4c9eeeb9a2bca5b5a4bc",
+      "afterHash": "ec9eb63250a57f87c111f9b29813b98793e967659e51b23cf4921ff7c24c848d"
+    },
+    "src/features/library/LibraryPage.tsx": {
+      "beforeHash": "ef3774abfd10746641a019d79ab0f00fa9ede3d6d954a4a91e5df88a0e649ea7",
+      "afterHash": "b58893c9c84bb2edfe7c7f9b85b21b3ebb203c5f3713d2e1aabbf3e76276520c"
+    },
+    "src/hooks/useProjectSessionState.test.tsx": {
+      "beforeHash": null,
+      "afterHash": "9bc7ed339eb14abcdf11bdbe7d35e73888711970ed42434f7ad5c97f5a8fa752"
+    },
+    "src/hooks/useProjectSessionState.ts": {
+      "beforeHash": null,
+      "afterHash": "54f6f7e7e5bba91923c4408572fad5047b6c181144202716b9a0800a08581411"
+    },
+    "src/stores/studioStore.ts": {
+      "beforeHash": "8c547da688bcaf4da27e6eb0fb40bdb241b2872a2d8bcc770e97a392dddcacee",
+      "afterHash": "2136c942934a216ad7dc09ba0bd839e8b119c7e63a1ef4a09bedb28acff89782"
+    }
+  }
+}

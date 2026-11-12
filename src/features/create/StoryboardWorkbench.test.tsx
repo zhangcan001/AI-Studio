@@ -11,6 +11,7 @@ vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
 // Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
 beforeEach(() => {
+  sessionStorage.clear();
   window.localStorage.setItem("ai-studio.storyboard.view", "grid");
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   api.runList.mockResolvedValue({ items: [], nextCursor: null, coverage: "" });
@@ -315,4 +316,13 @@ it("opens the exact saved failed-start batch from its real storyboard row, witho
   expect(renderRuns.mock.calls[0][0]).toEqual({ kind: "runs", projectId: "p", run: ref });
   expect(navigate).not.toHaveBeenCalled();
   expect(api.generate).toHaveBeenCalledTimes(1);
+});
+it("searches the full lightweight Shot index without fetching rich details for every match",async()=>{
+ window.localStorage.setItem('ai-studio.storyboard.view','shots');
+ const all=Array.from({length:65},(_,i)=>({id:`all-${i}`,name:`分镜${i+1}`,ordinal:i}));
+ api.workbench.mockResolvedValue({...workbenchFrom(context,'p'),shots:all,truncated:62});
+ const navigate=vi.fn();render(<StoryboardWorkbench route={route} navigate={navigate}/>);
+ const search=await screen.findByLabelText('搜索分镜');fireEvent.change(search,{target:{value:'分镜65'}});
+ fireEvent.click(screen.getByRole('button',{name:'打开分镜65'}));expect(navigate).toHaveBeenCalledWith({kind:'create',projectId:'p',stage:'video',shotId:'all-64'});
+ expect(api.workbench).toHaveBeenCalledWith('p','video',60);expect(api.generate).not.toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import { useStudioStore } from "../../stores/studioStore";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 // @vitest-environment jsdom
@@ -24,6 +25,7 @@ const generator = { selectionRef: "sel", name: "H3", version: "1", mode: "t2v", 
   resolutionPresets: [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }, { id: "mp-2_09-9x16", label: "2.09MP · 1088×1920", width: 1088, height: 1920 }] };
 const props = () => ({ projectId: "p", busy: false, onOpen: vi.fn(), onCreate: vi.fn(), onChanged: vi.fn(), onQueue: vi.fn() });
 beforeEach(() => {
+  sessionStorage.clear();useStudioStore.setState({storyboardPrompts:{}});
   api.list.mockResolvedValue([hero, lane]); api.listForShot.mockResolvedValue([hero]);
   api.bindShot.mockImplementation(async (_p: string, _s: string, ids: string[]) => [hero, lane].filter(e => ids.includes(e.id)));
   api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
@@ -101,7 +103,9 @@ it.each(["unmount", "project", "draft"])("does not submit late READY after a %s 
   api.readinessGet.mockReturnValueOnce(pending.promise);
   const p = props();
   const view = render(<StoryboardShotRows {...p} items={[shot("a", 0)]} />);
-  fireEvent.click(await screen.findByRole("button", { name: "生成视频" }));
+  const button = await screen.findByRole("button", { name: "生成视频" });
+  await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(button);
   await waitFor(() => expect(api.readinessGet).toHaveBeenCalledTimes(1));
   if (change === "unmount") view.unmount();
   else if (change === "project") view.rerender(<StoryboardShotRows {...p} projectId="other" items={[shot("a", 0)]} />);
@@ -315,6 +319,7 @@ it.each([
 it('row generation renews the key only after acceptance or changed inputs, not unknown IPC outcomes', async () => {
   render(<StoryboardShotRows {...props()} items={[shot('keys',0)]}/>);
   const button=await screen.findByRole('button',{name:'生成视频'});
+  await waitFor(()=>expect(button.hasAttribute('disabled')).toBe(false));
   fireEvent.click(button);
   await screen.findByText('已写入生产队列');
   fireEvent.click(button);
@@ -327,7 +332,8 @@ it('row generation changes the attempt key when the actual draft changes after a
   api.generate.mockRejectedValueOnce({code:'INTERNAL_ERROR'});
   const p=props(); const item=shot('changing',0);
   const h=render(<StoryboardShotRows {...p} items={[item]}/>);
-  fireEvent.click(await screen.findByRole('button',{name:'生成视频'}));
+  const button=await screen.findByRole('button',{name:'生成视频'});
+  await waitFor(()=>expect(button.hasAttribute('disabled')).toBe(false));fireEvent.click(button);
   await screen.findByRole('alert');
   h.rerender(<StoryboardShotRows {...p} items={[{...item,shot:{...item.shot!,values:{duration_seconds:{type:'integer',value:6}}}}]}/>);
   fireEvent.click(screen.getByRole('button',{name:'生成视频'}));
@@ -485,7 +491,8 @@ it('row entity references keep a failed generator switch on the old exact pair',
 
 it('plain T2V row generation needs no image or entity-reference save', async () => {
   render(<StoryboardShotRows {...props()} items={[shot('plain', 0)]} />);
-  fireEvent.click(await screen.findByRole('button', { name: '生成视频' }));
+  const button=await screen.findByRole('button', { name: '生成视频' });
+  await waitFor(()=>expect(button.hasAttribute('disabled')).toBe(false));fireEvent.click(button);
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
   expect(api.inputsGet).not.toHaveBeenCalled(); expect(api.inputsSave).not.toHaveBeenCalled();
 });
@@ -849,4 +856,66 @@ it.each([['STARTED','已启动生成'],['QUEUED','已写入生产队列'],['ALRE
  render(<StoryboardShotRows {...callbacks} items={[shot('a',0)]}/>);await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
  await user.click(screen.getByRole('button',{name:'生成视频'}));await screen.findByText(message);await user.click(screen.getByRole('button',{name:'查看已保存运行'}));
  expect(callbacks.onQueue).toHaveBeenCalledWith(ref);expect(api.generate).toHaveBeenCalledTimes(1);
+});
+
+it.each(['duration','name','sections'])('edited %s field should save then generate on one click',async(field)=>{
+ const user=userEvent.setup(),p=deferred<unknown>();
+ if(field==='sections')api.setPromptSections.mockReturnValueOnce(p.promise);else if(field==='duration')api.saveShotRow.mockReturnValueOnce(p.promise);else api.updateShot.mockReturnValueOnce(p.promise);
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const button=screen.getByRole('button',{name:'生成视频'});
+ await waitFor(()=>expect(button.hasAttribute('disabled')).toBe(false));
+ await waitFor(()=>expect(api.promptSections).toHaveBeenCalled());
+ await act(async()=>{});
+ const box=screen.getByLabelText(field==='duration'?'镜头1 时长（秒）':field==='name'?'镜头1 名称':'镜头1 风格');
+ await user.click(box);fireEvent.change(box,{target:{value:field==='duration'?'7':field==='name'?'Renamed shot':'Noir style'}});
+ await user.click(button);
+ const calls=field==='sections'?api.setPromptSections:field==='duration'?api.saveShotRow:api.updateShot;
+ expect(calls).toHaveBeenCalledTimes(1);
+ const disabledDuringSave=button.hasAttribute('disabled');
+ await act(async()=>{p.resolve(field==='sections'?{style:'Noir style',summary:null,soundscape:null,music:null}:field==='duration'?{shot:{...shot('a',0).shot!,values:{duration_seconds:{type:'integer',value:7}}},boundEntities:[hero]}:{});});
+ await waitFor(()=>expect(button.hasAttribute('disabled')).toBe(false));
+ console.log(JSON.stringify({field,disabledDuringSave,saves:calls.mock.calls.length,generates:api.generate.mock.calls.length}));
+ expect(api.generate,'valid first click should survive saving this field').toHaveBeenCalledTimes(1);
+});
+it('failed prompt save should survive hiding and restoring a row with search',async()=>{
+ const user=userEvent.setup();api.saveShotRow.mockRejectedValueOnce({code:'SAVE_ERROR',message:'fixture save failure'});
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'An unsaved draft I need to keep'}});
+ const search=screen.getByLabelText('搜索分镜');await user.click(search);await screen.findByRole('alert');
+ expect((box as HTMLTextAreaElement).value).toBe('An unsaved draft I need to keep');
+ fireEvent.change(search,{target:{value:'nothing-matches'}});expect(screen.queryByLabelText('镜头1 提示词')).toBeNull();
+ fireEvent.change(search,{target:{value:''}});const restored=screen.getByLabelText('镜头1 提示词');
+ console.log(JSON.stringify({afterRestore:(restored as HTMLTextAreaElement).value,saves:api.saveShotRow.mock.calls.length,generates:api.generate.mock.calls.length}));
+ expect((restored as HTMLTextAreaElement).value).toBe('An unsaved draft I need to keep');
+});
+it('CONTROL prompt edit still saves and generates on one click',async()=>{
+ const user=userEvent.setup();render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'A fresh prompt'}});await user.click(screen.getByRole('button',{name:'生成视频'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));expect(api.saveShotRow).toHaveBeenCalledTimes(1);
+});
+it.each(['duration','name','sections'])('failed %s save cannot generate or preflight',async(field)=>{
+ const user=userEvent.setup();const failure={code:'SAVE_ERROR',message:'field save rejected'};
+ if(field==='duration')api.saveShotRow.mockRejectedValueOnce(failure);else if(field==='name')api.updateShot.mockRejectedValueOnce(failure);else api.setPromptSections.mockRejectedValueOnce(failure);
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));await act(async()=>{});
+ const box=screen.getByLabelText(field==='duration'?'镜头1 时长（秒）':field==='name'?'镜头1 名称':'镜头1 风格');
+ await user.click(box);fireEvent.change(box,{target:{value:field==='duration'?'7':'new value'}});await user.click(screen.getByRole('button',{name:'生成视频'}));await screen.findByRole('alert');
+ expect(api.generate).not.toHaveBeenCalled();expect(api.readinessGet).not.toHaveBeenCalled();
+});
+it('restores row search/filter on return, keeps project scopes separate and finds an unloaded shot without rich reads',async()=>{
+ const callbacks=props();const index=[...Array.from({length:60},(_,i)=>({id:`loaded-${i}`,name:`已有${i}`,ordinal:i})),{id:'late-shot',name:'第61镜头',ordinal:60}];
+ const view=render(<StoryboardShotRows {...callbacks} items={[shot('a',0)]} shotIndex={index}/>);
+ fireEvent.change(screen.getByLabelText('搜索分镜'),{target:{value:'第61'}});fireEvent.click(screen.getByRole('button',{name:'打开第61镜头'}));expect(callbacks.onOpen).toHaveBeenCalledWith('late-shot');
+ expect(api.generate).not.toHaveBeenCalled();view.unmount();
+ const next=render(<StoryboardShotRows {...callbacks} items={[shot('a',0)]} shotIndex={index}/>);expect((screen.getByLabelText('搜索分镜') as HTMLInputElement).value).toBe('第61');
+ next.rerender(<StoryboardShotRows {...callbacks} projectId='other-project' items={[]}/>);expect((screen.getByLabelText('搜索分镜') as HTMLInputElement).value).toBe('');
+});
+it('failed prompt draft survives remount but never enters a different Recipe',async()=>{
+ const user=userEvent.setup();api.saveShotRow.mockRejectedValueOnce({code:'SAVE_ERROR',message:'blocked'});
+ const view=render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'Keep only for this recipe'}});await user.click(screen.getByLabelText('搜索分镜'));await screen.findByRole('alert');view.unmount();
+ const next=render(<StoryboardShotRows {...props()} items={[shot('a',0,'other-recipe')]}/>);expect((screen.getByLabelText('镜头1 提示词') as HTMLTextAreaElement).value).not.toBe('Keep only for this recipe');
+ next.rerender(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);await waitFor(()=>expect((screen.getByLabelText('镜头1 提示词') as HTMLTextAreaElement).value).toBe('Keep only for this recipe'));
 });

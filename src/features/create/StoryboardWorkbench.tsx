@@ -12,6 +12,8 @@ import "./CreatePage.css";
 import { CreatePage } from "./CreatePage";
 import type { CreateProps } from "./CreateController";
 import { useStudioStore } from "../../stores/studioStore";
+import { useProjectSessionState } from "../../hooks/useProjectSessionState";
+import type { CreationShotSummary } from "../../product/types";
 
 /** Bounded per-shot reads keep the workbench responsive on large projects. */
 export const STORYBOARD_MAX_DETAIL_SHOTS = 60;
@@ -31,6 +33,7 @@ interface Props extends CreateProps {
  */
 export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, renderRuns, renderFolderImport }: Props) {
   const [items, setItems] = useState<StoryboardShot[]>();
+  const [index, setIndex] = useState<{projectId: string; shots: CreationShotSummary[]}>();
   const [truncated, setTruncated] = useState(0);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -43,7 +46,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const [reviewId, setReviewId] = useState<string>();
   const [selectedId, setSelectedId] = useState<string>();
   const [runRoute, setRunRoute] = useState<Extract<AppRoute, { kind: "runs" }>>();
-  const [shotQuery, setShotQuery] = useState("");
+  const [shotQuery, setShotQuery] = useProjectSessionState(route.projectId, "storyboard.inline-search", "", (v): v is string => typeof v === "string");
   const libraryIntent = useStudioStore(state => state.pendingLibraryIntent);
   const runIntent = useStudioStore(state => state.pendingRunIntent);
   const matchingRunIntent = runIntent?.projectId === route.projectId && runIntent.stage === route.stage;
@@ -85,6 +88,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       const active = await activeRuns;
       if (token !== epoch.current) return;
       setQueueActive(Boolean(active?.items?.length));
+      setIndex({projectId, shots: workbench.shots});
       setItems(result); setTruncated(workbench.truncated); setError(undefined);
     } catch (cause) { if (token === epoch.current) setError(normalizeProductError(cause).message); }
     finally { if (token === epoch.current) { inFlight.current = false; setBusy(false); } }
@@ -117,6 +121,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   }, [anyGenerating, queueActive, load]);
 
   const stats = useMemo(() => storyboardStats(items ?? []), [items]);
+  const shotIndex = index?.projectId === projectId ? index.shots : [];
   const selected = items?.find(item => item.id === (route.shotId ?? selectedId)) ?? items?.[0];
   const reviewItem = items?.find(item => item.id === reviewId);
   const openShot = (shotId: string) => navigate({ kind: "create", projectId, stage: "video", shotId });
@@ -171,12 +176,12 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
         <header><h2>镜头列表</h2><button type="button" onClick={() => void navigate({ kind: "create", projectId, stage: "video" })}>展开分镜列表</button></header>
         <input type="search" aria-label="搜索操作镜头" placeholder="搜索镜头" value={shotQuery} onChange={e => setShotQuery(e.target.value)} />
         {!items && <p role="status">正在读取分镜…</p>}
-        <ol>{items?.filter(item => !shotQuery.trim() || `${item.name} ${item.shot?.prompt ?? ""}`.toLowerCase().includes(shotQuery.trim().toLowerCase())).map(item => <li key={item.id}>
-          <button type="button" aria-label={`操作${item.name}`} aria-current={route.shotId === item.id ? "true" : undefined} onClick={() => openShot(item.id)}>
-            <Cover item={item} playable={false} /><span><strong>{item.name}</strong><small>{shotDuration(item.shot)} · {shotResolution(item.shot)}</small><StatusBadge item={item} compact /></span>
+        <ol>{shotIndex.filter(summary => !shotQuery.trim() || `${summary.name} ${items?.find(i => i.id === summary.id)?.shot?.prompt ?? ""}`.toLowerCase().includes(shotQuery.trim().toLowerCase())).map(summary => { const item = items?.find(i => i.id === summary.id); return <li key={summary.id}>
+          <button type="button" aria-label={`操作${summary.name}`} aria-current={route.shotId === summary.id ? "true" : undefined} onClick={() => openShot(summary.id)}>
+            {item && <Cover item={item} playable={false} />}<span><strong>{summary.name}</strong>{item && <><small>{shotDuration(item.shot)} · {shotResolution(item.shot)}</small><StatusBadge item={item} compact /></>}</span>
           </button>
-        </li>)}</ol>
-        {truncated > 0 && <small>这里只展开前 {STORYBOARD_MAX_DETAIL_SHOTS} 个镜头；全部镜头可从右侧“镜头”选择器访问。</small>}
+        </li>; })}</ol>
+        {truncated > 0 && <small>可按全项目镜头名搜索；提示词搜索与状态仅覆盖已加载详情的镜头。</small>}
       </aside>
       <section className="storyboard-inline-editor" aria-label="镜头操作">
         <header><span>提示词 · 参数 · 素材 · 生成 · 候选</span>{route.shotId && selected?.id === route.shotId && canReview(selected) && <button type="button" onClick={() => setReviewId(selected.id)}>人工审核</button>}</header>
@@ -201,7 +206,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
         {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
-          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
+          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} shotIndex={shotIndex} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>

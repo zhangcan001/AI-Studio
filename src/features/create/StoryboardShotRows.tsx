@@ -14,6 +14,9 @@ import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../pr
 import { coverAsset, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 import { SHOT_DURATION_LIMIT_MESSAGE, shotDurationIssue, shotDurationMax } from "../../product/shotDuration";
 import { h3PromptHints } from "../../product/promptLanguage";
+import { useStudioStore } from "../../stores/studioStore";
+import { useProjectSessionState } from "../../hooks/useProjectSessionState";
+import type { CreationShotSummary } from "../../product/types";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品", composition: "构图" };
 const KINDS: StoryEntityKind[] = ["scene", "character", "prop", "composition"];
@@ -27,6 +30,7 @@ interface RowsProps {
   onCreate: () => void;
   onChanged: () => void;
   onQueue: (ref?: RunRef) => void;
+  shotIndex?: CreationShotSummary[];
 }
 
 /**
@@ -37,9 +41,9 @@ interface RowsProps {
  * duration and aspect/resolution persist through creation.updateShot (stage
  * prompt + generator scalar values validated by the selected recipe).
  */
-export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue }: RowsProps) {
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("ALL");
+export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, shotIndex = [] }: RowsProps) {
+  const [query, setQuery] = useProjectSessionState(projectId, "storyboard.search", "", (v): v is string => typeof v === "string");
+  const [filter, setFilter] = useProjectSessionState<(typeof FILTERS)[number]>(projectId, "storyboard.filter", "ALL", (v): v is (typeof FILTERS)[number] => FILTERS.includes(v as (typeof FILTERS)[number]));
   const [entities, setEntities] = useState<StoryEntity[]>([]);
   const [entitiesOwner, setEntitiesOwner] = useState<string>();
   const [entitiesError, setEntitiesError] = useState<{ projectId: string; message: string }>();
@@ -76,9 +80,10 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   const q = query.trim().toLowerCase();
   const visible = items.filter(item => (filter === "ALL" || item.status === filter)
     && (!q || item.name.toLowerCase().includes(q) || (item.shot?.prompt ?? "").toLowerCase().includes(q)));
+  const unloaded = q ? shotIndex.filter(s => !items.some(item => item.id === s.id) && s.name.toLowerCase().includes(q)) : [];
   return <section className="storyboard-shot-rows" aria-label="分镜编辑">
     <div className="storyboard-shot-toolbar">
-      <input type="search" aria-label="搜索分镜" placeholder="搜索分镜" value={query} onChange={e => setQuery(e.target.value)} />
+      <input type="search" aria-label="搜索分镜" placeholder="全项目镜头名 / 已加载提示词" value={query} onChange={e => setQuery(e.target.value)} />
       <span className="storyboard-shot-count">{visible.length}/{items.length} 个分镜</span>
       <div role="group" aria-label="状态筛选" className="storyboard-shot-filters">
         {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : storyboardStatusLabels[key]}</button>)}
@@ -91,7 +96,8 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} onRun={onQueue} />)}
-    {!visible.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
+    {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>以下镜头尚未加载详情，点击打开；状态筛选仅作用于上方已加载镜头。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onOpen(s.id)}>打开{s.name}</button>)}</section>}
+    {!visible.length && !unloaded.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
   </section>;
 }
 
@@ -185,7 +191,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   onRun: (ref: RunRef) => void;
 }) {
   const [bound, setBound] = useState<StoryEntity[]>([]);
-  const [prompt, setPrompt] = useState(item.shot?.prompt ?? "");
+  const draftKey = JSON.stringify([projectId, item.id, item.shot?.selectionRef ?? null]);
+  const [prompt, setPromptLocal] = useState(() => useStudioStore.getState().storyboardPrompts[draftKey] ?? item.shot?.prompt ?? "");
+  const setPrompt = (text: string) => { useStudioStore.getState().setStoryboardPrompt(draftKey, text); setPromptLocal(text); };
   const [name, setName] = useState(item.name);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
@@ -193,13 +201,14 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const [acceptedRun, setAcceptedRun] = useState<RunRef>();
   const generateButton = useRef<HTMLButtonElement>(null);
   const deferredPromptBlur = useRef(false);
+  const deferredFieldBlur = useRef<"name" | "duration" | "sections" | undefined>(undefined);
   const workingLock = useRef(false);
   const [pendingSelection, setPendingSelection] = useState<string>();
   const scopeEpoch = useRef(0);
   const bindingEpoch = useRef(0);
   const [bindingsReady, setBindingsReady] = useState(false);
   useEffect(() => () => { ++scopeEpoch.current; }, [projectId, item.id]);
-  useEffect(() => { setPrompt(item.shot?.prompt ?? ""); }, [item.shot?.prompt]);
+  useEffect(() => { setPromptLocal(useStudioStore.getState().storyboardPrompts[draftKey] ?? item.shot?.prompt ?? ""); }, [draftKey, item.shot?.prompt]);
   useEffect(() => { setName(item.name); }, [item.name]);
   useEffect(() => {
     const token = ++bindingEpoch.current;
@@ -350,6 +359,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     const before = { values: r.values ? current : undefined, boundIds: r.addEntityIds.length ? bound.map(e => e.id) : undefined };
     const saved = await saveRow({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && generator ? { values: r.values, selectionRef: generator.selectionRef } : {}), ...(r.addEntityIds.length ? { entityIds: [...bound.map(e => e.id), ...r.addEntityIds] } : {}) });
     if (!saved) return;
+    if (useStudioStore.getState().storyboardPrompts[draftKey] === prompt) useStudioStore.getState().setStoryboardPrompt(draftKey, undefined);
     const applied = r.labels.filter(l => !l.includes("（"));
     if (applied.length) { setUndo(before); setNote(`已识别并填入：${applied.join(" · ")}`); } else { setUndo(undefined); setNote("提示词已保存"); }
     onChanged();
@@ -443,17 +453,18 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     });
     return () => { ++sectionsEpoch.current; };
   }, [projectId, item.id]);
+  const persistSections = async () => {
+    const next = sections;
+    const token = ++sectionsEpoch.current;
+    const saved = await productClient.storyEntities.setPromptSections(projectId, item.id, next);
+    if (token !== sectionsEpoch.current) return;
+    const clean = { ...EMPTY_SECTIONS, ...saved };
+    savedSections.current = clean; setSections(clean);
+    setNote("提示词分段已保存");
+  };
   const saveSections = () => {
     if (bindingsDisabled || !sectionsReady || JSON.stringify(sections) === JSON.stringify(savedSections.current)) return;
-    const next = sections;
-    void run(async () => {
-      const token = ++sectionsEpoch.current;
-      const saved = await productClient.storyEntities.setPromptSections(projectId, item.id, next);
-      if (token !== sectionsEpoch.current) return;
-      const clean = { ...EMPTY_SECTIONS, ...saved };
-      savedSections.current = clean; setSections(clean);
-      setNote("提示词分段已保存");
-    });
+    void run(persistSections);
   };
   // Local evidence fences reads in flight; only authoritative semantic evidence
   // below owns retry identity (a notification alone must not renew a lost ACK).
@@ -464,14 +475,36 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   latestGenerationDraft.current = generationDraft;
   const generate = () => !bindingsDisabled && !entityIssue && !durationIssue && selectionRef && item.shot && void run(async () => {
     deferredPromptBlur.current = false;
+    deferredFieldBlur.current = undefined;
     const token = scopeEpoch.current;
     // A blur into this submit button is owned by this one transaction instead
     // of a competing autosave. Persist first; a failed/stale save never generates.
     const changed = prompt.trim() !== (item.shot!.prompt ?? "").trim();
-    const saved = changed ? await persistPrompt() : item.shot!;
+    const otherEdits = name.trim() !== item.name || durationDirty.current || JSON.stringify(sections) !== JSON.stringify(savedSections.current);
+    let saved = changed ? await persistPrompt() : item.shot!;
     if (!saved || token !== scopeEpoch.current) return;
+    if (name.trim() !== item.name) {
+      if (!name.trim()) throw new Error("镜头名称不能为空");
+      await productClient.creation.updateShot(projectId, { shotId: item.id, name: name.trim() });
+      if (token !== scopeEpoch.current) return;
+    }
+    if (durationDirty.current) {
+      const n = duration === "" ? undefined : Number(duration);
+      const value = n === undefined ? undefined : durationField?.type === "integer" ? Math.round(n) : n;
+      if (value !== undefined && (!Number.isFinite(value) || shotDurationIssue(value))) throw new Error(SHOT_DURATION_LIMIT_MESSAGE);
+      const { duration_seconds: _previous, ...rest } = scalarValues(saved.values);
+      const next = await saveRow({ values: value === undefined ? rest : { ...rest, duration_seconds: { type: durationField?.type === "number" ? "number" : "integer", value } }, selectionRef });
+      if (!next || token !== scopeEpoch.current) return;
+      saved = next; durationDirty.current = false;
+    }
+    if (JSON.stringify(sections) !== JSON.stringify(savedSections.current)) {
+      if (!sectionsReady) throw new Error("请先完成提示词分段读取后再生成");
+      await persistSections();
+      if (token !== scopeEpoch.current) return;
+    }
     if (saved.summary.id !== item.id || saved.selectionRef !== selectionRef) throw new Error("Saved shot identity changed");
-    const persistedDraft = changed ? semanticJson({ ...generationLocal, prompt: saved.prompt, values: saved.values }) : generationDraft;
+    if (otherEdits) onChanged();
+    const persistedDraft = semanticJson({ ...generationLocal, prompt: changed ? saved.prompt : prompt, values: saved.values, sections: savedSections.current });
     const isCurrent = () => token === scopeEpoch.current && [generationDraft, persistedDraft].includes(latestGenerationDraft.current);
     if (!isCurrent()) return;
     const values = { ...saved.values, prompt: { type: "string" as const, value: changed ? saved.prompt : prompt } };
@@ -522,7 +555,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
     </div>
     <div className="shot-row-actions">
-      <button ref={generateButton} type="button" className="primary" disabled={bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } }}>生成视频</button>
+      <button ref={generateButton} type="button" className="primary" disabled={bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>生成视频</button>
       <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>
     <div className="shot-row-prompt">
@@ -530,6 +563,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         onChange={e => setPrompt(e.target.value)} onBlur={e => { deferredPromptBlur.current = e.relatedTarget === generateButton.current; if (!deferredPromptBlur.current) savePrompt(); }} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
+      {prompt !== (item.shot?.prompt ?? "") && <p role="status">提示词尚未保存；筛选或返回列表后可继续编辑。<button type="button" disabled={bindingsDisabled} onClick={savePrompt}>保存提示词</button><button type="button" disabled={bindingsDisabled} onClick={() => { if (window.confirm("放弃本镜头未保存的提示词？")) { useStudioStore.getState().setStoryboardPrompt(draftKey, undefined); setPromptLocal(item.shot?.prompt ?? ""); } }}>放弃未保存提示词</button></p>}
       {promptHints.length > 0 && <ul className="muted" aria-label="提示词写作建议">{promptHints.map(h => <li key={h}>{h}</li>)}</ul>}
       <details className="shot-row-sections" aria-label="提示词分段">
         <summary>风格 / 摘要 / 环境声 / 配乐（英文，可选）</summary>
@@ -537,7 +571,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         {sectionsError && <p role="alert" className="storyboard-error">{sectionsError}</p>}
         {SECTION_FIELDS.map(([key, label, hint]) => <label key={key}><span>{label}</span>
           <textarea aria-label={`${item.name} ${label}`} placeholder={hint} value={sections[key] ?? ""} disabled={bindingsDisabled}
-            onChange={e => { editedSections.current.add(key); setSections(s => ({ ...s, [key]: e.target.value })); }} onBlur={saveSections} /></label>)}
+            onChange={e => { editedSections.current.add(key); setSections(s => ({ ...s, [key]: e.target.value })); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "sections"; else saveSections(); }} /></label>)}
       </details>
       {hasMentions && <section aria-label="角色与场景生成引用" className="composer-entity-references">
         <p>{entityIssue ?? "角色与场景已保存到正式参考输入，生成时按以下真实顺序引用。"}</p>
@@ -575,9 +609,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       </select></label>
       {pendingSelection && !working && <button type="button" onClick={onChanged}>刷新已保存的镜头设置</button>}
       <label><span>镜号</span><output>{item.ordinal + 1}</output></label>
-      <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => setName(e.target.value)} onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
+      <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => setName(e.target.value)} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "name"; else saveName(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
       {durationField
-        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => { durationDirty.current = true; setDuration(e.target.value); }} onBlur={saveDuration} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
+        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => { durationDirty.current = true; setDuration(e.target.value); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "duration"; else saveDuration(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
         : <label><span>时长</span><output title={noGen ?? "当前生成器没有时长参数"}>{shotDuration(item.shot)}</output></label>}
       {durationIssue && <small className="shot-row-duration-issue" role="alert">{durationIssue}</small>}
       {presets.length > 0

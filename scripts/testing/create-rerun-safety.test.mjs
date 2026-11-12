@@ -1,3 +1,4 @@
+import {USABILITY_COMPLETION_CHANGED, USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF} from '../usability-completion-successor-guard.mjs';
 import {STORYBOARD_USAGE_CHANGED, STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF} from '../storyboard-usage-successor-guard.mjs';
 import {REFERENCE_AUTHORITY_CHANGED, REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF} from '../reference-authority-successor-guard.mjs';
 import {INPUT_REFRESH_SAFETY_CHANGED, INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF} from '../input-refresh-safety-successor-guard.mjs';
@@ -21,8 +22,8 @@ const parentBytes = p => execFileSync('git', ['show', `${CREATE_RERUN_SAFETY_BAS
 it('verifies the exact rerun-safety successor and projects the frozen parent bytes', () => {
   const result = createRerunSafetyParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...CREATE_RERUN_SAFETY_CHANGED, ...INPUT_REFRESH_SAFETY_CHANGED, ...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF, ...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF, ...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...CREATE_RERUN_SAFETY_CHANGED, ...INPUT_REFRESH_SAFETY_CHANGED, ...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED, ...USABILITY_COMPLETION_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF, ...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF, ...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF, ...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF])].sort());
   for (const p of CREATE_RERUN_SAFETY_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

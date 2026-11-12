@@ -8,6 +8,8 @@ import type {
 } from "../types/generation";
 
 interface StudioState {
+  storyboardPrompts: Record<string, string>;
+  setStoryboardPrompt: (key: string, prompt: string | undefined) => void;
   creationLabReturn?: { scope: string; route?: Extract<import("../app/routes/types").AppRoute, {kind: "create"}>; selectionRef: string; runRef: import("../product/types").RunRef | null; accepted: import("../product/types").CreationAccepted | null };
   creationPromptProvenance?: import("../product/types").CreationPromptProvenance;
   applyCreationPrompt: (choice: import("../product/types").CreationPromptProvenance & {text: string}) => void;
@@ -42,6 +44,12 @@ interface StudioState {
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
+  storyboardPrompts: {},
+  setStoryboardPrompt: (key, prompt) => set(state => {
+    const storyboardPrompts = { ...state.storyboardPrompts };
+    if (prompt === undefined) delete storyboardPrompts[key]; else storyboardPrompts[key] = prompt;
+    return { storyboardPrompts };
+  }),
   applyCreationPrompt: ({promptId, promptVersionId, text}) => set(state => ({values: {...state.values, prompt: {type: "string", value: text}}, draftDirty: true, creationPromptProvenance: {promptId, promptVersionId}})),
   setCreationLabReturn: (creationLabReturn) => set({ creationLabReturn }),
   setPendingLibraryIntent: (pendingLibraryIntent) => set({ pendingLibraryIntent }),

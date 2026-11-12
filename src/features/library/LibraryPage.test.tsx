@@ -23,6 +23,19 @@ const generator:GeneratorOption={selectionRef:"exact-pair",name:"H3",mode:"FL2V"
 const context:CreationContext={projectId:"project-a",projectName:"A",stage:"video",shots:[{id:"shot-a",name:"镜头一",ordinal:0}],selectedShot:{summary:{id:"shot-a",name:"镜头一",ordinal:0},prompt:"默认",selectionRef:"exact-pair",values:{},referenceAssetIds:[],selectedResultId:null,recentRun:null},candidates:[],mediaInputs:[{id:"image-a",name:"图片",mediaKind:"image",selected:false},{id:"video-a",name:"视频",mediaKind:"video",selected:false}],promptChoices:[]};
 beforeEach(()=>{Object.values(api).forEach(mock=>mock.mockReset());useStudioStore.getState().resetDraft();api.tagsList.mockResolvedValue([]);api.list.mockResolvedValue(page);api.get.mockResolvedValue(detail);api.relationsGet.mockResolvedValue([]);api.versionsGet.mockResolvedValue({kind:"prompt",versions:[version]});api.imageGet.mockResolvedValue([1]);api.creationGet.mockResolvedValue(context);api.generatorsList.mockResolvedValue([generator]);api.readinessGet.mockResolvedValue({ready:true,issues:[],fieldErrors:[],actions:[]});URL.createObjectURL=vi.fn(()=>"blob:fixture");URL.revokeObjectURL=vi.fn();});
 afterEach(()=>{cleanup();vi.useRealTimers();sessionStorage.clear();});
+it("retains the separate entity category across return, isolates projects and tolerates corrupt session preferences", async()=>{
+ const props={route:{kind:'library',projectId:'project-a',filter:'images'} as const,navigate:vi.fn()};
+ const view=render(<LibraryPage {...props}/>);fireEvent.click(screen.getByRole('button',{name:'角色'}));await screen.findByRole('region',{name:'角色管理'});view.unmount();
+ const next=render(<LibraryPage {...props}/>);expect(screen.getByRole('region',{name:'角色管理'})).toBeTruthy();
+ next.rerender(<LibraryPage {...props} route={{...props.route,projectId:'project-b'}}/>);expect(screen.queryByRole('region',{name:'角色管理'})).toBeNull();
+ next.rerender(<LibraryPage {...props}/>);await screen.findByRole('region',{name:'角色管理'});next.unmount();
+ sessionStorage.setItem(JSON.stringify(['ai-studio.navigation.v1','project-a','library.entity-kind']),'"not-a-category"');render(<LibraryPage {...props}/>);expect(screen.queryByRole('region',{name:'角色管理'})).toBeNull();
+});
+it("an explicit resource route wins over a remembered entity category",async()=>{
+ sessionStorage.setItem(JSON.stringify(['ai-studio.navigation.v1','project-a','library.entity-kind']),'"character"');
+ render(<LibraryPage route={route} navigate={vi.fn()}/>);await screen.findAllByText('原始正文',{selector:'p.library-prompt-text'});
+ expect(screen.queryByRole('region',{name:'角色管理'})).toBeNull();
+});
 it("phase5_target12 canonical details search actual paging missing resource and project isolation",async()=>{
  const navigate=vi.fn();const cursor={projectId:"project-a",category:"prompts",keyword:null,position:{createdAt:"2026-10-02",id:"prompt-a"}};
  api.list.mockImplementation((_project,query)=>Promise.resolve(query.cursor ? {...page,items:[]} : {...page,nextCursor:cursor}));
