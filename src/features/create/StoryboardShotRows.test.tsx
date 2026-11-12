@@ -651,3 +651,91 @@ it("ignores a late prompt-section read after switching projects", async () => {
   await act(async () => pending.resolve({ style: "old project", summary: null, soundscape: null, music: null }));
   expect((screen.getByLabelText("镜头1 风格") as HTMLTextAreaElement).value).toBe("");
 });
+
+it('changed saved prompt sections after a lost acknowledgement must renew row intent identity',async()=>{
+ api.generatorsList.mockResolvedValue([{...generator,mode:'REF2VA',persistentInputs:true,fields:[...generator.fields,{type:'images',key:'reference_images',label:'Images',required:false,minItems:0,maxItems:8}]}]);
+ api.setPromptSections.mockImplementation(async (_p,_s,next)=>{api.promptSections.mockResolvedValue(next);return next;});
+ const p=props();render(<StoryboardShotRows {...p} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ await waitFor(()=>expect(api.promptSections).toHaveBeenCalled());
+ api.generate.mockRejectedValueOnce(new Error('ack lost after persistence'));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ const summary=screen.getByLabelText('镜头1 摘要');
+ fireEvent.change(summary,{target:{value:'A very different scene in a flooded city.'}});fireEvent.blur(summary);
+ await waitFor(()=>expect(api.setPromptSections).toHaveBeenCalledWith('p','a',expect.objectContaining({summary:'A very different scene in a flooded city.'})));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ const [a,b]=api.generate.mock.calls.map(x=>x[0]);
+ expect(b.submissionIdempotencyKey,'changed formal prompt sections must not replay the earlier frozen batch').not.toBe(a.submissionIdempotencyKey);
+});
+it('no-mention row must observe a formal media revision before retrying an uncertain submission',async()=>{
+ api.generatorsList.mockResolvedValue([{...generator,mode:'I2V',persistentInputs:true,fields:[...generator.fields,{type:'image',key:'first_frame',label:'First',required:true}]}]);
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ api.generate.mockRejectedValueOnce(new Error('ack lost after persistence'));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ api.inputsGet.mockResolvedValue({selectionRef:'sel',token:{instanceId:'inputs',revision:9},inputs:[{inputKey:'first_frame',ordinal:0,assetId:'changed-image'}],assets:[]});
+ await act(async()=>{invalidateVideoInputs('p');});
+ // Allow the real notification/render effect chain to run; no retry timer or simulated GPU.
+ await act(async()=>{await new Promise(r=>setTimeout(r,30));});
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ const [a,b]=api.generate.mock.calls.map(x=>x[0]);
+ expect(b.submissionIdempotencyKey,'current row cannot reuse frozen media after a known formal-input invalidation').not.toBe(a.submissionIdempotencyKey);
+});
+it('unchanged row retries preserve unknown-outcome identity',async()=>{
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ api.generate.mockRejectedValueOnce(new Error('ack lost'));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});
+
+it.each(['I2V','FIRST_LAST','REF2VA'])('retains %s retry identity after unchanged formal evidence and invalidation',async mode=>{
+ api.generatorsList.mockResolvedValue([{...generator,mode,persistentInputs:true}]);
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ api.generate.mockRejectedValueOnce(new Error('ack lost'));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ await act(async()=>{invalidateVideoInputs('p');});
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ expect(api.inputsGet).toHaveBeenCalledTimes(2);
+ expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});
+it('renews retry identity after persisted composition usage changes',async()=>{
+ api.generatorsList.mockResolvedValue([{...generator,mode:'REF2VA',persistentInputs:true}]);
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ api.generate.mockRejectedValueOnce(new Error('ack lost'));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ api.compositionUsage.mockResolvedValue({openingEntityId:'composition-new',endingEntityId:null});
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});
+it('rejects a mismatched fresh media identity before readiness or generation',async()=>{
+ api.generatorsList.mockResolvedValue([{...generator,mode:'I2V',persistentInputs:true}]);
+ api.inputsGet.mockResolvedValue({selectionRef:'other-recipe',token:null,inputs:[],assets:[]});
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));await screen.findByRole('alert');
+ expect(api.readinessGet).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
+});
+it('abandons a late formal evidence read after row/project replacement',async()=>{
+ api.generatorsList.mockResolvedValue([{...generator,mode:'I2V',persistentInputs:true}]);
+ const p=props(),read=deferred<{selectionRef:string;token:null;inputs:[];assets:[]}>();api.inputsGet.mockReturnValueOnce(read.promise);
+ const host=render(<StoryboardShotRows {...p} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ fireEvent.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.inputsGet).toHaveBeenCalled());
+ host.rerender(<StoryboardShotRows {...p} projectId='other' items={[shot('b',0)]}/>);
+ await act(async()=>{read.resolve({selectionRef:'sel',token:null,inputs:[],assets:[]});});
+ expect(api.readinessGet).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
+});

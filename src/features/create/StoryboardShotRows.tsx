@@ -371,30 +371,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; setDuration(String(value)); });
   };
   const noGen = generatorsFailed ? "生成器读取失败，请点击上方重试。" : !generator ? "请先在详情中选择生成器" : undefined;
-  const generationDraft = JSON.stringify([projectId, item.id, selectionRef, prompt, item.shot?.values, referenceView?.token]);
-  const generationAttempt = useRef<{ draft: string; key: string } | null>(null);
-  if (generationAttempt.current?.draft !== generationDraft) generationAttempt.current = null;
-  const latestGenerationDraft = useRef(generationDraft);
-  latestGenerationDraft.current = generationDraft;
   const durationIssue = shotDurationIssue(savedDuration);
-  const generate = () => !disabled && !entityIssue && !durationIssue && selectionRef && item.shot && void run(async () => {
-    const token = scopeEpoch.current;
-    const isCurrent = () => token === scopeEpoch.current && generationDraft === latestGenerationDraft.current;
-    const values = { ...item.shot!.values, prompt: { type: "string" as const, value: prompt } };
-    const base = { projectId, shotId: item.id, stage: "video" as const, selectionRef, values };
-    const readiness = await productClient.creation.readinessGet({ ...base, submissionIdempotencyKey: "readiness-only" });
-    if (!isCurrent()) return;
-    if (!readiness.ready) { setError(readiness.issues.map(i => i.message).join("；") || "尚未就绪，请在详情中完成设置"); return; }
-    const attempt = generationAttempt.current ?? { draft: generationDraft, key: newKey() };
-    generationAttempt.current = attempt;
-    const ack = await productClient.creation.generate({ ...base, submissionIdempotencyKey: attempt.key });
-    // Unknown transport outcomes retain the attempt. A confirmed acceptance
-    // ends it, so an explicit subsequent generation can use a fresh key.
-    if (ack.accepted && generationAttempt.current === attempt) generationAttempt.current = null;
-    if (!isCurrent()) return; // Accepted Queue work remains owned by the backend.
-    setNote(ack.accepted ? "已写入生产队列" : "未被接受");
-    onChanged();
-  });
   const cover = coverAsset(item);
   const percent = item.status === "GENERATING" ? runPercent(item.run) : null;
   // 构图用途: which bound composition governs the opening frame and which the final frame.
@@ -460,6 +437,40 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       setNote("提示词分段已保存");
     });
   };
+  // Local evidence fences reads in flight; only authoritative semantic evidence
+  // below owns retry identity (a notification alone must not renew a lost ACK).
+  const generationDraft = JSON.stringify([projectId, item.id, selectionRef, prompt, item.shot?.values, referenceRev, referenceView?.token, sectionsReady, savedSections.current, usage]);
+  const generationAttempt = useRef<{ draft: string; key: string } | null>(null);
+  const latestGenerationDraft = useRef(generationDraft);
+  latestGenerationDraft.current = generationDraft;
+  const generate = () => !disabled && !entityIssue && !durationIssue && selectionRef && item.shot && void run(async () => {
+    const token = scopeEpoch.current;
+    const isCurrent = () => token === scopeEpoch.current && generationDraft === latestGenerationDraft.current;
+    const values = { ...item.shot!.values, prompt: { type: "string" as const, value: prompt } };
+    // Read on explicit submission, not for every row/poll. All persistent modes
+    // need their own media revision, even without an @mention (I2V/FIRST_LAST).
+    const evidence = generator?.persistentInputs ? await Promise.all([
+      productClient.creation.inputsGet({ projectId, shotId: item.id, selectionRef }),
+      productClient.storyEntities.promptSections(projectId, item.id),
+      productClient.storyEntities.compositionUsage(projectId, item.id),
+    ]) : undefined;
+    if (!isCurrent()) return;
+    if (evidence && evidence[0].selectionRef !== selectionRef) throw new Error("Reference selection changed");
+    const fingerprint = JSON.stringify([projectId, item.id, selectionRef, values, evidence?.[0].token, evidence?.[1], evidence?.[2]],
+      (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+    const base = { projectId, shotId: item.id, stage: "video" as const, selectionRef, values };
+    const readiness = await productClient.creation.readinessGet({ ...base, submissionIdempotencyKey: "readiness-only" });
+    if (!isCurrent()) return;
+    if (!readiness.ready) { setError(readiness.issues.map(i => i.message).join("；") || "尚未就绪，请在详情中完成设置"); return; }
+    const attempt = generationAttempt.current?.draft === fingerprint ? generationAttempt.current : { draft: fingerprint, key: newKey() };
+    generationAttempt.current = attempt;
+    const ack = await productClient.creation.generate({ ...base, submissionIdempotencyKey: attempt.key });
+    if (ack.accepted && generationAttempt.current === attempt) generationAttempt.current = null;
+    if (!isCurrent()) return; // Accepted Queue work remains owned by the backend.
+    setNote(ack.accepted ? "已写入生产队列" : "未被接受");
+    onChanged();
+  });
   const promptHints = h3PromptHints({
     description: prompt,
     durationSeconds: savedDuration,

@@ -311,3 +311,30 @@ it('uncertain retry after a semantically identical input refresh renews identity
  expect(api.generate.mock.calls[1][0].values).toEqual(api.generate.mock.calls[0][0].values);
  expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
 });
+
+it('failed Library append must preserve existing plural draft references',async()=>{
+ saved.set('opaque-3',{selectionRef:'opaque-3',token:{instanceId:'refs',revision:1},inputs:[{inputKey:'reference_images',ordinal:0,assetId:'first'},{inputKey:'reference_images',ordinal:1,assetId:'last'}],assets:[...assets,{id:'new-image',name:'New image',mediaKind:'image'}]});
+ api.get.mockImplementation((p,s)=>{const c=context(p,s);return Promise.resolve({...c,selectedShot:c.selectedShot?{...c.selectedShot,selectionRef:'opaque-3'}:null});});
+ await start();
+ api.libraryGet.mockResolvedValue({kind:'asset',asset:{id:'new-image',assetType:'image',category:'source_image',sourceTaskId:null,name:'New image',mimeType:'image/png'}});
+ act(()=>useStudioStore.getState().setPendingLibraryIntent({kind:'asset',projectId:'owned',assetId:'new-image',mediaKind:'image'}));
+ const apply=await screen.findByRole('button',{name:'应用到参考图片'});
+ await waitFor(()=>expect(apply.hasAttribute('disabled')).toBe(false));
+ api.inputsSave.mockRejectedValueOnce({code:'SHOT_VIDEO_INPUT_CONFLICT',message:'conflict'});
+ fireEvent.click(apply);
+ await waitFor(()=>expect(api.inputsSave).toHaveBeenCalledTimes(1));
+ await screen.findByText(/镜头输入已被更新/);
+ const inputIds=useStudioStore.getState().values.reference_images;
+ expect(inputIds,'failed append must not silently delete the two prior draft references').toEqual(expect.objectContaining({assetIds:expect.arrayContaining(['first','last'])}));
+ expect(api.generate).not.toHaveBeenCalled();
+});
+it('successful Library append preserves existing plural formal references',async()=>{
+ saved.set('opaque-3',{selectionRef:'opaque-3',token:{instanceId:'refs',revision:1},inputs:[{inputKey:'reference_images',ordinal:0,assetId:'first'},{inputKey:'reference_images',ordinal:1,assetId:'last'}],assets:[...assets,{id:'new-image',name:'New image',mediaKind:'image'}]});
+ api.get.mockImplementation((p,s)=>{const c=context(p,s);return Promise.resolve({...c,selectedShot:c.selectedShot?{...c.selectedShot,selectionRef:'opaque-3'}:null});});
+ await start();api.libraryGet.mockResolvedValue({kind:'asset',asset:{id:'new-image',assetType:'image',category:'source_image',sourceTaskId:null,name:'New image',mimeType:'image/png'}});
+ act(()=>useStudioStore.getState().setPendingLibraryIntent({kind:'asset',projectId:'owned',assetId:'new-image',mediaKind:'image'}));
+ const apply=await screen.findByRole('button',{name:'应用到参考图片'});await waitFor(()=>expect(apply.hasAttribute('disabled')).toBe(false));fireEvent.click(apply);
+ await waitFor(()=>expect(useStudioStore.getState().pendingLibraryIntent).toBeUndefined());
+ expect(useStudioStore.getState().values.reference_images).toEqual({type:'image_assets',assetIds:['first','last','new-image']});
+ expect(api.generate).not.toHaveBeenCalled();
+});

@@ -307,11 +307,11 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
         setError("生成视频仅可作为视频参考绑定。请确认后再应用到参考视频槽，系统不会抽帧作为首帧。");
         return;
       }
-      setValue(field.key,mediaValue(field,[libraryIntent.assetId]));
       if (videoInputs.enabled) {
         const ok = await videoInputs.bindAsset(field.key, libraryIntent.assetId);
         if (!ok) return;
-      }
+        setPendingStandardRun(undefined); attempt.current = null; setAccepted(null);
+      } else setValue(field.key,mediaValue(field,[libraryIntent.assetId]));
       useStudioStore.getState().setPendingLibraryIntent(undefined);
       setLibraryAssetMeta(undefined);
       setLibraryMetaFailed(false);

@@ -42,6 +42,113 @@ fn input(key: &str, ordinal: i64, id: &AssetId) -> ShotVideoInputAsset {
 }
 
 #[tokio::test]
+async fn saved_section_mentions_resolve_against_formal_images_without_a_main_prompt_mention() {
+    use ai_studio_lib::application::ports::StoryEntityRepository;
+    use ai_studio_lib::domain::story_entity::{
+        ShotPromptSections, StoryEntityKind, StoryEntityUpsert,
+    };
+    use ai_studio_lib::infrastructure::database::repositories::story_entity::SqliteStoryEntityRepository;
+    let f = fixture().await;
+    let (inputs, first, _) = setup(&f).await;
+    let scope = scope(&f, 3);
+    let saved = inputs
+        .save(&scope, None, &[input("reference_images", 0, &first.id)])
+        .await
+        .unwrap();
+    let entities = SqliteStoryEntityRepository::new(f.pool.clone());
+    entities
+        .create(
+            PROJECT_ID,
+            StoryEntityKind::Character,
+            StoryEntityUpsert {
+                name: "Hero".into(),
+                description: "A man in a dark coat".into(),
+                cover_asset_id: Some(first.id.to_string()),
+                image_asset_ids: vec![first.id.to_string()],
+            },
+        )
+        .await
+        .unwrap();
+    let definition = SqliteGenerationDefinitionRepository::new(f.pool.clone())
+        .find(&f.pairs[3].0, &f.pairs[3].1)
+        .await
+        .unwrap()
+        .unwrap();
+    let recipe = RecipeParser::parse(&definition.recipe_yaml).unwrap();
+    for field in ["style", "summary", "soundscape", "music"] {
+        let mut sections = ShotPromptSections::default();
+        let text = Some("@Hero enters the room.".to_owned());
+        match field {
+            "style" => sections.style = text,
+            "summary" => sections.summary = text,
+            "soundscape" => sections.soundscape = text,
+            _ => sections.music = text,
+        }
+        entities
+            .set_prompt_sections(PROJECT_ID, "shot_phase2", &sections)
+            .await
+            .unwrap();
+        let values = inputs
+            .generation_values(&scope, &recipe, Some("Walk slowly across the room."))
+            .await
+            .unwrap();
+        let Some(GenerationInputValue::Text(prompt)) = values.get("prompt") else {
+            panic!("missing compiled prompt")
+        };
+        assert!(
+            prompt.contains("<Subject 1> enters the room."),
+            "{field}: {prompt}"
+        );
+        assert!(!prompt.contains('@'), "{field}: {prompt}");
+    }
+    entities
+        .set_prompt_sections(
+            PROJECT_ID,
+            "shot_phase2",
+            &ShotPromptSections {
+                summary: Some("@Unknown enters.".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let unknown = inputs
+        .generation_values(&scope, &recipe, Some("Walk slowly."))
+        .await
+        .unwrap_err();
+    assert!(unknown.to_string().contains("ENTITY_REFERENCE_UNKNOWN"));
+    // A fully structured user prompt supersedes the unused saved summary.
+    let structured = "subject_definitions:\nUser defined\nsummary:\nUser summary\nretention_analysis:\nKeep references\ndetailed_description:\nWalk slowly\noverall_soundscape:\nRoom tone\nnon_diegetic_music:\nN/A";
+    let values = inputs
+        .generation_values(&scope, &recipe, Some(structured))
+        .await
+        .unwrap();
+    assert!(
+        matches!(values.get("prompt"), Some(GenerationInputValue::Text(text)) if text == structured)
+    );
+    entities
+        .set_prompt_sections(
+            PROJECT_ID,
+            "shot_phase2",
+            &ShotPromptSections {
+                summary: Some("@Hero enters.".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    inputs.save(&scope, Some(&saved.token), &[]).await.unwrap();
+    let missing = inputs
+        .generation_values(&scope, &recipe, Some("Walk slowly."))
+        .await
+        .unwrap_err();
+    assert!(missing.to_string().contains("ENTITY_REFERENCE_NOT_APPLIED"));
+    assert_eq!(count(&f.pool, "tasks").await, 0);
+    assert_eq!(count(&f.pool, "production_batches").await, 0);
+    assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn entity_references_do_not_silently_use_an_old_i2v_first_frame() {
     use ai_studio_lib::application::shot_service::ShotGenerationRequest;
     let f = fixture().await;

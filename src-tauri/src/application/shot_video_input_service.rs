@@ -175,7 +175,7 @@ impl ShotVideoInputService {
         let Some(GenerationInputValue::Text(prompt)) = values.get("prompt") else {
             return Ok(());
         };
-        let has_mention = prompt.contains('@');
+        let mut has_mention = prompt.contains('@');
         let is_ref2va = matches!(
             recipe.inputs.get("reference_images"),
             Some(InputDefinition::Images { .. })
@@ -189,13 +189,23 @@ impl ShotVideoInputService {
         let repository = self.story_entities.as_ref().ok_or_else(|| {
             invalid("ENTITY_REFERENCE_UNAVAILABLE: 角色与场景解析不可用，请刷新后重试")
         })?;
-        let sections = match shot_id {
+        // An explicitly structured prompt supersedes the saved optional sections.
+        let sections = match shot_id.filter(|_| !has_ref2va_sections(prompt)) {
             Some(shot_id) => repository
                 .prompt_sections_for_shot(project_id, shot_id)
                 .await
                 .map_err(invalid)?,
             None => Default::default(),
         };
+        has_mention |= [
+            &sections.style,
+            &sections.summary,
+            &sections.soundscape,
+            &sections.music,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|text| text.contains('@'));
         if !has_mention && sections.clone().normalized().is_empty() {
             return Ok(());
         }
