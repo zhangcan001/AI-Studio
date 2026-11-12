@@ -51,6 +51,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const readinessEpoch = useRef(0);
   const mounted = useRef(false);
   const attempt = useRef<string | null>(null);
+  const attemptFingerprint = useRef<string | undefined>(undefined);
   const actionLock = useRef(false);
   const owner = `${route.projectId}:${route.shotId ?? ""}`;
   const previousOwner = useRef(owner);
@@ -369,7 +370,17 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       inputRevision,
     };
     ++readinessEpoch.current; // An earlier read-only check cannot replace submit-time readiness.
-    attempt.current ??= crypto.randomUUID();
+    // Transport retries retain identity only for the same semantic submission.
+    // Formal input refreshes bypass field setters, so object identity is insufficient.
+    const fingerprint = JSON.stringify({
+      projectId: route.projectId, shotId: route.shotId ?? "", stage: route.stage,
+      selectionRef, values: requestValues, ...store.creationPromptProvenance, inputRevision,
+    }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+    if (!attempt.current || attemptFingerprint.current !== fingerprint) {
+      attempt.current = crypto.randomUUID();
+      attemptFingerprint.current = fingerprint;
+    }
     const request = {
       projectId: route.projectId,
       shotId: route.shotId ?? "",

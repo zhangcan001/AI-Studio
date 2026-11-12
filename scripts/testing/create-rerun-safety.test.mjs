@@ -1,3 +1,4 @@
+import {INPUT_REFRESH_SAFETY_CHANGED, INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF} from '../input-refresh-safety-successor-guard.mjs';
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -18,8 +19,8 @@ const parentBytes = p => execFileSync('git', ['show', `${CREATE_RERUN_SAFETY_BAS
 it('verifies the exact rerun-safety successor and projects the frozen parent bytes', () => {
   const result = createRerunSafetyParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(CREATE_RERUN_SAFETY_CHANGED);
-  expect(result.addedPaths).toEqual([...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...CREATE_RERUN_SAFETY_CHANGED, ...INPUT_REFRESH_SAFETY_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF, ...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF])].sort());
   for (const p of CREATE_RERUN_SAFETY_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

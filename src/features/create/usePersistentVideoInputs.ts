@@ -76,6 +76,8 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
       }
       store.loadCreationDraft(merged, store.draftDirty, store.creationPromptProvenance);
       acceptView(own, next);
+      // Only an accepted clean view resolves a prior read error; dirty/OCC paths above retain it.
+      setError(undefined);
     } catch (e) { if (own === currentOwner.current && token === epoch.current && read === readEpoch.current) setError(normalizeProductError(e).message); }
     finally { if (own === currentOwner.current && token === epoch.current && read === readEpoch.current) setLoading(false); }
   }
@@ -91,7 +93,7 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
       if (projectId !== route.projectId || selfWrite.current) return;
       void load(false, true);
     });
-  }, [enabled, route.projectId, owner]);
+  }, [enabled, route.projectId, owner, pageLoading]);
 
   function beginWrite() { ++readEpoch.current; lock.current = true; setLoading(false); setBusy(true); setError(undefined); }
   function finishWrite(own: string, token: number) {

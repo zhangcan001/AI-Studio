@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GeneratorOption } from "../../product/types";
 import type { VideoInputSelection, VideoInputView } from "../../types/shotVideoInput";
@@ -13,7 +13,7 @@ const route: CreateRoute = { kind:"create",projectId:"p1",shotId:"shot1",stage:"
 const generator: GeneratorOption = { selectionRef:"exact-a",name:"FL",version:"2.2",mode:"FIRST_LAST",mediaKind:"video",availability:true,availabilityReason:null,recommended:true,persistentInputs:true,
   fields:[{key:"first_frame",type:"image",label:"首帧",required:true},{key:"last_frame",type:"image",label:"尾帧",required:true}] };
 function view(selectionRef="exact-a",revision=1): VideoInputView { return {selectionRef,token:{instanceId:`instance-${selectionRef}`,revision},inputs:[{inputKey:"first_frame",ordinal:0,assetId:`${selectionRef}-first`},{inputKey:"last_frame",ordinal:0,assetId:`${selectionRef}-last`}],assets:[]}; }
-afterEach(() => { resetVideoInputInvalidationForTests(); });
+afterEach(() => { cleanup(); resetVideoInputInvalidationForTests(); });
 beforeEach(()=>{ vi.clearAllMocks(); useStudioStore.getState().loadCreationDraft({prompt:{type:"string",value:"move"}}); api.inputsGet.mockImplementation((s:VideoInputSelection)=>Promise.resolve(view(s.selectionRef))); api.inputsSave.mockImplementation(async r=>({...view(r.selection.selectionRef,2),inputs:r.inputs})); api.assetsImport.mockResolvedValue({imported:[],failed:[],cancelled:false}); });
 describe("persistent video input ownership",()=>{
   it("preserves a same-owner unsaved/cleared return draft, while explicit refresh reads persisted OCC",async()=>{
@@ -204,4 +204,40 @@ it('background invalidation during exact-slot bind releases the write lock and p
   expect(h.result.current.busy).toBe(false);
   expect(useStudioStore.getState().values.first_frame).toEqual({type:'image_asset',assetId:'bound-first'});
   expect(useStudioStore.getState().values.last_frame).toEqual({type:'image_asset',assetId:'exact-a-last'});
+});
+
+it('successful background recovery clears a transient read error',async()=>{
+ const {result}=renderHook(()=>usePersistentVideoInputs(route,generator,false));
+ await waitFor(()=>expect(result.current.ready).toBe(true));
+ api.inputsGet.mockRejectedValueOnce(new Error('temporary read failure'));
+ act(()=>invalidateVideoInputs('p1'));
+ await waitFor(()=>expect(result.current.error).toBeTruthy());
+ api.inputsGet.mockResolvedValue(view('exact-a',2));
+ act(()=>invalidateVideoInputs('p1'));
+ await waitFor(()=>expect(result.current.view?.token?.revision).toBe(2));
+ expect(result.current.error).toBeUndefined();
+ expect(result.current.ready).toBe(true);
+});
+it('invalidation subscription uses the current loading state after initialization',async()=>{
+ const {result,rerender}=renderHook(({loading})=>usePersistentVideoInputs(route,generator,loading),{initialProps:{loading:true}});
+ rerender({loading:false});
+ await waitFor(()=>expect(result.current.ready).toBe(true));
+ api.inputsGet.mockClear(); api.inputsGet.mockResolvedValue(view('exact-a',2));
+ await act(async()=>{invalidateVideoInputs('p1');});
+ expect(api.inputsGet).toHaveBeenCalledTimes(1);
+ expect(result.current.view?.token?.revision).toBe(2);
+});
+it('background success cannot clear an unresolved dirty-draft OCC conflict',async()=>{
+ const {result}=renderHook(()=>usePersistentVideoInputs(route,generator,false));
+ await waitFor(()=>expect(result.current.ready).toBe(true));
+ act(()=>useStudioStore.getState().setValue('first_frame',{type:'image_asset',assetId:'dirty'}));
+ api.inputsGet.mockResolvedValue(view('exact-a',2));
+ await act(async()=>{invalidateVideoInputs('p1');});
+ await waitFor(()=>expect(result.current.error).toBeTruthy());
+ const conflict=result.current.error;
+ api.inputsGet.mockResolvedValue(view('exact-a',1));
+ await act(async()=>{invalidateVideoInputs('p1');});
+ expect(result.current.error).toBe(conflict);
+ expect(result.current.ready).toBe(false);
+ expect(useStudioStore.getState().values.first_frame).toEqual({type:'image_asset',assetId:'dirty'});
 });

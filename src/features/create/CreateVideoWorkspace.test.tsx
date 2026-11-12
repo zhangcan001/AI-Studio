@@ -262,3 +262,52 @@ it("Standard rerun obeys a negative fresh preflight and does not automatically r
   await waitFor(() => expect(screen.getByLabelText("包变体").hasAttribute("disabled")).toBe(false));
   expect(api.generate).not.toHaveBeenCalled();
 });
+
+it('changed formal inputs after an uncertain response require a new intent key',async()=>{
+ api.get.mockImplementation((p,s)=>{const c=context(p,s);return Promise.resolve({...c,selectedShot:c.selectedShot?{...c.selectedShot,selectionRef:'opaque-1'}:null});});
+ saved.set('opaque-1',{selectionRef:'opaque-1',token:{instanceId:'i2v',revision:1},inputs:[{inputKey:'first_frame',ordinal:0,assetId:'first'}],assets});
+ api.generate.mockRejectedValueOnce(new Error('ack lost'));
+ await start();fireEvent.click(screen.getByRole('button',{name:'生成'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成'}).hasAttribute('disabled')).toBe(false));
+ saved.set('opaque-1',{selectionRef:'opaque-1',token:{instanceId:'i2v',revision:2},inputs:[{inputKey:'first_frame',ordinal:0,assetId:'last'}],assets});
+ fireEvent.click(screen.getByText('高级设置'));
+ await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'刷新已保存输入'}));});
+ await waitFor(()=>expect(useStudioStore.getState().values.first_frame).toEqual({type:'image_asset',assetId:'last'}));
+ await readyToGenerate();fireEvent.click(screen.getByRole('button',{name:'生成'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ const [a,b]=api.generate.mock.calls.map(call=>call[0]);
+ expect(a.values.first_frame.assetId).toBe('first');expect(b.values.first_frame.assetId).toBe('last');
+ expect(b.submissionIdempotencyKey).not.toBe(a.submissionIdempotencyKey);
+});
+it('uncertain retry after a semantically identical input refresh retains identity 1',async()=>{
+ api.generate.mockRejectedValueOnce(new Error('ack lost'));
+ saved.set('opaque-0',{selectionRef:'opaque-0',token:{instanceId:'t2v',revision:1},inputs:[],assets});
+ await start();fireEvent.click(screen.getByRole('button',{name:'生成'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成'}).hasAttribute('disabled')).toBe(false));
+ saved.set('opaque-0',{selectionRef:'opaque-0',token:{instanceId:'t2v',revision:1},inputs:[],assets});
+ fireEvent.click(screen.getByText('高级设置'));
+ await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'刷新已保存输入'}));});
+ act(()=>{const store=useStudioStore.getState();store.loadCreationDraft(Object.fromEntries(Object.entries(store.values).reverse()),store.draftDirty,store.creationPromptProvenance);});
+ await readyToGenerate();fireEvent.click(screen.getByRole('button',{name:'生成'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ expect(api.generate.mock.calls[1][0].values).toEqual(api.generate.mock.calls[0][0].values);
+ expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});
+
+it('uncertain retry after a semantically identical input refresh renews identity 2',async()=>{
+ api.generate.mockRejectedValueOnce(new Error('ack lost'));
+ saved.set('opaque-0',{selectionRef:'opaque-0',token:{instanceId:'t2v',revision:1},inputs:[],assets});
+ await start();fireEvent.click(screen.getByRole('button',{name:'生成'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成'}).hasAttribute('disabled')).toBe(false));
+ saved.set('opaque-0',{selectionRef:'opaque-0',token:{instanceId:'t2v',revision:2},inputs:[],assets});
+ fireEvent.click(screen.getByText('高级设置'));
+ await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'刷新已保存输入'}));});
+ act(()=>{const store=useStudioStore.getState();store.loadCreationDraft(Object.fromEntries(Object.entries(store.values).reverse()),store.draftDirty,store.creationPromptProvenance);});
+ await readyToGenerate();fireEvent.click(screen.getByRole('button',{name:'生成'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ expect(api.generate.mock.calls[1][0].values).toEqual(api.generate.mock.calls[0][0].values);
+ expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);
+});

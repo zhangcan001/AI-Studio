@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "INPUT_REFRESH_SAFETY",
+  "parentHead": "e90b617a51ffdabe12a3159f6348190701bfb3f6",
+  "planningParentHead": "e90b617a51ffdabe12a3159f6348190701bfb3f6",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "historicalRuntimeBytesUnchanged": true,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "guardsRelaxed": false,
+    "semanticRequestRetryIdentity": true,
+    "backgroundErrorRecovery": true,
+    "loadingSubscriptionFreshness": true,
+    "dirtyOccConflictPreserved": true
+  },
+  "files": {
+    "scripts/create-rerun-safety-successor-guard.mjs": {
+      "beforeHash": "85bdf626328d4171a9897bc5310ec12776aabdd42c3d757ecfe870c38cdfe7cd",
+      "afterHash": "3c1714e39610fb6c2c1036c6efe219e070e9b8a3b68c2702d39f9449eedefae7"
+    },
+    "scripts/input-refresh-safety-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "c51193afde33f5e0eaebb92a75b78cefe80347b0b14fa496f60d6ceec0f506ce"
+    },
+    "scripts/testing/ci-chain-consolidated.test.mjs": {
+      "beforeHash": "bb8426854461869d1fa2a56ef6d6d690cd3a5e3419a7b752bfb9c5908b17776a",
+      "afterHash": "899f3e0a3bbd019a90a323b045264c1fe14c3763aa037b4bf663e9b752553bbe"
+    },
+    "scripts/testing/create-rerun-safety.test.mjs": {
+      "beforeHash": "36a144fb53e5361d8626e2a8a3e659ff0d5f3f4c4fde4d83645ce45764f5549c",
+      "afterHash": "16b44a9ea47b2ff4462bcab5a2d7cef26a59dedbbbb26450420a728f870597fd"
+    },
+    "scripts/testing/input-refresh-safety.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "d1e2854e16dd04f9bddc21375b4ccfa5d2ae528ee7f239a4f40aee715b7597fb"
+    },
+    "scripts/testing/pika-flex-reference.test.mjs": {
+      "beforeHash": "eaf5e310aa0383843bbb23356f60f8e4072e8f8bf43973eacd571cc849f60a02",
+      "afterHash": "e5c46375b2fae0c49a43b411ee0ce1d5413ed135e127322c2b7b7cd3235530f1"
+    },
+    "src/features/create/CreateController.ts": {
+      "beforeHash": "56118e3e57261ecfd0461f05dd45010a9b02ae59c46fd3ccee46b344f31b50c8",
+      "afterHash": "09aa3f745f816a4f5354b82f254ad323a8ebd69a92df44844c34ec57cee59c7e"
+    },
+    "src/features/create/CreateVideoWorkspace.test.tsx": {
+      "beforeHash": "f91fc4f212cd78a5e078b04da5ae2a2bae196f729cd716d18f16e7670a729331",
+      "afterHash": "bb0083b17a9755ad1e68d8d65540fc2e40778a94a20ddbde42d219340863495a"
+    },
+    "src/features/create/usePersistentVideoInputs.test.tsx": {
+      "beforeHash": "f8559e7958c227b555d75ca656c1dfa3567f4857350a611d9988a955fe8c6f28",
+      "afterHash": "1d23c3c227619e359bfb0de4860e8c4b555b87214e8a596f4982f50556f52d67"
+    },
+    "src/features/create/usePersistentVideoInputs.ts": {
+      "beforeHash": "0181478c6806faf2f629917136bbcb9d27aa41e3603c1011e4742916a40b0b27",
+      "afterHash": "caffcf796bfd69608be96b07f55d85c6db496bcea08948c2bff7eb9a0ca14995"
+    }
+  }
+}
