@@ -1,3 +1,4 @@
+import {STORYBOARD_USAGE_CHANGED, STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF} from '../storyboard-usage-successor-guard.mjs';
 import {REFERENCE_AUTHORITY_CHANGED, REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF} from '../reference-authority-successor-guard.mjs';
 // @vitest-environment node
 import { expect, it } from 'vitest';
@@ -19,8 +20,8 @@ const parentBytes = p => execFileSync('git', ['show', `${INPUT_REFRESH_SAFETY_BA
 it('verifies the exact input-refresh-safety successor and projects the frozen parent bytes', () => {
   const result = inputRefreshSafetyParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...INPUT_REFRESH_SAFETY_CHANGED, ...REFERENCE_AUTHORITY_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF, ...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...INPUT_REFRESH_SAFETY_CHANGED, ...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF, ...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF])].sort());
   for (const p of INPUT_REFRESH_SAFETY_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

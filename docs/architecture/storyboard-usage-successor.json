@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "STORYBOARD_USAGE",
+  "parentHead": "163499ba6e77ba4e0003b6af0c83abf08648926e",
+  "planningParentHead": "163499ba6e77ba4e0003b6af0c83abf08648926e",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "historicalRuntimeBytesUnchanged": true,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "guardsRelaxed": false,
+    "manualOverridesPreserved": true,
+    "saveBeforeGenerate": true,
+    "startFailureFeedback": true,
+    "exactRunNavigation": true,
+    "singleSubmission": true
+  },
+  "files": {
+    "scripts/reference-authority-successor-guard.mjs": {
+      "beforeHash": "490e3a461fc8567808159ce2e93ef7fdf7ff7ae44ce5613c160015a4f64c16de",
+      "afterHash": "5f2437d8a1fb237dcf69e610ac65200c9d889e3812b027844dfb30020c31e76b"
+    },
+    "scripts/storyboard-usage-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "f2941843673d4cef5f019c354a6860a43592490432aacc76e667a9ae7dd28be5"
+    },
+    "scripts/testing/ci-chain-consolidated.test.mjs": {
+      "beforeHash": "4d89a6d696166e564d06aef579a6fa10c1bdc9b758ec801f351e799e6b01ce09",
+      "afterHash": "24ff522e9d3b0cb8e956b0f22770437d7f47420411c7264e2beb43fdaadb93e2"
+    },
+    "scripts/testing/create-rerun-safety.test.mjs": {
+      "beforeHash": "a3b5ffbbed7ff93edbd9acff38526a9c39ace059eacac031c77dcb2b76d427fe",
+      "afterHash": "70218fa20165fc12f933aca45e5334cd354d50cc5c72139ad18b66cecb67c4b9"
+    },
+    "scripts/testing/input-refresh-safety.test.mjs": {
+      "beforeHash": "6dbd269f6ebb273e448825ece5e484ee23186244bb59548af5c183b67b241288",
+      "afterHash": "31d124d5b38a1cddbce74281ecb23605324dccf70d50710e8995828dfa71e433"
+    },
+    "scripts/testing/pika-flex-reference.test.mjs": {
+      "beforeHash": "a60e04d84a1c5a4d915d5af42452e0a0cc2af11e6548ab9070a1024f020e38f6",
+      "afterHash": "3b7956c410ac3074aa307e3ec0c05d67a4f9cd5d300e1c5e75c14699df4c46ee"
+    },
+    "scripts/testing/reference-authority.test.mjs": {
+      "beforeHash": "3090dad31a1e312bcdaddc066415d51f89ce6b9fdac4561c839bb8455e951444",
+      "afterHash": "cf7fbe4247d81c87d9109685827c6636b8710b057932338da0b3695970fe0be2"
+    },
+    "scripts/testing/storyboard-usage.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "ef91b75bc4f02f1efe07a06da71749cbb4c1748f98c2d85c50c296cbaba22b76"
+    },
+    "src/features/create/StoryboardSafety.test.tsx": {
+      "beforeHash": "6ae05861f9223509260057b643e0b0183d88033275d33ecced3475002997d819",
+      "afterHash": "23872e2f7098147af87165378930bb86cc7d44ed98d0f16ebdb229745389c72c"
+    },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": "1c6f6bf57e80e8901a8fe2036d2a40ca79ea4460ad06200ebef1554a548859c6",
+      "afterHash": "9141749fee9ccda144539532dd46097d16820c1ae473b5d8ed654994f925574f"
+    },
+    "src/features/create/StoryboardShotRows.tsx": {
+      "beforeHash": "30dfd76aaa0757db2e269874df25a8f797b75b0c96b54c3bba854732caf001db",
+      "afterHash": "6012bfcb8a726bda1e2a8a51cef4ebe67c59674df988701438e4966e21e3b404"
+    },
+    "src/features/create/StoryboardWorkbench.test.tsx": {
+      "beforeHash": "6cfd49daa65a336519aaee0fb78cb76a8c4756429c36b74036d7ba05b2fd68f5",
+      "afterHash": "6db63e5b037ec5dc24491ef1e3d5765bfb24ea27d9036c5a80942134a66a7bb8"
+    },
+    "src/features/create/StoryboardWorkbench.tsx": {
+      "beforeHash": "1992e588e87b816b1bfeb7a8a5a7d6d756fd8b49eee3e23aa8ce5d7c88bfefc0",
+      "afterHash": "8616a30642de7ae8eaa19c9eee986f6a7a95eee6f6eecc770c4a73009f98a748"
+    }
+  }
+}

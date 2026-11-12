@@ -1,3 +1,4 @@
+import {STORYBOARD_USAGE_CHANGED, STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF} from '../storyboard-usage-successor-guard.mjs';
 import {REFERENCE_AUTHORITY_CHANGED, REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF} from '../reference-authority-successor-guard.mjs';
 import {INPUT_REFRESH_SAFETY_CHANGED, INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF} from '../input-refresh-safety-successor-guard.mjs';
 // @vitest-environment node
@@ -23,8 +24,8 @@ const runtime = 'src-tauri/runtime_packages/minimax_h3_fl2va_i2v_quality_2_2_0/r
 it('verifies the additive Flex scope and projects the exact parent checkpoint', () => {
   const result = pikaFlexReferenceParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...PIKA_FLEX_REFERENCE_CHANGED, ...CREATE_RERUN_SAFETY_CHANGED, ...INPUT_REFRESH_SAFETY_CHANGED, ...REFERENCE_AUTHORITY_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF, ...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF, ...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF, ...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...PIKA_FLEX_REFERENCE_CHANGED, ...CREATE_RERUN_SAFETY_CHANGED, ...INPUT_REFRESH_SAFETY_CHANGED, ...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF, ...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF, ...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF, ...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF])].sort());
   for (const p of PIKA_FLEX_REFERENCE_CHANGED) {
     expect(result.read(p)).toBe(execFileSync('git', ['show', `${PIKA_FLEX_REFERENCE_BASE}:${p}`], { encoding: 'utf8' }).replaceAll('\r\n', '\n'));
   }

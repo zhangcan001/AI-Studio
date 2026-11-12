@@ -1,3 +1,4 @@
+import {STORYBOARD_USAGE_CHANGED, STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF} from '../storyboard-usage-successor-guard.mjs';
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -18,8 +19,8 @@ const parentBytes = p => execFileSync('git', ['show', `${REFERENCE_AUTHORITY_BAS
 it('verifies the exact reference-authority successor and projects the frozen parent bytes', () => {
   const result = referenceAuthorityParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(REFERENCE_AUTHORITY_CHANGED);
-  expect(result.addedPaths).toEqual([...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF])].sort());
   for (const p of REFERENCE_AUTHORITY_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

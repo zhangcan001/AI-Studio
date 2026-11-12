@@ -6,8 +6,8 @@ import type { CreationContext, ProductRun } from "../../product/types";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
+const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
 // Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
 beforeEach(() => {
@@ -295,4 +295,24 @@ it("a failed import receipt Shot navigation keeps the receipt open and shows a C
   fireEvent.click(screen.getByRole("button",{name:"编辑导入镜头"}));
   expect((await screen.findByRole("alert")).textContent).toMatch(/^无法打开镜头：/);
   expect(screen.getByRole("region",{name:"per-shot receipt"})).toBeTruthy();expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("opens the exact saved failed-start batch from its real storyboard row, without retry or external navigation", async () => {
+  window.localStorage.setItem("ai-studio.storyboard.view", "shots");
+  const summary = { id: "s1", name: "镜头01", ordinal: 0 };
+  const ref = { source: "queue-batch", id: "saved-start-failed" } as const;
+  api.workbench.mockResolvedValue({ projectId: "p", projectName: "P", stage: "video", shots: [summary], truncated: 0, items: [{ shot: { summary, prompt: "Walk slowly", selectionRef: "row-gen", values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null }, candidates: [] }] });
+  api.generatorsList.mockResolvedValue([{ selectionRef: "row-gen", name: "T2V", mode: "T2V", mediaKind: "video", availability: true, fields: [] }]);
+  api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
+  api.generate.mockResolvedValueOnce({ accepted: true, runRef: ref, startOutcome: "FAILED_TO_START", startIssue: { code: "RUNTIME_BLOCKED", message: "blocked", details: {} } });
+  const navigate = vi.fn(), renderRuns = vi.fn((r: {run?: {id:string}}) => <p>运行 {r.run?.id}</p>);
+  render(<StoryboardWorkbench route={route} navigate={navigate} renderRuns={renderRuns} />);
+  const generate = await screen.findByRole("button", { name: "生成视频" });
+  await waitFor(() => expect(generate.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(generate);
+  await screen.findByText("运行已保存，启动失败");
+  fireEvent.click(screen.getByRole("button", { name: "查看已保存运行" }));
+  expect(renderRuns.mock.calls[0][0]).toEqual({ kind: "runs", projectId: "p", run: ref });
+  expect(navigate).not.toHaveBeenCalled();
+  expect(api.generate).toHaveBeenCalledTimes(1);
 });

@@ -5,7 +5,7 @@ import type { ShotCompositionUsage, ShotPromptSections, StoryEntity, StoryEntity
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage } from "./CreateMediaPreview";
 import "./CreatePage.css";
-import type { GeneratorOption } from "../../product/types";
+import type { GeneratorOption, RunRef } from "../../product/types";
 import type { DraftValue } from "../../types/generation";
 import { explicitEntityMentions, parseShotPrompt, resolvePreset, resolvePromptSettings, type ParsedShotPrompt, type ResolutionPresetLike } from "./shotPromptParser";
 import { defaultGenerator, draftFor } from "./createModel";
@@ -26,7 +26,7 @@ interface RowsProps {
   onOpen: (shotId: string) => void;
   onCreate: () => void;
   onChanged: () => void;
-  onQueue: () => void;
+  onQueue: (ref?: RunRef) => void;
 }
 
 /**
@@ -83,14 +83,14 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       <div role="group" aria-label="状态筛选" className="storyboard-shot-filters">
         {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : storyboardStatusLabels[key]}</button>)}
       </div>
-      <button type="button" onClick={onQueue}>任务队列</button>
+      <button type="button" onClick={() => onQueue()}>任务队列</button>
       <button type="button" onClick={() => setRev(v => v + 1)}>刷新角色与场景</button>
     </div>
     {entityFailure && <p role="alert" className="storyboard-error">角色与场景读取失败：{entityFailure} <button type="button" onClick={() => setRev(v => v + 1)}>重试角色与场景</button></p>}
     {generatorFailure && <p role="alert" className="storyboard-error">生成器读取失败：{generatorFailure} <button type="button" onClick={() => setGeneratorsRev(v => v + 1)}>重试生成器</button></p>}
     {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
-      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} />)}
+      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} onRun={onQueue} />)}
     {!visible.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
   </section>;
 }
@@ -126,6 +126,10 @@ function Avatar({ entity, url }: { entity: StoryEntity; url?: string }) {
 }
 
 function newKey() { try { return crypto.randomUUID(); } catch { return `sb-${Date.now()}-${Math.random().toString(36).slice(2)}`; } }
+function semanticJson(value: unknown) {
+  return JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item) ?? "undefined";
+}
 
 type Scalar = Extract<DraftValue, {type: "string" | "integer" | "number" | "seed_random" | "seed_fixed"}>;
 type Scalars = Record<string, Scalar>;
@@ -140,15 +144,22 @@ function aspectKey(p: ResolutionPresetLike) { const m = /-(\d+)x(\d+)$/.exec(p.i
 interface Recognized { parsed: ParsedShotPrompt; values?: Scalars; addEntityIds: string[]; labels: string[]; warnings: string[] }
 
 /** Turns parser output into concrete writes for this shot + generator; labels describe them. */
-function recognize(text: string, entities: StoryEntity[], bound: StoryEntity[], generator: GeneratorOption | undefined, current: Scalars): Recognized {
+function recognize(text: string, entities: StoryEntity[], bound: StoryEntity[], generator: GeneratorOption | undefined, current: Scalars, previousText: string): Recognized {
   const parsed = parseShotPrompt(text, entities);
+  const before = parseShotPrompt(previousText);
+  // Only newly edited parameter phrases may override later manual controls.
+  const changed = { ...parsed,
+    durationSeconds: before.durationSeconds !== parsed.durationSeconds ? parsed.durationSeconds : undefined,
+    aspect: before.aspect !== parsed.aspect ? parsed.aspect : undefined,
+    resolution: semanticJson(before.resolution) !== semanticJson(parsed.resolution) ? parsed.resolution : undefined,
+  };
   const labels: string[] = [];
   let values: Scalars | undefined;
-  const settings = resolvePromptSettings(parsed, generator, current);
-  if (parsed.durationSeconds !== undefined) {
+  const settings = resolvePromptSettings(changed, generator, current);
+  if (changed.durationSeconds !== undefined) {
     if (settings.duration) {
       if (numberOf(current.duration_seconds) !== settings.duration.value) { values = { ...(values ?? current), duration_seconds: settings.duration }; labels.push(`时长 ${settings.duration.value} 秒`); }
-    } else labels.push(`时长 ${parsed.durationSeconds} 秒（当前生成器无此参数）`);
+    } else labels.push(`时长 ${changed.durationSeconds} 秒（当前生成器无此参数）`);
   }
   const w = numberOf(current.width), h = numberOf(current.height);
   const preset = settings.preset;
@@ -168,9 +179,10 @@ const SECTION_FIELDS: [keyof ShotPromptSections, string, string][] = [
   ["music", "配乐", "1 句英文；没有配乐留空即可"],
 ];
 
-function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged }: {
+function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun }: {
   projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
+  onRun: (ref: RunRef) => void;
 }) {
   const [bound, setBound] = useState<StoryEntity[]>([]);
   const [prompt, setPrompt] = useState(item.shot?.prompt ?? "");
@@ -178,6 +190,10 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
+  const [acceptedRun, setAcceptedRun] = useState<RunRef>();
+  const generateButton = useRef<HTMLButtonElement>(null);
+  const deferredPromptBlur = useRef(false);
+  const workingLock = useRef(false);
   const [pendingSelection, setPendingSelection] = useState<string>();
   const scopeEpoch = useRef(0);
   const bindingEpoch = useRef(0);
@@ -199,10 +215,12 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   }, [projectId, item.id, entities]);
   const disabled = busy || working || Boolean(pendingSelection);
   const bindingsDisabled = disabled || !bindingsReady;
-  const run = async (fn: () => Promise<unknown>) => {
+  const run = async <T,>(fn: () => Promise<T>) => {
+    if (workingLock.current) return;
+    workingLock.current = true;
     const token = scopeEpoch.current;
     setWorking(true); setError(undefined); setNote(undefined);
-    try { await fn(); } catch (cause) { if (token === scopeEpoch.current) setError(normalizeProductError(cause).message); } finally { if (token === scopeEpoch.current) setWorking(false); }
+    try { return await fn(); } catch (cause) { if (token === scopeEpoch.current) setError(normalizeProductError(cause).message); } finally { workingLock.current = false; if (token === scopeEpoch.current) setWorking(false); }
   };
   const replaceBindings = async (ids: string[]) => {
     const scope = scopeEpoch.current;
@@ -313,7 +331,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   }, [disabled, canApplyReferences, referenceApplyKey, item.shot?.prompt]);
   const [undo, setUndo] = useState<{ values?: Scalars; boundIds?: string[] }>();
   const save = (patch: { prompt?: string; values?: Scalars }) => productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", ...patch, ...(patch.values ? { selectionRef: selectionRef ?? generator?.selectionRef } : {}) });
-  const preview = useMemo(() => recognize(prompt, entities, bound, generator, current), [prompt, entities, bound, generator, current]);
+  const preview = useMemo(() => recognize(prompt, entities, bound, generator, current, item.shot?.prompt ?? ""), [prompt, entities, bound, generator, current, item.shot?.prompt]);
   /** Saves the prompt and applies recognized fields; the note lists exactly what was filled, with undo. */
   const saveRow = async (patch: Omit<import("../../product/types").CreationShotRowSave, "shotId" | "stage">) => {
     const scope = scopeEpoch.current;
@@ -322,22 +340,22 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     if (scope !== scopeEpoch.current) return false;
     ++bindingEpoch.current;
     setBound(result.boundEntities.filter(e => e.projectId === projectId)); setBindingsReady(true);
-    return true;
+    return result.shot;
   };
-  const savePrompt = () => {
-    if (bindingsDisabled) return;
+  const persistPrompt = async () => {
     const text = prompt.trim();
     const promptChanged = text !== (item.shot?.prompt ?? "").trim();
-    const r = recognize(text, entities, bound, generator, current);
-    if (!promptChanged && !r.values && !r.addEntityIds.length) return;
-    void run(async () => {
-      const before = { values: r.values ? current : undefined, boundIds: r.addEntityIds.length ? bound.map(e => e.id) : undefined };
-      if (!await saveRow({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && generator ? { values: r.values, selectionRef: generator.selectionRef } : {}), ...(r.addEntityIds.length ? { entityIds: [...bound.map(e => e.id), ...r.addEntityIds] } : {}) })) return;
-      const applied = r.labels.filter(l => !l.includes("（"));
-      if (applied.length) { setUndo(before); setNote(`已识别并填入：${applied.join(" · ")}`); } else { setUndo(undefined); setNote("提示词已保存"); }
-      onChanged();
-    });
+    const r = recognize(text, entities, bound, generator, current, item.shot?.prompt ?? "");
+    if (!promptChanged && !r.values && !r.addEntityIds.length) return item.shot;
+    const before = { values: r.values ? current : undefined, boundIds: r.addEntityIds.length ? bound.map(e => e.id) : undefined };
+    const saved = await saveRow({ ...(promptChanged ? { prompt: text } : {}), ...(r.values && generator ? { values: r.values, selectionRef: generator.selectionRef } : {}), ...(r.addEntityIds.length ? { entityIds: [...bound.map(e => e.id), ...r.addEntityIds] } : {}) });
+    if (!saved) return;
+    const applied = r.labels.filter(l => !l.includes("（"));
+    if (applied.length) { setUndo(before); setNote(`已识别并填入：${applied.join(" · ")}`); } else { setUndo(undefined); setNote("提示词已保存"); }
+    onChanged();
+    return saved;
   };
+  const savePrompt = () => { if (!bindingsDisabled) void run(persistPrompt); };
   const undoRecognized = () => undo && !bindingsDisabled && void run(async () => {
     if (!await saveRow({ ...(undo.values && generator ? { values: undo.values, selectionRef: generator.selectionRef } : {}), ...(undo.boundIds ? { entityIds: undo.boundIds } : {}) })) return;
     setUndo(undefined); setNote("已撤销自动填入"); onChanged();
@@ -439,14 +457,24 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   };
   // Local evidence fences reads in flight; only authoritative semantic evidence
   // below owns retry identity (a notification alone must not renew a lost ACK).
-  const generationDraft = JSON.stringify([projectId, item.id, selectionRef, prompt, item.shot?.values, referenceRev, referenceView?.token, sectionsReady, savedSections.current, usage]);
+  const generationLocal = { projectId, shotId: item.id, selectionRef, prompt, values: item.shot?.values, referenceRev, inputToken: referenceView?.token, sectionsReady, sections: savedSections.current, usage };
+  const generationDraft = semanticJson(generationLocal);
   const generationAttempt = useRef<{ draft: string; key: string } | null>(null);
   const latestGenerationDraft = useRef(generationDraft);
   latestGenerationDraft.current = generationDraft;
-  const generate = () => !disabled && !entityIssue && !durationIssue && selectionRef && item.shot && void run(async () => {
+  const generate = () => !bindingsDisabled && !entityIssue && !durationIssue && selectionRef && item.shot && void run(async () => {
+    deferredPromptBlur.current = false;
     const token = scopeEpoch.current;
-    const isCurrent = () => token === scopeEpoch.current && generationDraft === latestGenerationDraft.current;
-    const values = { ...item.shot!.values, prompt: { type: "string" as const, value: prompt } };
+    // A blur into this submit button is owned by this one transaction instead
+    // of a competing autosave. Persist first; a failed/stale save never generates.
+    const changed = prompt.trim() !== (item.shot!.prompt ?? "").trim();
+    const saved = changed ? await persistPrompt() : item.shot!;
+    if (!saved || token !== scopeEpoch.current) return;
+    if (saved.summary.id !== item.id || saved.selectionRef !== selectionRef) throw new Error("Saved shot identity changed");
+    const persistedDraft = changed ? semanticJson({ ...generationLocal, prompt: saved.prompt, values: saved.values }) : generationDraft;
+    const isCurrent = () => token === scopeEpoch.current && [generationDraft, persistedDraft].includes(latestGenerationDraft.current);
+    if (!isCurrent()) return;
+    const values = { ...saved.values, prompt: { type: "string" as const, value: changed ? saved.prompt : prompt } };
     // Read on explicit submission, not for every row/poll. All persistent modes
     // need their own media revision, even without an @mention (I2V/FIRST_LAST).
     const evidence = generator?.persistentInputs ? await Promise.all([
@@ -456,9 +484,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     ]) : undefined;
     if (!isCurrent()) return;
     if (evidence && evidence[0].selectionRef !== selectionRef) throw new Error("Reference selection changed");
-    const fingerprint = JSON.stringify([projectId, item.id, selectionRef, values, evidence?.[0].token, evidence?.[1], evidence?.[2]],
-      (_key, value) => value && typeof value === "object" && !Array.isArray(value)
-        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+    const fingerprint = semanticJson([projectId, item.id, selectionRef, values, evidence?.[0].token, evidence?.[1], evidence?.[2]]);
     const base = { projectId, shotId: item.id, stage: "video" as const, selectionRef, values };
     const readiness = await productClient.creation.readinessGet({ ...base, submissionIdempotencyKey: "readiness-only" });
     if (!isCurrent()) return;
@@ -467,8 +493,13 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     generationAttempt.current = attempt;
     const ack = await productClient.creation.generate({ ...base, submissionIdempotencyKey: attempt.key });
     if (ack.accepted && generationAttempt.current === attempt) generationAttempt.current = null;
-    if (!isCurrent()) return; // Accepted Queue work remains owned by the backend.
-    setNote(ack.accepted ? "已写入生产队列" : "未被接受");
+    if (token !== scopeEpoch.current) return; // Accepted Queue work remains owned by the backend.
+    if (ack.accepted) setAcceptedRun(ack.runRef);
+    if (!isCurrent()) { onChanged(); return; }
+    if (ack.accepted && ack.startOutcome === "FAILED_TO_START") {
+      setNote("运行已保存，启动失败");
+      setError(ack.startIssue ? normalizeProductError(ack.startIssue).message : "请查看运行详情，检查环境后手动启动。");
+    } else setNote(!ack.accepted ? "未被接受" : ack.startOutcome === "STARTED" ? "已启动生成" : ack.startOutcome === "ALREADY_ACCEPTED" ? "已定位原运行，未重复提交" : "已写入生产队列");
     onChanged();
   });
   const promptHints = h3PromptHints({
@@ -491,12 +522,12 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
     </div>
     <div className="shot-row-actions">
-      <button type="button" className="primary" disabled={disabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate}>生成视频</button>
+      <button ref={generateButton} type="button" className="primary" disabled={bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } }}>生成视频</button>
       <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>
     <div className="shot-row-prompt">
       <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 0.98MP / 50万像素 / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
-        onChange={e => setPrompt(e.target.value)} onBlur={savePrompt} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
+        onChange={e => setPrompt(e.target.value)} onBlur={e => { deferredPromptBlur.current = e.relatedTarget === generateButton.current; if (!deferredPromptBlur.current) savePrompt(); }} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
       {promptHints.length > 0 && <ul className="muted" aria-label="提示词写作建议">{promptHints.map(h => <li key={h}>{h}</li>)}</ul>}
@@ -535,6 +566,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <div className="shot-row-toolbar"><button type="button" onClick={onOpen}>编辑</button><button type="button" onClick={onOpen}>详情</button></div>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
       {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
+      {acceptedRun && <button type="button" onClick={() => onRun(acceptedRun)}>查看已保存运行</button>}
     </div>
     <div className="shot-row-fields">
       <label><span>生成器</span><select aria-label={`${item.name} 生成器`} value={pendingSelection ?? selectionRef ?? ""} disabled={disabled} onChange={e => chooseGenerator(e.target.value)}>

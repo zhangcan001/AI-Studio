@@ -1,3 +1,5 @@
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -29,7 +31,7 @@ beforeEach(() => {
   api.generatorsList.mockResolvedValue([generator]);
   api.inputsGet.mockImplementation(async s => ({ selectionRef: s.selectionRef, token: { instanceId: 'refs', revision: 4 }, inputs: [], assets: [] }));
   api.inputsSave.mockImplementation(async r => ({ selectionRef: r.selection.selectionRef, token: { instanceId: 'refs', revision: 5 }, inputs: r.inputs, assets: [] }));
-  api.saveShotRow.mockImplementation(async (_p: string, req: {entityIds?: string[]}) => ({ shot: shot("a",0).shot, boundEntities: [hero, lane].filter(e => (req.entityIds ?? ["e1"]).includes(e.id)) }));
+  api.saveShotRow.mockImplementation(async (_p: string, req: {shotId:string;prompt?:string;values?:Record<string,unknown>;selectionRef?:string;entityIds?: string[]}) => ({ shot: {...shot(req.shotId,0).shot!,...(req.prompt !== undefined ? {prompt:req.prompt}:{}),...(req.values ? {values:req.values}:{}),...(req.selectionRef ? {selectionRef:req.selectionRef}:{})}, boundEntities: [hero, lane].filter(e => (req.entityIds ?? ["e1"]).includes(e.id)) }));
   api.updateShot.mockResolvedValue({}); api.deleteShot.mockResolvedValue(undefined);
   api.compositionUsage.mockResolvedValue({ openingEntityId: null, endingEntityId: null });
   api.promptSections.mockResolvedValue({ style: null, summary: null, soundscape: null, music: null });
@@ -177,6 +179,7 @@ it("blocks generation when readiness fails and when no generator is selected", a
   api.readinessGet.mockResolvedValueOnce({ ready: false, issues: [{ code: "X", message: "缺少首帧", details: {} }], fieldErrors: [], actions: [] });
   render(<StoryboardShotRows {...props()} items={[shot("a", 0), shot("b", 1, null)]} />);
   const first = await screen.findByRole("article", { name: "分镜 1 镜头1" });
+  await waitFor(() => expect(within(first).getByRole("button", { name: "生成视频" }).hasAttribute("disabled")).toBe(false));
   fireEvent.click(within(first).getByRole("button", { name: "生成视频" }));
   expect(await within(first).findByRole("alert")).toHaveProperty("textContent", "缺少首帧");
   expect(api.generate).not.toHaveBeenCalled();
@@ -738,4 +741,112 @@ it('abandons a late formal evidence read after row/project replacement',async()=
  host.rerender(<StoryboardShotRows {...p} projectId='other' items={[shot('b',0)]}/>);
  await act(async()=>{read.resolve({selectionRef:'sel',token:null,inputs:[],assets:[]});});
  expect(api.readinessGet).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('unrelated wording edits must preserve manually chosen duration and aspect',async()=>{
+ const item=shot('a',0);item.shot!.prompt='Walk for 8秒，竖屏';
+ item.shot!.values={duration_seconds:{type:'integer',value:6},width:{type:'integer',value:1344},height:{type:'integer',value:768}};
+ render(<StoryboardShotRows {...props()} items={[item]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ fireEvent.change(box,{target:{value:'Walk for 8秒，竖屏，beneath soft light'}});fireEvent.blur(box);
+ await waitFor(()=>expect(api.saveShotRow).toHaveBeenCalledTimes(1));
+ const request=api.saveShotRow.mock.calls[0][1]; expect(request.values,'unchanged parameter phrases must not undo later explicit manual settings').toBeUndefined();
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+});
+it('explicit changed parameter wording still applies the new duration',async()=>{
+ const item=shot('a',0);item.shot!.prompt='Walk for 8秒';
+ item.shot!.values={duration_seconds:{type:'integer',value:6}};
+ render(<StoryboardShotRows {...props()} items={[item]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ fireEvent.change(box,{target:{value:'Walk for 7秒'}});fireEvent.blur(box);
+ await waitFor(()=>expect(api.saveShotRow).toHaveBeenCalledTimes(1));
+ expect(api.saveShotRow.mock.calls[0][1].values.duration_seconds).toEqual({type:'integer',value:7});
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+});
+it('one user click on Generate after editing must survive the asynchronous blur save',async()=>{
+ let resolve!:(v:unknown)=>void;const save=new Promise(r=>resolve=r);api.saveShotRow.mockReturnValueOnce(save);
+ const user=userEvent.setup();render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'Only new action text.'}});
+ await user.click(screen.getByRole('button',{name:'生成视频'}));
+ expect(api.saveShotRow).toHaveBeenCalledTimes(1);
+ const disabledDuringSave=screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled');
+ expect(disabledDuringSave).toBe(true);
+ await act(async()=>resolve({shot:{...shot('a',0).shot,prompt:'Only new action text.'},boundEntities:[hero]}));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ await waitFor(()=>expect(api.generate,'a valid first click should not disappear after its required save').toHaveBeenCalledTimes(1));
+});
+it('a saved row generates on one normal user click',async()=>{
+ const user=userEvent.setup();render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ await user.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ expect(api.saveShotRow).not.toHaveBeenCalled();
+});
+it('an accepted batch that failed to start must display a start failure rather than a queued success',async()=>{
+ api.generate.mockResolvedValueOnce({accepted:true,runRef:{source:'queue-batch',id:'saved-not-started'},startOutcome:'FAILED_TO_START',startIssue:{code:'RUNTIME_BLOCKED',message:'运行环境暂时不可用',details:{action:'OPEN_RUNTIME_SETTINGS'}}});
+ const user=userEvent.setup();render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ await user.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ expect(screen.queryByText('已写入生产队列'),'persisted acceptance is not a successfully queued/startable task').toBeNull();
+ expect(screen.getByText(/启动失败|无法启动/)).toBeTruthy();
+});
+
+it('does not generate or preflight after a required prompt save fails',async()=>{
+ const user=userEvent.setup();api.saveShotRow.mockRejectedValueOnce({code:'PROJECT_READ_FAILED',message:'save failed'});
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'Keep my unsaved text'}});
+ await user.click(screen.getByRole('button',{name:'生成视频'}));await screen.findByRole('alert');
+ expect((box as HTMLTextAreaElement).value).toBe('Keep my unsaved text');
+ expect(api.saveShotRow).toHaveBeenCalledTimes(1);expect(api.readinessGet).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
+});
+it('saves once then submits recognized values once even on a repeated click during save',async()=>{
+ const user=userEvent.setup(),p=deferred<unknown>();api.saveShotRow.mockReturnValueOnce(p.promise);
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'Walk for 7秒'}});
+ await user.click(screen.getByRole('button',{name:'生成视频'}));await user.click(screen.getByRole('button',{name:'生成视频'}));
+ expect(api.readinessGet).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
+ const saved={...shot('a',0).shot!,prompt:'Walk for 7秒',values:{duration_seconds:{type:'integer' as const,value:7}}};
+ await act(async()=>{p.resolve({shot:saved,boundEntities:[hero]});});
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ expect(api.saveShotRow).toHaveBeenCalledTimes(1);expect(api.generate.mock.calls[0][0].values.duration_seconds).toEqual({type:'integer',value:7});
+});
+it('allows its own accepted save refresh without cancelling the explicit generation',async()=>{
+ const user=userEvent.setup();let saved=shot('a',0);let update!: (next:StoryboardShot)=>void;
+ function Host(){const[item,setItem]=useState(saved);update=setItem;return <StoryboardShotRows {...props()} items={[item]} onChanged={()=>update(saved)}/>;}
+ api.saveShotRow.mockImplementation(async(_p,req)=>{saved={...saved,shot:{...saved.shot!,prompt:req.prompt,values:req.values}};return{shot:saved.shot,boundEntities:[hero]};});
+ render(<Host/>);const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'Walk for 7秒'}});await user.click(screen.getByRole('button',{name:'生成视频'}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));expect(api.generate.mock.calls[0][0].values.duration_seconds.value).toBe(7);
+});
+it('aborts generation when a save acknowledgement arrives after switching project/row',async()=>{
+ const user=userEvent.setup(),p=deferred<unknown>();api.saveShotRow.mockReturnValueOnce(p.promise);const callbacks=props();
+ const view=render(<StoryboardShotRows {...callbacks} items={[shot('a',0)]}/>);const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'Do not generate after leaving'}});await user.click(screen.getByRole('button',{name:'生成视频'}));
+ view.rerender(<StoryboardShotRows {...callbacks} projectId='other' items={[shot('b',0)]}/>);
+ await act(async()=>{p.resolve({shot:{...shot('a',0).shot!,prompt:'Do not generate after leaving'},boundEntities:[hero]});});
+ expect(api.readinessGet).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();expect(callbacks.onChanged).not.toHaveBeenCalled();
+});
+it('keyboard activation saves before generating; merely focusing the button does not generate',async()=>{
+ const user=userEvent.setup();render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'Keyboard submitted action'}});
+ act(()=>screen.getByRole('button',{name:'生成视频'}).focus());expect(api.generate).not.toHaveBeenCalled();
+ await user.keyboard('{Enter}');await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));expect(api.saveShotRow).toHaveBeenCalledTimes(1);
+});
+it('leaving the focused Generate button without activating still autosaves, without generating',async()=>{
+ const user=userEvent.setup();render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'Only save this draft'}});
+ act(()=>screen.getByRole('button',{name:'生成视频'}).focus());await user.click(screen.getByLabelText('搜索分镜'));
+ await waitFor(()=>expect(api.saveShotRow).toHaveBeenCalledTimes(1));expect(api.generate).not.toHaveBeenCalled();
+});
+it.each([['STARTED','已启动生成'],['QUEUED','已写入生产队列'],['ALREADY_ACCEPTED','已定位原运行，未重复提交'],['FAILED_TO_START','运行已保存，启动失败']])('shows %s and navigates to the exact acknowledged RunRef without retry',async(startOutcome,message)=>{
+ const user=userEvent.setup(),callbacks=props();const ref={source:'queue-batch',id:'exact-acknowledged-batch'};
+ api.generate.mockResolvedValueOnce({accepted:true,runRef:ref,startOutcome,startIssue:startOutcome==='FAILED_TO_START'?{code:'RUNTIME_BLOCKED',message:'blocked',details:{}}:null});
+ render(<StoryboardShotRows {...callbacks} items={[shot('a',0)]}/>);await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ await user.click(screen.getByRole('button',{name:'生成视频'}));await screen.findByText(message);await user.click(screen.getByRole('button',{name:'查看已保存运行'}));
+ expect(callbacks.onQueue).toHaveBeenCalledWith(ref);expect(api.generate).toHaveBeenCalledTimes(1);
 });
