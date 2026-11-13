@@ -47,7 +47,7 @@ it("UI restore: workbench derives real shot status/stats from the product facade
   render(<StoryboardWorkbench route={route} navigate={navigate} />);
   const stats = await screen.findByLabelText("镜头统计");
   expect(within(stats).getByText("镜头总数").nextSibling?.textContent).toBe("3");
-  expect(within(stats).getByText("已完成").nextSibling?.textContent).toBe("1");
+  expect(within(stats).getByText("已选用").nextSibling?.textContent).toBe("1");
   expect(within(stats).getByText("生成中").nextSibling?.textContent).toBe("1");
   expect(within(stats).getByText("待制作").nextSibling?.textContent).toBe("1");
   expect(screen.getAllByText("生成中 68%").length).toBeGreaterThan(0);
@@ -325,4 +325,30 @@ it("searches the full lightweight Shot index without fetching rich details for e
  const search=await screen.findByLabelText('搜索分镜');fireEvent.change(search,{target:{value:'分镜65'}});
  fireEvent.click(screen.getByRole('button',{name:'打开分镜65'}));expect(navigate).toHaveBeenCalledWith({kind:'create',projectId:'p',stage:'video',shotId:'all-64'});
  expect(api.workbench).toHaveBeenCalledWith('p','video',60);expect(api.generate).not.toHaveBeenCalled();
+});
+
+it('AUDIT-R03 A successful new-Shot refresh must survive an already in-flight background read',async()=>{
+ window.localStorage.setItem('ai-studio.storyboard.view','shots');api.generatorsList.mockResolvedValue([]);api.runGet.mockResolvedValue(run('SUCCEEDED',1,1));
+ const initial=workbenchFromContexts(),summary={id:'new-s4',name:'新镜头04',ordinal:4};
+ const updated={...initial,shots:[...initial.shots,summary],items:[...initial.items,{shot:{...initial.items[0].shot,summary,prompt:'',recentRun:null,selectedResultId:null},candidates:[]}]};
+ let release!:(value:typeof initial)=>void;const old=new Promise<typeof initial>(r=>release=r);
+ api.workbench.mockReset().mockResolvedValueOnce(initial).mockReturnValueOnce(old).mockResolvedValue(updated);api.createShot.mockResolvedValue(summary);
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ const add=await screen.findAllByRole('button',{name:'新建分镜'});await waitFor(()=>expect(add[0].hasAttribute('disabled')).toBe(false));
+ act(()=>invalidateRuns('p'));await waitFor(()=>expect(api.workbench).toHaveBeenCalledTimes(2));
+ fireEvent.click(add[0]);await waitFor(()=>expect(api.createShot).toHaveBeenCalledTimes(1));
+ await act(async()=>{release(initial);await old;});
+ // Allow a legitimate deferred UI refresh (the existing event debounce is 500ms).
+ try { await screen.findByLabelText('新镜头04 名称'); } catch { /* record stale view below; final assertions remain RED */ }
+ const beforeManual={reads:api.workbench.mock.calls.length,newShotVisible:!!screen.queryByLabelText('新镜头04 名称')};
+ fireEvent.click(screen.getByRole('button',{name:'刷新'}));await screen.findByLabelText('新镜头04 名称');
+ console.log('R03 '+JSON.stringify({beforeManual,manualRefreshRestored:true,totalReads:api.workbench.mock.calls.length}));expect(api.generate).not.toHaveBeenCalled();
+ expect(beforeManual.reads,'mutation refresh must be queued, not silently dropped by the read lock').toBe(3);
+ expect(beforeManual.newShotVisible).toBe(true);
+});
+it('CONTROL explicit manual refresh displays newly created read-model data',async()=>{
+ const initial=workbenchFromContexts(),summary={id:'manual-s4',name:'手动刷新镜头',ordinal:4};api.runGet.mockResolvedValue(run('SUCCEEDED',1,1));
+ const updated={...initial,shots:[...initial.shots,summary],items:[...initial.items,{shot:{...initial.items[0].shot,summary,prompt:'',recentRun:null,selectedResultId:null},candidates:[]}]};
+ api.workbench.mockReset().mockResolvedValueOnce(initial).mockResolvedValue(updated);
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);await screen.findByRole('article',{name:'镜头01'});fireEvent.click(screen.getByRole('button',{name:'刷新'}));await screen.findByRole('article',{name:'手动刷新镜头'});expect(api.workbench).toHaveBeenCalledTimes(2);expect(api.generate).not.toHaveBeenCalled();
 });

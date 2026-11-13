@@ -49,6 +49,31 @@ const IMAGE_UPLOAD_RETRY_DELAYS: [Duration; 2] =
     [Duration::from_millis(200), Duration::from_millis(800)];
 const MAX_IMAGE_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
 
+async fn collect_bounded_image<S, B, E>(
+    mut stream: S,
+    limit: usize,
+) -> Result<Vec<u8>, ComfyAdapterError>
+where
+    S: Stream<Item = Result<B, E>> + Unpin,
+    B: AsRef<[u8]>,
+    E: std::fmt::Display,
+{
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| {
+            ComfyAdapterError::OutputDownload(format!("image body read failed: {error}"))
+        })?;
+        let chunk = chunk.as_ref();
+        if chunk.len() > limit.saturating_sub(bytes.len()) {
+            return Err(ComfyAdapterError::OutputTooLarge(format!(
+                "response body exceeds {limit} bytes"
+            )));
+        }
+        bytes.extend_from_slice(chunk);
+    }
+    Ok(bytes)
+}
+
 pub struct ComfyHttpAdapter {
     client: Client,
     upload_client: Client,
@@ -728,18 +753,11 @@ impl ComfyHttpAdapter {
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let bytes = response.bytes().await.map_err(|error| {
-            ComfyAdapterError::OutputDownload(format!("GET {url} body read failed: {error}"))
-        })?;
-        if bytes.len() as u64 > MAX_IMAGE_OUTPUT_BYTES {
-            return Err(ComfyAdapterError::OutputTooLarge(format!(
-                "response body exceeds {} bytes",
-                MAX_IMAGE_OUTPUT_BYTES
-            )));
-        }
+        let bytes =
+            collect_bounded_image(response.bytes_stream(), MAX_IMAGE_OUTPUT_BYTES as usize).await?;
 
         Ok(ComfyOutputData {
-            bytes: bytes.to_vec(),
+            bytes,
             content_type,
         })
     }
@@ -1729,6 +1747,27 @@ fn http_status_error(method: &str, url: &str, status: StatusCode) -> ComfyAdapte
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn image_stream_limit_rejects_chunk_before_extending_buffer() {
+        let stream =
+            futures_util::stream::iter([Ok::<_, &str>(b"abc".to_vec()), Ok(b"def".to_vec())]);
+        assert!(matches!(
+            super::collect_bounded_image(stream, 5).await,
+            Err(crate::application::ports::ComfyAdapterError::OutputTooLarge(_))
+        ));
+        let stream =
+            futures_util::stream::iter([Ok::<_, &str>(b"abc".to_vec()), Ok(b"de".to_vec())]);
+        assert_eq!(
+            super::collect_bounded_image(stream, 5).await.unwrap(),
+            b"abcde"
+        );
+        let stream = futures_util::stream::iter([Err::<Vec<u8>, _>("broken stream")]);
+        assert!(matches!(
+            super::collect_bounded_image(stream, 5).await,
+            Err(crate::application::ports::ComfyAdapterError::OutputDownload(_))
+        ));
+    }
+
     use super::{
         normalize_history, ComfyHttpAdapter, MAX_IMAGE_OUTPUT_BYTES, MAX_IMAGE_UPLOAD_ATTEMPTS,
     };

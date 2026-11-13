@@ -350,10 +350,61 @@ pub struct RestoredProjectView {
     pub unresolved_tool_version_ids: Vec<String>,
 }
 
-#[derive(Clone)]
 struct Inspection {
     archive_path: PathBuf,
     expires_at: std::time::Instant,
+}
+
+impl Drop for Inspection {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.archive_path);
+    }
+}
+
+fn prune_inspection_archives(dir: &Path) {
+    let Ok(metadata) = fs::symlink_metadata(dir) else {
+        return;
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return;
+        }
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(id) = name
+            .strip_prefix("bki_")
+            .and_then(|v| v.strip_suffix(".zip"))
+        else {
+            continue;
+        };
+        if Uuid::parse_str(id).is_err() {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if entry.file_type().is_ok_and(|kind| kind.is_file())
+            && meta
+                .modified()
+                .ok()
+                .and_then(|at| at.elapsed().ok())
+                .is_some_and(|age| age >= INSPECTION_TTL)
+        {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn map_repository_error(error: RepositoryError) -> AppError {
@@ -421,7 +472,7 @@ pub struct ProjectBackupService {
     repository: Arc<dyn ProjectBackupRepository>,
     projects_dir: PathBuf,
     inspection_dir: PathBuf,
-    inspections: Mutex<HashMap<String, Inspection>>,
+    inspections: Arc<Mutex<HashMap<String, Inspection>>>,
 }
 
 impl ProjectBackupService {
@@ -430,11 +481,12 @@ impl ProjectBackupService {
         projects_dir: PathBuf,
         cache_dir: PathBuf,
     ) -> Self {
+        prune_inspection_archives(&cache_dir.join("backup-inspections"));
         Self {
             repository: repository.into_repository(),
             projects_dir,
             inspection_dir: cache_dir.join("backup-inspections"),
-            inspections: Mutex::new(HashMap::new()),
+            inspections: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -494,6 +546,7 @@ impl ProjectBackupService {
     }
 
     pub async fn inspect(&self, source: PathBuf) -> Result<ProjectBackupPreviewView, AppError> {
+        prune_inspection_archives(&self.inspection_dir);
         let (manifest, document, entry_names) = inspect_archive(&source)?;
         validate_document_entries(&document, &entry_names, manifest.version)?;
         let missing_workflows = self.find_missing_workflows(&document).await?;
@@ -501,7 +554,20 @@ impl ProjectBackupService {
             .map_err(|error| AppError::filesystem(error.to_string()))?;
         let inspection_id = format!("bki_{}", Uuid::new_v4());
         let archive_path = self.inspection_dir.join(format!("{inspection_id}.zip"));
+        let inspection = Inspection {
+            archive_path: archive_path.clone(),
+            expires_at: std::time::Instant::now() + INSPECTION_TTL,
+        };
         fs::copy(&source, &archive_path)
+            .map_err(|error| AppError::filesystem(error.to_string()))?;
+        // CopyFile can preserve the original archive timestamp on Windows.
+        // The cache TTL starts now, not when the user's backup was exported.
+        fs::File::options()
+            .write(true)
+            .open(&archive_path)
+            .and_then(|file| {
+                file.set_times(fs::FileTimes::new().set_modified(std::time::SystemTime::now()))
+            })
             .map_err(|error| AppError::filesystem(error.to_string()))?;
         let preview = ProjectBackupPreviewView {
             inspection_id: inspection_id.clone(),
@@ -545,13 +611,17 @@ impl ProjectBackupService {
         self.inspections
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .insert(
-                inspection_id,
-                Inspection {
-                    archive_path,
-                    expires_at: std::time::Instant::now() + INSPECTION_TTL,
-                },
-            );
+            .insert(inspection_id.clone(), inspection);
+        let inspections = Arc::downgrade(&self.inspections);
+        tokio::spawn(async move {
+            tokio::time::sleep(INSPECTION_TTL).await;
+            if let Some(inspections) = inspections.upgrade() {
+                inspections
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&inspection_id);
+            }
+        });
         Ok(preview)
     }
 
@@ -781,6 +851,7 @@ impl ProjectBackupService {
                 .insert(binding.id.clone(), format!("hrb_{}", Uuid::new_v4()));
         }
 
+        let restored_snapshots = prepare_restored_snapshots(&document, &asset_ids)?;
         let copy_result = copy_assets(
             &mut archive,
             &staging_root,
@@ -808,7 +879,6 @@ impl ProjectBackupService {
         let restored_generation_count = document.tasks.len();
         let expected_generation_tool_usages = document.generation_tool_usages.len();
         let expected_generation_asset_versions = document.generation_asset_versions.len();
-        let restored_snapshots = prepare_restored_snapshots(&document, &asset_ids)?;
         let restore_result = self
             .repository
             .restore_atomic(ProjectBackupRestorePlan {
@@ -5279,6 +5349,9 @@ pub(crate) use crate::infrastructure::database::{
 
 #[cfg(test)]
 mod tests {
+    use super::{prune_inspection_archives, Inspection, Uuid, INSPECTION_TTL};
+    use std::fs;
+
     #[test]
     fn phase14_restore_report_serializes_empty_issue_lists_for_typed_ui() {
         let report = super::RestoredProjectView {
@@ -5360,6 +5433,46 @@ mod tests {
         path::{Path, PathBuf},
     };
     use tempfile::tempdir;
+
+    #[test]
+    fn inspection_drop_cleans_archives_on_all_exit_paths() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(format!("bki_{}.zip", Uuid::new_v4()));
+        fs::write(&path, b"owned fixture").unwrap();
+        {
+            let _inspection = Inspection {
+                archive_path: path.clone(),
+                expires_at: std::time::Instant::now(),
+            };
+        }
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn expired_inspection_cleanup_preserves_fresh_and_unowned_files() {
+        let dir = tempdir().unwrap();
+        let old = dir.path().join(format!("bki_{}.zip", Uuid::new_v4()));
+        let fresh = dir.path().join(format!("bki_{}.zip", Uuid::new_v4()));
+        let unowned = dir.path().join("user-backup.zip");
+        for path in [&old, &fresh, &unowned] {
+            fs::write(path, b"owned test").unwrap();
+        }
+        let time =
+            std::time::SystemTime::now() - INSPECTION_TTL - std::time::Duration::from_secs(1);
+        for path in [&old, &unowned] {
+            fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(time))
+                .unwrap();
+        }
+        prune_inspection_archives(dir.path());
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert!(unowned.exists());
+    }
+
     use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
     fn test_service(

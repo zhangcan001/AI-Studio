@@ -3,7 +3,7 @@ import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import type { ShotCompositionUsage, ShotPromptSections, StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
-import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage } from "./CreateMediaPreview";
+import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage, useMediaLightbox } from "./CreateMediaPreview";
 import "./CreatePage.css";
 import type { GeneratorOption, RunRef } from "../../product/types";
 import type { DraftValue } from "../../types/generation";
@@ -30,6 +30,7 @@ interface RowsProps {
   onCreate: () => void;
   onChanged: () => void;
   onQueue: (ref?: RunRef) => void;
+  onReview?: (shotId: string) => void;
   shotIndex?: CreationShotSummary[];
 }
 
@@ -41,7 +42,7 @@ interface RowsProps {
  * duration and aspect/resolution persist through creation.updateShot (stage
  * prompt + generator scalar values validated by the selected recipe).
  */
-export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, shotIndex = [] }: RowsProps) {
+export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, shotIndex = [] }: RowsProps) {
   const [query, setQuery] = useProjectSessionState(projectId, "storyboard.search", "", (v): v is string => typeof v === "string");
   const [filter, setFilter] = useProjectSessionState<(typeof FILTERS)[number]>(projectId, "storyboard.filter", "ALL", (v): v is (typeof FILTERS)[number] => FILTERS.includes(v as (typeof FILTERS)[number]));
   const [entities, setEntities] = useState<StoryEntity[]>([]);
@@ -95,7 +96,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     {generatorFailure && <p role="alert" className="storyboard-error">生成器读取失败：{generatorFailure} <button type="button" onClick={() => setGeneratorsRev(v => v + 1)}>重试生成器</button></p>}
     {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
-      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} onRun={onQueue} />)}
+      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} />)}
     {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>以下镜头尚未加载详情，点击打开；状态筛选仅作用于上方已加载镜头。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onOpen(s.id)}>打开{s.name}</button>)}</section>}
     {!visible.length && !unloaded.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
   </section>;
@@ -185,11 +186,13 @@ const SECTION_FIELDS: [keyof ShotPromptSections, string, string][] = [
   ["music", "配乐", "1 句英文；没有配乐留空即可"],
 ];
 
-function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun }: {
+function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview }: {
   projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
   onRun: (ref: RunRef) => void;
+  onReview?: () => void;
 }) {
+  const lightbox = useMediaLightbox();
   const [bound, setBound] = useState<StoryEntity[]>([]);
   const draftKey = JSON.stringify([projectId, item.id, item.shot?.selectionRef ?? null]);
   const [prompt, setPromptLocal] = useState(() => useStudioStore.getState().storyboardPrompts[draftKey] ?? item.shot?.prompt ?? "");
@@ -342,6 +345,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const save = (patch: { prompt?: string; values?: Scalars }) => productClient.creation.updateShot(projectId, { shotId: item.id, name: item.name, stage: "video", ...patch, ...(patch.values ? { selectionRef: selectionRef ?? generator?.selectionRef } : {}) });
   const preview = useMemo(() => recognize(prompt, entities, bound, generator, current, item.shot?.prompt ?? ""), [prompt, entities, bound, generator, current, item.shot?.prompt]);
   /** Saves the prompt and applies recognized fields; the note lists exactly what was filled, with undo. */
+  const acknowledgedShot = useRef<{ base: string; shot: NonNullable<StoryboardShot["shot"]> } | undefined>(undefined);
+  const shotIdentity = (shot: StoryboardShot["shot"]) => semanticJson([shot?.summary.id, shot?.selectionRef, shot?.prompt, shot?.values]);
+  const savedProjection = () => acknowledgedShot.current?.base === shotIdentity(item.shot) ? acknowledgedShot.current.shot : item.shot;
   const saveRow = async (patch: Omit<import("../../product/types").CreationShotRowSave, "shotId" | "stage">) => {
     const scope = scopeEpoch.current;
     ++bindingEpoch.current;
@@ -349,6 +355,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     if (scope !== scopeEpoch.current) return false;
     ++bindingEpoch.current;
     setBound(result.boundEntities.filter(e => e.projectId === projectId)); setBindingsReady(true);
+    acknowledgedShot.current = { base: shotIdentity(item.shot), shot: result.shot };
     return result.shot;
   };
   const persistPrompt = async () => {
@@ -481,7 +488,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     // of a competing autosave. Persist first; a failed/stale save never generates.
     const changed = prompt.trim() !== (item.shot!.prompt ?? "").trim();
     const otherEdits = name.trim() !== item.name || durationDirty.current || JSON.stringify(sections) !== JSON.stringify(savedSections.current);
-    let saved = changed ? await persistPrompt() : item.shot!;
+    let saved = changed ? await persistPrompt() : savedProjection()!;
     if (!saved || token !== scopeEpoch.current) return;
     if (name.trim() !== item.name) {
       if (!name.trim()) throw new Error("镜头名称不能为空");
@@ -549,21 +556,22 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     <div className="shot-row-media">
       <div className="shot-row-preview">{cover ? <CandidateThumbnail asset={cover} playable /> : <span className="storyboard-cover-empty">暂无结果</span>}
         {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} aria-label={`进度 ${percent}%`}>{percent}%</span>}</div>
-      {item.candidates.length > 1 && <div className="shot-row-strip" aria-label="候选结果">{item.candidates.map(asset => <button type="button" key={asset.id} aria-pressed={item.shot?.selectedResultId === asset.id}
-        title={`选为结果：${asset.name}`} disabled={disabled || item.shot?.selectedResultId === asset.id}
-        onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); onChanged(); })}><CandidateThumbnail asset={asset} playable={false} /></button>)}</div>}
+      {item.candidates.length > 1 && <div className="shot-row-strip" aria-label="候选结果">{item.candidates.map(asset => <div key={asset.id}>
+        <button type="button" title={`预览：${asset.name}`} aria-label={`预览候选 ${asset.name}`} onClick={() => lightbox?.open({kind:"video",projectId,asset})}><CandidateThumbnail asset={asset} playable={false} /></button>
+        <button type="button" disabled={disabled || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? "已选用" : `选用 ${asset.name}`}</button>
+      </div>)}</div>}
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
     </div>
     <div className="shot-row-actions">
-      <button ref={generateButton} type="button" className="primary" disabled={bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>生成视频</button>
+      <button ref={generateButton} type="button" className="primary" disabled={bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>{item.candidates.length ? "重新生成此镜头" : "生成视频"}</button>
       <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>
     <div className="shot-row-prompt">
       <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 0.98MP / 50万像素 / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
-        onChange={e => setPrompt(e.target.value)} onBlur={e => { deferredPromptBlur.current = e.relatedTarget === generateButton.current; if (!deferredPromptBlur.current) savePrompt(); }} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
+        onChange={e => setPrompt(e.target.value)} onBlur={e => { deferredPromptBlur.current = e.relatedTarget === generateButton.current; if (!deferredPromptBlur.current && !(e.relatedTarget instanceof HTMLElement && e.relatedTarget.closest("[data-discard-prompt]"))) savePrompt(); }} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
-      {prompt !== (item.shot?.prompt ?? "") && <p role="status">提示词尚未保存；筛选或返回列表后可继续编辑。<button type="button" disabled={bindingsDisabled} onClick={savePrompt}>保存提示词</button><button type="button" disabled={bindingsDisabled} onClick={() => { if (window.confirm("放弃本镜头未保存的提示词？")) { useStudioStore.getState().setStoryboardPrompt(draftKey, undefined); setPromptLocal(item.shot?.prompt ?? ""); } }}>放弃未保存提示词</button></p>}
+      {prompt !== (item.shot?.prompt ?? "") && <p role="status">提示词尚未保存；筛选或返回列表后可继续编辑。<button type="button" disabled={bindingsDisabled} onClick={savePrompt}>保存提示词</button><button type="button" disabled={bindingsDisabled} data-discard-prompt onClick={() => { if (window.confirm("放弃本镜头未保存的提示词？")) { useStudioStore.getState().setStoryboardPrompt(draftKey, undefined); setPromptLocal(item.shot?.prompt ?? ""); } }}>放弃未保存提示词</button></p>}
       {promptHints.length > 0 && <ul className="muted" aria-label="提示词写作建议">{promptHints.map(h => <li key={h}>{h}</li>)}</ul>}
       <details className="shot-row-sections" aria-label="提示词分段">
         <summary>风格 / 摘要 / 环境声 / 配乐（英文，可选）</summary>
@@ -597,7 +605,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         </dd></div>}
         <div><dt>画面内容</dt><dd>{content}</dd></div>
       </dl>
-      <div className="shot-row-toolbar"><button type="button" onClick={onOpen}>编辑</button><button type="button" onClick={onOpen}>详情</button></div>
+      <div className="shot-row-toolbar"><span>{storyboardStatusLabels[item.status]}</span>{onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}<button type="button" onClick={onOpen}>编辑</button><button type="button" onClick={onOpen}>详情</button></div>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
       {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
       {acceptedRun && <button type="button" onClick={() => onRun(acceptedRun)}>查看已保存运行</button>}

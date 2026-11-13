@@ -115,6 +115,11 @@ export function phase7CFixtureFiles(root) {
 function walk(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(entry => {
     const path = `${dir}/${entry.name}`;
+    // These are generator-owned outputs, never executable source. Keep every
+    // other ignored/untracked file subject to the original fail-closed inventory.
+    if (path === "src-tauri/target" && entry.isDirectory() && !entry.isSymbolicLink()) return [];
+    if (["acl-manifests.json", "capabilities.json", "desktop-schema.json", "windows-schema.json"].some(name => path === `src-tauri/gen/schemas/${name}`) && entry.isFile()) return [];
+
     if (entry.isSymbolicLink()) throw Error(`Phase7C symbolic source: ${path}`);
     return entry.isDirectory() ? walk(root, path) : [path];
   }).sort();

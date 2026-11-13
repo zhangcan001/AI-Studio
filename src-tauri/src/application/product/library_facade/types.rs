@@ -93,6 +93,7 @@ pub struct LibraryItem {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub thumbnail_available: bool,
+    pub tags: Vec<crate::application::asset_query_service::TagSummaryView>,
     /// Present for media assets only: "source" (external import) or "generated".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_origin: Option<&'static str>,

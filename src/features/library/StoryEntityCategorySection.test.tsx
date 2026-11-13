@@ -5,11 +5,11 @@ import { StoryEntityCategorySection } from "./StoryEntityCategorySection";
 import type { AssetView } from "../../types/asset";
 import type { StoryEntityKind } from "../../types/storyEntity";
 
-const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), imageGet: vi.fn(), importImages: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), imageGet: vi.fn(), thumbnailGet: vi.fn(), importImages: vi.fn() }));
 vi.mock("../../product/client", () => ({
   productClient: {
     storyEntities: { list: api.list, create: api.create, update: api.update, delete: api.delete, importImages: api.importImages },
-    library: { imageGet: api.imageGet },
+    library: { imageGet: api.imageGet, thumbnailGet: api.thumbnailGet },
   },
 }));
 vi.mock("../../components/ImageAssetPicker", () => ({ ImageAssetPicker: () => null }));
@@ -88,4 +88,18 @@ it("ignores a late list response after the keyed project/category view changes",
   await act(async () => { resolveOld([{ id: "old-character", name: "迟到的旧角色", description: "", coverAssetId: null, imageAssetIds: [] }]); });
   expect(screen.queryByText("迟到的旧角色")).toBeNull();
   expect(screen.getByRole("region", { name: "场景管理" })).toBeTruthy();
+});
+
+it("bounds entity thumbnail reads and cancels queued work on unmount", async () => {
+  class VisibleObserver { constructor(private notify: (entries: {isIntersecting:boolean}[]) => void) {} observe() { this.notify([{isIntersecting:true}]); } disconnect() {} }
+  vi.stubGlobal("IntersectionObserver", VisibleObserver);
+  const releases: Array<() => void> = [];
+  api.list.mockResolvedValue(Array.from({length:100},(_,i)=>({id:`e${i}`,projectId:"p",kind:"character",name:`E${i}`,description:"",coverAssetId:`a${i}`,imageAssetIds:[`a${i}`],createdAt:"",updatedAt:""})));
+  api.thumbnailGet.mockImplementation(()=>new Promise(resolve=>releases.push(()=>resolve([1]))));
+  const view=render(<StoryEntityCategorySection projectId="p" kind="character"/>);
+  await screen.findByText("E99");await waitFor(()=>expect(api.thumbnailGet).toHaveBeenCalledTimes(4));
+  expect(api.imageGet).not.toHaveBeenCalled();
+  view.unmount();await act(async()=>{releases.forEach(release=>release());});
+  expect(api.thumbnailGet).toHaveBeenCalledTimes(4);
+  vi.unstubAllGlobals();
 });

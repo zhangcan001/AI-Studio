@@ -137,7 +137,7 @@ export function ImageAssetPicker({
       const hasTag = tags.some(tag => matchesHints(tag.name, hints));
       if (!hasTag) rows = rows.filter(i => matchesHints(i.title, hints) || matchesHints(i.subtype, hints));
     } else if (tab === "untagged") {
-      rows = rows.filter(i => !matchesHints(i.title, entityHints) && !matchesHints(i.subtype, entityHints));
+      rows = rows.filter(i => Array.isArray(i.tags) && i.tags.length === 0);
     }
     return rows;
   }, [items, excludeIds, tab, tags, entityHints, loadedScope, scope]);
@@ -155,14 +155,21 @@ export function ImageAssetPicker({
       const hints = TABS.find(x => x.id === tab)!.tagHints;
       rows = rows.filter(a => matchesHints(a.name, hints));
     } else if (tab === "untagged") {
-      rows = rows.filter(a => !matchesHints(a.name, entityHints));
+      rows = []; // Local choices without formal tag metadata cannot claim to be unclassified.
     }
     return rows;
   }, [localChoices, keyword, excludeIds, items, tab, entityHints, loadedScope, scope]);
 
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement;
+    dialog.current?.showModal?.();
+    return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, [open]);
   if (!open) return null;
   return <div className="image-asset-picker-backdrop" role="presentation" onClick={onClose}>
-    <section role="dialog" aria-modal="true" aria-label={title} className="image-asset-picker" onClick={e => e.stopPropagation()}>
+    <dialog ref={dialog} open={typeof HTMLDialogElement.prototype.showModal !== "function" ? true : undefined} onCancel={e => { e.preventDefault(); onClose(); }} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }} aria-modal="true" aria-label={title} className="image-asset-picker" onClick={e => e.stopPropagation()}>
       <header><strong>{title}</strong><button type="button" onClick={onClose}>关闭</button></header>
       <div className="image-asset-picker-toolbar">
         <input aria-label="搜索图片" placeholder="搜索名称…" value={keyword} onChange={e => setKeyword(e.target.value)} />
@@ -192,6 +199,6 @@ export function ImageAssetPicker({
         {onImportFolder && <button type="button" onClick={() => { onClose(); onImportFolder(); }}>导入图片文件夹…</button>}
         {onOpenLibrary && <button type="button" onClick={() => { onClose(); onOpenLibrary(); }}>在资源库查找</button>}
       </footer>
-    </section>
+    </dialog>
   </div>;
 }

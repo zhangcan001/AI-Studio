@@ -12,7 +12,7 @@ export interface StoryboardShot {
   status: StoryboardShotStatus;
   error?: string;
 }
-export const storyboardStatusLabels: Record<StoryboardShotStatus, string> = { COMPLETED: "已完成", GENERATING: "生成中", REVIEW: "待审核", FAILED: "失败", TODO: "待制作" };
+export const storyboardStatusLabels: Record<StoryboardShotStatus, string> = { COMPLETED: "已选用", GENERATING: "生成中", REVIEW: "待审核", FAILED: "失败", TODO: "待制作" };
 const ACTIVE = new Set<ProductRun["status"]>(["QUEUED", "RUNNING", "PAUSED"]);
 export function deriveStoryboardStatus(shot: CreationShot | null, candidates: CreationAsset[], run: ProductRun | null): StoryboardShotStatus {
   if (run && ACTIVE.has(run.status)) return "GENERATING";

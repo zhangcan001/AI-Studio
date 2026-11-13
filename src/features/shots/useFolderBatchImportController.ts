@@ -38,10 +38,10 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
   const legacyMode=Boolean(ownsPreview && preview?.formatSource!=="manifest");
   useEffect(()=>{let cancelled=false;if(!legacyMode)return;const project=projectId;void productClient.creation.generatorsList(project,"video").then(options=>{if(!cancelled && scope.current===project)setGenerators(options.filter(o=>o.mediaKind==="video"));}).catch(e=>{if(!cancelled && scope.current===project)setError(importError(e));});return()=>{cancelled=true;};},[projectId,legacyMode]);
   const current = (project: string, ticket: number) => mounted.current && scope.current === project && operation.current === ticket;
-  const accept = (p: FolderImportPreview) => {
+  const accept = (p: FolderImportPreview, revalidate = false) => {
     session.current = { project: projectId, id: p.sessionId }; setPreview(p); setResult(undefined);
-    setSelected(new Set(p.rows.filter(r => r.errors.length === 0).map(r => r.rowKey)));
-    setCreateQueue(p.createQueueDefault); setAutoStart(false); setSuffix(p.nameSuffix ?? "");setValidatedLegacy(p.formatSource==="manifest"?"":JSON.stringify(legacyRef.current));
+    setSelected(previous => new Set(p.rows.filter(r => r.errors.length === 0 && (!revalidate || previous.has(r.rowKey))).map(r => r.rowKey)));
+    if (!revalidate) setCreateQueue(p.createQueueDefault); setAutoStart(false); setSuffix(p.nameSuffix ?? "");setValidatedLegacy(p.formatSource==="manifest"?"":JSON.stringify(legacyRef.current));
   };
   const begin = (kind: "pick" | "rescan" | "commit") => {
     if (locked.current) return;
@@ -61,7 +61,7 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
   const rescan = async () => {
     if (!ownsPreview || !preview || result) return;
     const project = projectId, ticket = begin("rescan"); if (ticket === undefined) return;
-    try { const p = await productClient.folderImport.rescan(preview.sessionId, { nameSuffix: suffix || null, ...(legacyMode ? {legacy} : {}) }); if (current(project, ticket)) accept(p); }
+    try { const p = await productClient.folderImport.rescan(preview.sessionId, { nameSuffix: suffix || null, ...(legacyMode ? {legacy} : {}) }); if (current(project, ticket)) accept(p, true); }
     catch (e) { if (current(project, ticket)) setError(importError(e)); }
     finally { finish(project, ticket); }
   };

@@ -202,6 +202,7 @@ impl LibraryServices<'_> {
                     created_at: a.created_at,
                     updated_at: a.updated_at,
                     thumbnail_available: a.thumbnail_available,
+                    tags: a.tags,
                     source_origin: media_source_origin(&a.category),
                 })
                 .collect(),
@@ -238,6 +239,7 @@ impl LibraryServices<'_> {
                     created_at: date(&p.created_at)?,
                     updated_at: date(&p.updated_at)?,
                     thumbnail_available: false,
+                    tags: Vec::new(),
                     source_origin: None,
                 })
             })
@@ -264,6 +266,7 @@ impl LibraryServices<'_> {
                 created_at: p.created_at(),
                 updated_at: p.updated_at(),
                 thumbnail_available: false,
+                tags: Vec::new(),
                 source_origin: None,
             })
             .collect();
@@ -290,6 +293,7 @@ impl LibraryServices<'_> {
                 created_at: s.created_at,
                 updated_at: s.updated_at,
                 thumbnail_available: false,
+                tags: Vec::new(),
                 source_origin: None,
             })
             .collect();

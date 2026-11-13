@@ -1231,15 +1231,19 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     };
 
                     if activity.active_task_count == 0 && !activity.production_busy {
-                        tracing::info!("safe exit confirmed");
-                        let _ = window.destroy();
+                        app_handle.dialog()
+                            .message("退出会丢弃尚未保存的输入。请确认已保存需要保留的内容。")
+                            .title("确认退出")
+                            .buttons(MessageDialogButtons::OkCancelCustom("退出应用".to_owned(), "返回保存".to_owned()))
+                            .parent(&window)
+                            .show(move |confirmed| { if confirmed { let _ = window.destroy(); } });
                         return;
                     }
 
                     app_handle
                         .dialog()
                         .message(
-                            "当前仍有生成任务或生产队列正在运行。\n\n退出不会取消任务，但关闭期间将无法显示实时进度。",
+                            "当前仍有生成任务或生产队列正在运行。\n\n退出不会取消任务，但关闭期间将无法显示实时进度；尚未保存的输入将被丢弃。",
                         )
                         .title("安全退出")
                         .buttons(MessageDialogButtons::OkCancelCustom(

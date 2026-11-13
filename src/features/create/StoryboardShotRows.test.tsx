@@ -5,6 +5,7 @@ import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { MediaLightboxScope } from "./CreateMediaPreview";
 import { StoryboardShotRows } from "./StoryboardShotRows";
 import type { StoryboardShot } from "./storyboardModel";
 import { normalizeProductError } from "../../product/errors";
@@ -140,7 +141,7 @@ it("renders real shot rows with structured description, inline @entity chips and
   await waitFor(() => expect(within(within(row).getByLabelText("分镜描述")).getAllByText("阿离").length).toBeGreaterThan(0));
   expect(within(within(row).getByLabelText("分镜描述")).getByText("雨巷")).toBeTruthy();
   expect(within(row).getByText("5 秒", { selector: "dd" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "已完成" }));
+  fireEvent.click(screen.getByRole("button", { name: "已选用" }));
   expect(screen.queryByRole("article", { name: "分镜 1 镜头1" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "全部" }));
   fireEvent.change(screen.getByLabelText("搜索分镜"), { target: { value: "收尾" } });
@@ -918,4 +919,50 @@ it('failed prompt draft survives remount but never enters a different Recipe',as
  await user.click(box);fireEvent.change(box,{target:{value:'Keep only for this recipe'}});await user.click(screen.getByLabelText('搜索分镜'));await screen.findByRole('alert');view.unmount();
  const next=render(<StoryboardShotRows {...props()} items={[shot('a',0,'other-recipe')]}/>);expect((screen.getByLabelText('镜头1 提示词') as HTMLTextAreaElement).value).not.toBe('Keep only for this recipe');
  next.rerender(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);await waitFor(()=>expect((screen.getByLabelText('镜头1 提示词') as HTMLTextAreaElement).value).toBe('Keep only for this recipe'));
+});
+
+it('AUDIT-R01 Discard must not persist the very text being discarded',async()=>{
+ const user=userEvent.setup(),pending=deferred<unknown>();const confirm=vi.spyOn(window,'confirm').mockReturnValue(true);
+
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
+ await user.click(box);fireEvent.change(box,{target:{value:'I intend to discard this text'}});
+ await user.click(screen.getByRole('button',{name:'放弃未保存提示词'}));
+ const observed={saves:api.saveShotRow.mock.calls.length,confirmations:confirm.mock.calls.length};
+ await act(async()=>pending.resolve({shot:{...shot('a',0).shot!,prompt:'I intend to discard this text'},boundEntities:[hero]}));
+ console.log('R01 '+JSON.stringify(observed));
+ expect(observed.saves,'discard action must not trigger a persistence request').toBe(0);
+ expect(observed.confirmations).toBe(1);
+});
+it('AUDIT-R02 Lost ACK plus failed list refresh must retain saved duration and original submission identity',async()=>{
+ const user=userEvent.setup();api.generate.mockRejectedValueOnce(new Error('IPC response lost; acceptance unknown'));
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
+ const input=await screen.findByLabelText('镜头1 时长（秒）');await waitFor(()=>expect(input.hasAttribute('disabled')).toBe(false));
+ await user.click(input);fireEvent.change(input,{target:{value:'7'}});await user.click(screen.getByRole('button',{name:'生成视频'}));await screen.findByRole('alert');
+ await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
+ // Parent keeps its prior read model when its refresh fails, as Workbench.load does.
+ // The only duration edit was already confirmed by the formal saveShotRow response.
+ await user.click(screen.getByRole('button',{name:'生成视频'}));await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ const calls=api.generate.mock.calls.map(c=>({duration:c[0].values.duration_seconds.value,key:c[0].submissionIdempotencyKey}));
+ const displayed=(screen.getByLabelText('镜头1 时长（秒）') as HTMLInputElement).value;
+ console.log('R02 '+JSON.stringify({calls,displayed,saves:api.saveShotRow.mock.calls.length}));
+ expect(calls[0].duration).toBe(7);expect(calls[1].duration,'unchanged user intent must not revert to stale parent values').toBe(7);expect(calls[1].key).toBe(calls[0].key);
+});
+it('CONTROL unchanged saved row reuses its key after a lost ACK',async()=>{
+ const user=userEvent.setup();api.generate.mockRejectedValueOnce(new Error('lost ACK'));
+ render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);const button=screen.getByRole('button',{name:'生成视频'});
+ await waitFor(()=>expect(button.hasAttribute('disabled')).toBe(false));await user.click(button);await screen.findByRole('alert');await waitFor(()=>expect(button.hasAttribute('disabled')).toBe(false));await user.click(button);await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(2));
+ expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);expect(api.generate.mock.calls[1][0].values.duration_seconds.value).toBe(5);
+});
+
+it("previews candidates without selecting and exposes per-Shot review separately", async () => {
+  const item=shot("review-shot",0);item.status="REVIEW";
+  item.candidates=[{id:"candidate-a",name:"A",mediaKind:"video",selected:false},{id:"candidate-b",name:"B",mediaKind:"video",selected:false}];
+  item.run={ref:{source:"task",id:"task-owned"},projectId:"p",title:"Owned",status:"SUCCEEDED",phase:"DONE",createdAt:"",updatedAt:"",progress:{total:1,succeeded:1,failed:0,cancelled:0},recoverability:{retryItemIds:[],reviewRequired:0},resultsSummary:["candidate-a","candidate-b"],errorSummary:null,preferredParent:null,availableActions:[]};
+  const review=vi.fn();render(<MediaLightboxScope><StoryboardShotRows {...props()} items={[item]} onReview={review}/></MediaLightboxScope>);
+  const control=await screen.findByRole("button",{name:"审核与选用"});await waitFor(()=>expect(control).toHaveProperty("disabled",false));
+  fireEvent.click(screen.getByRole("button",{name:"预览候选 A"}));await screen.findByRole("dialog");expect(api.selectResult).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button",{name:"关闭"}));fireEvent.click(control);expect(review).toHaveBeenCalledWith("review-shot");
+  fireEvent.click(screen.getByRole("button",{name:"选用 A"}));await waitFor(()=>expect(api.selectResult).toHaveBeenCalledWith("p","review-shot","video","candidate-a"));
+  expect(api.generate).not.toHaveBeenCalled();
 });

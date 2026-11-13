@@ -113,17 +113,29 @@ export function useMediaLightbox() {
 
 /** Full-size preview: video/audio via existing media URL; images via library imageGet. */
 function MediaLightbox({ target, onClose }: { target: LightboxTarget; onClose: () => void }) {
-  const imageUrl = useLibraryImageUrl(target.kind === "image" ? target.projectId : null, target.kind === "image" ? target.assetId : null);
+  const [imageUrl, setImageUrl] = useState<string>();
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setImageUrl(undefined); setFailed(false);
+    if (target.kind !== "image") return;
+    let live = true;
+    const release = retainLibraryImage(target.projectId, target.assetId);
+    void loadLibraryImageUrl(target.projectId, target.assetId).then(url => { if (live) { setImageUrl(url); setFailed(!url); } });
+    return () => { live = false; release(); };
+  }, [target.projectId, target.kind, target.kind === "image" ? target.assetId : target.asset.id, attempt]);
   const shown = target.kind === "image" ? imageUrl : undefined;
+  const modal = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const previous = document.activeElement; modal.current?.showModal?.(); return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); }; }, []);
   return <div className="media-lightbox-backdrop" role="presentation" onClick={onClose}>
-    <section role="dialog" aria-modal="true" aria-label={target.kind === "image" ? `预览 ${target.name}` : `播放 ${target.asset.name}`} className="media-lightbox" onClick={e => e.stopPropagation()}>
+    <dialog ref={modal} open={typeof HTMLDialogElement.prototype.showModal !== "function" ? true : undefined} onCancel={e => { e.preventDefault(); onClose(); }} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }} aria-modal="true" aria-label={target.kind === "image" ? `预览 ${target.name}` : `播放 ${target.asset.name}`} className="media-lightbox" onClick={e => e.stopPropagation()}>
       <header><strong>{target.kind === "image" ? target.name : target.asset.name}</strong><button type="button" onClick={onClose}>关闭</button></header>
       <div className="media-lightbox-body">
         {target.kind === "image"
-          ? (shown ? <img src={shown} alt={target.name} /> : <p role="status">正在读取图片…</p>)
+          ? (shown ? <img src={shown} alt={target.name} /> : failed ? <div role="alert">无法读取图片。<button type="button" onClick={() => setAttempt(n => n + 1)}>重试读取</button></div> : <p role="status">正在读取图片…</p>)
           : <CreateMediaPreview projectId={target.projectId} asset={target.asset} />}
       </div>
-    </section>
+    </dialog>
   </div>;
 }
 

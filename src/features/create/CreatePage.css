@@ -568,3 +568,8 @@
 .composer-package { max-width: 14rem; }
 .composer-package select { max-width: 14rem; }
 .composer-package-hint { opacity: 0.75; font-size: 0.75rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Native modal semantics retain the existing dark workbench surfaces. */
+dialog.image-asset-picker, dialog.media-lightbox { color: var(--text-primary, #e5e7eb); padding: 0; margin: auto; }
+dialog.image-asset-picker::backdrop, dialog.media-lightbox::backdrop { background: rgba(0,0,0,.7); }
+.shot-row-strip > div { display: flex; flex-direction: column; min-width: 0; gap: 4px; }

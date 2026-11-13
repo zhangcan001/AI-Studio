@@ -20,7 +20,7 @@ describe("folder import preview and authority",()=>{
   api.rescan.mockResolvedValue({...p,previewVersion:2,validCount:1,rows:[{...p.rows[0],errors:[]}]});
   render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();
   const select=await screen.findByRole("combobox",{name:"生成器"});await screen.findByRole("option",{name:/Installed/});fireEvent.change(select,{target:{value:"exact-selection"}});expect(screen.getByRole("button",{name:"确认导入"})).toHaveProperty("disabled",true);
-  fireEvent.click(screen.getByRole("button",{name:"重新校验"}));await waitFor(()=>expect(screen.getByRole("button",{name:"确认导入"})).toHaveProperty("disabled",false));expect(api.rescan).toHaveBeenCalledWith("legacy",{nameSuffix:null,legacy:{selectionRef:"exact-selection",durationSeconds:6,width:1280,height:768}});
+  fireEvent.click(screen.getByRole("button",{name:"重新校验"}));await waitFor(()=>expect(screen.getByRole("checkbox",{name:"导入 镜头0"})).toHaveProperty("disabled",false));expect(screen.getByRole("checkbox",{name:"导入 镜头0"})).toHaveProperty("checked",false);fireEvent.click(screen.getByRole("checkbox",{name:"导入 镜头0"}));await waitFor(()=>expect(screen.getByRole("button",{name:"确认导入"})).toHaveProperty("disabled",false));expect(api.rescan).toHaveBeenCalledWith("legacy",{nameSuffix:null,legacy:{selectionRef:"exact-selection",durationSeconds:6,width:1280,height:768}});
   fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");expect(api.commit.mock.calls[0][0]).toMatchObject({sessionId:"legacy",previewVersion:2,autoStart:false});
  });
  it("does not offer a queue which successful compensation already deleted",async()=>{
@@ -52,7 +52,7 @@ describe("folder import preview and authority",()=>{
   const scan=deferred<FolderImportPreview>();api.rescan.mockReturnValue(scan.promise);render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();
   fireEvent.change(screen.getByLabelText("镜头名称后缀"),{target:{value:" v2"}});expect(screen.getByRole("button",{name:"确认导入"})).toHaveProperty("disabled",true);expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("disabled",true);
   fireEvent.click(screen.getByRole("button",{name:"重新校验"}));expect(api.rescan).toHaveBeenCalledWith("session",{nameSuffix:" v2"});
-  await act(async()=>scan.resolve({...preview("session",false),previewVersion:2,nameSuffix:" v2"}));expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("disabled",false);fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");expect(api.commit.mock.calls[0][0]).toMatchObject({previewVersion:2,nameSuffix:" v2",includeRowKeys:["r0","r1","r2"]});
+  await act(async()=>scan.resolve({...preview("session",false),previewVersion:2,nameSuffix:" v2"}));expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("disabled",false);expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("checked",false);fireEvent.click(screen.getByRole("checkbox",{name:"导入 镜头2"}));fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");expect(api.commit.mock.calls[0][0]).toMatchObject({previewVersion:2,nameSuffix:" v2",includeRowKeys:["r0","r1","r2"]});
  });
  it("reports partial cleanup and blocks double click/repeated writes",async()=>{
   const save=deferred<FolderImportResult>();api.commit.mockReturnValue(save.promise);render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();const b=screen.getByRole("button",{name:"确认导入"});fireEvent.click(b);fireEvent.click(b);expect(api.commit).toHaveBeenCalledOnce();expect(screen.getByRole("button",{name:"关闭"})).toHaveProperty("disabled",true);
@@ -102,4 +102,17 @@ it("bounds committed Shot controls to 50 and preserves exact IDs when paging", a
   await waitFor(() => expect(screen.getByRole("button",{name:"编辑导入镜头 51"})).toBeTruthy());
   fireEvent.click(screen.getByRole("button",{name:"编辑导入镜头 51"}));expect(openShot).toHaveBeenCalledExactlyOnceWith("shot-50");
   expect(screen.getAllByRole("button",{name:/编辑导入镜头/})).toHaveLength(50);
+});
+
+it('AUDIT-F13 rescan of identical valid rows must retain explicit exclusions and import-only intent',async()=>{
+ api.rescan.mockResolvedValue({...preview(),previewVersion:2,nameSuffix:'-new'});
+ render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();fireEvent.click(screen.getByRole("checkbox",{name:"导入 镜头1"}));fireEvent.click(screen.getByRole("checkbox",{name:"创建待启动批次"}));
+ fireEvent.change(screen.getByLabelText('镜头名称后缀'),{target:{value:'-new'}});fireEvent.click(screen.getByRole('button',{name:'重新校验'}));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'确认导入'})).toHaveProperty('disabled',false));
+ const observed={excludedRowChecked:(screen.getByRole('checkbox',{name:'导入 镜头1'}) as HTMLInputElement).checked,queueChecked:(screen.getByRole('checkbox',{name:'创建待启动批次'}) as HTMLInputElement).checked};
+ fireEvent.click(screen.getByRole('button',{name:'确认导入'}));await screen.findByText('导入完成');console.log('F13 '+JSON.stringify({...observed,request:api.commit.mock.calls[0][0]}));
+ expect(api.commit.mock.calls[0][0]).toMatchObject({includeRowKeys:['r0'],createQueue:false,autoStart:false});
+});
+it('CONTROL without rescan import preserves explicit exclusions and does not prepare Queue',async()=>{
+ render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();fireEvent.click(screen.getByRole("checkbox",{name:"导入 镜头1"}));fireEvent.click(screen.getByRole("checkbox",{name:"创建待启动批次"}));fireEvent.click(screen.getByRole('button',{name:'确认导入'}));await screen.findByText('导入完成');expect(api.commit.mock.calls[0][0]).toMatchObject({includeRowKeys:['r0'],createQueue:false,autoStart:false});
 });

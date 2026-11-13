@@ -69,6 +69,7 @@ pub struct SettingsService {
     activity_provider: Arc<dyn RuntimeActivityProvider>,
     configuration_admission: Arc<dyn RuntimeConfigurationAdmission>,
     adapter_factory: Arc<dyn ComfyAdapterFactory>,
+    mutation: tokio::sync::Mutex<()>,
     settings: RwLock<AppSettings>,
     warning: RwLock<Option<String>>,
 }
@@ -90,6 +91,7 @@ impl SettingsService {
             activity_provider,
             configuration_admission,
             adapter_factory,
+            mutation: tokio::sync::Mutex::new(()),
             settings: RwLock::new(loaded.settings),
             warning: RwLock::new(loaded.warning),
         }
@@ -173,6 +175,7 @@ impl SettingsService {
         &self,
         batch_workflow_presets: Vec<BatchWorkflowPreset>,
     ) -> Result<(), AppError> {
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -194,6 +197,7 @@ impl SettingsService {
         &self,
         workspace_resume: WorkspaceResume,
     ) -> Result<WorkspaceResume, AppError> {
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -216,6 +220,7 @@ impl SettingsService {
         name: &str,
     ) -> Result<Vec<String>, AppError> {
         let name = validate_queue_name_preset(name)?;
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -243,6 +248,7 @@ impl SettingsService {
         if name.is_empty() {
             return Err(AppError::invalid_input("队列名称模板不能为空。"));
         }
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -274,6 +280,7 @@ impl SettingsService {
         profile.updated_at = profile.updated_at.trim().to_owned();
         profile.values.retain(|key, _| !key.trim().is_empty());
 
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -299,6 +306,7 @@ impl SettingsService {
         if profile_id.is_empty() {
             return Err(AppError::invalid_input("参数档案 ID 不能为空。"));
         }
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -329,6 +337,7 @@ impl SettingsService {
         profile.updated_at = profile.updated_at.trim().to_owned();
         validate_comfy_environment_profile(&profile)?;
 
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -385,6 +394,7 @@ impl SettingsService {
         if profile_id.is_empty() {
             return Err(AppError::invalid_input("ComfyUI 环境档案 ID 不能为空。"));
         }
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -436,6 +446,7 @@ impl SettingsService {
             workflow_version_id,
             recipe_id,
         );
+        let _mutation = self.mutation.lock().await;
         let mut next_settings = self
             .settings
             .read()
@@ -496,6 +507,7 @@ impl SettingsService {
         // persisting and swapping the shared runtime adapter.
         adapter.health_check().await.map_err(endpoint_test_error)?;
 
+        let _mutation = self.mutation.lock().await;
         let preferred_presets = self
             .settings
             .read()
@@ -727,6 +739,7 @@ mod tests {
 
     #[derive(Default)]
     struct MemorySettingsStore {
+        yield_save: bool,
         saved: Mutex<Vec<AppSettings>>,
     }
 
@@ -740,6 +753,9 @@ mod tests {
         }
 
         async fn save(&self, settings: &AppSettings) -> Result<(), AppError> {
+            if self.yield_save {
+                tokio::task::yield_now().await;
+            }
             self.saved.lock().unwrap().push(settings.clone());
             Ok(())
         }
@@ -943,6 +959,44 @@ mod tests {
             production_busy: true,
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_settings_updates_preserve_independent_fields() {
+        let activity = Arc::new(TestActivityProvider {
+            status: Mutex::new(RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            }),
+        });
+        let admission = Arc::new(TestAdmission {
+            gate: Arc::new(AsyncMutex::new(())),
+        });
+        let store = Arc::new(MemorySettingsStore {
+            yield_save: true,
+            ..Default::default()
+        });
+        let service =
+            test_settings_service(activity, admission, store.clone(), BlockingAdapter::new());
+        let (first, second) = tokio::join!(
+            service.save_production_queue_name_preset("retained-name"),
+            service.save_batch_workflow_presets(Vec::new())
+        );
+        first.unwrap();
+        second.unwrap();
+        assert!(service
+            .production_queue_name_presets()
+            .iter()
+            .any(|name| name == "retained-name"));
+        assert!(store
+            .saved
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .production_queue_name_presets
+            .iter()
+            .any(|name| name == "retained-name"));
     }
 
     #[tokio::test]

@@ -1,3 +1,4 @@
+import { LibraryThumbnail, LibraryThumbnailScope } from "./LibraryThumbnail";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 import { productClient } from "../../product/client";
@@ -27,24 +28,11 @@ function filenameStem(value: string): string {
 }
 
 function EntityThumb({ projectId, assetId, name }: { projectId: string; assetId: string; name: string }) {
-  const [url, setUrl] = useState<string>();
-  useEffect(() => {
-    let alive = true;
-    let objectUrl: string | undefined;
-    void productClient.library.imageGet(projectId, { kind: "asset", id: assetId })
-      .then(bytes => {
-        if (!alive) return;
-        objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes as number[])], { type: "image/png" }));
-        setUrl(objectUrl);
-      })
-      .catch(() => undefined);
-    return () => { alive = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [projectId, assetId]);
-  return <span className="story-entity-thumb" title={name}>{url ? <img src={url} alt={name} /> : <span aria-hidden="true">…</span>}</span>;
+  return <span className="story-entity-thumb" title={name}><LibraryThumbnail projectId={projectId} item={{resourceRef:{kind:"asset",id:assetId},title:name,subtype:"image",thumbnailAvailable:true,createdAt:"",updatedAt:""}} /></span>;
 }
 
 /** A dedicated, project-scoped view for one entity kind. */
-export function StoryEntityCategorySection({ projectId, kind }: { projectId: string; kind: StoryEntityKind }) {
+export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: { projectId: string; kind: StoryEntityKind; onDirtyChange?: (dirty: boolean) => void }) {
   const label = KIND_LABEL[kind];
   const [items, setItems] = useState<StoryEntity[]>([]);
   const [loading, setLoading] = useState(false);
@@ -193,7 +181,9 @@ export function StoryEntityCategorySection({ projectId, kind }: { projectId: str
   const visibleItems = items.filter(item => !search.trim() || `${item.name} ${item.description}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const formOpen = creating || Boolean(editing);
 
-  return <section className="story-entities-section" aria-label={`${label}管理`}>
+  useEffect(() => { onDirtyChange?.(formOpen || busy); return () => onDirtyChange?.(false); }, [formOpen, busy, onDirtyChange]);
+
+  return <LibraryThumbnailScope><section className="story-entities-section" aria-label={`${label}管理`}>
     <header className="story-entities-header">
       <div>
         <h2>{label}</h2>
@@ -261,5 +251,5 @@ export function StoryEntityCategorySection({ projectId, kind }: { projectId: str
       }}
       onClose={() => setPicking(null)}
     />}
-  </section>;
+  </section></LibraryThumbnailScope>;
 }

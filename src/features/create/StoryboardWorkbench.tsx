@@ -53,6 +53,8 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const editing = Boolean(route.shotId || libraryIntent || matchingRunIntent);
   const epoch = useRef(0);
   const inFlight = useRef(false);
+  const pendingRefresh = useRef(false);
+  const latestLoad = useRef<(background?: boolean) => Promise<void>>(async () => {});
   const [queueActive, setQueueActive] = useState(false);
   const mounted = useRef(true);
   const projectId = route.projectId;
@@ -61,7 +63,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const load = useCallback(async (background = false) => {
-    if (inFlight.current) return;
+    if (inFlight.current) { if (!background) pendingRefresh.current = true; return; }
     inFlight.current = true; const token = ++epoch.current;
     // Progress reads must not toggle every action button. Foreground reads and
     // the existing row/create mutation locks still prevent duplicate actions.
@@ -91,10 +93,11 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       setIndex({projectId, shots: workbench.shots});
       setItems(result); setTruncated(workbench.truncated); setError(undefined);
     } catch (cause) { if (token === epoch.current) setError(normalizeProductError(cause).message); }
-    finally { if (token === epoch.current) { inFlight.current = false; setBusy(false); } }
+    finally { if (token === epoch.current) { inFlight.current = false; setBusy(false); if (pendingRefresh.current && mounted.current) { pendingRefresh.current = false; void latestLoad.current(true); } } }
   }, [projectId]);
 
-  useEffect(() => { void load(); return () => { epoch.current++; inFlight.current = false; }; }, [load]);
+  latestLoad.current = load;
+  useEffect(() => { pendingRefresh.current = false; void load(); return () => { epoch.current++; inFlight.current = false; pendingRefresh.current = false; }; }, [load]);
   const anyGenerating = items?.some(item => item.status === "GENERATING") ?? false;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -159,7 +162,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       <div className="storyboard-title"><h1>分镜工作台</h1><p>将剧本拆解为多个镜头，逐镜生成并完成整段视频的制作。</p></div>
       <dl className="storyboard-stats" aria-label="镜头统计">
         <div><dt>镜头总数</dt><dd>{stats.total + truncated}</dd></div>
-        <div data-tone="success"><dt>已完成</dt><dd>{stats.completed}</dd></div>
+        <div data-tone="success"><dt>已选用</dt><dd>{stats.completed}</dd></div>
         <div data-tone="info"><dt>生成中</dt><dd>{stats.generating}</dd></div>
         <div data-tone="muted"><dt>待制作</dt><dd>{stats.todo}</dd></div>
       </dl>
@@ -206,7 +209,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
         {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
-          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} shotIndex={shotIndex} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
+          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} shotIndex={shotIndex} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>
@@ -269,7 +272,7 @@ function ReviewPanel({ projectId, item, onClose, onChanged }: { projectId: strin
   return <div className="storyboard-review-backdrop" role="presentation" onClick={onClose}>
     <section role="dialog" aria-modal="true" aria-label={`审核 ${item.name}`} className="storyboard-review" onClick={e => e.stopPropagation()}>
       <header><h2>审核 · {item.name}</h2><button type="button" onClick={onClose}>关闭</button></header>
-      <p className="storyboard-review-note">审核通过、退回与选为镜头结果是独立操作；退回需填写说明。</p>
+      <p className="storyboard-review-note">审核通过、退回与选为镜头结果是独立操作；退回需填写说明。不满意可关闭此窗口，修改该镜头后单独重新生成，不必重跑整个包。</p>
       <label className="storyboard-review-comment">审核说明<input value={comment} disabled={busy} onChange={e => setComment(e.target.value)} /></label>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
       {!results ? <p role="status">正在读取候选…</p> : !results.length ? <p className="storyboard-empty-note">该运行没有可审核的结果。</p> :
