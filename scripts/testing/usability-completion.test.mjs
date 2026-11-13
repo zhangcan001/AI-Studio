@@ -1,3 +1,4 @@
+import { USAGE_FLOW_CHANGED, USAGE_FLOW_ADDED, USAGE_FLOW_PROOF } from "../usage-flow-successor-guard.mjs";
 import { AUDIT_REPAIR_CHANGED, AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF } from "../audit-repair-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';
@@ -19,8 +20,8 @@ const parentBytes = p => execFileSync('git', ['show', `${USABILITY_COMPLETION_BA
 it('verifies the exact usability-completion successor and projects the frozen parent bytes', () => {
   const result = usabilityCompletionParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...USABILITY_COMPLETION_CHANGED, ...AUDIT_REPAIR_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...USABILITY_COMPLETION_CHANGED, ...AUDIT_REPAIR_CHANGED, ...USAGE_FLOW_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...USAGE_FLOW_ADDED, USAGE_FLOW_PROOF])].sort());
   for (const p of USABILITY_COMPLETION_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

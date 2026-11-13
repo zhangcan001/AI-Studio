@@ -14,7 +14,6 @@ export function RunStatusCard({ controller: c }: { controller: CreateController 
     {c.run && <><p className="create-state-pill">{runLabels[c.run.status]}</p><p>{c.run.progress.succeeded}/{c.run.progress.total} 已完成</p><p>{c.run.progress.failed} 失败 · {c.run.progress.cancelled} 已取消</p>{c.run.errorSummary && <p>运行遇到问题，请查看详情。</p>}</>}
     {!c.runRef && <p>尚未生成</p>}
     {c.run?.availableActions.includes("EDIT_INPUT") && <button type="button" onClick={edit}>修改输入</button>}
-    {c.run?.availableActions.includes("RETRY") && <button type="button" disabled={c.busy} onClick={() => void c.retry()}>重试原运行</button>}
     {c.runRef && <button type="button" onClick={c.openRun}>查看运行详情</button>}
     <small>重试使用原运行快照；修改草稿后点击生成会创建新的运行。</small>
   </section>;

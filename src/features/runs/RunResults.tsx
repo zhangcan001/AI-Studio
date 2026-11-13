@@ -1,3 +1,4 @@
+import { ResultFileActions } from "../../components/ResultFileActions";
 import { useEffect, useState } from "react";
 import { productClient } from "../../product/client";
 import type { RunResult } from "../../product/types";
@@ -16,8 +17,8 @@ export function RunResults({ controller: c, route, navigate }: RunsProps & { con
   return <section><h3>结果</h3><p>执行成功、素材存在、审核通过与镜头选用是四个独立事实。</p><div className="run-results">{c.results.map(result => <article key={result.assetId}>
     {result.thumbnailBytes && <Thumbnail bytes={result.thumbnailBytes} />}
     {result.mediaKind === "video" && result.assetExists && result.availability === "available" && <video controls preload="metadata" src={productClient.creation.mediaUrl(route.projectId, result.assetId)} />}
-    <strong>{result.name}</strong><p>{result.assetExists ? result.availability === "missing" ? "素材文件缺失" : "素材存在" : "素材不存在"} · {result.reviewState ? reviewLabels[result.reviewState] ?? "审核状态未知" : "无审核记录"} · {result.selectedShotIds.length ? "镜头已选用" : "镜头未选用"}</p>
+    {result.mediaKind === "video" && result.assetExists && <ResultFileActions projectId={route.projectId} assetId={result.assetId}/>}<strong>{result.name}</strong><p>{result.assetExists ? result.availability === "missing" ? "素材文件缺失" : "素材存在" : "素材不存在"} · {result.reviewState ? reviewLabels[result.reviewState] ?? "审核状态未知" : "无审核记录"} · {result.selectedShotIds.length ? "镜头已选用" : "镜头未选用"}</p>
     <button type="button" disabled={!result.assetExists} onClick={() => navigate({ kind: "library", projectId: route.projectId, resource: { kind: "asset", id: result.assetId } })}>在素材库查看</button>
-    {result.reviewRevision !== null && result.assetExists && result.reviewState === "PENDING" && <ReviewActions result={result} controller={c} />}
+    {result.reviewRevision !== null && result.assetExists && (result.reviewState === "PENDING" ? <ReviewActions result={result} controller={c} /> : <button type="button" disabled={c.busy} onClick={() => void c.reopenReview(result)}>重新审核</button>)}
   </article>)}</div>{!c.results.length && <p>暂无结果。不会把任务成功当作素材已存在。</p>}</section>;
 }

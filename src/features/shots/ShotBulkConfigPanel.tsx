@@ -24,6 +24,7 @@ export interface ShotBulkConfigPanelProps {
   tree?: ProductionStructureTree;
   scope?: VideoPreparationScope;
   onRefresh?: () => Promise<void>;
+  onBusyChange?: (busy:boolean) => void;
   onNotice?: (message: string) => void;
   onError?: (message?: string) => void;
   onConfigureStage?: (stage: ShotStage, shotIds: string[]) => void | Promise<void>;
@@ -83,6 +84,7 @@ function ScopedShotBulkConfigPanel({
   onError,
   onConfigureStage,
   onBulkPrompt,
+  onBusyChange,
   onOpenProductionQueue,
   onOpenShot,
 }: ShotBulkConfigPanelProps) {
@@ -96,6 +98,7 @@ function ScopedShotBulkConfigPanel({
   const [planLoading, setPlanLoading] = useState(false);
   const [allowPartial, setAllowPartial] = useState(false);
   const [preparationResult, setPreparationResult] = useState<ProjectProductionAdmissionResult>();
+  useEffect(()=>{onBusyChange?.(Boolean(busyAction));return()=>onBusyChange?.(false);},[busyAction,onBusyChange]);
   const [filter, setFilter] = useState<BulkPreparationFilter>("all");
   const scopeKey = JSON.stringify(scope ?? { kind: "project" });
   const scoped = useMemo(() => {
@@ -363,10 +366,10 @@ function ScopedShotBulkConfigPanel({
         <button type="button" onClick={() => void configureStage("image")} disabled>
           配置图片阶段
         </button>
-        <button type="button" onClick={() => void configureStage("video")} disabled={Boolean(busyAction) || !selectedCount}>
+        <button type="button" hidden={!onConfigureStage} onClick={() => void configureStage("video")} disabled={Boolean(busyAction) || !selectedCount}>
           配置视频阶段
         </button>
-        <button type="button" onClick={() => void assignPrompt()} disabled={Boolean(busyAction) || !selectedCount}>
+        <button type="button" hidden={!onBulkPrompt} onClick={() => void assignPrompt()} disabled={Boolean(busyAction) || !selectedCount}>
           批量应用提示词
         </button>
         <button type="button" disabled>

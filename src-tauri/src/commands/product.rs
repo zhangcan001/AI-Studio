@@ -508,14 +508,16 @@ pub async fn product_creation_workbench_get(
     project_id: String,
     stage: String,
     limit: usize,
+    offset: Option<usize>,
 ) -> Result<CreationWorkbench, ProductError> {
     creation(&state)
-        .workbench(
+        .workbench_page(
             &state.projects.command_center,
             &state.assets.query,
             &project_id,
             &stage,
             limit,
+            offset.unwrap_or(0),
         )
         .await
 }
@@ -1084,4 +1086,101 @@ mod shot_row_dto_tests {
         .unwrap();
         assert!(clear.into_parts().is_ok());
     }
+}
+
+/// Product-side delivery; path selection is Native and sources are project-owned Assets.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_selected_videos_export(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Option<crate::application::product::selected_export::SelectedVideoExport>, ProductError>
+{
+    use tauri_plugin_dialog::DialogExt;
+    let mut shots = state
+        .shots
+        .shot
+        .list(&project_id)
+        .await
+        .map_err(ProductError::internal)?;
+    shots.sort_by_key(|s| (s.ordinal, s.id.clone()));
+    let mut sources = Vec::new();
+    for shot in shots {
+        if let Some(id) = shot.selected_video_asset_id {
+            let asset = state
+                .assets
+                .query
+                .get(&project_id, &id)
+                .await
+                .map_err(ProductError::internal)?;
+            if asset.asset_type != "video" {
+                return Err(ProductError::new(
+                    "INVALID_INPUT",
+                    "选用结果不是视频。",
+                    None,
+                ));
+            }
+            let path = state
+                .assets
+                .artifact
+                .resolve_artifact_path(&id)
+                .await
+                .map_err(ProductError::internal)?;
+            sources.push((shot.ordinal, path));
+        }
+    }
+    if sources.is_empty() {
+        return Err(ProductError::new(
+            "INVALID_INPUT",
+            "请先为镜头选用视频。",
+            None,
+        ));
+    }
+    let Some(folder) = app.dialog().file().blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let parent = folder.into_path().map_err(ProductError::internal)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::application::product::selected_export::copy_selected_videos(&parent, &sources)
+    })
+    .await
+    .map_err(ProductError::internal)?
+    .map(Some)
+    .map_err(ProductError::internal)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_run_result_review_reset(
+    state: State<'_, AppState>,
+    project_id: String,
+    run_ref: RunRef,
+    asset_id: String,
+    expected_revision: i64,
+) -> Result<(), ProductError> {
+    runs(&state)
+        .result_review_reset(
+            &project_id,
+            run_ref,
+            &asset_id,
+            expected_revision,
+            &run_details(&state),
+        )
+        .await
+}
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_asset_reveal(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_id: String,
+) -> Result<(), ProductError> {
+    state
+        .assets
+        .query
+        .get(&project_id, &asset_id)
+        .await
+        .map_err(ProductError::internal)?;
+    super::artifact::artifact_reveal(app, state, asset_id)
+        .await
+        .map_err(ProductError::internal)
 }

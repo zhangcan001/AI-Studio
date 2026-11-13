@@ -446,3 +446,50 @@ async fn product_creation_shot_fields_save_stage_prompt_and_require_generator_fo
         .is_err());
     assert_eq!(count(&pool, "tasks").await, 0);
 }
+
+#[tokio::test]
+async fn usage_flow_workbench_pages_are_bounded_scoped_and_do_not_create_tasks() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("paged.db")).await.unwrap();
+    seed_database(&pool, dir.path()).await;
+    let (facade, assets) = creation_context_services(&pool);
+    let center = command_center(&pool);
+    let mut ids = Vec::new();
+    for _ in 0..63 {
+        ids.push(facade.create_shot(PROJECT_ID).await.unwrap().id);
+    }
+    let first = facade
+        .workbench_page(&center, &assets, PROJECT_ID, "video", usize::MAX, 0)
+        .await
+        .unwrap();
+    let second = facade
+        .workbench_page(&center, &assets, PROJECT_ID, "video", 60, 60)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 60);
+    assert_eq!(first.truncated, 3);
+    assert_eq!(first.shots.len(), 63);
+    assert_eq!(second.items.len(), 3);
+    assert_eq!(second.truncated, 0);
+    assert_eq!(second.items[0].shot.summary.id, ids[60]);
+    assert!(facade
+        .workbench_page(&center, &assets, "prj_absent", "video", 60, 0)
+        .await
+        .is_err());
+    assert!(facade
+        .workbench_page(&center, &assets, PROJECT_ID, "video", 60, usize::MAX)
+        .await
+        .unwrap()
+        .items
+        .is_empty());
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tasks")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count.0, 0);
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM production_batches")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count.0, 0);
+}

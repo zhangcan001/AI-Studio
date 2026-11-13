@@ -1,3 +1,4 @@
+import { USAGE_FLOW_CHANGED, USAGE_FLOW_ADDED, USAGE_FLOW_PROOF } from "../usage-flow-successor-guard.mjs";
 import { AUDIT_REPAIR_CHANGED, AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF } from "../audit-repair-successor-guard.mjs";
 import {USABILITY_COMPLETION_CHANGED, USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF} from '../usability-completion-successor-guard.mjs';
 import {STORYBOARD_USAGE_CHANGED, STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF} from '../storyboard-usage-successor-guard.mjs';
@@ -909,8 +910,8 @@ const PARENT_PROOF = 'docs/architecture/ci-shard-fix-successor.json';
 it('validates the standalone ci-consolidate-fix tip and its declared scope', () => {
   const checked = ciConsolidateFixParentReader('.');
   expect(checked.violations).toEqual([]);
-  expect(checked.changedPaths).toEqual([...new Set([...CI_CONSOLIDATE_FIX_CHANGED, ...PIKA_REFERENCE_CHANGED, ...CREATE_PACKAGE_PREVIEW_CHANGED, ...PIKA_FLEX_REFERENCE_CHANGED, ...CREATE_RERUN_SAFETY_CHANGED, ...INPUT_REFRESH_SAFETY_CHANGED, ...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED, ...USABILITY_COMPLETION_CHANGED, ...AUDIT_REPAIR_CHANGED])].sort());
-  expect(checked.addedPaths).toEqual([...new Set([...CI_CONSOLIDATE_FIX_ADDED, CI_CONSOLIDATE_FIX_PROOF, ...PIKA_REFERENCE_ADDED, PIKA_REFERENCE_PROOF, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF, ...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF, ...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF, ...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF, ...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF, ...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF])].sort());
+  expect(checked.changedPaths).toEqual([...new Set([...CI_CONSOLIDATE_FIX_CHANGED, ...PIKA_REFERENCE_CHANGED, ...CREATE_PACKAGE_PREVIEW_CHANGED, ...PIKA_FLEX_REFERENCE_CHANGED, ...CREATE_RERUN_SAFETY_CHANGED, ...INPUT_REFRESH_SAFETY_CHANGED, ...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED, ...USABILITY_COMPLETION_CHANGED, ...AUDIT_REPAIR_CHANGED, ...USAGE_FLOW_CHANGED])].sort());
+  expect(checked.addedPaths).toEqual([...new Set([...CI_CONSOLIDATE_FIX_ADDED, CI_CONSOLIDATE_FIX_PROOF, ...PIKA_REFERENCE_ADDED, PIKA_REFERENCE_PROOF, ...CREATE_PACKAGE_PREVIEW_ADDED, CREATE_PACKAGE_PREVIEW_PROOF, ...PIKA_FLEX_REFERENCE_ADDED, PIKA_FLEX_REFERENCE_PROOF, ...CREATE_RERUN_SAFETY_ADDED, CREATE_RERUN_SAFETY_PROOF, ...INPUT_REFRESH_SAFETY_ADDED, INPUT_REFRESH_SAFETY_PROOF, ...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF, ...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...USAGE_FLOW_ADDED, USAGE_FLOW_PROOF])].sort());
 }, 120000);
 it('projects changed files to the closed parent tip and preserves its proof bytes', () => {
   const checked = ciConsolidateFixParentReader('.');
@@ -921,7 +922,7 @@ it('projects changed files to the closed parent tip and preserves its proof byte
   expect(readFileSync(PARENT_PROOF)).toEqual(execFileSync('git', ['show', `${CI_CONSOLIDATE_FIX_BASE}:${PARENT_PROOF}`]));
 }, 120000);
 it('consolidates every ci-*-fix tip into one single-copy test with all assertions and no raised timeouts', () => {
-  const self = readFileSync('scripts/testing/ci-chain-consolidated.test.mjs', 'utf8');
+  const self = readFileSync('scripts/testing/ci-chain-consolidated.test.mjs', 'utf8').replaceAll('\r\n', '\n');
   for (const name of CONSOLIDATED_TIPS) {
     const original = consolidatedRead(`scripts/testing/${name}.test.mjs`);
     expect(self).toContain(`describe('${name}', () => {`);

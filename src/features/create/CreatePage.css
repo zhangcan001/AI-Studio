@@ -573,3 +573,13 @@
 dialog.image-asset-picker, dialog.media-lightbox { color: var(--text-primary, #e5e7eb); padding: 0; margin: auto; }
 dialog.image-asset-picker::backdrop, dialog.media-lightbox::backdrop { background: rgba(0,0,0,.7); }
 .shot-row-strip > div { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+
+/* Daily workflow dialogs reuse native focus trapping and Escape. */
+dialog.storyboard-review { position: fixed; margin: auto; max-height: 85vh; overflow: auto; color: var(--studio-text-primary); }
+dialog.storyboard-review::backdrop, dialog.storyboard-batch-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+dialog.storyboard-batch-dialog { width: min(1100px, 92vw); max-height: 88vh; overflow: auto; background: var(--studio-surface-1); color: var(--studio-text-primary); border: 1px solid var(--studio-border); border-radius: 12px; }
+.storyboard-pagination, .storyboard-review footer, .result-file-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 10px; }
+.shot-row-entity-search input { max-width: 22rem; }
+.storyboard-badge.queued { color: var(--studio-accent); } .storyboard-badge.paused { color: var(--studio-warning); }
+
+dialog.storyboard-review:not([open]) { display: none; }

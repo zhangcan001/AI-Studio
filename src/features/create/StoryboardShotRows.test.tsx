@@ -66,6 +66,7 @@ it("does not replace saved bindings until the complete initial read succeeds", a
   const initial = deferred<(typeof hero | typeof lane)[]>();
   api.listForShot.mockReturnValue(initial.promise);
   render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  fireEvent.change(screen.getByRole("searchbox", { name: /搜索引用/ }), { target: { value: "雨巷" } });
   const add = await screen.findByTitle("绑定 场景 · 雨巷");
   expect(add.hasAttribute("disabled")).toBe(true);
   expect(screen.getByLabelText("镜头1 提示词").hasAttribute("disabled")).toBe(true);
@@ -80,6 +81,7 @@ it("does not replace saved bindings until the complete initial read succeeds", a
 it("fails closed when saved bindings cannot be read", async () => {
   api.listForShot.mockRejectedValue(new Error("binding read failed"));
   render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  fireEvent.change(screen.getByRole("searchbox", { name: /搜索引用/ }), { target: { value: "雨巷" } });
   const add = await screen.findByTitle("绑定 场景 · 雨巷");
   await screen.findByRole("alert");
   expect(add.hasAttribute("disabled")).toBe(true);
@@ -155,6 +157,7 @@ it("binds/unbinds entities, renames via updateShot, deletes with confirm and gen
   const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
   const list = within(row).getByLabelText("项目角色与场景");
   await within(list).findByTitle("解除绑定 角色 · 阿离");
+  fireEvent.change(screen.getByRole("searchbox", { name: /搜索引用/ }), { target: { value: "雨巷" } });
   fireEvent.click(within(list).getByTitle("绑定 场景 · 雨巷"));
   await waitFor(() => expect(api.bindShot).toHaveBeenCalledWith("p", "a", ["e1", "e2"]));
   fireEvent.click(await within(list).findByTitle("解除绑定 角色 · 阿离"));
@@ -176,8 +179,8 @@ it("binds/unbinds entities, renames via updateShot, deletes with confirm and gen
   fireEvent.click(within(row).getByRole("button", { name: "删除分镜" }));
   await waitFor(() => expect(api.deleteShot).toHaveBeenCalledWith("p", "a"));
   expect(confirm).toHaveBeenCalledTimes(2);
-  fireEvent.click(within(row).getByRole("button", { name: "新建分镜" })); expect(p.onCreate).toHaveBeenCalled();
-  fireEvent.click(within(row).getByRole("button", { name: "详情" })); expect(p.onOpen).toHaveBeenCalled();
+  fireEvent.click(within(row).getByRole("button", { name: "末尾新建分镜" })); expect(p.onCreate).toHaveBeenCalled();
+  fireEvent.click(within(row).getByRole("button", { name: "编辑与详情" })); expect(p.onOpen).toHaveBeenCalled();
 });
 
 it("blocks generation when readiness fails and when no generator is selected", async () => {
@@ -509,6 +512,7 @@ it('shows an alert and retry when story entity list fails, and recovers on retry
   expect(screen.queryByText('素材库中还没有角色与场景')).toBeNull();
   fireEvent.click(within(alert).getByRole('button', { name: '重试角色与场景' }));
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  fireEvent.change(screen.getByRole("searchbox", { name: /搜索引用/ }), { target: { value: "雨巷" } });
   expect(await screen.findByTitle('绑定 场景 · 雨巷')).toBeTruthy();
   expect(api.generate).not.toHaveBeenCalled();
 });
@@ -609,6 +613,7 @@ it("chooses 构图用途 only among the shot's bound compositions and keeps open
 
 it("hides 构图用途 when the shot has no bound composition", async () => {
   render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  fireEvent.change(screen.getByRole("searchbox", { name: /搜索引用/ }), { target: { value: "雨巷" } });
   await screen.findByTitle("绑定 场景 · 雨巷");
   expect(screen.queryByLabelText("镜头1 开场构图")).toBeNull();
 });
@@ -964,5 +969,14 @@ it("previews candidates without selecting and exposes per-Shot review separately
   fireEvent.click(screen.getByRole("button",{name:"预览候选 A"}));await screen.findByRole("dialog");expect(api.selectResult).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button",{name:"关闭"}));fireEvent.click(control);expect(review).toHaveBeenCalledWith("review-shot");
   fireEvent.click(screen.getByRole("button",{name:"选用 A"}));await waitFor(()=>expect(api.selectResult).toHaveBeenCalledWith("p","review-shot","video","candidate-a"));
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("offers explicit selection for a sole candidate without generating or reviewing", async () => {
+  const item=shot("s1",0); item.candidates=[{id:"only",name:"唯一视频",mediaKind:"video",selected:false}];
+  render(<StoryboardShotRows {...props()} items={[item]}/>);
+  const select=await screen.findByRole("button",{name:"选用 唯一视频"});
+  await waitFor(()=>expect(select.hasAttribute("disabled")).toBe(false)); fireEvent.click(select);
+  await waitFor(()=>expect(api.selectResult).toHaveBeenCalledWith("p","s1","video","only"));
   expect(api.generate).not.toHaveBeenCalled();
 });

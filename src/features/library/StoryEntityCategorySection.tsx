@@ -39,6 +39,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [importMode, setImportMode] = useState<"separate" | "group">("separate");
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<StoryEntity | null>(null);
   const [creating, setCreating] = useState(false);
@@ -117,7 +118,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   }
 
   async function importImages() {
-    if (busy) return;
+    if (busy || (formOpen && !window.confirm("当前编辑尚未保存，确定放弃并导入图片？"))) return;
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -127,6 +128,15 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       const result = await productClient.storyEntities.importImages(projectId);
       if (result.cancelled) return;
       failures.push(...result.failed.map(item => `${item.displayName}：${item.error}`));
+      if (importMode === "group" && result.imported.length) {
+        if (!mounted.current) return;
+        openCreate();
+        setDraftName(filenameStem(result.imported[0].originalName || result.imported[0].name));
+        setDraftCover(result.imported[0].id);
+        setDraftImages(result.imported.map(asset => asset.id));
+        setNotice(`已导入 ${result.imported.length} 张图，请确认名称与关联图片后保存为同一${label}。${failures.join("；")}`);
+        return;
+      }
       for (const asset of result.imported) {
         const name = filenameStem(asset.originalName || asset.name);
         if (!name) {
@@ -187,9 +197,10 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     <header className="story-entities-header">
       <div>
         <h2>{label}</h2>
-        <p className="story-entity-import-hint">可批量选择多张图片；每张图片自动创建一项{label}，名称取文件名（不含扩展名），图片同时作为封面和关联图。</p>
+        <p className="story-entity-import-hint">可批量选择多张图片；可每张图片新建一项，也可将本次所选图片归为同一{label}，确认后保存。不按文件名猜测合并。</p>
       </div>
       <div className="story-entity-header-actions">
+        <label>导入方式<select aria-label="实体图片导入方式" value={importMode} disabled={busy} onChange={e => setImportMode(e.target.value as "separate" | "group")}><option value="separate">每张图新建一项</option><option value="group">所选图片归为同一项（确认后保存）</option></select></label>
         <button type="button" onClick={() => void importImages()} disabled={busy || loading}>{busy ? "正在处理…" : `批量导入${label}图片`}</button>
         <button type="button" onClick={openCreate} disabled={busy || loading}>新建{label}</button>
         <button type="button" onClick={() => void reload()} disabled={busy || loading}>刷新</button>

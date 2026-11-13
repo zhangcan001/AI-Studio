@@ -1,3 +1,4 @@
+import { USAGE_FLOW_CHANGED, USAGE_FLOW_ADDED, USAGE_FLOW_PROOF } from "../usage-flow-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -18,8 +19,8 @@ const parentBytes = p => execFileSync('git', ['show', `${AUDIT_REPAIR_BASE}:${p}
 it('verifies the exact audit-repair successor and projects the frozen parent bytes', () => {
   const result = auditRepairParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(AUDIT_REPAIR_CHANGED);
-  expect(result.addedPaths).toEqual([...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...AUDIT_REPAIR_CHANGED, ...USAGE_FLOW_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...USAGE_FLOW_ADDED, USAGE_FLOW_PROOF])].sort());
   for (const p of AUDIT_REPAIR_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

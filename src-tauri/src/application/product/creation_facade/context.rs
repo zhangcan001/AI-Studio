@@ -331,6 +331,19 @@ impl ProductCreationFacade {
         requested_stage: &str,
         limit: usize,
     ) -> Result<CreationWorkbench, ProductError> {
+        self.workbench_page(projects, assets, project_id, requested_stage, limit, 0)
+            .await
+    }
+
+    pub async fn workbench_page(
+        &self,
+        projects: &ProjectCommandCenterService,
+        assets: &AssetQueryService,
+        project_id: &str,
+        requested_stage: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<CreationWorkbench, ProductError> {
         let stage = stage(requested_stage)?;
         self.bindings
             .get(project_id)
@@ -344,9 +357,11 @@ impl ProductCreationFacade {
         let mut shots = self.shots.list(project_id).await.map_err(shot_error)?;
         shots.sort_by_key(|shot| (shot.ordinal, shot.id.clone()));
         let summaries: Vec<_> = shots.iter().map(summary).collect();
-        let truncated = i64::try_from(shots.len().saturating_sub(limit)).unwrap_or(0);
+        let limit = limit.clamp(1, 60);
+        let truncated =
+            i64::try_from(shots.len().saturating_sub(offset.saturating_add(limit))).unwrap_or(0);
         let mut items = Vec::with_capacity(limit.min(shots.len()));
-        for shot in shots.into_iter().take(limit) {
+        for shot in shots.into_iter().skip(offset).take(limit) {
             let projected = project_shot(&shot, stage)?;
             let mut candidates = Vec::new();
             let mut seen = HashSet::new();

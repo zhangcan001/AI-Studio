@@ -93,7 +93,7 @@ it("one player, preview is not selection, explicit selection is not review, miss
 });
 it("failed-to-start is not success, retry uses frozen RunRef despite draft edits",async()=>{
   api.generate.mockResolvedValue({accepted:true,runRef:run().ref,startOutcome:"FAILED_TO_START",startIssue:null});api.runGet.mockResolvedValue(run("FAILED",["RETRY"]));api.retry.mockResolvedValue(run());await start();fireEvent.click(screen.getByRole("button",{name:"生成"}));expect(await screen.findByText("已保存运行，启动失败")).toBeTruthy();
-  setPrompt("edited draft");fireEvent.click(await screen.findByRole("button",{name:"重试原运行"}));await waitFor(()=>expect(api.retry).toHaveBeenCalledWith("owned",{ref:run().ref,selectedItemIds:["original"]}));expect(api.generate).toHaveBeenCalledTimes(1);fireEvent.click(screen.getByRole("button",{name:"查看运行详情"}));expect(nav).toHaveBeenLastCalledWith({kind:"runs",projectId:"owned",run:run().ref});
+  setPrompt("edited draft");fireEvent.click(await screen.findByRole("button",{name:"重试失败项（原输入）"}));await waitFor(()=>expect(api.retry).toHaveBeenCalledWith("owned",{ref:run().ref,selectedItemIds:["original"]}));expect(api.generate).toHaveBeenCalledTimes(1);fireEvent.click(screen.getByRole("button",{name:"查看运行详情"}));expect(nav).toHaveBeenLastCalledWith({kind:"runs",projectId:"owned",run:run().ref});
 });
 it("image previews ignore late owner reads, revoke URLs, and video detaches on unmount",async()=>{
   let finish!:(bytes:number[])=>void;api.imageGet.mockImplementationOnce(()=>new Promise(r=>{finish=r;}));const asset={id:"first",name:"owned image",mediaKind:"image"} as const;
@@ -183,8 +183,8 @@ it("a confirmed generation lets the next explicit unchanged generation use a new
   await start();
   fireEvent.click(screen.getByRole("button", { name: "生成" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(screen.getByRole("button", { name: "继续生成" }).hasAttribute("disabled")).toBe(false));
-  fireEvent.click(screen.getByRole("button", { name: "继续生成" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "按当前设置再生成" }).hasAttribute("disabled")).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "按当前设置再生成" }));
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2));
   expect(api.generate.mock.calls[1][0].values).toEqual(api.generate.mock.calls[0][0].values);
   expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).not.toBe(api.generate.mock.calls[0][0].submissionIdempotencyKey);

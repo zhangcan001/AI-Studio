@@ -1,3 +1,4 @@
+import { usageFlowParentReader, usageFlowScopeSince, usageFlowFixtureFiles, USAGE_FLOW_BASE } from "./usage-flow-successor-guard.mjs";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -94,10 +95,11 @@ export function auditRepairScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...AUDIT_REPAIR_CHANGED, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF,
+    ...usageFlowScopeSince(root, USAGE_FLOW_BASE),
   ])].sort();
 }
 export function auditRepairFixtureFiles(root) {
-  return [...facts(root, AUDIT_REPAIR_BASE).paths, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF];
+  return [...new Set([...facts(root, AUDIT_REPAIR_BASE).paths, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...usageFlowFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -107,9 +109,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, AUDIT_REPAIR_BASE);
+  const successor = usageFlowParentReader(root, override);
+  const workspace = resolve(root), violations = [...successor.violations], parent = facts(workspace, AUDIT_REPAIR_BASE);
   const fail = id => violations.push("audit-repair-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(AUDIT_REPAIR_PROOF));
@@ -123,10 +126,10 @@ function validate(root, override) {
     const allowed = [...scope, AUDIT_REPAIR_PROOF].sort();
     const expected = [...parent.paths, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -141,10 +144,10 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: AUDIT_REPAIR_CHANGED,
-    addedPaths: [...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF],
-    afterHashes: Object.fromEntries([...AUDIT_REPAIR_CHANGED, ...AUDIT_REPAIR_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
-    read: sessionMemoRead(workspace, p => AUDIT_REPAIR_CHANGED.includes(p) ? parent.read(p) : live(p)) };
+  return { violations, changedPaths: [...new Set([...AUDIT_REPAIR_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...AUDIT_REPAIR_CHANGED, ...AUDIT_REPAIR_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
+    read: sessionMemoRead(workspace, p => AUDIT_REPAIR_CHANGED.includes(p) ? parent.read(p) : successor.read(p)) };
 }
 export function auditRepairParentReader(root, override = undefined) {
   if (override) return validate(root, override);

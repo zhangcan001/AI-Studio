@@ -464,7 +464,7 @@ describe("Target14 run", () => {
   });
   it("shows retry only when allowed, preserving the old run locator", async () => {
     api.runGet.mockResolvedValue(run("FAILED", ["RETRY"])); render(<Host />); await loaded(); await readyToGenerate(); fireEvent.click(screen.getByRole("button", { name: "生成" }));
-    fireEvent.click(await screen.findByRole("button", { name: "重试原运行" })); await waitFor(() => expect(api.retry).toHaveBeenCalledWith("project", { ref: { source: "queue-batch", id: "run" }, selectedItemIds: ["old-item"] }));
+    fireEvent.click(await screen.findByRole("button", { name: "重试失败项（原输入）" })); await waitFor(() => expect(api.retry).toHaveBeenCalledWith("project", { ref: { source: "queue-batch", id: "run" }, selectedItemIds: ["old-item"] }));
   });
 });
 describe("Target15 candidates", () => {

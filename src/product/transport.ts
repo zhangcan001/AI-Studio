@@ -43,6 +43,8 @@ interface ProductCommands {
   product_library_list: { args: { projectId: string; query: import("./libraryTypes").LibraryQuery }; result: import("./libraryTypes").LibraryList };
   product_library_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryDetail };
   product_run_results_get: { args: { projectId: string; runRef: RunRef }; result: import("./types").RunResult[] };
+  product_run_result_review_reset: { args: { projectId: string; runRef: RunRef; assetId: string; expectedRevision: number }; result: void };
+  product_asset_reveal: { args: { projectId: string; assetId: string }; result: void };
   product_run_result_review: { args: { projectId: string; request: import("./types").RunResultReviewRequest }; result: void };
   product_run_list: { args: { projectId: string; filter: RunListFilter; cursor: string | null }; result: RunList };
   product_run_start: { args: { projectId: string; runRef: RunRef }; result: ProductRun };
@@ -52,7 +54,8 @@ interface ProductCommands {
   product_creation_readiness_get: { args: { request: CreationSubmission }; result: CreationReadiness };
   product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };
-  product_creation_workbench_get: { args: { projectId: string; stage: "image" | "video"; limit: number }; result: import("./types").CreationWorkbench };
+  product_selected_videos_export: { args: { projectId: string }; result: { exported: number; failed: number; directory: string } | null };
+  product_creation_workbench_get: { args: { projectId: string; stage: "image" | "video"; limit: number; offset?: number }; result: import("./types").CreationWorkbench };
   product_creation_shot_create: { args: { projectId: string }; result: CreationShotSummary };
   product_creation_shot_row_save: { args: { projectId: string; request: import("./types").CreationShotRowSave }; result: import("./types").CreationShotRowSaveResult };
   product_creation_shot_update: { args: { projectId: string; request: CreationShotUpdate }; result: CreationShotSummary };
@@ -69,3 +72,9 @@ export async function productRequest<K extends keyof ProductCommands>(command: K
   try { return await invokeCommand<ProductCommands[K]["result"]>(command, args); }
   catch (error) { throw normalizeProductError(error); }
 }
+
+/** Typed adapters to the existing Shot authority, not another ordering model. */
+export const shotOrderTransport = {
+  list: (projectId: string) => invokeCommand<import("../types/shot").ShotView[]>("shot_list", { projectId }),
+  reorder: (projectId: string, orderedIds: string[]) => invokeCommand<import("../types/shot").ShotView[]>("shot_reorder", { request: { projectId, orderedIds } }),
+};

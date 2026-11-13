@@ -6,8 +6,8 @@ import type { CreationContext, ProductRun } from "../../product/types";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
+const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), shotsList: vi.fn(), shotsReorder: vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { shotsList:api.shotsList,shotsReorder:api.shotsReorder,mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
 // Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
 beforeEach(() => {
@@ -44,7 +44,7 @@ it("UI restore: workbench derives real shot status/stats from the product facade
   api.get.mockImplementation(async (_p: string, shotId: string | null) => context(shotId));
   api.runGet.mockResolvedValue(run("RUNNING", 17, 25));
   const navigate = vi.fn();
-  render(<StoryboardWorkbench route={route} navigate={navigate} />);
+  render(<StoryboardWorkbench route={route} navigate={navigate} renderBatch={()=> <dialog open aria-label="批量准备视频"/>} />);
   const stats = await screen.findByLabelText("镜头统计");
   expect(within(stats).getByText("镜头总数").nextSibling?.textContent).toBe("3");
   expect(within(stats).getByText("已选用").nextSibling?.textContent).toBe("1");
@@ -53,8 +53,9 @@ it("UI restore: workbench derives real shot status/stats from the product facade
   expect(screen.getAllByText("生成中 68%").length).toBeGreaterThan(0);
   fireEvent.click(within(screen.getByRole("article", { name: "镜头03" })).getByRole("button", { name: "生成" }));
   expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "p", stage: "video", shotId: "s3" });
-  fireEvent.click(screen.getByRole("button", { name: "批量生成待制作镜头" }));
-  expect(navigate).toHaveBeenCalledWith({ kind: "project-settings", projectId: "p", section: "advanced-shots" });
+  fireEvent.click(screen.getByRole("button", { name: "批量准备视频" }));
+  expect(await screen.findByRole("dialog", { name: "批量准备视频" })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalledWith({ kind: "project-settings", projectId: "p", section: "advanced-shots" });
   expect(api.generate).not.toHaveBeenCalled();
 });
 
@@ -67,7 +68,7 @@ it("UI restore: empty project shows honest empty state without demo data", async
 });
 
 it("UI restore: status precedence keeps active runs ahead of selection", () => {
-  expect(deriveStoryboardStatus(null, [], run("QUEUED", 0, 1))).toBe("GENERATING");
+  expect(deriveStoryboardStatus(null, [], run("QUEUED", 0, 1))).toBe("QUEUED");
   expect(deriveStoryboardStatus(null, [{ id: "a", name: "a", mediaKind: "video", selected: false }], null)).toBe("REVIEW");
   expect(deriveStoryboardStatus(null, [], run("FAILED", 0, 1))).toBe("FAILED");
   expect(deriveStoryboardStatus(null, [], null)).toBe("TODO");
@@ -137,11 +138,12 @@ it("D3: a waiting queue item without a Task keeps a bounded poll until the Task 
     let task = false;
     api.workbench.mockImplementation(async () => workbenchFrom(id => idleContext(id, task)));
     api.runList.mockResolvedValue({ items: [run("QUEUED", 0, 1)], nextCursor: null, coverage: "" });
-    api.runGet.mockResolvedValue(run("RUNNING", 0, 1));
+    api.runGet.mockImplementation(async (_p, ref) => ref.id === "r-QUEUED" ? { ...run("QUEUED",0,1),detail:{sources:[],inputs:task?[]:[{shotId:"s3",taskId:null,itemId:"pending",executionStatus:"PENDING"}]}} : run("RUNNING",0,1));
     await act(async () => { render(<StoryboardWorkbench route={route} navigate={vi.fn()} />); });
     expect(screen.getByRole("article", { name: "镜头03" })).toBeTruthy();
     expect(interval).toHaveBeenCalledWith(expect.any(Function), 8000);
-    expect(api.runGet).not.toHaveBeenCalled();
+    expect(api.runGet).toHaveBeenCalledWith("p",{source:"production-run",id:"r-QUEUED"});
+    expect(within(screen.getByRole("article",{name:"镜头03"})).getByText("排队中")).toBeTruthy();
     task = true;
     const before = api.workbench.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(7999); });
@@ -334,7 +336,7 @@ it('AUDIT-R03 A successful new-Shot refresh must survive an already in-flight ba
  let release!:(value:typeof initial)=>void;const old=new Promise<typeof initial>(r=>release=r);
  api.workbench.mockReset().mockResolvedValueOnce(initial).mockReturnValueOnce(old).mockResolvedValue(updated);api.createShot.mockResolvedValue(summary);
  render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
- const add=await screen.findAllByRole('button',{name:'新建分镜'});await waitFor(()=>expect(add[0].hasAttribute('disabled')).toBe(false));
+ const add=await screen.findAllByRole('button',{name:'末尾新建分镜'});await waitFor(()=>expect(add[0].hasAttribute('disabled')).toBe(false));
  act(()=>invalidateRuns('p'));await waitFor(()=>expect(api.workbench).toHaveBeenCalledTimes(2));
  fireEvent.click(add[0]);await waitFor(()=>expect(api.createShot).toHaveBeenCalledTimes(1));
  await act(async()=>{release(initial);await old;});
@@ -351,4 +353,35 @@ it('CONTROL explicit manual refresh displays newly created read-model data',asyn
  const updated={...initial,shots:[...initial.shots,summary],items:[...initial.items,{shot:{...initial.items[0].shot,summary,prompt:'',recentRun:null,selectedResultId:null},candidates:[]}]};
  api.workbench.mockReset().mockResolvedValueOnce(initial).mockResolvedValue(updated);
  render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);await screen.findByRole('article',{name:'镜头01'});fireEvent.click(screen.getByRole('button',{name:'刷新'}));await screen.findByRole('article',{name:'手动刷新镜头'});expect(api.workbench).toHaveBeenCalledTimes(2);expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("pages bounded Shot details without generating and preserves the full name index", async()=>{
+ const all=Array.from({length:61},(_,i)=>({id:`page-${i}`,name:`分页镜头${i}`,ordinal:i}));
+ api.workbench.mockImplementation(async(_p,_stage,_limit,offset=0)=>({projectId:"p",projectName:"P",stage:"video",shots:all,items:all.slice(offset,offset+60).map(summary=>({shot:{summary,prompt:"",selectionRef:null,values:{},referenceAssetIds:[],selectedResultId:null,recentRun:null},candidates:[]})),truncated:Math.max(0,all.length-offset-60)}));
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ const next=await screen.findByRole("button",{name:"下一页镜头"});await waitFor(()=>expect(next.hasAttribute("disabled")).toBe(false));fireEvent.click(next);
+ await waitFor(()=>expect(api.workbench).toHaveBeenCalledWith("p","video",60,60));expect(await screen.findByRole("article",{name:"分页镜头60"})).toBeTruthy();expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("moves only through the authoritative complete Shot ordering, not local display order",async()=>{
+ localStorage.setItem("ai-studio.storyboard.view","shots");
+ api.shotsList.mockResolvedValue(shots.map(s=>({...s,projectId:"p"})));api.shotsReorder.mockResolvedValue([]);
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ const row=await screen.findByRole("article",{name:"分镜 3 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"上移"}));
+ await waitFor(()=>expect(api.shotsReorder).toHaveBeenCalledWith("p",["s2","s1","s3"]));expect(api.generate).not.toHaveBeenCalled();
+});
+it("inserts after the requested Shot using a fresh full order and never starts production",async()=>{
+ localStorage.setItem("ai-studio.storyboard.view","shots");api.createShot.mockResolvedValue({id:"inserted",name:"新镜头",ordinal:4});
+ api.shotsList.mockResolvedValue([...shots.map(s=>({...s,projectId:"p"})),{id:"inserted",projectId:"p",ordinal:4}]);api.shotsReorder.mockResolvedValue([]);
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ const row=await screen.findByRole("article",{name:"分镜 3 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"在此后插入"}));
+ await waitFor(()=>expect(api.shotsReorder).toHaveBeenCalledWith("p",["s1","s2","inserted","s3"]));expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("retains the insert failure receipt even after the automatic successful list refresh",async()=>{
+ localStorage.setItem("ai-studio.storyboard.view","shots");api.createShot.mockResolvedValue({id:"retained",name:"已创建",ordinal:4});api.shotsList.mockRejectedValue({code:"PROJECT_READ_FAILED"});
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);const row=await screen.findByRole("article",{name:"分镜 3 镜头02"});
+ const reads=api.workbench.mock.calls.length;fireEvent.click(within(row).getByRole("button",{name:"在此后插入"}));
+ await waitFor(()=>expect(api.workbench.mock.calls.length).toBeGreaterThan(reads));
+ expect((await screen.findByRole("alert")).textContent).toContain("新镜头已创建；排序未完成");expect(api.generate).not.toHaveBeenCalled();
 });

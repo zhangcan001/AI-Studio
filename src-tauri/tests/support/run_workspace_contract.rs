@@ -963,3 +963,112 @@ async fn imported_batch_ambiguous_and_unlinked_inputs_never_guess_a_shot() {
         .iter()
         .all(|input| input.shot_id.is_none() && input.shot_name.is_none()));
 }
+
+#[tokio::test]
+async fn usage_flow_review_reopen_checks_scope_revision_and_never_creates_tasks() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("reopen.db")).await.unwrap();
+    seed_database(&pool, dir.path()).await;
+    let services = build_services(
+        &pool,
+        Arc::new(ControlledComfy::new(ComfyBehavior::Success)),
+        dir.path(),
+    );
+    let locator = completed(&services.queue, &pool).await;
+    let (facade, _) = run_facade(&pool, services.queue.clone());
+    let authorities = details(&pool, services.queue.clone());
+    let result = facade
+        .results_get(PROJECT_ID, locator.clone(), &authorities.projection())
+        .await
+        .unwrap()
+        .remove(0);
+    let foreign = standalone(&pool).await;
+    facade
+        .result_review(
+            PROJECT_ID,
+            RunResultReviewRequest {
+                run_ref: locator.clone(),
+                asset_id: result.asset_id.clone(),
+                decision: "APPROVED".into(),
+                comment: "checked".into(),
+                expected_revision: 0,
+            },
+            &authorities.projection(),
+        )
+        .await
+        .unwrap();
+    let before: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tasks")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(facade
+        .result_review_reset(
+            "prj_absent",
+            locator.clone(),
+            &result.asset_id,
+            1,
+            &authorities.projection()
+        )
+        .await
+        .is_err());
+    assert_eq!(
+        facade
+            .result_review_reset(
+                PROJECT_ID,
+                foreign,
+                &result.asset_id,
+                1,
+                &authorities.projection()
+            )
+            .await
+            .unwrap_err()
+            .code,
+        "RUN_RESULT_NOT_FOUND"
+    );
+    assert_eq!(
+        facade
+            .result_review_reset(
+                PROJECT_ID,
+                locator.clone(),
+                &result.asset_id,
+                0,
+                &authorities.projection()
+            )
+            .await
+            .unwrap_err()
+            .code,
+        "RUN_REVIEW_CONFLICT"
+    );
+    facade
+        .result_review_reset(
+            PROJECT_ID,
+            locator.clone(),
+            &result.asset_id,
+            1,
+            &authorities.projection(),
+        )
+        .await
+        .unwrap();
+    facade
+        .result_review_reset(
+            PROJECT_ID,
+            locator.clone(),
+            &result.asset_id,
+            1,
+            &authorities.projection(),
+        )
+        .await
+        .unwrap();
+    let reopened = facade
+        .results_get(PROJECT_ID, locator, &authorities.projection())
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(reopened.review_state.as_deref(), Some("PENDING"));
+    assert_eq!(reopened.review_revision, Some(2));
+    let after: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tasks")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+}

@@ -103,3 +103,13 @@ it("bounds entity thumbnail reads and cancels queued work on unmount", async () 
   expect(api.thumbnailGet).toHaveBeenCalledTimes(4);
   vi.unstubAllGlobals();
 });
+
+it("groups selected reference views only after explicit preview and save", async () => {
+  api.list.mockResolvedValue([]);api.importImages.mockResolvedValue({imported:[{id:"front",name:"正面.png",originalName:"正面.png"},{id:"side",name:"侧面.png",originalName:"侧面.png"}],failed:[],cancelled:false});
+  render(<StoryEntityCategorySection projectId="project-a" kind="character"/>);
+  fireEvent.change(screen.getByRole("combobox",{name:"实体图片导入方式"}),{target:{value:"group"}});
+  const button=await screen.findByRole("button",{name:"批量导入角色图片"});await waitFor(()=>expect(button.hasAttribute("disabled")).toBe(false));fireEvent.click(button);
+  const name=await screen.findByRole("textbox",{name:"角色名称"});expect(api.create).not.toHaveBeenCalled();
+  fireEvent.change(name,{target:{value:"同一角色"}});fireEvent.click(screen.getByRole("button",{name:"保存"}));
+  await waitFor(()=>expect(api.create).toHaveBeenCalledWith({projectId:"project-a",kind:"character",name:"同一角色",description:"",coverAssetId:"front",imageAssetIds:["front","side"]}));
+});

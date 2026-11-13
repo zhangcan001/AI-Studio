@@ -20,7 +20,7 @@ import type { CreationShotSummary } from "../../product/types";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品", composition: "构图" };
 const KINDS: StoryEntityKind[] = ["scene", "character", "prop", "composition"];
-const FILTERS: (StoryboardShotStatus | "ALL")[] = ["ALL", "TODO", "GENERATING", "REVIEW", "COMPLETED", "FAILED"];
+const FILTERS: (StoryboardShotStatus | "ALL")[] = ["ALL", "TODO", "QUEUED", "GENERATING", "PAUSED", "REVIEW", "COMPLETED", "FAILED"];
 
 interface RowsProps {
   projectId: string;
@@ -31,6 +31,8 @@ interface RowsProps {
   onChanged: () => void;
   onQueue: (ref?: RunRef) => void;
   onReview?: (shotId: string) => void;
+  onMove?: (shotId: string, delta: -1 | 1) => void;
+  onInsert?: (shotId: string) => void;
   shotIndex?: CreationShotSummary[];
 }
 
@@ -42,7 +44,7 @@ interface RowsProps {
  * duration and aspect/resolution persist through creation.updateShot (stage
  * prompt + generator scalar values validated by the selected recipe).
  */
-export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, shotIndex = [] }: RowsProps) {
+export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, onMove, onInsert, shotIndex = [] }: RowsProps) {
   const [query, setQuery] = useProjectSessionState(projectId, "storyboard.search", "", (v): v is string => typeof v === "string");
   const [filter, setFilter] = useProjectSessionState<(typeof FILTERS)[number]>(projectId, "storyboard.filter", "ALL", (v): v is (typeof FILTERS)[number] => FILTERS.includes(v as (typeof FILTERS)[number]));
   const [entities, setEntities] = useState<StoryEntity[]>([]);
@@ -96,7 +98,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     {generatorFailure && <p role="alert" className="storyboard-error">生成器读取失败：{generatorFailure} <button type="button" onClick={() => setGeneratorsRev(v => v + 1)}>重试生成器</button></p>}
     {visible.map(item => <ShotRowCard key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
-      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} />)}
+      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} isLast={shotIndex.length ? item.id === shotIndex[shotIndex.length-1]?.id : item.id === items[items.length-1]?.id} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} onMove={onMove ? delta => onMove(item.id, delta) : undefined} onInsert={onInsert ? () => onInsert(item.id) : undefined} />)}
     {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>以下镜头尚未加载详情，点击打开；状态筛选仅作用于上方已加载镜头。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onOpen(s.id)}>打开{s.name}</button>)}</section>}
     {!visible.length && !unloaded.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
   </section>;
@@ -186,13 +188,17 @@ const SECTION_FIELDS: [keyof ShotPromptSections, string, string][] = [
   ["music", "配乐", "1 句英文；没有配乐留空即可"],
 ];
 
-function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview }: {
+function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview, onMove, onInsert, isLast }: {
   projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
   onRun: (ref: RunRef) => void;
   onReview?: () => void;
+  isLast?: boolean;
+  onMove?: (delta: -1 | 1) => void;
+  onInsert?: () => void;
 }) {
   const lightbox = useMediaLightbox();
+  const [entityQuery, setEntityQuery] = useState("");
   const [bound, setBound] = useState<StoryEntity[]>([]);
   const draftKey = JSON.stringify([projectId, item.id, item.shot?.selectionRef ?? null]);
   const [prompt, setPromptLocal] = useState(() => useStudioStore.getState().storyboardPrompts[draftKey] ?? item.shot?.prompt ?? "");
@@ -556,15 +562,16 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     <div className="shot-row-media">
       <div className="shot-row-preview">{cover ? <CandidateThumbnail asset={cover} playable /> : <span className="storyboard-cover-empty">暂无结果</span>}
         {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} aria-label={`进度 ${percent}%`}>{percent}%</span>}</div>
-      {item.candidates.length > 1 && <div className="shot-row-strip" aria-label="候选结果">{item.candidates.map(asset => <div key={asset.id}>
+      {item.candidates.length > 0 && <div className="shot-row-strip" aria-label="候选结果">{item.candidates.map(asset => <div key={asset.id}>
         <button type="button" title={`预览：${asset.name}`} aria-label={`预览候选 ${asset.name}`} onClick={() => lightbox?.open({kind:"video",projectId,asset})}><CandidateThumbnail asset={asset} playable={false} /></button>
         <button type="button" disabled={disabled || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? "已选用" : `选用 ${asset.name}`}</button>
       </div>)}</div>}
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
     </div>
     <div className="shot-row-actions">
-      <button ref={generateButton} type="button" className="primary" disabled={bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>{item.candidates.length ? "重新生成此镜头" : "生成视频"}</button>
-      <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
+      <button ref={generateButton} type="button" className="primary" disabled={bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>{item.candidates.length ? "按当前设置再生成" : "生成视频"}</button>
+      <label className="shot-row-entity-search">添加引用<input type="search" value={entityQuery} onChange={e => setEntityQuery(e.target.value)} placeholder="搜索角色、场景、道具或构图" aria-label={`${item.name} 搜索引用`} /></label>
+      <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.filter(e => bound.some(b => b.id === e.id) || (entityQuery.trim() && e.name.toLowerCase().includes(entityQuery.trim().toLowerCase()))).map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>
     <div className="shot-row-prompt">
       <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 0.98MP / 50万像素 / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
@@ -605,7 +612,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         </dd></div>}
         <div><dt>画面内容</dt><dd>{content}</dd></div>
       </dl>
-      <div className="shot-row-toolbar"><span>{storyboardStatusLabels[item.status]}</span>{onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}<button type="button" onClick={onOpen}>编辑</button><button type="button" onClick={onOpen}>详情</button></div>
+      <div className="shot-row-toolbar"><span>{storyboardStatusLabels[item.status]}</span>{item.shot?.selectedResultId && <small>保留已选用结果</small>}{onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}<button type="button" onClick={onOpen}>编辑与详情</button></div>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
       {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
       {acceptedRun && <button type="button" onClick={() => onRun(acceptedRun)}>查看已保存运行</button>}
@@ -628,7 +635,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         : <label><span>画幅</span><output title={noGen ?? "当前生成器没有分辨率预设"}>{shotResolution(item.shot)}</output></label>}
       {KINDS.map(kind => <label key={kind}><span>{KIND_LABEL[kind]}</span><output>{byKind[kind].map(e => `@${e.name}`).join("、") || "—"}</output></label>)}
       <div className="shot-row-field-actions">
-        <button type="button" className="success" disabled={disabled} title="新分镜追加到末尾" onClick={onCreate}>新建分镜</button>
+        {onMove && <><button type="button" disabled={disabled || item.ordinal === 0} onClick={() => onMove(-1)}>上移</button><button type="button" disabled={disabled || isLast} onClick={() => onMove(1)}>下移</button></>}
+        {onInsert && <button type="button" disabled={disabled} onClick={onInsert}>在此后插入</button>}
+        <button type="button" className="success" disabled={disabled} title="新分镜追加到末尾" onClick={onCreate}>末尾新建分镜</button>
         <button type="button" className="danger" disabled={disabled} onClick={remove}>删除分镜</button>
         {item.status === "GENERATING" && item.run?.availableActions.includes("CANCEL") && <button type="button" className="danger" disabled={busy} onClick={cancelGeneration}>取消生成</button>}
       </div>

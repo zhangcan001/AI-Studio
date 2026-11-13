@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef } from "react";
+import { productClient } from "../../product/client";
+import { normalizeProductError } from "../../product/errors";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectSessionState } from "../../hooks/useProjectSessionState";
 import { StoryEntityCategorySection } from "./StoryEntityCategorySection";
 import type { StoryEntityKind } from "../../types/storyEntity";
@@ -14,6 +16,9 @@ const ICONS: Record<string, string> = { all: "◷", media: "▦", images: "▣",
 /** Library: toolbar + one-column category nav + responsive thumbnail grid + detail drawer column. */
 export function LibraryPage(props:LibraryProps) {
   const c=useLibraryController(props);
+  const [importing,setImporting]=useState(false),[importNotice,setImportNotice]=useState<string>();
+  const importLock=useRef(false),owner=useRef(props.route.projectId); owner.current=props.route.projectId;
+  const importMedia=async(folder=false)=>{if(importLock.current)return;const project=props.route.projectId;importLock.current=true;setImporting(true);setImportNotice(undefined);try{const result=await productClient.creation.assetsImport(project,folder);if(owner.current!==project)return;if(!result.cancelled){setImportNotice(`导入成功 ${result.imported.length} 项，失败 ${result.failed.length} 项。${result.failed.map(f=>f.displayName+"："+f.error).join("；")}`);await c.refresh();}}catch(cause){if(owner.current===project)setImportNotice(normalizeProductError(cause).message);}finally{importLock.current=false;if(owner.current===project)setImporting(false);}};
   const entityDirty = useRef(false);
   const onEntityDirty = useCallback((dirty: boolean) => { entityDirty.current = dirty; }, []);
   const confirmEntityLeave = () => !entityDirty.current || window.confirm("当前角色/场景/道具有未保存的编辑，确定放弃并切换？");
@@ -34,7 +39,8 @@ export function LibraryPage(props:LibraryProps) {
         <select aria-label="标签" value={c.tagId} onChange={e=>c.setTagId(e.target.value)}><option value="">全部标签</option>{c.tags.map(tag=><option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>
         <label className="library-check"><input type="checkbox" checked={c.favoriteOnly} onChange={e=>c.setFavoriteOnly(e.target.checked)}/>仅收藏</label>
       </div>}
-      {!entityKind&&<button type="button" onClick={()=>void c.refresh()}>刷新</button>}
+      {!entityKind&&<><button type="button" disabled={importing} onClick={()=>void importMedia()}>导入素材</button><button type="button" disabled={importing} onClick={()=>void importMedia(true)}>导入素材文件夹</button><button type="button" onClick={()=>void c.refresh()}>刷新</button></>}
+      {importNotice&&<p role="status">{importNotice}</p>}
       <details className="library-advanced"><summary>高级</summary><div className="library-advanced-body">
         <button type="button" onClick={()=>props.navigate({...props.route,filter:"advanced-assets"})}>素材导入 / 高级设定</button>
         <button type="button" onClick={()=>props.navigate({...props.route,filter:"advanced-prompts"})}>高级提示词编辑器</button>

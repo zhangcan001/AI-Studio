@@ -1,7 +1,7 @@
 import type { CreationAsset, CreationContext, CreationShot, ProductRun } from "../../product/types";
 
 /** Read model for the storyboard workbench. Derived only from product facade state; never invents shots. */
-export type StoryboardShotStatus = "COMPLETED" | "GENERATING" | "REVIEW" | "FAILED" | "TODO";
+export type StoryboardShotStatus = "COMPLETED" | "GENERATING" | "QUEUED" | "PAUSED" | "REVIEW" | "FAILED" | "TODO";
 export interface StoryboardShot {
   id: string;
   name: string;
@@ -12,13 +12,14 @@ export interface StoryboardShot {
   status: StoryboardShotStatus;
   error?: string;
 }
-export const storyboardStatusLabels: Record<StoryboardShotStatus, string> = { COMPLETED: "已选用", GENERATING: "生成中", REVIEW: "待审核", FAILED: "失败", TODO: "待制作" };
-const ACTIVE = new Set<ProductRun["status"]>(["QUEUED", "RUNNING", "PAUSED"]);
+export const storyboardStatusLabels: Record<StoryboardShotStatus, string> = { COMPLETED: "已选用", GENERATING: "生成中", QUEUED: "排队中", PAUSED: "已暂停", REVIEW: "待审核", FAILED: "失败", TODO: "待制作" };
 export function deriveStoryboardStatus(shot: CreationShot | null, candidates: CreationAsset[], run: ProductRun | null): StoryboardShotStatus {
-  if (run && ACTIVE.has(run.status)) return "GENERATING";
+  if (run?.status === "QUEUED") return "QUEUED";
+  if (run?.status === "PAUSED") return "PAUSED";
+  if (run?.status === "RUNNING") return "GENERATING";
+  if (run?.status === "FAILED") return "FAILED";
   if (shot?.selectedResultId || candidates.some(asset => asset.selected)) return "COMPLETED";
   if (candidates.length) return "REVIEW";
-  if (run?.status === "FAILED") return "FAILED";
   return "TODO";
 }
 export function runPercent(run: ProductRun | null): number | null {

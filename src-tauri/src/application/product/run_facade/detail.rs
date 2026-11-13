@@ -26,6 +26,7 @@ pub struct RunShotContext {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunInput {
+    pub execution_status: String,
     pub task_id: Option<String>,
     pub item_id: Option<String>,
     pub shot_id: Option<String>,
@@ -274,6 +275,7 @@ impl ProductRunFacade {
             };
             let (shot_id, shot_name) = input_shot(Some(&id), item_id.as_deref());
             inputs.push(RunInput {
+                execution_status: task.status.clone(),
                 task_id: Some(id),
                 item_id,
                 shot_id,
@@ -306,6 +308,7 @@ impl ProductRunFacade {
             .encode()?;
             let (shot_id, shot_name) = input_shot(None, Some(item.id.as_str()));
             inputs.push(RunInput {
+                execution_status: item.status.as_str().to_owned(),
                 task_id: None,
                 item_id: Some(item.id.as_str().to_owned()),
                 shot_id,
@@ -415,6 +418,34 @@ impl ProductRunFacade {
             }
         }
         Ok(results)
+    }
+
+    /// Reuse the existing revision-checked audit lifecycle, never a local status write.
+    pub async fn result_review_reset(
+        &self,
+        project_id: &str,
+        run_ref: RunRef,
+        asset_id: &str,
+        expected_revision: i64,
+        services: &RunDetailServices<'_>,
+    ) -> Result<(), ProductError> {
+        let results = self.results_get(project_id, run_ref, services).await?;
+        if !results
+            .iter()
+            .any(|r| r.asset_id == asset_id && r.asset_exists)
+        {
+            return Err(ProductError::new(
+                "RUN_RESULT_NOT_FOUND",
+                "结果不存在或不属于此运行。",
+                None,
+            ));
+        }
+        services
+            .artifacts
+            .reset_review(project_id, asset_id, expected_revision)
+            .await
+            .map_err(review_error)?;
+        Ok(())
     }
 
     pub async fn result_review(

@@ -132,6 +132,10 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!detail || result.reviewRevision === null) return;
     await productClient.run.resultReview(route.projectId, { runRef: detail.ref, assetId: result.assetId, decision, comment, expectedRevision: result.reviewRevision });
   });
-  return { list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, remove, retryInput, openShot, reuse, review, refresh };
+  const reopenReview = (result: RunResult) => mutate(async () => {
+    if (!detail || result.reviewRevision === null || !window.confirm("重新打开审核？原审核记录保留。")) return;
+    await productClient.run.resultReviewReset(route.projectId, detail.ref, result.assetId, result.reviewRevision);
+  });
+  return { reopenReview, list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, remove, retryInput, openShot, reuse, review, refresh };
 }
 export type RunsController = ReturnType<typeof useRunsController>;

@@ -12,8 +12,8 @@ import { invalidateRuns } from "../../product/runInvalidation";
 import { useStudioStore } from "../../stores/studioStore";
 import type { LibraryDetail, LibraryList, LibraryCreateIntent } from "../../product/libraryTypes";
 import type { CreationContext, GeneratorOption } from "../../product/types";
-const api=vi.hoisted(()=>({tagsList:vi.fn(),list:vi.fn(),get:vi.fn(),relationsGet:vi.fn(),versionsGet:vi.fn(),imageGet:vi.fn(),useInCreation:vi.fn(),deletionInspect:vi.fn(),delete:vi.fn(),resourceEdit:vi.fn(),creationGet:vi.fn(),generatorsList:vi.fn(),readinessGet:vi.fn(),generate:vi.fn()}));
-vi.mock("../../product/client",()=>({productClient:{storyEntities:{list:async()=>[]},library:{...api,mediaUrl:()=>"http://fixture.invalid/media"},creation:{get:api.creationGet,generatorsList:api.generatorsList,readinessGet:api.readinessGet,generate:api.generate},run:{}}}));
+const api=vi.hoisted(()=>({tagsList:vi.fn(),list:vi.fn(),get:vi.fn(),relationsGet:vi.fn(),versionsGet:vi.fn(),imageGet:vi.fn(),useInCreation:vi.fn(),deletionInspect:vi.fn(),delete:vi.fn(),resourceEdit:vi.fn(),creationGet:vi.fn(),generatorsList:vi.fn(),readinessGet:vi.fn(),generate:vi.fn(),assetsImport:vi.fn()}));
+vi.mock("../../product/client",()=>({productClient:{storyEntities:{list:async()=>[]},library:{...api,mediaUrl:()=>"http://fixture.invalid/media"},creation:{assetsImport:api.assetsImport,get:api.creationGet,generatorsList:api.generatorsList,readinessGet:api.readinessGet,generate:api.generate},run:{}}}));
 const resource={kind:"prompt",id:"prompt-a"} as const;
 const route={kind:"library",projectId:"project-a",filter:"prompts",resource} as const;
 const version={id:"version-a",promptId:"prompt-a",version:1,text:"原始正文",modelVersionId:null,createdAt:"2026-10-02"};
@@ -151,4 +151,11 @@ it("A08 historical images remain readable while ordinary Library blocks new imag
  fireEvent.click(screen.getByRole("button",{name:"用于视频创作"}));
  await waitFor(()=>expect(navigate).toHaveBeenCalledWith({kind:"create",projectId:"project-a",stage:"video"}));
  expect(navigate.mock.calls.some(call=>call[0]?.stage==="image")).toBe(false);
+});
+
+it("offers direct ordinary media import and reports its receipt without starting generation",async()=>{
+ api.assetsImport.mockResolvedValue({imported:[{id:"media"}],failed:[],cancelled:false});
+ render(<LibraryPage route={{kind:"library",projectId:"project-a",filter:"videos"}} navigate={vi.fn()}/>);
+ fireEvent.click(await screen.findByRole("button",{name:"导入素材"}));
+ await waitFor(()=>expect(api.assetsImport).toHaveBeenCalledWith("project-a",false));expect(await screen.findByText(/导入成功 1 项/)).toBeTruthy();expect(api.generate).not.toHaveBeenCalled();
 });

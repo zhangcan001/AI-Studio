@@ -1,4 +1,4 @@
-import { productRequest, productMediaUrl, folderImportTransport } from "./transport";
+import { productRequest, productMediaUrl, folderImportTransport, shotOrderTransport } from "./transport";
 import type { CreationSubmission, CreationShotUpdate, GeneratorBindingSetRequest, RunRef, RunRetryRequest, RunListFilter } from "./types";
 
 export const productClient = {
@@ -33,6 +33,7 @@ export const productClient = {
       productRequest("product_shot_prompt_sections_set", { request: { projectId, shotId, sections } }),
   },
   library: {
+    reveal: (projectId: string, assetId: string) => productRequest("product_asset_reveal", { projectId, assetId }),
     mediaVerify: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_media_verify", { projectId, resource }),
     tagsList: (projectId: string) => productRequest("product_library_tags_list", { projectId }),
     imageGet: (projectId: string, resource: import("./libraryTypes").ResourceRef) => productRequest("product_library_image_get", { projectId, resource }),
@@ -52,6 +53,9 @@ export const productClient = {
     generatorBindingSet: (projectId: string, request: GeneratorBindingSetRequest) => productRequest("product_generator_binding_set", { projectId, request }),
   },
   creation: {
+    shotsList: shotOrderTransport.list,
+    shotsReorder: shotOrderTransport.reorder,
+    exportSelected: (projectId: string) => productRequest("product_selected_videos_export", { projectId }),
     inputsGet: (selection: import("../types/shotVideoInput").VideoInputSelection) => productRequest("product_creation_inputs_get", { selection }),
     inputsSave: (request: import("../types/shotVideoInput").VideoInputSave) => productRequest("product_creation_inputs_save", { request }),
     assetsImport: (projectId: string, folder = false) => productRequest("product_creation_assets_import", { projectId, folder }),
@@ -59,7 +63,7 @@ export const productClient = {
     readinessGet: (request: CreationSubmission) => productRequest("product_creation_readiness_get", { request }),
     generate: (request: CreationSubmission) => productRequest("product_creation_generate", { request }),
     get: (projectId: string, shotId: string | null, stage: "image" | "video") => productRequest("product_creation_get", { projectId, shotId, stage }),
-    workbench: (projectId: string, stage: "image" | "video", limit: number) => productRequest("product_creation_workbench_get", { projectId, stage, limit }),
+    workbench: (projectId: string, stage: "image" | "video", limit: number, offset?: number) => productRequest("product_creation_workbench_get", { projectId, stage, limit, ...(offset ? {offset} : {}) }),
     createShot: (projectId: string) => productRequest("product_creation_shot_create", { projectId }),
     saveShotRow: (projectId: string, request: import("./types").CreationShotRowSave) => productRequest("product_creation_shot_row_save", { projectId, request }),
     updateShot: (projectId: string, request: CreationShotUpdate) => productRequest("product_creation_shot_update", { projectId, request }),
@@ -69,6 +73,7 @@ export const productClient = {
     generatorsList: (projectId: string, stage: "image" | "video", shotId: string | null = null) => productRequest("product_generators_list", { projectId, shotId, stage }),
   },
   run: {
+    resultReviewReset: (projectId: string, runRef: RunRef, assetId: string, expectedRevision: number) => productRequest("product_run_result_review_reset", { projectId, runRef, assetId, expectedRevision }),
     resultsGet: (projectId: string, runRef: RunRef) => productRequest("product_run_results_get", { projectId, runRef }),
     resultReview: (projectId: string, request: import("./types").RunResultReviewRequest) => productRequest("product_run_result_review", { projectId, request }),
     list: (projectId: string, filter: RunListFilter = "all", cursor: string | null = null) => productRequest("product_run_list", { projectId, filter, cursor }),
