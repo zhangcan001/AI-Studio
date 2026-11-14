@@ -1,3 +1,4 @@
+import { reviewLabel } from "./storyboardModel";
 import { ResultFileActions } from "../../components/ResultFileActions";
 import { useEffect, useState } from "react";
 import { productClient } from "../../product/client";
@@ -64,7 +65,7 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
           ? <CreateMediaPreview key={`${route.projectId}:${current.id}:${previewAttempt}`} projectId={route.projectId} asset={current} onUnavailable={() => setUnavailable(previous => new Set([...previous,current.id]))} />
           : <div className="create-video-empty"><span aria-hidden="true">▷</span><h3>{c.run?.status === "RUNNING" ? "正在生成视频" : runLabel ? "查看本次运行" : "让创意开始流动"}</h3><p>{runMessage}</p><small>没有视频时不显示演示素材或模拟进度。</small></div>}
         </div>
-        {current && <div className="create-preview-actions"><div><strong>{current.name}</strong><small>{current.selected ? "已选用；审核状态请在运行详情查看。" : "预览不会选用；选用不等于审核。"}</small></div><button type="button" disabled={c.busy || current.selected || unavailable.has(current.id)} onClick={() => void c.selectResult(current.id)}>选用此结果</button></div>}
+        {current && <div className="create-preview-actions"><div><strong>{current.name}</strong><small>{current.selected ? "已选用；审核状态请在运行详情查看。" : "预览不会选用；选用不等于审核。"}</small></div><button type="button" disabled={c.busy || current.selected || current.reviewState==="REJECTED" || unavailable.has(current.id)} onClick={() => void c.selectResult(current.id)}>选用此结果</button></div>}
         <div className="create-action-row" aria-label="结果操作">
           {current && <ResultFileActions projectId={route.projectId} assetId={current.id}/>}
           {c.run?.availableActions.includes("RETRY") && <button type="button" disabled={c.busy} title="使用原运行快照重新生成" onClick={() => void c.retry()}>重试失败项（原输入）</button>}
@@ -78,7 +79,7 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
       <section className="create-candidate-strip" aria-label="当前镜头候选"><header><h2>当前镜头候选 <small>{candidates.length} 个视频</small></h2><div><button type="button" disabled={c.busy} onClick={() => { void c.refresh(); setUnavailable(new Set()); setPreviewAttempt(n => n+1); }}>刷新结果</button><button type="button" aria-label="在资源库查看视频" onClick={() => c.openLibrary("videos")}>资源库</button></div></header>
         {c.run?.status === "FAILED" && <p>本次生成失败；已有候选和选用状态不会删除。</p>}
         {!candidates.length && <p>尚无此阶段的生成候选。</p>}
-        <div className="create-video-candidates">{candidates.map(asset => <button key={asset.id} type="button" className={`create-candidate-card ${current?.id === asset.id ? "previewing" : ""}`} aria-label={`预览${asset.name}`} aria-pressed={current?.id === asset.id} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /><strong>{asset.name}</strong><span>{asset.selected ? "已选用" : "候选"}</span></button>)}</div>
+        <div className="create-video-candidates">{candidates.map(asset => <button key={asset.id} type="button" className={`create-candidate-card ${current?.id === asset.id ? "previewing" : ""}`} aria-label={`预览${asset.name}`} aria-pressed={current?.id === asset.id} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /><strong>{asset.name}</strong><span>{asset.selected ? "已选用" : "候选"} · {reviewLabel(asset.reviewState)}</span></button>)}</div>
         <small>切换仅预览 · 选用不等于审核 · 其他候选和历史运行保留</small>
       </section>
     </div>

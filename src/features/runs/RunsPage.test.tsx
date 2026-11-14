@@ -24,7 +24,7 @@ beforeEach(() => {
   for (const mock of Object.values(api)) mock.mockReset();
   api.list.mockResolvedValue({ items: [run], nextCursor: null, coverage: "FINITE" }); api.get.mockResolvedValue(run); api.resultsGet.mockResolvedValue([result]);
   api.generatorsList.mockImplementation((_p, stage) => Promise.resolve(stage === "video" ? [generator] : [])); api.creationGet.mockResolvedValue(context); api.readinessGet.mockResolvedValue({ ready: true, issues: [], fieldErrors: [], actions: [] });
-  useStudioStore.getState().resetDraft();
+  useStudioStore.getState().resetDraft();useStudioStore.setState({reviewComments:{}});
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 it("phase4_target_9 edit input creates only a scoped Create intent", async () => {
@@ -337,4 +337,8 @@ it("a confirmed deletion still navigates to the list when its scope is current",
     await waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: "runs", projectId: "project-a", run: undefined }));
     expect(api.delete).toHaveBeenCalledWith("project-a", ref);
   } finally { confirm.mockRestore(); }
+});
+
+it("usage polish restores unsubmitted review comments by project RunRef and asset and clears only a successful submission",async()=>{
+ const navigate=vi.fn(),route={kind:"runs" as const,projectId:"project-a",run:ref};const view=render(<RunsPage route={route} navigate={navigate}/>);fireEvent.change(await screen.findByLabelText("审核说明"),{target:{value:"A unsent"}});const b={source:"task" as const,id:"other-run"};api.get.mockResolvedValue({...run,ref:b});view.rerender(<RunsPage route={{...route,run:b}} navigate={navigate}/>);await waitFor(()=>expect((screen.getByLabelText("审核说明") as HTMLInputElement).value).toBe(""));fireEvent.change(screen.getByLabelText("审核说明"),{target:{value:"B unsent"}});api.get.mockResolvedValue(run);view.rerender(<RunsPage route={route} navigate={navigate}/>);await waitFor(()=>expect((screen.getByLabelText("审核说明") as HTMLInputElement).value).toBe("A unsent"));api.resultReview.mockRejectedValueOnce({code:"INVALID_INPUT"});fireEvent.click(screen.getByRole("button",{name:"审核拒绝"}));await screen.findByRole("alert");expect((screen.getByLabelText("审核说明") as HTMLInputElement).value).toBe("A unsent");api.resultReview.mockResolvedValue(undefined);fireEvent.click(screen.getByRole("button",{name:"审核拒绝"}));await waitFor(()=>expect((screen.getByLabelText("审核说明") as HTMLInputElement).value).toBe(""));expect(useStudioStore.getState().reviewComments[JSON.stringify(["project-a",b.source,b.id,result.assetId])]).toBe("B unsent");expect(api.generate).not.toHaveBeenCalled();
 });

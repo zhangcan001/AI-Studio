@@ -65,7 +65,7 @@ export interface CreationShot {
   selectedResultId: string | null;
   recentRun: RunRef | null;
 }
-export interface CreationAsset { id: string; name: string; mediaKind: "image" | "video" | "audio"; selected: boolean; thumbnailBytes?: number[] | null }
+export interface CreationAsset { reviewState?: string|null; id: string; name: string; mediaKind: "image" | "video" | "audio"; selected: boolean; thumbnailBytes?: number[] | null }
 export interface CreationContext {
   projectId: string;
   projectName: string;

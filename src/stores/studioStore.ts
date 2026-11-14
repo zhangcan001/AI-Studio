@@ -7,7 +7,12 @@ import type {
   StudioReuseProvenance,
 } from "../types/generation";
 
+export interface StoryboardFieldDraft { name?: string; duration?: string; sections?: Partial<import("../types/storyEntity").ShotPromptSections> }
 interface StudioState {
+  storyboardFields: Record<string, StoryboardFieldDraft>;
+  setStoryboardField: <K extends keyof StoryboardFieldDraft>(key: string, field: K, value: StoryboardFieldDraft[K]) => void;
+  reviewComments: Record<string,string>;
+  setReviewComment: (key:string, value:string|undefined)=>void;
   storyboardPrompts: Record<string, string>;
   setStoryboardPrompt: (key: string, prompt: string | undefined) => void;
   creationLabReturn?: { scope: string; route?: Extract<import("../app/routes/types").AppRoute, {kind: "create"}>; selectionRef: string; runRef: import("../product/types").RunRef | null; accepted: import("../product/types").CreationAccepted | null };
@@ -44,6 +49,15 @@ interface StudioState {
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
+  storyboardFields: {},
+  setStoryboardField: (key,field,value)=>set(state=>{
+    const storyboardFields={...state.storyboardFields}, next={...storyboardFields[key]};
+    if(value===undefined)delete next[field];else Object.assign(next,{[field]:value});
+    if(Object.keys(next).length)storyboardFields[key]=next;else delete storyboardFields[key];
+    return {storyboardFields};
+  }),
+  reviewComments: {},
+  setReviewComment:(key,value)=>set(state=>{const reviewComments={...state.reviewComments};if(value===undefined||value==='')delete reviewComments[key];else reviewComments[key]=value;return {reviewComments};}),
   storyboardPrompts: {},
   setStoryboardPrompt: (key, prompt) => set(state => {
     const storyboardPrompts = { ...state.storyboardPrompts };

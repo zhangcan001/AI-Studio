@@ -13,6 +13,7 @@ mod submission;
 pub use submission::*;
 
 pub struct ProductCreationFacade {
+    artifacts: Option<Arc<crate::application::artifact_service::ArtifactService>>,
     catalog: Arc<GenerationCatalogService>,
     bindings: Arc<ProjectWorkflowBindingService>,
     shots: Arc<ShotService>,
@@ -43,11 +44,20 @@ impl ProductCreationFacade {
         registry: Arc<crate::application::workflow_registry_service::WorkflowRegistryService>,
     ) -> Self {
         Self {
+            artifacts: None,
             catalog,
             bindings,
             shots,
             registry,
         }
+    }
+
+    pub fn with_artifacts(
+        mut self,
+        artifacts: Arc<crate::application::artifact_service::ArtifactService>,
+    ) -> Self {
+        self.artifacts = Some(artifacts);
+        self
     }
 
     pub async fn generators_list(

@@ -15,6 +15,7 @@ export const productMediaUrl = buildAssetMediaUrl;
 import type { CreationSubmission, CreationReadiness, CreationAccepted, CreationContext, CreationShot, CreationShotSummary, CreationShotUpdate, GeneratorBindingSetRequest, GeneratorBindingSummary, GeneratorOption, ProductRun, ProjectOverview, RunRef, RunRetryRequest, RunList, RunListFilter } from "./types";
 
 interface ProductCommands {
+  product_creation_shots_configure: {args:{projectId:string;request:{shotIds:string[];selectionRef:string;values:import("../types/shot").ShotInputValues}};result:{projectId:string;stage:string;configuredShotIds:string[]}};
   product_creation_inputs_get: { args: { selection: import("../types/shotVideoInput").VideoInputSelection }; result: import("../types/shotVideoInput").VideoInputView };
   product_creation_inputs_save: { args: { request: import("../types/shotVideoInput").VideoInputSave }; result: import("../types/shotVideoInput").VideoInputView };
   product_creation_assets_import: { args: { projectId: string; folder: boolean }; result: import("../types/shotVideoInput").SourceInputImport };

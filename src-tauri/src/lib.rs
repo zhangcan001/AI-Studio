@@ -1281,6 +1281,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::product::product_creation_shot_delete,
             commands::product::product_creation_references_set,
             commands::product::product_creation_result_select,
+            commands::product::product_creation_shots_configure,
             commands::product::product_generators_list,
             commands::product::product_generator_binding_set,
             commands::product::product_run_list,

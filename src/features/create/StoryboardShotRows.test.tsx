@@ -26,6 +26,7 @@ const generator = { selectionRef: "sel", name: "H3", version: "1", mode: "t2v", 
   resolutionPresets: [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }, { id: "mp-2_09-9x16", label: "2.09MP · 1088×1920", width: 1088, height: 1920 }] };
 const props = () => ({ projectId: "p", busy: false, onOpen: vi.fn(), onCreate: vi.fn(), onChanged: vi.fn(), onQueue: vi.fn() });
 beforeEach(() => {
+  useStudioStore.setState({storyboardFields:{},reviewComments:{}});
   sessionStorage.clear();useStudioStore.setState({storyboardPrompts:{}});
   api.list.mockResolvedValue([hero, lane]); api.listForShot.mockResolvedValue([hero]);
   api.bindShot.mockImplementation(async (_p: string, _s: string, ids: string[]) => [hero, lane].filter(e => ids.includes(e.id)));
@@ -979,4 +980,19 @@ it("offers explicit selection for a sole candidate without generating or reviewi
   await waitFor(()=>expect(select.hasAttribute("disabled")).toBe(false)); fireEvent.click(select);
   await waitFor(()=>expect(api.selectResult).toHaveBeenCalledWith("p","s1","video","only"));
   expect(api.generate).not.toHaveBeenCalled();
+});
+
+it.each(["name","duration","sections"] as const)("usage polish retains failed %s edits across filter unmount with exact Recipe ownership",async(field)=>{
+ api.updateShot.mockRejectedValue({code:"INVALID_INPUT"});api.setPromptSections.mockRejectedValue({code:"INVALID_INPUT"});const item=shot("draft-owner",0);render(<StoryboardShotRows projectId="p" items={[item]} busy={false} onOpen={vi.fn()} onCreate={vi.fn()} onChanged={vi.fn()} onQueue={vi.fn()}/>);
+ const label=field==="name"?"镜头1 名称":field==="duration"?"镜头1 时长（秒）":"镜头1 风格";const input=await screen.findByLabelText(label);await waitFor(()=>expect((input as HTMLInputElement).disabled).toBe(false));if(field==="sections")await waitFor(()=>expect(screen.queryByText("正在读取提示词分段，读取完成后可保存。")).toBeNull());
+ const value=field==="name"?"unsaved name":field==="duration"?"9":"unsaved style";fireEvent.change(input,{target:{value}});fireEvent.blur(input);await screen.findByRole("alert");fireEvent.click(screen.getByRole("button",{name:"失败"}));expect(screen.queryByLabelText(label)).toBeNull();fireEvent.click(screen.getByRole("button",{name:"全部"}));await waitFor(()=>expect((screen.getByLabelText(label) as HTMLInputElement).value).toBe(value));expect(screen.getByRole("region",{name:"未保存的镜头字段"})).toBeTruthy();expect(api.generate).not.toHaveBeenCalled();
+});
+it("usage polish filters actual pending review independently of selection and blocks rejected row selection",async()=>{
+ const pending={...shot("pending",0),status:"COMPLETED" as const,candidates:[{id:"pending-video",name:"pending video",mediaKind:"video" as const,selected:true,reviewState:"PENDING"}]};pending.shot!.selectedResultId="pending-video";
+ const approved={...shot("approved",1),status:"REVIEW" as const,candidates:[{id:"approved-video",name:"approved video",mediaKind:"video" as const,selected:false,reviewState:"APPROVED"}]};const rejected={...shot("rejected",2),candidates:[{id:"rejected-video",name:"rejected video",mediaKind:"video" as const,selected:false,reviewState:"REJECTED"}]};render(<StoryboardShotRows projectId="p" items={[pending,approved,rejected]} busy={false} onOpen={vi.fn()} onCreate={vi.fn()} onChanged={vi.fn()} onQueue={vi.fn()}/>);
+ await screen.findByText("已退回");expect((screen.getByRole("button",{name:"选用 rejected video"}) as HTMLButtonElement).disabled).toBe(true);fireEvent.click(screen.getByRole("button",{name:"待审核"}));expect(screen.getByRole("article",{name:"分镜 1 镜头1"})).toBeTruthy();expect(screen.queryByRole("article",{name:"分镜 2 镜头2"})).toBeNull();fireEvent.click(screen.getByRole("button",{name:"待选用"}));expect(screen.queryByRole("article",{name:"分镜 1 镜头1"})).toBeNull();expect(screen.getByRole("article",{name:"分镜 2 镜头2"})).toBeTruthy();expect(api.selectResult).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("usage polish isolates retained field drafts between exact Recipes and clears a successful field save",async()=>{
+ api.generatorsList.mockResolvedValue([generator,{...generator,selectionRef:"second-recipe"}]);api.updateShot.mockRejectedValueOnce({code:"INVALID_INPUT"});const props={projectId:"p",items:[shot("draft-identity",0)],busy:false,onOpen:vi.fn(),onCreate:vi.fn(),onChanged:vi.fn(),onQueue:vi.fn()};const view=render(<StoryboardShotRows {...props}/>);const field=await screen.findByLabelText("镜头1 时长（秒）");await waitFor(()=>expect((field as HTMLInputElement).disabled).toBe(false));fireEvent.change(field,{target:{value:"9"}});fireEvent.blur(field);await screen.findByRole("alert");view.rerender(<StoryboardShotRows {...props} items={[shot("draft-identity",0,"second-recipe")]}/>);await waitFor(()=>expect((screen.getByLabelText("镜头1 时长（秒）") as HTMLInputElement).value).toBe("5"));view.rerender(<StoryboardShotRows {...props}/>);await waitFor(()=>expect((screen.getByLabelText("镜头1 时长（秒）") as HTMLInputElement).value).toBe("9"));api.updateShot.mockResolvedValue({});fireEvent.click(screen.getByRole("button",{name:"重试保存时长"}));await waitFor(()=>expect(useStudioStore.getState().storyboardFields[JSON.stringify(["p","draft-identity","sel"])]).toBeUndefined());expect(api.generate).not.toHaveBeenCalled();
 });

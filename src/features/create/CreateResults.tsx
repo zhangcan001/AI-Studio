@@ -1,3 +1,4 @@
+import { reviewLabel } from "./storyboardModel";
 import { useEffect, useState } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
@@ -35,7 +36,7 @@ export function CandidatePanel({ controller: c, route }: { controller: CreateCon
   return <section aria-label="当前镜头候选"><h2>当前镜头候选</h2><button type="button" disabled={c.busy} onClick={() => void c.refresh()}>刷新结果</button>
     {c.run?.status === "FAILED" && <p>本次生成失败；已有候选和选用状态不会删除。</p>}
     {!candidates.length && <p>尚无此阶段的生成候选。</p>}<div className="create-candidates">{candidates.map(asset => <article key={asset.id} className={asset.selected ? "selected" : ""}>
-      <AssetPreview asset={asset} projectId={route.projectId} /><p>{asset.name}</p><strong>{asset.selected ? "已选用" : "待选择"}</strong><button type="button" disabled={c.busy || asset.selected} onClick={() => void c.selectResult(asset.id)}>选用此结果</button>
+      <AssetPreview asset={asset} projectId={route.projectId} /><p>{asset.name}</p><small>{reviewLabel(asset.reviewState)}</small><strong>{asset.selected ? "已选用" : "待选择"}</strong><button type="button" title={asset.reviewState==="REJECTED"?"已退回，请先重新审核后再选用":undefined} disabled={c.busy || asset.selected || asset.reviewState==="REJECTED"} onClick={() => void c.selectResult(asset.id)}>选用此结果</button>
     </article>)}</div><small>选用不等于审核；其他候选与历史运行会保留。</small></section>;
 }
 /** Readiness + errors for the composer; the composer's submit button is the only generate trigger. */

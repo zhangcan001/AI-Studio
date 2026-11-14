@@ -1,6 +1,7 @@
 import type { GeneratorBindingSummary, RunRef } from "./types";
 
 const messages = {
+  RESULT_REJECTED: "此视频已退回，请先重新审核后再选用。",
   ENTITY_REFERENCE_INVALID: "角色或场景引用未就绪：请在当前镜头选择 REF2VA 并应用参考图；修改项目默认生成器不会替换已有镜头。",
   SHOT_VIDEO_INPUT_CONFLICT: "镜头输入已被更新，请刷新后重新保存；当前修改未覆盖服务器。",
   SHOT_VIDEO_INPUT_COMBINATION_INVALID: "参考图最多 9 个、参考视频最多 3 个、参考音频最多 3 个，合计不超过 12 个，且不能只有音频。",

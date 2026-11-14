@@ -1,3 +1,4 @@
+import { useStudioStore } from "../../stores/studioStore";
 import { ResultFileActions } from "../../components/ResultFileActions";
 import { useEffect, useState } from "react";
 import { productClient } from "../../product/client";
@@ -9,9 +10,12 @@ function Thumbnail({ bytes }: { bytes: number[] }) {
   return <img src={url} alt="生成结果" />;
 }
 const reviewLabels: Record<string, string> = { PENDING: "待审核", APPROVED: "已通过", REJECTED: "已拒绝" };
-function ReviewActions({ result, controller: c }: { result: RunResult; controller: RunsController }) {
-  const [comment, setComment] = useState("");
-  return <div className="run-review-actions"><label>审核说明<input value={comment} onChange={event => setComment(event.target.value)} disabled={c.busy} /></label><button type="button" disabled={c.busy} onClick={() => void c.review(result, "APPROVED", comment)}>审核通过</button><button type="button" disabled={c.busy || !comment.trim()} onClick={() => void c.review(result, "REJECTED", comment)}>审核拒绝</button></div>;
+function ReviewActions({ result, controller: c, route }: { result: RunResult; controller: RunsController; route:RunsProps["route"] }) {
+  const key=JSON.stringify([route.projectId,route.run?.source,route.run?.id,result.assetId]);
+  const comment=useStudioStore(state=>state.reviewComments[key]??"");
+  const setComment=(text:string)=>useStudioStore.getState().setReviewComment(key,text);
+  const submit=async(decision:"APPROVED"|"REJECTED")=>{if(await c.review(result,decision,comment)===true&&useStudioStore.getState().reviewComments[key]===comment)useStudioStore.getState().setReviewComment(key,undefined);};
+  return <div className="run-review-actions"><label>审核说明<input value={comment} onChange={event => setComment(event.target.value)} disabled={c.busy} /></label><small>未提交说明仅在本次会话内保留，切换记录后可恢复。</small><button type="button" disabled={c.busy} onClick={() => void submit("APPROVED")}>审核通过</button><button type="button" disabled={c.busy || !comment.trim()} onClick={() => void submit("REJECTED")}>审核拒绝</button></div>;
 }
 export function RunResults({ controller: c, route, navigate }: RunsProps & { controller: RunsController }) {
   return <section><h3>结果</h3><p>执行成功、素材存在、审核通过与镜头选用是四个独立事实。</p><div className="run-results">{c.results.map(result => <article key={result.assetId}>
@@ -19,6 +23,6 @@ export function RunResults({ controller: c, route, navigate }: RunsProps & { con
     {result.mediaKind === "video" && result.assetExists && result.availability === "available" && <video controls preload="metadata" src={productClient.creation.mediaUrl(route.projectId, result.assetId)} />}
     {result.mediaKind === "video" && result.assetExists && <ResultFileActions projectId={route.projectId} assetId={result.assetId}/>}<strong>{result.name}</strong><p>{result.assetExists ? result.availability === "missing" ? "素材文件缺失" : "素材存在" : "素材不存在"} · {result.reviewState ? reviewLabels[result.reviewState] ?? "审核状态未知" : "无审核记录"} · {result.selectedShotIds.length ? "镜头已选用" : "镜头未选用"}</p>
     <button type="button" disabled={!result.assetExists} onClick={() => navigate({ kind: "library", projectId: route.projectId, resource: { kind: "asset", id: result.assetId } })}>在素材库查看</button>
-    {result.reviewRevision !== null && result.assetExists && (result.reviewState === "PENDING" ? <ReviewActions result={result} controller={c} /> : <button type="button" disabled={c.busy} onClick={() => void c.reopenReview(result)}>重新审核</button>)}
+    {result.reviewRevision !== null && result.assetExists && (result.reviewState === "PENDING" ? <ReviewActions result={result} controller={c} route={route} /> : <button type="button" disabled={c.busy} onClick={() => void c.reopenReview(result)}>重新审核</button>)}
   </article>)}</div>{!c.results.length && <p>暂无结果。不会把任务成功当作素材已存在。</p>}</section>;
 }

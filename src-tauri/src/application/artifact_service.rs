@@ -200,6 +200,45 @@ impl ArtifactService {
         }
     }
 
+    /// Review projection for owned candidate task links, including historical links
+    /// whose Task may no longer be present. Repository scope remains authoritative.
+    pub async fn review_states_for_tasks(
+        &self,
+        project_id: &str,
+        task_ids: &[String],
+    ) -> Result<std::collections::BTreeMap<String, String>, ArtifactServiceError> {
+        let ids = task_ids
+            .iter()
+            .map(|id| {
+                TaskId::parse(id.clone())
+                    .map_err(|error| ArtifactServiceError::InvalidInput(error.to_string()))
+            })
+            .collect::<Result<std::collections::HashSet<_>, _>>()?;
+        let records = self
+            .artifact_repository
+            .list_for_tasks(project_id, &ids.into_iter().collect::<Vec<_>>())
+            .await?;
+        Ok(records
+            .into_iter()
+            .filter_map(|record| {
+                let artifact = record.artifact;
+                if artifact.asset.project_id != project_id
+                    || artifact.asset.source_task_id.as_ref() != Some(&artifact.task_id)
+                {
+                    return None;
+                }
+                let review = record.review?;
+                if review.project_id != project_id || review.artifact_id != artifact.asset.id {
+                    return None;
+                }
+                Some((
+                    artifact.asset.id.as_str().to_owned(),
+                    review.decision.as_str().to_owned(),
+                ))
+            })
+            .collect())
+    }
+
     /// Read outputs for exact, project-owned tasks, including standalone history.
     pub async fn task_artifacts(
         &self,

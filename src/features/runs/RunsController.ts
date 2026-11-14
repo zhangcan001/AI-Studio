@@ -69,10 +69,10 @@ export function useRunsController({ route, navigate }: RunsProps) {
     return () => { ++epoch.current; unsubscribe(); clearTimeout(notification); clearInterval(timer); };
   }, [refresh]);
   async function mutate(action: () => Promise<unknown>) {
-    if (actionLock.current) return;
+    if (actionLock.current) return false;
     actionLock.current = true; setBusy(true); setActionError(undefined); const owner = scope;
-    try { await action(); invalidateRuns(route.projectId); }
-    catch (error) { if (owner === liveScope.current) setActionError(normalizeProductError(error).message); }
+    try { await action(); invalidateRuns(route.projectId); return true; }
+    catch (error) { if (owner === liveScope.current) setActionError(normalizeProductError(error).message); return false; }
     finally { actionLock.current = false; setBusy(false); }
   }
   const action = (kind: "START" | "PAUSE" | "CANCEL" | "RETRY") => mutate(async () => {
@@ -128,10 +128,13 @@ export function useRunsController({ route, navigate }: RunsProps) {
       }
     }
   });
-  const review = (result: RunResult, decision: "APPROVED" | "REJECTED", comment = "") => mutate(async () => {
-    if (!detail || result.reviewRevision === null) return;
-    await productClient.run.resultReview(route.projectId, { runRef: detail.ref, assetId: result.assetId, decision, comment, expectedRevision: result.reviewRevision });
-  });
+  const review = async (result: RunResult, decision: "APPROVED" | "REJECTED", comment = "") => {
+    if (!detail || result.reviewRevision === null) return false;
+    const expectedRevision=result.reviewRevision;
+    return mutate(async () => {
+    await productClient.run.resultReview(route.projectId, { runRef: detail.ref, assetId: result.assetId, decision, comment, expectedRevision });
+    });
+  };
   const reopenReview = (result: RunResult) => mutate(async () => {
     if (!detail || result.reviewRevision === null || !window.confirm("重新打开审核？原审核记录保留。")) return;
     await productClient.run.resultReviewReset(route.projectId, detail.ref, result.assetId, result.reviewRevision);

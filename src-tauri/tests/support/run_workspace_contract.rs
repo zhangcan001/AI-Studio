@@ -1072,3 +1072,184 @@ async fn usage_flow_review_reopen_checks_scope_revision_and_never_creates_tasks(
         .unwrap();
     assert_eq!(before, after);
 }
+
+#[tokio::test]
+async fn usage_polish_candidate_reviews_and_selection_share_authority_without_new_tasks() {
+    use super::creation_context_contract::creation_context_services;
+    use ai_studio_lib::application::ports::ShotRepository;
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("review-polish.db"))
+        .await
+        .unwrap();
+    seed_database(&pool, dir.path()).await;
+    let services = build_services(
+        &pool,
+        Arc::new(ControlledComfy::new(ComfyBehavior::Success)),
+        dir.path(),
+    );
+    let locator = completed(&services.queue, &pool).await;
+    let (runs, _) = run_facade(&pool, services.queue.clone());
+    let authorities = details(&pool, services.queue.clone());
+    let result = runs
+        .results_get(PROJECT_ID, locator.clone(), &authorities.projection())
+        .await
+        .unwrap()
+        .remove(0);
+    let (creation, assets) = creation_context_services(&pool);
+    let creation =
+        creation.with_artifacts(Arc::new(details(&pool, services.queue.clone()).artifacts));
+    let shot = creation.create_shot(PROJECT_ID).await.unwrap();
+    let task_id = assets
+        .get(PROJECT_ID, &result.asset_id)
+        .await
+        .unwrap()
+        .source_task_id
+        .unwrap();
+    SqliteShotRepository::new(pool.clone())
+        .link_generation(
+            PROJECT_ID,
+            &shot.id,
+            ai_studio_lib::domain::ShotStage::Video,
+            &task_id,
+            None,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let context = creation
+        .get(
+            &command_center(&pool),
+            &assets,
+            PROJECT_ID,
+            Some(&shot.id),
+            "video",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        context.candidates[0].review_state.as_deref(),
+        Some("PENDING")
+    );
+    creation
+        .select_result(&assets, PROJECT_ID, &shot.id, "video", &result.asset_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        runs.results_get(PROJECT_ID, locator.clone(), &authorities.projection())
+            .await
+            .unwrap()[0]
+            .review_state
+            .as_deref(),
+        Some("PENDING")
+    );
+    runs.result_review(
+        PROJECT_ID,
+        RunResultReviewRequest {
+            run_ref: locator.clone(),
+            asset_id: result.asset_id.clone(),
+            decision: "REJECTED".into(),
+            comment: "needs editing".into(),
+            expected_revision: 0,
+        },
+        &authorities.projection(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        creation
+            .select_result(&assets, PROJECT_ID, &shot.id, "video", &result.asset_id)
+            .await
+            .unwrap_err()
+            .code,
+        "RESULT_REJECTED"
+    );
+    let board = creation
+        .workbench_page(&command_center(&pool), &assets, PROJECT_ID, "video", 60, 0)
+        .await
+        .unwrap();
+    let item = board
+        .items
+        .iter()
+        .find(|item| item.shot.summary.id == shot.id)
+        .unwrap();
+    assert_eq!(item.candidates[0].review_state.as_deref(), Some("REJECTED"));
+    assert_eq!(
+        item.shot.selected_result_id.as_deref(),
+        Some(result.asset_id.as_str())
+    );
+    assert!(authorities
+        .artifacts
+        .review_states_for_tasks("prj_foreign", &[task_id.clone()])
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        authorities
+            .artifacts
+            .review_states_for_tasks(PROJECT_ID, &[task_id.clone(), task_id])
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    runs.result_review_reset(
+        PROJECT_ID,
+        locator.clone(),
+        &result.asset_id,
+        1,
+        &authorities.projection(),
+    )
+    .await
+    .unwrap();
+    creation
+        .select_result(&assets, PROJECT_ID, &shot.id, "video", &result.asset_id)
+        .await
+        .unwrap();
+    runs.result_review(
+        PROJECT_ID,
+        RunResultReviewRequest {
+            run_ref: locator,
+            asset_id: result.asset_id.clone(),
+            decision: "APPROVED".into(),
+            comment: "checked".into(),
+            expected_revision: 2,
+        },
+        &authorities.projection(),
+    )
+    .await
+    .unwrap();
+    let context = creation
+        .get(
+            &command_center(&pool),
+            &assets,
+            PROJECT_ID,
+            Some(&shot.id),
+            "video",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        context.candidates[0].review_state.as_deref(),
+        Some("APPROVED")
+    );
+    assert!(creation
+        .select_result(&assets, "prj_foreign", &shot.id, "video", &result.asset_id)
+        .await
+        .is_err());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        before
+    );
+    assert!(sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .is_empty());
+}

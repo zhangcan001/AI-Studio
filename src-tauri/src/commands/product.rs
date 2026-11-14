@@ -493,6 +493,31 @@ fn run_details(state: &AppState) -> RunDetailServices<'_> {
     }
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreationShotsConfigureRequest {
+    pub shot_ids: Vec<String>,
+    pub selection_ref: String,
+    pub values: std::collections::BTreeMap<String, super::generation::InputValueDto>,
+}
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_creation_shots_configure(
+    state: State<'_, AppState>,
+    project_id: String,
+    request: CreationShotsConfigureRequest,
+) -> Result<crate::application::shot_bulk_service::BulkStageConfigResult, ProductError> {
+    let values = row_scalar_values(Some(request.values))?.unwrap_or_default();
+    creation(&state)
+        .configure_shots(
+            &state.shots.bulk,
+            &project_id,
+            &request.selection_ref,
+            request.shot_ids,
+            values,
+        )
+        .await
+}
+
 fn creation(state: &AppState) -> ProductCreationFacade {
     ProductCreationFacade::new(
         state.catalog.generation.clone(),
@@ -500,6 +525,7 @@ fn creation(state: &AppState) -> ProductCreationFacade {
         state.shots.shot.clone(),
         state.workflow.registry.clone(),
     )
+    .with_artifacts(state.assets.artifact.clone())
 }
 
 #[tauri::command(rename_all = "camelCase")]

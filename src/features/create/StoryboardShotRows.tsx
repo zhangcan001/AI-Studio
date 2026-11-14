@@ -11,7 +11,7 @@ import { explicitEntityMentions, parseShotPrompt, resolvePreset, resolvePromptSe
 import { defaultGenerator, draftFor } from "./createModel";
 import type { VideoInputView } from "../../types/shotVideoInput";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
-import { coverAsset, runProgressText, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
+import { candidateReviewSummary, hasPendingReview, reviewLabel, coverAsset, runProgressText, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 import { SHOT_DURATION_LIMIT_MESSAGE, shotDurationIssue, shotDurationMax } from "../../product/shotDuration";
 import { h3PromptHints } from "../../product/promptLanguage";
 import { useStudioStore } from "../../stores/studioStore";
@@ -20,7 +20,7 @@ import type { CreationShotSummary } from "../../product/types";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品", composition: "构图" };
 const KINDS: StoryEntityKind[] = ["scene", "character", "prop", "composition"];
-const FILTERS: (StoryboardShotStatus | "ALL")[] = ["ALL", "TODO", "QUEUED", "GENERATING", "PAUSED", "REVIEW", "COMPLETED", "FAILED"];
+const FILTERS: (StoryboardShotStatus | "ALL" | "UNSELECTED")[] = ["ALL", "TODO", "QUEUED", "GENERATING", "PAUSED", "REVIEW", "UNSELECTED", "COMPLETED", "FAILED"];
 
 interface RowsProps {
   projectId: string;
@@ -82,7 +82,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     return () => { alive = false; };
   }, [projectId, generatorsRev]);
   const q = query.trim().toLowerCase();
-  const visible = items.filter(item => (filter === "ALL" || item.status === filter)
+  const visible = items.filter(item => (filter === "ALL" || (filter==="REVIEW" ? hasPendingReview(item) : filter==="UNSELECTED" ? item.candidates.length>0 && !item.shot?.selectedResultId && !item.candidates.some(a=>a.selected) : item.status === filter))
     && (!q || item.name.toLowerCase().includes(q) || (item.shot?.prompt ?? "").toLowerCase().includes(q)));
   const unloaded = q ? shotIndex.filter(s => !items.some(item => item.id === s.id) && s.name.toLowerCase().includes(q)) : [];
   return <section className="storyboard-shot-rows" aria-label="分镜编辑">
@@ -90,7 +90,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       <input type="search" aria-label="搜索分镜" placeholder="全项目镜头名 / 已加载提示词" value={query} onChange={e => setQuery(e.target.value)} />
       <span className="storyboard-shot-count">{visible.length}/{items.length} 个分镜</span>
       <div role="group" aria-label="状态筛选" className="storyboard-shot-filters">
-        {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : storyboardStatusLabels[key]}</button>)}
+        {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : key === "REVIEW" ? "待审核" : key === "UNSELECTED" ? "待选用" : storyboardStatusLabels[key]}</button>)}
       </div>
       <button type="button" onClick={() => onQueue()}>任务队列</button>
       <button type="button" onClick={() => setRev(v => v + 1)}>刷新角色与场景</button>
@@ -205,7 +205,12 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const draftKey = JSON.stringify([projectId, item.id, item.shot?.selectionRef ?? null]);
   const [prompt, setPromptLocal] = useState(() => useStudioStore.getState().storyboardPrompts[draftKey] ?? item.shot?.prompt ?? "");
   const setPrompt = (text: string) => { useStudioStore.getState().setStoryboardPrompt(draftKey, text); setPromptLocal(text); };
-  const [name, setName] = useState(item.name);
+  const fieldsDraft=useStudioStore(state=>state.storyboardFields[draftKey]);
+  const setField=useStudioStore.getState().setStoryboardField;
+  const clearField=<K extends keyof import("../../stores/studioStore").StoryboardFieldDraft>(field:K,submitted:import("../../stores/studioStore").StoryboardFieldDraft[K])=>{
+    if(JSON.stringify(useStudioStore.getState().storyboardFields[draftKey]?.[field])===JSON.stringify(submitted))setField(draftKey,field,undefined);
+  };
+  const [name, setName] = useState(()=>useStudioStore.getState().storyboardFields[draftKey]?.name??item.name);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
@@ -220,7 +225,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const [bindingsReady, setBindingsReady] = useState(false);
   useEffect(() => () => { ++scopeEpoch.current; }, [projectId, item.id]);
   useEffect(() => { setPromptLocal(useStudioStore.getState().storyboardPrompts[draftKey] ?? item.shot?.prompt ?? ""); }, [draftKey, item.shot?.prompt]);
-  useEffect(() => { setName(item.name); }, [item.name]);
+  useEffect(() => { setName(useStudioStore.getState().storyboardFields[draftKey]?.name??item.name); }, [draftKey,item.name]);
   useEffect(() => {
     const token = ++bindingEpoch.current;
     setBindingsReady(false);
@@ -254,7 +259,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     if (bindingsDisabled) return;
     void run(() => replaceBindings(bound.some(e => e.id === id) ? bound.filter(e => e.id !== id).map(e => e.id) : [...bound.map(e => e.id), id]));
   };
-  const saveName = () => { const next = name.trim(); if (!next || next === item.name) { setName(item.name); return; } void run(async () => { await productClient.creation.updateShot(projectId, { shotId: item.id, name: next }); onChanged(); }); };
+  const saveName = () => { const next = name.trim(); if (!next) {setError("镜头名称不能为空，请修改或明确放弃。");return;} if(next===item.name){clearField("name",name);setName(item.name);return;} void run(async () => { await productClient.creation.updateShot(projectId, { shotId: item.id, name: next }); clearField("name",name); onChanged(); }); };
   const cancelGeneration = () => {
     const active = item.run;
     if (!active || !active.availableActions.includes("CANCEL")) return;
@@ -396,22 +401,22 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const choosePreset = (p?: ResolutionPresetLike) => p && saveValues({ ...current, width: { type: "integer", value: p.width }, height: { type: "integer", value: p.height } });
   const chooseAspect = (a: string) => choosePreset(resolvePreset({ aspect: a }, presets, curW && curH ? { width: curW, height: curH } : undefined));
   const savedDuration = numberOf(current.duration_seconds);
-  const [duration, setDuration] = useState<string>(() => savedDuration === undefined ? "" : String(savedDuration));
-  const durationDirty = useRef(false);
+  const [duration, setDuration] = useState<string>(() => useStudioStore.getState().storyboardFields[draftKey]?.duration??(savedDuration === undefined ? "" : String(savedDuration)));
+  const durationDirty = useRef(useStudioStore.getState().storyboardFields[draftKey]?.duration!==undefined);
   const durationScope = `${projectId}:${item.id}:${selectionRef ?? ""}`;
   const previousDurationScope = useRef(durationScope);
   useEffect(() => {
-    if (previousDurationScope.current !== durationScope) { durationDirty.current = false; previousDurationScope.current = durationScope; }
+    if (previousDurationScope.current !== durationScope) { durationDirty.current = useStudioStore.getState().storyboardFields[draftKey]?.duration!==undefined; previousDurationScope.current = durationScope; setDuration(useStudioStore.getState().storyboardFields[draftKey]?.duration??(savedDuration===undefined?"":String(savedDuration))); }
     if (!durationDirty.current) setDuration(savedDuration === undefined ? "" : String(savedDuration));
   }, [savedDuration, durationScope]);
   const saveDuration = () => {
     if (!durationField) return;
     const prev = numberOf(current.duration_seconds);
-    if (duration === "" ) { if (prev !== undefined) { const { duration_seconds: _, ...rest } = current; saveValues(rest, () => { durationDirty.current = false; }); } else durationDirty.current = false; return; }
-    const n = Number(duration); if (!Number.isFinite(n) || n === prev) { durationDirty.current = false; setDuration(prev === undefined ? "" : String(prev)); return; }
+    if (duration === "" ) { if (prev !== undefined) { const { duration_seconds: _, ...rest } = current; saveValues(rest, () => { durationDirty.current = false; clearField("duration",duration); }); } else {durationDirty.current = false;clearField("duration",duration);} return; }
+    const n = Number(duration); if (!Number.isFinite(n) || n === prev) { durationDirty.current = false; clearField("duration",duration); setDuration(prev === undefined ? "" : String(prev)); return; }
     const value = durationField.type === "integer" ? Math.round(n) : n;
     if (shotDurationIssue(value)) { setError(SHOT_DURATION_LIMIT_MESSAGE); return; }
-    saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; setDuration(String(value)); });
+    saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; clearField("duration",duration); setDuration(String(value)); });
   };
   const noGen = generatorsFailed ? "生成器读取失败，请点击上方重试。" : !generator ? "请先在详情中选择生成器" : undefined;
   const durationIssue = shotDurationIssue(savedDuration);
@@ -458,7 +463,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       if (token !== sectionsEpoch.current) return;
       savedSections.current = next;
       setSections(current => {
-        const merged = { ...next };
+        const merged = { ...next, ...useStudioStore.getState().storyboardFields[draftKey]?.sections };
         for (const [key] of SECTION_FIELDS) if (editedSections.current.has(key)) merged[key] = current[key];
         return merged;
       });
@@ -467,11 +472,13 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       if (token === sectionsEpoch.current) setSectionsError(`提示词分段读取失败：${normalizeProductError(cause).message}`);
     });
     return () => { ++sectionsEpoch.current; };
-  }, [projectId, item.id]);
+  }, [projectId, item.id,draftKey]);
   const persistSections = async () => {
     const next = sections;
     const token = ++sectionsEpoch.current;
+    const submittedDraft=useStudioStore.getState().storyboardFields[draftKey]?.sections;
     const saved = await productClient.storyEntities.setPromptSections(projectId, item.id, next);
+    clearField("sections",submittedDraft);
     if (token !== sectionsEpoch.current) return;
     const clean = { ...EMPTY_SECTIONS, ...saved };
     savedSections.current = clean; setSections(clean);
@@ -501,6 +508,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     if (name.trim() !== item.name) {
       if (!name.trim()) throw new Error("镜头名称不能为空");
       await productClient.creation.updateShot(projectId, { shotId: item.id, name: name.trim() });
+      clearField("name",name);
       if (token !== scopeEpoch.current) return;
     }
     if (durationDirty.current) {
@@ -510,7 +518,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       const { duration_seconds: _previous, ...rest } = scalarValues(saved.values);
       const next = await saveRow({ values: value === undefined ? rest : { ...rest, duration_seconds: { type: durationField?.type === "number" ? "number" : "integer", value } }, selectionRef });
       if (!next || token !== scopeEpoch.current) return;
-      saved = next; durationDirty.current = false;
+      saved = next; durationDirty.current = false; clearField("duration",duration);
     }
     if (JSON.stringify(sections) !== JSON.stringify(savedSections.current)) {
       if (!sectionsReady) throw new Error("请先完成提示词分段读取后再生成");
@@ -566,7 +574,8 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} title="任务完成比例，不是视频推理百分比" aria-label={runProgressText(item.run)}>{item.run ? `${item.run.progress.succeeded+item.run.progress.failed+item.run.progress.cancelled}/${item.run.progress.total}` : "—"}</span>}</div>
       {item.candidates.length > 0 && <div className="shot-row-strip" aria-label="候选结果">{item.candidates.map(asset => <div key={asset.id}>
         <button type="button" title={`预览：${asset.name}`} aria-label={`预览候选 ${asset.name}`} onClick={() => lightbox?.open({kind:"video",projectId,asset})}><CandidateThumbnail asset={asset} playable={false} /></button>
-        <button type="button" disabled={disabled || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? "已选用" : `选用 ${asset.name}`}</button>
+        <button type="button" title={asset.reviewState==="REJECTED"?"此视频已退回，请先重新审核后再选用。":undefined} disabled={disabled || asset.reviewState==="REJECTED" || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? "已选用" : `选用 ${asset.name}`}</button>
+        <small>{reviewLabel(asset.reviewState)}</small>
       </div>)}</div>}
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
     </div>
@@ -578,6 +587,11 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     <div className="shot-row-prompt">
       <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 0.98MP / 50万像素 / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
         onChange={e => setPrompt(e.target.value)} onBlur={e => { deferredPromptBlur.current = e.relatedTarget === generateButton.current; if (!deferredPromptBlur.current && !(e.relatedTarget instanceof HTMLElement && e.relatedTarget.closest("[data-discard-prompt]"))) savePrompt(); }} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
+      {fieldsDraft && <section aria-label="未保存的镜头字段"><p role="status">名称、时长或提示词分段尚未保存；本次会话内筛选、翻页后可恢复。</p>
+        {fieldsDraft.name!==undefined&&<button type="button" disabled={bindingsDisabled} onClick={saveName}>重试保存名称</button>}
+        {fieldsDraft.duration!==undefined&&<button type="button" disabled={bindingsDisabled} onClick={saveDuration}>重试保存时长</button>}
+        {fieldsDraft.sections!==undefined&&<button type="button" disabled={bindingsDisabled||!sectionsReady} onClick={saveSections}>重试保存分段</button>}
+        <button type="button" data-discard-fields disabled={bindingsDisabled} onClick={()=>{if(!window.confirm("放弃此镜头尚未保存的名称、时长和提示词分段？"))return;setField(draftKey,"name",undefined);setField(draftKey,"duration",undefined);setField(draftKey,"sections",undefined);setName(item.name);durationDirty.current=false;setDuration(savedDuration===undefined?"":String(savedDuration));setSections(savedSections.current);}}>放弃未保存字段</button></section>}
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
       {prompt !== (item.shot?.prompt ?? "") && <p role="status">提示词尚未保存；筛选或返回列表后可继续编辑。<button type="button" disabled={bindingsDisabled} onClick={savePrompt}>保存提示词</button><button type="button" disabled={bindingsDisabled} data-discard-prompt onClick={() => { if (window.confirm("放弃本镜头未保存的提示词？")) { useStudioStore.getState().setStoryboardPrompt(draftKey, undefined); setPromptLocal(item.shot?.prompt ?? ""); } }}>放弃未保存提示词</button></p>}
@@ -588,7 +602,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         {sectionsError && <p role="alert" className="storyboard-error">{sectionsError}</p>}
         {SECTION_FIELDS.map(([key, label, hint]) => <label key={key}><span>{label}</span>
           <textarea aria-label={`${item.name} ${label}`} placeholder={hint} value={sections[key] ?? ""} disabled={bindingsDisabled}
-            onChange={e => { editedSections.current.add(key); setSections(s => ({ ...s, [key]: e.target.value })); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "sections"; else saveSections(); }} /></label>)}
+            onChange={e => { editedSections.current.add(key); const next={...sections,[key]:e.target.value};setSections(next);const patch={...useStudioStore.getState().storyboardFields[draftKey]?.sections};if(next[key]===savedSections.current[key])delete patch[key];else patch[key]=next[key];setField(draftKey,"sections",Object.keys(patch).length?patch:undefined); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "sections"; else if(!(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]")))saveSections(); }} /></label>)}
       </details>
       {hasMentions && <section aria-label="角色与场景生成引用" className="composer-entity-references">
         <p>{entityIssue ?? "角色与场景已保存到正式参考输入，生成时按以下真实顺序引用。"}</p>
@@ -614,7 +628,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         </dd></div>}
         <div><dt>画面内容</dt><dd>{content}</dd></div>
       </dl>
-      <div className="shot-row-toolbar"><span>{storyboardStatusLabels[item.status]}</span>{item.shot?.selectedResultId && <small>保留已选用结果</small>}{onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}<button type="button" onClick={onOpen}>编辑与详情</button></div>
+      <div className="shot-row-toolbar"><span>{storyboardStatusLabels[item.status]}</span><small>{candidateReviewSummary(item.candidates)}</small>{item.shot?.selectedResultId && <small>保留已选用结果</small>}{onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}<button type="button" onClick={onOpen}>编辑与详情</button></div>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
       {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
       {acceptedRun && <button type="button" onClick={() => onRun(acceptedRun)}>查看已保存运行</button>}
@@ -626,9 +640,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       </select></label>
       {pendingSelection && !working && <button type="button" onClick={onChanged}>刷新已保存的镜头设置</button>}
       <label><span>镜号</span><output>{item.ordinal + 1}</output></label>
-      <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => setName(e.target.value)} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "name"; else saveName(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
+      <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => {setName(e.target.value);setField(draftKey,"name",e.target.value===item.name?undefined:e.target.value);}} onBlur={e => { if(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]"))return; if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "name"; else saveName(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
       {durationField
-        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => { durationDirty.current = true; setDuration(e.target.value); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "duration"; else saveDuration(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
+        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => { durationDirty.current = true; setDuration(e.target.value);setField(draftKey,"duration",e.target.value); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "duration"; else if(!(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]")))saveDuration(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
         : <label><span>时长</span><output title={noGen ?? "当前生成器没有时长参数"}>{shotDuration(item.shot)}</output></label>}
       {durationIssue && <small className="shot-row-duration-issue" role="alert">{durationIssue}</small>}
       {presets.length > 0

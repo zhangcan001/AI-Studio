@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   admitProjectProduction,
   getProjectProductionPreflight,
@@ -24,10 +24,12 @@ export interface ShotBulkConfigPanelProps {
   tree?: ProductionStructureTree;
   scope?: VideoPreparationScope;
   onRefresh?: () => Promise<void>;
+  onDirtyChange?: (dirty:boolean)=>void;
   onBusyChange?: (busy:boolean) => void;
   onNotice?: (message: string) => void;
   onError?: (message?: string) => void;
-  onConfigureStage?: (stage: ShotStage, shotIds: string[]) => void | Promise<void>;
+  onConfigureStage?: (stage: ShotStage, shotIds: string[]) => void | boolean | Promise<void|boolean>;
+  configurationEditor?: ReactNode;
   confirmPromptOverwrite?: boolean;
   videoOnly?: boolean;
   onBulkPrompt?: (stage: ShotStage, shotIds: string[], promptText: string) => void | Promise<void>;
@@ -87,8 +89,10 @@ function ScopedShotBulkConfigPanel({
   onConfigureStage,
   onBulkPrompt,
   confirmPromptOverwrite,
+  configurationEditor,
   videoOnly,
   onBusyChange,
+  onDirtyChange,
   onOpenProductionQueue,
   onOpenShot,
 }: ShotBulkConfigPanelProps) {
@@ -99,6 +103,7 @@ function ScopedShotBulkConfigPanel({
   const [localNotice, setLocalNotice] = useState<string>();
   const [promptText, setPromptText] = useState("");
   const unappliedPrompt=Boolean(onBulkPrompt && promptText.trim());
+  useEffect(()=>{onDirtyChange?.(unappliedPrompt);return()=>onDirtyChange?.(false);},[unappliedPrompt,onDirtyChange]);
   const [projectPlan, setProjectPlan] = useState<ProjectPreparationView>();
   const [planLoading, setPlanLoading] = useState(false);
   const [allowPartial, setAllowPartial] = useState(false);
@@ -188,7 +193,6 @@ function ScopedShotBulkConfigPanel({
   useEffect(() => {
     setProjectPlan(undefined);
     setPreparationResult(undefined);
-    setSelectedIds(new Set());
     setLocalError(undefined);
     setLocalNotice(undefined);
     void refreshPlan().catch((error: unknown) => { if (isCurrent(owner)) reportError(preparationErrorMessage(error)); });
@@ -196,6 +200,8 @@ function ScopedShotBulkConfigPanel({
     // A saved Shot edit invalidates readiness, even when its ID is unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, stage, shots, tree, scopeKey]);
+
+  useEffect(()=>{setSelectedIds(new Set());},[projectId,stage,scopeKey]);
 
   function applyPreset(preset: BulkSelectionPreset) {
     const ids = preset === "ready" && projectPlan
@@ -228,7 +234,7 @@ function ScopedShotBulkConfigPanel({
 
   async function runAction(
     actionName: string,
-    action: (shotIds: string[]) => void | Promise<void>,
+    action: (shotIds: string[]) => void | boolean | Promise<void|boolean>,
     successMessage: string,
     refreshWorkspace = true,
   ) {
@@ -242,7 +248,7 @@ function ScopedShotBulkConfigPanel({
     setBusyAction(actionName);
     reportError(undefined);
     try {
-      await action(selectedIdsInOrder);
+      if(await action(selectedIdsInOrder)===false)return;
       if (!isCurrent(requestedOwner)) return;
       reportNotice(successMessage);
       if (refreshWorkspace) await onRefresh?.();
@@ -369,6 +375,7 @@ function ScopedShotBulkConfigPanel({
         ))}
       </div>
 
+      {configurationEditor}
       <div className="pipeline-action-grid">
         <button type="button" hidden={videoOnly} onClick={() => void configureStage("image")} disabled>
           配置图片阶段

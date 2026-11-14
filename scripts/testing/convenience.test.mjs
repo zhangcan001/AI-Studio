@@ -1,3 +1,4 @@
+import { USAGE_POLISH_CHANGED, USAGE_POLISH_ADDED, USAGE_POLISH_PROOF } from "../usage-polish-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -18,8 +19,8 @@ const parentBytes = p => execFileSync('git', ['show', `${CONVENIENCE_BASE}:${p}`
 it('verifies the exact convenience successor and projects the frozen parent bytes', () => {
   const result = convenienceParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(CONVENIENCE_CHANGED);
-  expect(result.addedPaths).toEqual([...CONVENIENCE_ADDED, CONVENIENCE_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...CONVENIENCE_CHANGED, ...USAGE_POLISH_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...CONVENIENCE_ADDED, CONVENIENCE_PROOF, ...USAGE_POLISH_ADDED, USAGE_POLISH_PROOF])].sort());
   for (const p of CONVENIENCE_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

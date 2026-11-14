@@ -39,6 +39,7 @@ pub struct CreationShot {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreationAsset {
+    pub review_state: Option<String>,
     pub id: String,
     pub name: String,
     pub media_kind: String,
@@ -207,6 +208,7 @@ fn project_shot(shot: &ShotView, stage: ShotStage) -> Result<CreationShot, Produ
 
 fn candidate(asset: AssetSummaryView, selected_result_id: Option<&str>) -> CreationAsset {
     CreationAsset {
+        review_state: None,
         selected: selected_result_id == Some(asset.id.as_str()),
         id: asset.id,
         name: asset.name,
@@ -216,6 +218,51 @@ fn candidate(asset: AssetSummaryView, selected_result_id: Option<&str>) -> Creat
 }
 
 impl ProductCreationFacade {
+    /// Typed Product adapter to the existing atomic bulk configuration authority.
+    pub async fn configure_shots(
+        &self,
+        bulk: &crate::application::shot_bulk_service::ShotBulkService,
+        project_id: &str,
+        selection_ref: &str,
+        shot_ids: Vec<String>,
+        values: BTreeMap<String, GenerationInputValue>,
+    ) -> Result<crate::application::shot_bulk_service::BulkStageConfigResult, ProductError> {
+        let pair = ExactGeneratorSelection::decode(selection_ref)?;
+        if !self
+            .generators_list(project_id, None, "video")
+            .await?
+            .iter()
+            .any(|g| g.selection_ref == selection_ref && g.availability)
+        {
+            return Err(ProductError::new(
+                "GENERATOR_UNAVAILABLE",
+                "请选择当前项目可用的正式视频生成器。",
+                None,
+            ));
+        }
+        bulk.set_stage_config(
+            crate::application::shot_bulk_service::BulkStageConfigRequest {
+                project_id: project_id.to_owned(),
+                stage: ShotStage::Video,
+                shot_ids,
+                workflow_version_id: pair.workflow_version_id,
+                recipe_id: pair.recipe_id,
+                values,
+                prompt: None,
+            },
+        )
+        .await
+        .map_err(|error| {
+            let mut issue = ProductError::new(
+                "INVALID_INPUT",
+                "批量设置未通过，请检查镜头归属、生成器和参数范围。",
+                Some("EDIT_INPUT"),
+            );
+            issue.details.technical_details = Some(error.to_string());
+            issue
+        })
+    }
+
     pub async fn get(
         &self,
         projects: &ProjectCommandCenterService,
@@ -271,6 +318,21 @@ impl ProductCreationFacade {
                         ));
                     }
                 }
+            }
+        }
+        if let (Some(artifacts), Some(shot)) = (&self.artifacts, selected) {
+            let ids = shot
+                .generation_links
+                .iter()
+                .filter(|link| link.stage == stage.as_str())
+                .filter_map(|link| link.task_id.clone())
+                .collect::<Vec<_>>();
+            let reviews = artifacts
+                .review_states_for_tasks(project_id, &ids)
+                .await
+                .map_err(ProductError::internal)?;
+            for item in &mut candidates {
+                item.review_state = reviews.get(&item.id).cloned();
             }
         }
         // Bounded thumbnails only; failures never erase valid candidate metadata.
@@ -361,7 +423,14 @@ impl ProductCreationFacade {
         let truncated =
             i64::try_from(shots.len().saturating_sub(offset.saturating_add(limit))).unwrap_or(0);
         let mut items = Vec::with_capacity(limit.min(shots.len()));
+        let mut candidate_tasks = Vec::new();
         for shot in shots.into_iter().skip(offset).take(limit) {
+            candidate_tasks.extend(
+                shot.generation_links
+                    .iter()
+                    .filter(|link| link.stage == stage.as_str())
+                    .filter_map(|link| link.task_id.clone()),
+            );
             let projected = project_shot(&shot, stage)?;
             let mut candidates = Vec::new();
             let mut seen = HashSet::new();
@@ -398,6 +467,15 @@ impl ProductCreationFacade {
                 shot: projected,
                 candidates,
             });
+        }
+        if let Some(artifacts) = &self.artifacts {
+            let reviews = artifacts
+                .review_states_for_tasks(project_id, &candidate_tasks)
+                .await
+                .map_err(ProductError::internal)?;
+            for item in items.iter_mut().flat_map(|item| &mut item.candidates) {
+                item.review_state = reviews.get(&item.id).cloned();
+            }
         }
         Ok(CreationWorkbench {
             project_id: project.id,
@@ -750,7 +828,7 @@ impl ProductCreationFacade {
             .get(project_id, shot_id)
             .await
             .map_err(shot_error)?;
-        assets
+        let asset = assets
             .get(project_id, asset_id)
             .await
             .map_err(|error| match error {
@@ -761,6 +839,23 @@ impl ProductCreationFacade {
                 ),
                 other => ProductError::internal(other),
             })?;
+        if let Some(artifacts) = &self.artifacts {
+            let ids = asset.source_task_id.into_iter().collect::<Vec<_>>();
+            let reviews = artifacts
+                .review_states_for_tasks(project_id, &ids)
+                .await
+                .map_err(ProductError::internal)?;
+            if reviews
+                .get(asset_id)
+                .is_some_and(|state| state == "REJECTED")
+            {
+                return Err(ProductError::new(
+                    "RESULT_REJECTED",
+                    "此视频已退回，请先重新审核后再选用。",
+                    None,
+                ));
+            }
+        }
         // Ordinary candidates MUST be outputs of this Shot/stage; no arbitrary asset adoption.
         let shot = self
             .shots

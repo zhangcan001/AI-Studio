@@ -55,6 +55,7 @@ export const productClient = {
   creation: {
     shotsList: shotOrderTransport.list,
     shotsPromptAssign: shotOrderTransport.assignPrompt,
+    shotsConfigure: (projectId:string,request:{shotIds:string[];selectionRef:string;values:import("../types/shot").ShotInputValues})=>productRequest("product_creation_shots_configure",{projectId,request}),
     shotsReorder: shotOrderTransport.reorder,
     exportSelected: (projectId: string, openDirectory = false) => productRequest("product_selected_videos_export", { projectId, ...(openDirectory ? {openDirectory} : {}) }),
     inputsGet: (selection: import("../types/shotVideoInput").VideoInputSelection) => productRequest("product_creation_inputs_get", { selection }),

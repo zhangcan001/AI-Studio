@@ -12,7 +12,7 @@ export interface StoryboardShot {
   status: StoryboardShotStatus;
   error?: string;
 }
-export const storyboardStatusLabels: Record<StoryboardShotStatus, string> = { COMPLETED: "已选用", GENERATING: "生成中", QUEUED: "排队中", PAUSED: "已暂停", REVIEW: "待审核", FAILED: "失败", TODO: "待制作" };
+export const storyboardStatusLabels: Record<StoryboardShotStatus, string> = { COMPLETED: "已选用", GENERATING: "生成中", QUEUED: "排队中", PAUSED: "已暂停", REVIEW: "待选用", FAILED: "失败", TODO: "待制作" };
 export function deriveStoryboardStatus(shot: CreationShot | null, candidates: CreationAsset[], run: ProductRun | null): StoryboardShotStatus {
   if (run?.status === "QUEUED") return "QUEUED";
   if (run?.status === "PAUSED") return "PAUSED";
@@ -37,6 +37,13 @@ function intValue(shot: CreationShot | null, key: string): number | undefined {
 export function shotDuration(shot: CreationShot | null) { const seconds = intValue(shot, "duration_seconds"); return seconds ? `${seconds} 秒` : "未设置"; }
 export function shotResolution(shot: CreationShot | null) { const w = intValue(shot, "width"), h = intValue(shot, "height"); return w && h ? `${w} × ${h}` : "未设置"; }
 export function storyboardStats(items: readonly StoryboardShot[]) {
-  return { total: items.length, completed: items.filter(i => i.status === "COMPLETED").length, generating: items.filter(i => i.status === "GENERATING").length, todo: items.filter(i => i.status === "TODO" || i.status === "FAILED").length, review: items.filter(i => i.status === "REVIEW").length };
+  return { total: items.length, completed: items.filter(i => i.shot?.selectedResultId || i.candidates.some(a=>a.selected)).length, generating: items.filter(i => i.status === "GENERATING").length, todo: items.filter(i => i.status === "TODO" || i.status === "FAILED").length, review: items.filter(hasPendingReview).length };
 }
 export function videoCandidates(context: CreationContext) { return context.candidates.filter(asset => asset.mediaKind === "video"); }
+
+export function reviewLabel(state: string|null|undefined) { return state === "PENDING" ? "待审核" : state === "APPROVED" ? "审核通过" : state === "REJECTED" ? "已退回" : "无审核信息"; }
+export function hasPendingReview(item: Pick<StoryboardShot,"candidates">) { return item.candidates.some(a=>a.reviewState==="PENDING"); }
+export function candidateReviewSummary(candidates: CreationAsset[]) {
+  const pending=candidates.filter(a=>a.reviewState==="PENDING").length,approved=candidates.filter(a=>a.reviewState==="APPROVED").length,rejected=candidates.filter(a=>a.reviewState==="REJECTED").length;
+  return [pending?`待审核 ${pending} 项`:undefined,approved?`已通过 ${approved} 项`:undefined,rejected?`已退回 ${rejected} 项`:undefined, candidates.some(a=>!a.reviewState)?"含无审核信息候选":undefined].filter(Boolean).join(" · ")||"暂无审核候选";
+}

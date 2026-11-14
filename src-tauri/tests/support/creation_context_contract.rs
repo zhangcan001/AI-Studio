@@ -493,3 +493,122 @@ async fn usage_flow_workbench_pages_are_bounded_scoped_and_do_not_create_tasks()
         .unwrap();
     assert_eq!(count.0, 0);
 }
+
+#[tokio::test]
+async fn usage_polish_bulk_config_is_atomic_scoped_and_never_starts_tasks() {
+    use ai_studio_lib::application::shot_bulk_service::ShotBulkService;
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("bulk-polish.db"))
+        .await
+        .unwrap();
+    seed_database(&pool, dir.path()).await;
+    let (facade, _) = creation_context_services(&pool);
+    let a = facade.create_shot(PROJECT_ID).await.unwrap();
+    let b = facade.create_shot(PROJECT_ID).await.unwrap();
+    let bulk = ShotBulkService::new(
+        Arc::new(SqliteShotRepository::new(pool.clone())),
+        Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone())),
+        Arc::new(SqlitePromptLibraryRepository::new(pool.clone())),
+        Arc::new(SystemClock),
+    );
+    let selection = ExactGeneratorSelection {
+        workflow_version_id: WORKFLOW_VERSION_ID.into(),
+        recipe_id: RECIPE_ID.into(),
+    }
+    .encode()
+    .unwrap();
+    let values = BTreeMap::from([("duration_seconds".into(), GenerationInputValue::Integer(8))]);
+    let result = facade
+        .configure_shots(
+            &bulk,
+            PROJECT_ID,
+            &selection,
+            vec![b.id.clone()],
+            values.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.configured_shot_ids, vec![b.id.clone()]);
+    let saved = facade
+        .workbench_page(
+            &command_center(&pool),
+            &creation_context_services(&pool).1,
+            PROJECT_ID,
+            "video",
+            60,
+            0,
+        )
+        .await
+        .unwrap();
+    assert!(saved
+        .items
+        .iter()
+        .find(|item| item.shot.summary.id == a.id)
+        .unwrap()
+        .shot
+        .selection_ref
+        .is_none());
+    assert_eq!(
+        saved
+            .items
+            .iter()
+            .find(|item| item.shot.summary.id == b.id)
+            .unwrap()
+            .shot
+            .selection_ref
+            .as_deref(),
+        Some(selection.as_str())
+    );
+    let before: Vec<(String, String)> = sqlx::query_as(
+        "SELECT shot_id,scalar_values_json FROM shot_stage_configs ORDER BY shot_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(facade
+        .configure_shots(
+            &bulk,
+            PROJECT_ID,
+            &selection,
+            vec![a.id.clone(), "missing-shot".into()],
+            values.clone()
+        )
+        .await
+        .is_err());
+    assert!(facade
+        .configure_shots(
+            &bulk,
+            "prj_foreign",
+            &selection,
+            vec![a.id.clone()],
+            values.clone()
+        )
+        .await
+        .is_err());
+    assert!(facade
+        .configure_shots(&bulk, PROJECT_ID, "forged-ref", vec![a.id], values)
+        .await
+        .is_err());
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT shot_id,scalar_values_json FROM shot_stage_configs ORDER BY shot_id"
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap(),
+        before
+    );
+    assert_eq!(count(&pool, "tasks").await, 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .is_empty());
+}

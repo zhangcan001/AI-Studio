@@ -146,3 +146,9 @@ it("folder import product bridge preserves the existing typed command payloads a
 it("uses the existing formal bulk prompt endpoint and explicitly controls export directory opening",async()=>{
  invokeCommand.mockResolvedValue({updatedShotIds:["s"]});await productClient.creation.shotsPromptAssign("p",["s"],"text");expect(invokeCommand).toHaveBeenLastCalledWith("bulk_assign_shot_prompt",{request:{projectId:"p",shotIds:["s"],stage:"video",source:{type:"text",text:"text"}}});await productClient.creation.exportSelected("p",true);expect(invokeCommand).toHaveBeenLastCalledWith("product_selected_videos_export",{projectId:"p",openDirectory:true});
 });
+
+it("usage polish sends opaque exact selection for formal bulk configuration without raw IDs or implicit start",async()=>{
+ invokeCommand.mockResolvedValue({configuredShotIds:["s"]});const request={shotIds:["s"],selectionRef:"opaque",values:{duration_seconds:{type:"integer" as const,value:8}}};await productClient.creation.shotsConfigure("p",request);expect(invokeCommand).toHaveBeenLastCalledWith("product_creation_shots_configure",{projectId:"p",request});
+});
+
+it("usage polish preserves a safe recovery explanation for rejected-result selection",()=>{const error=normalizeProductError({code:"RESULT_REJECTED",message:"private backend path"});expect(error.code).toBe("RESULT_REJECTED");expect(error.message).toContain("重新审核");expect(error.message).not.toContain("private");});
