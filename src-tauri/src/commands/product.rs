@@ -1094,6 +1094,7 @@ pub async fn product_selected_videos_export(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     project_id: String,
+    open_directory: Option<bool>,
 ) -> Result<Option<crate::application::product::selected_export::SelectedVideoExport>, ProductError>
 {
     use tauri_plugin_dialog::DialogExt;
@@ -1107,26 +1108,46 @@ pub async fn product_selected_videos_export(
     let mut sources = Vec::new();
     for shot in shots {
         if let Some(id) = shot.selected_video_asset_id {
-            let asset = state
-                .assets
-                .query
-                .get(&project_id, &id)
-                .await
-                .map_err(ProductError::internal)?;
-            if asset.asset_type != "video" {
-                return Err(ProductError::new(
-                    "INVALID_INPUT",
-                    "选用结果不是视频。",
-                    None,
-                ));
+            let source = async {
+                let asset = state
+                    .assets
+                    .query
+                    .get(&project_id, &id)
+                    .await
+                    .map_err(ProductError::internal)?;
+                if asset.asset_type != "video" {
+                    return Err(ProductError::new(
+                        "INVALID_INPUT",
+                        "选用结果不是视频。",
+                        None,
+                    ));
+                }
+                state
+                    .assets
+                    .artifact
+                    .resolve_artifact_path(&id)
+                    .await
+                    .map_err(ProductError::internal)
             }
-            let path = state
-                .assets
-                .artifact
-                .resolve_artifact_path(&id)
-                .await
-                .map_err(ProductError::internal)?;
-            sources.push((shot.ordinal, path));
+            .await;
+            let (path, error) = match source {
+                Ok(path) => (Some(path), None),
+                Err(_) => (
+                    None,
+                    Some(
+                        "所选视频不存在、不属于当前项目或不可读取，请检查此镜头的选用结果。"
+                            .to_owned(),
+                    ),
+                ),
+            };
+            sources.push(crate::application::product::selected_export::ExportSource {
+                ordinal: shot.ordinal,
+                shot_id: shot.id,
+                shot_name: shot.name,
+                asset_id: id,
+                path,
+                error,
+            });
         }
     }
     if sources.is_empty() {
@@ -1140,13 +1161,24 @@ pub async fn product_selected_videos_export(
         return Ok(None);
     };
     let parent = folder.into_path().map_err(ProductError::internal)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let mut result = tauri::async_runtime::spawn_blocking(move || {
         crate::application::product::selected_export::copy_selected_videos(&parent, &sources)
     })
     .await
     .map_err(ProductError::internal)?
-    .map(Some)
-    .map_err(ProductError::internal)
+    .map_err(ProductError::internal)?;
+    if open_directory.unwrap_or(false) {
+        use tauri_plugin_opener::OpenerExt;
+        // Only this command's owned result directory, never an arbitrary caller path.
+        if app
+            .opener()
+            .open_path(&result.directory, None::<&str>)
+            .is_err()
+        {
+            result.open_error = Some("视频已导出，但无法打开目录；可复制路径后手动打开。".into());
+        }
+    }
+    Ok(Some(result))
 }
 
 #[tauri::command(rename_all = "camelCase")]

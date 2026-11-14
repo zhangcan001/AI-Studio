@@ -121,3 +121,5 @@ export interface RunResultReviewRequest { runRef: RunRef; assetId: string; decis
 
 export type CreationShotRowSave = { shotId: string; stage: "video"; prompt?: string; selectionRef?: string; values?: Record<string, Extract<import("../types/generation").DraftValue, { type: "string" | "integer" | "number" | "seed_random" | "seed_fixed" }>>; entityIds?: string[] };
 export type CreationShotRowSaveResult = { shot: CreationShot; boundEntities: import("../types/storyEntity").StoryEntity[] };
+
+export interface SelectedVideoExport {exported:number;failed:number;directory:string;entries:{ordinal:number;shotId:string;shotName:string;assetId:string;fileName:string|null;error:string|null}[];manifestError:string|null;openError:string|null}

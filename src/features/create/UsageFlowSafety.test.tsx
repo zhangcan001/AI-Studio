@@ -28,10 +28,17 @@ it("reopens review through the existing revision-checked IPC, not a local status
 });
 it("navigates to next review or edit without submitting work",async()=>{
  const next=vi.fn(),edit=vi.fn();render(<ShotReviewDialog projectId="p" item={item} onClose={vi.fn()} onChanged={vi.fn()} onNext={next} onEdit={edit}/>);
- fireEvent.click(await screen.findByRole("button",{name:"下一个待选用镜头"}));fireEvent.click(screen.getByRole("button",{name:"修改此镜头"}));expect(next).toHaveBeenCalledOnce();expect(edit).toHaveBeenCalledOnce();expect(api.review).not.toHaveBeenCalled();expect(api.select).not.toHaveBeenCalled();
+ fireEvent.click(await screen.findByRole("button",{name:"下一个待审核镜头"}));await waitFor(()=>expect(screen.getByRole("button",{name:"修改此镜头"}).hasAttribute("disabled")).toBe(false));fireEvent.click(screen.getByRole("button",{name:"修改此镜头"}));expect(next).toHaveBeenCalledOnce();expect(edit).toHaveBeenCalledOnce();expect(api.review).not.toHaveBeenCalled();expect(api.select).not.toHaveBeenCalled();
 });
 
 it("file location uses a project-scoped product request and never selects or generates",async()=>{
  render(<ResultFileActions projectId="owned" assetId="video"/>);fireEvent.click(screen.getByRole("button",{name:"在文件夹中显示"}));
  await waitFor(()=>expect(api.reveal).toHaveBeenCalledWith("owned","video"));expect(api.select).not.toHaveBeenCalled();
+});
+
+it("resets file action state for B while A's locate request is pending and ignores late A errors",async()=>{
+ let rejectA!:(v:unknown)=>void;api.reveal.mockImplementation((_p:string,id:string)=>id==="A"?new Promise((_ok,fail)=>{rejectA=fail;}):Promise.resolve());
+ const view=render(<ResultFileActions projectId="p" assetId="A"/>);fireEvent.click(screen.getByRole("button",{name:"在文件夹中显示"}));expect(screen.getByRole("button",{name:"正在定位…"}).hasAttribute("disabled")).toBe(true);
+ view.rerender(<ResultFileActions projectId="p" assetId="B"/>);fireEvent.click(screen.getByRole("button",{name:"在文件夹中显示"}));await waitFor(()=>expect(api.reveal).toHaveBeenCalledWith("p","B"));
+ rejectA({code:"INVALID_INPUT"});await waitFor(()=>expect(screen.getByRole("button",{name:"在文件夹中显示"}).hasAttribute("disabled")).toBe(false));expect(screen.queryByRole("alert")).toBeNull();
 });

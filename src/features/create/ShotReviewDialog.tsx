@@ -8,13 +8,14 @@ import { CandidateThumbnail } from "./CreateMediaPreview";
 const labels: Record<string, string> = { PENDING: "待审核", APPROVED: "已通过", REJECTED: "已退回" };
 export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, onEdit }: {
   projectId: string; item: StoryboardShot; onClose: () => void; onChanged: () => void;
-  onNext?: () => void; onEdit: () => void;
+  onNext?: () => void | string | Promise<void | string>; onEdit: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [results, setResults] = useState<RunResult[]>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const lock = useRef(false), epoch = useRef(0);
+  const [navigationNote,setNavigationNote]=useState<string>();
   const [comment, setComment] = useState("");
   const runRef = item.run?.ref;
   useEffect(() => {
@@ -42,12 +43,19 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
     catch (cause) { if (token === epoch.current) setError(normalizeProductError(cause).message); }
     finally { lock.current = false; setBusy(false); }
   };
+  const next = async()=>{
+    if(!onNext||lock.current||(comment.trim()&&!window.confirm("审核说明尚未提交，确定放弃并离开？")))return;
+    lock.current=true;setBusy(true);const token=epoch.current;setNavigationNote(undefined);
+    try{const message=await onNext();if(token===epoch.current&&message)setNavigationNote(message);}
+    catch(cause){if(token===epoch.current)setError(normalizeProductError(cause).message);}
+    finally{lock.current=false;if(token===epoch.current)setBusy(false);}
+  };
   const review = (r: RunResult, decision: "APPROVED" | "REJECTED") => runRef && r.reviewRevision !== null && act(() => productClient.run.resultReview(projectId, { runRef, assetId: r.assetId, decision, comment, expectedRevision: r.reviewRevision! }), true);
   return <dialog ref={dialog} className="storyboard-review" aria-label={`审核 ${item.name}`} onCancel={e => { e.preventDefault(); leave(onClose); }}>
     <header><h2>审核 · {item.name}</h2><button type="button" disabled={busy} onClick={() => leave(onClose)}>关闭</button></header>
     <p>审核、选用和生成保持独立。退回不会自动重跑；修改仅影响此镜头的新运行。</p>
     <label className="storyboard-review-comment">审核说明<input value={comment} disabled={busy} onChange={e => setComment(e.target.value)} /></label>
-    {error && <p role="alert">{error}</p>}
+    {error && <p role="alert">{error}</p>}{navigationNote&&<p role="status">{navigationNote}</p>}
     {!results ? <p role="status">正在读取候选…</p> : !results.length ? <p>该运行没有可审核的结果；更早候选可在运行记录中审核。</p> :
       <ul className="storyboard-review-list">{results.map(r => {
         const asset = item.candidates.find(a => a.id === r.assetId);
@@ -63,6 +71,6 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
           </div>
         </li>;
       })}</ul>}
-    <footer><button type="button" disabled={busy} onClick={() => leave(onEdit)}>修改此镜头</button>{onNext && <button type="button" disabled={busy} onClick={() => leave(onNext)}>下一个待选用镜头</button>}</footer>
+    <footer><button type="button" disabled={busy} onClick={() => leave(onEdit)}>修改此镜头</button>{onNext && <button type="button" disabled={busy} onClick={() => void next()}>下一个待审核镜头</button>}</footer>
   </dialog>;
 }

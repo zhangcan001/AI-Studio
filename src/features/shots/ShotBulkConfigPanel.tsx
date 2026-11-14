@@ -28,6 +28,8 @@ export interface ShotBulkConfigPanelProps {
   onNotice?: (message: string) => void;
   onError?: (message?: string) => void;
   onConfigureStage?: (stage: ShotStage, shotIds: string[]) => void | Promise<void>;
+  confirmPromptOverwrite?: boolean;
+  videoOnly?: boolean;
   onBulkPrompt?: (stage: ShotStage, shotIds: string[], promptText: string) => void | Promise<void>;
   onOpenProductionQueue?: (batchId?: string) => void | Promise<void>;
   onOpenShot?: (shotId: string) => void;
@@ -84,6 +86,8 @@ function ScopedShotBulkConfigPanel({
   onError,
   onConfigureStage,
   onBulkPrompt,
+  confirmPromptOverwrite,
+  videoOnly,
   onBusyChange,
   onOpenProductionQueue,
   onOpenShot,
@@ -94,6 +98,7 @@ function ScopedShotBulkConfigPanel({
   const [localError, setLocalError] = useState<string>();
   const [localNotice, setLocalNotice] = useState<string>();
   const [promptText, setPromptText] = useState("");
+  const unappliedPrompt=Boolean(onBulkPrompt && promptText.trim());
   const [projectPlan, setProjectPlan] = useState<ProjectPreparationView>();
   const [planLoading, setPlanLoading] = useState(false);
   const [allowPartial, setAllowPartial] = useState(false);
@@ -272,15 +277,17 @@ function ScopedShotBulkConfigPanel({
       reportError("请输入要批量应用的提示词。清除来源标记请使用后端批量命令。" );
       return;
     }
+    if(confirmPromptOverwrite && !window.confirm(`将覆盖所选 ${selectedCount} 个镜头的视频提示词；不修改旧批次，也不启动生成。是否应用？`))return;
     await runAction(
       "prompt",
-      (shotIds) => onBulkPrompt(stage, shotIds, promptText),
+      async (shotIds) => { await onBulkPrompt(stage, shotIds, promptText); setPromptText(""); },
       `已提交 ${selectedCount} 个镜头的批量提示词操作；保存后仍按快照语义生效。`,
     );
   }
 
   async function prepareBatch(nextStage: ShotStage) {
     if (nextStage !== "video" || stage !== "video") return;
+    if (unappliedPrompt) {reportError("请先明确应用批量提示词，或清空输入框使用镜头已保存的内容。");return;}
     const requestedOwner = owner;
     setPreparationResult(undefined);
     await runAction(
@@ -331,7 +338,7 @@ function ScopedShotBulkConfigPanel({
       </div>
 
       <div className="pipeline-stage-tabs" role="tablist" aria-label="批量配置阶段">
-        {(["image", "video"] as const).map((nextStage) => (
+        {(videoOnly ? ["video"] as const : ["image", "video"] as const).map((nextStage) => (
           <button
             key={nextStage}
             type="button"
@@ -363,7 +370,7 @@ function ScopedShotBulkConfigPanel({
       </div>
 
       <div className="pipeline-action-grid">
-        <button type="button" onClick={() => void configureStage("image")} disabled>
+        <button type="button" hidden={videoOnly} onClick={() => void configureStage("image")} disabled>
           配置图片阶段
         </button>
         <button type="button" hidden={!onConfigureStage} onClick={() => void configureStage("video")} disabled={Boolean(busyAction) || !selectedCount}>
@@ -372,10 +379,10 @@ function ScopedShotBulkConfigPanel({
         <button type="button" hidden={!onBulkPrompt} onClick={() => void assignPrompt()} disabled={Boolean(busyAction) || !selectedCount}>
           批量应用提示词
         </button>
-        <button type="button" disabled>
+        <button type="button" hidden={videoOnly} disabled>
           {busyAction === "prepare-image" ? "正在准备图片生产…" : "准备图片生产"}
         </button>
-        <button type="button" onClick={() => void prepareBatch("video")} disabled={stage !== "video" || Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit}>
+        <button type="button" onClick={() => void prepareBatch("video")} disabled={stage !== "video" || Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit || unappliedPrompt}>
           {busyAction === "prepare-video" ? "正在准备视频生产…" : "准备视频生产"}
         </button>
       </div>
@@ -390,10 +397,11 @@ function ScopedShotBulkConfigPanel({
       </div>
       {selectedOverLimit && <p className="pipeline-preparation-limit" role="alert">本次最多准备 {MAX_BULK_PREPARATION_ITEMS} 个镜头；系统不会自动拆分批次，请减少选择或使用“选择就绪项”。</p>}
 
-      <label className="pipeline-prompt-editor">
+      {onBulkPrompt && <label className="pipeline-prompt-editor">
         <span>批量应用当前阶段提示词</span>
         <textarea value={promptText} onChange={(event) => setPromptText(event.target.value)} rows={3} placeholder="输入后点击“批量应用提示词”；文本会以当前阶段快照写入所选镜头。" disabled={Boolean(busyAction)} />
-      </label>
+      </label>}
+      {unappliedPrompt && <p role="status">批量提示词尚未应用；准备前请点击“批量应用提示词”，或清空输入框。</p>}
 
       <div className="pipeline-shot-table-wrap">
         <table className="pipeline-shot-table">

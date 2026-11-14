@@ -13,6 +13,6 @@ export function StoryboardBatchDialog({projectId,onClose,onQueue,onShot}: {proje
   return <dialog ref={dialog} className="storyboard-batch-dialog" aria-label="批量准备视频" onCancel={e=>{if(busy)e.preventDefault();else onClose();}}>
     <header><h2>批量准备视频</h2><button type="button" disabled={busy} onClick={onClose}>返回创作</button></header>
     <p>1 选择镜头 → 2 正式预检 → 3 准备冻结批次 → 4 在队列明确启动。准备不会运行 GPU；修改镜头不会改写旧批次。</p>
-    {error&&<p role="alert">{error}</p>}{shots?<ShotBulkConfigPanel projectId={projectId} shots={shots} onBusyChange={setBusy} onRefresh={reload} onOpenProductionQueue={onQueue} onOpenShot={onShot}/>:<p role="status">正在读取镜头…</p>}
+    {error&&<p role="alert">{error}</p>}{shots?<ShotBulkConfigPanel projectId={projectId} shots={shots} videoOnly confirmPromptOverwrite onBulkPrompt={async(stage,ids,text)=>{if(stage!=="video")throw new Error("仅支持视频提示词");await productClient.creation.shotsPromptAssign(projectId,ids,text);}} onBusyChange={setBusy} onRefresh={reload} onOpenProductionQueue={onQueue} onOpenShot={onShot}/>:<p role="status">正在读取镜头…</p>}
   </dialog>;
 }

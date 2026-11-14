@@ -29,7 +29,7 @@ export function NormalProductPages({ project: activeProject, runtime, route, nav
   return <>
     {activeProject && normalCreate(route) && route.kind === "create" && storyboard && <StoryboardWorkbench key={activeProject.id} route={route} runtime={runtime} navigate={navigate} onDirtyChange={onDirtyChange} renderBatch={props=><StoryboardBatchDialog {...props}/>} renderFolderImport={props=><FolderBatchImportDialog {...props}/>} renderRuns={(runRoute, inlineNavigate) => <RunsPage route={runRoute} navigate={inlineNavigate} />} />}
     {activeProject && (normalCreate(route) || (route.kind === "create" && route.stage === "image")) && route.kind === "create" && !storyboard && <CreatePage key={activeProject.id} route={route} runtime={runtime} navigate={navigate} onDirtyChange={onDirtyChange} />}
-    {activeProject && normalLibrary(route) && route.kind === "library" && <LibraryPage key={activeProject.id} route={route} navigate={navigate} />}
+    {activeProject && normalLibrary(route) && route.kind === "library" && <LibraryPage key={activeProject.id} route={route} navigate={navigate} onDirtyChange={onDirtyChange} />}
     {activeProject && normalRuns(route) && route.kind === "runs" && <RunsPage key={activeProject.id} route={route} navigate={navigate} />}
   </>;
 }

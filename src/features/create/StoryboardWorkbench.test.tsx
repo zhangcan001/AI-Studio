@@ -6,8 +6,8 @@ import type { CreationContext, ProductRun } from "../../product/types";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), shotsList: vi.fn(), shotsReorder: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { shotsList:api.shotsList,shotsReorder:api.shotsReorder,mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
+const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), shotsList: vi.fn(), shotsReorder: vi.fn(), exportSelected:vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { exportSelected:api.exportSelected,shotsList:api.shotsList,shotsReorder:api.shotsReorder,mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
 // Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
 beforeEach(() => {
@@ -50,7 +50,7 @@ it("UI restore: workbench derives real shot status/stats from the product facade
   expect(within(stats).getByText("已选用").nextSibling?.textContent).toBe("1");
   expect(within(stats).getByText("生成中").nextSibling?.textContent).toBe("1");
   expect(within(stats).getByText("待制作").nextSibling?.textContent).toBe("1");
-  expect(screen.getAllByText("生成中 68%").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("生成中 · 已处理 17/25 项").length).toBeGreaterThan(0);
   fireEvent.click(within(screen.getByRole("article", { name: "镜头03" })).getByRole("button", { name: "生成" }));
   expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "p", stage: "video", shotId: "s3" });
   fireEvent.click(screen.getByRole("button", { name: "批量准备视频" }));
@@ -384,4 +384,29 @@ it("retains the insert failure receipt even after the automatic successful list 
  const reads=api.workbench.mock.calls.length;fireEvent.click(within(row).getByRole("button",{name:"在此后插入"}));
  await waitFor(()=>expect(api.workbench.mock.calls.length).toBeGreaterThan(reads));
  expect((await screen.findByRole("alert")).textContent).toContain("新镜头已创建；排序未完成");expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("advances A to B to C using real pending-review facts, including an already selected B",async()=>{
+ const board=workbenchFromContexts();board.items=board.items.map((it,i)=>({...it,shot:{...it.shot,recentRun:{source:"task" as const,id:`review-${i}`},selectedResultId:i===1?`review-video-${i}`:null},candidates:[{id:`review-video-${i}`,name:`候选${i}`,mediaKind:"video" as const,selected:i===1}]}));
+ api.workbench.mockResolvedValue(board);api.runGet.mockImplementation(async(_p,ref)=>({...run("SUCCEEDED",1,1),ref}));api.resultsGet.mockImplementation(async(_p,ref)=>[{assetId:`review-video-${ref.id.split("-").pop()}`,name:"video",mediaKind:"video",assetExists:true,reviewState:"PENDING",reviewRevision:0,selectedShotIds:[]}]);
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);const card=await screen.findByRole("article",{name:"镜头01"});fireEvent.click(within(card).getByRole("button",{name:"审核"}));
+ let dialog=await screen.findByRole("dialog",{name:"审核 镜头01"});fireEvent.click(within(dialog).getByRole("button",{name:"下一个待审核镜头"}));
+ dialog=await screen.findByRole("dialog",{name:"审核 镜头02"});fireEvent.click(within(dialog).getByRole("button",{name:"下一个待审核镜头"}));
+ dialog=await screen.findByRole("dialog",{name:"审核 镜头03"});fireEvent.click(within(dialog).getByRole("button",{name:"下一个待审核镜头"}));expect(await within(dialog).findByText(/已到本页末尾/)).toBeTruthy();expect(api.resultReview).not.toHaveBeenCalled();expect(api.selectResult).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
+});
+it.each(["insert","move"] as const)("locates the acknowledged %s target beyond page60 and shows a success receipt",async(action)=>{
+ localStorage.setItem("ai-studio.storyboard.view","shots");let ordered=Array.from({length:61},(_,i)=>({id:`boundary-${i}`,projectId:"p",name:`边界镜头${i}`,ordinal:i}));
+ api.shotsList.mockImplementation(async()=>ordered);api.shotsReorder.mockImplementation(async(_p,ids:string[])=>{ordered=ids.map((id,i)=>({...ordered.find(s=>s.id===id)!,ordinal:i}));return ordered;});
+ api.createShot.mockImplementation(async()=>{const item={id:"inserted-boundary",projectId:"p",name:"新镜头",ordinal:ordered.length};ordered.push(item);return item;});
+ api.workbench.mockImplementation(async(_p,_stage,_limit,offset=0)=>({projectId:"p",projectName:"P",stage:"video",shots:ordered,items:ordered.slice(offset,offset+60).map(summary=>({shot:{summary,prompt:"",selectionRef:null,values:{},referenceAssetIds:[],selectedResultId:null,recentRun:null},candidates:[]})),truncated:Math.max(0,ordered.length-offset-60)}));
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);const row=await screen.findByRole("article",{name:"分镜 60 边界镜头59"});fireEvent.click(within(row).getByRole("button",{name:action==="insert"?"在此后插入":"下移"}));
+ await waitFor(()=>expect(api.workbench).toHaveBeenCalledWith("p","video",60,60));expect(await screen.findByText(new RegExp(`${action==="insert"?"新镜头已插入":"镜头已移动"}：第 61 镜，第 2 页`))).toBeTruthy();const target=document.getElementById(`storyboard-shot-${action==="insert"?"inserted-boundary":"boundary-59"}`);expect(target?.getAttribute("data-focused")).toBe("true");expect(api.generate).not.toHaveBeenCalled();
+});
+it("labels running one-video work as processed items rather than a misleading inference 0 percent",async()=>{
+ api.workbench.mockResolvedValue(workbenchFromContexts());api.runGet.mockResolvedValue(run("RUNNING",0,1));render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ expect((await screen.findAllByLabelText("已处理 0/1 项")).length).toBeGreaterThan(0);expect(screen.queryByText("0%")).toBeNull();expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("shows per-shot export failures, keeps the mapping receipt and can copy the destination",async()=>{
+ api.exportSelected.mockResolvedValue({exported:1,failed:1,directory:"D:/owned-export",entries:[{ordinal:1,shotId:"s2",shotName:"Second",assetId:"a2",fileName:null,error:"source missing"}],manifestError:null,openError:"Explorer unavailable"});const copy=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:copy}});render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);await screen.findByLabelText("镜头统计");fireEvent.click(screen.getByRole("checkbox",{name:"导出后打开目录"}));fireEvent.click(screen.getByRole("button",{name:"导出已选用视频"}));expect(await screen.findByText(/Second：source missing/)).toBeTruthy();expect(screen.getByText("Explorer unavailable")).toBeTruthy();expect(api.exportSelected).toHaveBeenCalledWith("p",true);fireEvent.click(screen.getByRole("button",{name:"复制导出路径"}));await waitFor(()=>expect(copy).toHaveBeenCalledWith("D:/owned-export"));expect(api.generate).not.toHaveBeenCalled();
 });

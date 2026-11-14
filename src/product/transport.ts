@@ -54,7 +54,7 @@ interface ProductCommands {
   product_creation_readiness_get: { args: { request: CreationSubmission }; result: CreationReadiness };
   product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };
-  product_selected_videos_export: { args: { projectId: string }; result: { exported: number; failed: number; directory: string } | null };
+  product_selected_videos_export: { args: { projectId: string; openDirectory?: boolean }; result: import("./types").SelectedVideoExport | null };
   product_creation_workbench_get: { args: { projectId: string; stage: "image" | "video"; limit: number; offset?: number }; result: import("./types").CreationWorkbench };
   product_creation_shot_create: { args: { projectId: string }; result: CreationShotSummary };
   product_creation_shot_row_save: { args: { projectId: string; request: import("./types").CreationShotRowSave }; result: import("./types").CreationShotRowSaveResult };
@@ -75,6 +75,7 @@ export async function productRequest<K extends keyof ProductCommands>(command: K
 
 /** Typed adapters to the existing Shot authority, not another ordering model. */
 export const shotOrderTransport = {
+  assignPrompt: (projectId: string, shotIds: string[], text: string) => invokeCommand<{projectId:string;stage:string;updatedShotIds:string[]}>("bulk_assign_shot_prompt", { request: {projectId,shotIds,stage:"video",source:{type:"text",text}} }),
   list: (projectId: string) => invokeCommand<import("../types/shot").ShotView[]>("shot_list", { projectId }),
   reorder: (projectId: string, orderedIds: string[]) => invokeCommand<import("../types/shot").ShotView[]>("shot_reorder", { request: { projectId, orderedIds } }),
 };

@@ -71,7 +71,9 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     return () => { mounted.current = false; ++requestEpoch.current; };
   }, [reload]);
 
-  function openCreate() {
+  const editorDirty=(creating||Boolean(editing)) && JSON.stringify([draftName,draftDesc,draftCover,draftImages])!==JSON.stringify(editing?[editing.name,editing.description,editing.coverAssetId,editing.imageAssetIds]:["","",null,[]]);
+  const allowReplace=()=>!editorDirty||window.confirm("当前编辑尚未保存，确定放弃并切换？");
+  function resetCreate() {
     setCreating(true);
     setEditing(null);
     setDraftName("");
@@ -81,7 +83,10 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     setError(undefined);
   }
 
+  function openCreate(){if(allowReplace())resetCreate();}
   function openEdit(entity: StoryEntity) {
+    if(editing?.id===entity.id&&!creating)return;
+    if(!allowReplace())return;
     setCreating(false);
     setEditing(entity);
     setDraftName(entity.name);
@@ -118,7 +123,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   }
 
   async function importImages() {
-    if (busy || (formOpen && !window.confirm("当前编辑尚未保存，确定放弃并导入图片？"))) return;
+    if (busy || (editorDirty && !window.confirm("当前编辑尚未保存，确定放弃并导入图片？"))) return;
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -130,7 +135,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       failures.push(...result.failed.map(item => `${item.displayName}：${item.error}`));
       if (importMode === "group" && result.imported.length) {
         if (!mounted.current) return;
-        openCreate();
+        resetCreate();
         setDraftName(filenameStem(result.imported[0].originalName || result.imported[0].name));
         setDraftCover(result.imported[0].id);
         setDraftImages(result.imported.map(asset => asset.id));
@@ -191,7 +196,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   const visibleItems = items.filter(item => !search.trim() || `${item.name} ${item.description}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const formOpen = creating || Boolean(editing);
 
-  useEffect(() => { onDirtyChange?.(formOpen || busy); return () => onDirtyChange?.(false); }, [formOpen, busy, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(editorDirty); return () => onDirtyChange?.(false); }, [editorDirty, onDirtyChange]);
 
   return <LibraryThumbnailScope><section className="story-entities-section" aria-label={`${label}管理`}>
     <header className="story-entities-header">
@@ -202,7 +207,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       <div className="story-entity-header-actions">
         <label>导入方式<select aria-label="实体图片导入方式" value={importMode} disabled={busy} onChange={e => setImportMode(e.target.value as "separate" | "group")}><option value="separate">每张图新建一项</option><option value="group">所选图片归为同一项（确认后保存）</option></select></label>
         <button type="button" onClick={() => void importImages()} disabled={busy || loading}>{busy ? "正在处理…" : `批量导入${label}图片`}</button>
-        <button type="button" onClick={openCreate} disabled={busy || loading}>新建{label}</button>
+        <button type="button" onClick={() => openCreate()} disabled={busy || loading}>新建{label}</button>
         <button type="button" onClick={() => void reload()} disabled={busy || loading}>刷新</button>
       </div>
     </header>
@@ -247,7 +252,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       </div>
       <footer>
         <button type="button" onClick={() => void save()} disabled={busy || !draftName.trim()}>保存</button>
-        <button type="button" onClick={() => { setCreating(false); setEditing(null); }} disabled={busy}>取消</button>
+        <button type="button" onClick={() => { if(allowReplace()){setCreating(false); setEditing(null);} }} disabled={busy}>取消</button>
       </footer>
     </div>}
     {picking && <ImageAssetPicker

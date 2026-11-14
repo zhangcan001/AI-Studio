@@ -159,3 +159,13 @@ it("offers direct ordinary media import and reports its receipt without starting
  fireEvent.click(await screen.findByRole("button",{name:"导入素材"}));
  await waitFor(()=>expect(api.assetsImport).toHaveBeenCalledWith("project-a",false));expect(await screen.findByText(/导入成功 1 项/)).toBeTruthy();expect(api.generate).not.toHaveBeenCalled();
 });
+
+it("reports ordinary prompt edits to the App leave guard and blocks standalone unsaved navigation",async()=>{
+ const dirty=vi.fn(),navigate=vi.fn();const confirm=vi.spyOn(window,"confirm").mockReturnValue(false);
+ const ui=render(<LibraryPage route={route} navigate={navigate} onDirtyChange={dirty}/>);fireEvent.click(await screen.findByRole("button",{name:"编辑"}));fireEvent.change(screen.getByLabelText("新版本正文"),{target:{value:"kept draft"}});await waitFor(()=>expect(dirty).toHaveBeenLastCalledWith(true));
+ ui.rerender(<LibraryPage route={route} navigate={navigate}/>);fireEvent.click(screen.getByRole("button",{name:"视频"}));await waitFor(()=>expect(confirm).toHaveBeenCalled());expect(navigate).not.toHaveBeenCalled();expect((screen.getByLabelText("新版本正文") as HTMLTextAreaElement).value).toBe("kept draft");
+});
+
+it("does not publish a Library intent when leaving an unsaved resource is declined",async()=>{
+ api.useInCreation.mockResolvedValue({kind:"prompt",projectId:"project-a",promptId:"prompt-a",promptVersionId:"version-a",text:"never apply",modelVersionId:null});const navigate=vi.fn().mockResolvedValue(false);render(<LibraryPage route={route} navigate={navigate} onDirtyChange={vi.fn()}/>);fireEvent.click(await screen.findByRole("button",{name:"用于视频创作"}));await waitFor(()=>expect(navigate).toHaveBeenCalled());await waitFor(()=>expect((screen.getByRole("button",{name:"用于视频创作"}) as HTMLButtonElement).disabled).toBe(false));expect(useStudioStore.getState().pendingLibraryIntent).toBeUndefined();expect(api.generate).not.toHaveBeenCalled();
+});

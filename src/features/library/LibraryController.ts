@@ -28,7 +28,7 @@ function writeStickyLibraryFilters(projectId: string, next: StickyLibraryFilters
   } catch { /* convenience only */ }
 }
 
-export interface LibraryProps { route: LibraryRoute; navigate: (route: AppRoute) => unknown }
+export interface LibraryProps { onDirtyChange?: (dirty:boolean)=>void; route: LibraryRoute; navigate: (route: AppRoute) => unknown }
 interface Projection {scope:string;list:LibraryList;detail?:LibraryDetail;relations:LibraryRelation[];versions?:LibraryVersions}
 export function useLibraryController({route,navigate}:LibraryProps) {
   const [queryState,setQueryState]=useState(()=>{
@@ -135,8 +135,8 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     if(stage==="image" || returnRoute?.stage==="image")return;
     const intent=await productClient.library.useInCreation(route.projectId,route.resource);
     if(liveScope.current!==scope || intent.projectId!==route.projectId || (intent.kind==="asset" && intent.mediaKind==="audio"))return;
-    useStudioStore.getState().setPendingLibraryIntent(intent);
-    navigate(returnRoute ? {...returnRoute, stage: "video"} : {kind:"create",projectId:route.projectId,stage:"video"});
+    const accepted=await navigate(returnRoute ? {...returnRoute, stage: "video"} : {kind:"create",projectId:route.projectId,stage:"video"});
+    if(accepted!==false)useStudioStore.getState().setPendingLibraryIntent(intent);
   });
   return {mediaInspection,returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,sourceKind,setSourceKind,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
     pageIndex,canPrevious:pageIndex>0,

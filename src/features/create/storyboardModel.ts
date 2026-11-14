@@ -26,6 +26,7 @@ export function runPercent(run: ProductRun | null): number | null {
   if (!run || !run.progress.total) return null;
   return Math.round(((run.progress.succeeded + run.progress.failed + run.progress.cancelled) / run.progress.total) * 100);
 }
+export function runProgressText(run: ProductRun | null) { return run ? `已处理 ${run.progress.succeeded+run.progress.failed+run.progress.cancelled}/${run.progress.total} 项` : "暂无任务进度"; }
 export function coverAsset(item: Pick<StoryboardShot, "candidates">): CreationAsset | undefined {
   return item.candidates.find(asset => asset.selected) ?? item.candidates.find(asset => asset.thumbnailBytes?.length) ?? item.candidates[0];
 }

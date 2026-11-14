@@ -583,3 +583,5 @@ dialog.storyboard-batch-dialog { width: min(1100px, 92vw); max-height: 88vh; ove
 .storyboard-badge.queued { color: var(--studio-accent); } .storyboard-badge.paused { color: var(--studio-warning); }
 
 dialog.storyboard-review:not([open]) { display: none; }
+
+.shot-row-card[data-focused="true"] { outline: 2px solid var(--studio-accent); outline-offset: 2px; }

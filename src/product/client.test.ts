@@ -142,3 +142,7 @@ it("folder import product bridge preserves the existing typed command payloads a
   const error={code:"INVALID_INPUT",message:"stale",details:{code:"STALE_PREVIEW",stage:"PREVIEW"}};invokeCommand.mockRejectedValueOnce(error);await expect(productClient.folderImport.commit(request)).rejects.toBe(error);
   invokeCommand.mockResolvedValueOnce(undefined);await productClient.folderImport.discard("session");expect(invokeCommand).toHaveBeenLastCalledWith("folder_batch_import_discard",{sessionId:"session"});
 });
+
+it("uses the existing formal bulk prompt endpoint and explicitly controls export directory opening",async()=>{
+ invokeCommand.mockResolvedValue({updatedShotIds:["s"]});await productClient.creation.shotsPromptAssign("p",["s"],"text");expect(invokeCommand).toHaveBeenLastCalledWith("bulk_assign_shot_prompt",{request:{projectId:"p",shotIds:["s"],stage:"video",source:{type:"text",text:"text"}}});await productClient.creation.exportSelected("p",true);expect(invokeCommand).toHaveBeenLastCalledWith("product_selected_videos_export",{projectId:"p",openDirectory:true});
+});

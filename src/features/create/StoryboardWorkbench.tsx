@@ -7,7 +7,7 @@ import { normalizeProductError } from "../../product/errors";
 import { subscribeRunInvalidation } from "../../product/runInvalidation";
 import type { AppRoute } from "../../app/routes/types";
 import { AssetImageThumb, CandidateThumbnail, MediaLightboxScope, ThumbnailProjectContext } from "./CreateMediaPreview";
-import { coverAsset, deriveStoryboardStatus, runPercent, shotDuration, shotResolution, storyboardStats, storyboardStatusLabels, type StoryboardShot } from "./storyboardModel";
+import { coverAsset, deriveStoryboardStatus, runProgressText, runPercent, shotDuration, shotResolution, storyboardStats, storyboardStatusLabels, type StoryboardShot } from "./storyboardModel";
 import "./CreatePage.css";
 import { CreatePage } from "./CreatePage";
 import type { CreateProps } from "./CreateController";
@@ -44,10 +44,15 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const setView = (next: StoryboardView) => { setViewState(next); try { window.localStorage.setItem(VIEW_KEY, next); } catch { /* storage unavailable */ } };
   const [folderImportOpen,setFolderImportOpen]=useState(false);
   useEffect(()=>setFolderImportOpen(false),[route.projectId]);
+  const [orderNotice,setOrderNotice]=useState<string>();
+  const [focusId,setFocusId]=useState<string>();
+  const pendingScroll=useRef<string | undefined>(undefined);
   const [orderError,setOrderError] = useState<string>();
   const [exporting,setExporting] = useState(false);
   const exportLock=useRef(false);
-  const [delivery,setDelivery] = useState<string>();
+  const [delivery,setDelivery] = useState<import("../../product/types").SelectedVideoExport>();
+  const [openExport,setOpenExport]=useState(false);
+  const [copyNotice,setCopyNotice]=useState<string>();
   const [batchOpen, setBatchOpen] = useState(false);
   const [page, setPage] = useState(0);
   const orderLock = useRef(false);
@@ -162,13 +167,23 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   };
   const exportSelected = async () => {
     if(exportLock.current)return;exportLock.current=true;setExporting(true);
-    try{const result=await productClient.creation.exportSelected(projectId);if(mounted.current&&scope.current===projectId&&result)setDelivery(`已导出 ${result.exported} 项，失败 ${result.failed} 项。目录：${result.directory}`);}
+    try{const result=await productClient.creation.exportSelected(projectId,openExport);if(mounted.current&&scope.current===projectId&&result)setDelivery(result);}
     catch(cause){if(mounted.current&&scope.current===projectId)setError(normalizeProductError(cause).message);}
     finally{exportLock.current=false;if(mounted.current&&scope.current===projectId)setExporting(false);}
   };
+  useEffect(()=>{
+    const id=pendingScroll.current;if(!id||!items?.some(i=>i.id===id))return;
+    const element=document.getElementById(`storyboard-shot-${id}`);if(element){element.scrollIntoView?.({block:"nearest"});pendingScroll.current=undefined;}
+  },[items]);
+  const locateOrderedShot=(id:string,ids:string[],message:string)=>{
+    const position=ids.indexOf(id);if(position<0)return;
+    const nextPage=Math.floor(position/STORYBOARD_MAX_DETAIL_SHOTS);
+    pendingScroll.current=id;setFocusId(id);setSelectedId(id);setOrderNotice(`${message}：第 ${position+1} 镜，第 ${nextPage+1} 页。若被筛选隐藏，请清除筛选查看。`);
+    if(nextPage!==page)setPage(nextPage);else void load();
+  };
   const moveShot = async (id: string, delta: -1 | 1) => {
     if (orderLock.current) return;
-    orderLock.current = true; setOrderError(undefined);
+    orderLock.current = true; setOrderError(undefined);setOrderNotice(undefined);
     try {
       const shots = await productClient.creation.shotsList(projectId);
       const ids = shots.filter(s => s.projectId === projectId).sort((a,b) => a.ordinal-b.ordinal || a.id.localeCompare(b.id)).map(s => s.id);
@@ -176,22 +191,23 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       if (i < 0 || j < 0 || j >= ids.length) return;
       [ids[i],ids[j]] = [ids[j],ids[i]];
       await productClient.creation.shotsReorder(projectId,ids);
-      if (mounted.current && scope.current === projectId) void load();
+      if (mounted.current && scope.current === projectId) locateOrderedShot(id,ids,"镜头已移动");
     } catch(cause) { if (mounted.current && scope.current === projectId) setOrderError(normalizeProductError(cause).message); }
     finally { orderLock.current=false; }
   };
   const insertShot = async (afterId: string) => {
     if (orderLock.current) return;
     orderLock.current=true; setOrderError(undefined);
-    let created: string | undefined;
+    let created: string | undefined;let positioned=false;
     try {
       const shot=await productClient.creation.createShot(projectId); created=shot.id;
       const shots=await productClient.creation.shotsList(projectId);
       const ids=shots.filter(s=>s.projectId===projectId).sort((a,b)=>a.ordinal-b.ordinal || a.id.localeCompare(b.id)).map(s=>s.id).filter(id=>id!==created);
       const index=ids.indexOf(afterId); if(index<0) throw new Error("插入位置已变化；新镜头保留在末尾，请刷新后移动。");
       ids.splice(index+1,0,shot.id); await productClient.creation.shotsReorder(projectId,ids);
+      if(mounted.current&&scope.current===projectId){positioned=true;locateOrderedShot(shot.id,ids,"新镜头已插入");}
     } catch(cause) { if(mounted.current&&scope.current===projectId)setOrderError(`${created ? "新镜头已创建；排序未完成，请刷新后移动。" : ""}${normalizeProductError(cause).message}`); }
-    finally { orderLock.current=false; if(mounted.current&&scope.current===projectId)void load(); }
+    finally { orderLock.current=false; if(!positioned&&mounted.current&&scope.current===projectId)void load(); }
   };
   const createShot = async (open = true) => {
     if (createInFlight.current) return;
@@ -220,11 +236,11 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       <div className="storyboard-header-actions">
         <button type="button" onClick={() => setRunRoute({ kind: "runs", projectId })}>任务队列与运行记录</button>
         <button type="button" onClick={() => setFolderImportOpen(true)} disabled={!renderFolderImport}>导入分镜脚本</button>
-        <button type="button" className="primary" disabled={!renderBatch} onClick={() => setBatchOpen(true)}>批量准备视频</button><button type="button" disabled={exporting} onClick={()=>void exportSelected()}>{exporting?"正在导出…":"导出已选用视频"}</button>
+        <button type="button" className="primary" disabled={!renderBatch} onClick={() => setBatchOpen(true)}>批量准备视频</button><button type="button" disabled={exporting} onClick={()=>void exportSelected()}>{exporting?"正在导出…":"导出已选用视频"}</button><label><input type="checkbox" checked={openExport} disabled={exporting} onChange={e=>setOpenExport(e.target.checked)}/>导出后打开目录</label>
       </div>
     </header>
-    {delivery && <p role="status">{delivery}</p>}
-    {orderError && <p role="alert">{orderError}</p>}
+    {delivery && <section aria-label="导出回执"><p role="status">已导出 {delivery.exported} 项，失败 {delivery.failed} 项。目录：{delivery.directory}</p><button type="button" onClick={()=>{void Promise.resolve().then(()=>navigator.clipboard.writeText(delivery.directory)).then(()=>setCopyNotice("导出路径已复制。"),()=>setCopyNotice("复制失败，可手动选择目录文本复制。"));}}>复制导出路径</button>{copyNotice&&<p role="status">{copyNotice}</p>}{delivery.manifestError&&<p role="alert">{delivery.manifestError}</p>}{delivery.openError&&<p role="alert">{delivery.openError}</p>}<ul>{delivery.entries?.filter(e=>e.error).map(e=><li key={e.shotId}>第 {e.ordinal+1} 镜 · {e.shotName}：{e.error}</li>)}</ul><small>export-manifest.json 保留镜头、素材和文件名对应关系，不包含绝对源路径。</small></section>}
+    {orderError && <p role="alert">{orderError}</p>}{orderNotice&&<p role="status">{orderNotice}</p>}
     {error && <p role="alert" className="storyboard-error">{error}</p>}
     {editing ? <div className="storyboard-editing-body">
       <aside className="storyboard-panel storyboard-shot-nav" aria-label="镜头切换">
@@ -261,7 +277,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
         {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
-          : view === "shots" ? <StoryboardShotRows projectId={projectId} items={items} shotIndex={shotIndex} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
+          : view === "shots" ? <StoryboardShotRows focusId={focusId} projectId={projectId} items={items} shotIndex={shotIndex} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>
@@ -280,7 +296,17 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
         </section>
       </aside>
     </div>}
-    {reviewItem && <ShotReviewDialog key={`${projectId}:${reviewItem.id}`} projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} onEdit={() => { void Promise.resolve(openShot(reviewItem.id)).then(ok => { if (ok !== false && mounted.current && scope.current === projectId) setReviewId(undefined); }); }} onNext={(items?.some(i=>i.id!==reviewItem.id&&canReview(i)&&i.status==="REVIEW")) ? () => { const next=items?.find(i=>i.id!==reviewItem.id&&canReview(i)&&i.status==="REVIEW"); if(next)setReviewId(next.id); } : undefined} />}
+    {reviewItem && <ShotReviewDialog key={`${projectId}:${reviewItem.id}`} projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} onEdit={() => { void Promise.resolve(openShot(reviewItem.id)).then(ok => { if (ok !== false && mounted.current && scope.current === projectId) setReviewId(undefined); }); }} onNext={async()=>{
+      const current=reviewItem.id, owner=projectId;
+      const position=(items??[]).findIndex(i=>i.id===current);
+      for(const candidate of (items??[]).slice(position+1)){
+        if(!canReview(candidate)||!candidate.run)continue;
+        const result=await productClient.run.resultsGet(owner,candidate.run.ref);
+        if(!mounted.current||scope.current!==owner)return;
+        if(result.some(r=>r.reviewState==="PENDING"&&r.assetExists&&candidate.candidates.some(a=>a.id===r.assetId))){setReviewId(candidate.id);return;}
+      }
+      return truncated>0?"本页后面没有待审核候选；可关闭窗口，翻到下一页继续。":"已到本页末尾，后面没有待审核候选。不会循环跳回，也不会自动选用或审核。";
+    }} />}
     {batchOpen && renderBatch?.({projectId,onClose:()=>setBatchOpen(false),onQueue:id=>{setBatchOpen(false);setRunRoute({kind:"runs",projectId,run:id?{source:"queue-batch",id}:undefined});},onShot:id=>{void Promise.resolve(openShot(id)).then(ok=>{if(ok!==false&&mounted.current&&scope.current===projectId)setBatchOpen(false);});}})}
     {folderImportOpen && renderFolderImport?.({projectId,onImported:()=>load(),onCancel:()=>setFolderImportOpen(false),onOpenShot:async(id)=>{const owner=projectId;try{const accepted=await openShot(id);if(accepted!==false&&mounted.current&&scope.current===owner)setFolderImportOpen(false);}catch(cause){if(mounted.current&&scope.current===owner)setError(`无法打开镜头：${normalizeProductError(cause).message}`);}},onOpenQueue:(id)=>{setFolderImportOpen(false);setRunRoute({kind:"runs",projectId,run:{source:"queue-batch",id}});},onOpenLegacy:()=>{setFolderImportOpen(false);void navigate({kind:"project-settings",projectId,section:"advanced-production"});}})}
     {runRoute && <WorkbenchRuns route={runRoute} navigate={navigateInline} renderRuns={renderRuns} onClose={() => setRunRoute(undefined)} />}
@@ -322,12 +348,12 @@ function ShotRow({ item, selected, onSelect, onOpen, onReview }: { item: Storybo
 function Cover({ item, playable = true }: { item: StoryboardShot; playable?: boolean }) {
   const asset = coverAsset(item); const percent = item.status === "GENERATING" ? runPercent(item.run) : null;
   return <div className="storyboard-cover">{asset ? <CandidateThumbnail asset={asset} playable={playable} /> : <span className="storyboard-cover-empty">暂无结果</span>}
-    {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} aria-label={`进度 ${percent}%`}>{percent}%</span>}
+    {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} title="任务完成比例，不是视频推理百分比" aria-label={runProgressText(item.run)}>{item.run ? `${item.run.progress.succeeded+item.run.progress.failed+item.run.progress.cancelled}/${item.run.progress.total}` : "—"}</span>}
   </div>;
 }
 function StatusBadge({ item, compact }: { item: StoryboardShot; compact?: boolean }) {
   const percent = item.status === "GENERATING" ? runPercent(item.run) : null;
-  return <span className={`storyboard-badge ${item.status.toLowerCase()}${compact ? " compact" : ""}`}>{item.error ? "读取失败" : storyboardStatusLabels[item.status]}{percent !== null && !compact ? ` ${percent}%` : ""}</span>;
+  return <span className={`storyboard-badge ${item.status.toLowerCase()}${compact ? " compact" : ""}`}>{item.error ? "读取失败" : storyboardStatusLabels[item.status]}{percent !== null && !compact ? ` · ${runProgressText(item.run)}` : ""}</span>;
 }
 function ShotCard({ item, selected, onSelect, onOpen, onRun, onReview }: { item: StoryboardShot; selected: boolean; onSelect: () => void; onOpen: () => void; onRun: () => void; onReview: () => void }) {
   const projectId = useContext(ThumbnailProjectContext);

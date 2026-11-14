@@ -260,10 +260,10 @@ function App() {
   useEffect(() => {
   }, [activeProjectId]);
 
-  async function allowProjectSwitch(projectId?: string) {
+  async function allowProjectSwitch(projectId?: string, discardApproved = false) {
     if (!projectId || projectId === activeProjectId) return true;
     const studio = useStudioStore.getState();
-    if (studio.draftDirty && !await confirmDraftDiscard("当前项目有未保存的创作草稿。切换项目会放弃该草稿，是否继续？")) return false;
+    if (!discardApproved && studio.draftDirty && !await confirmDraftDiscard("当前项目有未保存的创作草稿。切换项目会放弃该草稿，是否继续？")) return false;
     studio.resetDraft();
     useTaskStore.getState().clear();
     useProjectStore.getState().setActiveProject(projectId);
@@ -272,10 +272,12 @@ function App() {
   async function navigate(next: import("./routes/types").AppRoute) {
     const nextLegacy = toLegacyLocation(next);
     const preserveCreateDraft = preservesCreateDraftForSettings(route, next, useStudioStore.getState().creationLabReturn?.scope);
+    let discardApproved=false;
     if (!preserveCreateDraft && shotDraftDirty && (nextLegacy.workspace !== "shots" || nextLegacy.projectId !== activeProjectId || nextLegacy.shotId !== resumeShotId || nextLegacy.section !== activeStudioSection)) {
-      if (!await confirmDraftDiscard("镜头有未保存的修改。离开会放弃这些修改，是否继续？")) return false;
+      if (!await confirmDraftDiscard(route.kind==="library"?"当前页面及项目有未保存的修改。离开会放弃这些修改，是否继续？":"镜头有未保存的修改。离开会放弃这些修改，是否继续？")) return false;
+      discardApproved=true;
     }
-    if (!await allowProjectSwitch(routeProjectId(next))) return false;
+    if (!await allowProjectSwitch(routeProjectId(next),discardApproved)) return false;
     dispatchNavigate(next);
     return true;
   }
@@ -307,8 +309,9 @@ function App() {
   async function openProject(projectId: string, destination?: Workspace, section?: StudioSection) {
     if (!projects.some((project) => project.id === projectId)) return;
     if (destination) { await navigateLegacy({ projectId, workspace: destination, section }); return; }
-    if (shotDraftDirty && projectId !== activeProjectId && !await confirmDraftDiscard("镜头有未保存的修改。切换项目会放弃这些修改，是否继续？")) return;
-    if (!await allowProjectSwitch(projectId)) return;
+    const discardApproved=shotDraftDirty && projectId !== activeProjectId;
+    if (discardApproved && !await confirmDraftDiscard(route.kind==="library"?"当前页面及项目有未保存的修改。切换项目会放弃这些修改，是否继续？":"镜头有未保存的修改。切换项目会放弃这些修改，是否继续？")) return;
+    if (!await allowProjectSwitch(projectId,discardApproved)) return;
     setError(null);
     switchProject(projectId);
   }

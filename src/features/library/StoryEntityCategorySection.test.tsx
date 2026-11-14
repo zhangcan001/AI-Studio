@@ -113,3 +113,9 @@ it("groups selected reference views only after explicit preview and save", async
   fireEvent.change(name,{target:{value:"同一角色"}});fireEvent.click(screen.getByRole("button",{name:"保存"}));
   await waitFor(()=>expect(api.create).toHaveBeenCalledWith({projectId:"project-a",kind:"character",name:"同一角色",description:"",coverAssetId:"front",imageAssetIds:["front","side"]}));
 });
+
+it("only guards actual entity edits and preserves the current editor when replacing it is declined",async()=>{
+ const a={id:"entity-a",projectId:"p",kind:"character",name:"A",description:"",coverAssetId:null,imageAssetIds:[],createdAt:"",updatedAt:""};const b={...a,id:"entity-b",name:"B"};api.list.mockResolvedValue([a,b]);const dirty=vi.fn();const confirm=vi.spyOn(window,"confirm").mockReturnValue(false);
+ render(<StoryEntityCategorySection projectId="p" kind="character" onDirtyChange={dirty}/>);await screen.findByText("A");fireEvent.click(screen.getAllByRole("button",{name:"编辑"})[0]);expect(dirty).not.toHaveBeenLastCalledWith(true);
+ fireEvent.change(screen.getByLabelText("角色名称"),{target:{value:"A edited"}});await waitFor(()=>expect(dirty).toHaveBeenLastCalledWith(true));fireEvent.click(screen.getAllByRole("button",{name:"编辑"})[1]);expect(confirm).toHaveBeenCalledOnce();expect((screen.getByLabelText("角色名称") as HTMLInputElement).value).toBe("A edited");
+});

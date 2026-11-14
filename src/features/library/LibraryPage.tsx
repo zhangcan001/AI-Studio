@@ -15,12 +15,22 @@ const ICONS: Record<string, string> = { all: "◷", media: "▦", images: "▣",
 
 /** Library: toolbar + one-column category nav + responsive thumbnail grid + detail drawer column. */
 export function LibraryPage(props:LibraryProps) {
-  const c=useLibraryController(props);
+  const draftFlags=useRef({entity:false,detail:false});
+  const latestProps=useRef(props);latestProps.current=props;
+  const safeNavigate=useCallback(async(next:Parameters<LibraryProps["navigate"]>[0])=>{
+    const p=latestProps.current;
+    // The mounted App owns global leave confirmation. Standalone callers use this fallback.
+    if(!p.onDirtyChange&&(draftFlags.current.entity||draftFlags.current.detail)&&!window.confirm("当前资源编辑尚未保存，确定放弃并离开？"))return false;
+    return p.navigate(next);
+  },[]);
+  const c=useLibraryController({...props,navigate:safeNavigate});
   const [importing,setImporting]=useState(false),[importNotice,setImportNotice]=useState<string>();
   const importLock=useRef(false),owner=useRef(props.route.projectId); owner.current=props.route.projectId;
   const importMedia=async(folder=false)=>{if(importLock.current)return;const project=props.route.projectId;importLock.current=true;setImporting(true);setImportNotice(undefined);try{const result=await productClient.creation.assetsImport(project,folder);if(owner.current!==project)return;if(!result.cancelled){setImportNotice(`导入成功 ${result.imported.length} 项，失败 ${result.failed.length} 项。${result.failed.map(f=>f.displayName+"："+f.error).join("；")}`);await c.refresh();}}catch(cause){if(owner.current===project)setImportNotice(normalizeProductError(cause).message);}finally{importLock.current=false;if(owner.current===project)setImporting(false);}};
   const entityDirty = useRef(false);
-  const onEntityDirty = useCallback((dirty: boolean) => { entityDirty.current = dirty; }, []);
+  const onEntityDirty = useCallback((dirty: boolean) => { entityDirty.current = dirty; draftFlags.current.entity=dirty;props.onDirtyChange?.(dirty||draftFlags.current.detail); }, [props.onDirtyChange]);
+  const onDetailDirty=useCallback((dirty:boolean)=>{draftFlags.current.detail=dirty;props.onDirtyChange?.(dirty||draftFlags.current.entity);},[props.onDirtyChange]);
+  useEffect(()=>()=>props.onDirtyChange?.(false),[props.onDirtyChange]);
   const confirmEntityLeave = () => !entityDirty.current || window.confirm("当前角色/场景/道具有未保存的编辑，确定放弃并切换？");
   // Character, scene, and prop libraries are separate views over project story entities.
   const [entityKind,setEntityKind]=useProjectSessionState<StoryEntityKind|null>(props.route.projectId, "library.entity-kind", null, (v): v is StoryEntityKind|null => v === null || (typeof v === "string" && ["character","scene","prop","composition"].includes(v)));
@@ -42,17 +52,17 @@ export function LibraryPage(props:LibraryProps) {
       {!entityKind&&<><button type="button" disabled={importing} onClick={()=>void importMedia()}>导入素材</button><button type="button" disabled={importing} onClick={()=>void importMedia(true)}>导入素材文件夹</button><button type="button" onClick={()=>void c.refresh()}>刷新</button></>}
       {importNotice&&<p role="status">{importNotice}</p>}
       <details className="library-advanced"><summary>高级</summary><div className="library-advanced-body">
-        <button type="button" onClick={()=>props.navigate({...props.route,filter:"advanced-assets"})}>素材导入 / 高级设定</button>
-        <button type="button" onClick={()=>props.navigate({...props.route,filter:"advanced-prompts"})}>高级提示词编辑器</button>
+        <button type="button" onClick={()=>safeNavigate({...props.route,filter:"advanced-assets"})}>素材导入 / 高级设定</button>
+        <button type="button" onClick={()=>safeNavigate({...props.route,filter:"advanced-prompts"})}>高级提示词编辑器</button>
         {c.mediaCategory&&<ProjectMediaInspection inspection={c.mediaInspection} open={id=>c.open({kind:"asset",id})}/>}
       </div></details>
     </header>
     {c.queryError&&<p role="alert">{c.queryError}</p>}{c.actionError&&<p role="alert">{c.actionError}</p>}{c.notice&&<p role="status">{c.notice}</p>}{c.loading&&<p role="status">正在读取资源…</p>}
     <div className="library-layout" data-detail={showDetail?"open":"closed"}>
       <nav aria-label="资源分类" className="library-nav">
-        {categories.filter(cat=>cat.key!=="profiles").map(cat=><button type="button" key={cat.key} aria-pressed={!entityKind&&cat.key===c.category} onClick={()=>{if(!confirmEntityLeave())return;setEntityKind(null);props.navigate({kind:"library",projectId:props.route.projectId,filter:cat.key});}}><span aria-hidden="true" className="library-nav-icon">{ICONS[cat.key]??"•"}</span>{cat.label}</button>)}
-        {([{kind:"character",label:"角色"},{kind:"scene",label:"场景"},{kind:"prop",label:"道具"},{kind:"composition",label:"构图"}] as const).map(item=><button type="button" key={item.kind} aria-pressed={entityKind===item.kind} onClick={()=>{if(confirmEntityLeave())setEntityKind(item.kind);}}><span aria-hidden="true" className="library-nav-icon">{ICONS[item.kind]}</span>{item.label}</button>)}
-        <button type="button" aria-pressed={!entityKind&&c.category==="profiles"} onClick={()=>{if(!confirmEntityLeave())return;setEntityKind(null);props.navigate({kind:"library",projectId:props.route.projectId,filter:"profiles"});}}><span aria-hidden="true" className="library-nav-icon">✦</span>旧设定 · 风格</button>
+        {categories.filter(cat=>cat.key!=="profiles").map(cat=><button type="button" key={cat.key} aria-pressed={!entityKind&&cat.key===c.category} onClick={()=>{void Promise.resolve(safeNavigate({kind:"library",projectId:props.route.projectId,filter:cat.key})).then(ok=>{if(ok!==false)setEntityKind(null);});}}><span aria-hidden="true" className="library-nav-icon">{ICONS[cat.key]??"•"}</span>{cat.label}</button>)}
+        {([{kind:"character",label:"角色"},{kind:"scene",label:"场景"},{kind:"prop",label:"道具"},{kind:"composition",label:"构图"}] as const).map(item=><button type="button" key={item.kind} aria-pressed={entityKind===item.kind} onClick={()=>{if(entityKind===item.kind)return;if(!draftFlags.current.detail&&confirmEntityLeave())setEntityKind(item.kind);else if(draftFlags.current.detail&&window.confirm("当前资源编辑尚未保存，确定放弃并切换？"))setEntityKind(item.kind);}}><span aria-hidden="true" className="library-nav-icon">{ICONS[item.kind]}</span>{item.label}</button>)}
+        <button type="button" aria-pressed={!entityKind&&c.category==="profiles"} onClick={()=>{void Promise.resolve(safeNavigate({kind:"library",projectId:props.route.projectId,filter:"profiles"})).then(ok=>{if(ok!==false)setEntityKind(null);});}}><span aria-hidden="true" className="library-nav-icon">✦</span>旧设定 · 风格</button>
       </nav>
       {entityKind ? <StoryEntityCategorySection key={`${props.route.projectId}:${entityKind}`} projectId={props.route.projectId} kind={entityKind} onDirtyChange={onEntityDirty} /> : <LibraryThumbnailScope><section className="library-list" aria-label="资源列表">
         <header className="library-list-head"><h2>{categories.find(cat=>cat.key===c.category)?.label}</h2>{c.category==="all"&&<small>各类近期摘要；切换到媒体 / 图片 / 视频 / 音频后可按来源、收藏或标签查找。</small>}</header>
@@ -60,7 +70,7 @@ export function LibraryPage(props:LibraryProps) {
         {c.list&&!c.list.items.length&&<p className="library-empty">{c.mediaCategory&&c.sourceKind==="source"?"当前筛选下没有外部导入素材。请先导入图片/视频，或切换来源筛选。":c.mediaCategory&&c.sourceKind==="generated"?"当前筛选下没有生成结果。请切换来源或清除筛选。":"当前分类 / 搜索没有资源。"}</p>}
         <footer className="library-list-foot">{pager}<small>{c.list?.coverageMessage}</small></footer>
       </section></LibraryThumbnailScope>}
-      {showDetail&&<LibraryDetailPanel {...props} controller={c}/>}
+      {showDetail&&<LibraryDetailPanel {...props} navigate={safeNavigate} onDirtyChange={onDetailDirty} controller={c}/>}
     </div>
   </div>;
 }
