@@ -11,7 +11,7 @@ import { explicitEntityMentions, parseShotPrompt, resolvePreset, resolvePromptSe
 import { defaultGenerator, draftFor } from "./createModel";
 import type { VideoInputView } from "../../types/shotVideoInput";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
-import { candidateReviewSummary, hasPendingReview, reviewLabel, coverAsset, runProgressText, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
+import { candidateReviewSummary, hasPendingReview, reviewLabel, coverAsset, runProgressText, runPercent, shotDuration, shotResolution, storyboardStatusLabels, storyboardStatusText, selectedResultRejected, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 import { shotDurationMax, editableDurationIssue } from "../../product/shotDuration";
 import { h3PromptHints } from "../../product/promptLanguage";
 import { useStudioStore } from "../../stores/studioStore";
@@ -402,25 +402,33 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const chooseAspect = (a: string) => choosePreset(resolvePreset({ aspect: a }, presets, curW && curH ? { width: curW, height: curH } : undefined));
   const savedDuration = numberOf(current.duration_seconds);
   const [duration, setDuration] = useState<string>(() => useStudioStore.getState().storyboardFields[draftKey]?.duration??(savedDuration === undefined ? "" : String(savedDuration)));
+  const [durationBadInput, setDurationBadInput] = useState(false);
   const durationDirty = useRef(useStudioStore.getState().storyboardFields[draftKey]?.duration!==undefined);
   const durationScope = `${projectId}:${item.id}:${selectionRef ?? ""}`;
   const previousDurationScope = useRef(durationScope);
   useEffect(() => {
-    if (previousDurationScope.current !== durationScope) { durationDirty.current = useStudioStore.getState().storyboardFields[draftKey]?.duration!==undefined; previousDurationScope.current = durationScope; setDuration(useStudioStore.getState().storyboardFields[draftKey]?.duration??(savedDuration===undefined?"":String(savedDuration))); }
-    if (!durationDirty.current) setDuration(savedDuration === undefined ? "" : String(savedDuration));
+    if (previousDurationScope.current !== durationScope) { durationDirty.current = useStudioStore.getState().storyboardFields[draftKey]?.duration!==undefined; previousDurationScope.current = durationScope; setDurationBadInput(false); setDuration(useStudioStore.getState().storyboardFields[draftKey]?.duration??(savedDuration===undefined?"":String(savedDuration))); }
+    if (!durationDirty.current) { setDuration(savedDuration === undefined ? "" : String(savedDuration)); setDurationBadInput(false); }
   }, [savedDuration, durationScope]);
   const saveDuration = () => {
     if (!durationField) return;
     const prev = numberOf(current.duration_seconds);
-    const issue = editableDurationIssue(duration === "" ? undefined : Number(duration), durationField);
-    if (issue) { setError(issue); return; }
+    const issue = editableDurationIssue(durationBadInput ? NaN : duration === "" ? undefined : Number(duration), durationField);
+    if (issue) return; // The current draft error is already visible beside the field.
     if (duration === "" ) { if (prev !== undefined) { const { duration_seconds: _, ...rest } = current; saveValues(rest, () => { durationDirty.current = false; clearField("duration",duration); }); } else {durationDirty.current = false;clearField("duration",duration);} return; }
     const n = Number(duration); if (n === prev) { durationDirty.current = false; clearField("duration",duration); setDuration(String(prev)); setError(undefined); return; }
     const value = n;
     saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; clearField("duration",duration); setDuration(String(value)); });
   };
   const noGen = generatorsFailed ? "生成器读取失败，请点击上方重试。" : !generator ? "请先在详情中选择生成器" : undefined;
-  const durationIssue = editableDurationIssue(savedDuration, durationField);
+  const durationIssue = editableDurationIssue(durationBadInput ? NaN : duration === "" ? undefined : Number(duration), durationField);
+  const changeDuration = (input: HTMLInputElement) => {
+    const text = input.value, badInput = input.validity.badInput;
+    const reverted = !badInput && (text === "" ? savedDuration === undefined : Number.isFinite(Number(text)) && Number(text) === savedDuration);
+    durationDirty.current = !reverted;
+    setDuration(text); setDurationBadInput(badInput);
+    setField(draftKey, "duration", reverted ? undefined : text);
+  };
   const cover = coverAsset(item);
   const percent = item.status === "GENERATING" ? runPercent(item.run) : null;
   // 构图用途: which bound composition governs the opening frame and which the final frame.
@@ -582,7 +590,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} title="任务完成比例，不是视频推理百分比" aria-label={runProgressText(item.run)}>{item.run ? `${item.run.progress.succeeded+item.run.progress.failed+item.run.progress.cancelled}/${item.run.progress.total}` : "—"}</span>}</div>
       {item.candidates.length > 0 && <div className="shot-row-strip" aria-label="候选结果">{item.candidates.map(asset => <div key={asset.id}>
         <button type="button" title={`预览：${asset.name}`} aria-label={`预览候选 ${asset.name}`} onClick={() => lightbox?.open({kind:"video",projectId,asset})}><CandidateThumbnail asset={asset} playable={false} /></button>
-        <button type="button" title={asset.reviewState==="REJECTED"?"此视频已退回，请先重新审核后再选用。":undefined} disabled={disabled || asset.reviewState==="REJECTED" || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? "已选用" : `选用 ${asset.name}`}</button>
+        <button type="button" title={asset.reviewState==="REJECTED"?"此视频已退回，请先重新审核后再选用。":undefined} disabled={disabled || asset.reviewState==="REJECTED" || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? asset.reviewState === "REJECTED" ? "已选用（已退回）" : "已选用" : `选用 ${asset.name}`}</button>
         <small>{reviewLabel(asset.reviewState)}</small>
       </div>)}</div>}
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
@@ -599,7 +607,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         {fieldsDraft.name!==undefined&&<button type="button" disabled={bindingsDisabled} onClick={saveName}>重试保存名称</button>}
         {fieldsDraft.duration!==undefined&&<button type="button" disabled={bindingsDisabled} onClick={saveDuration}>重试保存时长</button>}
         {fieldsDraft.sections!==undefined&&<button type="button" disabled={bindingsDisabled||!sectionsReady} onClick={saveSections}>重试保存分段</button>}
-        <button type="button" data-discard-fields disabled={bindingsDisabled} onClick={()=>{if(!window.confirm("放弃此镜头尚未保存的名称、时长和提示词分段？"))return;setField(draftKey,"name",undefined);setField(draftKey,"duration",undefined);setField(draftKey,"sections",undefined);setName(item.name);durationDirty.current=false;setDuration(savedDuration===undefined?"":String(savedDuration));setSections(savedSections.current);}}>放弃未保存字段</button></section>}
+        <button type="button" data-discard-fields disabled={bindingsDisabled} onClick={()=>{if(!window.confirm("放弃此镜头尚未保存的名称、时长和提示词分段？"))return;setField(draftKey,"name",undefined);setField(draftKey,"duration",undefined);setField(draftKey,"sections",undefined);setName(item.name);durationDirty.current=false;setDurationBadInput(false);setDuration(savedDuration===undefined?"":String(savedDuration));setSections(savedSections.current);}}>放弃未保存字段</button></section>}
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
       {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
       {prompt !== (item.shot?.prompt ?? "") && <p role="status">提示词尚未保存；筛选或返回列表后可继续编辑。<button type="button" disabled={bindingsDisabled} onClick={savePrompt}>保存提示词</button><button type="button" disabled={bindingsDisabled} data-discard-prompt onClick={() => { if (window.confirm("放弃本镜头未保存的提示词？")) { useStudioStore.getState().setStoryboardPrompt(draftKey, undefined); setPromptLocal(item.shot?.prompt ?? ""); } }}>放弃未保存提示词</button></p>}
@@ -636,8 +644,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         </dd></div>}
         <div><dt>画面内容</dt><dd>{content}</dd></div>
       </dl>
-      <div className="shot-row-toolbar"><span>{storyboardStatusLabels[item.status]}</span><small>{candidateReviewSummary(item.candidates)}</small>{item.shot?.selectedResultId && <small>保留已选用结果</small>}{onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}<button type="button" onClick={onOpen}>编辑与详情</button></div>
+      <div className="shot-row-toolbar"><span>{storyboardStatusText(item)}</span><small>{candidateReviewSummary(item.candidates)}</small>{item.shot?.selectedResultId && <small>{selectedResultRejected(item) ? "保留已选用结果（已退回）" : "保留已选用结果"}</small>}{onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}<button type="button" onClick={onOpen}>编辑与详情</button></div>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
+      {item.error && <p role="alert" className="storyboard-error">{item.error}</p>}
       {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
       {acceptedRun && <button type="button" onClick={() => onRun(acceptedRun)}>查看已保存运行</button>}
     </div>
@@ -650,9 +659,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <label><span>镜号</span><output>{item.ordinal + 1}</output></label>
       <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => {setName(e.target.value);setField(draftKey,"name",e.target.value===item.name?undefined:e.target.value);}} onBlur={e => { if(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]"))return; if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "name"; else saveName(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
       {durationField
-        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} onChange={e => { durationDirty.current = true; setDuration(e.target.value);setField(draftKey,"duration",e.target.value); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "duration"; else if(!(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]")))saveDuration(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
+        ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} aria-invalid={Boolean(durationIssue)} aria-describedby={durationIssue ? `duration-issue-${projectId}-${item.id}` : undefined} onChange={e => changeDuration(e.currentTarget)} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "duration"; else if(!(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]")))saveDuration(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
         : <label><span>时长</span><output title={noGen ?? "当前生成器没有时长参数"}>{shotDuration(item.shot)}</output></label>}
-      {durationIssue && <small className="shot-row-duration-issue" role="alert">{durationIssue}</small>}
+      {durationIssue && <small id={`duration-issue-${projectId}-${item.id}`} className="shot-row-duration-issue" role="alert">{durationIssue}</small>}
       {presets.length > 0
         ? <><label><span>画幅</span><select aria-label={`${item.name} 画幅`} value={currentAspect ?? ""} disabled={disabled} onChange={e => chooseAspect(e.target.value)}>{!currentAspect && <option value="" disabled>未设置</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
           <label><span>分辨率</span><select aria-label={`${item.name} 分辨率`} value={currentPreset?.id ?? ""} disabled={disabled} onChange={e => choosePreset(presets.find(p => p.id === e.target.value))}>{!currentPreset && <option value="" disabled>{curW && curH ? `${curW}×${curH}` : "未设置"}</option>}{sizeList.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label></>
@@ -665,7 +674,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         <button type="button" className="danger" disabled={disabled} onClick={remove}>删除分镜</button>
         {item.status === "GENERATING" && item.run?.availableActions.includes("CANCEL") && <button type="button" className="danger" disabled={busy} onClick={cancelGeneration}>取消生成</button>}
       </div>
-      <span className="storyboard-badge">{item.error ? "读取失败" : storyboardStatusLabels[item.status]}</span>
+      <span className="storyboard-badge">{item.error ? "读取失败" : storyboardStatusText(item)}</span>
     </div>
   </article>;
 }

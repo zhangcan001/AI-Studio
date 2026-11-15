@@ -87,6 +87,25 @@ function asset(overrides: Partial<AssetView> = {}): AssetView {
 }
 
 describe("独立视频批次输入", () => {
+  it("caps new batch duration without rejecting or mutating the frozen 15-second Recipe", () => {
+    const before = JSON.stringify(recipe);
+    const result = h3RecipeContract(recipe);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.contract.durationOptions).toEqual(Array.from({length:11},(_,i)=>i+1));
+    expect(result.contract.durationField.max).toBe(11);
+    for (const duration of [12,13,14,15]) expect(()=>buildH3BatchValues(recipe,"ast-image","motion",duration)).toThrow("1–11");
+    expect(JSON.stringify(recipe)).toBe(before);
+  });
+  it("preserves tighter Recipe limits and rejects out-of-product defaults or empty intersections",()=>{
+    const withRange=(min:number,max:number,defaultValue:number):RecipeViewModel=>({...recipe,fields:recipe.fields.map(field=>field.key==="duration_seconds"&&field.type==="integer"?{...field,min,max,default:defaultValue}:field)});
+    const tighter=h3RecipeContract(withRange(4,8,5));expect(tighter.ok).toBe(true);
+    if(tighter.ok)expect(tighter.contract.durationOptions).toEqual([4,5,6,7,8]);
+    expect(h3RecipeContract(withRange(12,15,12)).ok).toBe(false);
+    expect(h3RecipeContract(withRange(1,15,12)).ok).toBe(false);
+    for(const mode of ["FL2VA_TEXT_TO_VIDEO","FL2VA_IMAGE_TO_VIDEO","FL2VA_FIRST_LAST"] as const)expect(()=>buildH3ModeBatchValues(fl2vaRecipe,mode,"motion",{},12)).toThrow("1–11");
+    expect(()=>buildH3ModeBatchValues(omniRecipe,"REF2VA_IMAGE","motion",{},12)).toThrow("1–11");
+  });
   it("only accepts image assets and splits pasted blocks on blank lines", () => {
     expect(isImageAssetForVideo(asset())).toBe(true);
     expect(isImageAssetForVideo(asset({ assetType: "video", category: "source_video" }))).toBe(false);
@@ -111,13 +130,13 @@ describe("独立视频批次输入", () => {
     expect(buildH3BatchValues(recipe, "ast-image", "three", 3).duration_seconds).toEqual({ type: "integer", value: 3 });
     expect(buildH3BatchValues(recipe, "ast-image", "five", 5).duration_seconds).toEqual({ type: "integer", value: 5 });
     expect(buildH3BatchValues(recipe, "ast-image", "ten", 10).duration_seconds).toEqual({ type: "integer", value: 10 });
-    expect(buildH3BatchValues(recipe, "ast-image", "fifteen", 15).duration_seconds).toEqual({ type: "integer", value: 15 });
-    expect(() => buildH3BatchValues(recipe, "ast-image", "invalid", 0)).toThrow("1–15");
-    expect(() => buildH3BatchValues(recipe, "ast-image", "invalid", 16)).toThrow("1–15");
-    expect(buildH3BatchValues(recipe, "ast-image", "high quality", 15, 1920, 1088)).toMatchObject({
+    expect(buildH3BatchValues(recipe, "ast-image", "eleven", 11).duration_seconds).toEqual({ type: "integer", value: 11 });
+    expect(() => buildH3BatchValues(recipe, "ast-image", "invalid", 0)).toThrow("1–11");
+    expect(() => buildH3BatchValues(recipe, "ast-image", "invalid", 16)).toThrow("1–11");
+    expect(buildH3BatchValues(recipe, "ast-image", "high quality", 11, 1920, 1088)).toMatchObject({
       width: { type: "integer", value: 1920 },
       height: { type: "integer", value: 1088 },
-      duration_seconds: { type: "integer", value: 15 },
+      duration_seconds: { type: "integer", value: 11 },
     });
     expect(() => buildH3BatchValues(recipe, "ast-image", "unsupported", 5, 1024, 576))
       .toThrow("14 档 16:9");
@@ -269,13 +288,13 @@ describe("独立视频批次输入", () => {
     expect(draft.items[0].values.reference_image).toEqual({ type: "image_asset", assetId: "ast-image" });
   });
 
-  it("rejects a Recipe range outside the public 1–15 second contract", () => {
+  it("rejects a Recipe range outside the public 1–11 second contract", () => {
     const invalid = {
       ...recipe,
       fields: recipe.fields.map((field) => field.key === "duration_seconds" ? { ...field, min: 0, max: 16 } : field),
     };
     const result = h3RecipeContract(invalid);
-    expect(result).toEqual({ ok: false, reason: "H3 配方的 duration_seconds 必须是 1–15 秒、步长 1 且包含默认值。" });
+    expect(result).toEqual({ ok: false, reason: "H3 配方的 duration_seconds 必须在产品允许的 1–11 秒内、步长 1 且包含合法默认值。" });
   });
 
   it("blocks asset qualification and creation eligibility for invalid custom resolution", () => {

@@ -1,3 +1,4 @@
+import { STORYBOARD_FEEDBACK_CHANGED, STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF } from "../storyboard-feedback-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -18,8 +19,8 @@ const parentBytes = p => execFileSync('git', ['show', `${PRODUCTION_SAFETY_BASE}
 it('verifies the exact production-safety successor and projects the frozen parent bytes', () => {
   const result = productionSafetyParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(PRODUCTION_SAFETY_CHANGED);
-  expect(result.addedPaths).toEqual([...PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...PRODUCTION_SAFETY_CHANGED, ...STORYBOARD_FEEDBACK_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF, ...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF])].sort());
   for (const p of PRODUCTION_SAFETY_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

@@ -39,12 +39,56 @@ function workbenchFrom(shotFn: (id: string | null) => CreationContext = context,
 function workbenchFromContexts() { return workbenchFrom(context); }
 const route = { kind: "create" as const, projectId: "p", stage: "video" as const };
 
+it("scopes a missing historical Run to its Shot instead of disabling all generation",async()=>{
+ vi.useFakeTimers({toFake:["setInterval","clearInterval"]});
+ localStorage.setItem("ai-studio.storyboard.view","shots");
+ const board=workbenchFromContexts();board.items=board.items.map(i=>({...i,shot:{...i.shot,selectionRef:"sel"}}));
+ api.workbench.mockResolvedValue(board);api.generatorsList.mockResolvedValue([{selectionRef:"sel",name:"H3",mode:"T2V",version:"1",availability:true,fields:[]}]);
+ api.runGet.mockRejectedValue({code:"RUN_NOT_FOUND"});
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ const failed=await screen.findByRole("article",{name:/分镜 .* 镜头02/});
+ expect(failed.textContent).toContain("读取失败");
+ const healthy=screen.getByRole("article",{name:/分镜 .* 镜头03/});
+ await waitFor(()=>expect(within(healthy).getByRole("button",{name:"生成视频"}).hasAttribute("disabled")).toBe(false));
+ expect(within(failed).getByRole("button",{name:"生成视频"}).hasAttribute("disabled")).toBe(true);
+ expect(within(screen.getByLabelText("镜头统计")).getByText("待制作").nextSibling?.textContent).toBe("1");
+ expect(screen.getByText("执行状态统计不包含读取失败的镜头；已选用数量不代表审核通过。")).toBeTruthy();
+ expect(api.generate).not.toHaveBeenCalled();
+ await act(async()=>{await vi.advanceTimersByTimeAsync(24000);});expect(api.runGet).toHaveBeenCalledTimes(1);
+});
+it("retains a failed pending Run's last owned Shot association without blocking unrelated Shots",async()=>{
+ vi.useFakeTimers();localStorage.setItem("ai-studio.storyboard.view","shots");
+ const board=workbenchFrom(id=>idleContext(id,false));board.items=board.items.map(i=>({...i,shot:{...i.shot,selectionRef:"sel"}}));
+ api.workbench.mockResolvedValue(board);api.generatorsList.mockResolvedValue([{selectionRef:"sel",name:"H3",mode:"T2V",version:"1",availability:true,fields:[]}]);
+ const queue={...run("QUEUED",0,1),detail:{sources:[],inputs:[{shotId:"s2",taskId:null,itemId:"pending",executionStatus:"PENDING"}]}};
+ api.runList.mockResolvedValue({items:[queue],nextCursor:null,coverage:""});api.runGet.mockResolvedValueOnce(queue).mockRejectedValue({code:"PROJECT_READ_FAILED"});
+ await act(async()=>{render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);});
+ await act(async()=>{await vi.advanceTimersByTimeAsync(8000);});
+ const failed=screen.getByRole("article",{name:/分镜 .* 镜头02/}),healthy=screen.getByRole("article",{name:/分镜 .* 镜头03/});
+ expect(failed.textContent).toContain("读取失败");expect(failed.textContent).toContain("排队中");
+ expect(within(failed).getByRole("button",{name:"生成视频"}).hasAttribute("disabled")).toBe(true);
+ expect(within(healthy).getByRole("button",{name:"生成视频"}).hasAttribute("disabled")).toBe(false);
+ expect(api.workbench).toHaveBeenCalledTimes(1);expect(api.generate).not.toHaveBeenCalled();
+});
+it("does not guess Shot ownership when an active Queue detail has never been readable",async()=>{
+ localStorage.setItem("ai-studio.storyboard.view","shots");
+ const board=workbenchFrom(id=>idleContext(id,false));board.items=board.items.map(i=>({...i,shot:{...i.shot,selectionRef:"sel"}}));
+ api.workbench.mockResolvedValue(board);api.generatorsList.mockResolvedValue([{selectionRef:"sel",name:"H3",mode:"T2V",version:"1",availability:true,fields:[]}]);
+ api.runList.mockResolvedValue({items:[{...run("QUEUED",0,1),ref:{source:"queue-batch",id:"unknown-queue"}}],nextCursor:null,coverage:""});
+ api.runGet.mockRejectedValue({code:"PROJECT_READ_FAILED"});
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ expect((await screen.findAllByRole("alert"))[0].textContent).toContain("无法确认所属镜头");
+ expect(screen.getAllByRole("button",{name:"生成视频"}).every(button=>button.hasAttribute("disabled"))).toBe(true);
+ expect(api.generate).not.toHaveBeenCalled();
+});
+
 it("reports failed Run reads instead of inventing idle state, and retries without user action", async () => {
   api.runGet.mockRejectedValueOnce(new Error("run read unavailable")).mockResolvedValue(run("RUNNING", 0, 1));
   vi.useFakeTimers();
   await act(async()=>{render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);});
   expect(screen.getByRole("alert")).toBeTruthy();
-  expect(screen.queryByRole("article", {name:"镜头02"})).toBeNull();
+  expect(screen.getByRole("article", {name:"镜头02"}).textContent).toContain("读取失败");
+  expect(screen.getByRole("article",{name:"镜头03"}).textContent).not.toContain("读取失败");
   await act(async()=>{await vi.advanceTimersByTimeAsync(8000);});
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByRole("article",{name:"镜头02"}).textContent).toContain("生成中");
@@ -95,7 +139,7 @@ it("UI restore: workbench derives real shot status/stats from the product facade
   const navigate = vi.fn();
   render(<StoryboardWorkbench route={route} navigate={navigate} renderBatch={()=> <dialog open aria-label="批量准备视频"/>} />);
   const stats = await screen.findByLabelText("镜头统计");
-  expect(within(stats).getByText("镜头总数").nextSibling?.textContent).toBe("3");
+  await waitFor(()=>expect(within(stats).getByText("镜头总数").nextSibling?.textContent).toBe("3"));
   expect(within(stats).getByText("已选用").nextSibling?.textContent).toBe("1");
   expect(within(stats).getByText("生成中").nextSibling?.textContent).toBe("1");
   expect(within(stats).getByText("待制作").nextSibling?.textContent).toBe("1");

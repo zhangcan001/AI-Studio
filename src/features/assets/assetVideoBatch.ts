@@ -4,6 +4,7 @@ import { h3FamilyForWorkflowId } from "../runtime/productRuntimeScope";
 import { validateResolution } from "../runtime/resolution";
 import { isMinimaxH3OutputResolution } from "../runtime/resolutionPresets";
 import type { BatchDraftItem } from "../studio/batchDraft";
+import { MAX_SHOT_DURATION_SECONDS, shotDurationMax } from "../../product/shotDuration";
 
 export const H3_PROMPT_KEY = "prompt" as const;
 export const H3_REFERENCE_IMAGE_KEY = "reference_image" as const;
@@ -401,10 +402,13 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
   ) {
     return { ok: false, reason: "H3 配方缺少键为 `reference_image` 或全能参考媒体字段。" };
   }
-  const durationField = exactField(recipe, H3_DURATION_KEY, "integer");
-  if (!durationField) {
+  const recipeDuration = exactField(recipe, H3_DURATION_KEY, "integer");
+  if (!recipeDuration) {
     return { ok: false, reason: "H3 配方缺少键为 `duration_seconds` 的整数输入字段。" };
   }
+  // Frozen Recipes describe model capability; new production uses the tighter
+  // product policy. Never mutate the original Recipe or reject max=15 wholesale.
+  const durationField = { ...recipeDuration, max: shotDurationMax(recipeDuration.max) };
   const widthField = exactField(recipe, "width", "integer");
   if (!widthField) {
     return { ok: false, reason: "H3 配方缺少键为 `width` 的整数输入字段。" };
@@ -430,12 +434,13 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
     || !Number.isInteger(durationField.default)
     || durationField.step !== 1
     || durationField.min < 1
-    || durationField.max > 15
+    || !Number.isInteger(recipeDuration.max)
+    || durationField.max > MAX_SHOT_DURATION_SECONDS
     || durationField.min > durationField.max
     || durationField.default < durationField.min
     || durationField.default > durationField.max
   ) {
-    return { ok: false, reason: "H3 配方的 duration_seconds 必须是 1–15 秒、步长 1 且包含默认值。" };
+    return { ok: false, reason: `H3 配方的 duration_seconds 必须在产品允许的 1–${MAX_SHOT_DURATION_SECONDS} 秒内、步长 1 且包含合法默认值。` };
   }
   const minDuration = durationField.min;
   const maxDuration = durationField.max;

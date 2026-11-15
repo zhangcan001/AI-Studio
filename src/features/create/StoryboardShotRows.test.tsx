@@ -26,6 +26,58 @@ const generator = { selectionRef: "sel", name: "H3", version: "1", mode: "t2v", 
   resolutionPresets: [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }, { id: "mp-2_09-9x16", label: "2.09MP · 1088×1920", width: 1088, height: 1920 }] };
 const props = () => ({ projectId: "p", busy: false, onOpen: vi.fn(), onCreate: vi.fn(), onChanged: vi.fn(), onQueue: vi.fn() });
 
+it("validates the current duration draft before blur and clears a reverted draft immediately",async()=>{
+ render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
+ const field=await screen.findByLabelText("镜头1 时长（秒）");
+ await waitFor(()=>expect(screen.getByTitle("解除绑定 角色 · 阿离").hasAttribute("disabled")).toBe(false));
+ fireEvent.change(field,{target:{value:"11"}});
+ expect(screen.getByRole("alert").textContent).toContain("最长 10 秒");
+ expect(screen.getByRole("button",{name:"生成视频"}).hasAttribute("disabled")).toBe(true);
+ expect(api.updateShot).not.toHaveBeenCalled();expect(api.saveShotRow).not.toHaveBeenCalled();
+ fireEvent.change(field,{target:{value:"5"}});
+ expect(screen.queryByRole("region",{name:"未保存的镜头字段"})).toBeNull();
+ expect(Object.values(useStudioStore.getState().storyboardFields).some(v=>v.duration!==undefined)).toBe(false);
+ expect(screen.queryByRole("alert")).toBeNull();expect(screen.getByRole("button",{name:"生成视频"}).hasAttribute("disabled")).toBe(false);
+});
+it("marks a selected rejected video without clearing selection or changing review",async()=>{
+ const item=shot("a",0);item.status="COMPLETED";item.shot!.selectedResultId="selected";
+ item.candidates=[{id:"selected",name:"old video",mediaKind:"video",selected:true,reviewState:"REJECTED"}];
+ render(<StoryboardShotRows {...props()} items={[item]}/>);
+ expect(screen.getByRole("button",{name:"已选用（已退回）"}).hasAttribute("disabled")).toBe(true);
+ expect(screen.getAllByText("已选用（已退回）").length).toBeGreaterThan(0);
+ expect(api.selectResult).not.toHaveBeenCalled();expect(api.updateShot).not.toHaveBeenCalled();
+});
+it("clears only reverted duration, preserving other unsaved fields",async()=>{
+ useStudioStore.setState({storyboardFields:{[JSON.stringify(["p","a","sel"])]:{name:"new name",duration:"8"}}});
+ render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
+ const field=await screen.findByLabelText("镜头1 时长（秒）");fireEvent.change(field,{target:{value:"5.0"}});
+ expect(useStudioStore.getState().storyboardFields[JSON.stringify(["p","a","sel"])]).toEqual({name:"new name"});
+ expect(api.updateShot).not.toHaveBeenCalled();
+});
+it("reports native bad number input immediately instead of treating it as an optional clear",async()=>{
+ render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
+ const field=await screen.findByLabelText("镜头1 时长（秒）");
+ Object.defineProperty(field,"validity",{configurable:true,value:{badInput:true}});
+ fireEvent.change(field,{target:{value:""}});
+ expect(screen.getByRole("alert").textContent).toContain("有效数字");
+ expect(field.getAttribute("aria-invalid")).toBe("true");
+ expect(screen.getByRole("button",{name:"生成视频"}).hasAttribute("disabled")).toBe(true);
+ expect(api.updateShot).not.toHaveBeenCalled();
+ Object.defineProperty(field,"validity",{configurable:true,value:{badInput:false}});fireEvent.change(field,{target:{value:"5"}});
+ expect(screen.queryByRole("alert")).toBeNull();
+});
+it("allows a valid correction of an oversized saved value to be submitted without a blur",async()=>{
+ const item=shot("a",0);item.shot!.values.duration_seconds={type:"integer",value:14};
+ render(<StoryboardShotRows {...props()} items={[item]}/>);
+ const field=await screen.findByLabelText("镜头1 时长（秒）");
+ await waitFor(()=>expect(screen.getByTitle("解除绑定 角色 · 阿离").hasAttribute("disabled")).toBe(false));
+ expect(screen.getByRole("button",{name:"生成视频"}).hasAttribute("disabled")).toBe(true);
+ fireEvent.change(field,{target:{value:"5"}});expect(screen.queryByRole("alert")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"生成视频"}));
+ await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
+ expect(api.saveShotRow).toHaveBeenCalledWith("p",expect.objectContaining({values:{duration_seconds:{type:"integer",value:5}}}));
+});
+
 it.each([0, 11])("rejects duration %s outside the selected Recipe before persistence", async value => {
   render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
   const field = await screen.findByLabelText("镜头1 时长（秒）");
@@ -51,8 +103,8 @@ it.each(["GENERATING","QUEUED","PAUSED"] as const)("does not submit another gene
 it.each(["NaN","0","11"])("validates restored duration draft %s before any write or readiness",async duration=>{
  useStudioStore.setState({storyboardFields:{[JSON.stringify(["p","a","sel"])]:{duration}}});
  render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
- const button=await screen.findByRole("button",{name:"生成视频"});await waitFor(()=>expect(button.hasAttribute("disabled")).toBe(false));
- fireEvent.click(button);const alert=await screen.findByRole("alert");
+ const button=await screen.findByRole("button",{name:"生成视频"});
+ const alert=await screen.findByRole("alert");expect(button.hasAttribute("disabled")).toBe(true);fireEvent.click(button);
  expect(alert.textContent).toContain(duration==="NaN"?"有效数字":duration==="0"?"最短 1 秒":"最长 10 秒");
  expect(api.generate).not.toHaveBeenCalled();expect(api.readinessGet).not.toHaveBeenCalled();expect(api.saveShotRow).not.toHaveBeenCalled();expect(api.updateShot).not.toHaveBeenCalled();
 });
