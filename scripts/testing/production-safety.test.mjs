@@ -21,8 +21,8 @@ const parentBytes = p => execFileSync('git', ['show', `${PRODUCTION_SAFETY_BASE}
 it('verifies the exact production-safety successor and projects the frozen parent bytes', () => {
   const result = productionSafetyParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...PRODUCTION_SAFETY_CHANGED, ...STORYBOARD_FEEDBACK_CHANGED, ...STORYBOARD_INTEGRITY_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF, ...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...PRODUCTION_SAFETY_CHANGED, ...STORYBOARD_FEEDBACK_CHANGED, ...STORYBOARD_INTEGRITY_CHANGED, ...RUN_RECOVERY_POLISH_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF, ...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF, ...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF])].sort());
   for (const p of PRODUCTION_SAFETY_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);
