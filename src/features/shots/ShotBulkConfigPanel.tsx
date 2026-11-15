@@ -201,7 +201,8 @@ function ScopedShotBulkConfigPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, stage, shots, tree, scopeKey]);
 
-  useEffect(()=>{setSelectedIds(new Set());},[projectId,stage,scopeKey]);
+  // Project/scope changes already remount the keyed panel. Do not clear the
+  // initial selection in a passive mount effect: it can erase an early click.
 
   function applyPreset(preset: BulkSelectionPreset) {
     const ids = preset === "ready" && projectPlan
@@ -351,7 +352,7 @@ function ScopedShotBulkConfigPanel({
             className={stage === nextStage ? "active" : ""}
             role="tab"
             aria-selected={stage === nextStage}
-            onClick={() => setStage(nextStage)}
+            onClick={() => { if(nextStage!==stage)setSelectedIds(new Set());setStage(nextStage); }}
             disabled={Boolean(busyAction)}
           >
             {nextStage === "image" ? "图片历史" : "视频阶段"}

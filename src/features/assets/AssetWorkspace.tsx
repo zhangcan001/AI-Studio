@@ -1,10 +1,9 @@
 import { useState } from "react";
 import type { AssetView } from "../../types/asset";
 import { AssetLibrary } from "./AssetLibrary";
-import { ConsistencyProfileLibrary } from "./ConsistencyProfileLibrary";
 import { ReferenceSetLibrary } from "./ReferenceSetLibrary";
 
-export type AssetWorkspaceTab = "assets" | "profiles" | "referenceSets";
+export type AssetWorkspaceTab = "assets" | "referenceSets";
 
 interface Props {
   projectId: string;
@@ -17,7 +16,6 @@ interface Props {
 
 const tabs: Array<{ value: AssetWorkspaceTab; label: string; description: string }> = [
   { value: "assets", label: "素材", description: "源素材、生成结果与旧版参考锚点" },
-  { value: "profiles", label: "档案", description: "角色、场景、道具与风格 Profile" },
   { value: "referenceSets", label: "参考集", description: "有序图片集合与使用关系" },
 ];
 
@@ -44,7 +42,6 @@ export function AssetWorkspace({ projectId, initialAssetId, onUseInStudio, onOpe
       </nav>
 
       {activeTab === "assets" && <AssetLibrary projectId={projectId} initialAssetId={initialAssetId} onUseInStudio={onUseInStudio} onOpenVideoBatch={onOpenVideoBatch} onOpenTask={onOpenTask} onOpenShot={onOpenShot} />}
-      {activeTab === "profiles" && <ConsistencyProfileLibrary projectId={projectId} />}
       {activeTab === "referenceSets" && <ReferenceSetLibrary projectId={projectId} />}
     </div>
   );

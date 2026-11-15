@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { useLayoutEffect } from "react";
 import type { ShotView } from "../../types/shot";
 import { StoryboardBatchDialog } from "./StoryboardBatchDialog";
 import { ShotBulkConfigPanel } from "./ShotBulkConfigPanel";
@@ -10,6 +11,21 @@ vi.mock("../../services/tauriClient",()=>({getProjectProductionPreflight:api.pre
 const shot:ShotView={id:"s",projectId:"p",ordinal:0,name:"one",promptText:"old",status:"DRAFT",imageStatus:"DRAFT",videoStatus:"DRAFT",stageConfigs:[],referenceAssets:[],generationLinks:[],createdAt:"",updatedAt:""};
 beforeEach(()=>{vi.resetAllMocks();HTMLDialogElement.prototype.showModal=function(){this.setAttribute("open","");};api.list.mockResolvedValue([shot]);api.generators.mockResolvedValue([]);api.configure.mockResolvedValue({configuredShotIds:["s"]});api.assign.mockResolvedValue({updatedShotIds:["s"]});api.preflight.mockResolvedValue({projectId:"p",stage:"video",items:[{shotId:"s",status:"READY",contextHash:"h",workflowVersionId:"v",recipeId:"r",blockers:[]} ]});api.admit.mockResolvedValue({projectId:"p",stage:"video",createdCount:1,createdBatchIds:["b"],alreadyPreparedCount:0,skippedIncomplete:0,skippedBlocked:0});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
+it("retains a valid selection made before initial passive effects complete",()=>{
+ function EarlySelection(){
+   useLayoutEffect(()=>{screen.getByLabelText("选择 one").click();},[]);
+   return <ShotBulkConfigPanel projectId="p" shots={[shot]}/>;
+ }
+ render(<EarlySelection/>);
+ expect((screen.getByLabelText("选择 one") as HTMLInputElement).checked).toBe(true);
+ expect(api.admit).not.toHaveBeenCalled();
+});
+it("clears explicit selection when changing stage without admitting any work",()=>{
+ render(<ShotBulkConfigPanel projectId="p" shots={[shot]}/>);
+ fireEvent.click(screen.getByLabelText("选择 one"));expect((screen.getByLabelText("选择 one") as HTMLInputElement).checked).toBe(true);
+ fireEvent.click(screen.getByRole("tab",{name:"图片历史"}));expect((screen.getByLabelText("选择 one") as HTMLInputElement).checked).toBe(false);
+ expect(api.admit).not.toHaveBeenCalled();
+});
 it("requires an explicit confirmed prompt save before preparing the persisted video snapshot",async()=>{
  const confirm=vi.spyOn(window,"confirm").mockReturnValue(false);render(<StoryboardBatchDialog projectId="p" onClose={vi.fn()} onQueue={vi.fn()} onShot={vi.fn()}/>);
  await screen.findByText("v / r");fireEvent.click(screen.getByRole("button",{name:"全选"}));const input=screen.getByRole("textbox");fireEvent.change(input,{target:{value:"new prompt"}});

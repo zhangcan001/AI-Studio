@@ -17,7 +17,7 @@ const asset: AssetView = {
 };
 
 describe("AssetWorkspace", () => {
-  it("exposes the three desktop tabs and keeps 素材 as the default view", () => {
+  it("retires legacy profiles and exposes the two media tabs and keeps 素材 as the default view", () => {
     const html = renderToStaticMarkup(
       <AssetWorkspace
         projectId="project-1"
@@ -27,11 +27,11 @@ describe("AssetWorkspace", () => {
       />,
     );
 
-    expect(tabs.map((tab) => tab.label)).toEqual(["素材", "档案", "参考集"]);
+    expect(tabs.map((tab) => tab.label)).toEqual(["素材", "参考集"]);
     expect(html).toContain('aria-label="资产工作区"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain("<strong>素材</strong>");
-    expect(html).toContain("档案");
+    expect(html).not.toContain("档案");
     expect(html).toContain("参考集");
     expect(html).toContain("资产库");
     expect(asset.id).toBe("asset-1");

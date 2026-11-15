@@ -1,3 +1,4 @@
+import { STORYBOARD_INTEGRITY_CHANGED, STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF } from "../storyboard-integrity-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -18,8 +19,8 @@ const parentBytes = p => execFileSync('git', ['show', `${STORYBOARD_FEEDBACK_BAS
 it('verifies the exact storyboard-feedback successor and projects the frozen parent bytes', () => {
   const result = storyboardFeedbackParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(STORYBOARD_FEEDBACK_CHANGED);
-  expect(result.addedPaths).toEqual([...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...STORYBOARD_FEEDBACK_CHANGED, ...STORYBOARD_INTEGRITY_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF])].sort());
   for (const p of STORYBOARD_FEEDBACK_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

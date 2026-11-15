@@ -1,3 +1,4 @@
+import { STORYBOARD_INTEGRITY_CHANGED, STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF } from "../storyboard-integrity-successor-guard.mjs";
 import { STORYBOARD_FEEDBACK_CHANGED, STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF } from "../storyboard-feedback-successor-guard.mjs";
 import { PRODUCTION_SAFETY_CHANGED, PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF } from "../production-safety-successor-guard.mjs";
 import { USAGE_POLISH_CHANGED, USAGE_POLISH_ADDED, USAGE_POLISH_PROOF } from "../usage-polish-successor-guard.mjs";
@@ -24,8 +25,8 @@ const parentBytes = p => execFileSync('git', ['show', `${USABILITY_COMPLETION_BA
 it('verifies the exact usability-completion successor and projects the frozen parent bytes', () => {
   const result = usabilityCompletionParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...USABILITY_COMPLETION_CHANGED, ...AUDIT_REPAIR_CHANGED, ...USAGE_FLOW_CHANGED, ...CONVENIENCE_CHANGED, ...USAGE_POLISH_CHANGED, ...PRODUCTION_SAFETY_CHANGED, ...STORYBOARD_FEEDBACK_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...USAGE_FLOW_ADDED, USAGE_FLOW_PROOF, ...CONVENIENCE_ADDED, CONVENIENCE_PROOF, ...USAGE_POLISH_ADDED, USAGE_POLISH_PROOF, ...PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF, ...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...USABILITY_COMPLETION_CHANGED, ...AUDIT_REPAIR_CHANGED, ...USAGE_FLOW_CHANGED, ...CONVENIENCE_CHANGED, ...USAGE_POLISH_CHANGED, ...PRODUCTION_SAFETY_CHANGED, ...STORYBOARD_FEEDBACK_CHANGED, ...STORYBOARD_INTEGRITY_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...USAGE_FLOW_ADDED, USAGE_FLOW_PROOF, ...CONVENIENCE_ADDED, CONVENIENCE_PROOF, ...USAGE_POLISH_ADDED, USAGE_POLISH_PROOF, ...PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF, ...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF])].sort());
   for (const p of USABILITY_COMPLETION_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);

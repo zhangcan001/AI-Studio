@@ -618,6 +618,77 @@ pub(crate) fn explicit_entity_mentions<'a>(
     Ok(found)
 }
 
+/// Rewrite editable text by exact identity, not string replacement. The second
+/// pass rejects aliases which would capture a different existing/unknown mention.
+/// Frozen execution inputs must never be passed to this helper.
+pub(crate) fn rename_entity_mentions(
+    prompt: &str,
+    project_id: &str,
+    entities: &[crate::domain::story_entity::StoryEntity],
+    entity_id: &str,
+    new_name: &str,
+) -> Result<String, String> {
+    let target = entities
+        .iter()
+        .find(|e| e.id == entity_id && e.project_id == project_id)
+        .ok_or("实体不存在或不属于当前项目")?;
+    if target.name == new_name {
+        return Ok(prompt.to_owned());
+    }
+    if new_name.contains('@') {
+        return Err("名称不能包含 @，否则无法保留正式引用".into());
+    }
+    let mut rewritten = String::new();
+    let mut expected = Vec::new();
+    let mut rest = prompt;
+    while let Some(at) = rest.find('@') {
+        rewritten.push_str(&rest[..at + 1]);
+        rest = &rest[at + 1..];
+        match match_entity_mention(rest, project_id, entities) {
+            Ok(entity) => {
+                expected.push(Some(entity.id.as_str()));
+                let tail = &rest[entity.name.len()..];
+                if entity.id == entity_id {
+                    rewritten.push_str(new_name);
+                    if new_name.ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                        && tail.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                    {
+                        rewritten.push(' ');
+                    }
+                } else {
+                    rewritten.push_str(&entity.name);
+                }
+                rest = tail;
+            }
+            Err(_) => {
+                if rest.starts_with(&target.name) {
+                    return Err("旧名称的 @引用存在歧义，请先修正后再改名".into());
+                }
+                expected.push(None);
+            }
+        }
+    }
+    rewritten.push_str(rest);
+    let mut after = entities.to_vec();
+    after.iter_mut().find(|e| e.id == entity_id).unwrap().name = new_name.into();
+    let mut actual = Vec::new();
+    let mut rest = rewritten.as_str();
+    while let Some(at) = rest.find('@') {
+        rest = &rest[at + 1..];
+        match match_entity_mention(rest, project_id, &after) {
+            Ok(entity) => {
+                actual.push(Some(entity.id.as_str()));
+                rest = &rest[entity.name.len()..];
+            }
+            Err(_) => actual.push(None),
+        }
+    }
+    if actual != expected {
+        return Err("新名称会改变其他 @引用的身份，请使用无歧义的唯一名称".into());
+    }
+    Ok(rewritten)
+}
+
 fn entity_cover(entity: &crate::domain::story_entity::StoryEntity) -> Option<&String> {
     entity
         .cover_asset_id
@@ -1174,6 +1245,45 @@ pub(crate) mod tests {
     use crate::application::ports::ShotVideoInputAsset;
     use crate::domain::{InputDefinition, Recipe};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn rename_mentions_keeps_exact_identity_boundaries_and_refuses_capture() {
+        use crate::domain::story_entity::{StoryEntity, StoryEntityKind};
+        let entity = |id: &str, name: &str| StoryEntity {
+            id: id.into(),
+            project_id: "p".into(),
+            kind: StoryEntityKind::Character,
+            name: name.into(),
+            description: String::new(),
+            cover_asset_id: None,
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let entities = vec![
+            entity("short", "Ann"),
+            entity("long", "Anna"),
+            entity("chinese", "阿离"),
+        ];
+        let rename = |text: &str, id: &str, name: &str| {
+            super::rename_entity_mentions(text, "p", &entities, id, name)
+        };
+        assert_eq!(
+            rename("@Ann, @Anna @Ann! Ann @unknown", "short", "Ada").unwrap(),
+            "@Ada, @Anna @Ada! Ann @unknown"
+        );
+        assert_eq!(
+            rename("@阿离walks", "chinese", "Alice").unwrap(),
+            "@Alice walks"
+        );
+        assert!(rename("@Ann @Anna", "short", "Anna").is_err());
+        assert!(rename("@Anna walks", "short", "Anna walks").is_err());
+        assert!(rename("@unknown", "short", "unknown").is_err());
+        assert!(rename("@Ann", "short", "A@B").is_err());
+        let mut ambiguous = entities.clone();
+        ambiguous.push(entity("duplicate", "Ann"));
+        assert!(super::rename_entity_mentions("@Ann", "p", &ambiguous, "short", "Ada").is_err());
+    }
 
     #[test]
     fn entity_prompt_retains_character_appearance_and_scene_structure_by_actual_picture() {

@@ -4,8 +4,19 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {readFileSync} from 'node:fs';
 import {AppShellV3} from './v3/AppShellV3';
 import {projectDisplayName} from '../i18n/statusLabels';
-import {preservesCreateDraftForSettings} from './App';
+import {leavesStoryboardWithDrafts,preservesCreateDraftForSettings} from './App';
+import {useStudioStore} from '../stores/studioStore';
 afterEach(cleanup);
+it('guards row drafts on Library/project navigation even when the separate Create draft can be preserved',()=>{
+ const route={kind:'create',projectId:'p',stage:'video'} as const;
+ useStudioStore.setState({storyboardPrompts:{[JSON.stringify(['p','s','recipe'])]:''},storyboardFields:{}});
+ try {
+   expect(leavesStoryboardWithDrafts(route,{kind:'library',projectId:'p'})).toBe(true);
+   expect(leavesStoryboardWithDrafts(route,{kind:'create',projectId:'other',stage:'video'})).toBe(true);
+   expect(leavesStoryboardWithDrafts(route,{...route,shotId:'s'})).toBe(false);
+   expect(leavesStoryboardWithDrafts({...route,projectId:'other'},{kind:'library',projectId:'other'})).toBe(false);
+ } finally {useStudioStore.setState({storyboardPrompts:{},storyboardFields:{}});}
+});
 it('M2-2 preserves only owned Create to Library draft navigation',()=>{
  const route={kind:'create',projectId:'p',shotId:'s',stage:'video'} as const;
  expect(preservesCreateDraftForSettings(route,{kind:'library',projectId:'p',filter:'prompts'},'p:s:video')).toBe(true);

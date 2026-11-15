@@ -26,6 +26,18 @@ const generator = { selectionRef: "sel", name: "H3", version: "1", mode: "t2v", 
   resolutionPresets: [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }, { id: "mp-2_09-9x16", label: "2.09MP · 1088×1920", width: 1088, height: 1920 }] };
 const props = () => ({ projectId: "p", busy: false, onOpen: vi.fn(), onCreate: vi.fn(), onChanged: vi.fn(), onQueue: vi.fn() });
 
+it("keeps current recipe drafts visible instead of silently hiding them on a generator switch",async()=>{
+ api.generatorsList.mockResolvedValue([generator,{...generator,selectionRef:"other",name:"Other"}]);
+ const key=JSON.stringify(["p","a","sel"]);useStudioStore.getState().setStoryboardPrompt(key,"unsaved script");
+ render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
+ const select=await screen.findByLabelText("镜头1 生成器");
+ await waitFor(()=>expect(within(select).getByRole("option",{name:/Other/})).toBeTruthy());
+ fireEvent.change(select,{target:{value:"other"}});
+ expect(api.updateShot).not.toHaveBeenCalled();
+ expect(screen.getByRole("alert").textContent).toContain("先保存或放弃");
+ expect(useStudioStore.getState().storyboardPrompts[key]).toBe("unsaved script");
+});
+
 it("validates the current duration draft before blur and clears a reverted draft immediately",async()=>{
  render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
  const field=await screen.findByLabelText("镜头1 时长（秒）");

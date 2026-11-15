@@ -47,6 +47,90 @@ mod story_entity_contract {
         }
     }
 
+    #[tokio::test]
+    async fn rename_rewrites_only_exact_mutable_project_mentions_atomically() {
+        let (db, service) = fixture().await;
+        let hero = service
+            .create("prj_a", StoryEntityKind::Character, input("Ann", None, &[]))
+            .await
+            .unwrap();
+        service
+            .create(
+                "prj_a",
+                StoryEntityKind::Character,
+                input("Anna", None, &[]),
+            )
+            .await
+            .unwrap();
+        sqlx::query("UPDATE shots SET prompt_text='@Ann meets @Anna; Ann', prompt_summary='@Ann runs' WHERE id IN ('sht_a','sht_b')").execute(&db.pool).await.unwrap();
+        sqlx::query("INSERT INTO shot_stage_prompts (shot_id,stage,prompt_text,updated_at) VALUES ('sht_a','video','@Ann smiles','2026-01-01')").execute(&db.pool).await.unwrap();
+        service
+            .update("prj_a", &hero.id, input("Ada", None, &[]))
+            .await
+            .unwrap();
+        let shot: (String, String) =
+            sqlx::query_as("SELECT prompt_text,prompt_summary FROM shots WHERE id='sht_a'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(shot, ("@Ada meets @Anna; Ann".into(), "@Ada runs".into()));
+        let stage: String =
+            sqlx::query_scalar("SELECT prompt_text FROM shot_stage_prompts WHERE shot_id='sht_a'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(stage, "@Ada smiles");
+        let other: String = sqlx::query_scalar("SELECT prompt_text FROM shots WHERE id='sht_b'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(other, "@Ann meets @Anna; Ann");
+        assert!(service
+            .update("prj_a", &hero.id, input("Anna", None, &[]))
+            .await
+            .is_err());
+        assert_eq!(service.get("prj_a", &hero.id).await.unwrap().name, "Ada");
+        let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(tasks, 0);
+    }
+
+    #[tokio::test]
+    async fn rename_rolls_back_all_text_when_new_alias_would_capture_another_reference() {
+        let (db, service) = fixture().await;
+        let hero = service
+            .create("prj_a", StoryEntityKind::Character, input("Ann", None, &[]))
+            .await
+            .unwrap();
+        service
+            .create("prj_a", StoryEntityKind::Scene, input("Anna", None, &[]))
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE shots SET prompt_text='@Ann',prompt_music='@Anna walks' WHERE id='sht_a'",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        assert!(service
+            .update("prj_a", &hero.id, input("Anna walks", None, &[]))
+            .await
+            .is_err());
+        let text: String = sqlx::query_scalar("SELECT prompt_text FROM shots WHERE id='sht_a'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(text, "@Ann");
+        assert_eq!(service.get("prj_a", &hero.id).await.unwrap().name, "Ann");
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&db.pool)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
     async fn bindings(db: &ProjectDatabase) -> Vec<(String, String, String, i64)> {
         sqlx::query_as("SELECT project_id, shot_id, entity_id, ordinal FROM shot_story_entity_bindings ORDER BY project_id, shot_id, ordinal")
             .fetch_all(&db.pool).await.unwrap()

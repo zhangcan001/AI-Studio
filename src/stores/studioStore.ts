@@ -8,6 +8,12 @@ import type {
 } from "../types/generation";
 
 export interface StoryboardFieldDraft { name?: string; duration?: string; sections?: Partial<import("../types/storyEntity").ShotPromptSections> }
+/** Exact scoped keys, never substring/prefix project matching. Empty prompt is a draft too. */
+export function storyboardDraftKeys(state: Pick<StudioState,"storyboardPrompts"|"storyboardFields">, projectId: string, shotId?: string) {
+  return [...new Set([...Object.keys(state.storyboardPrompts),...Object.keys(state.storyboardFields)])].filter(key=>{
+    try { const scope:unknown=JSON.parse(key);return Array.isArray(scope)&&scope.length===3&&scope[0]===projectId&&(shotId===undefined||scope[1]===shotId); } catch {return false;}
+  });
+}
 interface StudioState {
   storyboardFields: Record<string, StoryboardFieldDraft>;
   setStoryboardField: <K extends keyof StoryboardFieldDraft>(key: string, field: K, value: StoryboardFieldDraft[K]) => void;

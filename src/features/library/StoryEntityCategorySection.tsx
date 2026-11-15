@@ -5,6 +5,7 @@ import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import { entityAvatarAssetId, STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
+import { storyboardDraftKeys, useStudioStore } from "../../stores/studioStore";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = {
   character: "角色",
@@ -98,6 +99,12 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
 
   async function save() {
     if (!draftName.trim() || busy) return;
+    if(editing&&draftName.trim()!==editing.name){
+      const store=useStudioStore.getState();
+      if(storyboardDraftKeys(store,projectId).length||store.draftDirty){
+        setError("请先保存或放弃当前项目未保存的镜头草稿，再修改名称。保存改名会同步更新镜头正式提示词，历史批次和生成记录不会改写。");return;
+      }
+    }
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -114,7 +121,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       setCreating(false);
       setEditing(null);
       await reload();
-      if (mounted.current) setNotice(`${editing ? "已更新" : "已创建"}${label}「${payload.name}」。`);
+      if (mounted.current) setNotice(`${editing ? "已更新" : "已创建"}${label}「${payload.name}」。${editing&&editing.name!==payload.name?"镜头正式提示词中的精确 @引用已同步；历史批次与结果保持不变。":""}`);
     } catch (cause) {
       if (mounted.current) setError(entityError(cause));
     } finally {

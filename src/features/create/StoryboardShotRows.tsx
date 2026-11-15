@@ -35,6 +35,8 @@ interface RowsProps {
   onInsert?: (shotId: string) => void;
   shotIndex?: CreationShotSummary[];
   focusId?: string;
+  overview?: StoryboardShot[];
+  onLocate?: (shotId:string)=>void;
 }
 
 /**
@@ -45,7 +47,7 @@ interface RowsProps {
  * duration and aspect/resolution persist through creation.updateShot (stage
  * prompt + generator scalar values validated by the selected recipe).
  */
-export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, onMove, onInsert, focusId, shotIndex = [] }: RowsProps) {
+export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, onMove, onInsert, focusId, shotIndex = [], overview=items, onLocate }: RowsProps) {
   const [query, setQuery] = useProjectSessionState(projectId, "storyboard.search", "", (v): v is string => typeof v === "string");
   const [filter, setFilter] = useProjectSessionState<(typeof FILTERS)[number]>(projectId, "storyboard.filter", "ALL", (v): v is (typeof FILTERS)[number] => FILTERS.includes(v as (typeof FILTERS)[number]));
   const [entities, setEntities] = useState<StoryEntity[]>([]);
@@ -82,13 +84,17 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     return () => { alive = false; };
   }, [projectId, generatorsRev]);
   const q = query.trim().toLowerCase();
-  const visible = items.filter(item => (filter === "ALL" || (filter==="REVIEW" ? hasPendingReview(item) : filter==="UNSELECTED" ? item.candidates.length>0 && !item.shot?.selectedResultId && !item.candidates.some(a=>a.selected) : item.status === filter))
+  const matching = overview.filter(item => (filter === "ALL" || (filter==="REVIEW" ? hasPendingReview(item) : filter==="UNSELECTED" ? item.candidates.length>0 && !item.shot?.selectedResultId && !item.candidates.some(a=>a.selected) : item.status === filter))
     && (!q || item.name.toLowerCase().includes(q) || (item.shot?.prompt ?? "").toLowerCase().includes(q)));
-  const unloaded = q ? shotIndex.filter(s => !items.some(item => item.id === s.id) && s.name.toLowerCase().includes(q)) : [];
+  const visible=items.filter(item=>matching.some(match=>match.id===item.id));
+  const unloaded=q||filter!=="ALL"?matching.filter(item=>!items.some(loaded=>loaded.id===item.id)):[];
+  // Compatibility for standalone callers which only have the old name index;
+  // never invent status matches when global metadata is unavailable.
+  const nameOnly=overview===items&&q&&filter==="ALL"?shotIndex.filter(s=>!items.some(i=>i.id===s.id)&&s.name.toLowerCase().includes(q)):[];
   return <section className="storyboard-shot-rows" aria-label="分镜编辑">
     <div className="storyboard-shot-toolbar">
-      <input type="search" aria-label="搜索分镜" placeholder="全项目镜头名 / 已加载提示词" value={query} onChange={e => setQuery(e.target.value)} />
-      <span className="storyboard-shot-count">{visible.length}/{items.length} 个分镜</span>
+      <input type="search" aria-label="搜索分镜" placeholder="全项目镜头名 / 提示词" value={query} onChange={e => setQuery(e.target.value)} />
+      <span className="storyboard-shot-count">{matching.length}/{overview.length} 个分镜（本页 {visible.length} 个）</span>
       <div role="group" aria-label="状态筛选" className="storyboard-shot-filters">
         {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : key === "REVIEW" ? "待审核" : key === "UNSELECTED" ? "待选用" : storyboardStatusLabels[key]}</button>)}
       </div>
@@ -100,8 +106,9 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     {visible.map(item => <ShotRowCard focused={focusId===item.id} key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} isLast={shotIndex.length ? item.id === shotIndex[shotIndex.length-1]?.id : item.id === items[items.length-1]?.id} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} onMove={onMove ? delta => onMove(item.id, delta) : undefined} onInsert={onInsert ? () => onInsert(item.id) : undefined} />)}
-    {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>以下镜头尚未加载详情，点击打开；状态筛选仅作用于上方已加载镜头。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onOpen(s.id)}>打开{s.name}</button>)}</section>}
-    {!visible.length && !unloaded.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
+    {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>其他页符合条件的镜头，点击定位后编辑；筛选覆盖全项目。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onLocate ? onLocate(s.id) : onOpen(s.id)}>定位{s.name} · {storyboardStatusText(s)}</button>)}</section>}
+    {nameOnly.length>0&&<section aria-label="未加载镜头名称搜索结果"><p>以下仅匹配名称，尚无状态详情。</p>{nameOnly.map(s=><button type="button" key={s.id} onClick={()=>onOpen(s.id)}>打开{s.name}</button>)}</section>}
+    {!visible.length && !unloaded.length && !nameOnly.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
   </section>;
 }
 
@@ -204,7 +211,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const [bound, setBound] = useState<StoryEntity[]>([]);
   const draftKey = JSON.stringify([projectId, item.id, item.shot?.selectionRef ?? null]);
   const [prompt, setPromptLocal] = useState(() => useStudioStore.getState().storyboardPrompts[draftKey] ?? item.shot?.prompt ?? "");
-  const setPrompt = (text: string) => { useStudioStore.getState().setStoryboardPrompt(draftKey, text); setPromptLocal(text); };
+  const setPrompt = (text: string) => { useStudioStore.getState().setStoryboardPrompt(draftKey, text === (item.shot?.prompt ?? "") ? undefined : text); setPromptLocal(text); };
   const fieldsDraft=useStudioStore(state=>state.storyboardFields[draftKey]);
   const setField=useStudioStore.getState().setStoryboardField;
   const clearField=<K extends keyof import("../../stores/studioStore").StoryboardFieldDraft>(field:K,submitted:import("../../stores/studioStore").StoryboardFieldDraft[K])=>{
@@ -273,6 +280,10 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const chooseGenerator = (ref: string) => {
     const next = generators.find(g => g.selectionRef === ref && g.availability);
     if (!next || ref === selectionRef || disabled) return;
+    const store=useStudioStore.getState();
+    if(Object.prototype.hasOwnProperty.call(store.storyboardPrompts,draftKey)||store.storyboardFields[draftKey]){
+      setError("当前生成器有未保存的分镜草稿，请先保存或放弃，再切换生成器。草稿和正式素材均未清除。");return;
+    }
     // An explicit row selection changes only this Shot, not the project default.
     // Media are never copied between Recipes; the backend retains their own sets.
     const token = scopeEpoch.current;

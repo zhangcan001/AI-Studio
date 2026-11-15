@@ -21,11 +21,16 @@ export function storyboardStatusText(item: StoryboardShot) {
   if (item.error) return "读取失败";
   return item.status === "COMPLETED" && selectedResultRejected(item) ? "已选用（已退回）" : storyboardStatusLabels[item.status];
 }
-export function deriveStoryboardStatus(shot: CreationShot | null, candidates: CreationAsset[], run: ProductRun | null): StoryboardShotStatus {
+export function deriveStoryboardStatus(shot: CreationShot | null, candidates: CreationAsset[], run: ProductRun | null, taskStatus?: string|null): StoryboardShotStatus {
   if (run?.status === "QUEUED") return "QUEUED";
   if (run?.status === "PAUSED") return "PAUSED";
   if (run?.status === "RUNNING") return "GENERATING";
   if (run?.status === "FAILED") return "FAILED";
+  if (!run) {
+    if (taskStatus === "FAILED") return "FAILED";
+    if (["RUNNING","CANCEL_REQUESTED","COLLECTING"].includes(taskStatus ?? "")) return "GENERATING";
+    if (["CREATED","VALIDATING","PREPARING","QUEUED"].includes(taskStatus ?? "")) return "QUEUED";
+  }
   if (shot?.selectedResultId || candidates.some(asset => asset.selected)) return "COMPLETED";
   if (candidates.length) return "REVIEW";
   return "TODO";
@@ -45,7 +50,7 @@ function intValue(shot: CreationShot | null, key: string): number | undefined {
 export function shotDuration(shot: CreationShot | null) { const seconds = intValue(shot, "duration_seconds"); return seconds ? `${seconds} 秒` : "未设置"; }
 export function shotResolution(shot: CreationShot | null) { const w = intValue(shot, "width"), h = intValue(shot, "height"); return w && h ? `${w} × ${h}` : "未设置"; }
 export function storyboardStats(items: readonly StoryboardShot[]) {
-  return { total: items.length, completed: items.filter(i => i.shot?.selectedResultId || i.candidates.some(a=>a.selected)).length, generating: items.filter(i => !i.error && i.status === "GENERATING").length, todo: items.filter(i => !i.error && (i.status === "TODO" || i.status === "FAILED")).length, review: items.filter(hasPendingReview).length };
+  return { total: items.length, completed: items.filter(i => i.shot?.selectedResultId || i.candidates.some(a=>a.selected)).length, generating: items.filter(i => !i.error && i.status === "GENERATING").length, todo: items.filter(i => !i.error && i.status === "TODO").length, review: items.filter(hasPendingReview).length };
 }
 export function videoCandidates(context: CreationContext) { return context.candidates.filter(asset => asset.mediaKind === "video"); }
 

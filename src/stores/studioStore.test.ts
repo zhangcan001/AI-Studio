@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useStudioStore } from "./studioStore";
+import { storyboardDraftKeys, useStudioStore } from "./studioStore";
 import type { RecipeViewModel } from "../types/generation";
 
 const mediaWorkflow: RecipeViewModel = {
@@ -16,6 +16,14 @@ const mediaWorkflow: RecipeViewModel = {
     { key: "audios", type: "audios", label: "Audios", required: false, minItems: 0, maxItems: 3 },
   ],
 };
+
+it("detects unsaved row drafts across pages and recipes using exact project/shot identity",()=>{
+ const a=JSON.stringify(["p","a","recipe-one"]),b=JSON.stringify(["p","b","recipe-two"]),other=JSON.stringify(["p-other","a",null]);
+ const state={storyboardPrompts:{[a]:"",[other]:"unrelated",broken:"ignored"},storyboardFields:{[b]:{duration:"8"}}};
+ expect(storyboardDraftKeys(state,"p").sort()).toEqual([a,b].sort());
+ expect(storyboardDraftKeys(state,"p","a")).toEqual([a]);
+ expect(storyboardDraftKeys(state,"missing")).toEqual([]);
+});
 
 describe("studio media draft state", () => {
   beforeEach(() => {

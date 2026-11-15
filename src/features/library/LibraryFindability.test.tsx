@@ -78,7 +78,7 @@ it("sourceKind change clears cursor stack and pending generated responses cannot
  expect(api.list).toHaveBeenLastCalledWith("a",expect.objectContaining({sourceKind:"source",cursor:null}));
 });
 
-it("separates character, scene, and prop navigation while keeping legacy profiles reachable",async()=>{
+it("separates entity navigation without exposing the retired style entry",async()=>{
   const navigate=vi.fn();render(<LibraryPage route={{kind:"library",projectId:"a",filter:"profiles"}} navigate={navigate}/>);await screen.findByText("first");
   const nav=screen.getByRole("navigation",{name:"资源分类"});
   expect(within(nav).getByRole("button",{name:"角色"})).toBeTruthy();
@@ -94,6 +94,5 @@ it("separates character, scene, and prop navigation while keeping legacy profile
   fireEvent.click(within(nav).getByRole("button",{name:"道具"}));
   expect(await screen.findByRole("region",{name:"道具管理"})).toBeTruthy();
   expect(screen.queryByRole("region",{name:"场景管理"})).toBeNull();
-  fireEvent.click(within(nav).getByRole("button",{name:"旧设定 · 风格"}));
-  expect(navigate).toHaveBeenCalledWith({kind:"library",projectId:"a",filter:"profiles"});
+  expect(within(nav).queryByRole("button",{name:"旧设定 · 风格"})).toBeNull();
 });

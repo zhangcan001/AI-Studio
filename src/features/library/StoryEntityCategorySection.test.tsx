@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { StoryEntityCategorySection } from "./StoryEntityCategorySection";
 import type { AssetView } from "../../types/asset";
 import type { StoryEntityKind } from "../../types/storyEntity";
+import { useStudioStore } from "../../stores/studioStore";
 
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), imageGet: vi.fn(), thumbnailGet: vi.fn(), importImages: vi.fn() }));
 vi.mock("../../product/client", () => ({
@@ -15,6 +16,20 @@ vi.mock("../../product/client", () => ({
 vi.mock("../../components/ImageAssetPicker", () => ({ ImageAssetPicker: () => null }));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+it("does not rename over unsaved Shot drafts and does not discard them",async()=>{
+ const entity={id:"entity",projectId:"p",kind:"character",name:"Ann",description:"",coverAssetId:null,imageAssetIds:[],createdAt:"",updatedAt:""};
+ api.list.mockResolvedValue([entity]);const key=JSON.stringify(["p","shot","recipe"]);
+ useStudioStore.setState({storyboardPrompts:{[key]:"@Ann runs"},storyboardFields:{},draftDirty:false});
+ try {
+   render(<StoryEntityCategorySection projectId="p" kind="character"/>);
+   fireEvent.click(await screen.findByRole("button",{name:"编辑"}));
+   fireEvent.change(screen.getByLabelText("角色名称"),{target:{value:"Ada"}});
+   fireEvent.click(screen.getByRole("button",{name:"保存"}));
+   expect(screen.getByRole("alert").textContent).toContain("请先保存或放弃");
+   expect(api.update).not.toHaveBeenCalled();expect(useStudioStore.getState().storyboardPrompts[key]).toBe("@Ann runs");
+ } finally {useStudioStore.setState({storyboardPrompts:{},storyboardFields:{},draftDirty:false});}
+});
 
 it.each([
   { kind: "character" as StoryEntityKind, label: "角色", filename: "苏蔓.png" },

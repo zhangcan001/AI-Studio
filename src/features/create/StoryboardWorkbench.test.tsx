@@ -4,13 +4,15 @@ import { invalidateRuns } from "../../product/runInvalidation";
 import { afterEach, expect, it, vi, beforeEach } from "vitest";
 import type { CreationContext, ProductRun } from "../../product/types";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
-import { deriveStoryboardStatus, runPercent } from "./storyboardModel";
+import { deriveStoryboardStatus, runPercent, storyboardStats } from "./storyboardModel";
+import { useStudioStore } from "../../stores/studioStore";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), shotsList: vi.fn(), shotsReorder: vi.fn(), exportSelected:vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { creation: { exportSelected:api.exportSelected,shotsList:api.shotsList,shotsReorder:api.shotsReorder,mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
 // Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
 beforeEach(() => {
+  useStudioStore.setState({storyboardPrompts:{},storyboardFields:{}});
   sessionStorage.clear();
   window.localStorage.setItem("ai-studio.storyboard.view", "grid");
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
@@ -38,6 +40,46 @@ function workbenchFrom(shotFn: (id: string | null) => CreationContext = context,
 }
 function workbenchFromContexts() { return workbenchFrom(context); }
 const route = { kind: "create" as const, projectId: "p", stage: "video" as const };
+
+it("never opens saved detail over an undiscarded row draft",async()=>{
+ const key=JSON.stringify(["p","s3",null]);useStudioStore.getState().setStoryboardPrompt(key,"new unsaved script");
+ const confirm=vi.spyOn(window,"confirm").mockReturnValue(false),navigate=vi.fn();
+ api.runGet.mockResolvedValue(run("SUCCEEDED",1,1));
+ render(<StoryboardWorkbench route={route} navigate={navigate}/>);
+ const card=await screen.findByRole("article",{name:"镜头03"});
+ fireEvent.click(within(card).getByRole("button",{name:"设置与生成"}));
+ expect(confirm).toHaveBeenCalled();expect(navigate).not.toHaveBeenCalled();
+ expect(useStudioStore.getState().storyboardPrompts[key]).toBe("new unsaved script");confirm.mockRestore();
+});
+it("excludes failed shots from the to-make count",()=>{
+ expect(storyboardStats([{id:"failed",status:"FAILED",candidates:[],shot:null,run:null,name:"failed",ordinal:0}]).todo).toBe(0);
+});
+it.each([false,true])("clears only confirmed, unchanged row drafts after accepted navigation=%s",async(accepted)=>{
+ const key=JSON.stringify(["p","s3",null]),other=JSON.stringify(["p","s1",null]);
+ useStudioStore.setState({storyboardPrompts:{[key]:"old draft",[other]:"other shot"},storyboardFields:{}});
+ const confirm=vi.spyOn(window,"confirm").mockReturnValue(true);
+ let resolve!: (ok:boolean)=>void;const navigate=vi.fn(()=>new Promise<boolean>(done=>{resolve=done;}));
+ api.runGet.mockResolvedValue(run("SUCCEEDED",1,1));
+ render(<StoryboardWorkbench route={route} navigate={navigate}/>);
+ const card=await screen.findByRole("article",{name:"镜头03"});fireEvent.click(within(card).getByRole("button",{name:"设置与生成"}));
+ if(accepted)useStudioStore.getState().setStoryboardPrompt(key,"newer edit");
+ await act(async()=>{resolve(accepted);});
+ expect(useStudioStore.getState().storyboardPrompts[key]).toBe(accepted?"newer edit":"old draft");
+ expect(useStudioStore.getState().storyboardPrompts[other]).toBe("other shot");expect(api.generate).not.toHaveBeenCalled();confirm.mockRestore();
+});
+it("finds prompt and review matches outside the loaded detail page without loading their thumbnails",async()=>{
+ localStorage.setItem("ai-studio.storyboard.view","shots");
+ const board=workbenchFrom(id=>idleContext(id,false));
+ const far={...board.items[2],shot:{...board.items[2].shot,summary:{id:"far",name:"远处镜头",ordinal:61},prompt:"off-page unique word",recentRun:null},candidates:[{id:"far-video",name:"far-video",mediaKind:"video",selected:false,reviewState:"PENDING"}]};
+ api.workbench.mockResolvedValue({...board,shots:[...board.shots,far.shot.summary],overview:[...board.items,far],truncated:1});
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ const search=await screen.findByRole("searchbox",{name:"搜索分镜"});
+ fireEvent.change(search,{target:{value:"off-page unique"}});
+ expect(await screen.findByRole("button",{name:/定位远处镜头/})).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"待审核"}));
+ expect(screen.getByRole("button",{name:/定位远处镜头/})).toBeTruthy();
+ expect(api.generate).not.toHaveBeenCalled();expect(api.workbench).toHaveBeenCalledTimes(1);
+});
 
 it("scopes a missing historical Run to its Shot instead of disabling all generation",async()=>{
  vi.useFakeTimers({toFake:["setInterval","clearInterval"]});
@@ -144,7 +186,7 @@ it("UI restore: workbench derives real shot status/stats from the product facade
   expect(within(stats).getByText("生成中").nextSibling?.textContent).toBe("1");
   expect(within(stats).getByText("待制作").nextSibling?.textContent).toBe("1");
   expect(screen.getAllByText("生成中 · 已处理 17/25 项").length).toBeGreaterThan(0);
-  fireEvent.click(within(screen.getByRole("article", { name: "镜头03" })).getByRole("button", { name: "生成" }));
+  fireEvent.click(within(screen.getByRole("article", { name: "镜头03" })).getByRole("button", { name: "设置与生成" }));
   expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "p", stage: "video", shotId: "s3" });
   fireEvent.click(screen.getByRole("button", { name: "批量准备视频" }));
   expect(await screen.findByRole("dialog", { name: "批量准备视频" })).toBeTruthy();
@@ -415,14 +457,17 @@ it("opens the exact saved failed-start batch from its real storyboard row, witho
   expect(navigate).not.toHaveBeenCalled();
   expect(api.generate).toHaveBeenCalledTimes(1);
 });
-it("searches the full lightweight Shot index without fetching rich details for every match",async()=>{
+it("locates a global metadata match on its detail page without navigating into the editor",async()=>{
  window.localStorage.setItem('ai-studio.storyboard.view','shots');
  const all=Array.from({length:65},(_,i)=>({id:`all-${i}`,name:`分镜${i+1}`,ordinal:i}));
- api.workbench.mockResolvedValue({...workbenchFrom(context,'p'),shots:all,truncated:62});
+ const overview=all.map(summary=>({shot:{...context("s3").selectedShot!,summary,recentRun:null,prompt:`script ${summary.name}`},candidates:[]}));
+ api.workbench.mockImplementation(async(_p,_s,_l,offset=0)=>({...workbenchFrom(context,'p'),shots:all,items:overview.slice(offset,offset+60),overview,truncated:Math.max(0,65-offset-60)}));
  const navigate=vi.fn();render(<StoryboardWorkbench route={route} navigate={navigate}/>);
  const search=await screen.findByLabelText('搜索分镜');fireEvent.change(search,{target:{value:'分镜65'}});
- fireEvent.click(screen.getByRole('button',{name:'打开分镜65'}));expect(navigate).toHaveBeenCalledWith({kind:'create',projectId:'p',stage:'video',shotId:'all-64'});
- expect(api.workbench).toHaveBeenCalledWith('p','video',60);expect(api.generate).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:/定位分镜65/}));
+ await waitFor(()=>expect(api.workbench).toHaveBeenCalledWith('p','video',60,60));
+ expect(await screen.findByRole('article',{name:/分镜 65 分镜65/})).toBeTruthy();
+ expect(navigate).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
 });
 
 it('AUDIT-R03 A successful new-Shot refresh must survive an already in-flight background read',async()=>{

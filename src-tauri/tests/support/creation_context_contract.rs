@@ -469,6 +469,13 @@ async fn usage_flow_workbench_pages_are_bounded_scoped_and_do_not_create_tasks()
     assert_eq!(first.items.len(), 60);
     assert_eq!(first.truncated, 3);
     assert_eq!(first.shots.len(), 63);
+    assert_eq!(first.overview.len(), 63);
+    assert_eq!(first.overview[60].shot.summary.id, ids[60]);
+    assert!(first
+        .overview
+        .iter()
+        .flat_map(|i| &i.candidates)
+        .all(|a| a.thumbnail_bytes.is_none()));
     assert_eq!(second.items.len(), 3);
     assert_eq!(second.truncated, 0);
     assert_eq!(second.items[0].shot.summary.id, ids[60]);

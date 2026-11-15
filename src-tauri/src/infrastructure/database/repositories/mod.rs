@@ -767,6 +767,66 @@ pub mod story_entity {
                     message: e.to_string(),
                 })?;
             Self::validate_images(&mut tx, project_id, &input).await?;
+            // All editable references and the alias change share one SQLite
+            // transaction. Concurrent writers cannot commit a partial rename.
+            let rows = sqlx::query("SELECT * FROM story_entities WHERE project_id=?")
+                .bind(project_id)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(super::map_sqlx_error)?;
+            let entities = rows
+                .iter()
+                .map(|row| Self::map_row(row, Vec::new()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let old = entities
+                .iter()
+                .find(|e| e.id == id)
+                .ok_or_else(|| RepositoryError::integrity("实体不存在或不属于当前项目"))?;
+            if old.name != name {
+                let rewrite = |text: &str| {
+                    crate::application::shot_video_input_service::rename_entity_mentions(
+                        text, project_id, &entities, id, name,
+                    )
+                    .map_err(RepositoryError::integrity)
+                };
+                let shots=sqlx::query("SELECT id,prompt_text,prompt_style,prompt_summary,prompt_soundscape,prompt_music FROM shots WHERE project_id=?")
+                    .bind(project_id).fetch_all(&mut *tx).await.map_err(super::map_sqlx_error)?;
+                for shot in shots {
+                    let shot_id: String = shot.get("id");
+                    let prompt: String = shot.get("prompt_text");
+                    let next = rewrite(&prompt)?;
+                    if next != prompt {
+                        sqlx::query("UPDATE shots SET prompt_text=?,prompt_entry_id=NULL,prompt_version_id=NULL,updated_at=? WHERE id=? AND project_id=?")
+                            .bind(next).bind(&now).bind(&shot_id).bind(project_id).execute(&mut *tx).await.map_err(super::map_sqlx_error)?;
+                    }
+                    for column in [
+                        "prompt_style",
+                        "prompt_summary",
+                        "prompt_soundscape",
+                        "prompt_music",
+                    ] {
+                        if let Some(text) = shot.get::<Option<String>, _>(column) {
+                            let next = rewrite(&text)?;
+                            if next != text {
+                                // column is from the fixed list above, never user SQL.
+                                sqlx::query(&format!("UPDATE shots SET {column}=?,updated_at=? WHERE id=? AND project_id=?"))
+                                    .bind(next).bind(&now).bind(&shot_id).bind(project_id).execute(&mut *tx).await.map_err(super::map_sqlx_error)?;
+                            }
+                        }
+                    }
+                }
+                let stages=sqlx::query("SELECT p.shot_id,p.stage,p.prompt_text FROM shot_stage_prompts p JOIN shots s ON s.id=p.shot_id WHERE s.project_id=?")
+                    .bind(project_id).fetch_all(&mut *tx).await.map_err(super::map_sqlx_error)?;
+                for stage in stages {
+                    let text: String = stage.get("prompt_text");
+                    let next = rewrite(&text)?;
+                    if next != text {
+                        sqlx::query("UPDATE shot_stage_prompts SET prompt_text=?,prompt_entry_id=NULL,prompt_version_id=NULL,updated_at=? WHERE shot_id=? AND stage=?")
+                            .bind(next).bind(&now).bind(stage.get::<String,_>("shot_id")).bind(stage.get::<String,_>("stage")).execute(&mut *tx).await.map_err(super::map_sqlx_error)?;
+                    }
+                }
+            }
+
             let result = sqlx::query(
                 "UPDATE story_entities SET name = ?, description = ?, cover_asset_id = ?, updated_at = ?
                  WHERE project_id = ? AND id = ?",

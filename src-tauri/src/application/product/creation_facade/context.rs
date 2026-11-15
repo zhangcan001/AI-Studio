@@ -50,6 +50,7 @@ pub struct CreationAsset {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreationWorkbenchShot {
+    pub task_status: Option<String>,
     pub shot: CreationShot,
     pub candidates: Vec<CreationAsset>,
 }
@@ -62,6 +63,8 @@ pub struct CreationWorkbench {
     pub stage: String,
     pub shots: Vec<CreationShotSummary>,
     pub items: Vec<CreationWorkbenchShot>,
+    /// All-project metadata for search/counts. No off-page thumbnail IO.
+    pub overview: Vec<CreationWorkbenchShot>,
     pub truncated: i64,
 }
 
@@ -423,12 +426,7 @@ impl ProductCreationFacade {
         let truncated =
             i64::try_from(shots.len().saturating_sub(offset.saturating_add(limit))).unwrap_or(0);
         let mut items = Vec::with_capacity(limit.min(shots.len()));
-        let page = shots
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect::<Vec<_>>();
-        let candidate_tasks = page
+        let candidate_tasks = shots
             .iter()
             .flat_map(|shot| {
                 shot.generation_links
@@ -441,7 +439,16 @@ impl ProductCreationFacade {
             .list_by_tasks(project_id, &candidate_tasks)
             .await
             .map_err(ProductError::internal)?;
-        for shot in page {
+        let reviews = if let Some(artifacts) = &self.artifacts {
+            artifacts
+                .review_states_for_tasks(project_id, &candidate_tasks)
+                .await
+                .map_err(ProductError::internal)?
+        } else {
+            Default::default()
+        };
+        let mut overview = Vec::with_capacity(shots.len());
+        for (position, shot) in shots.into_iter().enumerate() {
             let projected = project_shot(&shot, stage)?;
             let mut candidates = Vec::new();
             let mut seen = HashSet::new();
@@ -457,10 +464,29 @@ impl ProductCreationFacade {
                     }
                 }
             }
-            items.push(CreationWorkbenchShot {
+            for candidate in &mut candidates {
+                candidate.review_state = reviews.get(&candidate.id).cloned();
+            }
+            let task_status = projected
+                .recent_run
+                .as_ref()
+                .and_then(|r| {
+                    shot.generation_links
+                        .iter()
+                        .find(|link| link.task_id.as_deref() == Some(r.id.as_str()))
+                })
+                .and_then(|link| link.task.as_ref())
+                .filter(|task| task.project_id == project_id)
+                .map(|task| task.status.clone());
+            let item = CreationWorkbenchShot {
                 shot: projected,
                 candidates,
-            });
+                task_status,
+            };
+            if position >= offset && position < offset.saturating_add(limit) {
+                items.push(item.clone());
+            }
+            overview.push(item);
         }
         let thumbnail_ids = items
             .iter()
@@ -483,21 +509,13 @@ impl ProductCreationFacade {
         for item in items.iter_mut().flat_map(|item| &mut item.candidates) {
             item.thumbnail_bytes = thumbnails.get(&item.id).cloned();
         }
-        if let Some(artifacts) = &self.artifacts {
-            let reviews = artifacts
-                .review_states_for_tasks(project_id, &candidate_tasks)
-                .await
-                .map_err(ProductError::internal)?;
-            for item in items.iter_mut().flat_map(|item| &mut item.candidates) {
-                item.review_state = reviews.get(&item.id).cloned();
-            }
-        }
         Ok(CreationWorkbench {
             project_id: project.id,
             project_name: project.name,
             stage: requested_stage.to_owned(),
             shots: summaries,
             items,
+            overview,
             truncated,
         })
     }
