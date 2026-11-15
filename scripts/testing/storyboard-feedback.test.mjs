@@ -1,3 +1,4 @@
+import { RUN_RECOVERY_POLISH_CHANGED, RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF } from "../run-recovery-polish-successor-guard.mjs";
 import { STORYBOARD_INTEGRITY_CHANGED, STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF } from "../storyboard-integrity-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';

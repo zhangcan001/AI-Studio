@@ -41,7 +41,7 @@ import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import { type Workspace } from "../types/workspaceResume";
-import { toUserMessage } from "../i18n/errorMessages";
+import { formatUiError, toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
 import { invalidateRuns } from "../product/runInvalidation";
@@ -196,14 +196,22 @@ function App() {
           setCatalog(recipes);
           void getRuntimeActivityStatus()
             .then((activity) => {
-              if (cancelled || (activity.activeTaskCount === 0 && !activity.productionBusy)) return;
-              setRecoveryNotice("正在同步上次未完成的任务……");
+              if (cancelled) return;
+              const shouldSync = activity.activeTaskCount > 0 || activity.productionBusy;
+              if (shouldSync) setRecoveryNotice("正在同步上次未完成的任务……");
               return reconcileActiveTasks().then((report) => {
-                if (!cancelled) setRecoveryNotice(`已同步 ${report.examined} 个任务。`);
+                if (!cancelled && shouldSync) setRecoveryNotice(`已同步 ${report.examined} 个任务。`);
               });
             })
-            .catch(() => {
-              if (!cancelled) setRecoveryNotice("上次任务状态暂时无法确认，请稍后重新同步。");
+            .catch((recoveryError: unknown) => {
+              if (!cancelled) {
+                const formatted = formatUiError(recoveryError);
+                setRecoveryNotice(
+                  formatted.code === "PRODUCTION_QUEUE_RECOVERY_FAILED"
+                    ? formatted.message
+                    : "上次任务状态暂时无法确认，请稍后重新同步。",
+                );
+              }
             });
         }
       })

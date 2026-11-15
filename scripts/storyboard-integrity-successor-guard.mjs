@@ -1,3 +1,4 @@
+import { runRecoveryPolishParentReader, runRecoveryPolishScopeSince, runRecoveryPolishFixtureFiles, RUN_RECOVERY_POLISH_BASE } from "./run-recovery-polish-successor-guard.mjs";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -96,10 +97,11 @@ export function storyboardIntegrityScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...STORYBOARD_INTEGRITY_CHANGED, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF,
+    ...runRecoveryPolishScopeSince(root, RUN_RECOVERY_POLISH_BASE),
   ])].sort();
 }
 export function storyboardIntegrityFixtureFiles(root) {
-  return [...facts(root, STORYBOARD_INTEGRITY_BASE).paths, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF];
+  return [...new Set([...facts(root, STORYBOARD_INTEGRITY_BASE).paths, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF, ...runRecoveryPolishFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -109,9 +111,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, STORYBOARD_INTEGRITY_BASE);
+  const successor = runRecoveryPolishParentReader(root, override);
+  const workspace = resolve(root), violations = [...successor.violations], parent = facts(workspace, STORYBOARD_INTEGRITY_BASE);
   const fail = id => violations.push("storyboard-integrity-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(STORYBOARD_INTEGRITY_PROOF));
@@ -125,10 +128,10 @@ function validate(root, override) {
     const allowed = [...scope, STORYBOARD_INTEGRITY_PROOF].sort();
     const expected = [...parent.paths, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -143,10 +146,10 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: STORYBOARD_INTEGRITY_CHANGED,
-    addedPaths: [...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF],
-    afterHashes: Object.fromEntries([...STORYBOARD_INTEGRITY_CHANGED, ...STORYBOARD_INTEGRITY_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
-    read: sessionMemoRead(workspace, p => STORYBOARD_INTEGRITY_CHANGED.includes(p) ? parent.read(p) : live(p)) };
+  return { violations, changedPaths: [...new Set([...STORYBOARD_INTEGRITY_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...STORYBOARD_INTEGRITY_CHANGED, ...STORYBOARD_INTEGRITY_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
+    read: sessionMemoRead(workspace, p => STORYBOARD_INTEGRITY_CHANGED.includes(p) ? parent.read(p) : successor.read(p)) };
 }
 export function storyboardIntegrityParentReader(root, override = undefined) {
   if (override) return validate(root, override);

@@ -1,3 +1,4 @@
+import { RUN_RECOVERY_POLISH_CHANGED, RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF } from "../run-recovery-polish-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';

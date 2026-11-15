@@ -80,7 +80,7 @@ it("offers each committed Shot as an independent edit target without restarting 
   const openShot=vi.fn(); const queue=vi.fn();
   render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenQueue={queue} onOpenShot={openShot}/>);
   await pick();fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");
-  fireEvent.click(screen.getByRole("button",{name:"编辑导入镜头 2"}));
+  fireEvent.click(screen.getByRole("button",{name:"编辑「镜头1」"}));
   expect(openShot).toHaveBeenCalledExactlyOnceWith("s2");expect(queue).not.toHaveBeenCalled();
   expect(api.commit).toHaveBeenCalledTimes(1);expect(api.commit.mock.calls[0][0].autoStart).toBe(false);
 });
@@ -89,7 +89,7 @@ it("does not offer per-Shot controls for rolled-back imports", async () => {
   api.commit.mockResolvedValue(result("compensated"));
   render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenShot={vi.fn()}/>);
   await pick();fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入失败，本次新增的数据已撤回");
-  expect(screen.queryByRole("region",{name:"逐镜控制"})).toBeNull();expect(screen.queryByRole("button",{name:/编辑导入镜头/})).toBeNull();
+  expect(screen.queryByRole("region",{name:"逐镜控制"})).toBeNull();expect(screen.queryByRole("button",{name:/编辑「/})).toBeNull();
 });
 
 it("bounds committed Shot controls to 50 and preserves exact IDs when paging", async () => {
@@ -98,10 +98,10 @@ it("bounds committed Shot controls to 50 and preserves exact IDs when paging", a
   const openShot=vi.fn();render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenShot={openShot}/>);
   await pick();fireEvent.click(screen.getByRole("checkbox",{name:"创建待启动批次"}));fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");
   await waitFor(() => expect(screen.getByRole("region",{name:"文件夹批量导入"}).getAttribute("aria-busy")).toBe("false"));
-  expect(screen.getAllByRole("button",{name:/编辑导入镜头/})).toHaveLength(50);fireEvent.click(screen.getByRole("button",{name:"下一组镜头"}));
-  await waitFor(() => expect(screen.getByRole("button",{name:"编辑导入镜头 51"})).toBeTruthy());
-  fireEvent.click(screen.getByRole("button",{name:"编辑导入镜头 51"}));expect(openShot).toHaveBeenCalledExactlyOnceWith("shot-50");
-  expect(screen.getAllByRole("button",{name:/编辑导入镜头/})).toHaveLength(50);
+  expect(screen.getAllByRole("button",{name:/编辑「/})).toHaveLength(50);fireEvent.click(screen.getByRole("button",{name:"下一组镜头"}));
+  await waitFor(() => expect(screen.getByRole("button",{name:"编辑「镜头50」"})).toBeTruthy());
+  fireEvent.click(screen.getByRole("button",{name:"编辑「镜头50」"}));expect(openShot).toHaveBeenCalledExactlyOnceWith("shot-50");
+  expect(screen.getAllByRole("button",{name:/编辑「/})).toHaveLength(50);
 });
 
 it('AUDIT-F13 rescan of identical valid rows must retain explicit exclusions and import-only intent',async()=>{

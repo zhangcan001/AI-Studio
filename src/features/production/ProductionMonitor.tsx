@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { isComfyNodeIncompatible, toUserMessage } from "../../i18n/errorMessages";
+import { errorMessageForCode, isComfyNodeIncompatible } from "../../i18n/errorMessages";
 import type { ProductionBatchArtifactsDto, ProductionTaskDto } from "../../types/artifact";
 import { ArtifactActions, ArtifactMetadata, ArtifactPreview, ReviewBadge } from "./ArtifactComponents";
 import "./ProductionMonitor.css";
@@ -137,7 +137,7 @@ function TaskRow({ projectId, item, busy, onRetry }: { projectId: string; item: 
       <div className="production-monitor-item-main">
         <div className="production-monitor-item-heading"><strong>生产项 {item.ordinal + 1}</strong><span className={`production-monitor-item-status status-${statusClass(item.productionItemStatus)}`}>{itemStatusLabel(item.productionItemStatus)}</span></div>
         {item.task ? <p className="production-monitor-task-context">Generation Task：{item.task.id} · {itemStatusLabel(item.task.status)} · {item.task.workflowVersionId} / {item.task.recipeId}</p> : <p className="production-monitor-task-context">尚未创建 Generation Task</p>}
-        {failed && <div className="production-monitor-error" role="alert"><strong>{item.errorCode ? `错误 ${item.errorCode}` : "错误详情"}</strong>{incompatible ? <><span>{toUserMessage({ code: item.errorCode, message: item.errorMessage })}</span><details><summary>查看技术详情</summary><pre>{item.errorMessage}</pre></details></> : <span>{item.errorMessage ?? "未提供错误详情"}</span>}<small>{onRetry ? "失败，需要处理；可创建新的执行尝试，原失败记录会保留。" : "失败，需要处理；请查看错误详情。"}</small></div>}
+        {failed && <div className="production-monitor-error" role="alert"><strong>错误详情</strong><span>{item.errorCode ? errorMessageForCode(item.errorCode, item.errorMessage ?? "未提供错误详情") : (item.errorMessage ?? "未提供错误详情")}</span>{(item.errorCode || item.errorMessage) ? <details><summary>查看技术详情</summary><pre>{[item.errorCode, item.errorMessage].filter(Boolean).join("\n")}</pre></details> : null}<small>{onRetry ? "失败，需要处理；可创建新的执行尝试，原失败记录会保留。" : "失败，需要处理；请查看错误详情。"}</small></div>}
         {item.productionItemStatus === "SUCCEEDED" && item.artifacts.length === 0 && <p className="production-monitor-unavailable" role="status">任务已完成，但没有登记可用产物。</p>}
         {item.artifacts.length > 0 && <section className="production-artifact-list" aria-label={`生产项 ${item.ordinal + 1} 的产物`}>
           {item.artifacts.map((artifact) => <article className="production-artifact-card" key={artifact.id} data-artifact-id={artifact.id}>

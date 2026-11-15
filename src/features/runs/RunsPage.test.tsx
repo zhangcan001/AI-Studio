@@ -132,8 +132,12 @@ it("m2_retry uses only authoritative original snapshot item ids, never the curre
   render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={navigate} />);
   expect(await screen.findByText("可恢复失败项：2 项")).toBeTruthy();
   expect(screen.getByText(/不会采用当前 Create 中尚未提交的修改/)).toBeTruthy();
+  expect(screen.getByText(/仍需再点「启动运行」后才会开始生成/)).toBeTruthy();
+  const confirmRetry = vi.spyOn(window, "confirm").mockReturnValue(true);
   fireEvent.click(screen.getByRole("button", { name: "重试原运行的可恢复失败项" }));
   await waitFor(() => expect(api.retry).toHaveBeenCalledTimes(1));
+  expect(confirmRetry).toHaveBeenCalled();
+  confirmRetry.mockRestore();
   expect(api.retry).toHaveBeenCalledWith("project-a", { ref, selectedItemIds: ids });
   expect(useStudioStore.getState().values).toEqual(before); expect(useStudioStore.getState().pendingRunIntent).toBeUndefined();
   expect(navigate).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled(); expect(api.start).not.toHaveBeenCalled(); expect(api.resultReview).not.toHaveBeenCalled();
@@ -238,8 +242,11 @@ it("folder batch retries only the explicitly chosen eligible item and preserves 
   render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: batchRef }} navigate={vi.fn()} />);
   await screen.findAllByRole("button", { name: "编辑这些输入并创建新运行" });
   const articles = document.querySelectorAll<HTMLElement>(".run-input");
+  const confirmItem = vi.spyOn(window, "confirm").mockReturnValue(true);
   fireEvent.click(within(articles[1]).getByRole("button", { name: "仅重试此镜头" }));
   await waitFor(() => expect(api.retry).toHaveBeenCalledWith("project-a", { ref: batchRef, selectedItemIds: ["item-b"] }));
+  expect(confirmItem).toHaveBeenCalled();
+  confirmItem.mockRestore();
   expect(api.retry).toHaveBeenCalledTimes(1); expect(api.start).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
 });
 
@@ -341,4 +348,43 @@ it("a confirmed deletion still navigates to the list when its scope is current",
 
 it("usage polish restores unsubmitted review comments by project RunRef and asset and clears only a successful submission",async()=>{
  const navigate=vi.fn(),route={kind:"runs" as const,projectId:"project-a",run:ref};const view=render(<RunsPage route={route} navigate={navigate}/>);fireEvent.change(await screen.findByLabelText("审核说明"),{target:{value:"A unsent"}});const b={source:"task" as const,id:"other-run"};api.get.mockResolvedValue({...run,ref:b});view.rerender(<RunsPage route={{...route,run:b}} navigate={navigate}/>);await waitFor(()=>expect((screen.getByLabelText("审核说明") as HTMLInputElement).value).toBe(""));fireEvent.change(screen.getByLabelText("审核说明"),{target:{value:"B unsent"}});api.get.mockResolvedValue(run);view.rerender(<RunsPage route={route} navigate={navigate}/>);await waitFor(()=>expect((screen.getByLabelText("审核说明") as HTMLInputElement).value).toBe("A unsent"));api.resultReview.mockRejectedValueOnce({code:"INVALID_INPUT"});fireEvent.click(screen.getByRole("button",{name:"审核退回"}));await screen.findByRole("alert");expect((screen.getByLabelText("审核说明") as HTMLInputElement).value).toBe("A unsent");api.resultReview.mockResolvedValue(undefined);fireEvent.click(screen.getByRole("button",{name:"审核退回"}));await waitFor(()=>expect((screen.getByLabelText("审核说明") as HTMLInputElement).value).toBe(""));expect(useStudioStore.getState().reviewComments[JSON.stringify(["project-a",b.source,b.id,result.assetId])]).toBe("B unsent");expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("retry confirm cancellation does not re-queue failed items", async () => {
+  api.get.mockResolvedValue({ ...run, availableActions: ["RETRY"], recoverability: { retryItemIds: ["item-1"], reviewRequired: 0 } });
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  try {
+    render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "重试原运行的可恢复失败项" }));
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(api.retry).not.toHaveBeenCalled();
+    expect(api.start).not.toHaveBeenCalled();
+  } finally { confirm.mockRestore(); }
+});
+
+it("disconnect pause explains that continue will not retry the failed item", async () => {
+  api.get.mockResolvedValue({
+    ...run,
+    status: "PAUSED",
+    availableActions: ["START", "REVIEW_RECOVERY", "DISCONNECT_PAUSE", "RETRY"],
+    recoverability: { retryItemIds: ["item-1"], reviewRequired: 0 },
+    progress: { total: 2, succeeded: 0, failed: 1, cancelled: 0 },
+    errorSummary: "与 ComfyUI 的连接已断开，批次已暂停。失败的镜头不会被「继续运行」覆盖，请先重试失败项，再启动运行。",
+  });
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={vi.fn()} />);
+  expect(await screen.findByRole("heading", { name: "连接中断后的暂停" })).toBeTruthy();
+  expect(screen.getByText(/失败的镜头不会被「继续运行」覆盖/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "继续运行" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "重试原运行的可恢复失败项" })).toBeTruthy();
+  expect(api.start).not.toHaveBeenCalled();
+  expect(api.retry).not.toHaveBeenCalled();
+});
+
+it("hides a zero failure count on the run list", async () => {
+  const succeeded = { ...run, status: "SUCCEEDED" as const, progress: { total: 1, succeeded: 1, failed: 0, cancelled: 0 }, availableActions: [], recoverability: { retryItemIds: [], reviewRequired: 0 } };
+  api.list.mockResolvedValue({ items: [succeeded], nextCursor: null, coverage: "FINITE" });
+  api.get.mockResolvedValue(succeeded);
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a" }} navigate={vi.fn()} />);
+  expect(await screen.findByText((_, node) => node?.tagName === "SPAN" && node.textContent === "0 个结果")).toBeTruthy();
+  expect(screen.queryByText(/0 项失败/)).toBeNull();
 });

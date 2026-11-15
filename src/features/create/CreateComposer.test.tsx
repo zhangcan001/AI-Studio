@@ -277,13 +277,13 @@ it("+ adds a shot image into the generator input, persists it via OCC save and s
   fireEvent.click(within(screen.getByRole("dialog",{name:"添加参考素材"})).getByRole("option",{name:/外部首帧/}));
   await waitFor(()=>expect(persisted()).toEqual([{inputKey:"first_frame",ordinal:0,assetId:"first"}]));
   await waitFor(()=>expect(composer().getAttribute("data-inputs")).toBe("saved"));
-  const thumb=screen.getByRole("button",{name:"插入 Image 1"});
+  const thumb=screen.getByRole("button",{name:"插入 图片 1"});
   await waitFor(()=>expect(thumb.querySelector("img")?.getAttribute("src")).toBe("blob:img"));
   expect(api.imageGet).toHaveBeenCalledWith("owned",{kind:"asset",id:"first"});
   expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"first"});
   fireEvent.click(screen.getByRole("button",{name:"首帧移除第1项"}));
   await waitFor(()=>expect(persisted()).toEqual([]));
-  expect(screen.queryByRole("button",{name:"插入 Image 1"})).toBeNull();
+  expect(screen.queryByRole("button",{name:"插入 图片 1"})).toBeNull();
 });
 it("import from computer binds the imported image into the chosen slot; library opens the image filter",async()=>{
   api.assetsImport.mockResolvedValue({imported:[{id:"new-img",name:"新图",mediaKind:"image"}],failed:[],cancelled:false});
@@ -303,10 +303,10 @@ it("clicking a thumbnail or typing @ inserts Image N chips that submit as Image 
   fireEvent.click(screen.getByLabelText("参考图片"));fireEvent.click(within(screen.getByRole("dialog")).getByRole("option",{name:/第二张/}));
   await waitFor(()=>expect(persisted()).toEqual([{inputKey:"reference_images",ordinal:0,assetId:"first"},{inputKey:"reference_images",ordinal:1,assetId:"second"}]));
   setPrompt("角色 ");
-  fireEvent.click(screen.getByRole("button",{name:"插入 Image 1"}));
+  fireEvent.click(screen.getByRole("button",{name:"插入 图片 1"}));
   expect(promptEditor().querySelectorAll(".composer-chip")).toHaveLength(1);
   fireEvent.keyDown(promptEditor(),{key:"@"});
-  fireEvent.click(within(screen.getByRole("listbox",{name:"插入参考图"})).getByRole("option",{name:/Image 2/}));
+  fireEvent.click(within(screen.getByRole("listbox",{name:"插入参考图"})).getByRole("option",{name:/图片 2/}));
   expect(promptEditor().querySelectorAll(".composer-chip")).toHaveLength(2);
   const text=(useStudioStore.getState().values.prompt as {value:string}).value;
   expect(text).toContain("Image 1");expect(text).toContain("Image 2");expect(text).toMatch(/^角色 /);
@@ -324,7 +324,7 @@ it("prompt edits round-trip through the draft and external prompt changes rebuil
   setPrompt("hello");expect(useStudioStore.getState().values.prompt).toEqual({type:"string",value:"hello"});
   useStudioStore.getState().setValue("prompt",{type:"string",value:"Image 1 是角色1"});
   await waitFor(()=>expect(promptEditor().querySelectorAll(".composer-chip")).toHaveLength(1));
-  expect(promptText()).toBe("Image 1 是角色1");
+  expect(promptText()).toBe("图片 1 是角色1");expect(useStudioStore.getState().values.prompt).toEqual({type:"string",value:"Image 1 是角色1"});
 });
 it("mode dropdown switches generator; resolution, aspect and duration reach the generate payload",async()=>{
   await start();
@@ -352,7 +352,7 @@ it("submit stays disabled until shared readiness is READY",async()=>{
 it("numbers images in submit order and serializes chips back to text",()=>{
   const fields=[{type:"image",key:"first_frame",label:"F",required:true},{type:"images",key:"reference_images",label:"R",required:false,minItems:0,maxItems:9}] as never;
   const refs=composerReferences(fields,{first_frame:{type:"image_asset",assetId:"a"},reference_images:{type:"image_assets",assetIds:["b","c"]}} as never,[]);
-  expect(refs.map(r=>r.label)).toEqual(["Image 1","Image 2","Image 3"]);
+  expect(refs.map(r=>r.label)).toEqual(["图片 1","图片 2","图片 3"]);
   const root=document.createElement("div");root.append("x ");const chip=document.createElement("span");chip.dataset.ref="2";chip.textContent="ignored";root.append(chip," y");
   expect(serializePrompt(root)).toBe("x Image 2 y");
   expect([aspectOf(1344,768),aspectOf(768,1344),aspectOf(1024,768),aspectOf(768,768)]).toEqual(["16:9","9:16","4:3","1:1"]);
@@ -378,7 +378,7 @@ it("D5: a late reference thumbnail patches the chip image in place and keeps the
  const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);
  fireEvent.mouseUp(editor);
  finish([137,80,78,71]);
- await waitFor(()=>expect(screen.getByRole('button',{name:'插入 Image 1'}).querySelector('img')).not.toBeNull());
+ await waitFor(()=>expect(screen.getByRole('button',{name:'插入 图片 1'}).querySelector('img')).not.toBeNull());
  expect(editor.firstChild).toBe(text);
  expect(selection.anchorNode).toBe(text);
  expect(selection.anchorOffset).toBe(5);

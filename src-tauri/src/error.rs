@@ -27,6 +27,7 @@ pub enum AppErrorCode {
     WorkflowRecipeLifecycleError,
     ProductionPackageError,
     ProductionQueueBusy,
+    ProductionQueueRecoveryFailed,
     ProductionStartAdmissionBlocked,
     ComfyEndpointInvalid,
     ComfyEndpointTestFailed,
@@ -109,6 +110,10 @@ impl AppError {
 
     pub fn project_not_found(message: impl Into<String>) -> Self {
         Self::new(AppErrorCode::ProjectNotFound, message)
+    }
+
+    pub fn production_queue_recovery_failed(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ProductionQueueRecoveryFailed, message)
     }
 
     pub fn invalid_input(message: impl Into<String>) -> Self {
@@ -301,6 +306,7 @@ impl AppError {
             AppErrorCode::WorkflowRecipeLifecycleError => "WORKFLOW_RECIPE_LIFECYCLE_ERROR",
             AppErrorCode::ProductionPackageError => "PRODUCTION_PACKAGE_ERROR",
             AppErrorCode::ProductionQueueBusy => "PRODUCTION_QUEUE_BUSY",
+            AppErrorCode::ProductionQueueRecoveryFailed => "PRODUCTION_QUEUE_RECOVERY_FAILED",
             AppErrorCode::ProductionStartAdmissionBlocked => "PRODUCTION_START_ADMISSION_BLOCKED",
             AppErrorCode::ComfyEndpointInvalid => "COMFY_ENDPOINT_INVALID",
             AppErrorCode::ComfyEndpointTestFailed => "COMFY_ENDPOINT_TEST_FAILED",

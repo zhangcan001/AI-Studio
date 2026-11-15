@@ -254,6 +254,7 @@ impl ProductRunFacade {
         let mut deferred_error = None;
         let mut preferred_parent = None;
         let mut available_actions = Vec::new();
+        let mut disconnect_pause = false;
         let (title, status, phase, created_at, updated_at) = match run_ref.source {
             RunSource::QueueBatch => {
                 let detail = self
@@ -344,6 +345,14 @@ impl ProductRunFacade {
                             ProductionBatchItemStatus::Cancelled
                                 | ProductionBatchItemStatus::Skipped
                         ));
+                        if item.status == ProductionBatchItemStatus::Failed
+                            && matches!(
+                                item.error_code.as_deref(),
+                                Some("COMFY_STREAM_DISCONNECTED" | "COMFY_OFFLINE")
+                            )
+                        {
+                            disconnect_pause = true;
+                        }
                     }
                     if entry.eligibility == "AUTO_RESUMABLE" {
                         retry_item_ids.push(entry.leaf_item_id.clone());
@@ -588,14 +597,21 @@ impl ProductRunFacade {
         }
         if status == "PAUSED" {
             available_actions.push("REVIEW_RECOVERY".to_owned());
+            if disconnect_pause {
+                available_actions.push("DISCONNECT_PAUSE".to_owned());
+            }
         }
         if review_required > 0 {
             available_actions.push("EDIT_INPUT".to_owned());
         }
-        let error_summary = deferred_error.or_else(|| {
-            (progress.failed > 0 || review_required > 0)
-                .then(|| "部分生成未完成，请检查失败项与输入。".to_owned())
-        });
+        let error_summary = if disconnect_pause && status == "PAUSED" {
+            Some("与 ComfyUI 的连接已断开，批次已暂停。失败的镜头不会被「继续运行」覆盖，请先重试失败项，再启动运行。".to_owned())
+        } else {
+            deferred_error.or_else(|| {
+                (progress.failed > 0 || review_required > 0)
+                    .then(|| "部分生成未完成，请检查失败项与输入。".to_owned())
+            })
+        };
         let mut results_summary: Vec<String> = results.into_iter().collect();
         results_summary.sort();
         Ok(ProductRun {

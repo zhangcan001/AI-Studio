@@ -102,12 +102,18 @@ pub async fn project_backup_export(
     project_id: String,
 ) -> Result<Option<crate::application::project_backup_service::ProjectBackupExportView>, AppError> {
     super::validate_project_id(&project_id)?;
-    let Some(file) = app_handle
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app_handle
         .dialog()
         .file()
         .add_filter("归档 / 备份", &["aiarchive", "zip"])
         .set_file_name("AI-Studio-Project.aiarchive")
-        .blocking_save_file()
+        .save_file(move |file| {
+            let _ = tx.send(file);
+        });
+    let Some(file) = rx
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
     else {
         return Ok(None);
     };
@@ -128,11 +134,17 @@ pub async fn project_backup_inspect(
     state: State<'_, AppState>,
 ) -> Result<Option<crate::application::project_backup_service::ProjectBackupPreviewView>, AppError>
 {
-    let Some(file) = app_handle
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app_handle
         .dialog()
         .file()
         .add_filter("归档 / 备份", &["aiarchive", "zip"])
-        .blocking_pick_file()
+        .pick_file(move |file| {
+            let _ = tx.send(file);
+        });
+    let Some(file) = rx
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
     else {
         return Ok(None);
     };
@@ -162,12 +174,18 @@ pub async fn project_manifest_export(
     let destination = match destination {
         Some(path) => path,
         None => {
-            let Some(file) = app_handle
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            app_handle
                 .dialog()
                 .file()
                 .add_filter("AI Studio 项目清单", &["json"])
                 .set_file_name("AI-Studio-Project-Manifest.json")
-                .blocking_save_file()
+                .save_file(move |file| {
+                    let _ = tx.send(file);
+                });
+            let Some(file) = rx
+                .await
+                .map_err(|error| AppError::internal(error.to_string()))?
             else {
                 return Ok(None);
             };

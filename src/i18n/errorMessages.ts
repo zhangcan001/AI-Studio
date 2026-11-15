@@ -19,6 +19,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   COMFY_IMAGE_UPLOAD_FAILED: "图片上传到 ComfyUI 失败。",
   COMFY_INPUT_UPLOAD_TOO_LARGE: "素材文件过大，无法上传到 ComfyUI。",
   PRODUCTION_QUEUE_BUSY: "当前有生产队列正在运行，请等待完成或暂停后再提交任务。",
+  PRODUCTION_QUEUE_RECOVERY_FAILED: "生产队列启动恢复失败，排队中的生产不会自动继续。请点击「重新同步任务」，或到运行页手动启动。",
   PRODUCTION_PACKAGE_ERROR: "生产包操作失败，请查看下方错误详情。",
   PACKAGE_INVALID_INPUT: "生产包输入无效，请检查后重试。",
   PACKAGE_RECIPE_INCOMPATIBLE: "工作流不兼容当前生产模式。",

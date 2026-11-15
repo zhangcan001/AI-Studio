@@ -160,4 +160,11 @@ describe("ProductionMonitor artifact workflow", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText("asset-51.mp4")).toBeTruthy();
   });
+
+  it("shows the Chinese error copy instead of a raw Comfy disconnect code", () => {
+    render(<ProductionMonitor projectId="project-1" batch={batch([task(3, "FAILED", [], { errorCode: "COMFY_STREAM_DISCONNECTED", errorMessage: "stream closed" })], "FAILED")} />);
+    expect(screen.getByText("与 ComfyUI 的执行连接已断开，请重新同步任务状态。")).toBeTruthy();
+    expect(screen.queryByText("错误 COMFY_STREAM_DISCONNECTED")).toBeNull();
+    expect(screen.getByText(/stream closed/)).toBeTruthy();
+  });
 });

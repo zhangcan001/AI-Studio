@@ -21,7 +21,7 @@ type Asset = { id: string; name: string; mediaKind: string; thumbnailBytes?: num
 export interface ComposerReference { n: number; label: string; field: RecipeField; fieldKey: string; index: number; kind: Kind; assetId: string; asset?: Asset }
 const TOKEN = /Image (\d+)/g;
 const AUTOSAVE_MS = 250;
-const KIND_PREFIX: Record<Kind, string> = { image: "Image", video: "Video", audio: "Audio" };
+const KIND_PREFIX: Record<Kind, string> = { image: "图片", video: "Video", audio: "Audio" };
 /** Resolution presets come from backend h3_resolution.rs (megapixel ladder, multiple of 32). */
 
 export function composerReferences(fields: RecipeField[], values: CreateController["values"], choices: Asset[]): ComposerReference[] {
@@ -329,7 +329,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       })}
     </div>}
     {promptField && <div className="composer-prompt">
-      <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} title="总像素可写0.5MP、0.98MP、50万像素或总像素500000；MP按ComfyUI的1024×1024约定，实际尺寸按当前预设匹配。" data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入 Image 标签" : "描述画面；可写0.98MP / 50万像素"}
+      <div ref={editor} id="create-field-prompt" className="composer-editor" contentEditable={!c.busy} suppressContentEditableWarning tabIndex={0} role="textbox" aria-multiline="true" aria-label={fieldLabel(promptField)} title="总像素可写0.5MP、0.98MP、50万像素或总像素500000；MP按ComfyUI的1024×1024约定，实际尺寸按当前预设匹配。" data-placeholder={images.length ? "描述画面；输入 @ 或点击上方缩略图插入图片标签" : "描述画面；可写0.98MP / 50万像素"}
         onInput={emit} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; emit(); setCompositionRevision(v => v + 1); }} onKeyUp={saveCaret} onMouseUp={saveCaret} onBlur={() => { saveCaret(); applyPromptSettings(); }}
         onKeyDown={e => { if (e.key === "@") { e.preventDefault(); saveCaret(); if (allEntities.length) setEntityPicker(true); else if (images.length) setPicker("insert"); } else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); } }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />
@@ -369,7 +369,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
         root.focus(); const sel = window.getSelection(); const r = document.createRange(); r.setStartAfter(space); r.collapse(true); if (sel) { sel.removeAllRanges(); sel.addRange(r); } caret.current = r.cloneRange();
         setEntityPicker(false); emit(); if (shotId && !isBound(entity.id)) toggleBound(entity.id);
       }} className="composer-picker-option">{(() => { const aid = entityAvatarAssetId(entity); const u = aid ? entityUrls[aid] : undefined; return u ? <img src={u} alt="" /> : <span className="composer-picker-glyph">@</span>; })()}<span>@{entity.name}</span></button>)}
-      {images.length > 0 && <button type="button" onClick={() => { setEntityPicker(false); setPicker("insert"); }}>插入 Image N…</button>}
+      {images.length > 0 && <button type="button" onClick={() => { setEntityPicker(false); setPicker("insert"); }}>插入图片 N…</button>}
       <button type="button" className="composer-picker-close" onClick={() => setEntityPicker(false)}>关闭</button></div>}
     <div className="composer-toolbar">
       <button type="button" className="composer-icon" aria-label="添加参考素材" title={target ? `添加到${fieldLabel(target)}` : mediaFields.length ? "输入已满" : "当前模式不需要参考素材"} disabled={!target || locked} onClick={() => {

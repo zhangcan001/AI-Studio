@@ -408,11 +408,17 @@ pub async fn asset_pick_and_import_image(
     project_id: String,
 ) -> Result<Option<AssetView>, AppError> {
     super::validate_project_id(&project_id)?;
-    let Some(file) = app_handle
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app_handle
         .dialog()
         .file()
         .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
-        .blocking_pick_file()
+        .pick_file(move |file| {
+            let _ = tx.send(file);
+        });
+    let Some(file) = rx
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
     else {
         return Ok(None);
     };
@@ -450,7 +456,8 @@ pub async fn asset_pick_and_import_source_assets(
     project_id: String,
 ) -> Result<AssetSourceImportBatchView, AppError> {
     super::validate_project_id(&project_id)?;
-    let Some(files) = app_handle
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app_handle
         .dialog()
         .file()
         .add_filter(
@@ -460,7 +467,12 @@ pub async fn asset_pick_and_import_source_assets(
                 "ogg", "opus", "m4a",
             ],
         )
-        .blocking_pick_files()
+        .pick_files(move |files| {
+            let _ = tx.send(files);
+        });
+    let Some(files) = rx
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
     else {
         return Ok(AssetSourceImportBatchView {
             imported: Vec::new(),
@@ -517,11 +529,17 @@ pub async fn asset_pick_and_import_story_entity_images(
     project_id: String,
 ) -> Result<AssetSourceImportBatchView, AppError> {
     super::validate_project_id(&project_id)?;
-    let Some(files) = app_handle
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app_handle
         .dialog()
         .file()
         .add_filter("图像文件", &["png", "jpg", "jpeg", "webp"])
-        .blocking_pick_files()
+        .pick_files(move |files| {
+            let _ = tx.send(files);
+        });
+    let Some(files) = rx
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
     else {
         return Ok(AssetSourceImportBatchView {
             imported: Vec::new(),
@@ -588,7 +606,14 @@ pub async fn asset_pick_and_import_source_folder(
     project_id: String,
 ) -> Result<AssetSourceImportBatchView, AppError> {
     super::validate_project_id(&project_id)?;
-    let Some(folder) = app_handle.dialog().file().blocking_pick_folder() else {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app_handle.dialog().file().pick_folder(move |folder| {
+        let _ = tx.send(folder);
+    });
+    let Some(folder) = rx
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
+    else {
         return Ok(AssetSourceImportBatchView {
             imported: Vec::new(),
             failed: Vec::new(),
@@ -634,11 +659,17 @@ pub async fn asset_pick_and_import_video(
     project_id: String,
 ) -> Result<Option<AssetView>, AppError> {
     super::validate_project_id(&project_id)?;
-    let Some(file) = app_handle
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app_handle
         .dialog()
         .file()
         .add_filter("Videos", &["mp4", "webm", "mov", "mkv"])
-        .blocking_pick_file()
+        .pick_file(move |file| {
+            let _ = tx.send(file);
+        });
+    let Some(file) = rx
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
     else {
         return Ok(None);
     };
@@ -661,11 +692,17 @@ pub async fn asset_pick_and_import_audio(
     project_id: String,
 ) -> Result<Option<AssetView>, AppError> {
     super::validate_project_id(&project_id)?;
-    let Some(file) = app_handle
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app_handle
         .dialog()
         .file()
         .add_filter("Audio files", &["wav", "flac", "mp3", "ogg", "opus", "m4a"])
-        .blocking_pick_file()
+        .pick_file(move |file| {
+            let _ = tx.send(file);
+        });
+    let Some(file) = rx
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
     else {
         return Ok(None);
     };
