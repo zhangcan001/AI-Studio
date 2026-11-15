@@ -93,6 +93,171 @@ impl AssetQueryService {
             .collect())
     }
 
+    /// Project-scoped batch projection preserving mapping-first fallback and Recipe output order.
+    pub async fn list_by_tasks(
+        &self,
+        project_id: &str,
+        task_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<AssetView>>, AssetQueryError> {
+        use std::collections::{HashMap, HashSet};
+        validate_project_id(project_id)?;
+        let ids = task_ids
+            .iter()
+            .map(|id| {
+                TaskId::parse(id.clone()).map_err(|e| AssetQueryError::InvalidTaskId(e.to_string()))
+            })
+            .collect::<Result<HashSet<_>, _>>()?
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut out = HashMap::new();
+        for chunk in ids.chunks(500) {
+            let mappings = self
+                .asset_repository
+                .list_output_mappings_for_tasks(chunk)
+                .await?;
+            let asset_ids = mappings
+                .iter()
+                .map(|m| m.asset_id.clone())
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let mut by_id = HashMap::new();
+            for group in asset_ids.chunks(500) {
+                for asset in self.asset_repository.find_many_by_ids(group).await? {
+                    by_id.insert(asset.id.clone(), asset);
+                }
+            }
+            let mut mapped: HashMap<TaskId, Vec<_>> = HashMap::new();
+            for mapping in mappings {
+                if let Some(asset) = by_id.get(&mapping.asset_id) {
+                    mapped
+                        .entry(mapping.task_id.clone())
+                        .or_default()
+                        .push((mapping, asset.clone()));
+                }
+            }
+            let fallback_ids = chunk
+                .iter()
+                .filter(|id| !mapped.contains_key(*id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let fallback = self
+                .asset_repository
+                .list_by_source_tasks(&fallback_ids)
+                .await?;
+            let mut orders = HashMap::new();
+            if !mapped.is_empty() {
+                if let (Some(tasks), Some(definitions)) =
+                    (&self.task_repository, &self.definition_repository)
+                {
+                    let tasks = tasks
+                        .find_many_by_ids(&mapped.keys().cloned().collect::<Vec<_>>())
+                        .await?;
+                    let pairs = tasks
+                        .iter()
+                        .map(|t| (t.workflow_version_id.clone(), t.recipe_id.clone()))
+                        .collect::<HashSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    let definitions = definitions
+                        .find_many(&pairs)
+                        .await?
+                        .into_iter()
+                        .map(|d| ((d.workflow_version_id, d.recipe_id), d.recipe_yaml))
+                        .collect::<HashMap<_, _>>();
+                    for task in tasks {
+                        if let Some(yaml) =
+                            definitions.get(&(task.workflow_version_id, task.recipe_id))
+                        {
+                            orders.insert(
+                                task.id,
+                                RecipeParser::parse(yaml)
+                                    .map(|r| {
+                                        r.outputs.into_iter().map(|o| o.id).collect::<Vec<_>>()
+                                    })
+                                    .unwrap_or_default(),
+                            );
+                        }
+                    }
+                }
+            }
+            for id in chunk {
+                let assets = if let Some(mut pairs) = mapped.remove(id) {
+                    let order = orders.remove(id).unwrap_or_default();
+                    pairs.sort_by(|(a, _), (b, _)| compare_mappings(a, b, &order));
+                    pairs
+                        .into_iter()
+                        .filter(|(_, a)| a.project_id == project_id)
+                        .map(|(_, a)| AssetView::from(a))
+                        .collect()
+                } else {
+                    fallback
+                        .iter()
+                        .filter(|a| {
+                            a.project_id == project_id && a.source_task_id.as_ref() == Some(id)
+                        })
+                        .cloned()
+                        .map(AssetView::from)
+                        .collect()
+                };
+                out.insert(id.as_str().to_owned(), assets);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Bulk ownership lookup plus one project-root read, bounded by the workbench page.
+    /// Unavailable thumbnails remain optional exactly as in the individual projection.
+    pub async fn read_thumbnails(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, AssetQueryError> {
+        validate_project_id(project_id)?;
+        let mut out = std::collections::HashMap::new();
+        if asset_ids.is_empty() {
+            return Ok(out);
+        }
+        let mut root = None;
+        for chunk in asset_ids.chunks(500) {
+            let ids = chunk
+                .iter()
+                .map(|id| {
+                    AssetId::parse(id.clone())
+                        .map_err(|e| AssetQueryError::InvalidAssetId(e.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            for asset in self.asset_repository.find_many_by_ids(&ids).await? {
+                if asset.project_id != project_id
+                    || !matches!(asset.asset_type, AssetType::Image | AssetType::Video)
+                {
+                    continue;
+                }
+                if let Some(path) = asset.thumbnail_path {
+                    if root.is_none() {
+                        match self.project_root(project_id).await {
+                            Ok(value) => root = Some(value),
+                            Err(_) => return Ok(out),
+                        }
+                    }
+                    let Some(root) = &root else {
+                        continue;
+                    };
+                    if let Ok(bytes) = self
+                        .asset_store
+                        .read(root, std::path::Path::new(&path))
+                        .await
+                    {
+                        if bytes.len() <= 256 * 1024 {
+                            out.insert(asset.id.as_str().to_owned(), bytes);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     async fn output_order(&self, task_id: &TaskId) -> Result<Vec<String>, AssetQueryError> {
         let (Some(task_repository), Some(definition_repository)) =
             (&self.task_repository, &self.definition_repository)
@@ -448,6 +613,198 @@ mod tests {
         Arc,
     };
     use tempfile::tempdir;
+
+    struct CountingRepository {
+        inner: Arc<SqliteAssetRepository>,
+        singles: Arc<AtomicUsize>,
+        bulk: Arc<AtomicUsize>,
+    }
+    #[async_trait]
+    impl AssetRepository for CountingRepository {
+        async fn insert_many(
+            &self,
+            assets: &[Asset],
+        ) -> Result<(), crate::application::ports::RepositoryError> {
+            self.inner.insert_many(assets).await
+        }
+        async fn find_by_id(
+            &self,
+            id: &AssetId,
+        ) -> Result<Option<Asset>, crate::application::ports::RepositoryError> {
+            self.singles.fetch_add(1, Ordering::SeqCst);
+            self.inner.find_by_id(id).await
+        }
+        async fn list_by_source_task(
+            &self,
+            id: &crate::domain::TaskId,
+        ) -> Result<Vec<Asset>, crate::application::ports::RepositoryError> {
+            self.singles.fetch_add(1, Ordering::SeqCst);
+            self.inner.list_by_source_task(id).await
+        }
+        async fn list_by_source_tasks(
+            &self,
+            ids: &[crate::domain::TaskId],
+        ) -> Result<Vec<Asset>, crate::application::ports::RepositoryError> {
+            self.bulk.fetch_add(1, Ordering::SeqCst);
+            self.inner.list_by_source_tasks(ids).await
+        }
+        async fn find_many_by_ids(
+            &self,
+            ids: &[AssetId],
+        ) -> Result<Vec<Asset>, crate::application::ports::RepositoryError> {
+            self.bulk.fetch_add(1, Ordering::SeqCst);
+            self.inner.find_many_by_ids(ids).await
+        }
+        async fn list_recent(
+            &self,
+            p: &str,
+            n: u32,
+        ) -> Result<Vec<Asset>, crate::application::ports::RepositoryError> {
+            self.inner.list_recent(p, n).await
+        }
+        async fn list_output_mappings_for_tasks(
+            &self,
+            ids: &[crate::domain::TaskId],
+        ) -> Result<
+            Vec<crate::application::ports::TaskOutputAssetMapping>,
+            crate::application::ports::RepositoryError,
+        > {
+            self.bulk.fetch_add(1, Ordering::SeqCst);
+            self.inner.list_output_mappings_for_tasks(ids).await
+        }
+        async fn list_output_mappings(
+            &self,
+            id: &crate::domain::TaskId,
+        ) -> Result<
+            Vec<crate::application::ports::TaskOutputAssetMapping>,
+            crate::application::ports::RepositoryError,
+        > {
+            self.singles.fetch_add(1, Ordering::SeqCst);
+            self.inner.list_output_mappings(id).await
+        }
+    }
+    #[tokio::test]
+    async fn batch_candidates_preserve_projection_without_per_task_reads() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE projects SET root_path = ? WHERE id = 'project-1'")
+            .bind(directory.path().to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        std::fs::write(directory.path().join("thumb.png"), b"thumbnail").unwrap();
+        let tasks = SqliteTaskRepository::new(pool.clone());
+        let inner = Arc::new(SqliteAssetRepository::new(pool.clone()));
+        let mut ids = Vec::new();
+        for i in 0..40 {
+            let task = Task::new(
+                "project-1",
+                "workflow-1",
+                "workflow-version-1",
+                "recipe-1",
+                Utc::now(),
+            );
+            tasks.create(&task, &task.created_event()).await.unwrap();
+            ids.push(task.id.as_str().to_owned());
+            let mut asset = Asset::new_image(
+                AssetId::parse(format!("ast_batch_{i}")).unwrap(),
+                "project-1",
+                "image",
+                "out.png",
+                "out.png",
+                "a".repeat(64),
+                "image/png",
+                1,
+                1,
+                1,
+                task.id.clone(),
+                json!({}),
+                task.created_at,
+            )
+            .unwrap();
+            asset.thumbnail_path = Some("thumb.png".into());
+            if i % 2 == 0 {
+                inner
+                    .insert_generated_outputs(
+                        &[asset.clone()],
+                        &[crate::application::ports::TaskOutputAssetMapping {
+                            task_id: task.id,
+                            output_id: "image".into(),
+                            ordinal: 0,
+                            asset_id: asset.id,
+                            created_at: task.created_at,
+                        }],
+                    )
+                    .await
+                    .unwrap();
+            } else {
+                inner.insert_many(&[asset]).await.unwrap();
+            }
+        }
+        let singles = Arc::new(AtomicUsize::new(0));
+        let bulk = Arc::new(AtomicUsize::new(0));
+        let service = AssetQueryService::new(
+            Arc::new(CountingRepository {
+                inner,
+                singles: singles.clone(),
+                bulk: bulk.clone(),
+            }),
+            Arc::new(FileSystemAssetStore::new()),
+            Arc::new(SqliteProjectRepository::new(pool)),
+        );
+        let start = std::time::Instant::now();
+        let mut expected = std::collections::HashMap::new();
+        for id in &ids {
+            expected.insert(
+                id.clone(),
+                service.list_by_task("project-1", id).await.unwrap(),
+            );
+        }
+        let before = (singles.swap(0, Ordering::SeqCst), start.elapsed());
+        let start = std::time::Instant::now();
+        let actual = service.list_by_tasks("project-1", &ids).await.unwrap();
+        let after = singles.load(Ordering::SeqCst);
+        println!("candidate_batch before_single_reads={} before_ms={:.3} after_single_reads={} after_ms={:.3}",before.0,before.1.as_secs_f64()*1000.0,after,start.elapsed().as_secs_f64()*1000.0);
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(after, 0, "workbench candidate reads must be set-based");
+        assert_eq!(
+            bulk.load(Ordering::SeqCst),
+            3,
+            "mapping, mapped assets, legacy fallback are each one batch read"
+        );
+        let thumbnails = (0..40)
+            .map(|i| format!("ast_batch_{i}"))
+            .collect::<Vec<_>>();
+        let previous = bulk.load(Ordering::SeqCst);
+        assert_eq!(
+            service
+                .read_thumbnails("project-1", &thumbnails)
+                .await
+                .unwrap()
+                .len(),
+            40
+        );
+        assert_eq!(
+            bulk.load(Ordering::SeqCst) - previous,
+            1,
+            "one bulk ownership lookup for all thumbnails"
+        );
+        assert!(service
+            .read_thumbnails("project-2", &thumbnails)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(service
+            .list_by_tasks("project-2", &ids)
+            .await
+            .unwrap()
+            .values()
+            .all(Vec::is_empty));
+    }
 
     #[derive(Clone)]
     struct CountingAssetStore {

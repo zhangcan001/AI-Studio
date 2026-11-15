@@ -34,7 +34,7 @@ function ScopedStoryboardBatchDialog({projectId,onClose,onQueue,onShot}:Props) {
     }
     if(generator.resolutionPresets?.length&&!preset){setError("请选择分辨率。");throw new Error("INVALID_INPUT");}
     if(preset){values.width={type:"integer",value:preset.width};values.height={type:"integer",value:preset.height};}
-    if(!window.confirm(`将覆盖所选 ${shotIds.length} 个镜头的生成器及标量参数；保留各 Recipe 的媒体输入、提示词和旧批次。不会启动生成。是否应用？`))return false;
+    if(!window.confirm(`将覆盖所选 ${shotIds.length} 个镜头的生成器及标量参数；已有自定义种子会被所选生成器的默认种子覆盖。保留各 Recipe 的媒体输入、提示词和旧批次。不会启动生成。是否应用？`))return false;
     await productClient.creation.shotsConfigure(projectId,{shotIds,selectionRef:generator.selectionRef,values});
     setSelection("");setError(undefined);
   };

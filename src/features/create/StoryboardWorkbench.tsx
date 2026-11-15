@@ -69,13 +69,15 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const pendingRefresh = useRef(false);
   const latestLoad = useRef<(background?: boolean) => Promise<void>>(async () => {});
   const [queueActive, setQueueActive] = useState(false);
+  const [statusUncertain, setStatusUncertain] = useState(false);
+  const cachedWorkbench = useRef<{ scope: string; value: Awaited<ReturnType<typeof productClient.creation.workbench>>; signature: string } | undefined>(undefined);
   const mounted = useRef(true);
   const projectId = route.projectId;
   const scope = useRef(projectId);
   scope.current = projectId;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  const load = useCallback(async (background = false) => {
+  const load = useCallback(async (background = false, statusOnly = false) => {
     if (inFlight.current) { if (!background) pendingRefresh.current = true; return; }
     inFlight.current = true; const token = ++epoch.current;
     // Progress reads must not toggle every action button. Foreground reads and
@@ -84,20 +86,31 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
     try {
       // Formal Queue/Run read model: a waiting item may have no Task yet, so
       // shot.recentRun alone cannot tell us whether a refresh is still needed.
-      const activeRuns = Promise.resolve().then(() => productClient.run.list(projectId, "active", null)).catch(() => null);
-      const workbench = await productClient.creation.workbench(projectId, "video", STORYBOARD_MAX_DETAIL_SHOTS, ...(page ? [page * STORYBOARD_MAX_DETAIL_SHOTS] as [number] : []));
+      const cache = cachedWorkbench.current?.scope === `${projectId}:${page}` ? cachedWorkbench.current : undefined;
+      const [active, workbench] = await Promise.all([
+        productClient.run.list(projectId, "active", null),
+        statusOnly && cache ? Promise.resolve(cache.value) : productClient.creation.workbench(projectId, "video", STORYBOARD_MAX_DETAIL_SHOTS, ...(page ? [page * STORYBOARD_MAX_DETAIL_SHOTS] as [number] : [])),
+      ]);
       const runKeys = new Map<string, NonNullable<(typeof workbench.items)[number]["shot"]["recentRun"]>>();
       for (const item of workbench.items) {
         const ref = item.shot.recentRun;
         if (ref) runKeys.set(`${ref.source}:${ref.id}`, ref);
       }
+      const activeRefs = active.items.filter(r => r.projectId === projectId && ["QUEUED", "RUNNING", "PAUSED"].includes(r.status));
+      for (const r of activeRefs) runKeys.set(`${r.ref.source}:${r.ref.id}`, r.ref);
       const runs = new Map<string, Awaited<ReturnType<typeof productClient.run.get>>>();
       await Promise.all([...runKeys.entries()].map(async ([key, ref]) => {
-        try { runs.set(key, await productClient.run.get(projectId, ref)); } catch { /* keep null */ }
+        const value = await productClient.run.get(projectId, ref);
+        if (value.projectId !== projectId) throw new Error("Run project mismatch");
+        runs.set(key, value);
       }));
-      const active = await activeRuns;
-      // Detail inputs resolve formal no-Task Queue items to their owned Shot.
-      const activeDetails = await Promise.all((active?.items ?? []).filter(r => r.projectId === projectId && ["QUEUED", "RUNNING", "PAUSED"].includes(r.status)).map(async r => { try { return await productClient.run.get(projectId, r.ref); } catch { return null; } }));
+      const activeDetails = activeRefs.map(r => runs.get(`${r.ref.source}:${r.ref.id}`)!);
+      // Progress alone refreshes status, not all thumbnails/candidate queries.
+      // New tasks, transitions or result identities require a fresh full projection.
+      const signature = JSON.stringify([...runs].sort(([a],[b])=>a.localeCompare(b)).map(([key,r]) => [key,r.status,r.detail?.inputs,r.resultsSummary]));
+      if (token !== epoch.current) return;
+      if (statusOnly && cache && cache.signature !== signature) pendingRefresh.current = true;
+      if (!statusOnly || !cache) cachedWorkbench.current = {scope:`${projectId}:${page}`,value:workbench,signature};
       const activeByShot = new Map<string, NonNullable<typeof activeDetails[number]>>();
       for (const run of activeDetails) { if (!run || run.projectId !== projectId) continue; for (const input of run.detail?.inputs ?? []) { if (input.shotId && !input.taskId && input.executionStatus === "PENDING" && !activeByShot.has(input.shotId)) activeByShot.set(input.shotId, { ...run, status: run.status === "PAUSED" ? "PAUSED" : "QUEUED" }); } }
       const result: StoryboardShot[] = workbench.items.map(({ shot, candidates }) => {
@@ -108,37 +121,38 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       if (token !== epoch.current) return;
       setQueueActive(Boolean(active?.items?.length));
       setIndex({projectId, shots: workbench.shots});
-      setItems(result); setTruncated(workbench.truncated); setError(undefined);
-    } catch (cause) { if (token === epoch.current) setError(normalizeProductError(cause).message); }
+      setItems(result); setTruncated(workbench.truncated); setError(undefined); setStatusUncertain(false);
+    } catch (cause) { if (token === epoch.current) { setError(normalizeProductError(cause).message); setStatusUncertain(true); } }
     finally { if (token === epoch.current) { inFlight.current = false; setBusy(false); if (pendingRefresh.current && mounted.current) { pendingRefresh.current = false; void latestLoad.current(true); } } }
   }, [projectId, page]);
 
   latestLoad.current = load;
   useEffect(() => { pendingRefresh.current = false; void load(); return () => { epoch.current++; inFlight.current = false; pendingRefresh.current = false; }; }, [load]);
-  const anyGenerating = items?.some(item => item.status === "GENERATING") ?? false;
+  const anyGenerating = items?.some(item => ["GENERATING", "QUEUED", "PAUSED"].includes(item.status)) ?? false;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let dirty = false;
+    let full = false;
     const flush = () => {
       timer = undefined;
       if (!dirty) return;
       // Keep the final notification pending while a slow read completes. Do not
       // restart the timer on every event: continuous progress must not starve it.
-      if (!inFlight.current) { dirty = false; void load(true); }
+      if (!inFlight.current) { dirty = false; const statusOnly = !full; full = false; void load(true, statusOnly); }
       else timer = setTimeout(flush, EVENT_REFRESH_MS);
     };
-    const unsubscribe = subscribeRunInvalidation(changed => {
+    const unsubscribe = subscribeRunInvalidation((changed, options) => {
       if (changed !== projectId) return;
-      dirty = true;
+      dirty = true; full ||= !options?.statusOnly;
       if (timer === undefined) timer = setTimeout(flush, EVENT_REFRESH_MS);
     });
     return () => { unsubscribe(); clearTimeout(timer); };
   }, [projectId, load]);
   useEffect(() => {
-    if (!anyGenerating && !queueActive) return;
-    const timer = window.setInterval(() => void load(true), POLL_MS);
+    if (!anyGenerating && !queueActive && !statusUncertain) return;
+    const timer = window.setInterval(() => void load(true, true), POLL_MS);
     return () => window.clearInterval(timer);
-  }, [anyGenerating, queueActive, load]);
+  }, [anyGenerating, queueActive, statusUncertain, load]);
 
   const stats = useMemo(() => storyboardStats(items ?? []), [items]);
   const shotIndex = index?.projectId === projectId ? index.shots : [];
@@ -167,7 +181,17 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   };
   const exportSelected = async () => {
     if(exportLock.current)return;exportLock.current=true;setExporting(true);
-    try{const result=await productClient.creation.exportSelected(projectId,openExport);if(mounted.current&&scope.current===projectId&&result)setDelivery(result);}
+    try{
+      let result;
+      try { result = await productClient.creation.exportSelected(projectId,openExport); }
+      catch (cause) {
+        const error = normalizeProductError(cause), ids = error.details.rejectedAssetIds;
+        if (error.code !== "EXPORT_REJECTED_CONFIRMATION_REQUIRED" || !ids?.length) throw cause;
+        if (!mounted.current || scope.current !== projectId || !window.confirm(`全项目已选用视频中有 ${ids.length} 个已退回候选。选用不等于审核通过。仍要将这些视频包含在交付导出中吗？`)) return;
+        result = await productClient.creation.exportSelected(projectId,openExport,ids);
+      }
+      if(mounted.current&&scope.current===projectId&&result)setDelivery(result);
+    }
     catch(cause){if(mounted.current&&scope.current===projectId)setError(normalizeProductError(cause).message);}
     finally{exportLock.current=false;if(mounted.current&&scope.current===projectId)setExporting(false);}
   };
@@ -278,7 +302,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
         {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
-          : view === "shots" ? <StoryboardShotRows focusId={focusId} projectId={projectId} items={items} shotIndex={shotIndex} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
+          : view === "shots" ? <StoryboardShotRows focusId={focusId} projectId={projectId} items={items.map(item => statusUncertain ? {...item,error:"运行状态读取失败，确认恢复前不能重复生成。"} : item)} shotIndex={shotIndex} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>

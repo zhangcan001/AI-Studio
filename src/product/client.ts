@@ -57,7 +57,7 @@ export const productClient = {
     shotsPromptAssign: shotOrderTransport.assignPrompt,
     shotsConfigure: (projectId:string,request:{shotIds:string[];selectionRef:string;values:import("../types/shot").ShotInputValues})=>productRequest("product_creation_shots_configure",{projectId,request}),
     shotsReorder: shotOrderTransport.reorder,
-    exportSelected: (projectId: string, openDirectory = false) => productRequest("product_selected_videos_export", { projectId, ...(openDirectory ? {openDirectory} : {}) }),
+    exportSelected: (projectId: string, openDirectory = false, confirmedRejectedAssetIds?: string[]) => productRequest("product_selected_videos_export", { projectId, ...(openDirectory ? {openDirectory} : {}), ...(confirmedRejectedAssetIds ? {confirmedRejectedAssetIds} : {}) }),
     inputsGet: (selection: import("../types/shotVideoInput").VideoInputSelection) => productRequest("product_creation_inputs_get", { selection }),
     inputsSave: (request: import("../types/shotVideoInput").VideoInputSave) => productRequest("product_creation_inputs_save", { request }),
     assetsImport: (projectId: string, folder = false) => productRequest("product_creation_assets_import", { projectId, folder }),

@@ -2,6 +2,7 @@ use crate::application::asset_video_prompt_service::AssetVideoPromptService;
 use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::media_probe::{CommandMediaProbe, MediaProbe};
 use crate::application::ports::Clock;
+use crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS;
 use crate::application::production_queue_service::{
     CreateProductionBatchItem, CreateProductionBatchRequest, ProductionQueueService,
 };
@@ -2093,7 +2094,7 @@ fn apply_prompt_duration(spec: &mut ProjectPromptSpec, value: f64, raw: &str) {
     }
     let rounded = value.round();
     let rounded_i64 = rounded as i64;
-    if !(1..=15).contains(&rounded_i64) {
+    if !(1..=MAX_SHOT_DURATION_SECONDS).contains(&rounded_i64) {
         spec.duration_out_of_range = Some(value);
         return;
     }
@@ -2501,7 +2502,7 @@ fn initialize_project_segment_inputs(segment: &mut H3ProjectSegmentInspection, _
         if front_matter_duration.is_none() {
             if let Some(duration) = prompt_spec.duration_out_of_range {
                 segment.base_errors.push(format!(
-                    "PROMPT_DURATION_UNSUPPORTED：Prompt指定{}秒，当前 H3 只支持 1–15 秒。",
+                    "PROMPT_DURATION_UNSUPPORTED：Prompt指定{}秒，当前 H3 只支持 1–{MAX_SHOT_DURATION_SECONDS} 秒。",
                     format_prompt_number(duration)
                 ));
             }
@@ -2692,7 +2693,8 @@ fn project_duration_for_segment(
             .first()
             .and_then(|media| media.duration_ms)
         {
-            let rounded = ((duration_ms as f64 / 1000.0).round() as i64).clamp(1, 15);
+            let rounded =
+                ((duration_ms as f64 / 1000.0).round() as i64).clamp(1, MAX_SHOT_DURATION_SECONDS);
             return (rounded, "REFERENCE_VIDEO".to_owned());
         }
     }
@@ -2725,8 +2727,10 @@ fn recompute_project_segment_status(segment: &mut H3ProjectSegmentInspection) {
     {
         errors.push("MISSING_PROMPT：Segment 缺少有效 Prompt。".to_owned());
     }
-    if !(1..=15).contains(&segment.duration_seconds) {
-        errors.push("duration 必须在 1–15 秒范围内。".to_owned());
+    if !(1..=MAX_SHOT_DURATION_SECONDS).contains(&segment.duration_seconds) {
+        errors.push(format!(
+            "duration 必须在 1–{MAX_SHOT_DURATION_SECONDS} 秒范围内。"
+        ));
     }
     if !valid_project_resolution(segment.width, segment.height) {
         errors.push("resolution 不符合当前 H3 Recipe 的合法范围。".to_owned());
@@ -2904,10 +2908,10 @@ fn validate_project_segment_draft(draft: &H3ProjectSegmentDraft) -> Result<(), H
         }
     }
     if let Some(duration) = draft.duration_seconds {
-        if !(1..=15).contains(&duration) {
-            return Err(H3LocalImportError::InvalidInput(
-                "duration 必须在 1–15 秒范围内".to_owned(),
-            ));
+        if !(1..=MAX_SHOT_DURATION_SECONDS).contains(&duration) {
+            return Err(H3LocalImportError::InvalidInput(format!(
+                "duration 必须在 1–{MAX_SHOT_DURATION_SECONDS} 秒范围内"
+            )));
         }
     }
     if let (Some(width), Some(height)) = (draft.width, draft.height) {
@@ -3945,10 +3949,10 @@ fn validate_commit_request(request: &H3LocalImportCommitRequest) -> Result<(), H
             "输出视频分辨率必须选择图片规格中的 14 档 16:9 分辨率".to_owned(),
         ));
     }
-    if !(1..=15).contains(&request.duration_seconds) {
-        return Err(H3LocalImportError::InvalidInput(
-            "H3 视频时长必须为 1–15 秒".to_owned(),
-        ));
+    if !(1..=MAX_SHOT_DURATION_SECONDS).contains(&request.duration_seconds) {
+        return Err(H3LocalImportError::InvalidInput(format!(
+            "H3 视频时长必须为 1–{MAX_SHOT_DURATION_SECONDS} 秒"
+        )));
     }
     if let Some(name) = request.batch_name.as_deref() {
         if name.trim().chars().count() > 120 {
@@ -4279,6 +4283,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn product_duration_cap_applies_to_prompt_and_commit() {
+        for duration in [0, 12, 13, 14, 15] {
+            let prompt = format!("Duration: {duration}s");
+            let parsed = parse_project_prompt_bytes(prompt.as_bytes()).unwrap();
+            assert!(
+                parsed.prompt_spec.duration_out_of_range.is_some(),
+                "{duration}"
+            );
+            let request = H3LocalImportCommitRequest {
+                batch_name: None,
+                workflow_version_id: "w".into(),
+                recipe_id: "r".into(),
+                width: 960,
+                height: 544,
+                duration_seconds: duration,
+                seed: None,
+                auto_start: false,
+                generation_mode: None,
+                fl2va_workflow_version_id: None,
+                fl2va_recipe_id: None,
+                ref2va_workflow_version_id: None,
+                ref2va_recipe_id: None,
+                quality_profile: None,
+                quality_recipes: Vec::new(),
+                mode_recipes: Vec::new(),
+            };
+            assert!(validate_commit_request(&request).is_err(), "{duration}");
+            let mut valid = request.clone();
+            valid.duration_seconds = 11;
+            assert!(validate_commit_request(&valid).is_ok());
+            let draft = H3ProjectSegmentDraft {
+                segment_id: "s".into(),
+                mode: None,
+                prompt: None,
+                duration_seconds: Some(duration),
+                width: None,
+                height: None,
+                reference_image_ids: None,
+                reference_audio_ids: None,
+                reference_video_ids: None,
+                first_frame_id: None,
+                last_frame_id: None,
+                reset_auto_detection: false,
+            };
+            assert!(validate_project_segment_draft(&draft).is_err());
+        }
+        let parsed = parse_project_prompt_bytes(b"Duration: 11s").unwrap();
+        assert_eq!(parsed.prompt_spec.duration_seconds, Some(11));
+    }
+
+    #[test]
     fn quality_profile_freezes_a_recipe_per_project_segment_mode() {
         let request = H3LocalImportCommitRequest {
             batch_name: None,
@@ -4384,9 +4439,9 @@ mod tests {
         assert_eq!(english.prompt_spec.resolution, Some((960, 544)));
 
         let compact =
-            parse_project_prompt_bytes("规格：15秒｜1920×1088｜16:9｜原生立体声".as_bytes())
+            parse_project_prompt_bytes("规格：11秒｜1920×1088｜16:9｜原生立体声".as_bytes())
                 .expect("compact prompt spec should parse");
-        assert_eq!(compact.prompt_spec.duration_seconds, Some(15));
+        assert_eq!(compact.prompt_spec.duration_seconds, Some(11));
         assert_eq!(compact.prompt_spec.resolution, Some((1920, 1088)));
 
         let slash = parse_project_prompt_bytes(b"10s / 1344x768")
@@ -5552,7 +5607,7 @@ outputs:
         for (folder, prompt) in [
             ("001", "视频规格：5秒，960×544"),
             ("002", "Duration: 10s\nResolution: 1344x768"),
-            ("003", "规格：15秒｜1920×1088｜16:9｜原生立体声"),
+            ("003", "规格：11秒｜1920×1088｜16:9｜原生立体声"),
             ("004", "分辨率：1280×720"),
         ] {
             let segment = fixture_root.join(folder);
@@ -5584,7 +5639,7 @@ outputs:
                 .take(3)
                 .map(|segment| (segment.duration_seconds, segment.width, segment.height))
                 .collect::<Vec<_>>(),
-            vec![(5, 960, 544), (10, 1344, 768), (15, 1920, 1088)]
+            vec![(5, 960, 544), (10, 1344, 768), (11, 1920, 1088)]
         );
         assert!(project
             .segments

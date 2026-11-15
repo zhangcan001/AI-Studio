@@ -25,6 +25,37 @@ const generator = { selectionRef: "sel", name: "H3", version: "1", mode: "t2v", 
   fields: [{ key: "duration_seconds", type: "integer", label: "时长", required: false, min: 1, max: 10 }],
   resolutionPresets: [{ id: "mp-0_98-16x9", label: "0.98MP · 1344×768", width: 1344, height: 768 }, { id: "mp-0_98-9x16", label: "0.98MP · 768×1344", width: 768, height: 1344 }, { id: "mp-2_09-9x16", label: "2.09MP · 1088×1920", width: 1088, height: 1920 }] };
 const props = () => ({ projectId: "p", busy: false, onOpen: vi.fn(), onCreate: vi.fn(), onChanged: vi.fn(), onQueue: vi.fn() });
+
+it.each([0, 11])("rejects duration %s outside the selected Recipe before persistence", async value => {
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const field = await screen.findByLabelText("镜头1 时长（秒）");
+  await waitFor(() => expect(field.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(field, { target: { value: String(value) } }); fireEvent.blur(field);
+  await screen.findByRole("alert");
+  expect(api.saveShotRow).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+});
+it("clears a duration draft reverted to its saved value without writing", async () => {
+  render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const field = await screen.findByLabelText("镜头1 时长（秒）");
+  await waitFor(() => expect(field.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(field, { target: { value: "8" } }); fireEvent.change(field, { target: { value: "5" } }); fireEvent.blur(field);
+  expect(Object.values(useStudioStore.getState().storyboardFields).some(v => v.duration !== undefined)).toBe(false);
+  expect(api.saveShotRow).not.toHaveBeenCalled();
+});
+it.each(["GENERATING","QUEUED","PAUSED"] as const)("does not submit another generation while the shot is %s",async status=>{
+ render(<StoryboardShotRows {...props()} items={[{...shot("a",0),status}]} />);
+ const button=await screen.findByRole("button",{name:"生成视频"});
+ expect(button.hasAttribute("disabled")).toBe(true);fireEvent.click(button);
+ expect(api.generate).not.toHaveBeenCalled();expect(api.readinessGet).not.toHaveBeenCalled();
+});
+it.each(["NaN","0","11"])("validates restored duration draft %s before any write or readiness",async duration=>{
+ useStudioStore.setState({storyboardFields:{[JSON.stringify(["p","a","sel"])]:{duration}}});
+ render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
+ const button=await screen.findByRole("button",{name:"生成视频"});await waitFor(()=>expect(button.hasAttribute("disabled")).toBe(false));
+ fireEvent.click(button);const alert=await screen.findByRole("alert");
+ expect(alert.textContent).toContain(duration==="NaN"?"有效数字":duration==="0"?"最短 1 秒":"最长 10 秒");
+ expect(api.generate).not.toHaveBeenCalled();expect(api.readinessGet).not.toHaveBeenCalled();expect(api.saveShotRow).not.toHaveBeenCalled();expect(api.updateShot).not.toHaveBeenCalled();
+});
 beforeEach(() => {
   useStudioStore.setState({storyboardFields:{},reviewComments:{}});
   sessionStorage.clear();useStudioStore.setState({storyboardPrompts:{}});
@@ -771,6 +802,9 @@ it('explicit changed parameter wording still applies the new duration',async()=>
  const item=shot('a',0);item.shot!.prompt='Walk for 8秒';
  item.shot!.values={duration_seconds:{type:'integer',value:6}};
  render(<StoryboardShotRows {...props()} items={[item]}/>);
+ // The initial empty-entity projection can enable briefly before the owned
+ // entity refresh restarts the binding read. Await the final official read.
+ await waitFor(()=>expect(screen.getByTitle('解除绑定 角色 · 阿离').hasAttribute('disabled')).toBe(false));
  const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
  fireEvent.change(box,{target:{value:'Walk for 7秒'}});fireEvent.blur(box);
  await waitFor(()=>expect(api.saveShotRow).toHaveBeenCalledTimes(1));

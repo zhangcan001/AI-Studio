@@ -39,6 +39,55 @@ function workbenchFrom(shotFn: (id: string | null) => CreationContext = context,
 function workbenchFromContexts() { return workbenchFrom(context); }
 const route = { kind: "create" as const, projectId: "p", stage: "video" as const };
 
+it("reports failed Run reads instead of inventing idle state, and retries without user action", async () => {
+  api.runGet.mockRejectedValueOnce(new Error("run read unavailable")).mockResolvedValue(run("RUNNING", 0, 1));
+  vi.useFakeTimers();
+  await act(async()=>{render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);});
+  expect(screen.getByRole("alert")).toBeTruthy();
+  expect(screen.queryByRole("article", {name:"镜头02"})).toBeNull();
+  await act(async()=>{await vi.advanceTimersByTimeAsync(8000);});
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByRole("article",{name:"镜头02"}).textContent).toContain("生成中");
+});
+
+it("deduplicates recent/active RunRef reads and avoids full media reads on unchanged progress",async()=>{
+ vi.useFakeTimers(); const running={...run("RUNNING",0,1),ref:{source:"production-run" as const,id:"r"}};
+ api.runList.mockResolvedValue({items:[running],nextCursor:null,coverage:""});api.runGet.mockResolvedValue(running);
+ await act(async()=>{render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);});
+ expect(api.runGet).toHaveBeenCalledTimes(1);expect(api.workbench).toHaveBeenCalledTimes(1);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(8000*5);});
+ expect(api.runGet).toHaveBeenCalledTimes(6);expect(api.workbench).toHaveBeenCalledTimes(1);
+ api.runGet.mockResolvedValue({...running,status:"SUCCEEDED"});
+ await act(async()=>{await vi.advanceTimersByTimeAsync(8000);});
+ expect(api.workbench).toHaveBeenCalledTimes(2);expect(api.generate).not.toHaveBeenCalled();
+});
+it("retains known running facts on list failure, polls again and never marks it idle",async()=>{
+ vi.useFakeTimers();api.runGet.mockResolvedValue(run("RUNNING",0,1));
+ await act(async()=>{render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);});
+ api.runList.mockRejectedValueOnce(new Error("list unavailable"));
+ await act(async()=>{await vi.advanceTimersByTimeAsync(8000);});
+ expect(screen.getByRole("alert")).toBeTruthy();expect(screen.getByRole("article",{name:"镜头02"}).textContent).toContain("生成中");
+ await act(async()=>{await vi.advanceTimersByTimeAsync(8000);});expect(screen.queryByRole("alert")).toBeNull();
+});
+it("continues status polling for a known QUEUED shot even during an empty active-list read",async()=>{
+ vi.useFakeTimers();api.runGet.mockResolvedValue(run("QUEUED",0,1));
+ await act(async()=>{render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);});
+ await act(async()=>{await vi.advanceTimersByTimeAsync(8000);});
+ expect(api.runGet).toHaveBeenCalledTimes(2);expect(api.workbench).toHaveBeenCalledTimes(1);
+ expect(api.generate).not.toHaveBeenCalled();
+});
+it.each([false,true])("requires explicit confirmation before exporting rejected selected videos (confirm=%s)",async confirmed=>{
+ api.runGet.mockResolvedValue(run("SUCCEEDED",1,1));
+ api.exportSelected.mockReset().mockRejectedValueOnce({code:"EXPORT_REJECTED_CONFIRMATION_REQUIRED",details:{rejectedAssetIds:["rejected"]}}).mockResolvedValue(null);
+ const confirm=vi.spyOn(window,"confirm").mockReturnValue(confirmed);
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);await screen.findByRole("article",{name:"镜头01"});
+ fireEvent.click(screen.getByRole("button",{name:"导出全项目已选用视频"}));await waitFor(()=>expect(confirm).toHaveBeenCalledWith(expect.stringContaining("已退回")));
+ await waitFor(()=>expect(screen.getByRole("button",{name:"导出全项目已选用视频"}).hasAttribute("disabled")).toBe(false));
+ expect(api.exportSelected).toHaveBeenCalledTimes(confirmed?2:1);
+ if(confirmed)expect(api.exportSelected).toHaveBeenLastCalledWith("p",false,["rejected"]);
+ expect(api.generate).not.toHaveBeenCalled();confirm.mockRestore();
+});
+
 it("UI restore: workbench derives real shot status/stats from the product facade and never generates", async () => {
   api.workbench.mockResolvedValue(workbenchFromContexts());
   api.get.mockImplementation(async (_p: string, shotId: string | null) => context(shotId));
@@ -208,16 +257,18 @@ it("background polling preserves existing buttons while manual refresh still loc
   api.runList.mockResolvedValue({ items: [run("RUNNING", 0, 1)], nextCursor: null, coverage: "" });
   api.runGet.mockResolvedValue(run("RUNNING", 0, 1));
   await act(async () => { render(<StoryboardWorkbench route={route} navigate={vi.fn()} />); });
-  const button = screen.getAllByRole<HTMLButtonElement>("button", { name: "生成视频" })[0];
+  const idleRow = screen.getByRole("article", {name:/镜头03/});
+  expect(within(screen.getByRole("article",{name:/镜头02/})).getByRole<HTMLButtonElement>("button",{name:"生成视频"}).disabled).toBe(true);
+  const button = within(idleRow).getByRole<HTMLButtonElement>("button", {name:"生成视频"});
   const create = screen.getByRole<HTMLButtonElement>("button", { name: "+ 新建镜头" });
   expect(button.disabled).toBe(false);
   let release!: (value: ReturnType<typeof board>) => void;
   const hold = () => { const pending = new Promise<ReturnType<typeof board>>(r => { release = r; }); api.workbench.mockReturnValue(pending); };
-  hold();
+  const reads = api.workbench.mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+  expect(api.workbench).toHaveBeenCalledTimes(reads);
   expect(button.disabled).toBe(false); expect(create.disabled).toBe(false);
-  expect(button).toBe(screen.getAllByRole("button", { name: "生成视频" })[0]);
-  await act(async () => { release(board()); });
+  expect(button).toBe(within(idleRow).getByRole("button", { name: "生成视频" }));
   hold(); fireEvent.click(screen.getByRole("button", { name: "刷新" }));
   expect(button.disabled).toBe(true); expect(create.disabled).toBe(true);
   await act(async () => { release(board()); });
@@ -257,6 +308,7 @@ it("old-project completion cannot release the new project's read lock or overwri
   api.workbench.mockImplementation((projectId: string) => new Promise(r => { if (projectId === "p") oldRelease = r; else nextRelease = r; }));
   // workbench(projectId, stage, limit) — match client signature via mockImplementation args
   api.workbench.mockImplementation((projectId: string) => new Promise(r => { if (projectId === "p") oldRelease = r; else nextRelease = r; }) as any);
+  api.runGet.mockImplementation(async (projectId: string) => ({...run("SUCCEEDED",1,1),projectId}));
   const view = render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
   view.rerender(<StoryboardWorkbench route={{ ...route, projectId: "next" }} navigate={vi.fn()} />);
   act(() => invalidateRuns("next"));

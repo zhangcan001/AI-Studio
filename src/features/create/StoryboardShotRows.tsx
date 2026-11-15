@@ -12,7 +12,7 @@ import { defaultGenerator, draftFor } from "./createModel";
 import type { VideoInputView } from "../../types/shotVideoInput";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { candidateReviewSummary, hasPendingReview, reviewLabel, coverAsset, runProgressText, runPercent, shotDuration, shotResolution, storyboardStatusLabels, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
-import { SHOT_DURATION_LIMIT_MESSAGE, shotDurationIssue, shotDurationMax } from "../../product/shotDuration";
+import { shotDurationMax, editableDurationIssue } from "../../product/shotDuration";
 import { h3PromptHints } from "../../product/promptLanguage";
 import { useStudioStore } from "../../stores/studioStore";
 import { useProjectSessionState } from "../../hooks/useProjectSessionState";
@@ -412,14 +412,15 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const saveDuration = () => {
     if (!durationField) return;
     const prev = numberOf(current.duration_seconds);
+    const issue = editableDurationIssue(duration === "" ? undefined : Number(duration), durationField);
+    if (issue) { setError(issue); return; }
     if (duration === "" ) { if (prev !== undefined) { const { duration_seconds: _, ...rest } = current; saveValues(rest, () => { durationDirty.current = false; clearField("duration",duration); }); } else {durationDirty.current = false;clearField("duration",duration);} return; }
-    const n = Number(duration); if (!Number.isFinite(n) || n === prev) { durationDirty.current = false; clearField("duration",duration); setDuration(prev === undefined ? "" : String(prev)); return; }
-    const value = durationField.type === "integer" ? Math.round(n) : n;
-    if (shotDurationIssue(value)) { setError(SHOT_DURATION_LIMIT_MESSAGE); return; }
+    const n = Number(duration); if (n === prev) { durationDirty.current = false; clearField("duration",duration); setDuration(String(prev)); setError(undefined); return; }
+    const value = n;
     saveValues({ ...current, duration_seconds: { type: durationField.type as "integer", value } }, () => { durationDirty.current = false; clearField("duration",duration); setDuration(String(value)); });
   };
   const noGen = generatorsFailed ? "生成器读取失败，请点击上方重试。" : !generator ? "请先在详情中选择生成器" : undefined;
-  const durationIssue = shotDurationIssue(savedDuration);
+  const durationIssue = editableDurationIssue(savedDuration, durationField);
   const cover = coverAsset(item);
   const percent = item.status === "GENERATING" ? runPercent(item.run) : null;
   // 构图用途: which bound composition governs the opening frame and which the final frame.
@@ -495,7 +496,13 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const generationAttempt = useRef<{ draft: string; key: string } | null>(null);
   const latestGenerationDraft = useRef(generationDraft);
   latestGenerationDraft.current = generationDraft;
-  const generate = () => !bindingsDisabled && !entityIssue && !durationIssue && selectionRef && item.shot && void run(async () => {
+  const generating = ["GENERATING", "QUEUED", "PAUSED"].includes(item.status) || Boolean(item.error);
+  const generate = () => !generating && !bindingsDisabled && !entityIssue && !durationIssue && selectionRef && item.shot && void run(async () => {
+    // Validate the local draft before any prompt/name write or preflight.
+    if (durationDirty.current) {
+      const issue = editableDurationIssue(duration === "" ? undefined : Number(duration), durationField);
+      if (issue) { setError(issue); return; }
+    }
     deferredPromptBlur.current = false;
     deferredFieldBlur.current = undefined;
     const token = scopeEpoch.current;
@@ -513,8 +520,9 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
     }
     if (durationDirty.current) {
       const n = duration === "" ? undefined : Number(duration);
-      const value = n === undefined ? undefined : durationField?.type === "integer" ? Math.round(n) : n;
-      if (value !== undefined && (!Number.isFinite(value) || shotDurationIssue(value))) throw new Error(SHOT_DURATION_LIMIT_MESSAGE);
+      const value = n;
+      const issue = editableDurationIssue(value, durationField);
+      if (issue) { setError(issue); return; }
       const { duration_seconds: _previous, ...rest } = scalarValues(saved.values);
       const next = await saveRow({ values: value === undefined ? rest : { ...rest, duration_seconds: { type: durationField?.type === "number" ? "number" : "integer", value } }, selectionRef });
       if (!next || token !== scopeEpoch.current) return;
@@ -580,7 +588,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
     </div>
     <div className="shot-row-actions">
-      <button ref={generateButton} type="button" className="primary" disabled={bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>{item.candidates.length ? "按当前设置再生成" : "生成视频"}</button>
+      <button ref={generateButton} type="button" className="primary" disabled={generating || bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>{item.candidates.length ? "按当前设置再生成" : "生成视频"}</button>
       <label className="shot-row-entity-search">添加引用<input type="search" value={entityQuery} onChange={e => setEntityQuery(e.target.value)} placeholder="搜索角色、场景、道具或构图" aria-label={`${item.name} 搜索引用`} /></label>
       <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.filter(e => bound.some(b => b.id === e.id) || (entityQuery.trim() && e.name.toLowerCase().includes(entityQuery.trim().toLowerCase()))).map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>

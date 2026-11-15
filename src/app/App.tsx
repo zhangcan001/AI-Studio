@@ -163,7 +163,7 @@ function App() {
     let admissionRefreshTimer: number | undefined;
 
     void subscribeTaskUpdates((task) => {
-      invalidateRuns(task.projectId);
+      invalidateRuns(task.projectId, { statusOnly: !["SUCCEEDED", "FAILED", "CANCELLED"].includes(task.status) });
       if (admissionRefreshTimer !== undefined) window.clearTimeout(admissionRefreshTimer);
       admissionRefreshTimer = window.setTimeout(() => void refreshProductionAdmission(), 1_000);
       const currentProjectId = useProjectStore.getState().activeProjectId;

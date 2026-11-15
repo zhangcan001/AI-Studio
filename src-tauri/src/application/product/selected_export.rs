@@ -34,6 +34,29 @@ pub struct SelectedVideoExport {
     pub manifest_error: Option<String>,
     pub open_error: Option<String>,
 }
+/// Confirmation is tied to the exact current rejected set, not a blanket bypass.
+pub fn check_review_confirmation(
+    rejected: &[String],
+    confirmed: Option<&[String]>,
+) -> Result<(), super::error::ProductError> {
+    use std::collections::BTreeSet;
+    let actual = rejected.iter().collect::<BTreeSet<_>>();
+    let expected = confirmed
+        .unwrap_or_default()
+        .iter()
+        .collect::<BTreeSet<_>>();
+    if actual == expected {
+        return Ok(());
+    }
+    let mut error = super::error::ProductError::new(
+        "EXPORT_REJECTED_CONFIRMATION_REQUIRED",
+        "已选用视频包含已退回候选，请明确确认后导出。",
+        None,
+    );
+    error.details.rejected_asset_ids = Some(rejected.to_vec());
+    Err(error)
+}
+
 fn safe_name(value: &str) -> String {
     let name: String = value
         .chars()
@@ -138,6 +161,35 @@ pub fn copy_selected_videos(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejected_export_requires_exact_fresh_confirmation() {
+        let rejected = vec!["a".to_owned()];
+        assert!(check_review_confirmation(&rejected, None).is_err());
+        assert!(check_review_confirmation(&rejected, Some(&rejected)).is_ok());
+        assert!(check_review_confirmation(&["a".into(), "b".into()], Some(&rejected)).is_err());
+        assert!(check_review_confirmation(&[], Some(&rejected)).is_err());
+        assert!(check_review_confirmation(&[], None).is_ok());
+    }
+    #[test]
+    fn export_command_uses_nonblocking_native_picker_and_revalidates_before_copy() {
+        let source = include_str!("../../commands/product.rs");
+        let command = source
+            .split("pub async fn product_selected_videos_export(")
+            .nth(1)
+            .unwrap()
+            .split("#[tauri::command")
+            .next()
+            .unwrap();
+        assert!(!command.contains("blocking_pick_folder"));
+        assert!(command.contains(".pick_folder("));
+        assert!(command.contains("rx.await"));
+        assert_eq!(command.matches("check_review_confirmation(").count(), 2);
+        assert!(
+            command.find("current_selection != selection").unwrap()
+                < command.find("copy_selected_videos(").unwrap()
+        );
+    }
+
     fn source(ordinal: i64, name: &str, path: PathBuf) -> ExportSource {
         ExportSource {
             ordinal,

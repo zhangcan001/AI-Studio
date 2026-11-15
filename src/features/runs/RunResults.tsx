@@ -9,13 +9,13 @@ function Thumbnail({ bytes }: { bytes: number[] }) {
   useEffect(() => { const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)], { type: "image/png" })); setUrl(url); return () => URL.revokeObjectURL(url); }, [bytes]);
   return <img src={url} alt="生成结果" />;
 }
-const reviewLabels: Record<string, string> = { PENDING: "待审核", APPROVED: "已通过", REJECTED: "已拒绝" };
+const reviewLabels: Record<string, string> = { PENDING: "待审核", APPROVED: "已通过", REJECTED: "已退回" };
 function ReviewActions({ result, controller: c, route }: { result: RunResult; controller: RunsController; route:RunsProps["route"] }) {
   const key=JSON.stringify([route.projectId,route.run?.source,route.run?.id,result.assetId]);
   const comment=useStudioStore(state=>state.reviewComments[key]??"");
   const setComment=(text:string)=>useStudioStore.getState().setReviewComment(key,text);
   const submit=async(decision:"APPROVED"|"REJECTED")=>{if(await c.review(result,decision,comment)===true&&useStudioStore.getState().reviewComments[key]===comment)useStudioStore.getState().setReviewComment(key,undefined);};
-  return <div className="run-review-actions"><label>审核说明<input value={comment} onChange={event => setComment(event.target.value)} disabled={c.busy} /></label><small>未提交说明仅在本次会话内保留，切换记录后可恢复。</small><button type="button" disabled={c.busy} onClick={() => void submit("APPROVED")}>审核通过</button><button type="button" disabled={c.busy || !comment.trim()} onClick={() => void submit("REJECTED")}>审核拒绝</button></div>;
+  return <div className="run-review-actions"><label>审核说明<input value={comment} onChange={event => setComment(event.target.value)} disabled={c.busy} /></label><small>未提交说明仅在本次会话内保留，切换记录后可恢复。</small><button type="button" disabled={c.busy} onClick={() => void submit("APPROVED")}>审核通过</button><button type="button" disabled={c.busy || !comment.trim()} onClick={() => void submit("REJECTED")}>审核退回</button></div>;
 }
 export function RunResults({ controller: c, route, navigate }: RunsProps & { controller: RunsController }) {
   return <section><h3>结果</h3><p>执行成功、素材存在、审核通过与镜头选用是四个独立事实。</p><div className="run-results">{c.results.map(result => <article key={result.assetId}>

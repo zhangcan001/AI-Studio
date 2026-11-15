@@ -423,14 +423,25 @@ impl ProductCreationFacade {
         let truncated =
             i64::try_from(shots.len().saturating_sub(offset.saturating_add(limit))).unwrap_or(0);
         let mut items = Vec::with_capacity(limit.min(shots.len()));
-        let mut candidate_tasks = Vec::new();
-        for shot in shots.into_iter().skip(offset).take(limit) {
-            candidate_tasks.extend(
+        let page = shots
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let candidate_tasks = page
+            .iter()
+            .flat_map(|shot| {
                 shot.generation_links
                     .iter()
                     .filter(|link| link.stage == stage.as_str())
-                    .filter_map(|link| link.task_id.clone()),
-            );
+                    .filter_map(|link| link.task_id.clone())
+            })
+            .collect::<Vec<_>>();
+        let by_task = assets
+            .list_by_tasks(project_id, &candidate_tasks)
+            .await
+            .map_err(ProductError::internal)?;
+        for shot in page {
             let projected = project_shot(&shot, stage)?;
             let mut candidates = Vec::new();
             let mut seen = HashSet::new();
@@ -440,26 +451,9 @@ impl ProductCreationFacade {
                 .filter(|link| link.stage == stage.as_str())
                 .filter_map(|link| link.task_id.as_deref())
             {
-                for asset in assets
-                    .list_by_task(project_id, task_id)
-                    .await
-                    .map_err(ProductError::internal)?
-                {
+                for asset in by_task.get(task_id).into_iter().flatten().cloned() {
                     if asset.asset_type == requested_stage && seen.insert(asset.id.clone()) {
                         candidates.push(candidate(asset, projected.selected_result_id.as_deref()));
-                    }
-                }
-            }
-            for item in candidates
-                .iter_mut()
-                .filter(|item| {
-                    crate::application::product::run_facade::has_thumbnail_preview(&item.media_kind)
-                })
-                .take(12)
-            {
-                if let Ok(binary) = assets.read_thumbnail(project_id, &item.id).await {
-                    if binary.bytes.len() <= 256 * 1024 {
-                        item.thumbnail_bytes = Some(binary.bytes);
                     }
                 }
             }
@@ -467,6 +461,27 @@ impl ProductCreationFacade {
                 shot: projected,
                 candidates,
             });
+        }
+        let thumbnail_ids = items
+            .iter()
+            .flat_map(|item| {
+                item.candidates
+                    .iter()
+                    .filter(|a| {
+                        crate::application::product::run_facade::has_thumbnail_preview(
+                            &a.media_kind,
+                        )
+                    })
+                    .take(12)
+                    .map(|a| a.id.clone())
+            })
+            .collect::<Vec<_>>();
+        let thumbnails = assets
+            .read_thumbnails(project_id, &thumbnail_ids)
+            .await
+            .map_err(ProductError::internal)?;
+        for item in items.iter_mut().flat_map(|item| &mut item.candidates) {
+            item.thumbnail_bytes = thumbnails.get(&item.id).cloned();
         }
         if let Some(artifacts) = &self.artifacts {
             let reviews = artifacts

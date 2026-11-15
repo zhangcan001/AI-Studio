@@ -55,7 +55,7 @@ interface ProductCommands {
   product_creation_readiness_get: { args: { request: CreationSubmission }; result: CreationReadiness };
   product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };
-  product_selected_videos_export: { args: { projectId: string; openDirectory?: boolean }; result: import("./types").SelectedVideoExport | null };
+  product_selected_videos_export: { args: { projectId: string; openDirectory?: boolean; confirmedRejectedAssetIds?: string[] }; result: import("./types").SelectedVideoExport | null };
   product_creation_workbench_get: { args: { projectId: string; stage: "image" | "video"; limit: number; offset?: number }; result: import("./types").CreationWorkbench };
   product_creation_shot_create: { args: { projectId: string }; result: CreationShotSummary };
   product_creation_shot_row_save: { args: { projectId: string; request: import("./types").CreationShotRowSave }; result: import("./types").CreationShotRowSaveResult };

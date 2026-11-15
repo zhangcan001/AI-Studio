@@ -1,6 +1,7 @@
 import type { GeneratorBindingSummary, RunRef } from "./types";
 
 const messages = {
+  EXPORT_REJECTED_CONFIRMATION_REQUIRED: "已选用视频中包含后来被退回的候选，请明确确认后再导出。",
   RESULT_REJECTED: "此视频已退回，请先重新审核后再选用。",
   ENTITY_REFERENCE_INVALID: "角色或场景引用未就绪：请在当前镜头选择 REF2VA 并应用参考图；修改项目默认生成器不会替换已有镜头。",
   SHOT_VIDEO_INPUT_CONFLICT: "镜头输入已被更新，请刷新后重新保存；当前修改未覆盖服务器。",
@@ -52,6 +53,7 @@ const messages = {
 } as const;
 export type ProductErrorCode = keyof typeof messages;
 export interface ProductErrorDetails {
+  rejectedAssetIds?: string[];
   actionLocation?: { projectId: string; runRef: RunRef; shotId: string | null; stage: string | null };
   field?: string;
   action?: string;
@@ -82,6 +84,7 @@ export function normalizeProductError(error: unknown): ProductError {
   if (!record(error) || !knownCode(error.code)) return new ProductError("INTERNAL_ERROR", messages.INTERNAL_ERROR, { retryable: false, technicalDetails: error });
   const details = record(error.details) ? error.details : {};
   return new ProductError(error.code, messages[error.code], {
+    rejectedAssetIds: Array.isArray(details.rejectedAssetIds) && details.rejectedAssetIds.every(v => typeof v === "string") ? details.rejectedAssetIds : undefined,
     actionLocation: actionLocation(details.actionLocation),
     retryable: details.retryable === true,
     field: typeof details.field === "string" ? details.field : undefined,

@@ -7,6 +7,7 @@
 
 use crate::application::h3_local_import_service::is_supported_h3_output_resolution;
 use crate::application::media_probe::{AudioMetadata, CommandMediaProbe, MediaProbe};
+use crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS;
 use crate::application::source_asset_import_service::{
     MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_IMAGE_BYTES, MAX_SOURCE_VIDEO_BYTES,
 };
@@ -763,10 +764,10 @@ impl ProductionPackageInspector {
             .duration_seconds
             .or(defaults.duration_seconds)
             .unwrap_or(DEFAULT_PACKAGE_DURATION_SECONDS);
-        if !(1..=15).contains(&duration_seconds) {
+        if !(1..=MAX_SHOT_DURATION_SECONDS).contains(&duration_seconds) {
             errors.push(ProductionPackageDiagnostic::error(
                 "PACKAGE_DURATION_INVALID",
-                "durationSeconds must be an integer from 1 to 15",
+                format!("durationSeconds must be an integer from 1 to {MAX_SHOT_DURATION_SECONDS}"),
                 Some("durationSeconds".to_owned()),
             ));
         }
@@ -1808,6 +1809,25 @@ mod tests {
             .write_to(&mut bytes, ImageFormat::Png)
             .expect("png fixture should encode");
         bytes.into_inner()
+    }
+
+    #[tokio::test]
+    async fn product_duration_cap_blocks_oversized_package_items() {
+        let root = tempdir().unwrap();
+        for duration in [11, 12, 13, 14, 15] {
+            let mut entry = item("S01", "camera moves");
+            entry["durationSeconds"] = serde_json::json!(duration);
+            write_package(root.path(), &package_json(serde_json::json!([entry]))).await;
+            let inspection = ProductionPackageInspector::default()
+                .inspect(root.path())
+                .await
+                .unwrap();
+            assert_eq!(
+                inspection.blocked_count,
+                if duration <= 11 { 0 } else { 1 },
+                "{duration}"
+            );
+        }
     }
 
     fn package_json(items: Value) -> Value {

@@ -164,6 +164,30 @@ impl AssetRepository for SqliteAssetRepository {
             .collect()
     }
 
+    async fn list_output_mappings_for_tasks(
+        &self,
+        task_ids: &[TaskId],
+    ) -> Result<Vec<TaskOutputAssetMapping>, RepositoryError> {
+        let mut out = Vec::new();
+        for chunk in task_ids.chunks(500) {
+            let mut query = QueryBuilder::<Sqlite>::new("SELECT task_id, output_id, ordinal, asset_id, created_at FROM task_output_assets WHERE task_id IN (");
+            let mut separated = query.separated(", ");
+            for id in chunk {
+                separated.push_bind(id.as_str());
+            }
+            separated.push_unseparated(") ORDER BY task_id, output_id, ordinal");
+            let rows = query
+                .build_query_as::<TaskOutputAssetMappingRow>()
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
+            for row in rows {
+                out.push(row.try_into_domain()?);
+            }
+        }
+        Ok(out)
+    }
+
     async fn find_by_id(&self, asset_id: &AssetId) -> Result<Option<Asset>, RepositoryError> {
         let row = sqlx::query_as::<_, AssetRow>(&format!("{ASSET_SELECT} WHERE id = ?"))
             .bind(asset_id.as_str())

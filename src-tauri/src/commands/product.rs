@@ -1121,6 +1121,7 @@ pub async fn product_selected_videos_export(
     state: State<'_, AppState>,
     project_id: String,
     open_directory: Option<bool>,
+    confirmed_rejected_asset_ids: Option<Vec<String>>,
 ) -> Result<Option<crate::application::product::selected_export::SelectedVideoExport>, ProductError>
 {
     use tauri_plugin_dialog::DialogExt;
@@ -1131,6 +1132,11 @@ pub async fn product_selected_videos_export(
         .await
         .map_err(ProductError::internal)?;
     shots.sort_by_key(|s| (s.ordinal, s.id.clone()));
+    let selection = shots
+        .iter()
+        .map(|s| (s.id.clone(), s.selected_video_asset_id.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut source_tasks = Vec::new();
     let mut sources = Vec::new();
     for shot in shots {
         if let Some(id) = shot.selected_video_asset_id {
@@ -1141,6 +1147,9 @@ pub async fn product_selected_videos_export(
                     .get(&project_id, &id)
                     .await
                     .map_err(ProductError::internal)?;
+                if let Some(task) = &asset.source_task_id {
+                    source_tasks.push(task.clone());
+                }
                 if asset.asset_type != "video" {
                     return Err(ProductError::new(
                         "INVALID_INPUT",
@@ -1183,10 +1192,61 @@ pub async fn product_selected_videos_export(
             None,
         ));
     }
-    let Some(folder) = app.dialog().file().blocking_pick_folder() else {
+    let reviews = state
+        .assets
+        .artifact
+        .review_states_for_tasks(&project_id, &source_tasks)
+        .await
+        .map_err(ProductError::internal)?;
+    let rejected = sources
+        .iter()
+        .filter(|s| reviews.get(&s.asset_id).is_some_and(|v| v == "REJECTED"))
+        .map(|s| s.asset_id.clone())
+        .collect::<Vec<_>>();
+    crate::application::product::selected_export::check_review_confirmation(
+        &rejected,
+        confirmed_rejected_asset_ids.as_deref(),
+    )?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |folder| {
+        let _ = tx.send(folder);
+    });
+    let Some(folder) = rx.await.map_err(ProductError::internal)? else {
         return Ok(None);
     };
     let parent = folder.into_path().map_err(ProductError::internal)?;
+    // Folder dialogs may remain open while selection/review changes elsewhere.
+    let current_selection = state
+        .shots
+        .shot
+        .list(&project_id)
+        .await
+        .map_err(ProductError::internal)?
+        .into_iter()
+        .map(|s| (s.id, s.selected_video_asset_id))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if current_selection != selection {
+        return Err(ProductError::new(
+            "INVALID_INPUT",
+            "选用结果已变化，请重新导出。",
+            None,
+        ));
+    }
+    let reviews = state
+        .assets
+        .artifact
+        .review_states_for_tasks(&project_id, &source_tasks)
+        .await
+        .map_err(ProductError::internal)?;
+    let rejected = sources
+        .iter()
+        .filter(|s| reviews.get(&s.asset_id).is_some_and(|v| v == "REJECTED"))
+        .map(|s| s.asset_id.clone())
+        .collect::<Vec<_>>();
+    crate::application::product::selected_export::check_review_confirmation(
+        &rejected,
+        confirmed_rejected_asset_ids.as_deref(),
+    )?;
     let mut result = tauri::async_runtime::spawn_blocking(move || {
         crate::application::product::selected_export::copy_selected_videos(&parent, &sources)
     })

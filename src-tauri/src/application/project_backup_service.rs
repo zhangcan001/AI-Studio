@@ -2,6 +2,7 @@ use crate::application::ports::{
     ProjectBackupRepository, ProjectBackupRepositorySource, ProjectBackupRestorePlan,
     ProjectBackupRestoreResult, ProjectRecord, RepositoryError,
 };
+use crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS;
 use crate::domain::consistency::{
     BindingRole, InheritanceMode, ProfileRevisionStatus, ProfileType, ReferenceSetPurpose,
 };
@@ -3478,7 +3479,7 @@ fn validate_production_orchestrator_document(document: &BackupDocument) -> Resul
             || !(1..=100).contains(&template.default_image_count)
             || template
                 .default_duration_seconds
-                .is_some_and(|value| !(1..=15).contains(&value))
+                .is_some_and(|value| !(1..=MAX_SHOT_DURATION_SECONDS).contains(&value))
         {
             return Err(AppError::backup_invalid("Production Run 模板无效"));
         }
@@ -9869,6 +9870,24 @@ mod tests {
         };
         document.assets.clear();
         document
+    }
+
+    #[test]
+    fn product_duration_cap_validates_editable_backup_templates() {
+        let mut document = empty_archive_document("p", "project");
+        let template: super::BackupProductionRunTemplate = serde_json::from_value(json!({
+            "id":"template", "projectId":"p", "name":"template", "defaultImageCount":1,
+            "defaultDurationSeconds":11, "createdAt":"2026-01-01T00:00:00Z", "updatedAt":"2026-01-01T00:00:00Z"
+        })).unwrap();
+        document.production_run_templates.push(template);
+        assert!(super::validate_production_orchestrator_document(&document).is_ok());
+        for duration in [0, 12, 13, 14, 15] {
+            document.production_run_templates[0].default_duration_seconds = Some(duration);
+            assert!(
+                super::validate_production_orchestrator_document(&document).is_err(),
+                "{duration}"
+            );
+        }
     }
 
     #[test]

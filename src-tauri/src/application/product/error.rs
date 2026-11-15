@@ -14,6 +14,8 @@ pub struct ProductError {
 #[serde(rename_all = "camelCase")]
 pub struct ProductErrorDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub rejected_asset_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub action_location: Option<super::run_facade::RunActionLocation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_binding: Option<super::project_facade::GeneratorBindingSummary>,

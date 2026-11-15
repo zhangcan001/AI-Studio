@@ -184,6 +184,18 @@ pub trait AssetRepository: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Production SQLite performs one bounded set lookup; small adapters retain compatibility.
+    async fn list_output_mappings_for_tasks(
+        &self,
+        task_ids: &[TaskId],
+    ) -> Result<Vec<TaskOutputAssetMapping>, RepositoryError> {
+        let mut out = Vec::new();
+        for id in task_ids {
+            out.extend(self.list_output_mappings(id).await?);
+        }
+        Ok(out)
+    }
+
     async fn list_mapped_assets(
         &self,
         task_id: &TaskId,
