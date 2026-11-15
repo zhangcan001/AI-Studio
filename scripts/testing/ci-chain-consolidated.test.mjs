@@ -814,7 +814,7 @@ it('fixes green Phase5C needle escape and FolderBatch page waitFor without raisi
   expect(green).toContain("UiPhase5CReviewBoundary.test.ts");
   expect(green).toContain("bytes.toString()");
   expect(readFileSync('src/app/UiPhase5CReviewBoundary.test.ts', 'utf8')).toContain("writeFileSync(p, bytes.toString() + '\\n')");
-  expect(readFileSync('src/features/shots/FolderBatchImportPanel.test.tsx', 'utf8')).toContain('waitFor(() => expect(screen.getByRole("button",{name:"编辑导入镜头 51"}))');
+  expect(readFileSync('src/features/shots/FolderBatchImportPanel.test.tsx', 'utf8')).toContain('waitFor(() => expect(screen.getByRole("button",{name:"编辑「镜头50」"}))');
   expect(CI_STABLE_FIX_CONTRACTS.timeoutsRaised).toBe(false);
   expect(CI_STABLE_FIX_CONTRACTS.guardsRelaxed).toBe(false);
   expect(ciStableFixParentReader('.').violations).toEqual([]);

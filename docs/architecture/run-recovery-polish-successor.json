@@ -30,7 +30,7 @@
     },
     "scripts/testing/ci-chain-consolidated.test.mjs": {
       "beforeHash": "048404d956ef4e55e3faf46ab697838e5e5086be39de89bc90497a8775fd96fc",
-      "afterHash": "cca3d8e6682ac7da42f0426a5f8e3f49091e5f50784b45bf90c89d407aa4bf66"
+      "afterHash": "ed4cd0595f08612b4180ea45a25f461276fb1dd6a5e88a6c5185ba35c9fc56aa"
     },
     "scripts/testing/convenience.test.mjs": {
       "beforeHash": "25a851a0c791f59e2d8b1969efc4d29bbcc43e67743ca55bcde8fbe7cc4f2549",
