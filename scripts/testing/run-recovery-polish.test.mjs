@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSy
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { LIBRARY_HIDDEN_PROMPTS_CHANGED, LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF } from '../library-hidden-prompts-successor-guard.mjs';
 import {
   runRecoveryPolishParentReader, RUN_RECOVERY_POLISH_BASE, RUN_RECOVERY_POLISH_PROOF,
   RUN_RECOVERY_POLISH_CHANGED, RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_CONTRACTS,
@@ -18,8 +19,8 @@ const parentBytes = p => execFileSync('git', ['show', `${RUN_RECOVERY_POLISH_BAS
 it('verifies the exact run-recovery-polish successor and projects the frozen parent bytes', () => {
   const result = runRecoveryPolishParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(RUN_RECOVERY_POLISH_CHANGED);
-  expect(result.addedPaths).toEqual([...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF])].sort());
   for (const p of RUN_RECOVERY_POLISH_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(STORYBOARD_INTEGRITY_PROOF)).toEqual(parentBytes(STORYBOARD_INTEGRITY_PROOF));
   expect(storyboardIntegrityParentReader('.').violations).toEqual([]);

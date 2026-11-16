@@ -95,4 +95,12 @@ it("separates entity navigation without exposing the retired style entry",async(
   expect(await screen.findByRole("region",{name:"道具管理"})).toBeTruthy();
   expect(screen.queryByRole("region",{name:"场景管理"})).toBeNull();
   expect(within(nav).queryByRole("button",{name:"旧设定 · 风格"})).toBeNull();
+  expect(within(nav).queryByRole("button",{name:"提示词"})).toBeNull();
+});
+
+it("hides the unreachable prompts category and explains leftover deep links",async()=>{
+  render(<LibraryPage route={{kind:"library",projectId:"prompts-hidden",filter:"prompts"}} navigate={vi.fn()}/>);
+  expect((await screen.findByRole("note")).textContent).toBe("提示词分类入口已停用。当前无法在资源库中新增提示词，已有记录仍保留用于历史查看与备份。");
+  expect(within(screen.getByRole("navigation",{name:"资源分类"})).queryByRole("button",{name:"提示词"})).toBeNull();
+  expect(await screen.findByText("first")).toBeTruthy();
 });

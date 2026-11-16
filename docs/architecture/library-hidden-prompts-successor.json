@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "LIBRARY_HIDDEN_PROMPTS",
+  "parentHead": "86acd5abbcb5f14eca34bdac505161d7e58d5804",
+  "planningParentHead": "86acd5abbcb5f14eca34bdac505161d7e58d5804",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "historicalRuntimeBytesUnchanged": true,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "guardsRelaxed": false,
+    "explicitSelectionAndReview": true,
+    "boundedWorkbenchPaging": true,
+    "noImplicitStart": true
+  },
+  "files": {
+    "scripts/run-recovery-polish-successor-guard.mjs": {
+      "beforeHash": "d4bbb1a109c84f878ebd22da565ae39faa7fcaa8db1c6835c0d993f98b4e237e",
+      "afterHash": "a5f5a9179fdc97190941fb958a400b95573e7ed04c352e18766a8dd83c384fbc"
+    },
+    "scripts/testing/audit-repair.test.mjs": {
+      "beforeHash": "2679ee7876adefe1ed3b41ea6ed5469862abc60bbe5d563e47f014294b072ded",
+      "afterHash": "2bf3797eb15120072c66398d82de792df3a8afba9311b603a06e1650a6db70de"
+    },
+    "scripts/testing/ci-chain-consolidated.test.mjs": {
+      "beforeHash": "ed4cd0595f08612b4180ea45a25f461276fb1dd6a5e88a6c5185ba35c9fc56aa",
+      "afterHash": "8309117dc746e780fe3994ef25db494cb476581f97615d65d4c7a64cea0e56ba"
+    },
+    "scripts/testing/convenience.test.mjs": {
+      "beforeHash": "8d30726ea963f1ceed7928835d338ee5a407010cdadbef1e5ca4df767be56bb2",
+      "afterHash": "b93384eadc966c29fdf01ac2742515bd37ecb5fa4ffc3a2b2c92c5dce80a0c07"
+    },
+    "scripts/testing/create-rerun-safety.test.mjs": {
+      "beforeHash": "040256586434d23aa2fc0f18288b291444ed4b6643f74346fd86ca6ef1672c20",
+      "afterHash": "5bbd23a64cb287a424f3fe1896b90e34bf0bad32b2d7ec6eee0bb351e17c4893"
+    },
+    "scripts/testing/input-refresh-safety.test.mjs": {
+      "beforeHash": "5a4341c5b67204afb51de121e8a9b5154ae41d4f3c7b4153275261564bc03cb4",
+      "afterHash": "645825ffb31784b556a31694c4f9c6f9f0158e69c77e3088d53e8cd4b336621a"
+    },
+    "scripts/testing/pika-flex-reference.test.mjs": {
+      "beforeHash": "b5af13518e4902aa74261fc0ebafaae2e4a22c506c2a543100217cca545aebfc",
+      "afterHash": "1fe654a34cdb173ece44caa1b7d922c348e8bb19ec21ca9e864b39db084b3a95"
+    },
+    "scripts/testing/production-safety.test.mjs": {
+      "beforeHash": "0b155151d86b18e46faeb40408d64f460954cd7a2f2eb29de60dbb9ac66ae687",
+      "afterHash": "16569b0698942ba684d6df28e4add4007337b87787229a4a75c1bb4b8f799bd4"
+    },
+    "scripts/testing/reference-authority.test.mjs": {
+      "beforeHash": "040962178b4b932779645afa185cbd7bbb569b7d4fe883c4b7d82992bc319678",
+      "afterHash": "2004c67abebeb3cf74efc6070e6ef9a13cd3beab8f8d545fde6496b30d1347ca"
+    },
+    "scripts/testing/run-recovery-polish.test.mjs": {
+      "beforeHash": "c561418891dc431b0c8a44b321b6a488f4c362d0853a083dd17c331868912176",
+      "afterHash": "d3b767728bd26abaa6b266010b3da477a0a020a3287787e31a836e67e7a4260e"
+    },
+    "scripts/testing/storyboard-feedback.test.mjs": {
+      "beforeHash": "bed67433e30f661102dcbbb691be3eebcadfc27c8b100035f75051df44b6a506",
+      "afterHash": "e16df05ad9de703af8312d42cd45ddddc8dcdde36b46b72c9606524794df71c7"
+    },
+    "scripts/testing/storyboard-integrity.test.mjs": {
+      "beforeHash": "2fbe6d33b8e123c15272a3bad8b3ab572a5ba5eee4dc2ad1260d7bc9ca4609bb",
+      "afterHash": "d3acc7c541d1e43c957f66ebf1d1f8d164aba4303f5fb46d42c1c1b34141925e"
+    },
+    "scripts/testing/storyboard-usage.test.mjs": {
+      "beforeHash": "753b8218ac0fdb54a54f13e6da7ac00074bf1dff01bdff622b1f0786b02ba217",
+      "afterHash": "d13c14e6057d8dcb1174e0eeb45d37fa721a6458afd015048bdb1d0ae5e3c57a"
+    },
+    "scripts/testing/usability-completion.test.mjs": {
+      "beforeHash": "72525efabe0b43639a78a8f7ad38f16fffb432fa43abc2d7b1f92f29c9e84dfb",
+      "afterHash": "dbf0643933264bcbf9e8cca703e27861792bf2478476ee8e419b476e605acf76"
+    },
+    "scripts/testing/usage-flow.test.mjs": {
+      "beforeHash": "0109da6789fb692b7d877957a05721ba800eff6b34b77e2876ed5c877e76d64a",
+      "afterHash": "5dd16bd3260f9c92ac23c8d308f74ddc574e3af8859d6383f184d2c809ba75cb"
+    },
+    "scripts/testing/usage-polish.test.mjs": {
+      "beforeHash": "ce232f2825ba1db8917a5d581e7fe22f7ef8c834d60655d7f0d667c720269cc5",
+      "afterHash": "a7ebc98b4b9c0aecf88534fd9107b798f1ec24b5a23220cf6f3fdd22ea726df1"
+    },
+    "src/features/library/LibraryFindability.test.tsx": {
+      "beforeHash": "5c53a4b2dac7dc7522ae528ba5213c4d55c7dc458409f232731cc4b9515dd3a6",
+      "afterHash": "d068a0be86f5b8da47bc3fb69ab51be24beb7a9e7dae7f05165ca3d2aaebde76"
+    },
+    "src/features/library/LibraryPage.tsx": {
+      "beforeHash": "ec052750476341e7d37005186b8fb4b5f926ee085174a25954e13645b5a0bd0e",
+      "afterHash": "803714d3cda1fb7f4490267dba52166bed97f51d9d6a3215b958075f31d31628"
+    },
+    "scripts/library-hidden-prompts-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "434db31f2e17d73d02dcbec6f64b8ea2874d0815deb996529444c14dd407dc4b"
+    },
+    "scripts/testing/library-hidden-prompts.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "bd931eec1c091a942c31d8a268f8a647c781c24bd352f122b059e7c877687347"
+    }
+  }
+}

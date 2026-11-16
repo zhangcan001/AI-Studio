@@ -59,10 +59,11 @@ export function LibraryPage(props:LibraryProps) {
       </div></details>
     </header>
     {c.category==="profiles"&&<p role="note">旧设定入口已停用，请使用角色、场景、道具或构图分类。旧记录仍保留用于历史查看与备份。</p>}
+    {c.category==="prompts"&&<p role="note">提示词分类入口已停用。当前无法在资源库中新增提示词，已有记录仍保留用于历史查看与备份。</p>}
     {c.queryError&&<p role="alert">{c.queryError}</p>}{c.actionError&&<p role="alert">{c.actionError}</p>}{c.notice&&<p role="status">{c.notice}</p>}{c.loading&&<p role="status">正在读取资源…</p>}
     <div className="library-layout" data-detail={showDetail?"open":"closed"}>
       <nav aria-label="资源分类" className="library-nav">
-        {categories.filter(cat=>cat.key!=="profiles").map(cat=><button type="button" key={cat.key} aria-pressed={!entityKind&&cat.key===c.category} onClick={()=>{void Promise.resolve(safeNavigate({kind:"library",projectId:props.route.projectId,filter:cat.key})).then(ok=>{if(ok!==false)setEntityKind(null);});}}><span aria-hidden="true" className="library-nav-icon">{ICONS[cat.key]??"•"}</span>{cat.label}</button>)}
+        {categories.filter(cat=>cat.key!=="profiles"&&cat.key!=="prompts").map(cat=><button type="button" key={cat.key} aria-pressed={!entityKind&&cat.key===c.category} onClick={()=>{void Promise.resolve(safeNavigate({kind:"library",projectId:props.route.projectId,filter:cat.key})).then(ok=>{if(ok!==false)setEntityKind(null);});}}><span aria-hidden="true" className="library-nav-icon">{ICONS[cat.key]??"•"}</span>{cat.label}</button>)}
         {([{kind:"character",label:"角色"},{kind:"scene",label:"场景"},{kind:"prop",label:"道具"},{kind:"composition",label:"构图"}] as const).map(item=><button type="button" key={item.kind} aria-pressed={entityKind===item.kind} onClick={()=>{if(entityKind===item.kind)return;if(!draftFlags.current.detail&&confirmEntityLeave())setEntityKind(item.kind);else if(draftFlags.current.detail&&window.confirm("当前资源编辑尚未保存，确定放弃并切换？"))setEntityKind(item.kind);}}><span aria-hidden="true" className="library-nav-icon">{ICONS[item.kind]}</span>{item.label}</button>)}
       </nav>
       {entityKind ? <StoryEntityCategorySection key={`${props.route.projectId}:${entityKind}`} projectId={props.route.projectId} kind={entityKind} onDirtyChange={onEntityDirty} /> : <LibraryThumbnailScope><section className="library-list" aria-label="资源列表">

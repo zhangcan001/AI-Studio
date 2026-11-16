@@ -1,3 +1,4 @@
+import { libraryHiddenPromptsParentReader, libraryHiddenPromptsScopeSince, libraryHiddenPromptsFixtureFiles, LIBRARY_HIDDEN_PROMPTS_BASE } from "./library-hidden-prompts-successor-guard.mjs";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -91,10 +92,11 @@ export function runRecoveryPolishScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...RUN_RECOVERY_POLISH_CHANGED, ...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF,
+    ...libraryHiddenPromptsScopeSince(root, LIBRARY_HIDDEN_PROMPTS_BASE),
   ])].sort();
 }
 export function runRecoveryPolishFixtureFiles(root) {
-  return [...facts(root, RUN_RECOVERY_POLISH_BASE).paths, ...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF];
+  return [...new Set([...facts(root, RUN_RECOVERY_POLISH_BASE).paths, ...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...libraryHiddenPromptsFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -104,9 +106,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, RUN_RECOVERY_POLISH_BASE);
+  const successor = libraryHiddenPromptsParentReader(root, override);
+  const workspace = resolve(root), violations = [...successor.violations], parent = facts(workspace, RUN_RECOVERY_POLISH_BASE);
   const fail = id => violations.push("run-recovery-polish-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(RUN_RECOVERY_POLISH_PROOF));
@@ -120,10 +123,10 @@ function validate(root, override) {
     const allowed = [...scope, RUN_RECOVERY_POLISH_PROOF].sort();
     const expected = [...parent.paths, ...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -138,10 +141,10 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: RUN_RECOVERY_POLISH_CHANGED,
-    addedPaths: [...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF],
-    afterHashes: Object.fromEntries([...RUN_RECOVERY_POLISH_CHANGED, ...RUN_RECOVERY_POLISH_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
-    read: sessionMemoRead(workspace, p => RUN_RECOVERY_POLISH_CHANGED.includes(p) ? parent.read(p) : live(p)) };
+  return { violations, changedPaths: [...new Set([...RUN_RECOVERY_POLISH_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...RUN_RECOVERY_POLISH_CHANGED, ...RUN_RECOVERY_POLISH_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
+    read: sessionMemoRead(workspace, p => RUN_RECOVERY_POLISH_CHANGED.includes(p) ? parent.read(p) : successor.read(p)) };
 }
 export function runRecoveryPolishParentReader(root, override = undefined) {
   if (override) return validate(root, override);
