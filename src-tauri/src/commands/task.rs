@@ -104,17 +104,17 @@ pub async fn task_reconcile_active(state: State<'_, AppState>) -> Result<Recover
         .reconcile_active()
         .await
         .map_err(map_recovery_error)?;
-    if state.production.queue.recover_and_resume().await.is_err() {
+    if state
+        .production
+        .queue
+        .ensure_startup_recovery(state.production.admission.clone())
+        .await
+        .is_err()
+    {
         return Err(AppError::production_queue_recovery_failed(
             "生产队列启动恢复失败，排队中的生产不会自动继续。请点击「重新同步任务」，或到运行页手动启动。",
         ));
     }
-    state
-        .production
-        .queue
-        .clone()
-        .run_deferred_starts(state.production.admission.clone())
-        .await;
     Ok(report)
 }
 

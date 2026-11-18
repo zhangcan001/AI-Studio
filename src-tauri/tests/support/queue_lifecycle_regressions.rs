@@ -418,6 +418,40 @@ impl ProductionQueueRepository for GatedQueueRepository {
 }
 
 #[tokio::test]
+async fn recovery_skips_startup_repair_during_live_dispatch_without_a_task() {
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Success));
+        let gate = Arc::new(QueueGate::default());
+        let (_directory, pool, services, batch, item) =
+            fixture_with_gate(comfy.clone(), Some(gate.clone())).await;
+        gate.dispatch_armed.store(true, Ordering::SeqCst);
+        services
+            .queue
+            .start_for_test(PROJECT_ID, &batch)
+            .await
+            .unwrap();
+        gate.dispatch_entered.notified().await;
+
+        let recovery = services.queue.recover_and_resume().await;
+        let detail = services.queue.get(PROJECT_ID, &batch).await.unwrap();
+        gate.dispatch_release.notify_one();
+
+        recovery.unwrap();
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Running);
+        assert_eq!(
+            detail.items[0].status,
+            ProductionBatchItemStatus::Dispatching
+        );
+        assert!(detail.items[0].task_id.is_none());
+        assert!(detail.items[0].error_code.is_none());
+        wait_for_item_status(&pool, &item, ProductionBatchItemStatus::Succeeded).await;
+        assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 1);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn cancel_batch_waits_for_live_dispatch_then_cancels_the_bound_task() {
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
         let mut adapter = ControlledComfy::new(ComfyBehavior::Success);

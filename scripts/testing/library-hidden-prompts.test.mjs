@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
+import { QUEUE_SYNC_IMPORT_PAGING_CHANGED, QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF } from "../queue-sync-import-paging-successor-guard.mjs";
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -18,8 +19,8 @@ const parentBytes = p => execFileSync('git', ['show', `${LIBRARY_HIDDEN_PROMPTS_
 it('verifies the exact library-hidden-prompts successor and projects the frozen parent bytes', () => {
   const result = libraryHiddenPromptsParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(LIBRARY_HIDDEN_PROMPTS_CHANGED);
-  expect(result.addedPaths).toEqual([...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF])].sort());
   for (const p of LIBRARY_HIDDEN_PROMPTS_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(RUN_RECOVERY_POLISH_PROOF)).toEqual(parentBytes(RUN_RECOVERY_POLISH_PROOF));
   expect(runRecoveryPolishParentReader('.').violations).toEqual([]);

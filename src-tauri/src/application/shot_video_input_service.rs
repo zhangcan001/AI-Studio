@@ -197,15 +197,7 @@ impl ShotVideoInputService {
                 .map_err(invalid)?,
             None => Default::default(),
         };
-        has_mention |= [
-            &sections.style,
-            &sections.summary,
-            &sections.soundscape,
-            &sections.music,
-        ]
-        .into_iter()
-        .flatten()
-        .any(|text| text.contains('@'));
+        has_mention |= ref2va_prompt_texts(prompt, &sections).any(|text| text.contains('@'));
         if !has_mention && sections.clone().normalized().is_empty() {
             return Ok(());
         }
@@ -614,6 +606,43 @@ pub(crate) fn explicit_entity_mentions<'a>(
             found.push(entity);
         }
         rest = &rest[entity.name.len()..];
+    }
+    Ok(found)
+}
+
+/// Visit the same text used for Ref2VA substitution, in subject-label order.
+pub(crate) fn ref2va_prompt_texts<'a>(
+    prompt: &'a str,
+    sections: &'a crate::domain::story_entity::ShotPromptSections,
+) -> impl Iterator<Item = &'a str> {
+    let use_optional = !has_ref2va_sections(prompt);
+    std::iter::once(prompt).chain(
+        [
+            sections.summary.as_deref(),
+            sections.style.as_deref(),
+            sections.soundscape.as_deref(),
+            sections.music.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(move |_| use_optional),
+    )
+}
+
+pub(crate) fn explicit_ref2va_entity_mentions<'a>(
+    prompt: &str,
+    sections: &crate::domain::story_entity::ShotPromptSections,
+    project_id: &str,
+    entities: &'a [crate::domain::story_entity::StoryEntity],
+) -> Result<Vec<&'a crate::domain::story_entity::StoryEntity>, ShotVideoInputError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut found = Vec::new();
+    for text in ref2va_prompt_texts(prompt, sections) {
+        found.extend(
+            explicit_entity_mentions(text, project_id, entities)?
+                .into_iter()
+                .filter(|entity| seen.insert(entity.id.as_str())),
+        );
     }
     Ok(found)
 }

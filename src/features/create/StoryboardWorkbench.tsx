@@ -93,6 +93,12 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
         productClient.run.list(projectId, "active", null),
         statusOnly && cache ? Promise.resolve(cache.value) : productClient.creation.workbench(projectId, "video", STORYBOARD_MAX_DETAIL_SHOTS, ...(page ? [page * STORYBOARD_MAX_DETAIL_SHOTS] as [number] : [])),
       ]);
+      if (token !== epoch.current) return;
+      const lastPage = Math.max(0, Math.ceil(workbench.shots.length / STORYBOARD_MAX_DETAIL_SHOTS) - 1);
+      if (page > lastPage) {
+        setPage(lastPage);
+        return;
+      }
       const runKeys = new Map<string, NonNullable<(typeof workbench.items)[number]["shot"]["recentRun"]>>();
       for (const item of workbench.items) {
         const ref = item.shot.recentRun;
@@ -343,7 +349,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
         <ol className="storyboard-tree-shots">{allItems.map(item => <li key={item.id}><button type="button" aria-current={selected?.id === item.id ? "true" : undefined} onClick={() => locateShot(item.id)}>
           <span className="storyboard-tree-name"><strong>{item.name}</strong><small>{shotDuration(item.shot)}</small></span><StatusBadge item={item} compact />
         </button></li>)}</ol>
-        {!items.length && <p className="storyboard-empty-note">还没有镜头。新建镜头或导入分镜脚本后会显示在这里。</p>}
+        {shotIndex.length === 0 && <p className="storyboard-empty-note">还没有镜头。新建镜头或导入分镜脚本后会显示在这里。</p>}
         <button type="button" className="storyboard-tree-manage" onClick={() => void navigate({ kind: "project-settings", projectId, section: "advanced-shots" })}>管理剧集与场景结构</button>
       </aside>
       <main className="storyboard-panel storyboard-list" aria-label="镜头列表">
@@ -353,7 +359,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <button type="button" aria-pressed={view === "grid"} onClick={() => setView("grid")}>宫格模式</button>
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
-        {!items.length ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
+        {!items.length && shotIndex.length === 0 ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
           : view === "shots" ? <StoryboardShotRows focusId={focusId} projectId={projectId} items={items.map(item => statusUncertain ? {...item,error:"运行状态读取失败，确认恢复前不能重复生成。"} : item)} shotIndex={shotIndex} overview={allItems} onLocate={locateShot} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">

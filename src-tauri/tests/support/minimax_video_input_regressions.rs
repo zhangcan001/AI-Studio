@@ -42,6 +42,25 @@ fn input(key: &str, ordinal: i64, id: &AssetId) -> ShotVideoInputAsset {
 }
 
 #[tokio::test]
+async fn queue_startup_recovery_returns_to_both_callers_with_no_deferred_starts() {
+    let f = fixture_with_capability(true).await;
+    let (inputs, _, _) = setup(&f).await;
+    let (_, admission) = formal_preparation(&f, inputs).await;
+    let queue = &f.services.queue;
+    let (startup, sync) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(
+            queue.ensure_startup_recovery(admission.clone()),
+            queue.ensure_startup_recovery(admission.clone()),
+        )
+    })
+    .await
+    .expect("startup and Sync must return while the deferred worker waits for work");
+    startup.unwrap();
+    sync.unwrap();
+    assert_eq!(count(&f.pool, "tasks").await, 0);
+}
+
+#[tokio::test]
 async fn saved_section_mentions_resolve_against_formal_images_without_a_main_prompt_mention() {
     use ai_studio_lib::application::ports::StoryEntityRepository;
     use ai_studio_lib::domain::story_entity::{

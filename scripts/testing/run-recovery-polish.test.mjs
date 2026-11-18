@@ -1,3 +1,4 @@
+import { QUEUE_SYNC_IMPORT_PAGING_CHANGED, QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF } from "../queue-sync-import-paging-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -19,8 +20,8 @@ const parentBytes = p => execFileSync('git', ['show', `${RUN_RECOVERY_POLISH_BAS
 it('verifies the exact run-recovery-polish successor and projects the frozen parent bytes', () => {
   const result = runRecoveryPolishParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF])].sort());
   for (const p of RUN_RECOVERY_POLISH_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(STORYBOARD_INTEGRITY_PROOF)).toEqual(parentBytes(STORYBOARD_INTEGRITY_PROOF));
   expect(storyboardIntegrityParentReader('.').violations).toEqual([]);

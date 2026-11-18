@@ -1,7 +1,8 @@
+import { queueSyncImportPagingParentReader, queueSyncImportPagingScopeSince, queueSyncImportPagingFixtureFiles, QUEUE_SYNC_IMPORT_PAGING_BASE } from "./queue-sync-import-paging-successor-guard.mjs";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
+import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
 
 export const LIBRARY_HIDDEN_PROMPTS_BASE = "86acd5abbcb5f14eca34bdac505161d7e58d5804";
 export const LIBRARY_HIDDEN_PROMPTS_PROOF = "docs/architecture/library-hidden-prompts-successor.json";
@@ -76,10 +77,11 @@ export function libraryHiddenPromptsScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF,
+    ...queueSyncImportPagingScopeSince(root, QUEUE_SYNC_IMPORT_PAGING_BASE),
   ])].sort();
 }
 export function libraryHiddenPromptsFixtureFiles(root) {
-  return [...facts(root, LIBRARY_HIDDEN_PROMPTS_BASE).paths, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF];
+  return [...new Set([...facts(root, LIBRARY_HIDDEN_PROMPTS_BASE).paths, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF, ...queueSyncImportPagingFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -89,9 +91,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, LIBRARY_HIDDEN_PROMPTS_BASE);
+  const successor = queueSyncImportPagingParentReader(root, override);
+  const workspace = resolve(root), violations = [...successor.violations], parent = facts(workspace, LIBRARY_HIDDEN_PROMPTS_BASE);
   const fail = id => violations.push("library-hidden-prompts-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(LIBRARY_HIDDEN_PROMPTS_PROOF));
@@ -105,10 +108,10 @@ function validate(root, override) {
     const allowed = [...scope, LIBRARY_HIDDEN_PROMPTS_PROOF].sort();
     const expected = [...parent.paths, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -123,9 +126,9 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: LIBRARY_HIDDEN_PROMPTS_CHANGED,
-    addedPaths: [...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF],
-    afterHashes: Object.fromEntries([...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: sessionMemoRead(workspace, p => LIBRARY_HIDDEN_PROMPTS_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function libraryHiddenPromptsParentReader(root, override = undefined) {

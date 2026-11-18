@@ -1155,13 +1155,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                             unresolved = report.unresolved,
                             "startup task recovery completed"
                         );
-                        if let Err(error) = startup_production_queue.recover_and_resume().await {
+                        if let Err(error) = startup_production_queue.ensure_startup_recovery(startup_start_admission).await {
                             tracing::warn!(
                                 error_type = std::any::type_name_of_val(&error),
                                 "startup production queue recovery failed; deferred starts not resumed"
                             );
-                        } else {
-                            startup_production_queue.run_deferred_starts(startup_start_admission).await;
                         }
                     }
                     Err(error) => tracing::warn!(

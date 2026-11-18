@@ -614,6 +614,13 @@ pub mod folder_batch_import_service {
                         "需要该模式准确的 WorkflowVersion + Recipe",
                     ));
                 }
+                let prompt_sections = crate::domain::story_entity::ShotPromptSections {
+                    style: shot.style.clone(),
+                    summary: shot.summary.clone(),
+                    soundscape: shot.soundscape.clone(),
+                    music: shot.music.clone(),
+                }
+                .normalized();
                 let has_at = shot.prompt.contains('@');
                 let valid = match mode {
                     Mode::FirstLast => {
@@ -633,7 +640,12 @@ pub mod folder_batch_import_service {
                     Mode::Reference => {
                         shot.first_frame.is_none()
                             && shot.last_frame.is_none()
-                            && (!shot.references.is_empty() || has_at)
+                            && (!shot.references.is_empty()
+                                || super::shot_video_input_service::ref2va_prompt_texts(
+                                    &shot.prompt,
+                                    &prompt_sections,
+                                )
+                                .any(|text| text.contains('@')))
                     }
                 };
                 if !valid {
@@ -700,13 +712,7 @@ pub mod folder_batch_import_service {
                     name,
                     prompt_preview: shot.prompt.chars().take(240).collect(),
                     prompt: shot.prompt.clone(),
-                    prompt_sections: crate::domain::story_entity::ShotPromptSections {
-                        style: shot.style.clone(),
-                        summary: shot.summary.clone(),
-                        soundscape: shot.soundscape.clone(),
-                        music: shot.music.clone(),
-                    }
-                    .normalized(),
+                    prompt_sections,
                     duration_seconds: duration,
                     width,
                     height,
@@ -1289,11 +1295,20 @@ pub mod folder_batch_import_service {
                         failure("INVALID_MANIFEST", "镜头名称不符合正式命名规则"),
                     );
                 }
-                let mentions = super::shot_video_input_service::explicit_entity_mentions(
-                    &row.prompt,
-                    project,
-                    &entities,
-                );
+                let mentions = if row.mode == Mode::Reference {
+                    super::shot_video_input_service::explicit_ref2va_entity_mentions(
+                        &row.prompt,
+                        &row.prompt_sections,
+                        project,
+                        &entities,
+                    )
+                } else {
+                    super::shot_video_input_service::explicit_entity_mentions(
+                        &row.prompt,
+                        project,
+                        &entities,
+                    )
+                };
                 let mut reference_paths = row.references.clone();
                 let listed_before = row.references.clone();
                 match mentions {
@@ -2543,8 +2558,9 @@ pub mod folder_batch_import_service {
                         .filter_map(|p| assets.get(p).cloned())
                         .collect();
                     let bound: Vec<_> = entities.values().cloned().collect();
-                    for entity in super::shot_video_input_service::explicit_entity_mentions(
+                    for entity in super::shot_video_input_service::explicit_ref2va_entity_mentions(
                         &row.prompt,
+                        &row.prompt_sections,
                         project,
                         &bound,
                     )
@@ -3755,6 +3771,39 @@ pub mod folder_batch_import_service {
                 .await
                 .unwrap()
                 .is_empty());
+        }
+        #[tokio::test]
+        async fn reference_only_in_summary_is_prechecked_bound_and_frozen() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let mut m = parse_manifest(&std::fs::read(&path).unwrap()).unwrap();
+            let shot = &mut m.shots[1];
+            shot.prompt = "A person turns toward the door.".into();
+            shot.references.clear();
+            shot.summary = Some("@Missing turns toward the door.".into());
+            std::fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+            let invalid = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert!(invalid.rows[1]
+                .errors
+                .iter()
+                .any(|e| e.code == "ENTITY_REFERENCE_UNKNOWN"));
+            assert_eq!(count(&f.pool, "shots").await, 0);
+
+            m.shots[1].summary = Some("@Alice turns toward the door.".into());
+            m.shots[1].style = Some("Keep @Alice in soft light.".into());
+            std::fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+            let preview = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert!(preview.rows[1].errors.is_empty(), "{:?}", preview.rows[1]);
+            assert_eq!(preview.rows[1].entity_names, ["Alice"]);
+            assert_eq!(preview.rows[1].reference_count, 1);
+            let result = f.service.commit(request(&preview, true)).await.unwrap();
+            assert_eq!(result.outcome, "completed", "{result:?}");
+            assert_eq!(result.item_count, 2);
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shot_video_input_assets WHERE shot_id=? AND input_key='reference_images'")
+                .bind(&result.created_shot_ids[1]).fetch_one(&f.pool).await.unwrap();
+            assert_eq!(count, 1);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
         }
         #[tokio::test]
         async fn import_while_project_video_task_runs_is_blocked_by_precheck_with_chinese_reason() {

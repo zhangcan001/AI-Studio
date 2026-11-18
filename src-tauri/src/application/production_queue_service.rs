@@ -33,7 +33,7 @@ use std::{
     fmt,
     sync::{Arc, Mutex},
 };
-use tokio::sync::{Mutex as AsyncMutex, Notify, OwnedMutexGuard};
+use tokio::sync::{Mutex as AsyncMutex, Notify, OnceCell, OwnedMutexGuard};
 use tokio::time::{sleep, Duration};
 
 const MAX_PRODUCTION_BATCH_ITEMS: usize = 100;
@@ -281,6 +281,7 @@ pub struct ProductionQueueService {
     admission_gate: Arc<AsyncMutex<()>>,
     idempotency_gate: Arc<AsyncMutex<()>>,
     recovery_tasks: Arc<Mutex<HashSet<String>>>,
+    startup_recovery: Arc<OnceCell<()>>,
     deferred_start_notify: Arc<Notify>,
     new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
     task_cancellation: Option<Arc<TaskCancellationService>>,
@@ -308,6 +309,7 @@ impl ProductionQueueService {
             admission_gate: Arc::new(AsyncMutex::new(())),
             idempotency_gate: Arc::new(AsyncMutex::new(())),
             recovery_tasks: Arc::new(Mutex::new(HashSet::new())),
+            startup_recovery: Arc::new(OnceCell::new()),
             deferred_start_notify: Arc::new(Notify::new()),
             new_generation_admission: None,
             task_cancellation: None,
@@ -400,7 +402,7 @@ impl ProductionQueueService {
     /// start an already-persisted batch; it never creates Tasks or executes a
     /// workflow. The DB request survives process restart, and unexpected
     /// runtime errors block that request rather than bypassing preflight.
-    pub async fn run_deferred_starts(
+    async fn run_deferred_starts(
         self: Arc<Self>,
         admission: Arc<
             crate::application::production_start_admission_service::ProductionStartAdmissionService,
@@ -1725,6 +1727,7 @@ impl ProductionQueueService {
             admission_gate: Arc::clone(&self.admission_gate),
             idempotency_gate: Arc::clone(&self.idempotency_gate),
             recovery_tasks: Arc::clone(&self.recovery_tasks),
+            startup_recovery: Arc::clone(&self.startup_recovery),
             deferred_start_notify: Arc::clone(&self.deferred_start_notify),
             new_generation_admission: self.new_generation_admission.clone(),
             task_cancellation: self.task_cancellation.clone(),
@@ -2231,8 +2234,51 @@ impl ProductionQueueService {
         Err(ProductionQueueError::NotFound(item_id.to_owned()))
     }
 
+    pub async fn ensure_startup_recovery(
+        self: &Arc<Self>,
+        admission: Arc<
+            crate::application::production_start_admission_service::ProductionStartAdmissionService,
+        >,
+    ) -> Result<(), ProductionQueueError> {
+        self.startup_recovery
+            .get_or_try_init(|| async {
+                if !self.recover_startup_queue().await? {
+                    return Err(ProductionQueueError::InvalidState(
+                        "startup recovery requires all live queue runners to finish".to_owned(),
+                    ));
+                }
+                tokio::spawn(Arc::clone(self).run_deferred_starts(admission));
+                Ok(())
+            })
+            .await
+            .copied()
+    }
+
     pub async fn recover_and_resume(self: &Arc<Self>) -> Result<(), ProductionQueueError> {
+        if !self.recover_startup_queue().await? {
+            // The live runner owns its queue item; sync the Task and let the
+            // runner observe the outcome through its normal polling path.
+            self.task_recovery_service
+                .reconcile_active()
+                .await
+                .map_err(|error| ProductionQueueError::InvalidState(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Returns false if a live runner owns the queue and startup repair is deferred.
+    async fn recover_startup_queue(self: &Arc<Self>) -> Result<bool, ProductionQueueError> {
         let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
+        // A failed startup recovery may be retried after the user has started a
+        // queue manually. A live runner can own a dispatch without a Task yet.
+        if !self
+            .running_batches
+            .lock()
+            .expect("production queue runner registry mutex poisoned")
+            .is_empty()
+        {
+            return Ok(false);
+        }
         let uncertain = self
             .repository
             .recover_uncertain_dispatches(self.clock.now())
@@ -2338,7 +2384,7 @@ impl ProductionQueueService {
                 self.spawn_if_needed(primary.project_id.clone(), primary.id.clone());
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     fn spawn_if_needed(self: &Arc<Self>, project_id: String, batch_id: ProductionBatchId) {

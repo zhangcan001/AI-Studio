@@ -551,3 +551,27 @@ it("labels running one-video work as processed items rather than a misleading in
 it("shows per-shot export failures, keeps the mapping receipt and can copy the destination",async()=>{
  api.exportSelected.mockResolvedValue({exported:1,failed:1,directory:"D:/owned-export",entries:[{ordinal:1,shotId:"s2",shotName:"Second",assetId:"a2",fileName:null,error:"source missing"}],manifestError:null,openError:"Explorer unavailable"});const copy=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:copy}});render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);await screen.findByLabelText("镜头统计");fireEvent.click(screen.getByRole("checkbox",{name:"导出后打开目录"}));fireEvent.click(screen.getByRole("button",{name:"导出全项目已选用视频"}));expect(await screen.findByText(/Second：source missing/)).toBeTruthy();expect(screen.getByText("Explorer unavailable")).toBeTruthy();expect(api.exportSelected).toHaveBeenCalledWith("p",true);fireEvent.click(screen.getByRole("button",{name:"复制导出路径"}));await waitFor(()=>expect(copy).toHaveBeenCalledWith("D:/owned-export"));expect(api.generate).not.toHaveBeenCalled();
 });
+
+it("returns to the remaining page after the last shot on page two is removed", async () => {
+  const summaries = Array.from({ length: 61 }, (_, i) => ({ id: `page-shot-${i}`, name: `分页镜头${i + 1}`, ordinal: i + 1 }));
+  let current = summaries;
+  const item = (summary: (typeof summaries)[number]) => ({
+    shot: { summary, prompt: "A robot walks.", selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null },
+    candidates: [],
+  });
+  api.workbench.mockImplementation(async (_project: string, _stage: string, limit: number, offset = 0) => ({
+    projectId: "p", projectName: "P", stage: "video", shots: current,
+    overview: current.map(item), items: current.slice(offset, offset + limit).map(item),
+    truncated: Math.max(0, current.length - offset - limit),
+  }));
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  await screen.findByRole("article", { name: "分页镜头1" });
+  fireEvent.click(screen.getByRole("button", { name: "下一页镜头" }));
+  await screen.findByRole("article", { name: "分页镜头61" });
+
+  current = summaries.slice(0, 60);
+  fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+  expect(await screen.findByRole("article", { name: "分页镜头1" })).toBeTruthy();
+  expect(screen.queryByText("开始你的第一个镜头")).toBeNull();
+  expect(screen.getByRole("button", { name: "上一页镜头" }).hasAttribute("disabled")).toBe(true);
+});
