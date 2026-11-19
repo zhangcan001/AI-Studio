@@ -103,6 +103,15 @@ pub async fn save(
     service: &ShotVideoInputService,
     request: VideoInputSave,
 ) -> Result<VideoInputView, ProductError> {
+    // Build the optional picker projection before committing OCC. A broken
+    // unrelated asset must not turn a successful write into an IPC failure.
+    let assets = service
+        .available_assets(&request.selection.project_id, &request.inputs)
+        .await
+        .map_err(map_error)?
+        .into_iter()
+        .map(InputAsset::from)
+        .collect();
     let set = service
         .save(
             &request.selection.scope()?,
@@ -112,12 +121,28 @@ pub async fn save(
         .await
         .map_err(map_error)?;
     let mut view = request.selection.view(Some(set));
-    view.assets = service
-        .available_assets(&request.selection.project_id, &view.inputs)
-        .await
-        .map_err(map_error)?
-        .into_iter()
-        .map(InputAsset::from)
-        .collect();
+    view.assets = assets;
     Ok(view)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn r30_unrelated_picker_projection_is_built_before_the_formal_write() {
+        let source = include_str!("video_inputs.rs");
+        let save = source
+            .split("pub async fn save(")
+            .nth(1)
+            .unwrap()
+            .split("pub async fn")
+            .next()
+            .unwrap();
+        let assets = save.find("available_assets(").expect("picker projection");
+        let write = save.find(".save(").expect("formal write");
+        assert!(
+            assets < write,
+            "an unrelated later asset read must not run after a successful formal write"
+        );
+        assert!(save.contains("&request.inputs"));
+    }
 }

@@ -124,7 +124,9 @@ export function ProductionQueuePanel({
         setOverview(nextOverview);
         const selectedId = selectedIdRef.current;
         const detailId = selectProductionQueueId(nextQueues, [selectedId, focusBatchId], inline);
-        const shouldRestoreDetail = Boolean(detailId) && (refreshDetail || inline || Boolean(selectedId) || Boolean(focusBatchId));
+        // A mutation already supplied the authoritative selected detail. A list-only
+        // refresh must not replace that successful receipt with a second read.
+        const shouldRestoreDetail = Boolean(detailId) && (refreshDetail || detailId !== selectedId);
         if (detailId && shouldRestoreDetail) {
           try {
             const nextDetail = await getProductionQueue(forProject, detailId);
@@ -486,7 +488,9 @@ export function ProductionQueuePanel({
     if (!detail) return;
     await runMutation(async () => {
       const updated = await requeueProductionQueueItem(projectId, detail.id, itemId);
-      commitDetail(updated, "已创建新的待执行重试项；原失败任务保持不变。");
+      const existingIds = new Set(detail.items.map(item => item.id));
+      const added = updated.items.filter(item => !existingIds.has(item.id)).length;
+      commitDetail(updated, added > 0 ? `实际新增 ${added} 个待执行重试项；原失败任务保持不变。` : "已复用现有重试项，本次未新增；原失败任务保持不变。");
     });
   }
 
@@ -503,10 +507,22 @@ export function ProductionQueuePanel({
     }
     await runMutation(async () => {
       let updated = detail;
+      const originalIds = new Set(detail.items.map(item => item.id));
+      let completed = 0;
       for (const item of targets) {
-        updated = await requeueProductionQueueItem(projectId, detail.id, item.id);
+        try {
+          updated = await requeueProductionQueueItem(projectId, detail.id, item.id);
+          completed++;
+          commitDetail(updated, `已处理 ${completed} 项重试回执，尚未启动生产。`);
+        } catch (error) {
+          const added = updated.items.filter(item => !originalIds.has(item.id)).length;
+          setStructuredIssues(productionBatchPreflightIssues(error));
+          setNotice(`已处理 ${completed} 项，实际新增 ${added} 个待执行重试项；后续操作失败，已保留成功回执。${toUserMessage(error)} 请检查后手动启动。`);
+          return;
+        }
       }
-      commitDetail(updated, `已为 ${targets.length} 个可安全重试项创建新的待执行项；原失败记录保留，仍需手动开始生产。`);
+      const added = updated.items.filter(item => !originalIds.has(item.id)).length;
+      commitDetail(updated, `已处理 ${targets.length} 个可安全重试项，实际新增 ${added} 个待执行项；原失败记录保留，仍需手动开始生产。`);
     });
   }
 

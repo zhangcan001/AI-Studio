@@ -53,7 +53,22 @@ fn details(pool: &SqlitePool, queue: Arc<ProductionQueueService>) -> DetailAutho
             Arc::new(TaskQueryService::new(tasks, assets, definitions)),
             Arc::new(SqliteProductionQueueRepository::new(pool.clone())),
             Arc::new(SystemClock),
-        ),
+        )
+        .with_asset_query(Arc::new(
+            ai_studio_lib::application::asset_query_service::AssetQueryService::new(
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteAssetRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+                Arc::new(ai_studio_lib::infrastructure::filesystem::FileSystemAssetStore::new()),
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteProjectRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+            ),
+        )),
     }
 }
 
@@ -267,6 +282,77 @@ async fn phase4_target_10_results_project_asset_review_selection_as_independent_
         .unwrap();
     assert_eq!(selected[0].selected_shot_ids, vec![shot.id]);
     assert_eq!(selected[0].review_state.as_deref(), Some("PENDING"));
+}
+
+#[tokio::test]
+async fn r22_missing_file_is_neither_reviewable_nor_selectable_even_with_database_records() {
+    let dir = tempdir().unwrap();
+    let pool = initialize(&dir.path().join("missing-result.db"))
+        .await
+        .unwrap();
+    seed_database(&pool, dir.path()).await;
+    let services = build_services(
+        &pool,
+        Arc::new(ControlledComfy::new(ComfyBehavior::Success)),
+        dir.path(),
+    );
+    let locator = completed(&services.queue, &pool).await;
+    let (facade, _) = run_facade(&pool, services.queue.clone());
+    let authorities = details(&pool, services.queue.clone());
+    let result = facade
+        .results_get(PROJECT_ID, locator.clone(), &authorities.projection())
+        .await
+        .unwrap()
+        .remove(0);
+    assert!(result.asset_exists);
+    let path: String = sqlx::query_scalar("SELECT storage_path FROM assets WHERE id = ?")
+        .bind(&result.asset_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    let missing = facade
+        .results_get(PROJECT_ID, locator.clone(), &authorities.projection())
+        .await
+        .unwrap()
+        .remove(0);
+    assert!(!missing.asset_exists);
+    assert_eq!(missing.availability.as_deref(), Some("missing"));
+    let shot = authorities.shots.create(PROJECT_ID).await.unwrap();
+    let rejected = authorities
+        .shots
+        .select_result(
+            PROJECT_ID,
+            &shot.id,
+            ai_studio_lib::domain::ShotStage::Video,
+            &result.asset_id,
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(rejected.to_string().contains("文件缺失"));
+    assert!(authorities
+        .shots
+        .get(PROJECT_ID, &shot.id)
+        .await
+        .unwrap()
+        .selected_video_asset_id
+        .is_none());
+    assert!(facade
+        .result_review(
+            PROJECT_ID,
+            RunResultReviewRequest {
+                run_ref: locator,
+                asset_id: result.asset_id,
+                decision: "APPROVED".into(),
+                comment: "must reject".into(),
+                expected_revision: 0
+            },
+            &authorities.projection()
+        )
+        .await
+        .is_err());
+    pool.close().await;
 }
 
 #[tokio::test]

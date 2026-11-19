@@ -387,6 +387,21 @@ async fn dev055_real_comfyui_release_gate() {
             shot_batch_repository.clone(),
             clock.clone(),
         )
+        .with_asset_query(Arc::new(
+            ai_studio_lib::application::asset_query_service::AssetQueryService::new(
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteAssetRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+                Arc::new(ai_studio_lib::infrastructure::filesystem::FileSystemAssetStore::new()),
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteProjectRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+            ),
+        ))
         .with_stage_prompt_repository(shot_repository.clone())
         .with_generation_snapshot_repository(snapshot_repository.clone()),
     );

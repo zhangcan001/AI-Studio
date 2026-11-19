@@ -966,7 +966,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             )
             .with_row_edit_repository(Arc::new(infrastructure::database::repositories::story_entity::SqliteShotRowEditRepository::new(database_pool.clone())))
             .with_stage_prompt_repository(shot_bulk_repository.clone())
-            .with_generation_snapshot_repository(snapshot_repository.clone()).with_video_inputs(shot_video_input_service.clone()));
+            .with_generation_snapshot_repository(snapshot_repository.clone()).with_video_inputs(shot_video_input_service.clone()).with_asset_query(asset_query_service.clone()));
             let shot_batch_service = Arc::new(ShotBatchService::new(
                 shot_repository,
                 shot_batch_repository.clone(),

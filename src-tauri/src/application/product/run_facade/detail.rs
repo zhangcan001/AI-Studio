@@ -382,7 +382,12 @@ impl ProductRunFacade {
                     .map(|asset| asset.name.clone())
                     .unwrap_or_else(|| "结果已不存在".to_owned()),
                 media_kind: asset.as_ref().map(|asset| asset.asset_type.clone()),
-                asset_exists: asset.is_some(),
+                asset_exists: asset.is_some()
+                    && services
+                        .assets
+                        .is_file_available(project_id, &id)
+                        .await
+                        .map_err(ProductError::internal)?,
                 availability: record.map(|record| record.availability.as_str().to_owned()),
                 review_state: record.and_then(|record| record.review_status.clone()),
                 review_revision: record.and_then(|record| record.review_revision),

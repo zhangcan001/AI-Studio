@@ -1,12 +1,12 @@
 import type { RunsProps, RunsController } from "./RunsController";
-import { actionLabel, friendlyGenerator, inputText, labels, sourceLabels } from "./runsModel";
+import { actionLabel, friendlyGenerator, inputText, runStatusLabel, sourceLabels } from "./runsModel";
 import { RunResults } from "./RunResults";
 import { runRecoveryPresentation } from "./runRecoveryPresentation";
 export function RunDetail(props: RunsProps & { controller: RunsController }) {
   const c = props.controller; const run = c.detail;
   if (!run) return <section className="run-detail"><p>{c.missing ? "运行已不存在或不可访问。请从列表选择其他运行。" : "选择一个运行查看详情。"}</p></section>;
   const recovery = runRecoveryPresentation(run);
-  return <section className="run-detail" aria-label="运行详情"><header><h2>{run.title}</h2><span className="run-source">{sourceLabels[run.ref.source]}</span><span className={`run-status status-${run.status.toLowerCase()}`}>{labels[run.status]}</span></header>
+  return <section className="run-detail" aria-label="运行详情"><header><h2>{run.title}</h2><span className="run-source">{sourceLabels[run.ref.source]}</span><span className={`run-status status-${run.status.toLowerCase()}`}>{runStatusLabel(run)}</span></header>
     <section><h3>进度</h3><p>{run.progress.succeeded}/{run.progress.total} 已完成 · {run.progress.failed} 项失败 · {run.progress.cancelled} 项取消</p><progress max={Math.max(1, run.progress.total)} value={run.progress.succeeded + run.progress.failed + run.progress.cancelled} /></section>
     <div className="run-actions">{(["START", "PAUSE", "CANCEL"] as const).filter(action => run.availableActions.includes(action)).map(action => <button type="button" disabled={c.busy} key={action} onClick={() => void c.action(action)}>{actionLabel(action, run.status)}</button>)}{run.ref.source !== "production-run" && ["SUCCEEDED", "FAILED", "PARTIAL", "CANCELLED"].includes(run.status) && <button type="button" className="danger" disabled={c.busy} onClick={() => void c.remove()}>删除记录</button>}</div>
     <p role="note">启动需显式确认；暂停不抢占正在推理的项；取消会中断正在生成的任务并停止后续镜头，已生成的视频和素材会保留。</p>

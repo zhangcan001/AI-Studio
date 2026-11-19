@@ -1,4 +1,5 @@
 import { AUDIT70_RECOVERY_CHANGED, AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF } from "../audit70-recovery-successor-guard.mjs";
+import { AUDIT70_COMPLETION_CHANGED, AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF } from "../audit70-completion-successor-guard.mjs";
 // @vitest-environment node
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -13,8 +14,8 @@ import { LIBRARY_HIDDEN_PROMPTS_PROOF } from "../library-hidden-prompts-successo
 it("projects exact parent bytes and preserves its frozen proof", () => {
   const result = queueSyncImportPagingParentReader(".");
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...AUDIT70_RECOVERY_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...AUDIT70_RECOVERY_CHANGED, ...AUDIT70_COMPLETION_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF])].sort());
   const parent = path => execFileSync("git", ["show", `${QUEUE_SYNC_IMPORT_PAGING_BASE}:${path}`]);
   for (const path of QUEUE_SYNC_IMPORT_PAGING_CHANGED) {
     expect(result.read(path)).toBe(parent(path).toString().replaceAll("\r\n", "\n"));

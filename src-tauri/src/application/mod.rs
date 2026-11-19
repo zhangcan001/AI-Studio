@@ -386,7 +386,6 @@ pub mod folder_batch_import_service {
         pub mode: Mode,
         pub name: String,
         pub prompt_preview: String,
-        #[serde(skip)]
         pub prompt: String,
         pub duration_seconds: i64,
         pub width: i64,
@@ -402,8 +401,8 @@ pub mod folder_batch_import_service {
         pub entity_names: Vec<String>,
         pub opening_composition: Option<String>,
         pub ending_composition: Option<String>,
-        #[serde(skip)]
         pub prompt_sections: crate::domain::story_entity::ShotPromptSections,
+        pub reference_preview: Vec<String>,
         #[serde(skip)]
         pub references: Vec<String>,
         pub errors: Vec<crate::application::shot_bulk_service::BulkIssue>,
@@ -491,6 +490,7 @@ pub mod folder_batch_import_service {
                 || entity.name.trim() != entity.name
                 || !names.insert(entity.name.to_lowercase())
                 || entity.images.is_empty()
+                || entity.images.iter().collect::<BTreeSet<_>>().len() != entity.images.len()
                 || entity
                     .kind
                     .as_deref()
@@ -514,6 +514,14 @@ pub mod folder_batch_import_service {
             .any(|id| id.trim().is_empty() || !ids.insert(id))
         {
             return Err(failure("INVALID_MANIFEST", "镜头 id 必须非空且唯一"));
+        }
+        if manifest.shots.iter().any(|shot| {
+            shot.characters.iter().collect::<BTreeSet<_>>().len() != shot.characters.len()
+        }) {
+            return Err(failure(
+                "INVALID_MANIFEST",
+                "同一镜头的 characters 不能重复声明同一实体",
+            ));
         }
         Ok(manifest)
     }
@@ -712,6 +720,7 @@ pub mod folder_batch_import_service {
                     name,
                     prompt_preview: shot.prompt.chars().take(240).collect(),
                     prompt: shot.prompt.clone(),
+                    reference_preview: Vec::new(),
                     prompt_sections,
                     duration_seconds: duration,
                     width,
@@ -936,6 +945,7 @@ pub mod folder_batch_import_service {
         created_at: chrono::DateTime<chrono::Utc>,
         plan: Plan,
         state: SessionState,
+        commit_request: Option<CommitRequest>,
     }
     pub struct FolderBatchImportService {
         sessions: Mutex<HashMap<String, Session>>,
@@ -1012,6 +1022,7 @@ pub mod folder_batch_import_service {
                     created_at: self.clock.now(),
                     plan,
                     state: SessionState::Previewed,
+                    commit_request: None,
                 },
             );
             Ok(view)
@@ -1088,13 +1099,8 @@ pub mod folder_batch_import_service {
             }
             Ok(s.clone())
         }
-        /// One image per reused entity per shot. A reused entity's declared
-        /// package images listed in the row's `references` collapse to one:
-        /// - same bytes as the project cover: the package path is dropped and the
-        ///   existing asset is used (returns `false`, the caller adds it);
-        /// - different bytes: the first declared package path is kept; commit
-        ///   imports it and makes it the entity cover (old images are kept), so
-        ///   the shot binds that new cover once (returns `true`).
+        /// A listed image matching an existing cover satisfies the entity at
+        /// that exact position; distinct package pictures remain separate refs.
         async fn dedupe_existing_entity_reference(
             &self,
             root: &Path,
@@ -1106,53 +1112,37 @@ pub mod folder_batch_import_service {
             if !existing.iter().any(|e| e.id == entity.id) {
                 return Ok(false);
             }
-            let declared = declared_paths(manifest, &entity.name);
-            let listed: Vec<String> = declared
-                .iter()
-                .filter(|p| row.references.contains(p))
-                .cloned()
-                .collect();
-            let Some(first) = listed.first().cloned() else {
-                return Ok(false);
-            };
-            let managed = entity
+            let Some(cover) = entity
                 .cover_asset_id
                 .as_ref()
                 .or_else(|| entity.image_asset_ids.first())
-                .and_then(|id| crate::domain::AssetId::parse(id).ok());
-            let managed_sha = match managed {
-                Some(id) => self
-                    .assets
-                    .find_by_id(&id)
-                    .await
-                    .map_err(|_| failure("IMAGE_INVALID", "无法检查实体素材"))?
-                    .map(|asset| asset.sha256),
-                None => None,
-            };
-            let package_sha = read_file(
-                root,
-                &first,
-                super::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
-            )
-            .ok()
-            .map(|bytes| sha(&bytes));
-            if managed_sha.is_some() && package_sha == managed_sha {
-                row.references.retain(|p| !listed.contains(p));
+            else {
                 return Ok(false);
+            };
+            let id = crate::domain::AssetId::parse(cover)
+                .map_err(|_| failure("IMAGE_INVALID", "实体素材标识无效"))?;
+            let Some(managed) = self
+                .assets
+                .find_by_id(&id)
+                .await
+                .map_err(|_| failure("IMAGE_INVALID", "无法检查实体素材"))?
+            else {
+                return Ok(false);
+            };
+            for path in declared_paths(manifest, &entity.name)
+                .iter()
+                .filter(|path| row.references.contains(path))
+            {
+                let bytes = read_file(
+                    root,
+                    path,
+                    super::source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
+                )?;
+                if sha(&bytes) == managed.sha256 {
+                    return Ok(true);
+                }
             }
-            row.references
-                .retain(|p| p == &first || !listed.contains(p));
-            row.warnings
-                .push(crate::application::shot_bulk_service::BulkIssue {
-                    code: "ENTITY_COVER_FROM_PACKAGE".into(),
-                    message: format!(
-                        "「{}」将使用导入包中的新图片作为封面（原图片保留在资料库中）",
-                        entity.name
-                    ),
-                    row_number: Some(row.row_number),
-                    shot_id: None,
-                });
-            Ok(true)
+            Ok(false)
         }
         async fn build(
             &self,
@@ -1309,6 +1299,10 @@ pub mod folder_batch_import_service {
                         &entities,
                     )
                 };
+                let mentioned_names: Vec<_> = mentions
+                    .as_ref()
+                    .map(|items| items.iter().map(|entity| entity.name.clone()).collect())
+                    .unwrap_or_default();
                 let mut reference_paths = row.references.clone();
                 let listed_before = row.references.clone();
                 match mentions {
@@ -1378,7 +1372,7 @@ pub mod folder_batch_import_service {
                             ),
                         ),
                         Some(entity) => {
-                            if !row.entity_names.contains(&entity.name) {
+                            if !mentioned_names.contains(&entity.name) {
                                 row_error(
                                     row,
                                     failure(
@@ -1446,11 +1440,20 @@ pub mod folder_batch_import_service {
                                         .map_err(|_| {
                                             failure("IMAGE_INVALID", "无法检查素材收据")
                                         })?;
-                                    if available.as_ref().is_none_or(|a| {
-                                        a.project_id != project
-                                            || a.source_task_id.is_some()
-                                            || a.category != crate::domain::SOURCE_IMAGE_CATEGORY
-                                    }) || receipt.is_none()
+                                    let file_present = if let Some(asset) = &available {
+                                        self.projects.get_storage_root(project).await.map_err(|_| failure("IMAGE_INVALID", "无法检查项目存储"))?
+                                            .is_some_and(|root| matches!(crate::application::ports::inspect_asset_read_path(&root, Path::new(&asset.storage_path)), crate::application::ports::AssetReadInspection::Present { .. }))
+                                    } else {
+                                        false
+                                    };
+                                    if !file_present
+                                        || available.as_ref().is_none_or(|a| {
+                                            a.project_id != project
+                                                || a.source_task_id.is_some()
+                                                || a.category
+                                                    != crate::domain::SOURCE_IMAGE_CATEGORY
+                                        })
+                                        || receipt.is_none()
                                     {
                                         row_error(row,failure("IMAGE_INVALID","实体图片必须是当前项目具有导入收据的外部 SOURCE 图片"));
                                     }
@@ -1499,6 +1502,18 @@ pub mod folder_batch_import_service {
                     }
                 }
                 row.reference_count = reference_paths.iter().collect::<BTreeSet<_>>().len();
+                if row.mode == Mode::Reference {
+                    match ordered_reference_preview(
+                        row,
+                        &reference_paths,
+                        &entities,
+                        &manifest,
+                        &existing,
+                    ) {
+                        Ok(paths) => row.reference_preview = paths,
+                        Err(error) => row_error(row, error),
+                    }
+                }
                 if let Some(generator) = &row.generator {
                     let generator = generator.clone();
                     let pair = serde_json::to_string(&generator).expect("serializable generator");
@@ -1528,10 +1543,12 @@ pub mod folder_batch_import_service {
                                     definition.workflow_sha256, definition.recipe_sha256
                                 ),
                             );
-                            if let Err(error) =
-                                validate_definition(row, &definition, &reference_paths)
-                            {
-                                row_error(row, error);
+                            if row.width > 0 && row.height > 0 {
+                                if let Err(error) =
+                                    validate_definition(row, &definition, &reference_paths)
+                                {
+                                    row_error(row, error);
+                                }
                             }
                         }
                     }
@@ -1596,14 +1613,14 @@ pub mod folder_batch_import_service {
             for declared in &manifest.characters {
                 if let Some(old) = existing.iter().find(|e| e.name == declared.name) {
                     warnings.push(format!(
-                        "复用实体 {}：同一镜头内该实体只计一张参考图；图片与项目中相同时直接复用已有素材。",
+                        "复用实体 {}：保留既有封面、图片和描述；清单显式参考图按原顺序保留，同字节封面在原位置复用已有素材。",
                         declared.name
                     ));
                     let given = declared.description.as_deref().unwrap_or("").trim();
                     if fill_description(&old.description, declared.description.as_deref()).is_some()
                     {
                         warnings.push(format!(
-                            "「{}」已有描述为空或不是英文，导入时将填入清单中的英文外观描述。",
+                            "「{}」已有描述为空或不是英文，但导入不会改写既有实体；如需更新请在素材库明确编辑。",
                             declared.name
                         ));
                     } else if !given.is_empty() && given != old.description.trim() {
@@ -1719,6 +1736,73 @@ pub mod folder_batch_import_service {
                 paths
             })
             .unwrap_or_default()
+    }
+    fn ordered_reference_preview(
+        row: &Row,
+        paths: &[String],
+        entities: &[StoryEntity],
+        manifest: &Manifest,
+        existing: &[StoryEntity],
+    ) -> Result<Vec<String>, ImportFailure> {
+        let original: Vec<_> = paths
+            .iter()
+            .map(|path| {
+                crate::domain::AssetId::parse(format!("ast_{}", sha(path.as_bytes())))
+                    .expect("hash asset identity")
+            })
+            .collect();
+        let mut references = original.clone();
+        let projected = entities
+            .iter()
+            .cloned()
+            .map(|mut entity| {
+                entity.cover_asset_id = entity_image(manifest, existing, &entity)
+                    .ok()
+                    .and_then(|path| paths.iter().position(|p| *p == path))
+                    .map(|index| original[index].to_string());
+                entity.image_asset_ids.clear();
+                entity
+            })
+            .collect::<Vec<_>>();
+        let usage = crate::domain::story_entity::ShotCompositionUsage {
+            opening_entity_id: row
+                .opening_composition
+                .as_ref()
+                .and_then(|name| projected.iter().find(|entity| entity.name == *name))
+                .map(|entity| entity.id.clone()),
+            ending_entity_id: row
+                .ending_composition
+                .as_ref()
+                .and_then(|name| projected.iter().find(|entity| entity.name == *name))
+                .map(|entity| entity.id.clone()),
+        };
+        let reordered = super::shot_video_input_service::order_composition_references(
+            &mut references,
+            &projected,
+            &usage,
+        );
+        if reordered
+            && super::shot_video_input_service::ref2va_prompt_texts(
+                &row.prompt,
+                &row.prompt_sections,
+            )
+            .any(|text| text.contains("<Picture "))
+        {
+            return Err(failure(
+                "PICTURE_ORDER_AMBIGUOUS",
+                "首尾构图会重排参考图，请将手写 Picture 编号改为 @实体后重新校验",
+            ));
+        }
+        Ok(references
+            .iter()
+            .map(|id| {
+                paths[original
+                    .iter()
+                    .position(|original| original == id)
+                    .expect("ordered reference identity")]
+                .clone()
+            })
+            .collect())
     }
     fn entity_image(
         manifest: &Manifest,
@@ -1836,7 +1920,7 @@ pub mod folder_batch_import_service {
         Writing,
         Terminal(Box<ImportResult>),
     }
-    #[derive(Clone, Debug, Deserialize)]
+    #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     pub struct CommitRequest {
         pub session_id: String,
@@ -1863,6 +1947,13 @@ pub mod folder_batch_import_service {
         pub id: String,
         pub message: String,
     }
+    #[derive(Clone, Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ImportedRowReceipt {
+        pub row_key: String,
+        pub shot_id: String,
+        pub name: String,
+    }
     #[derive(Clone, Debug, Default, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct ImportResult {
@@ -1870,6 +1961,7 @@ pub mod folder_batch_import_service {
         pub failure: Option<ImportFailure>,
         pub compensation_errors: Vec<CompensationError>,
         pub created_shot_ids: Vec<String>,
+        pub created_rows: Vec<ImportedRowReceipt>,
         pub reused_entity_ids: Vec<String>,
         pub created_entity_ids: Vec<String>,
         pub imported_asset_ids: Vec<String>,
@@ -1878,10 +1970,6 @@ pub mod folder_batch_import_service {
         pub auto_started: bool,
         pub residual: Residual,
         pub warnings: Vec<String>,
-        /// Reused entities as they were before this import changed their cover
-        /// or description; compensation writes them back.
-        #[serde(skip)]
-        pub restored_entities: Vec<StoryEntity>,
     }
     /// Test seam for explicit Start only; the product adapter delegates to the existing admission/Queue authority.
     #[async_trait::async_trait]
@@ -2083,13 +2171,20 @@ pub mod folder_batch_import_service {
             let _ = stage;
             Ok(())
         }
-        pub async fn commit(&self, request: CommitRequest) -> Result<ImportResult, ImportFailure> {
+        pub async fn commit(
+            &self,
+            mut request: CommitRequest,
+        ) -> Result<ImportResult, ImportFailure> {
+            request.include_row_keys.sort();
             let initial = self.session(&request.session_id).await?;
             let _guard =
                 ProjectImportGuard::acquire(self.project_locks.clone(), &initial.project_id)?;
             let session = self.session(&request.session_id).await?;
             match &session.state {
                 SessionState::Terminal(result) => {
+                    if session.commit_request.as_ref() != Some(&request) {
+                        return Err(failure("SESSION_CONSUMED", "本会话已有不同选集的写入回执；请恢复原选择查看回执，或重新选择文件夹开始新导入"));
+                    }
                     let mut result = (**result).clone();
                     result
                         .warnings
@@ -2180,6 +2275,16 @@ pub mod folder_batch_import_service {
                     &session.plan.options,
                 )
                 .await?;
+            if fresh.view.manifest_sha256 != preview.manifest_sha256
+                || files
+                    .iter()
+                    .any(|file| fresh.file_sha256.get(file) != session.plan.file_sha256.get(file))
+            {
+                return Err(failure(
+                    "STALE_PREVIEW",
+                    "重建预检时文件内容已变化，请重新校验并确认",
+                ));
+            }
             for row in &rows {
                 let next = fresh
                     .view
@@ -2224,6 +2329,7 @@ pub mod folder_batch_import_service {
                 {
                     return Err(failure("STALE_PREVIEW", "预览已更新"));
                 }
+                live.commit_request = Some(request.clone());
                 live.state = SessionState::Writing;
             }
             let mut result = ImportResult {
@@ -2283,6 +2389,41 @@ pub mod folder_batch_import_service {
                         "STALE_PREVIEW",
                         "素材在导入期间发生变化",
                     ));
+                }
+                let mut existing_cover = None;
+                for entity in &plan.entities {
+                    if !plan
+                        .view
+                        .characters
+                        .iter()
+                        .any(|item| item.name == entity.name && item.action == "reuse")
+                        || !declared_paths(&plan.manifest, &entity.name).contains(file)
+                    {
+                        continue;
+                    }
+                    let Some(cover) = entity
+                        .cover_asset_id
+                        .as_ref()
+                        .or_else(|| entity.image_asset_ids.first())
+                    else {
+                        continue;
+                    };
+                    let asset_id = crate::domain::AssetId::parse(cover)
+                        .map_err(|_| stage_failure("A", "IMAGE_INVALID", "既有封面标识无效"))?;
+                    if self
+                        .assets
+                        .find_by_id(&asset_id)
+                        .await
+                        .map_err(|_| stage_failure("A", "IMAGE_INVALID", "无法检查既有封面"))?
+                        .is_some_and(|asset| asset.sha256 == sha(&bytes))
+                    {
+                        existing_cover = Some(cover.clone());
+                        break;
+                    }
+                }
+                if let Some(id) = existing_cover {
+                    assets.insert(file.clone(), id);
+                    continue;
                 }
                 let name = Path::new(file)
                     .file_name()
@@ -2355,48 +2496,10 @@ pub mod folder_batch_import_service {
                     if !result.reused_entity_ids.contains(&entity.id) {
                         result.reused_entity_ids.push(entity.id.clone());
                     }
-                    let given = plan
-                        .manifest
-                        .characters
-                        .iter()
-                        .find(|e| e.name == *name)
-                        .and_then(|e| e.description.as_deref());
-                    // Only an empty or non-English description is filled.
-                    let description = fill_description(&entity.description, given);
-                    // A package image that preview kept (different bytes) was
-                    // imported in stage A; it becomes the cover, old images stay.
-                    let new_cover = declared_paths(&plan.manifest, name)
-                        .iter()
-                        .find_map(|p| assets.get(p).cloned())
-                        .filter(|id| entity.cover_asset_id.as_ref() != Some(id));
-                    if description.is_none() && new_cover.is_none() {
-                        entity.clone()
-                    } else {
-                        let mut images = entity.image_asset_ids.clone();
-                        if let Some(id) = &new_cover {
-                            if !images.contains(id) {
-                                images.push(id.clone());
-                            }
-                        }
-                        result.restored_entities.push(entity.clone());
-                        self.entities
-                            .update(
-                                project,
-                                &entity.id,
-                                crate::domain::story_entity::StoryEntityUpsert {
-                                    name: entity.name.clone(),
-                                    description: description
-                                        .unwrap_or_else(|| entity.description.clone()),
-                                    cover_asset_id: new_cover
-                                        .or_else(|| entity.cover_asset_id.clone()),
-                                    image_asset_ids: images,
-                                },
-                            )
-                            .await
-                            .map_err(|_| {
-                                stage_failure("B", "ENTITY_UPDATE_FAILED", "实体更新失败")
-                            })?
-                    }
+                    // Existing entities are immutable during folder import.
+                    // This also eliminates snapshot rollback overwriting edits
+                    // made by another editor while a later stage fails.
+                    entity.clone()
                 };
                 entities.insert(name.clone(), entity);
             }
@@ -2425,6 +2528,15 @@ pub mod folder_batch_import_service {
                     "镜头创建数量不一致，拒绝继续",
                 ));
             }
+            result.created_rows = rows
+                .iter()
+                .zip(&result.created_shot_ids)
+                .map(|(row, id)| ImportedRowReceipt {
+                    row_key: row.row_key.clone(),
+                    shot_id: id.clone(),
+                    name: row.name.clone(),
+                })
+                .collect();
             self.injection("C2")?;
             let mut configs = Vec::new();
             let mut prompts = Vec::new();
@@ -2612,12 +2724,22 @@ pub mod folder_batch_import_service {
                     }
                 }
                 let saved = services.inputs.save(&input_scope, None, &inputs).await;
-                if saved.is_err() {
-                    result.residual.shot_ids.push(id.clone());
+                if let Err(error) = saved {
+                    if matches!(
+                        error,
+                        super::shot_video_input_service::ShotVideoInputError::Conflict
+                    ) {
+                        result.residual.shot_ids.push(id.clone());
+                        return Err(stage_failure(
+                            "D",
+                            "INPUT_SAVE_CONFLICT",
+                            "正式输入已被并发编辑；保留该镜头，请刷新后检查",
+                        ));
+                    }
                     return Err(stage_failure(
                         "D",
                         "INPUT_SAVE_FAILED",
-                        "正式输入保存被拒绝；保留可能被并发编辑的镜头",
+                        format!("正式输入保存失败：{error}"),
                     ));
                 }
             }
@@ -2751,29 +2873,6 @@ pub mod folder_batch_import_service {
                         target: "entity".into(),
                         id: id.clone(),
                         message: "保留仍有关联或未能清理的实体".into(),
-                    });
-                }
-            }
-            for old in result.restored_entities.clone().iter().rev() {
-                let restored = self
-                    .entities
-                    .update(
-                        project,
-                        &old.id,
-                        crate::domain::story_entity::StoryEntityUpsert {
-                            name: old.name.clone(),
-                            description: old.description.clone(),
-                            cover_asset_id: old.cover_asset_id.clone(),
-                            image_asset_ids: old.image_asset_ids.clone(),
-                        },
-                    )
-                    .await;
-                if restored.is_err() {
-                    result.residual.entity_ids.push(old.id.clone());
-                    result.compensation_errors.push(CompensationError {
-                        target: "entity".into(),
-                        id: old.id.clone(),
-                        message: "未能恢复复用实体的原封面/描述".into(),
                     });
                 }
             }
@@ -2911,6 +3010,26 @@ pub mod folder_batch_import_service {
                 );
             }
         }
+        #[test]
+        fn r46_duplicate_entity_paths_and_duplicate_shot_bindings_fail_before_writes() {
+            let mut value = serde_json::to_value(manifest()).unwrap();
+            value["shots"][0]["characters"] = serde_json::json!(["Alice", "Alice"]);
+            assert_eq!(
+                parse_manifest(&serde_json::to_vec(&value).unwrap())
+                    .unwrap_err()
+                    .code,
+                "INVALID_MANIFEST"
+            );
+            value["shots"][0]["characters"] = serde_json::json!([]);
+            value["characters"] =
+                serde_json::json!([{"name":"Alice", "images":["images/a.png","images/a.png"]}]);
+            assert_eq!(
+                parse_manifest(&serde_json::to_vec(&value).unwrap())
+                    .unwrap_err()
+                    .code,
+                "INVALID_MANIFEST"
+            );
+        }
         fn manifest() -> Manifest {
             parse_manifest(br#"{"format":"ai-studio-shot-batch","version":1,"name":"test","generators":{"firstLast":{"workflowVersionId":"wv","recipeId":"recipe"},"reference":{"workflowVersionId":"ref","recipeId":"recipe"}},"defaults":{"durationSeconds":5,"aspectRatio":"16:9","resolutionPreset":"0.98"},"shots":[{"prompt":"open door","mode":"firstLast","firstFrame":"images/a.png","lastFrame":"images/b.png"},{"prompt":"@Alice turn","mode":"reference","references":["images/c.png"],"aspectRatio":"9:16"}]}"#).unwrap()
         }
@@ -2953,10 +3072,20 @@ pub mod folder_batch_import_service {
             m = manifest();
             m.shots[0].width = Some(1280);
             m.shots[0].height = Some(720);
-            assert!(normalize(&m, None, &[])[0]
+            let invalid = &normalize(&m, None, &[])[0];
+            assert!(invalid
                 .errors
                 .iter()
                 .any(|e| e.code == "RESOLUTION_UNSUPPORTED"));
+            assert_eq!((invalid.width, invalid.height), (0, 0));
+            assert_eq!(
+                invalid
+                    .errors
+                    .iter()
+                    .filter(|e| e.code == "RESOLUTION_UNSUPPORTED")
+                    .count(),
+                1
+            );
             for p in [
                 "../x.png",
                 "/x.png",
@@ -3688,6 +3817,19 @@ pub mod folder_batch_import_service {
                     queue_repo.clone(),
                     clock.clone(),
                 )
+                .with_asset_query(Arc::new(
+                    crate::application::asset_query_service::AssetQueryService::new(
+                        Arc::new(crate::infrastructure::database::SqliteAssetRepository::new(
+                            pool.clone(),
+                        )),
+                        Arc::new(crate::infrastructure::filesystem::FileSystemAssetStore::new()),
+                        Arc::new(
+                            crate::infrastructure::database::SqliteProjectRepository::new(
+                                pool.clone(),
+                            ),
+                        ),
+                    ),
+                ))
                 .with_row_edit_repository(Arc::new(SqliteShotRowEditRepository::new(pool.clone())))
                 .with_stage_prompt_repository(shots.clone())
                 .with_video_inputs(inputs.clone()),
@@ -3964,7 +4106,7 @@ pub mod folder_batch_import_service {
                     .unwrap();
             let png = std::fs::read(f.root.join("images/alice.png")).unwrap();
             let mut refs = vec!["images/c.png".to_string()];
-            for i in 0..6 {
+            for i in 0..if same_bytes { 6 } else { 5 } {
                 let mut other = Vec::new();
                 image::DynamicImage::new_rgb8(32 + i, 32)
                     .write_to(
@@ -3976,7 +4118,11 @@ pub mod folder_batch_import_service {
                 std::fs::write(f.root.join(&name), other).unwrap();
                 refs.push(name);
             }
-            refs.push("images/alice.png".into());
+            if same_bytes {
+                refs.insert(1, "images/alice.png".into());
+            } else {
+                refs.push("images/alice.png".into());
+            }
             m.shots[1].references = refs;
             m.characters[0].description = Some("Tall woman in a red wool coat".into());
             std::fs::write(
@@ -4037,7 +4183,15 @@ pub mod folder_batch_import_service {
             let (cover, description) = alice(&f).await;
             assert_eq!(cover, old_cover);
             assert_eq!(refs.iter().filter(|r| **r == cover).count(), 1);
-            assert_eq!(description, "Tall woman in a red wool coat");
+            assert_eq!(
+                refs.get(1),
+                Some(&cover),
+                "R05: same-byte explicit cover remains Picture 2, not moved to the end"
+            );
+            assert_eq!(
+                description, "",
+                "R44: importing cannot replace an existing description"
+            );
             assert!(!preview.rows[1]
                 .warnings
                 .iter()
@@ -4047,35 +4201,40 @@ pub mod folder_batch_import_service {
             f.pool.close().await;
         }
         #[tokio::test]
-        async fn reused_entity_different_bytes_package_image_becomes_cover_once() {
+        async fn reused_entity_different_bytes_preserves_old_cover_and_explicit_picture() {
             let (f, preview, result, old_cover) =
                 reimport_with_existing_entity_paths_and_mentions(false).await;
-            assert!(preview.rows[1]
+            assert!(preview
                 .warnings
                 .iter()
-                .any(|w| w.message
-                    == "「Alice」将使用导入包中的新图片作为封面（原图片保留在资料库中）"));
+                .any(|warning| warning.contains("保留既有封面")));
             let refs = bound_reference_assets(&f, &result.created_shot_ids[1]).await;
             assert_eq!(refs.len(), 8);
             assert_eq!(refs.iter().collect::<BTreeSet<_>>().len(), 8);
             let (cover, _) = alice(&f).await;
-            assert_ne!(cover, old_cover);
+            assert_eq!(cover, old_cover);
             assert_eq!(refs.iter().filter(|r| **r == cover).count(), 1);
-            assert!(!refs.contains(&old_cover));
+            assert!(refs.contains(&old_cover));
+            assert_ne!(
+                refs[refs.len() - 2],
+                old_cover,
+                "R05: the distinct explicit package picture is retained before the implicit cover"
+            );
             let images: Vec<String> = sqlx::query_scalar("SELECT i.asset_id FROM story_entity_images i JOIN story_entities e ON e.id=i.entity_id WHERE e.name='Alice'")
                 .fetch_all(&f.pool)
                 .await
                 .unwrap();
-            assert!(
-                images.contains(&old_cover) && images.contains(&cover),
-                "{images:?}"
+            assert_eq!(
+                images,
+                vec![old_cover],
+                "R44: existing entity image membership is unchanged"
             );
             assert_eq!(count(&f.pool, "story_entities").await, 1);
             assert_no_execution(&f.pool).await;
             f.pool.close().await;
         }
         #[tokio::test]
-        async fn reused_entity_cover_change_is_restored_on_compensation() {
+        async fn r45_reused_entity_is_untouched_through_compensation() {
             let f = preview_fixture().await;
             let first = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
             assert_eq!(
@@ -4170,6 +4329,98 @@ pub mod folder_batch_import_service {
             let r2 = f.service.commit(req).await.unwrap();
             assert_eq!(r2.outcome, "partial");
             assert_eq!(count(&f.pool, "assets").await, 4);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn r07_rebuilt_preview_cannot_substitute_new_image_bytes_for_confirmation() {
+            struct MutatingAdmission {
+                path: PathBuf,
+                once: std::sync::atomic::AtomicBool,
+            }
+            #[async_trait::async_trait]
+            impl NewGenerationAdmission for MutatingAdmission {
+                async fn is_available_for_new_generation(
+                    &self,
+                    _: &str,
+                    _: &str,
+                ) -> Result<bool, crate::application::ports::RepositoryError> {
+                    if !self.once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        let mut bytes = Vec::new();
+                        image::DynamicImage::new_rgb8(48, 32)
+                            .write_to(
+                                &mut std::io::Cursor::new(&mut bytes),
+                                image::ImageFormat::Png,
+                            )
+                            .unwrap();
+                        std::fs::write(&self.path, bytes).unwrap();
+                    }
+                    Ok(true)
+                }
+            }
+            let mut f = preview_fixture().await;
+            let preview = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            f.service.admission = Arc::new(MutatingAdmission {
+                path: f.root.join("images/c.png"),
+                once: std::sync::atomic::AtomicBool::new(false),
+            });
+            assert_eq!(
+                f.service
+                    .commit(request(&preview, false))
+                    .await
+                    .unwrap_err()
+                    .code,
+                "STALE_PREVIEW"
+            );
+            assert_eq!(count(&f.pool, "shots").await, 0);
+            assert_eq!(count(&f.pool, "assets").await, 0);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn r49_terminal_receipt_is_bound_to_original_selection_and_contains_stable_rows() {
+            let f = preview_fixture().await;
+            let preview = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let request = request(&preview, false);
+            let result = f.service.commit(request.clone()).await.unwrap();
+            assert_eq!(result.created_rows.len(), 2);
+            for (receipt, row) in result.created_rows.iter().zip(&preview.rows) {
+                assert_eq!(receipt.row_key, row.row_key);
+                assert_eq!(receipt.name, row.name);
+                assert!(result.created_shot_ids.contains(&receipt.shot_id));
+            }
+            let mut changed = request.clone();
+            changed.include_row_keys.truncate(1);
+            assert_eq!(
+                f.service.commit(changed).await.unwrap_err().code,
+                "SESSION_CONSUMED"
+            );
+            assert_eq!(
+                f.service.commit(request).await.unwrap().created_shot_ids,
+                result.created_shot_ids
+            );
+            assert_eq!(count(&f.pool, "shots").await, 2);
+            assert_no_execution(&f.pool).await;
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn r47_missing_existing_cover_file_is_visible_during_preview() {
+            let f = preview_fixture().await;
+            let preview = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            f.service.commit(request(&preview, false)).await.unwrap();
+            let (cover, _) = alice(&f).await;
+            let path: String = sqlx::query_scalar("SELECT storage_path FROM assets WHERE id = ?")
+                .bind(cover)
+                .fetch_one(&f.pool)
+                .await
+                .unwrap();
+            std::fs::remove_file(path).unwrap();
+            let preview = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert!(preview.rows[1]
+                .errors
+                .iter()
+                .any(|issue| issue.code == "IMAGE_INVALID"));
+            assert_eq!(count(&f.pool, "shots").await, 2);
             assert_no_execution(&f.pool).await;
             f.pool.close().await;
         }
@@ -4799,6 +5050,91 @@ pub mod folder_batch_import_service {
             assert_eq!(again.outcome, "partial");
             assert_eq!(again.created_shot_ids, r.created_shot_ids);
             assert_eq!(count(&f.pool, "shots").await, 1);
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn r04_invalid_dimensions_do_not_compile_a_zero_by_zero_recipe() {
+            let f = preview_fixture().await;
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["shots"][0]["width"] = 1280.into();
+            value["shots"][0]["height"] = 720.into();
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            let row = &p.rows[0];
+            assert_eq!((row.width, row.height), (0, 0), "{row:?}");
+            assert_eq!(
+                row.errors
+                    .iter()
+                    .filter(|e| e.code == "RESOLUTION_UNSUPPORTED")
+                    .count(),
+                1,
+                "{:?}",
+                row.errors
+            );
+            assert!(
+                row.errors
+                    .iter()
+                    .all(|e| e.code == "RESOLUTION_UNSUPPORTED"),
+                "{:?}",
+                row.errors
+            );
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn r11_handwritten_picture_tags_are_rejected_when_usage_reorders_references() {
+            let f = preview_fixture().await;
+            add_composition_usage(
+                &f,
+                "开场",
+                "结尾",
+                "按 <Picture 3> 和 @开场，@Alice 走近，最后停在 @结尾 的构图",
+            );
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert!(
+                p.rows[1]
+                    .errors
+                    .iter()
+                    .any(|e| e.code == "PICTURE_ORDER_AMBIGUOUS"),
+                "{:?}",
+                p.rows[1].errors
+            );
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn r70_preview_reference_order_matches_opening_and_ending_usage() {
+            let f = preview_fixture().await;
+            add_composition_usage(
+                &f,
+                "开场",
+                "结尾",
+                "按 @开场 的构图，@Alice 走近，最后停在 @结尾 的构图",
+            );
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            assert!(p.rows[1].errors.is_empty(), "{:?}", p.rows[1].errors);
+            let preview = &p.rows[1].reference_preview;
+            assert!(
+                preview.first().is_some_and(|path| path.contains("开场")),
+                "{preview:?}"
+            );
+            assert!(
+                preview.last().is_some_and(|path| path.contains("结尾")),
+                "{preview:?}"
+            );
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn r48_only_true_input_conflicts_retain_shots_other_save_failures_compensate() {
+            let f = preview_fixture().await;
+            let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
+            f.service.faults.lock().unwrap().insert("D");
+            let r = f.service.commit(request(&p, true)).await.unwrap();
+            assert_eq!(r.outcome, "compensated", "{r:?}");
+            assert_eq!(r.failure.as_ref().unwrap().stage, "D");
+            assert!(!r.failure.as_ref().unwrap().message.is_empty());
+            assert!(r.residual.shot_ids.is_empty(), "{r:?}");
+            assert_eq!(count(&f.pool, "shots").await, 0);
             f.pool.close().await;
         }
     }

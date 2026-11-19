@@ -52,6 +52,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const mounted = useRef(false);
   const attempt = useRef<string | null>(null);
   const attemptFingerprint = useRef<string | undefined>(undefined);
+  const submissionIntents = useRef(new Map<string, string>());
   const actionLock = useRef(false);
   const owner = `${route.projectId}:${route.shotId ?? ""}`;
   const previousOwner = useRef(owner);
@@ -102,7 +103,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
         if (selected?.selectionRef) writeLastGenerator(route.projectId, route.stage, selected.selectionRef);
         setRestoredDraft(saved && selected ? { key, selection: selected.selectionRef, values: saved.values } : undefined);
         const reused = reuse && selected?.selectionRef === reuse.selectionRef && next.selectedShot;
-        useStudioStore.getState().loadCreationDraft(reused ? draftFor(selected, next.selectedShot, reuse.values) : saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), reused ? true : saved?.dirty ?? false, reused ? undefined : saved?.provenance);
+        useStudioStore.getState().loadCreationDraft(reused ? draftFor(selected, null, reuse.values) : saved?.values ?? (selected ? draftFor(selected, next.selectedShot) : {}), reused ? true : saved?.dirty ?? false, reused ? undefined : saved?.provenance);
         if (reused) useStudioStore.getState().setPendingRunIntent(undefined);
         setRunRef(saved?.runRef ?? next.selectedShot?.recentRun ?? null); setAccepted(saved?.accepted ?? null);
         useStudioStore.getState().setCreationLabReturn(undefined);
@@ -114,6 +115,20 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       if (initialized) snapshots.current.set(key, { ...live.current, values: store.values, dirty: store.draftDirty, provenance: store.creationPromptProvenance });
     };
   }, [key]); // Canonical route is the only Shot/stage owner.
+  const pickerOwner = useRef<{key:string;requestId:string} | undefined>(undefined);
+  useEffect(() => {
+    const intent = pendingRunIntent;
+    if (!intent?.target || intent.target.shotId !== null || intent.projectId !== route.projectId || intent.stage !== route.stage || route.shotId) return;
+    const owner = {key,requestId:intent.target.requestId};
+    pickerOwner.current=owner;
+    // Defer disposal one microtask so StrictMode's immediate same-owner replay
+    // can renew ownership; a genuine exit still abandons the unassigned draft.
+    return () => { queueMicrotask(() => {
+      if (pickerOwner.current !== owner && pickerOwner.current?.key === owner.key) return;
+      const pending = useStudioStore.getState().pendingRunIntent;
+      if (pending?.target?.requestId === owner.requestId && pending.target.shotId === null) useStudioStore.getState().setPendingRunIntent(undefined);
+    }); };
+  }, [pendingRunIntent?.target?.requestId, key]);
   useEffect(() => {
     const intent = pendingRunIntent;
     const shot = context?.selectedShot;
@@ -125,7 +140,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (!option) {
       setError("原生成器当前不可用，请明确选择其他生成器；未自动替换。");
     } else {
-      const next = draftFor(option, shot, intent.values);
+      const next = draftFor(option, null, intent.values);
       attempt.current = null; setAccepted(null); setError(undefined); setSelection(option.selectionRef);
       setRestoredDraft({ key, selection: option.selectionRef, values: next });
       writeLastGenerator(route.projectId, route.stage, option.selectionRef);
@@ -138,7 +153,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   useEffect(() => () => { onDirtyChange?.(false); const store = useStudioStore.getState(); if (!store.creationLabReturn) store.loadCreationDraft({}); }, [onDirtyChange]);
   function submission() {
     const store = useStudioStore.getState();
-    return { projectId: route.projectId, shotId: route.shotId ?? "", stage: route.stage, selectionRef: selection, values: store.values, ...store.creationPromptProvenance, submissionIdempotencyKey: attempt.current ?? "readiness-only" };
+    return { expectedVideoInputs: videoInputs.enabled ? videoInputs.view?.token ?? null : undefined, projectId: route.projectId, shotId: route.shotId ?? "", stage: route.stage, selectionRef: selection, values: store.values, ...store.creationPromptProvenance, submissionIdempotencyKey: attempt.current ?? "readiness-only" };
   }
   useEffect(() => {
     ++readinessEpoch.current;
@@ -318,18 +333,18 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       setGeneratedVideoConfirm(false);
     });
   }
-  function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); setPendingStandardRun(undefined); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
-  function removeValue(field: string) { setPendingStandardRun(undefined); attempt.current = null; setAccepted(null); useStudioStore.getState().removeValue(field); }
+  function setValue(field: string, value: DraftValue) { const intent = useStudioStore.getState().pendingAssetIntent; if (intent && (("assetId" in value && value.assetId === intent.assetId) || ("assetIds" in value && value.assetIds.includes(intent.assetId)))) useStudioStore.getState().clearPendingAssetIntent(); setPendingStandardRun(undefined); submissionIntents.current.clear(); attempt.current = null; setAccepted(null); useStudioStore.getState().setValue(field, value); }
+  function removeValue(field: string) { setPendingStandardRun(undefined); submissionIntents.current.clear(); attempt.current = null; setAccepted(null); useStudioStore.getState().removeValue(field); }
   function chooseResolution(id: string) {
     const preset = generator?.resolutionPresets?.find(item => item.id === id);
     if (!preset || busy) return;
-    setPendingStandardRun(undefined); attempt.current = null; setAccepted(null);
+    setPendingStandardRun(undefined); submissionIntents.current.clear(); attempt.current = null; setAccepted(null);
     const store = useStudioStore.getState();
     store.loadCreationDraft({ ...store.values, width: { type: "integer", value: preset.width }, height: { type: "integer", value: preset.height } }, true, store.creationPromptProvenance);
   }
   function applyPromptChoice(choice: CreationPromptChoice | (CreationPromptProvenance & {text:string})) {
     if (!context?.selectedShot || !generator?.fields.some(field=>field.key==="prompt" && field.type==="textarea")) return;
-    setPendingStandardRun(undefined); attempt.current=null; setAccepted(null); useStudioStore.getState().applyCreationPrompt(choice);
+    setPendingStandardRun(undefined); submissionIntents.current.clear(); attempt.current=null; setAccepted(null); useStudioStore.getState().applyCreationPrompt(choice);
   }
   function openLibrary(filter: "prompts" | "images" | "videos" | "audio" | "media") {
     useStudioStore.getState().setCreationLabReturn({scope:key, route, selectionRef:selection, runRef, accepted});
@@ -340,7 +355,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     const stripsMedia = option.persistentInputs && Object.values(values).some(value => "assetId" in value || "assetIds" in value);
     if ((videoInputs.dirty || stripsMedia) && typeof window !== "undefined" && !window.confirm("切换生成器会丢弃当前未保存的媒体输入草稿，已保存的正式输入仍按 Recipe 保留。确定继续？")) return;
     useStudioStore.getState().setPendingRunIntent(undefined);
-    setPendingStandardRun(undefined); attempt.current = null; setSelection(ref); writeLastGenerator(route.projectId, route.stage, ref); setAccepted(null); setRestoredDraft(undefined);
+    setPendingStandardRun(undefined); submissionIntents.current.clear(); attempt.current = null; setSelection(ref); writeLastGenerator(route.projectId, route.stage, ref); setAccepted(null); setRestoredDraft(undefined);
     const previous = option.persistentInputs ? Object.fromEntries(Object.entries(values).filter(([,v]) => !("assetId" in v || "assetIds" in v))) : values;
     useStudioStore.getState().loadCreationDraft(draftFor(option, context?.selectedShot ?? null, previous), true, option.fields.some(field=>field.key==="prompt" && field.type==="textarea") ? useStudioStore.getState().creationPromptProvenance : undefined);
   }
@@ -378,7 +393,8 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
       ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
     if (!attempt.current || attemptFingerprint.current !== fingerprint) {
-      attempt.current = crypto.randomUUID();
+      attempt.current = submissionIntents.current.get(fingerprint) ?? crypto.randomUUID();
+      submissionIntents.current.set(fingerprint, attempt.current);
       attemptFingerprint.current = fingerprint;
     }
     const request = {
@@ -389,6 +405,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
       values: requestValues,
       ...store.creationPromptProvenance,
       submissionIdempotencyKey: attempt.current,
+      expectedVideoInputs: videoInputs.enabled ? videoInputs.view?.token ?? null : undefined,
     };
     const ready = await productClient.creation.readinessGet(request);
     // Compare against live currentDraft, not the closed-over render locals — otherwise
@@ -398,7 +415,10 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     const ack = await productClient.creation.generate(request);
     // A lost response must retain its key; a confirmed acceptance ends this attempt.
     // The next explicit generation is a new intent, even if its values are unchanged.
-    if (ack.accepted && attempt.current === request.submissionIdempotencyKey) attempt.current = null;
+    if (ack.accepted) {
+      if (submissionIntents.current.get(fingerprint) === request.submissionIdempotencyKey) submissionIntents.current.delete(fingerprint);
+      if (attempt.current === request.submissionIdempotencyKey) attempt.current = null;
+    }
     if (!mounted.current || token !== epoch.current || draft.key !== currentDraft.current.key) return;
     // A committed run belongs to this scope even if runtime/input evidence changed
     // in flight. Keep its locator without accepting or overwriting a newer draft.
@@ -458,7 +478,20 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     }
     void mutate(() => commitGenerate());
   }, [pendingStandardRun, key, selection, loading, busy, generator, videoInputs.enabled, videoInputs.view, videoInputs.loading, videoInputs.busy, videoInputs.ready, videoInputs.error]);
-  const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); if (token === epoch.current) navigate({ ...route, shotId: shot.id }); });
+  const selectShot = async (shotId: string) => {
+      const intent = useStudioStore.getState().pendingRunIntent;
+      const choosingForReuse = Boolean(shotId && !route.shotId && intent?.target?.shotId === null && intent.projectId === route.projectId && intent.stage === route.stage);
+      if (choosingForReuse && intent?.target) useStudioStore.getState().setPendingRunIntent({ ...intent, target: { ...intent.target, shotId } });
+      try {
+        const accepted = await navigate({ ...route, shotId: shotId || undefined });
+        if (accepted === false && choosingForReuse && useStudioStore.getState().pendingRunIntent?.target?.requestId === intent?.target?.requestId) useStudioStore.getState().setPendingRunIntent(undefined);
+        return accepted;
+      } catch (cause) {
+        if (choosingForReuse && useStudioStore.getState().pendingRunIntent?.target?.requestId === intent?.target?.requestId) useStudioStore.getState().setPendingRunIntent(undefined);
+        throw cause;
+      }
+    };
+  const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); if (token === epoch.current) await selectShot(shot.id); });
   const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const token = epoch.current; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); if (!mounted.current || token !== epoch.current) return; setRun(next); setRunRef(next.ref); setAccepted(null); });
@@ -470,7 +503,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     },
     openProjects: () => navigate({ kind: "project-list" }),
     refresh: () => mutate(() => refreshContext()),
-    selectShot: (shotId: string) => navigate({ ...route, shotId: shotId || undefined }),
+    selectShot,
     selectStage: (stage: "image" | "video") => navigate({ ...route, stage }),
     openRun: () => runRef && navigate({ kind: "runs", projectId: route.projectId, run: runRef }),
     openRunsList: () => navigate({ kind: "runs", projectId: route.projectId }),

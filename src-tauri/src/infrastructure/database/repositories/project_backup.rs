@@ -559,6 +559,29 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
                 missing.push(binding.recipe_id.clone());
             }
         }
+
+        for input_set in &document.shot_video_input_sets {
+            let pair = sqlx::query_as::<_, (String, String)>(
+                "SELECT r.recipe_yaml, v.api_workflow_json FROM recipes r INNER JOIN workflow_versions v ON v.id = r.workflow_version_id WHERE r.id = ? AND v.id = ?"
+            ).bind(&input_set.scope.recipe_id).bind(&input_set.scope.workflow_version_id).fetch_optional(&self.pool).await
+                .map_err(|error| RepositoryError::database(error.to_string()))?;
+            let executable = pair.is_some_and(|(yaml, workflow)| {
+                crate::compiler::RecipeParser::parse(&yaml).is_ok()
+                    && serde_json::from_str::<serde_json::Value>(&workflow)
+                        .ok()
+                        .and_then(|v| v.as_object().map(|m| !m.is_empty()))
+                        .unwrap_or(false)
+            });
+            if !executable {
+                let identity = format!(
+                    "正式输入：{} / {}",
+                    input_set.scope.workflow_version_id, input_set.scope.recipe_id
+                );
+                if !missing.contains(&identity) {
+                    missing.push(identity);
+                }
+            }
+        }
         Ok(missing)
     }
 

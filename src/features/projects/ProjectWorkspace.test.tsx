@@ -166,6 +166,13 @@ describe("ProjectWorkspace archive UX", () => {
     expect(screen.getByText("工具状态为 UNKNOWN。")).toBeTruthy();
   });
 
+  it("R64: failed restore invalidates the preview and requires checking the archive again",async()=>{
+    const user=userEvent.setup();vi.mocked(inspectProjectBackup).mockResolvedValue(preview);vi.mocked(restoreProjectBackup).mockRejectedValue(new Error("controlled write failure"));vi.stubGlobal("confirm",vi.fn(()=>true));renderWorkspace();
+    await user.click(screen.getByRole("button",{name:"检查归档"}));await screen.findByText("归档检查");await user.click(screen.getByRole("button",{name:"确认恢复（新建项目）"}));
+    expect(await screen.findByText(/预览已失效，请重新选择备份文件进行检查后重试/)).toBeTruthy();expect(screen.queryByRole("button",{name:"确认恢复（新建项目）"})).toBeNull();expect(restoreProjectBackup).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button",{name:"检查归档"}));expect(await screen.findByRole("button",{name:"确认恢复（新建项目）"})).toBeTruthy();expect(inspectProjectBackup).toHaveBeenCalledTimes(2);
+  });
+
   it("export uses typed transport only", async () => {
     const user = userEvent.setup();
     vi.mocked(exportProjectBackup).mockResolvedValue({

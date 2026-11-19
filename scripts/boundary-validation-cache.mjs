@@ -1,7 +1,7 @@
 // Immutable Git objects persist; live acceptance is keyed by freshly read bytes.
 import { createHash } from 'node:crypto';
 import { execFileSync as exec } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import fs, { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 const gitObjects = new Map(), gitBlobs = new Map(), gitTrees = new Map(), results = new Map(), validatedProofs = new Map();
 let session;
@@ -9,9 +9,12 @@ function immutableObjectStore(root, env) {
   // Only immutable SHA queries share IO. Live acceptance and mutable refs stay
   // root-scoped and freshly hashed. Environment-directed Git layouts do not
   // participate in alternate-store sharing.
+  const source = env ?? process.env;
   const harmless = ['GIT_PAGER','GIT_TERMINAL_PROMPT','GIT_OPTIONAL_LOCKS','GIT_ASKPASS','GIT_LFS_SKIP_SMUDGE'];
-  const gitEnv = Object.entries(env ?? process.env).filter(([key]) => key.startsWith('GIT_') && !harmless.includes(key)).sort();
-  if (gitEnv.length) return JSON.stringify([resolve(root), gitEnv]);
+  const layout = ['GIT_DIR','GIT_WORK_TREE','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_COMMON_DIR','GIT_NAMESPACE','GIT_INDEX_FILE','GIT_EXEC_PATH'];
+  const layoutEnv = Object.entries(source).filter(([key]) => layout.includes(key)).sort();
+  if (layoutEnv.length) return JSON.stringify([resolve(root), layoutEnv]);
+  const profile = Object.entries(source).filter(([key]) => key.startsWith('GIT_') && !harmless.includes(key) && !layout.includes(key)).sort();
   try {
     const dot = join(root, '.git');
     let git = statSync(dot).isDirectory() ? dot : resolve(root, readFileSync(dot,'utf8').trim().replace(/^gitdir: /,''));
@@ -19,11 +22,16 @@ function immutableObjectStore(root, env) {
     const objects = join(git,'objects'), alternates = join(objects,'info/alternates');
     const empty = readdirSync(objects).every(p => p === 'info' || p === 'pack')
       && (!existsSync(join(objects,'pack')) || readdirSync(join(objects,'pack')).length === 0);
+    let store;
     if (empty && existsSync(alternates)) {
       const paths = readFileSync(alternates,'utf8').trim().split(/\r?\n/);
-      if (paths.length === 1 && paths[0]) return realpathSync(resolve(objects,paths[0]));
+      if (paths.length === 1 && paths[0]) store = realpathSync(resolve(objects,paths[0]));
     }
-    return realpathSync(objects);
+    store ??= realpathSync(objects);
+    // Formatting/config GIT_* (for example quotePath) must not invent a second
+    // layout, but they remain in the cache key so a different profile cannot
+    // reuse another profile's bytes.
+    return profile.length ? JSON.stringify([store, profile]) : store;
   } catch { return resolve(root); } // Missing Git evidence must still reach Git and fail.
 }
 // Share immutable parent facts across owned fixtures using the same object store.
@@ -277,4 +285,35 @@ export function immutableBlobBytes(id, bytes) {
   let value = blobBytes.get(id);
   if (value === undefined) blobBytes.set(id, value = Buffer.from(bytes));
   return value;
+}
+
+// In-memory override probes skip cachedBoundary, so they used to re-walk the
+// live tree and re-query Git for every forged proof. Share one IO session for
+// a whole probe loop: inventory, live non-overridden bytes, and directory
+// walks are memoized, but each override still runs the full validation. Do not
+// use this around tests that mutate the workspace mid-loop.
+const originalReaddirSync = fs.readdirSync;
+function installProbeReaddir() {
+  fs.readdirSync = function(path, options) {
+    if (!session) return originalReaddirSync(path, options);
+    session.readdir ??= new Map();
+    const key = JSON.stringify([resolve(String(path)), options ?? null]);
+    if (!session.readdir.has(key)) session.readdir.set(key, originalReaddirSync(path, options));
+    const value = session.readdir.get(key);
+    return Array.isArray(value) ? value.slice() : value;
+  };
+}
+function restoreProbeReaddir() {
+  fs.readdirSync = originalReaddirSync;
+}
+export function runOverrideProbeSession(root, fn) {
+  root = resolve(root);
+  const outer = !session;
+  if (outer) {
+    installProbeReaddir();
+    session = {root, identity: 'override-probe', staged: new Map(), files: new Map(), texts: new Map()};
+  }
+  if (session.root !== root) throw Error('Mixed boundary roots in one validation');
+  try { return fn(); }
+  finally { if (outer) { session = undefined; restoreProbeReaddir(); } }
 }

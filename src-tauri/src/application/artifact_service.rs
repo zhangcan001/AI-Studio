@@ -491,6 +491,9 @@ impl ArtifactService {
         comment: String,
         expected_revision: i64,
     ) -> Result<ArtifactReviewView, ArtifactServiceError> {
+        if decision == ArtifactReviewDecision::Approved {
+            self.resolve_artifact_path(project_id, artifact_id).await?;
+        }
         let comment = comment.trim().to_owned();
         let artifact_id = AssetId::parse(artifact_id.to_owned())
             .map_err(|error| ArtifactServiceError::NotFound(error.to_string()))?;

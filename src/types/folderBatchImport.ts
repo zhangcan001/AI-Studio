@@ -2,6 +2,7 @@ export type FolderImportMode = "firstLast" | "reference" | "image";
 export interface FolderImportIssue { code: string; message: string; rowNumber?: number; shotId?: string }
 export interface FolderImportRow {
   rowKey: string; rowNumber: number; manifestId: string | null; mode: FolderImportMode; name: string;
+  prompt: string; promptSections: import("./storyEntity").ShotPromptSections; referencePreview: string[];
   promptPreview: string; durationSeconds: number; width: number; height: number; generatorLabel: string;
   firstFrame: string | null; lastFrame: string | null; referenceCount: number; entityNames: string[]; openingComposition?: string | null; endingComposition?: string | null;
   errors: FolderImportIssue[]; warnings: FolderImportIssue[];
@@ -22,6 +23,7 @@ export interface FolderImportResult {
  outcome:"completed"|"compensated"|"partial";
  failure:{stage:string;code:string;message:string}|null;
  compensationErrors:{target:string;id:string;message:string}[];
+ createdRows:{rowKey:string;shotId:string;name:string}[];
  createdShotIds:string[];reusedEntityIds:string[];createdEntityIds:string[];importedAssetIds:string[];
  batchId:string|null;itemCount:number;autoStarted:boolean;
  residual:{unverifiedFileCleanup:boolean;shotIds:string[];entityIds:string[];assetIds:string[];batchId:string|null};warnings:string[];

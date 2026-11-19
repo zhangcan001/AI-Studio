@@ -960,6 +960,7 @@ impl ShotBatchService {
                         GenerationInputValue::Text(text) => Some(text.as_str()),
                         _ => None,
                     }),
+                    None,
                 )
                 .await
             {

@@ -33,7 +33,7 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
       const out = await productClient.run.resultsGet(projectId, runRef);
       if (token === epoch.current) { setResults(out.filter(r => item.candidates.some(a => a.id === r.assetId))); setError(undefined); }
     } catch (cause) { if (token === epoch.current) { setError(normalizeProductError(cause).message); setResults([]); } }
-  }, [projectId, runRef?.source, runRef?.id, item.id]);
+  }, [projectId, runRef?.source, runRef?.id, item.id, JSON.stringify(item.candidates.map(a => a.id))]);
   useEffect(() => { setResults(undefined); void reload(); return () => { ++epoch.current; }; }, [reload]);
   const leave = (fn: () => void) => {
     if (lock.current || (hasDraft && !window.confirm("审核说明尚未提交，本次会话会保留草稿。确定离开？"))) return;
@@ -67,15 +67,15 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
         const key = commentKey(r.assetId), comment = comments[key] ?? "";
         const asset = item.candidates.find(a => a.id === r.assetId);
         const chosen = r.selectedShotIds.includes(item.id) || item.shot?.selectedResultId === r.assetId;
-        const pending = r.reviewState === "PENDING" && r.reviewRevision !== null && r.assetExists;
+        const pending = r.reviewState === "PENDING" && r.reviewRevision !== null && r.assetExists && r.availability !== "missing" && r.availability !== "unavailable";
         return <li key={r.assetId} aria-label={`候选 ${r.name}`}>
           <div className="storyboard-cover">{asset && <CandidateThumbnail asset={asset} playable />}</div>
           <div><strong>{r.name}</strong><small>{r.reviewState ? labels[r.reviewState] : "无审核记录"}{chosen ? " · 已选为结果" : ""}</small></div>
           <label className="storyboard-review-comment">审核说明<input value={comment} disabled={busy} onChange={e => useStudioStore.getState().setReviewComment(key, e.target.value)} /></label>
           <div className="storyboard-card-actions">
             {pending && <><button type="button" disabled={busy} onClick={() => void review(r, "APPROVED")}>通过</button><button type="button" disabled={busy || !comment.trim()} onClick={() => void review(r, "REJECTED")}>退回</button></>}
-            {r.reviewState && !pending && r.reviewRevision !== null && <button type="button" disabled={busy || !r.assetExists} onClick={() => { if (window.confirm("重新打开审核？原审核记录会保留，需要重新明确作出决定。")) void act(() => productClient.run.resultReviewReset(projectId, runRef!, r.assetId, r.reviewRevision!)); }}>重新审核</button>}
-            <button type="button" disabled={busy || chosen || !r.assetExists || r.reviewState === "REJECTED"} onClick={() => void act(() => productClient.creation.selectResult(projectId, item.id, "video", r.assetId))}>{chosen ? "当前结果" : "选为结果"}</button>
+            {r.reviewState && !pending && r.reviewRevision !== null && <button type="button" disabled={busy || (!r.assetExists || r.availability === "missing" || r.availability === "unavailable")} onClick={() => { if (window.confirm("重新打开审核？原审核记录会保留，需要重新明确作出决定。")) void act(() => productClient.run.resultReviewReset(projectId, runRef!, r.assetId, r.reviewRevision!)); }}>重新审核</button>}
+            <button type="button" disabled={busy || chosen || !r.assetExists || r.availability === "missing" || r.availability === "unavailable" || r.reviewState === "REJECTED"} onClick={() => void act(() => productClient.creation.selectResult(projectId, item.id, "video", r.assetId))}>{chosen ? "当前结果" : "选为结果"}</button>
           </div>
         </li>;
       })}</ul>}

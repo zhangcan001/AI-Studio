@@ -19,6 +19,7 @@ use serde::Serialize;
 use std::{collections::BTreeMap, future::Future};
 
 pub struct CreationSubmission {
+    pub expected_video_inputs: Option<crate::application::ports::ShotVideoInputToken>,
     pub prompt_id: Option<String>,
     pub prompt_version_id: Option<String>,
     pub project_id: String,
@@ -144,12 +145,16 @@ impl ProductCreationFacade {
                 },
                 selection.workflow_version_id,
                 selection.recipe_id,
+                Some(&request.expected_video_inputs),
             )
             .await
             .map_err(|error| match error {
                 ShotServiceError::NotFound(_) => {
                     ProductError::new("PROJECT_SCOPE_VIOLATION", "无法访问当前镜头。", None)
                 }
+                ShotServiceError::InvalidInput(message) if message.starts_with("SHOT_VIDEO_INPUT_CONFLICT") => ProductError::new(
+                    "SHOT_VIDEO_INPUT_CONFLICT", "正式输入已在预检后修改；请刷新并重新确认后生成。", Some("REFRESH_INPUTS"),
+                ),
                 ShotServiceError::InvalidInput(message) if message.starts_with("ENTITY_REFERENCE_") => {
                     let mut error = ProductError::new(
                         "ENTITY_REFERENCE_INVALID",

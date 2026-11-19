@@ -117,14 +117,17 @@ pub fn copy_selected_videos(
                     ext
                 );
                 let mut input = fs::File::open(path)?;
-                if !input.metadata()?.is_file() {
+                let metadata = input.metadata()?;
+                if !metadata.is_file() || metadata.len() == 0 {
                     return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a file"));
                 }
                 let mut output = OpenOptions::new()
                     .write(true)
                     .create_new(true)
                     .open(directory.join(&file_name))?;
-                io::copy(&mut input, &mut output)?;
+                if io::copy(&mut input, &mut output)? == 0 {
+                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "empty video"));
+                }
                 output.sync_all()?;
                 Ok(file_name)
             })();
@@ -158,6 +161,25 @@ pub fn copy_selected_videos(
         open_error: None,
     })
 }
+/// Identity of the videos actually selected for export. Unselected shots never
+/// participate; a name or ordinal change of a selected shot is a new identity.
+pub fn export_selection_identity<'a, I>(
+    selected: I,
+) -> std::collections::BTreeMap<String, (String, String, i64)>
+where
+    I: IntoIterator<Item = (&'a str, &'a str, &'a str, i64)>,
+{
+    selected
+        .into_iter()
+        .map(|(shot_id, asset_id, name, ordinal)| {
+            (
+                shot_id.to_owned(),
+                (asset_id.to_owned(), name.to_owned(), ordinal),
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,10 +206,41 @@ mod tests {
         assert!(command.contains(".pick_folder("));
         assert!(command.contains("rx.await"));
         assert_eq!(command.matches("check_review_confirmation(").count(), 2);
+        assert_eq!(command.matches("selected_video_export_sources(").count(), 2);
         assert!(
             command.find("current_selection != selection").unwrap()
                 < command.find("copy_selected_videos(").unwrap()
         );
+        assert!(
+            command
+                .find("selected_video_export_sources(&state, &project_id, &current_shots)")
+                .unwrap()
+                > command.find("current_selection != selection").unwrap()
+        );
+        assert!(command.contains("(asset.clone(), s.name.clone(), s.ordinal)"));
+    }
+    #[test]
+    fn r57_r58_selection_identity_includes_name_and_ordinal_but_ignores_unselected_shots() {
+        let selected = export_selection_identity([
+            ("shot-a", "asset-a", "镜头一", 0),
+            ("shot-c", "asset-c", "镜头三", 2),
+        ]);
+        let renamed = export_selection_identity([
+            ("shot-a", "asset-a", "新名称", 0),
+            ("shot-c", "asset-c", "镜头三", 2),
+        ]);
+        let reordered = export_selection_identity([
+            ("shot-a", "asset-a", "镜头一", 1),
+            ("shot-c", "asset-c", "镜头三", 2),
+        ]);
+        let unselected_tail_changed = export_selection_identity([
+            ("shot-a", "asset-a", "镜头一", 0),
+            ("shot-c", "asset-c", "镜头三", 2),
+        ]);
+        assert_ne!(selected, renamed);
+        assert_ne!(selected, reordered);
+        assert_eq!(selected, unselected_tail_changed);
+        assert!(!selected.contains_key("shot-b"));
     }
 
     fn source(ordinal: i64, name: &str, path: PathBuf) -> ExportSource {
@@ -246,5 +299,16 @@ mod tests {
         assert!(!name.contains(':'));
         assert!(!name.contains('*'));
         assert!(copy_selected_videos(dir.path(), &[]).is_err());
+    }
+    #[test]
+    fn r23_empty_video_is_a_failed_manifest_entry_not_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.mp4");
+        fs::write(&path, []).unwrap();
+        let receipt = copy_selected_videos(dir.path(), &[source(0, "空视频", path)]).unwrap();
+        assert_eq!(receipt.exported, 0);
+        assert_eq!(receipt.failed, 1);
+        assert!(receipt.entries[0].error.is_some());
+        assert!(receipt.entries[0].file_name.is_none());
     }
 }

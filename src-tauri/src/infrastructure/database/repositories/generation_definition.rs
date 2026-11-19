@@ -105,7 +105,7 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
              INNER JOIN workflow_versions cv ON cv.id = w.current_version_id
              INNER JOIN recipes r ON r.id = ?
              INNER JOIN workflow_versions rv ON rv.id = r.workflow_version_id
-             WHERE old.id = ? AND rv.workflow_id = w.id
+             WHERE old.id = ? AND rv.id = old.id AND rv.workflow_id = w.id
                AND w.source_kind = 'PRODUCT' AND w.library_state = 'ACTIVE'
                AND (old.id <> w.current_version_id OR rv.id <> w.current_version_id)
                AND NOT EXISTS (SELECT 1 FROM workflow_runtime_states s
@@ -494,5 +494,33 @@ mod tests {
         .unwrap();
 
         assert!(repository.list_available().await.unwrap().is_empty());
+    }
+    #[tokio::test]
+    async fn r08_supersession_requires_the_exact_old_version_recipe_pair() {
+        let (_directory, pool, repository) = setup().await;
+        for (version_id, version, recipe_id) in [("v2", "2", "r2"), ("v3", "3", "r3")] {
+            sqlx::query("INSERT INTO workflow_versions (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at) SELECT ?, workflow_id, ?, api_workflow_json, workflow_sha256, created_at FROM workflow_versions WHERE id = 'workflow-version-1'")
+                .bind(version_id).bind(version).execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO recipes (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at) SELECT ?, ?, version, schema_version, recipe_yaml, recipe_sha256, created_at FROM recipes WHERE id = 'recipe-1'")
+                .bind(recipe_id).bind(version_id).execute(&pool).await.unwrap();
+        }
+        sqlx::query("UPDATE workflows SET source_kind = 'PRODUCT', current_version_id = 'v3' WHERE id = 'workflow-1'").execute(&pool).await.unwrap();
+        let valid = repository
+            .resolve_superseded_pair("workflow-version-1", "recipe-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(valid.workflow_version_id, "v3");
+        assert_eq!(valid.recipe_id, "r3");
+        assert!(repository
+            .resolve_superseded_pair("workflow-version-1", "r2")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(repository
+            .resolve_superseded_pair("v3", "recipe-1")
+            .await
+            .unwrap()
+            .is_none());
     }
 }

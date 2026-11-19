@@ -9,6 +9,7 @@ impl ShotService {
         request: ShotGenerationRequest,
         workflow_version_id: String,
         recipe_id: String,
+        expected_video_inputs: Option<&Option<crate::application::ports::ShotVideoInputToken>>,
     ) -> Result<PreparedShotGeneration, ShotServiceError> {
         validate_project(&request.project_id)?;
         if request.retry_task_id.is_some() {
@@ -93,6 +94,7 @@ impl ShotService {
                         GenerationInputValue::Text(text) => Some(text.as_str()),
                         _ => None,
                     }),
+                    expected_video_inputs,
                 )
                 .await
                 .map_err(|e| ShotServiceError::InvalidInput(e.to_string()))?;

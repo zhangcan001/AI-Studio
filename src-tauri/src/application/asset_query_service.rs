@@ -337,6 +337,32 @@ impl AssetQueryService {
         Ok(view)
     }
 
+    /// A database row alone is not a usable result. Recheck the managed file at
+    /// the action boundary without reading an entire video into memory.
+    pub async fn is_file_available(
+        &self,
+        project_id: &str,
+        asset_id: &str,
+    ) -> Result<bool, AssetQueryError> {
+        validate_project_id(project_id)?;
+        let id = AssetId::parse(asset_id.to_owned())
+            .map_err(|error| AssetQueryError::InvalidAssetId(error.to_string()))?;
+        let Some(asset) = self.asset_repository.find_by_id(&id).await? else {
+            return Ok(false);
+        };
+        if asset.project_id != project_id {
+            return Ok(false);
+        }
+        let root = self.project_root(project_id).await?;
+        Ok(matches!(
+            crate::application::ports::inspect_asset_read_path(
+                &root,
+                std::path::Path::new(&asset.storage_path)
+            ),
+            crate::application::ports::AssetReadInspection::Present { .. }
+        ))
+    }
+
     pub async fn read_image(
         &self,
         project_id: &str,

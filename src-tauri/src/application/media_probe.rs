@@ -92,7 +92,28 @@ impl MediaProbe for CommandMediaProbe {
             ])
             .arg(path);
         match bounded_output(&mut command, PROBE_BUDGET).await {
-            Some(output) if output.status.success() => MediaProbeOutcome::Decodable,
+            Some(output) if output.status.success() => {
+                let expected = if audio { "audio" } else { "video" };
+                if serde_json::from_slice::<serde_json::Value>(&output.stdout)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("streams")
+                            .and_then(|streams| streams.as_array())
+                            .map(|streams| {
+                                streams.iter().any(|stream| {
+                                    stream.get("codec_type").and_then(|kind| kind.as_str())
+                                        == Some(expected)
+                                })
+                            })
+                    })
+                    .unwrap_or(false)
+                {
+                    MediaProbeOutcome::Decodable
+                } else {
+                    MediaProbeOutcome::DecodeFailed
+                }
+            }
             Some(_) => MediaProbeOutcome::DecodeFailed,
             None => MediaProbeOutcome::ProbeUnavailable,
         }
@@ -107,7 +128,7 @@ impl MediaProbe for CommandMediaProbe {
                 "-select_streams",
                 "v:0",
                 "-show_entries",
-                "stream=width,height:format=duration",
+                "stream=width,height,duration,duration_ts,time_base:stream_tags=DURATION,duration",
                 "-of",
                 "json",
             ])
@@ -199,7 +220,44 @@ fn parse_probe_json(bytes: &[u8]) -> VideoMetadata {
         .and_then(|stream| stream.get("height"))
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok());
-    let duration_ms = parse_duration_ms(bytes);
+    // Container duration may include a longer audio track. Video admission
+    // must use the selected video stream only; unknown duration stays unknown.
+    let seconds = stream
+        .and_then(|s| s.get("duration"))
+        .and_then(|v| {
+            v.as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .or_else(|| v.as_f64())
+        })
+        .or_else(|| {
+            let stream = stream?;
+            let ticks = stream.get("duration_ts")?.as_i64()? as f64;
+            let (n, d) = stream.get("time_base")?.as_str()?.split_once('/')?;
+            let numerator = n.parse::<f64>().ok()?;
+            let denominator = d.parse::<f64>().ok()?;
+            (denominator > 0.0 && numerator > 0.0).then_some(ticks * numerator / denominator)
+        })
+        .or_else(|| {
+            // Matroska commonly exposes track duration as a stream tag rather
+            // than duration_ts. Never read the format/container DURATION tag.
+            let tags = stream?.get("tags")?;
+            let value = tags
+                .get("DURATION")
+                .or_else(|| tags.get("duration"))?
+                .as_str()?;
+            let parts: Vec<_> = value.split(':').collect();
+            if parts.len() != 3 {
+                return None;
+            }
+            let hours = parts[0].parse::<u64>().ok()?;
+            let minutes = parts[1].parse::<u64>().ok()?;
+            let seconds = parts[2].parse::<f64>().ok()?;
+            (minutes < 60 && seconds.is_finite() && (0.0..60.0).contains(&seconds))
+                .then_some(hours as f64 * 3600.0 + minutes as f64 * 60.0 + seconds)
+        });
+    let duration_ms = seconds
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .map(|v| (v * 1000.0).round() as u64);
     VideoMetadata {
         width,
         height,
@@ -290,10 +348,28 @@ mod tests {
     #[test]
     fn parses_optional_video_metadata() {
         let metadata = parse_probe_json(
-            br#"{"streams":[{"width":1280,"height":720}],"format":{"duration":"1.25"}}"#,
+            br#"{"streams":[{"width":1280,"height":720,"duration":"1.25"}],"format":{"duration":"4.0"}}"#,
         );
         assert_eq!(metadata.width, Some(1280));
         assert_eq!(metadata.height, Some(720));
         assert_eq!(metadata.duration_ms, Some(1250));
+    }
+    #[test]
+    fn r32_matroska_uses_selected_video_track_tag_not_longer_container_audio() {
+        let metadata = parse_probe_json(br#"{"streams":[{"width":16,"height":16,"tags":{"DURATION":"00:00:01.250000000"}}],"format":{"duration":"4.0"}}"#);
+        assert_eq!(metadata.duration_ms, Some(1250));
+        let malformed = parse_probe_json(
+            br#"{"streams":[{"tags":{"DURATION":"00:99:01.0"}}],"format":{"duration":"4.0"}}"#,
+        );
+        assert_eq!(malformed.duration_ms, None);
+    }
+    #[test]
+    fn r32_video_duration_never_inherits_longer_audio_container_duration() {
+        let metadata = parse_probe_json(br#"{"streams":[{"width":16,"height":16,"duration":"1.0"}],"format":{"duration":"4.0"}}"#);
+        assert_eq!(metadata.duration_ms, Some(1000));
+        let unknown = parse_probe_json(
+            br#"{"streams":[{"width":16,"height":16}],"format":{"duration":"4.0"}}"#,
+        );
+        assert_eq!(unknown.duration_ms, None);
     }
 }

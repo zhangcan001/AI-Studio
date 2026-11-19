@@ -338,3 +338,8 @@ it('successful Library append preserves existing plural formal references',async
  expect(useStudioStore.getState().values.reference_images).toEqual({type:'image_assets',assetIds:['first','last','new-image']});
  expect(api.generate).not.toHaveBeenCalled();
 });
+
+it("R14: only explicit Start availability marks a READY queue projection as waiting for manual start",()=>{
+ expect(queueRunLabel({status:"QUEUED",errorSummary:null,availableActions:["START"]})).toBe("待启动");
+ expect(queueRunLabel({status:"QUEUED",errorSummary:null,availableActions:["PAUSE"]})).toBe("排队中");
+});

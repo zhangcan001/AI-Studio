@@ -108,7 +108,7 @@ async fn saved_section_mentions_resolve_against_formal_images_without_a_main_pro
             .await
             .unwrap();
         let values = inputs
-            .generation_values(&scope, &recipe, Some("Walk slowly across the room."))
+            .generation_values(&scope, &recipe, Some("Walk slowly across the room."), None)
             .await
             .unwrap();
         let Some(GenerationInputValue::Text(prompt)) = values.get("prompt") else {
@@ -132,14 +132,14 @@ async fn saved_section_mentions_resolve_against_formal_images_without_a_main_pro
         .await
         .unwrap();
     let unknown = inputs
-        .generation_values(&scope, &recipe, Some("Walk slowly."))
+        .generation_values(&scope, &recipe, Some("Walk slowly."), None)
         .await
         .unwrap_err();
     assert!(unknown.to_string().contains("ENTITY_REFERENCE_UNKNOWN"));
     // A fully structured user prompt supersedes the unused saved summary.
     let structured = "subject_definitions:\nUser defined\nsummary:\nUser summary\nretention_analysis:\nKeep references\ndetailed_description:\nWalk slowly\noverall_soundscape:\nRoom tone\nnon_diegetic_music:\nN/A";
     let values = inputs
-        .generation_values(&scope, &recipe, Some(structured))
+        .generation_values(&scope, &recipe, Some(structured), None)
         .await
         .unwrap();
     assert!(
@@ -158,7 +158,7 @@ async fn saved_section_mentions_resolve_against_formal_images_without_a_main_pro
         .unwrap();
     inputs.save(&scope, Some(&saved.token), &[]).await.unwrap();
     let missing = inputs
-        .generation_values(&scope, &recipe, Some("Walk slowly."))
+        .generation_values(&scope, &recipe, Some("Walk slowly."), None)
         .await
         .unwrap_err();
     assert!(missing.to_string().contains("ENTITY_REFERENCE_NOT_APPLIED"));
@@ -193,6 +193,7 @@ async fn entity_references_do_not_silently_use_an_old_i2v_first_frame() {
             },
             f.pairs[1].0.clone(),
             f.pairs[1].1.clone(),
+            None,
         )
         .await;
     assert!(
@@ -301,6 +302,19 @@ fn shot_service(
         Arc::new(SqliteProductionQueueRepository::new(f.pool.clone())),
         Arc::new(SystemClock),
     )
+    .with_asset_query(Arc::new(
+        ai_studio_lib::application::asset_query_service::AssetQueryService::new(
+            Arc::new(
+                ai_studio_lib::infrastructure::database::SqliteAssetRepository::new(f.pool.clone()),
+            ),
+            Arc::new(ai_studio_lib::infrastructure::filesystem::FileSystemAssetStore::new()),
+            Arc::new(
+                ai_studio_lib::infrastructure::database::SqliteProjectRepository::new(
+                    f.pool.clone(),
+                ),
+            ),
+        ),
+    ))
     .with_video_inputs(inputs)
 }
 
@@ -963,6 +977,7 @@ async fn scene_preparation_supports_all_four_modes_without_image_result_selectio
                 normal_request,
                 f.pairs[index].0.clone(),
                 f.pairs[index].1.clone(),
+                None,
             )
             .await
             .unwrap();
@@ -1697,7 +1712,7 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
         submission_idempotency_key: Some("entity-positive".into()),
     };
     let prepared = service
-        .prepare_creation_submission(request(), f.pairs[3].0.clone(), f.pairs[3].1.clone())
+        .prepare_creation_submission(request(), f.pairs[3].0.clone(), f.pairs[3].1.clone(), None)
         .await
         .unwrap();
     let GenerationInputValue::Text(compiled) = &prepared.values["prompt"] else {
@@ -1793,7 +1808,7 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
         .unwrap();
     assert_eq!(frozen.items[0].values_json, batch.items[0].values_json);
     let updated = service
-        .prepare_creation_submission(request(), f.pairs[3].0.clone(), f.pairs[3].1.clone())
+        .prepare_creation_submission(request(), f.pairs[3].0.clone(), f.pairs[3].1.clone(), None)
         .await
         .unwrap();
     assert!(
@@ -1810,6 +1825,52 @@ async fn entity_references_freeze_real_images_and_compiled_labels_without_starti
     assert_eq!(
         changed_plan[0].stale_prepared_batch_ids,
         vec![receipt.created_batch_ids[0].clone()]
+    );
+    assert_eq!(count(&f.pool, "tasks").await, 0);
+    assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn r16_formal_input_revision_is_checked_on_the_same_set_used_for_freezing() {
+    let f = fixture().await;
+    let (inputs, first, last) = setup(&f).await;
+    configure(&f, 1).await;
+    let scope = scope(&f, 1);
+    let before = inputs
+        .save(&scope, None, &[input("first_frame", 0, &first.id)])
+        .await
+        .unwrap();
+    let after = inputs
+        .save(
+            &scope,
+            Some(&before.token),
+            &[input("first_frame", 0, &last.id)],
+        )
+        .await
+        .unwrap();
+    let recipe = ai_studio_lib::compiler::RecipeParser::parse(
+        &SqliteGenerationDefinitionRepository::new(f.pool.clone())
+            .find(&scope.workflow_version_id, &scope.recipe_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .recipe_yaml,
+    )
+    .unwrap();
+    let expected = Some(before.token);
+    let rejected = inputs
+        .generation_values(&scope, &recipe, Some("move"), Some(&expected))
+        .await;
+    assert!(rejected
+        .unwrap_err()
+        .to_string()
+        .starts_with("SHOT_VIDEO_INPUT_CONFLICT"));
+    let accepted = inputs
+        .generation_values(&scope, &recipe, Some("move"), Some(&Some(after.token)))
+        .await
+        .unwrap();
+    assert!(
+        matches!(accepted.get("first_frame"), Some(GenerationInputValue::ImageAsset(id)) if id == &last.id)
     );
     assert_eq!(count(&f.pool, "tasks").await, 0);
     assert_eq!(f.comfy.submit_calls.load(Ordering::SeqCst), 0);

@@ -24,6 +24,21 @@ pub(super) fn creation_context_services(
             Arc::new(SqliteProductionQueueRepository::new(pool.clone())),
             Arc::new(SystemClock),
         )
+        .with_asset_query(Arc::new(
+            ai_studio_lib::application::asset_query_service::AssetQueryService::new(
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteAssetRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+                Arc::new(ai_studio_lib::infrastructure::filesystem::FileSystemAssetStore::new()),
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteProjectRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+            ),
+        ))
         .with_stage_prompt_repository(Arc::new(SqliteShotRepository::new(pool.clone()))),
     );
     let facade = ProductCreationFacade::new(

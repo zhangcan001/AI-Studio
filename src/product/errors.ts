@@ -83,7 +83,8 @@ export function normalizeProductError(error: unknown): ProductError {
   if (error instanceof ProductError) return error;
   if (!record(error) || !knownCode(error.code)) return new ProductError("INTERNAL_ERROR", messages.INTERNAL_ERROR, { retryable: false, technicalDetails: error });
   const details = record(error.details) ? error.details : {};
-  return new ProductError(error.code, messages[error.code], {
+  const message = error.code === "INVALID_INPUT" && error.message === "选用结果已变化，请重新导出。" ? error.message : messages[error.code];
+  return new ProductError(error.code, message, {
     rejectedAssetIds: Array.isArray(details.rejectedAssetIds) && details.rejectedAssetIds.every(v => typeof v === "string") ? details.rejectedAssetIds : undefined,
     actionLocation: actionLocation(details.actionLocation),
     retryable: details.retryable === true,

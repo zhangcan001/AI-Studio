@@ -13,7 +13,7 @@ import { CreatePage } from "./CreatePage";
 import type { CreateProps } from "./CreateController";
 import { storyboardDraftKeys, useStudioStore } from "../../stores/studioStore";
 import { useProjectSessionState } from "../../hooks/useProjectSessionState";
-import type { CreationShotSummary } from "../../product/types";
+import type { CreationShotSummary, ProductRun } from "../../product/types";
 
 /** Bounded per-shot reads keep the workbench responsive on large projects. */
 export const STORYBOARD_MAX_DETAIL_SHOTS = 60;
@@ -57,7 +57,9 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const [batchOpen, setBatchOpen] = useState(false);
   const [page, setPage] = useState(0);
   const orderLock = useRef(false);
+  const [orderPending, setOrderPending] = useState(false);
   const [reviewId, setReviewId] = useState<string>();
+  const [reviewRun, setReviewRun] = useState<{projectId:string;shotId:string;run:ProductRun}>();
   const [selectedId, setSelectedId] = useState<string>();
   const [runRoute, setRunRoute] = useState<Extract<AppRoute, { kind: "runs" }>>();
   const [shotQuery, setShotQuery] = useProjectSessionState(route.projectId, "storyboard.inline-search", "", (v): v is string => typeof v === "string");
@@ -204,7 +206,8 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
     if (position >= 0) setPage(Math.floor(position / STORYBOARD_MAX_DETAIL_SHOTS));
   }, [projectId, route.shotId, index]);
   const selected = items?.find(item => item.id === (route.shotId ?? selectedId)) ?? items?.[0];
-  const reviewItem = items?.find(item => item.id === reviewId);
+  const selectedReviewItem = items?.find(item => item.id === reviewId);
+  const reviewItem = selectedReviewItem && reviewRun?.projectId === projectId && reviewRun.shotId === selectedReviewItem.id ? {...selectedReviewItem,run:reviewRun.run} : selectedReviewItem;
   const openShot = async (shotId: string) => {
     const store=useStudioStore.getState(),keys=storyboardDraftKeys(store,projectId,shotId);
     const drafts=keys.map(key=>({key,prompt:store.storyboardPrompts[key],fields:store.storyboardFields[key]}));
@@ -237,7 +240,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
     return result;
   };
   const exportSelected = async () => {
-    if(exportLock.current)return;exportLock.current=true;setExporting(true);
+    if(exportLock.current)return;exportLock.current=true;setExporting(true); setError(undefined);
     try{
       let result;
       try { result = await productClient.creation.exportSelected(projectId,openExport); }
@@ -264,7 +267,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   };
   const moveShot = async (id: string, delta: -1 | 1) => {
     if (orderLock.current) return;
-    orderLock.current = true; setOrderError(undefined);setOrderNotice(undefined);
+    orderLock.current = true; setOrderPending(true); setOrderError(undefined);setOrderNotice(undefined);
     try {
       const shots = await productClient.creation.shotsList(projectId);
       const ids = shots.filter(s => s.projectId === projectId).sort((a,b) => a.ordinal-b.ordinal || a.id.localeCompare(b.id)).map(s => s.id);
@@ -274,11 +277,11 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       await productClient.creation.shotsReorder(projectId,ids);
       if (mounted.current && scope.current === projectId) locateOrderedShot(id,ids,"镜头已移动");
     } catch(cause) { if (mounted.current && scope.current === projectId) setOrderError(normalizeProductError(cause).message); }
-    finally { orderLock.current=false; }
+    finally { orderLock.current=false; setOrderPending(false); }
   };
   const insertShot = async (afterId: string) => {
     if (orderLock.current) return;
-    orderLock.current=true; setOrderError(undefined);
+    orderLock.current=true; setOrderPending(true); setOrderError(undefined);
     let created: string | undefined;let positioned=false;
     try {
       const shot=await productClient.creation.createShot(projectId); created=shot.id;
@@ -288,7 +291,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       ids.splice(index+1,0,shot.id); await productClient.creation.shotsReorder(projectId,ids);
       if(mounted.current&&scope.current===projectId){positioned=true;locateOrderedShot(shot.id,ids,"新镜头已插入");}
     } catch(cause) { if(mounted.current&&scope.current===projectId)setOrderError(`${created ? "新镜头已创建；排序未完成，请刷新后移动。" : ""}${normalizeProductError(cause).message}`); }
-    finally { orderLock.current=false; if(!positioned&&mounted.current&&scope.current===projectId)void load(); }
+    finally { orderLock.current=false; setOrderPending(false); if(!positioned&&mounted.current&&scope.current===projectId)void load(); }
   };
   const createShot = async (open = true) => {
     if (createInFlight.current) return;
@@ -360,7 +363,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
         {!items.length && shotIndex.length === 0 ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
-          : view === "shots" ? <StoryboardShotRows focusId={focusId} projectId={projectId} items={items.map(item => statusUncertain ? {...item,error:"运行状态读取失败，确认恢复前不能重复生成。"} : item)} shotIndex={shotIndex} overview={allItems} onLocate={locateShot} busy={busy || creating} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
+          : view === "shots" ? <StoryboardShotRows focusId={focusId} projectId={projectId} items={items.map(item => statusUncertain ? {...item,error:"运行状态读取失败，确认恢复前不能重复生成。"} : item)} shotIndex={shotIndex} overview={allItems} onLocate={locateShot} busy={busy || creating || orderPending} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>
@@ -379,14 +382,29 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
         </section>
       </aside>
     </div>}
-    {reviewItem && <ShotReviewDialog key={`${projectId}:${reviewItem.id}`} projectId={projectId} item={reviewItem} onClose={() => setReviewId(undefined)} onChanged={() => void load()} onEdit={() => { void Promise.resolve(openShot(reviewItem.id)).then(ok => { if (ok !== false && mounted.current && scope.current === projectId) setReviewId(undefined); }); }} onNext={async()=>{
+    {reviewItem && <ShotReviewDialog key={`${projectId}:${reviewItem.id}`} projectId={projectId} item={reviewItem} onClose={() => {setReviewId(undefined);setReviewRun(undefined);}} onChanged={() => void load()} onEdit={() => { void Promise.resolve(openShot(reviewItem.id)).then(ok => { if (ok !== false && mounted.current && scope.current === projectId) setReviewId(undefined); }); }} onNext={async()=>{
       const current=reviewItem.id, owner=projectId;
       const position=(items??[]).findIndex(i=>i.id===current);
+      let history: Awaited<ReturnType<typeof productClient.creation.shotsList>> | undefined;
       for(const candidate of (items??[]).slice(position+1)){
         if(!canReview(candidate)||!candidate.run)continue;
+        const pending = (results: import("../../product/types").RunResult[]) => results.some(r=>r.reviewState==="PENDING"&&r.assetExists&&r.availability!=="missing"&&r.availability!=="unavailable"&&candidate.candidates.some(a=>a.id===r.assetId));
         const result=await productClient.run.resultsGet(owner,candidate.run.ref);
         if(!mounted.current||scope.current!==owner)return;
-        if(result.some(r=>r.reviewState==="PENDING"&&r.assetExists&&candidate.candidates.some(a=>a.id===r.assetId))){setReviewId(candidate.id);return;}
+        if(pending(result)){setReviewRun(undefined);setReviewId(candidate.id);return;}
+        history ??= await productClient.creation.shotsList(owner);
+        if(!mounted.current||scope.current!==owner)return;
+        const links = history.find(shot=>shot.id===candidate.id&&shot.projectId===owner)?.generationLinks ?? [];
+        for(const link of [...links].filter(link=>link.stage==="video"&&link.taskId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))){
+          const ref = {source:"task" as const,id:link.taskId!};
+          if(candidate.run.ref.source===ref.source&&candidate.run.ref.id===ref.id)continue;
+          const older = await productClient.run.resultsGet(owner,ref);
+          if(!mounted.current||scope.current!==owner)return;
+          if(!pending(older))continue;
+          const run = await productClient.run.get(owner,ref);
+          if(!mounted.current||scope.current!==owner)return;
+          setReviewRun({projectId:owner,shotId:candidate.id,run});setReviewId(candidate.id);return;
+        }
       }
       return truncated>0?"本页后面没有待审核候选；可关闭窗口，翻到下一页继续。":"已到本页末尾，后面没有待审核候选。不会循环跳回，也不会自动选用或审核。";
     }} />}

@@ -16,9 +16,11 @@ pub struct TaskRecoveryService {
     task_repository: Arc<dyn TaskRepository>,
     snapshot_repository: Arc<dyn GenerationSnapshotRepository>,
     asset_repository: Arc<dyn AssetRepository>,
+    asset_store: Arc<dyn AssetStore>,
+    project_repository: Arc<dyn crate::application::ports::ProjectRepository>,
     comfy_adapter: Arc<dyn ComfyAdapter>,
     output_collector: Arc<OutputCollector>,
-    asset_import_service: Arc<AssetImportService>,
+    asset_import_service: AssetImportService,
     clock: Arc<dyn Clock>,
     task_update_sink: Arc<dyn TaskUpdateSink>,
     execution_registry: TaskExecutionRegistry,
@@ -41,19 +43,29 @@ impl TaskRecoveryService {
             task_repository,
             snapshot_repository,
             asset_repository: asset_repository.clone(),
+            asset_store: asset_store.clone(),
+            project_repository: project_repository.clone(),
             output_collector: Arc::new(OutputCollector::new(comfy_adapter.clone())),
-            asset_import_service: Arc::new(AssetImportService::new(
+            asset_import_service: AssetImportService::new(
                 project_repository,
                 asset_store,
                 asset_repository,
                 clock.clone(),
-            )),
+            ),
             comfy_adapter,
             clock,
             task_update_sink,
             execution_registry: TaskExecutionRegistry::default(),
             gate: Mutex::new(()),
         }
+    }
+
+    pub fn with_media_probe(
+        mut self,
+        probe: Arc<dyn crate::application::media_probe::MediaProbe>,
+    ) -> Self {
+        self.asset_import_service = self.asset_import_service.with_media_probe(probe);
+        self
     }
 
     pub fn with_execution_registry(mut self, registry: TaskExecutionRegistry) -> Self {
@@ -186,8 +198,32 @@ impl TaskRecoveryService {
         if let Some(history) = history {
             match crate::application::generation_service::classify_history_status(&history.status) {
                 crate::application::generation_service::HistoryResolution::Success => {
-                    self.recover_success(&mut task, &prompt_id, &history)
-                        .await?;
+                    if let Err(error) = self.recover_success(&mut task, &prompt_id, &history).await
+                    {
+                        // Collection/import failures belong to this Task. Keep
+                        // processing siblings and persist an actionable terminal
+                        // failure instead of stranding it in COLLECTING.
+                        if matches!(
+                            error,
+                            TaskRecoveryError::OutputCollection(_)
+                                | TaskRecoveryError::AssetImport(_)
+                                | TaskRecoveryError::Unresolved(_)
+                        ) {
+                            let message = error.to_string();
+                            self.fail_task(
+                                &mut task,
+                                TaskError {
+                                    code: "TASK_RECOVERY_OUTPUT_UNAVAILABLE".to_owned(),
+                                    message: message.clone(),
+                                    raw: None,
+                                },
+                            )
+                            .await?;
+                            self.record_unresolved(&task, &message).await?;
+                            return Ok(RecoveryOutcome::Failed);
+                        }
+                        return Err(error);
+                    }
                     self.record_succeeded(&task, "history confirms completed execution")
                         .await?;
                     return Ok(RecoveryOutcome::Succeeded);
@@ -353,9 +389,53 @@ impl TaskRecoveryService {
         } else {
             Vec::new()
         };
+        let project_root = self
+            .project_repository
+            .get_storage_root(&task.project_id)
+            .await?
+            .ok_or_else(|| {
+                TaskRecoveryError::Unresolved("project storage is missing".to_owned())
+            })?;
+        // Mapping rows and asset records are not evidence of a usable file.
+        // Do not duplicate/import over an existing output identity if it is
+        // missing: fail this recovery explicitly and preserve historical data.
+        let mut existing_assets = assets.clone();
+        for mapping in &mappings {
+            let asset = self
+                .asset_repository
+                .find_by_id(&mapping.asset_id)
+                .await?
+                .ok_or_else(|| {
+                    TaskRecoveryError::Unresolved("mapped output asset is missing".to_owned())
+                })?;
+            existing_assets.push(asset);
+        }
+        for asset in &existing_assets {
+            if asset.project_id != task.project_id {
+                return Err(TaskRecoveryError::Unresolved(
+                    "output asset project mismatch".to_owned(),
+                ));
+            }
+            let bytes = self
+                .asset_store
+                .read_range(
+                    &project_root,
+                    std::path::Path::new(&asset.storage_path),
+                    0,
+                    1,
+                )
+                .await
+                .map_err(|error| {
+                    TaskRecoveryError::Unresolved(format!("output asset is unavailable: {error}"))
+                })?;
+            if bytes.is_empty() {
+                return Err(TaskRecoveryError::Unresolved(
+                    "output asset is empty".to_owned(),
+                ));
+            }
+        }
         if mappings.is_empty() && !assets.is_empty() {
-            // Legacy tasks have no output mapping. Their existing source-task assets
-            // remain the idempotency fallback and must not be re-collected.
+            // Verified legacy outputs remain the idempotency fallback.
         } else {
             let existing_outputs: HashSet<(String, usize)> = mappings
                 .iter()
@@ -726,6 +806,7 @@ outputs:
 
     #[derive(Clone)]
     struct RecoveryAdapter {
+        fail_first_download: bool,
         online: bool,
         history: Option<ComfyHistory>,
         queue: ComfyQueueState,
@@ -806,7 +887,14 @@ outputs:
             &self,
             _file: &ComfyOutputFile,
         ) -> Result<ComfyOutputData, ComfyAdapterError> {
-            self.counters.lock().unwrap().download += 1;
+            let mut counters = self.counters.lock().unwrap();
+            counters.download += 1;
+            if self.fail_first_download && counters.download == 1 {
+                return Err(ComfyAdapterError::Offline(
+                    "controlled download failure".to_owned(),
+                ));
+            }
+            drop(counters);
             Ok(ComfyOutputData {
                 bytes: png_bytes(),
                 content_type: Some("image/png".to_owned()),
@@ -899,6 +987,8 @@ outputs:
         let directory = tempdir().expect("temporary directory should exist");
         let root = directory.path().join("project");
         std::fs::create_dir_all(&root).expect("project directory should exist");
+        std::fs::write(root.join("existing.png"), png_bytes()).unwrap();
+        std::fs::write(root.join("existing-mapped.png"), png_bytes()).unwrap();
         let pool = initialize(&directory.path().join("app.db"))
             .await
             .expect("database should initialize");
@@ -940,6 +1030,7 @@ outputs:
         queue: ComfyQueueState,
     ) -> RecoveryAdapter {
         RecoveryAdapter {
+            fail_first_download: false,
             online,
             history,
             queue,
@@ -1613,57 +1704,83 @@ outputs:
 
     #[tokio::test]
     async fn history_success_with_existing_mapping_does_not_download_again() {
-        let harness = setup(adapter(
-            true,
-            Some(success_history()),
-            ComfyQueueState {
-                running_prompt_ids: Vec::new(),
-                pending_prompt_ids: Vec::new(),
-            },
-        ))
-        .await;
-        let task = submitted_task(&harness.task_repository, TaskStatus::Collecting).await;
-        let asset = Asset::new_generated_image(
-            AssetId::new(),
-            "project-1",
-            "Generated Image 1",
-            "ComfyUI_00001.png",
-            "existing-mapped.png",
-            "hash-mapped",
-            "image/png",
-            2,
-            2,
-            4,
-            task.id.clone(),
-            json!({}),
-            task.created_at + Duration::seconds(7),
-        )
-        .unwrap();
-        let mapping = crate::application::ports::TaskOutputAssetMapping {
-            task_id: task.id.clone(),
-            output_id: "generated_image".to_owned(),
-            ordinal: 0,
-            asset_id: asset.id.clone(),
-            created_at: asset.created_at,
-        };
-        harness
-            .asset_repository
-            .insert_generated_outputs(&[asset], &[mapping])
-            .await
+        for missing in [false, true] {
+            let harness = setup(adapter(
+                true,
+                Some(success_history()),
+                ComfyQueueState {
+                    running_prompt_ids: Vec::new(),
+                    pending_prompt_ids: Vec::new(),
+                },
+            ))
+            .await;
+            let task = submitted_task(&harness.task_repository, TaskStatus::Collecting).await;
+            let asset = Asset::new_generated_image(
+                AssetId::new(),
+                "project-1",
+                "Generated Image 1",
+                "ComfyUI_00001.png",
+                "existing-mapped.png",
+                "hash-mapped",
+                "image/png",
+                2,
+                2,
+                4,
+                task.id.clone(),
+                json!({}),
+                task.created_at + Duration::seconds(7),
+            )
             .unwrap();
-        snapshot_for(&harness.snapshot_repository, &task).await;
-
-        harness.service.reconcile_active().await.unwrap();
-        assert_eq!(
+            let mapping = crate::application::ports::TaskOutputAssetMapping {
+                task_id: task.id.clone(),
+                output_id: "generated_image".to_owned(),
+                ordinal: 0,
+                asset_id: asset.id.clone(),
+                created_at: asset.created_at,
+            };
             harness
                 .asset_repository
-                .list_output_mappings(&task.id)
+                .insert_generated_outputs(&[asset], &[mapping])
+                .await
+                .unwrap();
+            snapshot_for(&harness.snapshot_repository, &task).await;
+
+            if missing {
+                std::fs::remove_file(
+                    harness
+                        ._directory
+                        .path()
+                        .join("project/existing-mapped.png"),
+                )
+                .unwrap();
+            }
+            let report = harness.service.reconcile_active().await.unwrap();
+            let found = harness
+                .task_repository
+                .find_by_id(&task.id)
                 .await
                 .unwrap()
-                .len(),
-            1
-        );
-        assert_eq!(harness.adapter.counters.lock().unwrap().download, 0);
+                .unwrap();
+            assert_eq!(
+                found.status,
+                if missing {
+                    TaskStatus::Failed
+                } else {
+                    TaskStatus::Succeeded
+                }
+            );
+            assert_eq!(report.failed, u32::from(missing));
+            assert_eq!(
+                harness
+                    .asset_repository
+                    .list_output_mappings(&task.id)
+                    .await
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(harness.adapter.counters.lock().unwrap().download, 0);
+        }
     }
 
     #[tokio::test]
@@ -1862,5 +1979,42 @@ outputs:
         assert_eq!(counters.cancel, 1);
         assert_eq!(counters.submit, 0);
         assert_eq!(counters.upload, 0);
+    }
+    #[tokio::test]
+    async fn r26_download_failure_is_terminal_for_one_task_and_does_not_abort_siblings() {
+        let mut external = adapter(
+            true,
+            Some(success_history()),
+            ComfyQueueState {
+                running_prompt_ids: vec![],
+                pending_prompt_ids: vec![],
+            },
+        );
+        external.fail_first_download = true;
+        let harness = setup(external).await;
+        let a = submitted_task(&harness.task_repository, TaskStatus::Running).await;
+        let b = submitted_task(&harness.task_repository, TaskStatus::Running).await;
+        snapshot_for(&harness.snapshot_repository, &a).await;
+        snapshot_for(&harness.snapshot_repository, &b).await;
+        let report = harness.service.reconcile_active().await.unwrap();
+        assert_eq!(report.examined, 2);
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.succeeded, 1);
+        let a = harness
+            .task_repository
+            .find_by_id(&a.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let b = harness
+            .task_repository
+            .find_by_id(&b.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(a.status.is_terminal() && b.status.is_terminal());
+        assert!(a.status == TaskStatus::Failed || b.status == TaskStatus::Failed);
+        assert_eq!(harness.adapter.counters.lock().unwrap().download, 2);
+        assert_eq!(harness.adapter.counters.lock().unwrap().submit, 0);
     }
 }

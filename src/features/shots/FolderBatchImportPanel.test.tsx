@@ -7,8 +7,8 @@ import { FolderBatchImportPanel, FolderBatchImportDialog } from "./FolderBatchIm
 import type { FolderImportPreview, FolderImportResult } from "../../types/folderBatchImport";
 const api=vi.hoisted(()=>({pick:vi.fn(),rescan:vi.fn(),discard:vi.fn(),commit:vi.fn(),generators:vi.fn()}));
 vi.mock("../../product/client",()=>({productClient:{creation:{generatorsList:api.generators},folderImport:{pick:api.pick,rescan:api.rescan,discard:api.discard,commit:api.commit}}}));
-function preview(id="session",bad=true):FolderImportPreview{return {sessionId:id,previewVersion:1,nameSuffix:null,displayRootName:"fixture",manifestSha256:"abc",formatSource:"manifest",shotCount:3,validCount:bad?2:3,errorCount:bad?1:0,warningCount:0,maxQueueItems:100,createQueueDefault:true,characters:[],errors:[],warnings:[],rows:[0,1,2].map(i=>({rowKey:`r${i}`,rowNumber:i+1,manifestId:null,mode:i===0?"firstLast":"reference",name:`镜头${i}`,promptPreview:"真实原文",durationSeconds:6,width:1280,height:768,generatorLabel:"Exact",firstFrame:i===0?"a.png":null,lastFrame:i===0?"b.png":null,referenceCount:2,entityNames:[],errors:i===2&&bad?[{code:"FILE_NOT_FOUND",message:"图片缺失"}]:[],warnings:[]}))};}
-function result(outcome:FolderImportResult["outcome"]="completed"):FolderImportResult{return {outcome,failure:outcome==="completed"?null:{stage:"C3",code:"PROMPT_SAVE_FAILED",message:"写入失败"},compensationErrors:[],createdShotIds:["s1","s2"],reusedEntityIds:[],createdEntityIds:[],importedAssetIds:["a","b"],batchId:"batch",itemCount:2,autoStarted:false,residual:{unverifiedFileCleanup:false,shotIds:[],entityIds:[],assetIds:[],batchId:null},warnings:[]};}
+function preview(id="session",bad=true):FolderImportPreview{return {sessionId:id,previewVersion:1,nameSuffix:null,displayRootName:"fixture",manifestSha256:"abc",formatSource:"manifest",shotCount:3,validCount:bad?2:3,errorCount:bad?1:0,warningCount:0,maxQueueItems:100,createQueueDefault:true,characters:[],errors:[],warnings:[],rows:[0,1,2].map(i=>({rowKey:`r${i}`,rowNumber:i+1,manifestId:null,mode:i===0?"firstLast":"reference",name:`镜头${i}`,prompt:"真实完整原文",promptSections:{style:null,summary:null,soundscape:null,music:null},referencePreview:["a.png","b.png"],promptPreview:"真实原文",durationSeconds:6,width:1280,height:768,generatorLabel:"Exact",firstFrame:i===0?"a.png":null,lastFrame:i===0?"b.png":null,referenceCount:2,entityNames:[],errors:i===2&&bad?[{code:"FILE_NOT_FOUND",message:"图片缺失"}]:[],warnings:[]}))};}
+function result(outcome:FolderImportResult["outcome"]="completed"):FolderImportResult{return {outcome,failure:outcome==="completed"?null:{stage:"C3",code:"PROMPT_SAVE_FAILED",message:"写入失败"},compensationErrors:[],createdRows:[{rowKey:"r0",shotId:"s1",name:"镜头0"},{rowKey:"r1",shotId:"s2",name:"镜头1"}],createdShotIds:["s1","s2"],reusedEntityIds:[],createdEntityIds:[],importedAssetIds:["a","b"],batchId:"batch",itemCount:2,autoStarted:false,residual:{unverifiedFileCleanup:false,shotIds:[],entityIds:[],assetIds:[],batchId:null},warnings:[]};}
 function deferred<T>(){let resolve!:(v:T)=>void;let reject!:(e:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 beforeEach(()=>{vi.clearAllMocks();api.generators.mockResolvedValue([]);api.pick.mockResolvedValue(preview());api.rescan.mockResolvedValue({...preview(),previewVersion:2});api.discard.mockResolvedValue(undefined);api.commit.mockResolvedValue(result());HTMLDialogElement.prototype.showModal=function(){this.setAttribute("open","");};});
 afterEach(cleanup);
@@ -94,7 +94,7 @@ it("does not offer per-Shot controls for rolled-back imports", async () => {
 
 it("bounds committed Shot controls to 50 and preserves exact IDs when paging", async () => {
   const p=preview("large",false);p.rows=Array.from({length:101},(_,i)=>({...p.rows[1],rowKey:`r${i}`,rowNumber:i+1,name:`镜头${i}`}));p.shotCount=101;p.validCount=101;
-  api.pick.mockResolvedValue(p);api.commit.mockResolvedValue({...result(),createdShotIds:Array.from({length:101},(_,i)=>`shot-${i}`),batchId:null,itemCount:0});
+  api.pick.mockResolvedValue(p);api.commit.mockResolvedValue({...result(),createdRows:p.rows.map((row,i)=>({rowKey:row.rowKey,shotId:`shot-${i}`,name:row.name})),createdShotIds:Array.from({length:101},(_,i)=>`shot-${i}`),batchId:null,itemCount:0});
   const openShot=vi.fn();render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenShot={openShot}/>);
   await pick();fireEvent.click(screen.getByRole("checkbox",{name:"创建待启动批次"}));fireEvent.click(screen.getByRole("button",{name:"确认导入"}));await screen.findByText("导入完成");
   await waitFor(() => expect(screen.getByRole("region",{name:"文件夹批量导入"}).getAttribute("aria-busy")).toBe("false"));
@@ -115,4 +115,26 @@ it('AUDIT-F13 rescan of identical valid rows must retain explicit exclusions and
 });
 it('CONTROL without rescan import preserves explicit exclusions and does not prepare Queue',async()=>{
  render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();fireEvent.click(screen.getByRole("checkbox",{name:"导入 镜头1"}));fireEvent.click(screen.getByRole("checkbox",{name:"创建待启动批次"}));fireEvent.click(screen.getByRole('button',{name:'确认导入'}));await screen.findByText('导入完成');expect(api.commit.mock.calls[0][0]).toMatchObject({includeRowKeys:['r0'],createQueue:false,autoStart:false});
+});
+
+it("R66/R69: new passing rows are offered explicitly without restoring a user's exclusion, and range shortcuts are bounded",async()=>{
+ api.rescan.mockResolvedValue({...preview("session",false),previewVersion:2});
+ render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()}/>);await pick();
+ fireEvent.click(screen.getByRole("checkbox",{name:"导入 镜头1"}));
+ fireEvent.click(screen.getByRole("button",{name:"重新校验"}));
+ const apply=await screen.findByRole("button",{name:"勾选本次新通过镜头"});
+ expect(screen.getByRole("checkbox",{name:"导入 镜头1"})).toHaveProperty("checked",false);
+ expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("checked",false);
+ fireEvent.click(apply);expect(screen.getByRole("checkbox",{name:"导入 镜头2"})).toHaveProperty("checked",true);
+ expect(screen.getByRole("checkbox",{name:"导入 镜头1"})).toHaveProperty("checked",false);
+ fireEvent.click(screen.getByRole("button",{name:"清空全部选择"}));expect(screen.getByRole("button",{name:"确认导入"})).toHaveProperty("disabled",true);
+ fireEvent.click(screen.getByRole("button",{name:"仅选前 100 个可导入镜头"}));expect(screen.getByRole("checkbox",{name:"导入 镜头1"})).toHaveProperty("checked",true);
+});
+it("R49/R70: full prompt and Picture identities are inspectable and receipts never relabel IDs from current selection",async()=>{
+ const p=preview();p.rows[0].prompt="完整正文末尾不可截断";p.rows[0].referencePreview=["z.png","a.png"];api.pick.mockResolvedValue(p);
+ const receipt=result();receipt.createdRows=[{rowKey:"old",shotId:"s1",name:"原回执镜头名"}];receipt.createdShotIds=["s1"];api.commit.mockResolvedValue(receipt);
+ render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} onOpenShot={vi.fn()}/>);await pick();
+ expect(screen.getByText("完整正文末尾不可截断")).toBeTruthy();expect(screen.getByText("Picture 1 · z.png")).toBeTruthy();expect(screen.getByText("Picture 2 · a.png")).toBeTruthy();
+ fireEvent.click(screen.getByRole("checkbox",{name:"导入 镜头0"}));fireEvent.click(screen.getByRole("button",{name:"确认导入"}));
+ expect(await screen.findByRole("button",{name:"编辑「原回执镜头名」"})).toBeTruthy();
 });

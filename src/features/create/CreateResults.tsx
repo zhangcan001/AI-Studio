@@ -6,13 +6,13 @@ import type { CreationAsset } from "../../product/types";
 import type { CreateController } from "./CreateController";
 import { modeLabel } from "../../product/generatorPresentation";
 import { useLibraryImageUrl } from "./CreateMediaPreview";
-import { candidateForStage, runLabels, type CreateRoute } from "./createModel";
+import { candidateForStage, queueRunLabel, type CreateRoute } from "./createModel";
 import { focusCreateInput, resolveCreateReadinessAction, type CreateReadinessAction } from "./createReadinessAction";
 export function RunStatusCard({ controller: c }: { controller: CreateController }) {
   const edit = () => document.getElementById("create-field-prompt")?.focus();
   return <section aria-label="本次运行" aria-live="polite"><h2>本次运行</h2>
     {c.accepted && <p>{c.accepted.startOutcome === "FAILED_TO_START" ? "已保存运行，启动失败" : c.accepted.startOutcome === "QUEUED" ? "任务已排队，将在当前任务结束后自动启动" : "请求已接受"}</p>}
-    {c.run && <><p className="create-state-pill">{runLabels[c.run.status]}</p><p>{c.run.progress.succeeded}/{c.run.progress.total} 已完成</p><p>{c.run.progress.failed} 失败 · {c.run.progress.cancelled} 已取消</p>{c.run.errorSummary && <p>运行遇到问题，请查看详情。</p>}</>}
+    {c.run && <><p className="create-state-pill">{queueRunLabel(c.run)}</p><p>{c.run.progress.succeeded}/{c.run.progress.total} 已完成</p><p>{c.run.progress.failed} 失败 · {c.run.progress.cancelled} 已取消</p>{c.run.errorSummary && <p>运行遇到问题，请查看详情。</p>}</>}
     {!c.runRef && <p>尚未生成</p>}
     {c.run?.availableActions.includes("EDIT_INPUT") && <button type="button" onClick={edit}>修改输入</button>}
     {c.runRef && <button type="button" onClick={c.openRun}>查看运行详情</button>}

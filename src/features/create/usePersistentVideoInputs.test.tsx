@@ -241,3 +241,25 @@ it('background success cannot clear an unresolved dirty-draft OCC conflict',asyn
  expect(result.current.ready).toBe(false);
  expect(useStudioStore.getState().values.first_frame).toEqual({type:'image_asset',assetId:'dirty'});
 });
+
+it("R10: reapplying an existing plural reference preserves explicit order", async () => {
+  const g = { ...generator, fields: [{ key: "reference_images", type: "images" as const, label: "参考图", required: false, minItems: 0, maxItems: 10 }] };
+  api.inputsGet.mockResolvedValue({ ...view(), inputs: [{ inputKey: "reference_images", ordinal: 0, assetId: "first" }, { inputKey: "reference_images", ordinal: 1, assetId: "last" }] });
+  const h = renderHook(() => usePersistentVideoInputs(route, g, false));
+  await waitFor(() => expect(h.result.current.ready).toBe(true));
+  await act(async () => { expect(await h.result.current.bindAsset("reference_images", "first")).toBe(true); });
+  expect(api.inputsSave.mock.calls[0][0].inputs.map((i: { assetId: string }) => i.assetId)).toEqual(["first", "last"]);
+});
+it("R27: a same-Recipe history draft supersedes every earlier formal-input read", async () => {
+  let finish!: (value: VideoInputView) => void;
+  api.inputsGet.mockImplementationOnce(() => new Promise<VideoInputView>(done => { finish = done; }));
+  const history = { prompt: { type: "string" as const, value: "history" }, first_frame: { type: "image_asset" as const, assetId: "history-first" }, last_frame: { type: "image_asset" as const, assetId: "history-last" } };
+  const h = renderHook(({ restored }: { restored: typeof history | undefined }) => usePersistentVideoInputs(route, generator, false, restored), { initialProps: { restored: undefined as typeof history | undefined } });
+  act(() => useStudioStore.getState().loadCreationDraft(history, true));
+  h.rerender({ restored: history });
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  await act(async () => { finish(view()); });
+  expect(useStudioStore.getState().values).toEqual(history);
+  expect(h.result.current.dirty).toBe(true);
+  expect(api.inputsSave).not.toHaveBeenCalled();
+});

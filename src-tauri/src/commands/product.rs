@@ -345,6 +345,7 @@ pub async fn product_library_get(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreationSubmissionDto {
+    expected_video_inputs: Option<crate::application::ports::ShotVideoInputToken>,
     prompt_id: Option<String>,
     prompt_version_id: Option<String>,
     project_id: String,
@@ -377,6 +378,7 @@ impl CreationSubmissionDto {
             })
             .collect::<Result<_, _>>()?;
         Ok(CreationSubmission {
+            expected_video_inputs: self.expected_video_inputs,
             prompt_id: self.prompt_id,
             prompt_version_id: self.prompt_version_id,
             project_id: self.project_id,
@@ -1114,32 +1116,18 @@ mod shot_row_dto_tests {
     }
 }
 
-/// Product-side delivery; path selection is Native and sources are project-owned Assets.
-#[tauri::command(rename_all = "camelCase")]
-pub async fn product_selected_videos_export(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    project_id: String,
-    open_directory: Option<bool>,
-    confirmed_rejected_asset_ids: Option<Vec<String>>,
-) -> Result<Option<crate::application::product::selected_export::SelectedVideoExport>, ProductError>
-{
-    use tauri_plugin_dialog::DialogExt;
-    let mut shots = state
-        .shots
-        .shot
-        .list(&project_id)
-        .await
-        .map_err(ProductError::internal)?;
-    shots.sort_by_key(|s| (s.ordinal, s.id.clone()));
-    let selection = shots
-        .iter()
-        .map(|s| (s.id.clone(), s.selected_video_asset_id.clone()))
-        .collect::<std::collections::BTreeMap<_, _>>();
+async fn selected_video_export_sources(
+    state: &AppState,
+    project_id: &str,
+    shots: &[crate::application::shot_service::ShotView],
+) -> (
+    Vec<String>,
+    Vec<crate::application::product::selected_export::ExportSource>,
+) {
     let mut source_tasks = Vec::new();
     let mut sources = Vec::new();
     for shot in shots {
-        if let Some(id) = shot.selected_video_asset_id {
+        if let Some(id) = shot.selected_video_asset_id.clone() {
             let source = async {
                 let asset = state
                     .assets
@@ -1177,14 +1165,44 @@ pub async fn product_selected_videos_export(
             };
             sources.push(crate::application::product::selected_export::ExportSource {
                 ordinal: shot.ordinal,
-                shot_id: shot.id,
-                shot_name: shot.name,
+                shot_id: shot.id.clone(),
+                shot_name: shot.name.clone(),
                 asset_id: id,
                 path,
                 error,
             });
         }
     }
+    (source_tasks, sources)
+}
+
+/// Product-side delivery; path selection is Native and sources are project-owned Assets.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn product_selected_videos_export(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+    open_directory: Option<bool>,
+    confirmed_rejected_asset_ids: Option<Vec<String>>,
+) -> Result<Option<crate::application::product::selected_export::SelectedVideoExport>, ProductError>
+{
+    use tauri_plugin_dialog::DialogExt;
+    let mut shots = state
+        .shots
+        .shot
+        .list(&project_id)
+        .await
+        .map_err(ProductError::internal)?;
+    shots.sort_by_key(|s| (s.ordinal, s.id.clone()));
+    let selection = shots
+        .iter()
+        .filter_map(|s| {
+            s.selected_video_asset_id
+                .as_ref()
+                .map(|asset| (s.id.clone(), (asset.clone(), s.name.clone(), s.ordinal)))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let (source_tasks, sources) = selected_video_export_sources(&state, &project_id, &shots).await;
     if sources.is_empty() {
         return Err(ProductError::new(
             "INVALID_INPUT",
@@ -1216,14 +1234,19 @@ pub async fn product_selected_videos_export(
     };
     let parent = folder.into_path().map_err(ProductError::internal)?;
     // Folder dialogs may remain open while selection/review changes elsewhere.
-    let current_selection = state
+    let current_shots = state
         .shots
         .shot
         .list(&project_id)
         .await
-        .map_err(ProductError::internal)?
-        .into_iter()
-        .map(|s| (s.id, s.selected_video_asset_id))
+        .map_err(ProductError::internal)?;
+    let current_selection = current_shots
+        .iter()
+        .filter_map(|s| {
+            s.selected_video_asset_id
+                .as_ref()
+                .map(|asset| (s.id.clone(), (asset.clone(), s.name.clone(), s.ordinal)))
+        })
         .collect::<std::collections::BTreeMap<_, _>>();
     if current_selection != selection {
         return Err(ProductError::new(
@@ -1232,6 +1255,10 @@ pub async fn product_selected_videos_export(
             None,
         ));
     }
+    // Resolve again after the dialog: a source may have recovered or become
+    // unavailable while the user selected a destination.
+    let (source_tasks, sources) =
+        selected_video_export_sources(&state, &project_id, &current_shots).await;
     let reviews = state
         .assets
         .artifact

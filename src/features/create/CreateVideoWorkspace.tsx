@@ -98,13 +98,17 @@ function ShotInfoCard({ controller: c, candidates }: { controller: CreateControl
   const shot = c.context?.selectedShot;
   const num = (key: string) => { const v = c.values[key]; return v?.type === "integer" || v?.type === "number" ? v.value : undefined; };
   const duration = num("duration_seconds"); const w = num("width"), h = num("height");
+  const formal = c.videoInputs?.enabled ? c.videoInputs.view?.inputs : undefined;
+  const images = formal ? formal.filter(i => ["first_frame", "last_frame", "reference_images"].includes(i.inputKey)).map(i => i.assetId) : shot?.referenceAssetIds ?? [];
+  const videoCount = formal?.filter(i => i.inputKey === "reference_videos").length ?? 0;
+  const audioCount = formal?.filter(i => i.inputKey === "reference_audios").length ?? 0;
   return <section className="create-shot-info" aria-label="当前镜头信息"><h2>当前镜头信息</h2><strong>{shot?.summary.name}</strong>
     <p className="create-shot-prompt">{shot?.prompt.trim() || "尚未保存镜头提示词"}</p>
     <dl>
       <div><dt>镜头时长</dt><dd>{duration ? `${duration} 秒` : "未设置"}</dd></div>
       <div><dt>画面尺寸</dt><dd>{w && h ? `${w} × ${h}` : "未设置"}</dd></div>
       <div><dt>生成模式</dt><dd>{c.generator ? `MiniMax 视频 · ${modeLabel(c.generator)}` : "未选择模式"}</dd></div>
-      <div><dt>参考素材</dt><dd>{shot?.referenceAssetIds.length ? <div className="storyboard-ref-thumbs" aria-label="参考素材缩略图">{shot.referenceAssetIds.map(id => <AssetImageThumb key={id} projectId={c.context!.projectId} assetId={id} name={`参考 ${id.slice(0, 8)}`} size="lg" />)}<small>{shot.referenceAssetIds.length} 张</small></div> : "0 张"}</dd></div>
+      <div><dt>参考素材</dt><dd>{images.length ? <div className="storyboard-ref-thumbs" aria-label="参考素材缩略图">{images.map((id, index) => <AssetImageThumb key={`${index}:${id}`} projectId={c.context!.projectId} assetId={id} name={`参考 ${index + 1}`} size="lg" />)}<small>{images.length} 张图片</small></div> : "0 张图片"}{` · ${videoCount} 个视频 · ${audioCount} 个音频`}</dd></div>
       <div><dt>生成候选</dt><dd>{candidates.length} 个</dd></div>
     </dl><small>当前 Recipe 的草稿与原运行快照独立。</small></section>;
 }

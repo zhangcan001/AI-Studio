@@ -172,7 +172,8 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
       setBackupNotice(`项目已恢复：${restored.name}`);
       onProjectRestored(restored);
     } catch (backupError: unknown) {
-      setError(toUserMessage(backupError));
+      setBackupPreview(undefined);
+      setError(`${toUserMessage(backupError)}。本次预览已失效，请重新选择备份文件进行检查后重试。`);
     } finally {
       setBackupBusy(false);
     }

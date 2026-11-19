@@ -548,9 +548,6 @@ impl ProjectBackupService {
 
     pub async fn inspect(&self, source: PathBuf) -> Result<ProjectBackupPreviewView, AppError> {
         prune_inspection_archives(&self.inspection_dir);
-        let (manifest, document, entry_names) = inspect_archive(&source)?;
-        validate_document_entries(&document, &entry_names, manifest.version)?;
-        let missing_workflows = self.find_missing_workflows(&document).await?;
         fs::create_dir_all(&self.inspection_dir)
             .map_err(|error| AppError::filesystem(error.to_string()))?;
         let inspection_id = format!("bki_{}", Uuid::new_v4());
@@ -559,8 +556,28 @@ impl ProjectBackupService {
             archive_path: archive_path.clone(),
             expires_at: std::time::Instant::now() + INSPECTION_TTL,
         };
-        fs::copy(&source, &archive_path)
+        let input = File::open(&source).map_err(|error| AppError::filesystem(error.to_string()))?;
+        let metadata = input
+            .metadata()
             .map_err(|error| AppError::filesystem(error.to_string()))?;
+        if !metadata.is_file() || metadata.len() > MAX_ZIP_BYTES {
+            return Err(AppError::backup_invalid(
+                "备份压缩包超过 20 GiB 限制或不是普通文件",
+            ));
+        }
+        let mut output =
+            File::create(&archive_path).map_err(|error| AppError::filesystem(error.to_string()))?;
+        let copied = io::copy(&mut input.take(MAX_ZIP_BYTES + 1), &mut output)
+            .map_err(|error| AppError::filesystem(error.to_string()))?;
+        if copied > MAX_ZIP_BYTES {
+            return Err(AppError::backup_invalid("备份压缩包超过 20 GiB 限制"));
+        }
+        drop(output);
+        // Inspect the retained bytes before the first await. Source replacement
+        // during dependency lookup can no longer change what Restore receives.
+        let (manifest, document, entry_names) = inspect_archive(&archive_path)?;
+        validate_document_entries(&document, &entry_names, manifest.version)?;
+        let missing_workflows = self.find_missing_workflows(&document).await?;
         // CopyFile can preserve the original archive timestamp on Windows.
         // The cache TTL starts now, not when the user's backup was exported.
         fs::File::options()
@@ -630,6 +647,10 @@ impl ProjectBackupService {
         let inspection = self.take_inspection(inspection_id)?;
         let (manifest, document, entry_names) = inspect_archive(&inspection.archive_path)?;
         validate_document_entries(&document, &entry_names, manifest.version)?;
+        let missing = self.find_missing_workflows(&document).await?;
+        if missing.iter().any(|item| item.starts_with("正式输入：")) {
+            return Err(AppError::backup_invalid(format!("正式参考所需的精确生成器不可执行，请先安装匹配的 WorkflowVersion 和 Recipe 后重新检查备份：{}", missing.join("；"))));
+        }
 
         let new_project_id = format!("prj_{}", Uuid::new_v4());
         let final_root = self.projects_dir.join(&new_project_id);
@@ -2642,6 +2663,11 @@ fn write_zip_to_path(
     if bytes > MAX_ZIP_BYTES {
         return Err(AppError::backup_invalid("备份压缩包超过 20 GiB 限制"));
     }
+    let mut archive = ZipArchive::new(
+        File::open(destination).map_err(|error| AppError::filesystem(error.to_string()))?,
+    )
+    .map_err(|error| AppError::backup_invalid(format!("备份压缩包无效：{error}")))?;
+    validate_archive_entries(&mut archive, MAX_ENTRY_BYTES, MAX_ZIP_BYTES)?;
     Ok(())
 }
 
@@ -2804,17 +2830,11 @@ fn replace_backup_file(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)
 }
 
-fn inspect_archive(
-    source: &Path,
-) -> Result<(ProjectBackupManifest, BackupDocument, HashSet<String>), AppError> {
-    let metadata = fs::metadata(source).map_err(|error| AppError::filesystem(error.to_string()))?;
-    if metadata.len() > MAX_ZIP_BYTES {
-        return Err(AppError::backup_invalid("备份压缩包超过 20 GiB 限制"));
-    }
-    let mut archive = ZipArchive::new(
-        File::open(source).map_err(|error| AppError::filesystem(error.to_string()))?,
-    )
-    .map_err(|error| AppError::backup_invalid(format!("备份压缩包无效：{error}")))?;
+fn validate_archive_entries<R: io::Read + io::Seek>(
+    archive: &mut ZipArchive<R>,
+    entry_limit: u64,
+    total_limit: u64,
+) -> Result<HashSet<String>, AppError> {
     if archive.len() > MAX_ENTRIES {
         return Err(AppError::backup_invalid("备份文件数量超过限制"));
     }
@@ -2828,15 +2848,30 @@ fn inspect_archive(
         if !safe_zip_path(&name) || entry.unix_mode().is_some_and(is_symlink_mode) {
             return Err(AppError::backup_invalid("备份包含不安全的文件路径"));
         }
-        if entry.size() > MAX_ENTRY_BYTES {
+        if entry.size() > entry_limit {
             return Err(AppError::backup_invalid("备份条目超过单文件大小限制"));
         }
         total_uncompressed = total_uncompressed.saturating_add(entry.size());
         names.insert(name);
     }
-    if total_uncompressed > MAX_ZIP_BYTES {
+    if total_uncompressed > total_limit {
         return Err(AppError::backup_invalid("备份解压后超过大小限制"));
     }
+    Ok(names)
+}
+
+fn inspect_archive(
+    source: &Path,
+) -> Result<(ProjectBackupManifest, BackupDocument, HashSet<String>), AppError> {
+    let metadata = fs::metadata(source).map_err(|error| AppError::filesystem(error.to_string()))?;
+    if metadata.len() > MAX_ZIP_BYTES {
+        return Err(AppError::backup_invalid("备份压缩包超过 20 GiB 限制"));
+    }
+    let mut archive = ZipArchive::new(
+        File::open(source).map_err(|error| AppError::filesystem(error.to_string()))?,
+    )
+    .map_err(|error| AppError::backup_invalid(format!("备份压缩包无效：{error}")))?;
+    let names = validate_archive_entries(&mut archive, MAX_ENTRY_BYTES, MAX_ZIP_BYTES)?;
     let first_entry_is_manifest = archive
         .by_index(0)
         .map(|entry| entry.name() == "manifest.json")
@@ -5350,6 +5385,27 @@ pub(crate) use crate::infrastructure::database::{
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn r65_reader_and_writer_share_the_uncompressed_total_budget() {
+        use std::io::{Cursor, Write};
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for name in ["first", "second"] {
+            writer
+                .start_file(
+                    name,
+                    zip::write::FileOptions::default()
+                        .compression_method(zip::CompressionMethod::Deflated),
+                )
+                .unwrap();
+            writer.write_all(&[0; 8]).unwrap();
+        }
+        let bytes = writer.finish().unwrap().into_inner();
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        assert!(super::validate_archive_entries(&mut archive, 8, 16).is_ok());
+        assert!(super::validate_archive_entries(&mut archive, 8, 15).is_err());
+        assert!(super::validate_archive_entries(&mut archive, 7, 16).is_err());
+    }
+
     use super::{prune_inspection_archives, Inspection, Uuid, INSPECTION_TTL};
     use std::fs;
 
@@ -10464,6 +10520,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn r62_source_replacement_during_dependency_lookup_restores_only_inspected_bytes() {
+        use crate::application::ports::ProjectBackupSnapshot;
+        struct ReplacingRepository {
+            inner: SqliteProjectBackupRepository,
+            source: PathBuf,
+            replacement: PathBuf,
+        }
+        #[async_trait::async_trait]
+        impl ProjectBackupRepository for ReplacingRepository {
+            async fn load_export_snapshot(
+                &self,
+                project: &str,
+            ) -> Result<ProjectBackupSnapshot, RepositoryError> {
+                self.inner.load_export_snapshot(project).await
+            }
+            async fn find_missing_workflows(
+                &self,
+                document: &BackupDocument,
+            ) -> Result<Vec<String>, RepositoryError> {
+                // This callback is precisely the first await after inspection:
+                // the original implementation copied B after validating A.
+                fs::copy(&self.replacement, &self.source).unwrap();
+                self.inner.find_missing_workflows(document).await
+            }
+            async fn restore_atomic(
+                &self,
+                plan: ProjectBackupRestorePlan,
+            ) -> Result<ProjectBackupRestoreResult, RepositoryError> {
+                self.inner.restore_atomic(plan).await
+            }
+        }
+        let directory = tempdir().unwrap();
+        let data = AppDataDirs::initialize(directory.path().join("data")).unwrap();
+        let pool = initialize(&data.database).await.unwrap();
+        let source = directory.path().join("source.aiarchive");
+        let replacement = directory.path().join("replacement.aiarchive");
+        write_zip_to_path(
+            &empty_archive_document("source-a", "确认归档A"),
+            &[],
+            &source,
+        )
+        .unwrap();
+        write_zip_to_path(
+            &empty_archive_document("source-b", "替换归档B"),
+            &[],
+            &replacement,
+        )
+        .unwrap();
+        let service = ProjectBackupService::new(
+            Arc::new(ReplacingRepository {
+                inner: SqliteProjectBackupRepository::new(pool.clone()),
+                source: source.clone(),
+                replacement,
+            }),
+            data.projects,
+            data.cache,
+        );
+        let preview = service.inspect(source.clone()).await.unwrap();
+        assert_eq!(preview.project_name, "确认归档A");
+        assert_eq!(
+            inspect_archive(&source).unwrap().0.project.name,
+            "替换归档B"
+        );
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert!(restored.name.contains("确认归档A"));
+        assert!(!restored.name.contains("替换归档B"));
+        pool.close().await;
+    }
+
+    #[tokio::test]
     async fn restore_from_aiarchive_creates_new_project_id() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
@@ -11967,6 +12093,16 @@ mod video_input_tests {
         let dir = tempfile::tempdir().unwrap();
         let (pool, service, project, _archive) =
             super::tests::seed_current_v20_legacy_shot_fixture(&dir).await;
+        let workflow = include_str!("../../../tests/fixtures/simple_t2i/workflow_api.json");
+        let recipe = include_str!("../../../tests/fixtures/simple_t2i/recipe.yaml");
+        sqlx::query("UPDATE workflow_versions SET api_workflow_json = ?, workflow_sha256 = ? WHERE id = 'workflow-version-1'")
+            .bind(workflow).bind(format!("{:x}", Sha256::digest(workflow.as_bytes()))).execute(&pool).await.unwrap();
+        sqlx::query("UPDATE recipes SET recipe_yaml = ?, recipe_sha256 = ? WHERE id = 'recipe-1'")
+            .bind(recipe)
+            .bind(format!("{:x}", Sha256::digest(recipe.as_bytes())))
+            .execute(&pool)
+            .await
+            .unwrap();
         let root = PathBuf::from(
             sqlx::query_scalar::<_, String>("SELECT root_path FROM projects WHERE id = ?")
                 .bind(&project)
@@ -12034,6 +12170,52 @@ mod video_input_tests {
             .unwrap()
             .unwrap();
         (dir, pool, service, scope)
+    }
+
+    #[tokio::test]
+    async fn r63_unexecutable_exact_recipe_warns_and_blocks_restore_without_losing_inputs() {
+        let (dir, pool, service, scope) = owned_fixture().await;
+        let destination = dir.path().join("exact-inputs.aiarchive");
+        service
+            .export(&scope.project_id, destination.clone())
+            .await
+            .unwrap();
+        let original = SqliteShotVideoInputRepository::new(pool.clone())
+            .find(&scope)
+            .await
+            .unwrap()
+            .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE recipes SET recipe_yaml = 'schema_version: 1' WHERE id = ?")
+            .bind(&scope.recipe_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let inspected = service.inspect(destination).await.unwrap();
+        assert!(inspected
+            .missing_workflows
+            .iter()
+            .any(|warning| warning.starts_with("正式输入：")));
+        assert!(service.restore(&inspected.inspection_id).await.is_err());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            count
+        );
+        assert_eq!(
+            SqliteShotVideoInputRepository::new(pool.clone())
+                .find(&scope)
+                .await
+                .unwrap()
+                .unwrap(),
+            original
+        );
+        pool.close().await;
     }
 
     #[tokio::test]

@@ -23,13 +23,21 @@ afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 it('phase11_runs rejects late project and route responses without issuing stale detail reads', async () => {
   const old = deferred<RunList>();
+  const oldDetail = deferred<ProductRun>();
+  api.runs.get.mockReturnValue(oldDetail.promise);
   api.runs.list.mockImplementation((project: string) => project === 'a' ? old.promise : Promise.resolve(emptyRuns));
   const navigate = vi.fn(); const route: RunsRoute = { kind: 'runs', projectId: 'a', run: { source: 'task', id: 'old' } };
   const hook = renderHook(({ route }) => useRunsController({ route, navigate }), { initialProps: { route } });
   await act(async () => hook.rerender({ route: { kind: 'runs', projectId: 'b', filter: 'completed' } }));
   expect(hook.result.current.loading).toBe(false); expect(hook.result.current.filter).toBe('completed');
-  await act(async () => old.resolve({ ...emptyRuns, coverage: 'STALE' }));
-  expect(hook.result.current.list).toEqual(emptyRuns); expect(api.runs.get).not.toHaveBeenCalled();
+  // R54 allows the selected detail to start without waiting for history.
+  // Neither its late response nor the old history can cross the project boundary.
+  expect(api.runs.get).toHaveBeenCalledExactlyOnceWith('a', { source: 'task', id: 'old' });
+  await act(async () => { old.resolve({ ...emptyRuns, coverage: 'STALE' }); oldDetail.resolve({ ref: { source: 'task', id: 'old' } } as ProductRun); });
+  expect(hook.result.current.list).toEqual(emptyRuns);
+  expect(hook.result.current.detail).toBeUndefined();
+  expect(api.runs.get).toHaveBeenCalledTimes(1);
+  expect(api.runs.resultsGet).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalled();
   const pending = deferred<ProductRun>(); api.runs.get.mockReturnValue(pending.promise);
   await act(async () => hook.rerender({ route: { kind: 'runs', projectId: 'b', run: { source: 'task', id: 'old' } } }));

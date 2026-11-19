@@ -10,6 +10,7 @@ fn request(
     key: &str,
 ) -> CreationSubmission {
     CreationSubmission {
+        expected_video_inputs: None,
         prompt_id: None,
         prompt_version_id: None,
         project_id: PROJECT_ID.into(),

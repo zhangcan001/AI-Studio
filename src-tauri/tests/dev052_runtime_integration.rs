@@ -255,6 +255,26 @@ fn shared_recipe_packages() -> Vec<WorkflowPackageFiles> {
 }
 
 #[derive(Clone)]
+// Controlled media capability for queue/SQLite tests. This does not claim to
+// decode the synthetic Comfy stream; real media probing has its own regressions.
+struct ControlledMediaProbe;
+#[async_trait]
+impl ai_studio_lib::application::media_probe::MediaProbe for ControlledMediaProbe {
+    async fn probe_video(
+        &self,
+        _: &Path,
+    ) -> ai_studio_lib::application::media_probe::VideoMetadata {
+        ai_studio_lib::application::media_probe::VideoMetadata {
+            width: Some(64),
+            height: Some(64),
+            duration_ms: Some(3000),
+        }
+    }
+    async fn generate_video_poster(&self, _: &Path) -> Option<Vec<u8>> {
+        None
+    }
+}
+
 struct StaticWorkflowSource {
     packages: Vec<WorkflowPackageFiles>,
     load_calls: Arc<AtomicUsize>,
@@ -771,6 +791,21 @@ async fn harness_with_packages(
             shot_batch_repository.clone(),
             clock.clone(),
         )
+        .with_asset_query(Arc::new(
+            ai_studio_lib::application::asset_query_service::AssetQueryService::new(
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteAssetRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+                Arc::new(ai_studio_lib::infrastructure::filesystem::FileSystemAssetStore::new()),
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteProjectRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+            ),
+        ))
         .with_stage_prompt_repository(shot_bulk_repository)
         .with_generation_snapshot_repository(snapshot_repository.clone()),
     );
@@ -786,6 +821,7 @@ async fn harness_with_packages(
             asset_repository.clone(),
             clock.clone(),
         )
+        .with_media_probe(Arc::new(ControlledMediaProbe))
         .with_workflow_compatibility_service(onboarding_service.clone())
         .with_execution_registry(execution_registry.clone()),
     );
@@ -800,6 +836,7 @@ async fn harness_with_packages(
             clock.clone(),
             Arc::new(NoopTaskUpdateSink),
         )
+        .with_media_probe(Arc::new(ControlledMediaProbe))
         .with_execution_registry(execution_registry.clone()),
     );
     let cancellation_service = Arc::new(TaskCancellationService::new(

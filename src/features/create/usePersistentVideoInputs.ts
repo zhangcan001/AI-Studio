@@ -17,8 +17,15 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
   const enabled = route.stage === "video" && !!generator?.persistentInputs && !!route.shotId;
   const owner = JSON.stringify([route.projectId, route.shotId, generator?.selectionRef]);
   const currentOwner = useRef(owner); currentOwner.current = owner;
-  const epoch = useRef(0); const lock = useRef(false); const selfWrite = useRef(false);
   const readEpoch = useRef(0), pendingRefresh = useRef(false);
+  // Same-Recipe history reuse is a new draft generation even though the
+  // formal input owner did not change. Invalidate reads started before it.
+  const currentRestoredDraft = useRef(restoredDraft);
+  if (currentRestoredDraft.current !== restoredDraft) {
+    ++readEpoch.current;
+    currentRestoredDraft.current = restoredDraft;
+  }
+  const epoch = useRef(0); const lock = useRef(false); const selfWrite = useRef(false);
   const values = useStudioStore(state => state.values);
   const [state, setState] = useState<{ owner: string; view: VideoInputView }>();
   const liveState = useRef(state); liveState.current = state;
@@ -86,7 +93,7 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     lock.current = false; setBusy(false); liveState.current = undefined; setState(undefined);
     setError(undefined); setImportReceipt(undefined); setLoading(enabled); void load(true);
     return () => { ++epoch.current; ++readEpoch.current; };
-  }, [owner, enabled, pageLoading]);
+  }, [owner, enabled, pageLoading, restoredDraft]);
   useEffect(() => {
     if (!enabled) return;
     return subscribeVideoInputInvalidation((projectId) => {
@@ -126,9 +133,8 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
       const currentKey = inputs.filter(i => i.inputKey === inputKey).sort((a,b)=>a.ordinal-b.ordinal);
       let nextKey: VideoInputAsset[];
       if (pluralField(field)) {
-        const without = currentKey.filter(i => i.assetId !== assetId);
-        nextKey = [...without, { inputKey: inputKey as VideoInputKey, ordinal: without.length, assetId }]
-          .map((item, ordinal) => ({ ...item, ordinal }));
+        nextKey = currentKey.some(i => i.assetId === assetId) ? currentKey
+          : [...currentKey, { inputKey: inputKey as VideoInputKey, ordinal: currentKey.length, assetId }];
       } else {
         nextKey = [{ inputKey: inputKey as VideoInputKey, ordinal: 0, assetId }];
       }

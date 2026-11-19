@@ -1,3 +1,5 @@
+import { renderHook } from "@testing-library/react";
+import { useCreateController } from "./CreateController";
 // @vitest-environment jsdom
 import { StrictMode, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -147,6 +149,16 @@ describe("H3 native resolution presets", () => {
     render(<Host initialStage="video" />); await loaded();
     expect(screen.queryByLabelText("视频分辨率")).toBeNull();
     expect(screen.getByLabelText("宽度")).toBeTruthy();
+  });
+  it("R29: a historical snapshot missing parameters uses the generator defaults, not a blank form", () => {
+    const prior = { prompt: { type: "string", value: "历史提示" } } as const;
+    const draft = draftFor(videos[0], null, prior);
+    expect(draft.prompt).toEqual(prior.prompt);
+    expect(draft.duration_seconds).toEqual({ type: "integer", value: 5 });
+    expect(draft.seed).toEqual({ type: "seed_random" });
+    expect(draft.width).toEqual({ type: "integer", value: 640 });
+    expect(draft.height).toEqual({ type: "integer", value: 480 });
+    expect(draftFor(videos[0], null, { ...prior, duration_seconds: { type: "integer", value: 8 } }).duration_seconds).toEqual({ type: "integer", value: 8 });
   });
 });
 describe("M1-1 readiness actions", () => {
@@ -724,4 +736,39 @@ describe("long-term reference draft ownership", () => {
     expect((screen.getByRole("checkbox",{name:"尾帧素材"}) as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByRole("button",{name:"保存长期参考图"}));expect(save).toHaveBeenCalledWith(["img2"]);
   });
+});
+
+it("R15: a lost generation receipt retains semantic intent across stage navigation", async () => {
+  api.generate.mockRejectedValue({ code: "IPC_TRANSPORT_FAILED", message: "lost receipt" });
+  const video = { kind: "create", projectId: "project", shotId: "shot1", stage: "video" } as const;
+  const h = renderHook(({ stage }: { stage: "video" | "image" }) => useCreateController({ route: { ...video, stage }, runtime: { ...runtime, devices: [] }, navigate: navigations }), { initialProps: { stage: "video" as "video" | "image" } });
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  await act(async () => { await h.result.current.generate(); });
+  expect(api.generate).toHaveBeenCalledTimes(1);
+  const first = api.generate.mock.calls[0][0];
+  h.rerender({ stage: "image" });
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  h.rerender({ stage: "video" });
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  await act(async () => { await h.result.current.generate(); });
+  expect(api.generate).toHaveBeenCalledTimes(2);
+  expect(api.generate.mock.calls[1][0].submissionIdempotencyKey).toBe(first.submissionIdempotencyKey);
+});
+it("R28: abandoning a no-Shot history picker clears only that pending intent", async () => {
+  const intent = { projectId: "project", stage: "video" as const, selectionRef: "t2v-opaque", values: { prompt: { type: "string" as const, value: "abandoned history" } }, target: { shotId: null, requestId: "abandoned", approved: true } };
+  useStudioStore.getState().setPendingRunIntent(intent);
+  const h = renderHook(() => useCreateController({ route: { kind: "create", projectId: "project", stage: "video" }, runtime: { ...runtime, devices: [] }, navigate: navigations }));
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  await act(async()=>h.unmount());
+  expect(useStudioStore.getState().pendingRunIntent).toBeUndefined();
+});
+
+it.each(["existing","new"])("R28: StrictMode preserves picker intent until explicit %s Shot handoff",async kind=>{
+ const intent={projectId:"project",stage:"video" as const,selectionRef:"t2v-opaque",values:{prompt:{type:"string" as const,value:"owned history"}},target:{shotId:null,requestId:`strict-picker-${kind}`,approved:true}};
+ useStudioStore.getState().setPendingRunIntent(intent);api.createShot.mockResolvedValue({id:"new-shot",name:"新镜头",ordinal:3});const navigate=vi.fn();
+ const h=renderHook(()=>useCreateController({route:{kind:"create",projectId:"project",stage:"video"},runtime:{...runtime,devices:[]},navigate}),{wrapper:StrictMode});await waitFor(()=>expect(h.result.current.loading).toBe(false));
+ expect(useStudioStore.getState().pendingRunIntent?.target?.requestId).toBe(intent.target.requestId);
+ await act(async()=>{if(kind==="existing")await h.result.current.selectShot("shot1");else await h.result.current.createShot();});
+ const target=kind==="existing"?"shot1":"new-shot";expect(useStudioStore.getState().pendingRunIntent?.target?.shotId).toBe(target);expect(navigate).toHaveBeenCalledWith(expect.objectContaining({shotId:target}));
+ await act(async()=>h.unmount());expect(useStudioStore.getState().pendingRunIntent?.target?.shotId).toBe(target);
 });

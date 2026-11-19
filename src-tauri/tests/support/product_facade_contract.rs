@@ -255,16 +255,33 @@ async fn product_contract_catalog_retirement_unavailable_and_no_raw_identity() {
     let definitions = Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone()));
     let tasks = Arc::new(SqliteTaskRepository::new(pool.clone()));
     let assets = Arc::new(SqliteAssetRepository::new(pool.clone()));
-    let shots = Arc::new(ShotService::new(
-        Arc::new(SqliteShotRepository::new(pool.clone())),
-        tasks.clone(),
-        assets.clone(),
-        definitions.clone(),
-        Arc::new(SqlitePromptLibraryRepository::new(pool.clone())),
-        Arc::new(TaskQueryService::new(tasks, assets, definitions.clone())),
-        Arc::new(SqliteProductionQueueRepository::new(pool.clone())),
-        Arc::new(SystemClock),
-    ));
+    let shots = Arc::new(
+        ShotService::new(
+            Arc::new(SqliteShotRepository::new(pool.clone())),
+            tasks.clone(),
+            assets.clone(),
+            definitions.clone(),
+            Arc::new(SqlitePromptLibraryRepository::new(pool.clone())),
+            Arc::new(TaskQueryService::new(tasks, assets, definitions.clone())),
+            Arc::new(SqliteProductionQueueRepository::new(pool.clone())),
+            Arc::new(SystemClock),
+        )
+        .with_asset_query(Arc::new(
+            ai_studio_lib::application::asset_query_service::AssetQueryService::new(
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteAssetRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+                Arc::new(ai_studio_lib::infrastructure::filesystem::FileSystemAssetStore::new()),
+                Arc::new(
+                    ai_studio_lib::infrastructure::database::SqliteProjectRepository::new(
+                        pool.clone(),
+                    ),
+                ),
+            ),
+        )),
+    );
     let registry = Arc::new(WorkflowRegistryService::new(
         Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone())),
         Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone())),

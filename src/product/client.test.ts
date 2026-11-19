@@ -152,3 +152,8 @@ it("usage polish sends opaque exact selection for formal bulk configuration with
 });
 
 it("usage polish preserves a safe recovery explanation for rejected-result selection",()=>{const error=normalizeProductError({code:"RESULT_REJECTED",message:"private backend path"});expect(error.code).toBe("RESULT_REJECTED");expect(error.message).toContain("重新审核");expect(error.message).not.toContain("private");});
+
+it("R60: selected-export identity guidance is preserved without trusting arbitrary backend prose",()=>{
+ expect(normalizeProductError({code:"INVALID_INPUT",message:"选用结果已变化，请重新导出。"}).message).toBe("选用结果已变化，请重新导出。");
+ expect(normalizeProductError({code:"INVALID_INPUT",message:"untrusted arbitrary detail"}).message).not.toBe("untrusted arbitrary detail");
+});

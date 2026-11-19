@@ -298,12 +298,12 @@ it("saves the prompt on blur and auto-fills recognized duration, aspect/resoluti
   await within(row).findByLabelText("镜头1 画幅");
   await within(within(row).getByLabelText("项目角色与场景")).findByTitle("解除绑定 角色 · 阿离");
   const box = within(row).getByLabelText("镜头1 提示词");
-  fireEvent.change(box, { target: { value: "阿离 走进 雨巷 8秒 竖屏 720p" } });
+  fireEvent.change(box, { target: { value: "阿离 走进 雨巷 时长8秒 竖屏 720p" } });
   expect(within(row).getByLabelText("识别结果").textContent).toContain("时长 8 秒");
   expect(within(row).getByLabelText("识别结果").textContent).toContain("画幅 9:16 · 768×1344");
   expect(within(row).getByLabelText("识别结果").textContent).toContain("场景 @雨巷");
   fireEvent.blur(box);
-  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalledWith("p", { shotId: "a", stage: "video", prompt: "阿离 走进 雨巷 8秒 竖屏 720p", selectionRef: "sel",
+  await waitFor(() => expect(api.saveShotRow).toHaveBeenCalledWith("p", { shotId: "a", stage: "video", prompt: "阿离 走进 雨巷 时长8秒 竖屏 720p", selectionRef: "sel",
     values: { duration_seconds: { type: "integer", value: 8 }, width: { type: "integer", value: 768 }, height: { type: "integer", value: 1344 } }, entityIds: ["e1", "e2"] }));
   expect(api.bindShot).not.toHaveBeenCalled();
   expect(api.updateShot).not.toHaveBeenCalled();
@@ -319,6 +319,7 @@ it("saves the prompt on blur and auto-fills recognized duration, aspect/resoluti
 });
 
 it("edits duration, aspect and resolution inline through updateShot; Ctrl+Enter saves the prompt", async () => {
+  api.generatorsList.mockResolvedValue([{...generator,resolutionPresets:[...generator.resolutionPresets,{id:"mp-2_09-16x9",label:"2.09MP",width:1920,height:1088}]}]);
   render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
   const row = await screen.findByRole("article", { name: "分镜 1 镜头1" });
   const duration = await within(row).findByLabelText("镜头1 时长（秒）");
@@ -326,9 +327,9 @@ it("edits duration, aspect and resolution inline through updateShot; Ctrl+Enter 
   fireEvent.change(duration, { target: { value: "7" } }); fireEvent.blur(duration);
   await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", { shotId: "a", name: "镜头1", stage: "video", selectionRef: "sel", values: { duration_seconds: { type: "integer", value: 7 } } }));
   fireEvent.change(within(row).getByLabelText("镜头1 画幅"), { target: { value: "16:9" } });
-  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", expect.objectContaining({ values: { duration_seconds: { type: "integer", value: 5 }, width: { type: "integer", value: 1344 }, height: { type: "integer", value: 768 } } })));
-  fireEvent.change(within(row).getByLabelText("镜头1 分辨率"), { target: { value: "mp-2_09-9x16" } });
-  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", expect.objectContaining({ values: expect.objectContaining({ width: { type: "integer", value: 1088 }, height: { type: "integer", value: 1920 } }) })));
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", expect.objectContaining({ values: { duration_seconds: { type: "integer", value: 7 }, width: { type: "integer", value: 1344 }, height: { type: "integer", value: 768 } } })));
+  fireEvent.change(within(row).getByLabelText("镜头1 分辨率"), { target: { value: "mp-2_09-16x9" } });
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", expect.objectContaining({ values: expect.objectContaining({ width: { type: "integer", value: 1920 }, height: { type: "integer", value: 1088 } }) })));
   const box = within(row).getByLabelText("镜头1 提示词");
   fireEvent.change(box, { target: { value: "只改文字" } });
   fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
@@ -853,24 +854,24 @@ it('abandons a late formal evidence read after row/project replacement',async()=
 });
 
 it('unrelated wording edits must preserve manually chosen duration and aspect',async()=>{
- const item=shot('a',0);item.shot!.prompt='Walk for 8秒，竖屏';
+ const item=shot('a',0);item.shot!.prompt='时长8秒 Walk，竖屏';
  item.shot!.values={duration_seconds:{type:'integer',value:6},width:{type:'integer',value:1344},height:{type:'integer',value:768}};
  render(<StoryboardShotRows {...props()} items={[item]}/>);
  const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
- fireEvent.change(box,{target:{value:'Walk for 8秒，竖屏，beneath soft light'}});fireEvent.blur(box);
+ fireEvent.change(box,{target:{value:'时长8秒 Walk，竖屏，beneath soft light'}});fireEvent.blur(box);
  await waitFor(()=>expect(api.saveShotRow).toHaveBeenCalledTimes(1));
  const request=api.saveShotRow.mock.calls[0][1]; expect(request.values,'unchanged parameter phrases must not undo later explicit manual settings').toBeUndefined();
  await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
 });
 it('explicit changed parameter wording still applies the new duration',async()=>{
- const item=shot('a',0);item.shot!.prompt='Walk for 8秒';
+ const item=shot('a',0);item.shot!.prompt='时长8秒 Walk';
  item.shot!.values={duration_seconds:{type:'integer',value:6}};
  render(<StoryboardShotRows {...props()} items={[item]}/>);
  // The initial empty-entity projection can enable briefly before the owned
  // entity refresh restarts the binding read. Await the final official read.
  await waitFor(()=>expect(screen.getByTitle('解除绑定 角色 · 阿离').hasAttribute('disabled')).toBe(false));
  const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
- fireEvent.change(box,{target:{value:'Walk for 7秒'}});fireEvent.blur(box);
+ fireEvent.change(box,{target:{value:'时长7秒 Walk'}});fireEvent.blur(box);
  await waitFor(()=>expect(api.saveShotRow).toHaveBeenCalledTimes(1));
  expect(api.saveShotRow.mock.calls[0][1].values.duration_seconds).toEqual({type:'integer',value:7});
  await waitFor(()=>expect(screen.getByRole('button',{name:'生成视频'}).hasAttribute('disabled')).toBe(false));
@@ -917,10 +918,10 @@ it('saves once then submits recognized values once even on a repeated click duri
  const user=userEvent.setup(),p=deferred<unknown>();api.saveShotRow.mockReturnValueOnce(p.promise);
  render(<StoryboardShotRows {...props()} items={[shot('a',0)]}/>);
  const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
- await user.click(box);fireEvent.change(box,{target:{value:'Walk for 7秒'}});
+ await user.click(box);fireEvent.change(box,{target:{value:'时长7秒 Walk'}});
  await user.click(screen.getByRole('button',{name:'生成视频'}));await user.click(screen.getByRole('button',{name:'生成视频'}));
  expect(api.readinessGet).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
- const saved={...shot('a',0).shot!,prompt:'Walk for 7秒',values:{duration_seconds:{type:'integer' as const,value:7}}};
+ const saved={...shot('a',0).shot!,prompt:'时长7秒 Walk',values:{duration_seconds:{type:'integer' as const,value:7}}};
  await act(async()=>{p.resolve({shot:saved,boundEntities:[hero]});});
  await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
  expect(api.saveShotRow).toHaveBeenCalledTimes(1);expect(api.generate.mock.calls[0][0].values.duration_seconds).toEqual({type:'integer',value:7});
@@ -930,7 +931,7 @@ it('allows its own accepted save refresh without cancelling the explicit generat
  function Host(){const[item,setItem]=useState(saved);update=setItem;return <StoryboardShotRows {...props()} items={[item]} onChanged={()=>update(saved)}/>;}
  api.saveShotRow.mockImplementation(async(_p,req)=>{saved={...saved,shot:{...saved.shot!,prompt:req.prompt,values:req.values}};return{shot:saved.shot,boundEntities:[hero]};});
  render(<Host/>);const box=screen.getByLabelText('镜头1 提示词');await waitFor(()=>expect(box.hasAttribute('disabled')).toBe(false));
- await user.click(box);fireEvent.change(box,{target:{value:'Walk for 7秒'}});await user.click(screen.getByRole('button',{name:'生成视频'}));
+ await user.click(box);fireEvent.change(box,{target:{value:'时长7秒 Walk'}});await user.click(screen.getByRole('button',{name:'生成视频'}));
  await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));expect(api.generate.mock.calls[0][0].values.duration_seconds.value).toBe(7);
 });
 it('aborts generation when a save acknowledgement arrives after switching project/row',async()=>{
@@ -1093,4 +1094,63 @@ it("usage polish filters actual pending review independently of selection and bl
 
 it("usage polish isolates retained field drafts between exact Recipes and clears a successful field save",async()=>{
  api.generatorsList.mockResolvedValue([generator,{...generator,selectionRef:"second-recipe"}]);api.updateShot.mockRejectedValueOnce({code:"INVALID_INPUT"});const props={projectId:"p",items:[shot("draft-identity",0)],busy:false,onOpen:vi.fn(),onCreate:vi.fn(),onChanged:vi.fn(),onQueue:vi.fn()};const view=render(<StoryboardShotRows {...props}/>);const field=await screen.findByLabelText("镜头1 时长（秒）");await waitFor(()=>expect((field as HTMLInputElement).disabled).toBe(false));fireEvent.change(field,{target:{value:"9"}});fireEvent.blur(field);await screen.findByRole("alert");view.rerender(<StoryboardShotRows {...props} items={[shot("draft-identity",0,"second-recipe")]}/>);await waitFor(()=>expect((screen.getByLabelText("镜头1 时长（秒）") as HTMLInputElement).value).toBe("5"));view.rerender(<StoryboardShotRows {...props}/>);await waitFor(()=>expect((screen.getByLabelText("镜头1 时长（秒）") as HTMLInputElement).value).toBe("9"));api.updateShot.mockResolvedValue({});fireEvent.click(screen.getByRole("button",{name:"重试保存时长"}));await waitFor(()=>expect(useStudioStore.getState().storyboardFields[JSON.stringify(["p","draft-identity","sel"])]).toBeUndefined());expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("R01: usage edits wait for the authoritative read and preserve the existing other endpoint", async () => {
+  const opening = {...hero,id:"opening",kind:"composition",name:"开场"};
+  const ending = {...hero,id:"ending",kind:"composition",name:"结尾"};
+  api.list.mockResolvedValue([opening,ending]);api.listForShot.mockResolvedValue([opening,ending]);
+  const read = deferred<{openingEntityId:string|null;endingEntityId:string|null}>();api.compositionUsage.mockReturnValue(read.promise);
+  render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
+  const input=await screen.findByLabelText("镜头1 开场构图");
+  await waitFor(()=>expect(api.compositionUsage).toHaveBeenCalledWith("p","a"));
+  expect(input).toHaveProperty("disabled",true);
+  fireEvent.change(input,{target:{value:"opening"}});expect(api.setCompositionUsage).not.toHaveBeenCalled();
+  await act(async()=>read.resolve({openingEntityId:null,endingEntityId:"ending"}));
+  await waitFor(()=>expect(input).toHaveProperty("disabled",false));
+  fireEvent.change(input,{target:{value:"opening"}});
+  await waitFor(()=>expect(api.setCompositionUsage).toHaveBeenCalledWith("p","a",{openingEntityId:"opening",endingEntityId:"ending"}));
+});
+it("R02: a saved summary-only entity mention applies its formal reference before generation", async () => {
+  photos();const item=shot("summary-only",0,"ref");item.shot!.prompt="A person walks.";
+  api.promptSections.mockResolvedValue({style:null,summary:"@阿离 walks.",soundscape:null,music:null});
+  render(<StoryboardShotRows {...props()} items={[item]}/>);
+  await waitFor(()=>expect(api.inputsSave).toHaveBeenCalledWith(expect.objectContaining({inputs:[{inputKey:"reference_images",ordinal:0,assetId:"hero-image"}]})));
+  expect(api.generate).not.toHaveBeenCalled();
+});
+it("R33/R34: acknowledged name and duration survive stale parent rows during later parameter writes and generation", async () => {
+  render(<StoryboardShotRows {...props()} items={[shot("a",0)]}/>);
+  const name=await screen.findByLabelText("镜头1 名称");await waitFor(()=>expect(name).toHaveProperty("disabled",false));
+  fireEvent.change(name,{target:{value:"已保存新名"}});fireEvent.blur(name);
+  await waitFor(()=>expect(api.updateShot).toHaveBeenLastCalledWith("p",{shotId:"a",name:"已保存新名"}));
+  const duration=screen.getByLabelText("镜头1 时长（秒）");await waitFor(()=>expect(duration).toHaveProperty("disabled",false));
+  fireEvent.change(duration,{target:{value:"8"}});fireEvent.blur(duration);
+  await waitFor(()=>expect(api.updateShot).toHaveBeenLastCalledWith("p",expect.objectContaining({name:"已保存新名",values:{duration_seconds:{type:"integer",value:8}}})));
+  const aspect=screen.getByLabelText("镜头1 画幅");await waitFor(()=>expect(aspect).toHaveProperty("disabled",false));
+  fireEvent.change(aspect,{target:{value:"16:9"}});
+  await waitFor(()=>expect(api.updateShot).toHaveBeenLastCalledWith("p",expect.objectContaining({name:"已保存新名",values:expect.objectContaining({duration_seconds:{type:"integer",value:8}})})));
+  const generate=screen.getByRole("button",{name:"生成视频"});await waitFor(()=>expect(generate).toHaveProperty("disabled",false));fireEvent.click(generate);
+  await waitFor(()=>expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({values:expect.objectContaining({duration_seconds:{type:"integer",value:8}})})));
+});
+it("R34: generate and later resolution writes use the acknowledged duration even if the parent row is still stale", async () => {
+  const view = render(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const duration = await screen.findByLabelText("镜头1 时长（秒）");
+  await waitFor(() => expect(duration).toHaveProperty("disabled", false));
+  fireEvent.change(duration, { target: { value: "8" } });
+  fireEvent.blur(duration);
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledWith("p", expect.objectContaining({ values: { duration_seconds: { type: "integer", value: 8 } } })));
+  view.rerender(<StoryboardShotRows {...props()} items={[shot("a", 0)]} />);
+  const aspect = screen.getByLabelText("镜头1 画幅");
+  await waitFor(() => expect(aspect).toHaveProperty("disabled", false));
+  fireEvent.change(aspect, { target: { value: "16:9" } });
+  await waitFor(() => expect(api.updateShot).toHaveBeenLastCalledWith("p", expect.objectContaining({ values: expect.objectContaining({ duration_seconds: { type: "integer", value: 8 } }) })));
+  fireEvent.click(screen.getByRole("button", { name: "生成视频" }));
+  await waitFor(() => expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({ values: expect.objectContaining({ duration_seconds: { type: "integer", value: 8 } }) })));
+});
+it("R50/R68: first surviving ordinal cannot move up and inserting an @ token is distinct from binding", async () => {
+  render(<StoryboardShotRows {...props()} items={[shot("survivor",3)]} onMove={vi.fn()}/>);
+  expect(await screen.findByRole("button",{name:"上移"})).toHaveProperty("disabled",true);
+  const insert=await screen.findByRole("button",{name:"插入 @阿离"});await waitFor(()=>expect(insert).toHaveProperty("disabled",false));
+  fireEvent.click(insert);expect((screen.getByLabelText("镜头4 提示词") as HTMLTextAreaElement).value).toContain("@阿离");
+  expect(api.bindShot).not.toHaveBeenCalled();expect(api.saveShotRow).not.toHaveBeenCalled();
 });

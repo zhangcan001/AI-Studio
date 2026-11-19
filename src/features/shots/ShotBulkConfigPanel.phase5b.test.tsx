@@ -105,3 +105,20 @@ it("requires explicit partial mode, displays actual reused/skipped counts and op
   await waitFor(() => expect(api.admit).toHaveBeenCalledTimes(1)); expect(api.admit.mock.calls[0][0].allowPartial).toBe(true);
   await user.click(await screen.findByRole("button", { name: "打开生产队列" })); expect(open).toHaveBeenCalledWith("reused"); expect(api.start).not.toHaveBeenCalled();
 });
+
+it("R35: unapplied generator/scalar draft cannot prepare a frozen batch",async()=>{
+ const user=userEvent.setup();const props={projectId:"p",shots,tree,scope:{kind:"episode" as const,id:"e1"}};
+ const {rerender}=render(<ShotBulkConfigPanel {...props} unappliedConfiguration/>);await screen.findByText("v-fl / fl");await user.click(screen.getByRole("button",{name:"全选"}));
+ expect(screen.getByRole("button",{name:"准备视频生产"}).hasAttribute("disabled")).toBe(true);await user.click(screen.getByRole("button",{name:"准备视频生产"}));expect(api.admit).not.toHaveBeenCalled();
+ rerender(<ShotBulkConfigPanel {...props} unappliedConfiguration={false}/>);expect(screen.getByRole("button",{name:"准备视频生产"}).hasAttribute("disabled")).toBe(false);await user.click(screen.getByRole("button",{name:"准备视频生产"}));await waitFor(()=>expect(api.admit).toHaveBeenCalledTimes(1));expect(api.start).not.toHaveBeenCalled();
+});
+it("R36: all-blocked partial admission reports no created batch and no queue link",async()=>{
+ api.preflight.mockResolvedValue({...plan,items:rows.map(r=>({...r,status:"BLOCKED",blockers:["缺少输入"]}))});api.admit.mockResolvedValue({projectId:"p",stage:"video",createdCount:0,alreadyPreparedCount:0,skippedIncomplete:0,skippedBlocked:3,createdBatchIds:[]});
+ const user=userEvent.setup();render(<ShotBulkConfigPanel projectId="p" shots={shots} tree={tree} scope={{kind:"episode",id:"e1"}} onOpenProductionQueue={vi.fn()}/>);await screen.findByText("v-fl / fl");await user.click(screen.getByRole("button",{name:"全选"}));await user.click(screen.getByRole("checkbox",{name:/允许部分准备/}));await user.click(screen.getByRole("button",{name:"准备视频生产"}));
+ expect(await screen.findByText(/本次未创建任何批次/)).toBeTruthy();expect(screen.queryByText(/已创建待启动批次/)).toBeNull();expect(screen.queryByRole("button",{name:"打开生产队列"})).toBeNull();expect(api.start).not.toHaveBeenCalled();
+});
+it("R67: hidden selected shots are explicit and can be removed before admission",async()=>{
+ api.preflight.mockResolvedValue({...plan,items:rows.map(r=>({...r,status:r.shotId==="fl"?"BLOCKED":"READY",blockers:r.shotId==="fl"?["缺少输入"]:[]}))});
+ const user=userEvent.setup();render(<ShotBulkConfigPanel projectId="p" shots={shots} tree={tree} scope={{kind:"episode",id:"e1"}}/>);await screen.findByText("v-fl / fl");await user.click(screen.getByRole("button",{name:"全选"}));await user.click(screen.getByRole("button",{name:"可准备"}));
+ const hidden=await screen.findByText(/筛选隐藏了 1 个已选镜头/);await user.click(hidden);await user.click(screen.getByRole("button",{name:"移除隐藏选择：fl"}));expect(screen.queryByText(/筛选隐藏了/)).toBeNull();await user.click(screen.getByRole("button",{name:"准备视频生产"}));await waitFor(()=>expect(api.admit).toHaveBeenCalledTimes(1));expect(api.admit.mock.calls[0][0].shotIds).toEqual(["i2v","t2v"]);
+});

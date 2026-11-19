@@ -423,6 +423,15 @@ impl AssetImportService {
         } else {
             self.media_probe.probe_video(&stored.path).await
         };
+        if !audio
+            && (!probed.width.is_some_and(|width| width > 0)
+                || !probed.height.is_some_and(|height| height > 0))
+        {
+            self.compensate(&paths).await;
+            return Err(AssetImportError::OutputImportFailed {
+                message: "视频输出没有可验证的视频轨，或媒体探测不可用".to_owned(),
+            });
+        }
         let poster = if audio {
             None
         } else {
@@ -798,6 +807,27 @@ mod tests {
         }
     }
 
+    // Codec-independent persistence fixture. Production always uses CommandMediaProbe.
+    // The negative case explicitly models a container with no video track.
+    struct FixtureMediaProbe(bool);
+    #[async_trait]
+    impl crate::application::media_probe::MediaProbe for FixtureMediaProbe {
+        async fn probe_video(&self, _: &Path) -> crate::application::media_probe::VideoMetadata {
+            if self.0 {
+                crate::application::media_probe::VideoMetadata {
+                    width: Some(32),
+                    height: Some(32),
+                    duration_ms: None,
+                }
+            } else {
+                Default::default()
+            }
+        }
+        async fn generate_video_poster(&self, _: &Path) -> Option<Vec<u8>> {
+            None
+        }
+    }
+
     fn service(root: &Path, repository: FakeAssetRepository) -> AssetImportService {
         AssetImportService::new(
             Arc::new(FakeProjectRepository {
@@ -809,6 +839,7 @@ mod tests {
                 Utc.with_ymd_and_hms(2026, 1, 1, 10, 0, 0).unwrap(),
             )),
         )
+        .with_media_probe(Arc::new(FixtureMediaProbe(true)))
     }
 
     use std::io::Cursor;
@@ -1005,6 +1036,25 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn r24_mp4_header_without_a_video_track_publishes_no_asset_or_mapping() {
+        let root = tempdir().unwrap();
+        let repository = FakeAssetRepository::default();
+        let error = service(root.path(), repository.clone())
+            .with_media_probe(Arc::new(FixtureMediaProbe(false)))
+            .import_outputs(
+                "project-1",
+                &task_id(),
+                vec![video("generated_video", 16, None)],
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, AssetImportError::OutputImportFailed { .. }));
+        assert!(repository.assets.lock().unwrap().is_empty());
+        let folder = root.path().join("assets/generated/video");
+        assert_eq!(std::fs::read_dir(folder).unwrap().count(), 0);
     }
 
     #[tokio::test]

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
+import { audit70CompletionParentReader, audit70CompletionScopeSince, audit70CompletionFixtureFiles, AUDIT70_COMPLETION_BASE } from "./audit70-completion-successor-guard.mjs";
 
 export const AUDIT70_RECOVERY_BASE = "c7698fea1794683831fd61a56b2b5a230cea941b";
 export const AUDIT70_RECOVERY_PROOF = "docs/architecture/audit70-recovery-successor.json";
@@ -87,10 +88,11 @@ export function audit70RecoveryScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...AUDIT70_RECOVERY_CHANGED, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF,
+    ...audit70CompletionScopeSince(root, AUDIT70_COMPLETION_BASE),
   ])].sort();
 }
 export function audit70RecoveryFixtureFiles(root) {
-  return [...facts(root, AUDIT70_RECOVERY_BASE).paths, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF];
+  return [...new Set([...facts(root, AUDIT70_RECOVERY_BASE).paths, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF, ...audit70CompletionFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -100,9 +102,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, AUDIT70_RECOVERY_BASE);
+  const successor = audit70CompletionParentReader(root, override);
+  const workspace = resolve(root), violations = [...successor.violations], parent = facts(workspace, AUDIT70_RECOVERY_BASE);
   const fail = id => violations.push("audit70-recovery-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(AUDIT70_RECOVERY_PROOF));
@@ -116,10 +119,10 @@ function validate(root, override) {
     const allowed = [...scope, AUDIT70_RECOVERY_PROOF].sort();
     const expected = [...parent.paths, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -134,9 +137,9 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: AUDIT70_RECOVERY_CHANGED,
-    addedPaths: [...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF],
-    afterHashes: Object.fromEntries([...AUDIT70_RECOVERY_CHANGED, ...AUDIT70_RECOVERY_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...AUDIT70_RECOVERY_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...AUDIT70_RECOVERY_CHANGED, ...AUDIT70_RECOVERY_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: sessionMemoRead(workspace, p => AUDIT70_RECOVERY_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function audit70RecoveryParentReader(root, override = undefined) {

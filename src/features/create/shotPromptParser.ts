@@ -12,7 +12,10 @@ export function explicitEntityMentions(text: string, entities: StoryEntity[]) {
   const used: StoryEntity[] = [];
   let rest = text;
   while (rest.includes("@")) {
-    rest = rest.slice(rest.indexOf("@") + 1);
+    const at = rest.indexOf("@");
+    const email = at > 0 && /[A-Za-z0-9_.%+\-]/.test(rest[at - 1]);
+    rest = rest.slice(at + 1);
+    if (email) continue;
     const matches = entities.filter(e => e.name && rest.startsWith(e.name)
       && !(/[A-Za-z0-9_]$/.test(e.name) && /^[A-Za-z0-9_]/.test(rest.slice(e.name.length))))
       .sort((a, b) => b.name.length - a.name.length);
@@ -74,10 +77,10 @@ export function parseShotPrompt(text: string, entities: readonly StoryEntity[] =
   const out: ParsedShotPrompt = { entityIds: [] };
   const src = text.normalize("NFKC");
   // Duration: "时长5秒", "5秒", "5s", "5 sec", "8秒钟". Ignore "5s内" style? keep simple, last wins.
-  const dur = [...src.matchAll(new RegExp(`(?:时长\\s*[:：]?\\s*)?${NUM}\\s*(?:秒钟?|s(?:ec(?:onds?)?)?)(?![a-z])`, "gi"))];
+  const dur = [...src.matchAll(new RegExp(`(?:时长|总时长|duration)\\s*[:：=]?\\s*${NUM}\\s*(?:秒钟?|s(?:ec(?:onds?)?)?)(?![a-z])`, "gi"))];
   for (const m of dur) { const n = toNumber(m[1]); if (n !== undefined && n > 0 && n <= 600) out.durationSeconds = Math.round(n); }
   // Aspect: explicit ratio first, then 竖屏/横屏/方形 words.
-  const ratio = [...src.matchAll(/(?<![\d.])(\d{1,2})\s*[:：]\s*(\d{1,2})(?![\d.])/g)].map(m => `${m[1]}:${m[2]}`).filter(r => ASPECTS.includes(r));
+  const ratio = [...src.matchAll(/(?:画幅|比例|宽高比|aspect(?: ratio)?)\s*[:：=]?\s*(\d{1,2})\s*[:：]\s*(\d{1,2})(?![\d.])/gi)].map(m => `${m[1]}:${m[2]}`).filter(r => ASPECTS.includes(r));
   if (ratio.length) out.aspect = ratio[ratio.length - 1];
   else if (/竖屏|竖版|竖构图|portrait/i.test(src)) out.aspect = "9:16";
   else if (/横屏|横版|宽屏|landscape/i.test(src)) out.aspect = "16:9";

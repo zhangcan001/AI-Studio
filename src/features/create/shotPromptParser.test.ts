@@ -42,14 +42,14 @@ describe("parseShotPrompt", () => {
     expect(parseShotPrompt("总像素0.5MP，1344×768").resolution).toEqual({ kind: "size", width: 1344, height: 768 });
   });
   it("recognizes duration in several spellings", () => {
-    expect(parseShotPrompt("雨夜街头 5秒").durationSeconds).toBe(5);
+    expect(parseShotPrompt("雨夜街头，时长5秒").durationSeconds).toBe(5);
     expect(parseShotPrompt("时长：8 秒钟").durationSeconds).toBe(8);
-    expect(parseShotPrompt("a run 6s long").durationSeconds).toBe(6);
-    expect(parseShotPrompt("十秒的推镜").durationSeconds).toBe(10);
+    expect(parseShotPrompt("duration: 6s").durationSeconds).toBe(6);
+    expect(parseShotPrompt("时长十秒，推镜").durationSeconds).toBe(10);
     expect(parseShotPrompt("雨夜街头").durationSeconds).toBeUndefined();
   });
   it("recognizes aspect ratios and orientation words", () => {
-    expect(parseShotPrompt("16:9 远景").aspect).toBe("16:9");
+    expect(parseShotPrompt("画幅16:9 远景").aspect).toBe("16:9");
     expect(parseShotPrompt("画幅 9：16").aspect).toBe("9:16");
     expect(parseShotPrompt("竖屏 特写").aspect).toBe("9:16");
     expect(parseShotPrompt("横屏 全景").aspect).toBe("16:9");
@@ -91,7 +91,7 @@ describe("resolvePreset", () => {
     expect(resolvePreset(parseShotPrompt("0.98MP"), presets)?.id).toBe("mp-0_98-16x9");
     expect(resolvePreset(parseShotPrompt("0.98MP"), presets, { width: 1088, height: 1920 })?.id).toBe("mp-0_98-9x16");
     expect(resolvePreset(parseShotPrompt("总像素100万"), presets, { width: 992, height: 992 })?.id).toBe("mp-0_98-1x1");
-    expect(resolvePreset(parseShotPrompt("0.98MP 21:9"), presets)).toBeUndefined();
+    expect(resolvePreset(parseShotPrompt("0.98MP 画幅21:9"), presets)).toBeUndefined();
   });
   it("preserves the backend nominal aspect even when aligned pixels drift beyond the old tolerance", () => {
     const aligned = [...presets, { id: "mp-0_5-4x3", width: 832, height: 640 }];
@@ -119,7 +119,7 @@ describe("resolvePreset", () => {
 describe("resolvePromptSettings", () => {
   it("uses selected Recipe bounds and presets, never creates arbitrary dimensions", () => {
     const generator = { fields: [{ type: "integer", key: "duration_seconds", label: "duration", required: true, min: 4, max: 10 }] as const, resolutionPresets: presets };
-    const settings = resolvePromptSettings(parseShotPrompt("时长20秒 9:16 1080p"), generator, {});
+    const settings = resolvePromptSettings(parseShotPrompt("时长20秒 画幅9:16 1080p"), generator, {});
     expect(settings.duration).toEqual({ type: "integer", value: 10 });
     expect(settings.preset?.id).toBe("mp-2_09-9x16");
     expect(settings.warnings).toEqual([]);
@@ -131,9 +131,20 @@ describe("resolvePromptSettings", () => {
     expect(settings.warnings).toEqual([expect.stringContaining("显存限制")]);
   });
   it("explains unsupported settings and leaves missing Recipe fields untouched", () => {
-    const settings = resolvePromptSettings(parseShotPrompt("21:9 5秒"), { fields: [], resolutionPresets: presets }, {});
+    const settings = resolvePromptSettings(parseShotPrompt("画幅21:9 时长5秒"), { fields: [], resolutionPresets: presets }, {});
     expect(settings.duration).toBeUndefined();
     expect(settings.preset).toBeUndefined();
     expect(settings.warnings).toEqual([expect.stringContaining("没有时长参数"), expect.stringContaining("没有匹配的画幅")]);
   });
+});
+
+// Narrative timestamps, spoken durations, and clocks are never parameter declarations.
+it.each(["At 00:03.000s the shot cuts", "I waited 4 seconds", "十秒的推镜", "钟面显示9:16"])("R37/R38: does not infer formal settings from narrative %s", text => {
+  expect(parseShotPrompt(text).durationSeconds).toBeUndefined();
+  expect(parseShotPrompt(text).aspect).toBeUndefined();
+});
+it("R42: email addresses remain literal while real entity tokens still resolve", () => {
+  const hero = ent("hero", "小明", "character");
+  expect(explicitEntityMentions("Contact support@example.com. @小明 walks.", [hero])).toEqual({ entities: [hero], error: undefined });
+  expect(explicitEntityMentions("support@example.com", []).error).toBeUndefined();
 });

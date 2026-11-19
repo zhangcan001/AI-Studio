@@ -899,6 +899,15 @@ impl GenerationInputPreparer {
                     asset_id: asset.id.as_str().to_owned(),
                     message: error.to_string(),
                 })?;
+            use sha2::{Digest, Sha256};
+            if bytes.len() as u64 != asset.file_size
+                || format!("{:x}", Sha256::digest(&bytes)) != asset.sha256
+            {
+                return Err(GenerationInputPrepareError::AssetRead {
+                    asset_id: asset.id.as_str().to_owned(),
+                    message: "参考图已在预检后改变；请重新导入并确认素材。".to_owned(),
+                });
+            }
             let original_bytes = bytes.len();
             let preprocess_started_at = Instant::now();
             let (bytes, mut timings) = if asset.width.max(asset.height) <= MAX_COMFY_IMAGE_EDGE
@@ -1470,11 +1479,14 @@ mod tests {
             "reference.png",
             "reference.png",
             "C:/project/reference.png",
-            "a".repeat(64),
+            {
+                use sha2::{Digest, Sha256};
+                format!("{:x}", Sha256::digest([1, 2, 3, 4]))
+            },
             "image/png",
             2,
             2,
-            10,
+            4,
             json!({}),
             chrono::Utc::now(),
         )
@@ -1949,6 +1961,31 @@ mod tests {
             .expect("reduced image should remain valid");
         assert!(resized.width().max(resized.height()) < 2048);
         assert_eq!(resized.color(), ColorType::Rgba8);
+    }
+    #[tokio::test]
+    async fn r31_changed_image_bytes_are_rejected_before_upload() {
+        let adapter = RecordingAdapter::default();
+        let uploads = adapter.filenames.clone();
+        let mut changed = asset();
+        changed.sha256 = "0".repeat(64);
+        let preparer = preparer(vec![changed], adapter);
+        let values = BTreeMap::from([(
+            "reference_image".to_owned(),
+            GenerationInputValue::ImageAsset(AssetId::parse("ast_reference").unwrap()),
+        )]);
+        let error = preparer
+            .prepare(
+                "project-1",
+                &TaskId::parse("tsk_r31_mutation").unwrap(),
+                &values,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            GenerationInputPrepareError::AssetRead { .. }
+        ));
+        assert!(uploads.lock().unwrap().is_empty());
     }
 }
 

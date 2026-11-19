@@ -154,8 +154,9 @@ impl ShotVideoInputService {
         scope: &ShotVideoInputScope,
         recipe: &Recipe,
         prompt: Option<&str>,
+        expected: Option<&Option<ShotVideoInputToken>>,
     ) -> Result<BTreeMap<String, GenerationInputValue>, ShotVideoInputError> {
-        let mut values = self.values(scope, recipe).await?;
+        let mut values = self.load_validated(scope, recipe, expected).await?.1;
         if let Some(prompt) = prompt {
             values.insert("prompt".into(), GenerationInputValue::Text(prompt.into()));
         }
@@ -175,7 +176,7 @@ impl ShotVideoInputService {
         let Some(GenerationInputValue::Text(prompt)) = values.get("prompt") else {
             return Ok(());
         };
-        let mut has_mention = prompt.contains('@');
+        let mut has_mention = has_entity_mention_token(prompt);
         let is_ref2va = matches!(
             recipe.inputs.get("reference_images"),
             Some(InputDefinition::Images { .. })
@@ -197,25 +198,25 @@ impl ShotVideoInputService {
                 .map_err(invalid)?,
             None => Default::default(),
         };
-        has_mention |= ref2va_prompt_texts(prompt, &sections).any(|text| text.contains('@'));
-        if !has_mention && sections.clone().normalized().is_empty() {
+        has_mention |= ref2va_prompt_texts(prompt, &sections).any(has_entity_mention_token);
+        let usage = match shot_id {
+            Some(shot_id) => repository
+                .composition_usage_for_shot(project_id, shot_id)
+                .await
+                .map_err(invalid)?,
+            None => Default::default(),
+        };
+        if !has_mention
+            && sections.clone().normalized().is_empty()
+            && usage.opening_entity_id.is_none()
+            && usage.ending_entity_id.is_none()
+        {
             return Ok(());
         }
         let entities = if has_mention {
             repository.list(project_id, None).await.map_err(invalid)?
         } else {
             Vec::new()
-        };
-        let usage = if has_mention {
-            match shot_id {
-                Some(shot_id) => repository
-                    .composition_usage_for_shot(project_id, shot_id)
-                    .await
-                    .map_err(invalid)?,
-                None => Default::default(),
-            }
-        } else {
-            Default::default()
         };
         let mut references = match values.get("reference_images") {
             Some(GenerationInputValue::ImageAssets(ids)) => ids.clone(),
@@ -231,6 +232,11 @@ impl ShotVideoInputService {
         } else {
             false
         };
+        if reordered
+            && ref2va_prompt_texts(prompt, &sections).any(|text| text.contains("<Picture "))
+        {
+            return Err(invalid("PICTURE_ORDER_AMBIGUOUS: 首尾构图需要重排参考图，手写 Picture 编号会改变含义；请改用 @实体引用后重新确认"));
+        }
         let compiled = compile_ref2va_prompt(
             prompt,
             project_id,
@@ -363,13 +369,14 @@ impl ShotVideoInputService {
         scope: &ShotVideoInputScope,
         recipe: &Recipe,
     ) -> Result<BTreeMap<String, GenerationInputValue>, ShotVideoInputError> {
-        Ok(self.load_validated(scope, recipe).await?.1)
+        Ok(self.load_validated(scope, recipe, None).await?.1)
     }
 
     async fn load_validated(
         &self,
         scope: &ShotVideoInputScope,
         recipe: &Recipe,
+        expected: Option<&Option<ShotVideoInputToken>>,
     ) -> Result<
         (
             Option<ShotVideoInputSet>,
@@ -378,6 +385,10 @@ impl ShotVideoInputService {
         ShotVideoInputError,
     > {
         let set = self.get(scope).await?;
+        if expected.is_some_and(|expected| set.as_ref().map(|set| &set.token) != expected.as_ref())
+        {
+            return Err(ShotVideoInputError::Conflict);
+        }
         let values = match &set {
             Some(set) => media_values(recipe, &set.inputs)?,
             None => BTreeMap::new(),
@@ -430,7 +441,7 @@ impl ShotVideoInputService {
             .map_err(invalid)?
             .ok_or_else(|| invalid("生成器不可用"))?;
         let recipe = RecipeParser::parse(&definition.recipe_yaml).map_err(invalid)?;
-        let (set, _) = self.load_validated(scope, &recipe).await?;
+        let (set, _) = self.load_validated(scope, &recipe, None).await?;
         let mut inputs = Vec::new();
         if let Some(set) = &set {
             for input in &set.inputs {
@@ -597,7 +608,14 @@ pub(crate) fn explicit_entity_mentions<'a>(
     let mut rest = prompt;
     let mut found = Vec::new();
     while let Some(at) = rest.find('@') {
+        let email = rest[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || "_.%+-".contains(c));
         rest = &rest[at + 1..];
+        if email {
+            continue;
+        }
         let entity = match_entity_mention(rest, project_id, entities)?;
         if !found
             .iter()
@@ -672,7 +690,14 @@ pub(crate) fn rename_entity_mentions(
     let mut rest = prompt;
     while let Some(at) = rest.find('@') {
         rewritten.push_str(&rest[..at + 1]);
+        let email = rest[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || "_.%+-".contains(c));
         rest = &rest[at + 1..];
+        if email {
+            continue;
+        }
         match match_entity_mention(rest, project_id, entities) {
             Ok(entity) => {
                 expected.push(Some(entity.id.as_str()));
@@ -703,7 +728,14 @@ pub(crate) fn rename_entity_mentions(
     let mut actual = Vec::new();
     let mut rest = rewritten.as_str();
     while let Some(at) = rest.find('@') {
+        let email = rest[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || "_.%+-".contains(c));
         rest = &rest[at + 1..];
+        if email {
+            continue;
+        }
         match match_entity_mention(rest, project_id, &after) {
             Ok(entity) => {
                 actual.push(Some(entity.id.as_str()));
@@ -888,13 +920,22 @@ pub(crate) fn mostly_english(text: &str) -> bool {
 
 /// Lines starting with `[Shot N]` mark an already shot-structured body; a
 /// `[Shot 1]` reference inside a sentence (e.g. "(appears in [Shot 1])") does not.
-fn has_shot_markers(text: &str) -> bool {
-    text.lines().any(|line| {
-        let line = line.trim_start();
-        line.strip_prefix("[Shot ")
-            .and_then(|rest| rest.split_once(']'))
-            .is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+fn has_entity_mention_token(text: &str) -> bool {
+    text.match_indices('@').any(|(at, _)| {
+        text[..at].chars().next_back().map_or(true, |c| {
+            !(c.is_ascii_alphanumeric() || "_.%+-".contains(c))
+        })
     })
+}
+
+fn shot_marker_number(line: &str) -> Option<&str> {
+    let (n, _) = line.trim_start().strip_prefix("[Shot")?.split_once(']')?;
+    let n = n.trim();
+    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).then_some(n)
+}
+
+fn has_shot_markers(text: &str) -> bool {
+    text.lines().any(|line| shot_marker_number(line).is_some())
 }
 
 /// Shot numbers (from line-leading `[Shot N]` markers) whose text mentions `label`.
@@ -902,14 +943,8 @@ fn shots_mentioning(body: &str, label: &str) -> Vec<String> {
     let mut current = "1".to_string();
     let mut found: Vec<String> = Vec::new();
     for line in body.lines() {
-        let trimmed = line.trim_start();
-        if let Some((n, _)) = trimmed
-            .strip_prefix("[Shot ")
-            .and_then(|rest| rest.split_once(']'))
-        {
-            if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
-                current = n.to_string();
-            }
+        if let Some(n) = shot_marker_number(line) {
+            current = n.to_string();
         }
         if line.contains(label) && !found.contains(&current) {
             found.push(current.clone());
@@ -962,7 +997,23 @@ fn substitute_mentions<'a>(
     let mut output = String::new();
     while let Some(at) = rest.find('@') {
         output.push_str(&rest[..at]);
+        if rest[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || "_.%+-".contains(c))
+        {
+            output.push('@');
+            rest = &rest[at + 1..];
+            continue;
+        }
+        let email = rest[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || "_.%+-".contains(c));
         rest = &rest[at + 1..];
+        if email {
+            continue;
+        }
         let entity = match_entity_mention(rest, project_id, entities)?;
         let asset_id = entity_cover(entity).ok_or_else(|| {
             invalid(format!(
@@ -1025,9 +1076,14 @@ pub(crate) fn compile_ref2va_prompt(
         pictures: Vec::new(),
     };
     let output = substitute_mentions(prompt, project_id, entities, references, usage, &mut state)?;
-    if has_ref2va_sections(&output) {
-        return Ok(output);
-    }
+    let already_structured = has_ref2va_sections(&output);
+    // Structured text owns its sections; ignored external fields cannot satisfy
+    // a composition usage that is absent from the prompt actually submitted.
+    let sections = if already_structured {
+        Default::default()
+    } else {
+        sections
+    };
     let mut sub = |text: &Option<String>| -> Result<Option<String>, ShotVideoInputError> {
         text.as_deref()
             .map(|t| substitute_mentions(t, project_id, entities, references, usage, &mut state))
@@ -1037,14 +1093,54 @@ pub(crate) fn compile_ref2va_prompt(
     let style_text = sub(&sections.style)?;
     let soundscape_text = sub(&sections.soundscape)?;
     let music_text = sub(&sections.music)?;
+    for id in usage
+        .opening_entity_id
+        .iter()
+        .chain(usage.ending_entity_id.iter())
+    {
+        let mentioned = state
+            .pictures
+            .iter()
+            .any(|(entity_id, _, _)| *entity_id == id);
+        // Already-compiled six-section text has official Picture labels rather
+        // than @ tokens. Retain its idempotency, but only when the configured
+        // endpoint's actual formal reference is explicitly present.
+        let official_picture = already_structured
+            && entities
+                .iter()
+                .find(|entity| {
+                    entity.id == *id
+                        && entity.project_id == project_id
+                        && entity.kind == StoryEntityKind::Composition
+                })
+                .and_then(|entity| entity.cover_asset_id.as_deref())
+                .and_then(|cover| references.iter().position(|asset| asset.as_str() == cover))
+                .is_some_and(|index| output.contains(&format!("<Picture {}>", index + 1)));
+        if !mentioned && !official_picture {
+            return Err(invalid("COMPOSITION_USAGE_UNREFERENCED: 构图用途尚未在正文或摘要中通过 @构图引用，请先插入引用"));
+        }
+    }
+    if already_structured {
+        return Ok(output);
+    }
     if state.subjects.is_empty() && state.pictures.is_empty() && sections.is_empty() {
         return Ok(output);
     }
-    let body = if has_shot_markers(output.trim_start().lines().next().unwrap_or("")) {
+    let body = if has_shot_markers(output.trim_start().lines().next().unwrap_or(""))
+        || output
+            .lines()
+            .any(|line| shot_marker_number(line) == Some("1"))
+    {
         output.clone()
     } else {
         format!("[Shot 1] {output}")
     };
+    let multi_shot = body
+        .lines()
+        .filter_map(shot_marker_number)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        > 1;
     let mut definitions = Vec::new();
     let mut retention = Vec::new();
     for (index, subject) in state.subjects.iter().enumerate() {
@@ -1111,11 +1207,24 @@ pub(crate) fn compile_ref2va_prompt(
             Some((name, when)) => (format!(" {name} layout"), format!(" {when}")),
             None => (String::new(), String::new()),
         };
+        let label = format!("<Picture {picture}>");
+        let appears = shots_mentioning(&body, &label)
+            .iter()
+            .map(|n| format!("[Shot {n}]"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let framing = if matches!(moment, Some(("ending", _))) {
+            "ending camera framing"
+        } else if matches!(moment, Some(("opening", _))) {
+            "opening camera framing"
+        } else {
+            "camera framing in its referenced shots"
+        };
         definitions.push(format!(
-            "<Picture {picture}> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of {placed} and props{when}."
+            "<Picture {picture}> is a shot-planning reference for {appears}, defining viewpoint and the placement of {placed} and props{when}."
         ));
         retention.push(format!(
-            "<Picture {picture}> (shot-planning reference for [Shot 1]{layout}): partially_preserved - storyboard/layout reference only for the opening camera framing, character placement and facing, and prop positions; camera movement during the shot is not limited by this picture. Ignore its background, colors, lighting and textures{environment} The appearance and clothing of people in this picture are not used, identities follow {placed}."
+            "<Picture {picture}> (shot-planning reference for {appears}{layout}): partially_preserved - storyboard/layout reference only for the {framing}, character placement and facing, and prop positions; camera movement during the shot is not limited by this picture. Ignore its background, colors, lighting and textures{environment} The appearance and clothing of people in this picture are not used, identities follow {placed}."
         ));
     }
     let prefix = if has_audio_reference {
@@ -1157,7 +1266,14 @@ pub(crate) fn compile_ref2va_prompt(
                     parts.push(format!("{n} {}", if n == 1 { one } else { many }));
                 }
             }
-            let mut summary = format!("{prefix} The target video is a single shot");
+            let mut summary = format!(
+                "{prefix} The target video is {}",
+                if multi_shot {
+                    "a sequence of shots"
+                } else {
+                    "a single shot"
+                }
+            );
             if !parts.is_empty() {
                 summary.push_str(" featuring ");
                 summary.push_str(&parts.join(", "));
@@ -1177,7 +1293,11 @@ pub(crate) fn compile_ref2va_prompt(
         }
     };
     let style = style_text.unwrap_or_else(|| {
-        "A single continuous shot whose visual style follows the reference pictures.".into()
+        if multi_shot {
+            "A sequence of shots whose visual style follows the reference pictures.".into()
+        } else {
+            "A single continuous shot whose visual style follows the reference pictures.".into()
+        }
     });
     let soundscape = soundscape_text.unwrap_or_else(|| {
         "Quiet room tone matching the environment; follow any sound directions in detailed_description.".into()
@@ -1272,7 +1392,7 @@ pub(crate) mod tests {
     use super::{media_values, reject_ungeneratable_combination};
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::ports::ShotVideoInputAsset;
-    use crate::domain::{InputDefinition, Recipe};
+    use crate::domain::{AssetId, InputDefinition, Recipe};
     use std::collections::BTreeMap;
 
     #[test]
@@ -1593,6 +1713,131 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn r06_composition_usage_requires_a_real_mention_even_in_complete_six_section_text() {
+        use crate::domain::story_entity::{ShotCompositionUsage, StoryEntity, StoryEntityKind};
+        let entity = StoryEntity {
+            id: "end".into(),
+            project_id: "p".into(),
+            name: "结尾".into(),
+            kind: StoryEntityKind::Composition,
+            description: String::new(),
+            cover_asset_id: Some("ast_end".into()),
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let usage = ShotCompositionUsage {
+            opening_entity_id: None,
+            ending_entity_id: Some("end".into()),
+        };
+        let full = "subject_definitions:
+none
+summary:
+a room
+retention_analysis:
+none
+detailed_description:
+[Shot1] A room
+overall_soundscape:
+quiet
+non_diegetic_music:
+N/A";
+        for prompt in ["A room", full] {
+            assert!(super::compile_ref2va_prompt(
+                prompt,
+                "p",
+                std::slice::from_ref(&entity),
+                &[AssetId::parse("ast_end").unwrap()],
+                &usage,
+                &Default::default(),
+                false
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("COMPOSITION_USAGE_UNREFERENCED"));
+        }
+        let compiled = super::compile_ref2va_prompt(
+            "[Shot1] 按 @结尾 构图结束",
+            "p",
+            &[entity],
+            &[AssetId::parse("ast_end").unwrap()],
+            &usage,
+            &Default::default(),
+            false,
+        )
+        .unwrap();
+        assert!(compiled.contains("ending camera framing"));
+        assert!(!compiled.contains("opening camera framing"));
+    }
+
+    #[test]
+    fn r39_r40_r41_multishot_prelude_never_duplicates_shot_one_or_mislabels_picture_scope() {
+        use crate::domain::story_entity::{ShotPromptSections, StoryEntity, StoryEntityKind};
+        let entity = StoryEntity {
+            id: "layout".into(),
+            project_id: "p".into(),
+            name: "构图".into(),
+            kind: StoryEntityKind::Composition,
+            description: String::new(),
+            cover_asset_id: Some("ast_layout".into()),
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        for first in ["[Shot1] 空房间", "空房间"] {
+            let prompt = format!("引导句。\n{first}\n[Shot2] 按 @构图 移动").replace(
+                "\n", "
+",
+            );
+            let compiled = super::compile_ref2va_prompt(
+                &prompt,
+                "p",
+                std::slice::from_ref(&entity),
+                &[AssetId::parse("ast_layout").unwrap()],
+                &Default::default(),
+                &ShotPromptSections::default(),
+                false,
+            )
+            .unwrap();
+            let body = compiled
+                .split(
+                    "detailed_description:
+",
+                )
+                .nth(1)
+                .unwrap()
+                .split("overall_soundscape:")
+                .next()
+                .unwrap();
+            assert_eq!(
+                body.matches("[Shot1]").count() + body.matches("[Shot 1]").count(),
+                1,
+                "{body}"
+            );
+            assert!(
+                compiled.contains("<Picture 1> is a shot-planning reference for [Shot 2]"),
+                "{compiled}"
+            );
+            assert!(!compiled.contains("reference for [Shot 1]"));
+            assert!(!compiled.contains("single shot"));
+            assert!(!compiled.contains("single continuous shot"));
+            assert!(compiled.contains("a sequence of shots"));
+        }
+    }
+
+    #[test]
+    fn r42_email_tokens_are_unchanged_and_are_not_entity_lookups_or_rename_targets() {
+        let text = "Contact support@example.com before shooting";
+        assert!(super::explicit_entity_mentions(text, "p", &[])
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            super::compile_entity_prompt(text, "p", &[], &[]).unwrap(),
+            text
+        );
+    }
+
+    #[test]
     fn composition_usage_marks_opening_and_ending_and_orders_their_pictures() {
         use crate::domain::{
             story_entity::{ShotCompositionUsage, StoryEntity, StoryEntityKind},
@@ -1700,6 +1945,47 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn r11_handwritten_picture_numbers_are_ambiguous_once_endpoints_reorder_references() {
+        use crate::domain::{
+            story_entity::{ShotCompositionUsage, StoryEntity, StoryEntityKind},
+            AssetId,
+        };
+        let entity = |id: &str, kind, cover: &str| StoryEntity {
+            id: id.into(),
+            project_id: "prj_owned".into(),
+            kind,
+            name: id.into(),
+            description: String::new(),
+            cover_asset_id: Some(cover.into()),
+            image_asset_ids: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let entities = [
+            entity("开场", StoryEntityKind::Composition, "ast_open"),
+            entity("沈簿", StoryEntityKind::Character, "ast_hero"),
+            entity("结尾", StoryEntityKind::Composition, "ast_end"),
+            entity("中段", StoryEntityKind::Composition, "ast_mid"),
+        ];
+        let id = |v: &str| AssetId::parse(v).unwrap();
+        let usage = ShotCompositionUsage {
+            opening_entity_id: Some("开场".into()),
+            ending_entity_id: Some("结尾".into()),
+        };
+        let mut refs = vec![id("ast_end"), id("ast_hero"), id("ast_open"), id("ast_mid")];
+        assert!(super::order_composition_references(
+            &mut refs, &entities, &usage
+        ));
+        let prompt = "开场按 <Picture 3> 的构图，@沈簿 走过 @中段，最后停在 @结尾 的构图";
+        assert!(super::ref2va_prompt_texts(prompt, &Default::default())
+            .any(|text| text.contains("<Picture ")));
+        assert_eq!(
+            refs,
+            vec![id("ast_open"), id("ast_hero"), id("ast_mid"), id("ast_end")]
+        );
+    }
+
+    #[test]
     fn composition_pictures_are_layout_only_with_official_markers_and_summary() {
         use crate::domain::{
             story_entity::{ShotCompositionUsage, StoryEntity, StoryEntityKind},
@@ -1783,14 +2069,21 @@ pub(crate) mod tests {
             },
             ShotCompositionUsage::default(),
         ] {
-            let c = super::compile_entity_prompt_with_usage(
+            let result = super::compile_entity_prompt_with_usage(
                 "@沈簿和@林舟对话，6秒",
                 "prj_owned",
                 &entities,
                 &refs,
                 &usage,
-            )
-            .unwrap();
+            );
+            if usage.opening_entity_id.is_some() || usage.ending_entity_id.is_some() {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("COMPOSITION_USAGE_UNREFERENCED"));
+                continue;
+            }
+            let c = result.unwrap();
             assert!(c.starts_with("subject_definitions:\n<Subject 1>"));
             assert!(!c.contains("<Picture 3> is"));
             assert!(c.contains("[reference generation]"));
@@ -1801,7 +2094,10 @@ pub(crate) mod tests {
             "prj_owned",
             &entities,
             &refs,
-            &both,
+            &ShotCompositionUsage {
+                opening_entity_id: None,
+                ending_entity_id: Some("结尾构图".into()),
+            },
         )
         .unwrap();
         assert!(c.contains("<Picture 4> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of the characters and props near the end of the shot."));
@@ -1824,7 +2120,10 @@ pub(crate) mod tests {
             "prj_owned",
             &entities,
             &refs,
-            &both,
+            &ShotCompositionUsage {
+                opening_entity_id: Some("开场构图".into()),
+                ending_entity_id: None,
+            },
         )
         .unwrap();
         assert_eq!(c.matches("subject_definitions:").count(), 1);
@@ -1872,6 +2171,7 @@ pub(crate) mod tests {
         assert_eq!(plain, "A person walks across the room.");
     }
 
+    #[test]
     fn writer_sections_and_appearance_assemble_the_six_official_sections() {
         use crate::domain::{
             story_entity::{
@@ -1947,7 +2247,7 @@ pub(crate) mod tests {
             "prj_owned",
             &entities,
             &refs,
-            &usage,
+            &Default::default(),
             &Default::default(),
             true,
         )
@@ -1962,7 +2262,7 @@ pub(crate) mod tests {
             "prj_owned",
             &entities,
             &refs,
-            &usage,
+            &Default::default(),
             &Default::default(),
             false,
         )
@@ -1978,7 +2278,7 @@ pub(crate) mod tests {
             "prj_owned",
             &entities,
             &refs,
-            &usage,
+            &Default::default(),
             &bad,
             false
         )

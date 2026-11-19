@@ -217,7 +217,7 @@ pub struct GenerationService {
     definition_repository: Arc<dyn GenerationDefinitionRepository>,
     comfy_adapter: Arc<dyn ComfyAdapter>,
     output_collector: Arc<OutputCollector>,
-    asset_import_service: Arc<AssetImportService>,
+    asset_import_service: AssetImportService,
     asset_repository: Arc<dyn AssetRepository>,
     generation_input_preparer: Arc<GenerationInputPreparer>,
     clock: Arc<dyn Clock>,
@@ -568,12 +568,12 @@ impl GenerationService {
             snapshot_repository,
             definition_repository,
             output_collector: Arc::new(OutputCollector::new(comfy_adapter.clone())),
-            asset_import_service: Arc::new(AssetImportService::new(
+            asset_import_service: AssetImportService::new(
                 project_repository.clone(),
                 asset_store.clone(),
                 asset_repository.clone(),
                 clock.clone(),
-            )),
+            ),
             asset_repository: asset_repository.clone(),
             generation_input_preparer: Arc::new(GenerationInputPreparer::new(
                 asset_repository.clone(),
@@ -593,6 +593,14 @@ impl GenerationService {
             model_repository: None,
             provenance_lineage_service: None,
         }
+    }
+
+    pub fn with_media_probe(
+        mut self,
+        probe: Arc<dyn crate::application::media_probe::MediaProbe>,
+    ) -> Self {
+        self.asset_import_service = self.asset_import_service.with_media_probe(probe);
+        self
     }
 
     pub fn with_task_update_sink(mut self, task_update_sink: Arc<dyn TaskUpdateSink>) -> Self {

@@ -3,6 +3,8 @@ import type { ProductRun, RunInput, RunListFilter, RunRef } from "../../product/
 export type RunsRoute = Extract<AppRoute, { kind: "runs" }>;
 export const runKey = (ref: RunRef) => `${ref.source}:${ref.id}`;
 export const labels: Record<ProductRun["status"], string> = { QUEUED: "排队中", RUNNING: "运行中", PAUSED: "已暂停", FAILED: "失败", PARTIAL: "部分完成", SUCCEEDED: "已完成", CANCELLED: "已取消" };
+export function runStatusLabel(run: Pick<ProductRun,"status"|"availableActions">): string { return run.status === "QUEUED" && run.availableActions.includes("START") ? "待启动" : labels[run.status]; }
+
 export const sourceLabels: Record<RunRef["source"], string> = {
   "production-run": "生产运行",
   "queue-batch": "队列批次",

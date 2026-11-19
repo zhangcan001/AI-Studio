@@ -491,6 +491,17 @@ outputs:
             queue_repository.clone(),
             clock.clone(),
         )
+        .with_asset_query(Arc::new(
+            crate::application::asset_query_service::AssetQueryService::new(
+                Arc::new(crate::infrastructure::database::SqliteAssetRepository::new(
+                    pool.clone(),
+                )),
+                Arc::new(crate::infrastructure::filesystem::FileSystemAssetStore::new()),
+                Arc::new(
+                    crate::infrastructure::database::SqliteProjectRepository::new(pool.clone()),
+                ),
+            ),
+        ))
         .with_stage_prompt_repository(shot_repository.clone());
         let batch_service = ShotBatchService::new(
             shot_repository.clone(),
@@ -914,6 +925,17 @@ outputs:
             queue_repository.clone(),
             clock.clone(),
         )
+        .with_asset_query(Arc::new(
+            crate::application::asset_query_service::AssetQueryService::new(
+                Arc::new(crate::infrastructure::database::SqliteAssetRepository::new(
+                    pool.clone(),
+                )),
+                Arc::new(crate::infrastructure::filesystem::FileSystemAssetStore::new()),
+                Arc::new(
+                    crate::infrastructure::database::SqliteProjectRepository::new(pool.clone()),
+                ),
+            ),
+        ))
         .with_stage_prompt_repository(shot_repository.clone());
         let batch_service = ShotBatchService::new(
             shot_repository.clone(),

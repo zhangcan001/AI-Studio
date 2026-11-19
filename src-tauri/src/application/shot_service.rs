@@ -137,6 +137,7 @@ pub struct PreparedShotGeneration {
 }
 
 pub struct ShotService {
+    asset_query: Option<Arc<crate::application::asset_query_service::AssetQueryService>>,
     video_inputs: Option<Arc<crate::application::shot_video_input_service::ShotVideoInputService>>,
     row_edits: Option<Arc<dyn crate::application::ports::ShotRowEditRepository>>,
     repository: Arc<dyn ShotRepository>,
@@ -164,6 +165,7 @@ impl ShotService {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
+            asset_query: None,
             row_edits: None,
             video_inputs: None,
             repository,
@@ -177,6 +179,14 @@ impl ShotService {
             stage_prompt_repository: None,
             generation_snapshot_repository: None,
         }
+    }
+
+    pub fn with_asset_query(
+        mut self,
+        query: Arc<crate::application::asset_query_service::AssetQueryService>,
+    ) -> Self {
+        self.asset_query = Some(query);
+        self
     }
 
     pub fn with_stage_prompt_repository(mut self, repository: Arc<dyn ShotBulkRepository>) -> Self {
@@ -515,6 +525,18 @@ impl ShotService {
                 "素材必须属于当前项目且媒体类型与阶段匹配".to_owned(),
             ));
         }
+        let query = self.asset_query.as_ref().ok_or_else(|| {
+            ShotServiceError::InvalidInput("素材可用性检查未配置，不能选用结果".to_owned())
+        })?;
+        if !query
+            .is_file_available(project_id, asset_id)
+            .await
+            .map_err(|error| ShotServiceError::InvalidInput(format!("无法检查结果文件：{error}")))?
+        {
+            return Err(ShotServiceError::InvalidInput(
+                "结果文件缺失或不可读，不能选用".to_owned(),
+            ));
+        }
         if from_linked_task {
             let source_task_id = asset.source_task_id.as_ref().map(|id| id.as_str());
             if source_task_id.is_none()
@@ -664,6 +686,7 @@ impl ShotService {
                                 GenerationInputValue::Text(text) => Some(text.as_str()),
                                 _ => None,
                             }),
+                            None,
                         )
                         .await
                         .map_err(|e| ShotServiceError::InvalidInput(e.to_string()))?;

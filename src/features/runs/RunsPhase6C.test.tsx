@@ -75,7 +75,7 @@ it("C02/C03 Drawer-equivalent Runs actions: list shows shared statuses; start is
   expect(screen.getAllByText("生产运行").length).toBeGreaterThan(0);
   expect(screen.getAllByText("队列批次").length).toBeGreaterThan(0);
   expect(screen.getAllByText("历史任务").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("排队中").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("待启动").length).toBeGreaterThan(0);
   expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
   expect(screen.getByLabelText("运行列表").textContent).toContain("已完成");
   fireEvent.click(screen.getByRole("button", { name: /生产 A/ }));

@@ -16,6 +16,7 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
   const [busy, setBusy] = useState<"pick" | "rescan" | "commit">();
   const [suffix, setSuffix] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [newlyValid, setNewlyValid] = useState<Set<string>>(new Set());
   const [createQueue, setCreateQueue] = useState(true);
   const [autoStart, setAutoStart] = useState(false);
   const [legacy,setLegacy]=useState<FolderImportLegacyDefaults>({selectionRef:"",durationSeconds:6,width:0,height:0});
@@ -31,7 +32,7 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
     setUiProject(projectId);
     mounted.current = true; locked.current = false; operation.current++;
     setPreview(undefined); setResult(undefined); setError(undefined); setBusy(undefined);
-    setSuffix(""); setSelected(new Set()); setAutoStart(false); setCreateQueue(true);setLegacy({selectionRef:"",durationSeconds:6,width:0,height:0});setValidatedLegacy("");setGenerators([]);
+    setSuffix(""); setSelected(new Set()); setNewlyValid(new Set()); setAutoStart(false); setCreateQueue(true);setLegacy({selectionRef:"",durationSeconds:6,width:0,height:0});setValidatedLegacy("");setGenerators([]);
     return () => { mounted.current = false; operation.current++; if (session.current?.project === projectId) { discard(session.current.id); session.current = undefined; } };
   }, [projectId]);
   const ownsPreview=Boolean(preview && session.current?.project===projectId && uiProject===projectId);
@@ -39,6 +40,8 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
   useEffect(()=>{let cancelled=false;if(!legacyMode)return;const project=projectId;void productClient.creation.generatorsList(project,"video").then(options=>{if(!cancelled && scope.current===project)setGenerators(options.filter(o=>o.mediaKind==="video"));}).catch(e=>{if(!cancelled && scope.current===project)setError(importError(e));});return()=>{cancelled=true;};},[projectId,legacyMode]);
   const current = (project: string, ticket: number) => mounted.current && scope.current === project && operation.current === ticket;
   const accept = (p: FolderImportPreview, revalidate = false) => {
+    const wasBlocked = new Set(preview?.rows.filter(row => row.errors.length > 0).map(row => row.rowKey));
+    setNewlyValid(new Set(revalidate ? p.rows.filter(row => !row.errors.length && wasBlocked.has(row.rowKey)).map(row => row.rowKey) : []));
     session.current = { project: projectId, id: p.sessionId }; setPreview(p); setResult(undefined);
     setSelected(previous => new Set(p.rows.filter(r => r.errors.length === 0 && (!revalidate || previous.has(r.rowKey))).map(r => r.rowKey)));
     if (!revalidate) setCreateQueue(p.createQueueDefault); setAutoStart(false); setSuffix(p.nameSuffix ?? "");setValidatedLegacy(p.formatSource==="manifest"?"":JSON.stringify(legacyRef.current));
@@ -81,5 +84,11 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
     finally { finish(project, ticket); }
   };
   const toggle = (key: string) => { if (busy || result || !preview?.rows.some(r => r.rowKey === key && !r.errors.length)) return; setSelected(old => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; }); };
-  return { legacyMode,legacy,setLegacy,generators,preview:ownsPreview?preview:undefined, result:ownsPreview?result:undefined, error:uiProject===projectId?error:undefined, busy:uiProject===projectId?busy:undefined, suffix, setSuffix, selected, toggle, createQueue, setCreateQueue: (value: boolean) => { setCreateQueue(value); if (!value) setAutoStart(false); }, autoStart, setAutoStart, dirty, overQueueLimit, canCommit, pick, rescan, commit };
+  const selectRows = (keys: string[]) => {
+    if (busy || result || !ownsPreview || !preview) return;
+    const valid = new Set(preview.rows.filter(row => !row.errors.length).map(row => row.rowKey));
+    setSelected(new Set(keys.filter(key => valid.has(key))));
+  };
+  const selectNewlyValid = () => { selectRows([...selected, ...newlyValid]); setNewlyValid(new Set()); };
+  return { newlyValid, selectNewlyValid, selectRows, legacyMode,legacy,setLegacy,generators,preview:ownsPreview?preview:undefined, result:ownsPreview?result:undefined, error:uiProject===projectId?error:undefined, busy:uiProject===projectId?busy:undefined, suffix, setSuffix, selected, toggle, createQueue, setCreateQueue: (value: boolean) => { setCreateQueue(value); if (!value) setAutoStart(false); }, autoStart, setAutoStart, dirty, overQueueLimit, canCommit, pick, rescan, commit };
 }

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { invalidateRuns } from "../../product/runInvalidation";
 import { afterEach, expect, it, vi, beforeEach } from "vitest";
 import type { CreationContext, ProductRun } from "../../product/types";
+import { ShotReviewDialog } from "./ShotReviewDialog";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent, storyboardStats } from "./storyboardModel";
 import { useStudioStore } from "../../stores/studioStore";
@@ -590,4 +591,40 @@ it("R13: an unbound DISPATCHING queue item is queued, not available for generati
   expect(card.getAttribute("data-status")).toBe("QUEUED");
   expect(within(card).getByRole("button", { name: "生成视频" }).hasAttribute("disabled")).toBe(true);
   expect(api.generate).not.toHaveBeenCalled();
+});
+
+it("R20: next review finds an older pending Task when the latest run failed without outputs",async()=>{
+ const board=workbenchFromContexts();board.items=board.items.map((item,i)=>({...item,shot:{...item.shot,recentRun:{source:"task" as const,id:`latest-${i}`}},candidates:[{id:`candidate-${i}`,name:`video-${i}`,mediaKind:"video" as const,selected:false}]}));
+ api.workbench.mockResolvedValue(board);api.runGet.mockImplementation(async(_p,ref)=>({...run(ref.id==="latest-1"?"FAILED":"SUCCEEDED",1,1),ref}));
+ api.resultsGet.mockImplementation(async(_p,ref)=>ref.id==="latest-1"?[]:[{assetId:ref.id==="older-b"?"candidate-1":"candidate-0",name:ref.id==="older-b"?"旧待审结果":"首镜结果",mediaKind:"video",assetExists:true,availability:"available",reviewState:"PENDING",reviewRevision:0,selectedShotIds:[]}]);
+ api.shotsList.mockResolvedValue([{id:"s2",projectId:"p",generationLinks:[{id:"link-old",stage:"video",taskId:"older-b",createdAt:"2026-01-01"}]}]);
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
+ fireEvent.click(within(await screen.findByRole("article",{name:"镜头01"})).getByRole("button",{name:"审核"}));
+ fireEvent.click(within(await screen.findByRole("dialog",{name:"审核 镜头01"})).getByRole("button",{name:"下一个待审核镜头"}));
+ const dialog=await screen.findByRole("dialog",{name:"审核 镜头02"});expect(await within(dialog).findByText("旧待审结果")).toBeTruthy();
+ expect(api.runGet).toHaveBeenCalledWith("p",{source:"task",id:"older-b"});expect(api.resultReview).not.toHaveBeenCalled();expect(api.selectResult).not.toHaveBeenCalled();
+});
+it("R21: same RunRef reloads candidates without retaining the previous candidate set",async()=>{
+ const makeItem=(id:string)=>({id:"s2",name:"镜头02",ordinal:2,status:"REVIEW" as const,shot:context("s2").selectedShot,run:run("SUCCEEDED",1,1),candidates:[{id,name:id,mediaKind:"video" as const,selected:false}]});
+ api.resultsGet.mockImplementation(async()=>["old","new"].map(id=>({assetId:id,name:`result-${id}`,mediaKind:"video",assetExists:true,reviewState:"PENDING",reviewRevision:0,selectedShotIds:[]})));
+ const props={projectId:"p",onClose:vi.fn(),onChanged:vi.fn(),onEdit:vi.fn()};
+ const {rerender}=render(<ShotReviewDialog {...props} item={makeItem("old")}/>);await screen.findByText("result-old");
+ rerender(<ShotReviewDialog {...props} item={makeItem("new")}/>);await screen.findByText("result-new");expect(screen.queryByText("result-old")).toBeNull();expect(api.resultsGet).toHaveBeenCalledTimes(2);
+});
+it.each(["missing","unavailable"])("R22: %s candidate has no approval or selection action",async availability=>{
+ const item={id:"s2",name:"镜头02",ordinal:2,status:"REVIEW" as const,shot:context("s2").selectedShot,run:run("SUCCEEDED",1,1),candidates:[{id:"bad",name:"bad",mediaKind:"video" as const,selected:false}]};
+ api.resultsGet.mockResolvedValue([{assetId:"bad",name:"missing-video",mediaKind:"video",assetExists:true,availability,reviewState:"PENDING",reviewRevision:0,selectedShotIds:[]}]);
+ render(<ShotReviewDialog projectId="p" item={item} onClose={vi.fn()} onChanged={vi.fn()} onEdit={vi.fn()}/>);await screen.findByText("missing-video");
+ expect(screen.queryByRole("button",{name:"通过"})).toBeNull();expect(screen.getByRole("button",{name:"选为结果"}).hasAttribute("disabled")).toBe(true);expect(api.selectResult).not.toHaveBeenCalled();
+});
+it("R51: pending reorder disables insertion rather than silently dropping a second operation",async()=>{
+ localStorage.setItem("ai-studio.storyboard.view","shots");api.shotsList.mockResolvedValue(shots.map(s=>({...s,projectId:"p"})));
+ let resolve!:(v:unknown)=>void;api.shotsReorder.mockReturnValueOnce(new Promise(r=>{resolve=r;}));
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);const row=await screen.findByRole("article",{name:"分镜 3 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"上移"}));
+ await waitFor(()=>expect(api.shotsReorder).toHaveBeenCalled());expect(within(row).getByRole("button",{name:"在此后插入"}).hasAttribute("disabled")).toBe(true);expect(api.createShot).not.toHaveBeenCalled();await act(async()=>resolve([]));
+});
+it("R61: a successful export clears the preceding failed export error",async()=>{
+ api.exportSelected.mockRejectedValueOnce({code:"INVALID_INPUT",message:"选用结果已变化，请重新导出。"}).mockResolvedValue({exported:1,failed:0,directory:"owned-export",entries:[],manifestError:null,openError:null});
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);await screen.findByLabelText("镜头统计");const button=screen.getByRole("button",{name:"导出全项目已选用视频"});fireEvent.click(button);
+ await screen.findByText("选用结果已变化，请重新导出。");fireEvent.click(button);await waitFor(()=>expect(api.exportSelected).toHaveBeenCalledTimes(2));await waitFor(()=>expect(screen.queryByText("选用结果已变化，请重新导出。")).toBeNull());
 });

@@ -30,6 +30,7 @@ export interface ShotBulkConfigPanelProps {
   onError?: (message?: string) => void;
   onConfigureStage?: (stage: ShotStage, shotIds: string[]) => void | boolean | Promise<void|boolean>;
   configurationEditor?: ReactNode;
+  unappliedConfiguration?: boolean;
   confirmPromptOverwrite?: boolean;
   videoOnly?: boolean;
   onBulkPrompt?: (stage: ShotStage, shotIds: string[], promptText: string) => void | Promise<void>;
@@ -90,6 +91,7 @@ function ScopedShotBulkConfigPanel({
   onBulkPrompt,
   confirmPromptOverwrite,
   configurationEditor,
+  unappliedConfiguration = false,
   videoOnly,
   onBusyChange,
   onDirtyChange,
@@ -294,6 +296,7 @@ function ScopedShotBulkConfigPanel({
 
   async function prepareBatch(nextStage: ShotStage) {
     if (nextStage !== "video" || stage !== "video") return;
+    if (unappliedConfiguration) { reportError("请先应用批量生成器与参数，或清空配置草稿后再准备。"); return; }
     if (unappliedPrompt) {reportError("请先明确应用批量提示词，或清空输入框使用镜头已保存的内容。");return;}
     const requestedOwner = owner;
     setPreparationResult(undefined);
@@ -376,7 +379,10 @@ function ScopedShotBulkConfigPanel({
         ))}
       </div>
 
+      {selectedIdsInOrder.some(id => !visibleShots.some(shot => shot.id === id)) && <details><summary>筛选隐藏了 {selectedIdsInOrder.filter(id => !visibleShots.some(shot => shot.id === id)).length} 个已选镜头（仍会提交）</summary><ul>{scopeShots.filter(shot => selectedIds.has(shot.id) && !visibleShots.some(visible => visible.id === shot.id)).map(shot => <li key={shot.id}>{shot.name}<button type="button" disabled={Boolean(busyAction)} onClick={() => setSelectedIds(old => { const next = new Set(old); next.delete(shot.id); return next; })}>移除隐藏选择：{shot.name}</button></li>)}</ul></details>}
+      <button type="button" disabled={Boolean(busyAction)} onClick={() => setSelectedIds(new Set(visibleShots.map(shot => shot.id)))}>仅选择当前筛选</button>
       {configurationEditor}
+      {unappliedConfiguration && <p role="status">批量生成器与参数尚未应用，不能准备冻结批次。</p>}
       <div className="pipeline-action-grid">
         <button type="button" hidden={videoOnly} onClick={() => void configureStage("image")} disabled>
           配置图片阶段
@@ -390,7 +396,7 @@ function ScopedShotBulkConfigPanel({
         <button type="button" hidden={videoOnly} disabled>
           {busyAction === "prepare-image" ? "正在准备图片生产…" : "准备图片生产"}
         </button>
-        <button type="button" onClick={() => void prepareBatch("video")} disabled={stage !== "video" || Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit || unappliedPrompt}>
+        <button type="button" onClick={() => void prepareBatch("video")} disabled={stage !== "video" || Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit || unappliedPrompt || unappliedConfiguration}>
           {busyAction === "prepare-video" ? "正在准备视频生产…" : "准备视频生产"}
         </button>
       </div>
@@ -443,7 +449,7 @@ function ScopedShotBulkConfigPanel({
       </div>
 
       <p className="pipeline-human-review-note"><strong>人工审核保持不变：</strong>生成成功、候选选用和人工审核通过是三个独立状态；准备与生成不会自动选择候选或通过审核。</p>
-      {preparationResult && <div className="pipeline-preparation-result" role="status"><strong>已准备完成 · {preparationResult.createdCount} 个镜头</strong><span>已创建待启动批次；当前尚未开始生产。已准备 {preparationResult.alreadyPreparedCount} · 阻塞跳过 {preparationResult.skippedBlocked} · 不完整跳过 {preparationResult.skippedIncomplete}。</span>{onOpenProductionQueue && (preparationResult.createdCount > 0 || preparationResult.alreadyPreparedCount > 0) && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue(preparationResult.batchId ?? preparationResult.createdBatchIds?.[0] ?? preparationResult.matchingPreparedBatchIds?.[0])}>打开生产队列</button>}</div>}
+      {preparationResult && <div className="pipeline-preparation-result" role="status"><strong>已准备完成 · {preparationResult.createdCount} 个镜头</strong><span>{preparationResult.createdCount > 0 ? "已创建待启动批次；当前尚未开始生产。" : "本次未创建任何批次。"}已准备 {preparationResult.alreadyPreparedCount} · 阻塞跳过 {preparationResult.skippedBlocked} · 不完整跳过 {preparationResult.skippedIncomplete}。</span>{onOpenProductionQueue && (preparationResult.createdCount > 0 || preparationResult.alreadyPreparedCount > 0) && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue(preparationResult.batchId ?? preparationResult.createdBatchIds?.[0] ?? preparationResult.matchingPreparedBatchIds?.[0])}>打开生产队列</button>}</div>}
       {localNotice && <p className="studio-notice">{localNotice}</p>}
       {localError && <p className="error-message" role="alert">{localError}</p>}
     </section>
