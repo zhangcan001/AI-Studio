@@ -318,6 +318,12 @@ async fn product_creation_context_select_second_preserves_candidates_and_task_hi
             .unwrap()
         })
         .collect::<Vec<_>>();
+    // Positive selection owns actual managed media, not database-only ghost candidates.
+    for candidate in &candidates {
+        image::RgbImage::new(16, 16)
+            .save(dir.path().join(&candidate.storage_path))
+            .unwrap();
+    }
     SqliteAssetRepository::new(pool.clone())
         .insert_many(&candidates)
         .await

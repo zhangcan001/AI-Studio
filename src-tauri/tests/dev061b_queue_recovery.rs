@@ -657,7 +657,8 @@ fn build_services_with_admission(
         asset_store.clone(),
         asset_repository.clone(),
         clock.clone(),
-    );
+    )
+    .with_media_probe(Arc::new(ControlledQueueMediaProbe));
     // Opt-in schema fixture; all existing recovery fixtures keep their old setup.
     let generation_service = if creation_preflight {
         use ai_studio_lib::application::{
@@ -711,6 +712,7 @@ fn build_services_with_admission(
             clock.clone(),
             Arc::new(NoopTaskUpdateSink),
         )
+        .with_media_probe(Arc::new(ControlledQueueMediaProbe))
         .with_execution_registry(execution_registry.clone()),
     );
 
@@ -784,6 +786,26 @@ fn build_services_with_admission(
         package,
         queue,
         asset_reads,
+    }
+}
+
+// The controlled Comfy adapter returns a synthetic MP4 stream. Queue/recovery
+// tests exercise persistence and dispatch, not the host's optional ffprobe.
+struct ControlledQueueMediaProbe;
+#[async_trait]
+impl ai_studio_lib::application::media_probe::MediaProbe for ControlledQueueMediaProbe {
+    async fn probe_video(
+        &self,
+        _: &Path,
+    ) -> ai_studio_lib::application::media_probe::VideoMetadata {
+        ai_studio_lib::application::media_probe::VideoMetadata {
+            width: Some(64),
+            height: Some(64),
+            duration_ms: Some(3000),
+        }
+    }
+    async fn generate_video_poster(&self, _: &Path) -> Option<Vec<u8>> {
+        None
     }
 }
 

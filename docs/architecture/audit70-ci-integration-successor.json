@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "AUDIT70_CI_INTEGRATION",
+  "parentHead": "1650cc570591f06c8811603f98c61e19488c5b1b",
+  "planningParentHead": "1650cc570591f06c8811603f98c61e19488c5b1b",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "historicalRuntimeBytesUnchanged": true,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "guardsRelaxed": false,
+    "explicitSelectionAndReview": true,
+    "boundedWorkbenchPaging": true,
+    "noImplicitStart": true
+  },
+  "files": {
+    "scripts/audit70-ci-fixtures-successor-guard.mjs": {
+      "beforeHash": "dd6088a8edc3757e3c238f3e224d4f09930fd2ae80c835349fbec8e8f9d51a8b",
+      "afterHash": "7857aa946f08e0960424a7abf9445a2f0a911bc7a7632ba3085db7ebc7b49478"
+    },
+    "scripts/testing/audit-repair.test.mjs": {
+      "beforeHash": "509280729d19e6298f15555c10cd2e282063ee71d78d4cc94ecf957421609569",
+      "afterHash": "53a48b2ebad6583e3c267eea71d3ab6d48b58b09f359bb0e2c684da498fb9133"
+    },
+    "scripts/testing/audit70-ci-fixtures.test.mjs": {
+      "beforeHash": "84389b5f7f0c7ff12f37cc9c129956bf1014f6f92fd2d0952f1f6fb51e549790",
+      "afterHash": "16e0f0588f55ed5b35e4b090d398ca4f01497d1499305abe0956d384e75af914"
+    },
+    "scripts/testing/audit70-ci-repair.test.mjs": {
+      "beforeHash": "3ed9a88ca1123790c8fd1437e19496a86ae3726b2c8b896ce46eb2198df078a3",
+      "afterHash": "df8b3b82bce3c641e6cb997ce128c2675cd6a825eacdf439024cb7b88700adae"
+    },
+    "scripts/testing/audit70-ci-validation.test.mjs": {
+      "beforeHash": "1ff5ae28f5e49269f96adb479a5dbdae119dc39a0335646be92c97388ff62456",
+      "afterHash": "e0de65ca7ab911a7223e06e619ca9cdf799f9bcd1b9ec03438b01fb5fc786570"
+    },
+    "scripts/testing/audit70-completion.test.mjs": {
+      "beforeHash": "76960ffd29ff4d094883704b2535cf6fe697f246e463a2c6fbb7d02f04ac0be4",
+      "afterHash": "442f7fce50f8b9efc6a3961255e076433d0d24e5cc6d9c2ddda5fbe2488e80ea"
+    },
+    "scripts/testing/audit70-recovery.test.mjs": {
+      "beforeHash": "7496a9e544759a7ba32e71a5f3a6b6749d0e1891ec51da7f46256e7f12f71fe1",
+      "afterHash": "e3db57afcf6c66942b9f2d05fa62f222d8fa391e75eb8055503077caeb408c38"
+    },
+    "scripts/testing/ci-chain-consolidated.test.mjs": {
+      "beforeHash": "b81a43adecf5634c5400a61cc8d6064fc72bbc89383f3e55f5830491154713e2",
+      "afterHash": "08528aa1e821fe85cf66af44f5eaada2134e45ddbfd7a70e303e10d4ef2abc76"
+    },
+    "scripts/testing/convenience.test.mjs": {
+      "beforeHash": "632925166fa20f9ceecc4907f3bc9a06bac17c772256c9e9a925db74b89c6f76",
+      "afterHash": "243d928b2913bc7de81b6e815a6fca7cb02660fa04c7dac1ebdd66cb29ddbac2"
+    },
+    "scripts/testing/create-rerun-safety.test.mjs": {
+      "beforeHash": "c35f390b2899ab2a0eabde52d690b33e2e813de7d398043f903a86f1a93328b7",
+      "afterHash": "cc38ba74a5a3f2d293338c5f7105cded4d65812382c716a18fe43851b3d7f95d"
+    },
+    "scripts/testing/input-refresh-safety.test.mjs": {
+      "beforeHash": "e32499799b6933db231aa11fb4eac8d1e65e2581d1fd1664f413fe7675911b5f",
+      "afterHash": "72fca668ca5481b4f1e24ed5891054c07958c10b86621b40a347f1a5d81015d6"
+    },
+    "scripts/testing/library-hidden-prompts.test.mjs": {
+      "beforeHash": "700fa9f4635cbf676a5292499d41cbf2dfd158bfee4649727620688eb7241a71",
+      "afterHash": "a6066814572ad79ee3105dabf71e5d7df281cc0ca0e71babe6699206c1c54265"
+    },
+    "scripts/testing/pika-flex-reference.test.mjs": {
+      "beforeHash": "c14bbeaeb3fe4ea4b2a855f5cea3b539ca96af3e5e661755dee8f1748d3d7989",
+      "afterHash": "e82ac02ec208426a6fc259ce89cb21583a602cda00888024a1222ab0bce9f0ee"
+    },
+    "scripts/testing/production-safety.test.mjs": {
+      "beforeHash": "6513370ae367cb1bd2634c248ec271582894fc7e296371ede3563949864b03eb",
+      "afterHash": "9474218449f2b374c3a4047adef5fda6d265f0b596ec495e37311dbb3cbc1bc3"
+    },
+    "scripts/testing/queue-sync-import-paging.test.mjs": {
+      "beforeHash": "8cb493b16c1fd1b66edcff6a72a1aa85d748985ab9a8bb96e2dcb52e1d6ee914",
+      "afterHash": "2deb70ae48aed90d8ed0aa029a2c82b73740d117a6f262d02cc004b862379f02"
+    },
+    "scripts/testing/reference-authority.test.mjs": {
+      "beforeHash": "a4436c4502cfcf034e2b5d0f003556627da81e2fa576705b61b5ef5da2183bf9",
+      "afterHash": "a9b0ce1e1d829b07725b23646f5217cbbf2b25fe4074cba70a25401e4db01ce4"
+    },
+    "scripts/testing/run-recovery-polish.test.mjs": {
+      "beforeHash": "a82898a2788ec437c77a411f7de11bdf407df7a43f0d8a387855cc1f84b51fda",
+      "afterHash": "e49f239ea9398a940dca3835cd8df0828b39fc7b7557db00375a878be793fb74"
+    },
+    "scripts/testing/storyboard-feedback.test.mjs": {
+      "beforeHash": "c8d26102f6ec33b58c5c231b770035c108c3f7bc52321462c865315c2069ea3f",
+      "afterHash": "33aaa77c8bba5386480b78a6da6714f094c4be21da65f9671f7b8499fbc54275"
+    },
+    "scripts/testing/storyboard-integrity.test.mjs": {
+      "beforeHash": "e105cfd8bbac7785f9d80390a6158fb18a87c50ca08cbbe15465f2a412ea0758",
+      "afterHash": "359a5c55e67e2467d8b7a174aae5376c5b65673419c94e3ce94f1ebb81b8b86a"
+    },
+    "scripts/testing/storyboard-usage.test.mjs": {
+      "beforeHash": "04e662f113ceb4ec7f452629d9a13cbf7e8eb0285ddc7e4be6dc0c2685633c8f",
+      "afterHash": "7b14d83c234a4894484dc340629e2524b855b26e43cd90e89ce11c840ab6bde5"
+    },
+    "scripts/testing/usability-completion.test.mjs": {
+      "beforeHash": "fea7dba3de4dfdf2245556f7c77ecc52b2b420902cbe2138c89ea84b64f8ca56",
+      "afterHash": "0af368cac160b4e57739021aee32e41afbf8e0822affca6c5fc5b2a0101225a5"
+    },
+    "scripts/testing/usage-flow.test.mjs": {
+      "beforeHash": "cd65fd03d0dc0bbd712e3b7f89ddb76b839f850fbdad3ff35d67676e90ed4e48",
+      "afterHash": "647c09e8cd75b1eecb2124b015ec8ff1ee915a25c98dcab9990e4667283146df"
+    },
+    "scripts/testing/usage-polish.test.mjs": {
+      "beforeHash": "4f9b6ec19b86c91c8ea7a40e66b0fa6d79afa5d03a3c454588d93bfdc2221104",
+      "afterHash": "2cddf775044e6aa558c271851d7bccb1574f85fd2584df1fd31902a750cb592e"
+    },
+    "src-tauri/tests/dev061b_queue_recovery.rs": {
+      "beforeHash": "e74138e7de4a39762dfabe579ab87a080ef54f0fb6a16bc46c7866d2fc81e38c",
+      "afterHash": "82590a11d1899e9b153203e8902604a6818dc8a8dbd2fe182055cd9e80961a50"
+    },
+    "src-tauri/tests/support/creation_context_contract.rs": {
+      "beforeHash": "fce5a70b1e79fd4028c7303fd073edc021f17bb5f822a946b220b8aac1e6d1d8",
+      "afterHash": "c3ec4a4627c661d0b7ef1f54a1b39ae52621c59043df936ea2b959ac53907674"
+    },
+    "scripts/audit70-ci-integration-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "438a4f81dfdf0460453b3ca1e99873a3ab4a3a62feac63b7f9e2eb357ed38cc7"
+    },
+    "scripts/testing/audit70-ci-integration.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "1725de9812d00336be8e2a018d44c2b7bca27a6cae1c1f143b5dd9ea5a85a2c7"
+    }
+  }
+}
