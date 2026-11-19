@@ -3,6 +3,8 @@ import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
 
+import { audit70CiFixturesParentReader, audit70CiFixturesScopeSince, audit70CiFixturesFixtureFiles, AUDIT70_CI_FIXTURES_BASE } from "./audit70-ci-fixtures-successor-guard.mjs";
+
 export const AUDIT70_CI_VALIDATION_BASE = "ad7ffcb571f2dd1e02a3aef4cf41a6f8ff458b92";
 export const AUDIT70_CI_VALIDATION_PROOF = "docs/architecture/audit70-ci-validation-successor.json";
 export const AUDIT70_CI_VALIDATION_CHANGED = [
@@ -80,10 +82,11 @@ export function audit70CiValidationScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...AUDIT70_CI_VALIDATION_CHANGED, ...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF,
+    ...audit70CiFixturesScopeSince(root, AUDIT70_CI_FIXTURES_BASE),
   ])].sort();
 }
 export function audit70CiValidationFixtureFiles(root) {
-  return [...facts(root, AUDIT70_CI_VALIDATION_BASE).paths, ...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF];
+  return [...new Set([...facts(root, AUDIT70_CI_VALIDATION_BASE).paths, ...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF, ...audit70CiFixturesFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -93,9 +96,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, AUDIT70_CI_VALIDATION_BASE);
+  const successor = audit70CiFixturesParentReader(root, override);
+  const workspace = resolve(root), violations = [...successor.violations], parent = facts(workspace, AUDIT70_CI_VALIDATION_BASE);
   const fail = id => violations.push("audit70-ci-validation-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(AUDIT70_CI_VALIDATION_PROOF));
@@ -109,10 +113,10 @@ function validate(root, override) {
     const allowed = [...scope, AUDIT70_CI_VALIDATION_PROOF].sort();
     const expected = [...parent.paths, ...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -127,9 +131,9 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: AUDIT70_CI_VALIDATION_CHANGED,
-    addedPaths: [...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF],
-    afterHashes: Object.fromEntries([...AUDIT70_CI_VALIDATION_CHANGED, ...AUDIT70_CI_VALIDATION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...AUDIT70_CI_VALIDATION_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...AUDIT70_CI_VALIDATION_CHANGED, ...AUDIT70_CI_VALIDATION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: sessionMemoRead(workspace, p => AUDIT70_CI_VALIDATION_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function audit70CiValidationParentReader(root, override = undefined) {

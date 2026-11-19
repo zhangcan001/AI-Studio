@@ -1621,7 +1621,9 @@ pub(crate) mod tests {
         let compiled =
             super::compile_entity_prompt("按@剧情01构图", "prj_owned", &entities, &refs).unwrap();
         assert!(compiled.contains("<Picture 1> is a shot-planning reference for [Shot 1], defining viewpoint and the placement of the characters and props."));
-        assert!(compiled.contains("<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved - storyboard/layout reference only for the opening camera framing"));
+        assert!(compiled.contains("<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved - storyboard/layout reference only for the camera framing in its referenced shots"));
+        assert!(!compiled.contains("opening camera framing"));
+        assert!(!compiled.contains("ending camera framing"));
         assert!(compiled.contains("[Shot 1] 按<Picture 1>构图"));
         assert!(!compiled.contains("<Subject 1"));
         assert!(!compiled.contains("fully_preserved"));
@@ -1677,8 +1679,10 @@ pub(crate) mod tests {
         };
         let compiled = compile("@沈簿在@旧档房里按@持账低位构图蹲下抽出账册，镜头大幅环绕");
         println!("{compiled}");
-        let note = "<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved - storyboard/layout reference only for the opening camera framing, character placement and facing, and prop positions; camera movement during the shot is not limited by this picture. Ignore its background, colors, lighting and textures; the environment follows <Picture 3>. The appearance and clothing of people in this picture are not used, identities follow <Subject 1>, <Subject 2>.";
+        let note = "<Picture 1> (shot-planning reference for [Shot 1]): partially_preserved - storyboard/layout reference only for the camera framing in its referenced shots, character placement and facing, and prop positions; camera movement during the shot is not limited by this picture. Ignore its background, colors, lighting and textures; the environment follows <Picture 3>. The appearance and clothing of people in this picture are not used, identities follow <Subject 1>, <Subject 2>.";
         assert!(compiled.contains(note), "{compiled}");
+        assert!(!compiled.contains("opening camera framing"));
+        assert!(!compiled.contains("ending camera framing"));
         let anchor = "Set in the same dim archive room with tall wooden shelves as <Picture 3>; the room layout, set dressing and lighting stay consistent for the entire shot, while the camera may move freely, including large moves.";
         assert!(compiled.contains(&format!(
             "detailed_description:\nCinematic realism, soft window light.\n{anchor}\n[Shot 1] <Subject 1>在<Subject 2>里"

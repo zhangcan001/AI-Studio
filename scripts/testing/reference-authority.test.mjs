@@ -1,3 +1,4 @@
+import { AUDIT70_CI_FIXTURES_CHANGED, AUDIT70_CI_FIXTURES_ADDED, AUDIT70_CI_FIXTURES_PROOF } from "../audit70-ci-fixtures-successor-guard.mjs";
 import { AUDIT70_CI_VALIDATION_CHANGED, AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF } from "../audit70-ci-validation-successor-guard.mjs";
 import { AUDIT70_CI_REPAIR_CHANGED, AUDIT70_CI_REPAIR_ADDED, AUDIT70_CI_REPAIR_PROOF } from "../audit70-ci-repair-successor-guard.mjs";
 import { AUDIT70_RECOVERY_CHANGED, AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF } from "../audit70-recovery-successor-guard.mjs";
@@ -16,6 +17,7 @@ import {USABILITY_COMPLETION_CHANGED, USABILITY_COMPLETION_ADDED, USABILITY_COMP
 import {STORYBOARD_USAGE_CHANGED, STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF} from '../storyboard-usage-successor-guard.mjs';
 // @vitest-environment node
 import { expect, it } from 'vitest';
+import { runOverrideProbeSession } from '../boundary-validation-cache.mjs';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -34,8 +36,8 @@ const parentBytes = p => execFileSync('git', ['show', `${REFERENCE_AUTHORITY_BAS
 it('verifies the exact reference-authority successor and projects the frozen parent bytes', () => {
   const result = referenceAuthorityParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED, ...USABILITY_COMPLETION_CHANGED, ...AUDIT_REPAIR_CHANGED, ...USAGE_FLOW_CHANGED, ...CONVENIENCE_CHANGED, ...USAGE_POLISH_CHANGED, ...PRODUCTION_SAFETY_CHANGED, ...STORYBOARD_FEEDBACK_CHANGED, ...STORYBOARD_INTEGRITY_CHANGED, ...RUN_RECOVERY_POLISH_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...AUDIT70_RECOVERY_CHANGED, ...AUDIT70_COMPLETION_CHANGED, ...AUDIT70_CI_REPAIR_CHANGED, ...AUDIT70_CI_VALIDATION_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF, ...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...USAGE_FLOW_ADDED, USAGE_FLOW_PROOF, ...CONVENIENCE_ADDED, CONVENIENCE_PROOF, ...USAGE_POLISH_ADDED, USAGE_POLISH_PROOF, ...PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF, ...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF, ...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF, ...AUDIT70_CI_REPAIR_ADDED, AUDIT70_CI_REPAIR_PROOF, ...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...REFERENCE_AUTHORITY_CHANGED, ...STORYBOARD_USAGE_CHANGED, ...USABILITY_COMPLETION_CHANGED, ...AUDIT_REPAIR_CHANGED, ...USAGE_FLOW_CHANGED, ...CONVENIENCE_CHANGED, ...USAGE_POLISH_CHANGED, ...PRODUCTION_SAFETY_CHANGED, ...STORYBOARD_FEEDBACK_CHANGED, ...STORYBOARD_INTEGRITY_CHANGED, ...RUN_RECOVERY_POLISH_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...AUDIT70_RECOVERY_CHANGED, ...AUDIT70_COMPLETION_CHANGED, ...AUDIT70_CI_REPAIR_CHANGED, ...AUDIT70_CI_VALIDATION_CHANGED, ...AUDIT70_CI_FIXTURES_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...REFERENCE_AUTHORITY_ADDED, REFERENCE_AUTHORITY_PROOF, ...STORYBOARD_USAGE_ADDED, STORYBOARD_USAGE_PROOF, ...USABILITY_COMPLETION_ADDED, USABILITY_COMPLETION_PROOF, ...AUDIT_REPAIR_ADDED, AUDIT_REPAIR_PROOF, ...USAGE_FLOW_ADDED, USAGE_FLOW_PROOF, ...CONVENIENCE_ADDED, CONVENIENCE_PROOF, ...USAGE_POLISH_ADDED, USAGE_POLISH_PROOF, ...PRODUCTION_SAFETY_ADDED, PRODUCTION_SAFETY_PROOF, ...STORYBOARD_FEEDBACK_ADDED, STORYBOARD_FEEDBACK_PROOF, ...STORYBOARD_INTEGRITY_ADDED, STORYBOARD_INTEGRITY_PROOF, ...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF, ...AUDIT70_CI_REPAIR_ADDED, AUDIT70_CI_REPAIR_PROOF, ...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF, ...AUDIT70_CI_FIXTURES_ADDED, AUDIT70_CI_FIXTURES_PROOF])].sort());
   for (const p of REFERENCE_AUTHORITY_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(PIKA_FLEX_REFERENCE_PROOF)).toEqual(parentBytes(PIKA_FLEX_REFERENCE_PROOF));
   expect(pikaFlexReferenceParentReader('.').violations).toEqual([]);
@@ -44,15 +46,17 @@ it('verifies the exact reference-authority successor and projects the frozen par
 
 it('rejects forged identity, scope, contracts, hashes and unapproved Queue or Runtime edits', () => {
   const proof = JSON.parse(readFileSync(REFERENCE_AUTHORITY_PROOF, 'utf8'));
-  for (const override of [
-    ...['checkpoint', 'parentHead', 'planningParentHead'].map(key => ({ [REFERENCE_AUTHORITY_PROOF]: JSON.stringify({ ...proof, [key]: 'forged' }) })),
-    ...Object.entries(REFERENCE_AUTHORITY_CONTRACTS).map(([key, value]) => ({ [REFERENCE_AUTHORITY_PROOF]: JSON.stringify({ ...proof, contracts: { ...proof.contracts, [key]: !value } }) })),
-    { [REFERENCE_AUTHORITY_PROOF]: JSON.stringify({ ...proof, files: {} }) },
-    ...['beforeHash', 'afterHash'].map(key => ({ [REFERENCE_AUTHORITY_PROOF]: JSON.stringify({ ...proof, files: { ...proof.files, [source]: { ...proof.files[source], [key]: '0'.repeat(64) } } }) })),
-    ...[...REFERENCE_AUTHORITY_CHANGED, ...REFERENCE_AUTHORITY_ADDED, PIKA_FLEX_REFERENCE_PROOF, runtime].map(p => ({ [p]: readFileSync(p, 'utf8') + '\n// unapproved' })),
-    { 'src-tauri/src/application/production_queue_service.rs': 'unapproved queue edit' },
-    { 'src-tauri/migrations/999_unapproved.sql': 'SELECT 1;' },
-  ]) expect(referenceAuthorityParentReader('.', override).violations.length).toBeGreaterThan(0);
+  runOverrideProbeSession('.', () => {
+    for (const override of [
+      ...['checkpoint', 'parentHead', 'planningParentHead'].map(key => ({ [REFERENCE_AUTHORITY_PROOF]: JSON.stringify({ ...proof, [key]: 'forged' }) })),
+      ...Object.entries(REFERENCE_AUTHORITY_CONTRACTS).map(([key, value]) => ({ [REFERENCE_AUTHORITY_PROOF]: JSON.stringify({ ...proof, contracts: { ...proof.contracts, [key]: !value } }) })),
+      { [REFERENCE_AUTHORITY_PROOF]: JSON.stringify({ ...proof, files: {} }) },
+      ...['beforeHash', 'afterHash'].map(key => ({ [REFERENCE_AUTHORITY_PROOF]: JSON.stringify({ ...proof, files: { ...proof.files, [source]: { ...proof.files[source], [key]: '0'.repeat(64) } } }) })),
+      ...[...REFERENCE_AUTHORITY_CHANGED, ...REFERENCE_AUTHORITY_ADDED, PIKA_FLEX_REFERENCE_PROOF, runtime].map(p => ({ [p]: readFileSync(p, 'utf8') + '\n// unapproved' })),
+      { 'src-tauri/src/application/production_queue_service.rs': 'unapproved queue edit' },
+      { 'src-tauri/migrations/999_unapproved.sql': 'SELECT 1;' },
+    ]) expect(referenceAuthorityParentReader('.', override).violations.length).toBeGreaterThan(0);
+  });
   expect(referenceAuthorityParentReader('.').violations).toEqual([]);
 }, 120000);
 

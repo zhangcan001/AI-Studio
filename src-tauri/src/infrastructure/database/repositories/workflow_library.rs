@@ -747,21 +747,18 @@ mod tests {
             workflow_name: "wfl_a".into(),
             current_version: "wv_a3".into(),
         });
-        for (v, r) in [
-            ("wv_a1", "r_wv_a1"),
-            ("wv_a2", "r_wv_a2"),
-            ("wv_a1", "r_wv_a2"),
-            ("wv_a3", "r_wv_a1"),
-        ] {
+        for (v, r) in [("wv_a1", "r_wv_a1"), ("wv_a2", "r_wv_a2")] {
             assert_eq!(
                 definitions.resolve_superseded_pair(v, r).await.unwrap(),
                 current,
                 "{v}/{r}"
             );
         }
-        // Current, unknown and cross-workflow pairs are left to the normal checks.
+        // Current, mismatched, unknown and cross-workflow pairs never gain upgrade authority.
         for (v, r) in [
             ("wv_a3", "r_wv_a3"),
+            ("wv_a1", "r_wv_a2"),
+            ("wv_a3", "r_wv_a1"),
             ("wv_missing", "r_wv_a1"),
             ("wv_a1", "r_missing"),
             ("wv_a1", "r_wv_b1"),

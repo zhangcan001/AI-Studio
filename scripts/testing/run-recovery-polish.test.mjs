@@ -1,3 +1,4 @@
+import { AUDIT70_CI_FIXTURES_CHANGED, AUDIT70_CI_FIXTURES_ADDED, AUDIT70_CI_FIXTURES_PROOF } from "../audit70-ci-fixtures-successor-guard.mjs";
 import { AUDIT70_CI_VALIDATION_CHANGED, AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF } from "../audit70-ci-validation-successor-guard.mjs";
 import { AUDIT70_CI_REPAIR_CHANGED, AUDIT70_CI_REPAIR_ADDED, AUDIT70_CI_REPAIR_PROOF } from "../audit70-ci-repair-successor-guard.mjs";
 import { AUDIT70_RECOVERY_CHANGED, AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF } from "../audit70-recovery-successor-guard.mjs";
@@ -5,6 +6,7 @@ import { AUDIT70_COMPLETION_CHANGED, AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETIO
 import { QUEUE_SYNC_IMPORT_PAGING_CHANGED, QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF } from "../queue-sync-import-paging-successor-guard.mjs";
 // @vitest-environment node
 import { expect, it } from 'vitest';
+import { runOverrideProbeSession } from '../boundary-validation-cache.mjs';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -24,8 +26,8 @@ const parentBytes = p => execFileSync('git', ['show', `${RUN_RECOVERY_POLISH_BAS
 it('verifies the exact run-recovery-polish successor and projects the frozen parent bytes', () => {
   const result = runRecoveryPolishParentReader('.');
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...AUDIT70_RECOVERY_CHANGED, ...AUDIT70_COMPLETION_CHANGED, ...AUDIT70_CI_REPAIR_CHANGED, ...AUDIT70_CI_VALIDATION_CHANGED])].sort());
-  expect(result.addedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF, ...AUDIT70_CI_REPAIR_ADDED, AUDIT70_CI_REPAIR_PROOF, ...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF])].sort());
+  expect(result.changedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_CHANGED, ...LIBRARY_HIDDEN_PROMPTS_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...AUDIT70_RECOVERY_CHANGED, ...AUDIT70_COMPLETION_CHANGED, ...AUDIT70_CI_REPAIR_CHANGED, ...AUDIT70_CI_VALIDATION_CHANGED, ...AUDIT70_CI_FIXTURES_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...RUN_RECOVERY_POLISH_ADDED, RUN_RECOVERY_POLISH_PROOF, ...LIBRARY_HIDDEN_PROMPTS_ADDED, LIBRARY_HIDDEN_PROMPTS_PROOF, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF, ...AUDIT70_RECOVERY_ADDED, AUDIT70_RECOVERY_PROOF, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF, ...AUDIT70_CI_REPAIR_ADDED, AUDIT70_CI_REPAIR_PROOF, ...AUDIT70_CI_VALIDATION_ADDED, AUDIT70_CI_VALIDATION_PROOF, ...AUDIT70_CI_FIXTURES_ADDED, AUDIT70_CI_FIXTURES_PROOF])].sort());
   for (const p of RUN_RECOVERY_POLISH_CHANGED) expect(result.read(p)).toBe(parentBytes(p).toString().replaceAll('\r\n', '\n'));
   expect(readFileSync(STORYBOARD_INTEGRITY_PROOF)).toEqual(parentBytes(STORYBOARD_INTEGRITY_PROOF));
   expect(storyboardIntegrityParentReader('.').violations).toEqual([]);
@@ -34,15 +36,17 @@ it('verifies the exact run-recovery-polish successor and projects the frozen par
 
 it('rejects forged identity, scope, contracts, hashes and unapproved Queue or Runtime edits', () => {
   const proof = JSON.parse(readFileSync(RUN_RECOVERY_POLISH_PROOF, 'utf8'));
-  for (const override of [
-    ...['checkpoint', 'parentHead', 'planningParentHead'].map(key => ({ [RUN_RECOVERY_POLISH_PROOF]: JSON.stringify({ ...proof, [key]: 'forged' }) })),
-    ...Object.entries(RUN_RECOVERY_POLISH_CONTRACTS).map(([key, value]) => ({ [RUN_RECOVERY_POLISH_PROOF]: JSON.stringify({ ...proof, contracts: { ...proof.contracts, [key]: !value } }) })),
-    { [RUN_RECOVERY_POLISH_PROOF]: JSON.stringify({ ...proof, files: {} }) },
-    ...['beforeHash', 'afterHash'].map(key => ({ [RUN_RECOVERY_POLISH_PROOF]: JSON.stringify({ ...proof, files: { ...proof.files, [source]: { ...proof.files[source], [key]: '0'.repeat(64) } } }) })),
-    ...[...RUN_RECOVERY_POLISH_CHANGED, ...RUN_RECOVERY_POLISH_ADDED, STORYBOARD_INTEGRITY_PROOF, runtime].map(p => ({ [p]: readFileSync(p, 'utf8') + '\n// unapproved' })),
-    { 'src-tauri/src/application/production_queue_service.rs': 'unapproved queue edit' },
-    { 'src-tauri/migrations/999_unapproved.sql': 'SELECT 1;' },
-  ]) expect(runRecoveryPolishParentReader('.', override).violations.length).toBeGreaterThan(0);
+  runOverrideProbeSession('.', () => {
+    for (const override of [
+      ...['checkpoint', 'parentHead', 'planningParentHead'].map(key => ({ [RUN_RECOVERY_POLISH_PROOF]: JSON.stringify({ ...proof, [key]: 'forged' }) })),
+      ...Object.entries(RUN_RECOVERY_POLISH_CONTRACTS).map(([key, value]) => ({ [RUN_RECOVERY_POLISH_PROOF]: JSON.stringify({ ...proof, contracts: { ...proof.contracts, [key]: !value } }) })),
+      { [RUN_RECOVERY_POLISH_PROOF]: JSON.stringify({ ...proof, files: {} }) },
+      ...['beforeHash', 'afterHash'].map(key => ({ [RUN_RECOVERY_POLISH_PROOF]: JSON.stringify({ ...proof, files: { ...proof.files, [source]: { ...proof.files[source], [key]: '0'.repeat(64) } } }) })),
+      ...[...RUN_RECOVERY_POLISH_CHANGED, ...RUN_RECOVERY_POLISH_ADDED, STORYBOARD_INTEGRITY_PROOF, runtime].map(p => ({ [p]: readFileSync(p, 'utf8') + '\n// unapproved' })),
+      { 'src-tauri/src/application/production_queue_service.rs': 'unapproved queue edit' },
+      { 'src-tauri/migrations/999_unapproved.sql': 'SELECT 1;' },
+    ]) expect(runRecoveryPolishParentReader('.', override).violations.length).toBeGreaterThan(0);
+  });
   expect(runRecoveryPolishParentReader('.').violations).toEqual([]);
 }, 120000);
 

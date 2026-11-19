@@ -958,6 +958,26 @@ outputs:
         }
     }
 
+    // Recovery tests stream a synthetic MP4 header; decoding is controlled here,
+    // while real decoder failures retain their dedicated AssetImport regressions.
+    struct RecoveryMediaProbe;
+    #[async_trait]
+    impl crate::application::media_probe::MediaProbe for RecoveryMediaProbe {
+        async fn probe_video(
+            &self,
+            _: &std::path::Path,
+        ) -> crate::application::media_probe::VideoMetadata {
+            crate::application::media_probe::VideoMetadata {
+                width: Some(64),
+                height: Some(64),
+                duration_ms: Some(3000),
+            }
+        }
+        async fn generate_video_poster(&self, _: &std::path::Path) -> Option<Vec<u8>> {
+            None
+        }
+    }
+
     #[derive(Clone, Copy)]
     struct FixedClock;
 
@@ -1013,7 +1033,8 @@ outputs:
             asset_store,
             Arc::new(FixedClock),
             Arc::new(NoopSink),
-        );
+        )
+        .with_media_probe(Arc::new(RecoveryMediaProbe));
         Harness {
             _directory: directory,
             task_repository,
@@ -1655,10 +1676,16 @@ outputs:
             .list_output_mappings(&task.id)
             .await
             .unwrap();
-        assert_eq!(report.succeeded, 1);
+        assert_eq!(
+            report.succeeded, 1,
+            "{report:?}; task error: {:?}",
+            found.error
+        );
         assert_eq!(found.status, TaskStatus::Succeeded);
         assert_eq!(assets.len(), 1);
         assert_eq!(assets[0].asset_type, crate::domain::AssetType::Video);
+        assert_eq!((assets[0].width, assets[0].height), (64, 64));
+        assert_eq!(assets[0].duration_ms, Some(3000));
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].output_id, "generated_video");
         assert_eq!(mappings[0].ordinal, 0);

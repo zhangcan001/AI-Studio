@@ -189,6 +189,7 @@ outputs:
     }
 
     async fn simulate_successful_item(
+        project_root: &std::path::Path,
         pool: &sqlx::SqlitePool,
         queue: &SqliteProductionQueueRepository,
         task_repository: &SqliteTaskRepository,
@@ -271,6 +272,14 @@ outputs:
             )
             .expect("simulated video should be valid"),
         };
+        // The no-GPU fixture simulates generation, but selection requires a real readable output.
+        let output = project_root.join(&asset.storage_path);
+        std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+        if stage == ShotStage::Image {
+            image::RgbImage::new(512, 512).save(&output).unwrap();
+        } else {
+            std::fs::write(&output, b"controlled DEV027 video output").unwrap();
+        }
         asset_repository
             .insert_many(&[asset])
             .await
@@ -358,6 +367,12 @@ outputs:
             .execute(&pool)
             .await
             .expect("DEV027 test project should use production id format");
+        sqlx::query("UPDATE projects SET root_path = ? WHERE id = ?")
+            .bind(directory.path().to_string_lossy().as_ref())
+            .bind(PROJECT_ID)
+            .execute(&pool)
+            .await
+            .expect("DEV027 output root should stay inside its owned temporary directory");
 
         insert_definition(
             &pool,
@@ -566,6 +581,7 @@ outputs:
         let mut image_asset_ids = Vec::with_capacity(6);
         for item in &image_batch.items {
             let asset_id = simulate_successful_item(
+                directory.path(),
                 &pool,
                 &queue_repository,
                 &task_repository,
@@ -635,6 +651,7 @@ outputs:
             .is_some());
         for item in &i2v_batch.items {
             let asset_id = simulate_successful_item(
+                directory.path(),
                 &pool,
                 &queue_repository,
                 &task_repository,
@@ -677,6 +694,7 @@ outputs:
         );
         for item in &ref2va_batch.items {
             let asset_id = simulate_successful_item(
+                directory.path(),
                 &pool,
                 &queue_repository,
                 &task_repository,
