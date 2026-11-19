@@ -2065,7 +2065,10 @@ impl ProductionQueueService {
             sources.push(source);
         }
 
-        if plan.pending > 0
+        // A paused batch may retain untouched pending siblings after a
+        // disconnect. Preparing retries must preserve those siblings and the
+        // explicit-start boundary; active/running batches remain forbidden.
+        if (plan.pending > 0 && detail.batch.status != ProductionBatchStatus::Paused)
             || plan.active > 0
             || detail.batch.status == ProductionBatchStatus::Running
         {
@@ -2673,11 +2676,37 @@ impl ProductionQueueService {
                         continue;
                     }
                 };
-                let (queue_attempt, queue_parent_task_id) =
-                    self.retry_identity(&detail, next).await?;
-                let (direct_attempt, direct_parent_task_id) = self
-                    .direct_retry_identity(project_id, direct_context.as_ref())
-                    .await?;
+                // Identity resolution is still pre-submit work. A bad lineage
+                // must settle the claimed item, never strand DISPATCHING and
+                // retain global admission after the worker exits.
+                let identities = async {
+                    let queue = self.retry_identity(&detail, next).await?;
+                    let direct = self
+                        .direct_retry_identity(project_id, direct_context.as_ref())
+                        .await?;
+                    Ok::<_, ProductionQueueError>((queue, direct))
+                }
+                .await;
+                let (
+                    (queue_attempt, queue_parent_task_id),
+                    (direct_attempt, direct_parent_task_id),
+                ) = match identities {
+                    Ok(identities) => identities,
+                    Err(error) => {
+                        self.finish_item_and_settle_batch(
+                            &detail,
+                            TerminalItemTransition {
+                                item_id: &next.id,
+                                status: ProductionBatchItemStatus::Failed,
+                                error_code: Some("QUEUE_RETRY_IDENTITY_INVALID"),
+                                error_message: Some(&error.to_string()),
+                            },
+                            true,
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                };
                 let (submission_attempt, parent_task_id) = if queue_parent_task_id.is_some() {
                     (queue_attempt, queue_parent_task_id)
                 } else {
@@ -2839,6 +2868,14 @@ impl ProductionQueueService {
                     "retry source production item {source_item_id} is missing"
                 ))
             })?;
+        // Cancelling a pending item creates no Task. Its explicit retry is
+        // the first submission, not a retry of a nonexistent Task. Keep the
+        // queue lineage and the child's own idempotency key nonetheless.
+        if source_item.status == ProductionBatchItemStatus::Cancelled
+            && source_item.task_id.is_none()
+        {
+            return Ok((None, None));
+        }
         let parent_task_id = source_item.task_id.as_deref().ok_or_else(|| {
             ProductionQueueError::InvalidState(format!(
                 "retry source production item {source_item_id} has no parent task"

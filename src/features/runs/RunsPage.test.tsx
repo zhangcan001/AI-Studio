@@ -388,3 +388,45 @@ it("hides a zero failure count on the run list", async () => {
   expect(await screen.findByText((_, node) => node?.tagName === "SPAN" && node.textContent === "0 个结果")).toBeTruthy();
   expect(screen.queryByText(/0 项失败/)).toBeNull();
 });
+
+it("R54: a list failure does not suppress a selected Run detail read", async () => {
+  api.list.mockRejectedValue({ code: "PROJECT_READ_FAILED", message: "列表读取失败" });
+  api.get.mockResolvedValue({ ...run, title: "独立运行详情" });
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={vi.fn()} />);
+  expect(await screen.findByRole("heading", { name: "独立运行详情" })).toBeTruthy();
+  expect(api.resultsGet).toHaveBeenCalledWith("project-a", ref);
+});
+it("R55: a failed result refresh retains newly observed RUNNING rather than stale READY actions", async () => {
+  api.get.mockResolvedValueOnce({ ...run, status: "QUEUED", availableActions: ["START"] });
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={vi.fn()} />);
+  expect(await screen.findByRole("button", { name: "启动运行" })).toBeTruthy();
+  api.get.mockResolvedValue({ ...run, status: "RUNNING", availableActions: ["CANCEL"] });
+  api.resultsGet.mockRejectedValue({ code: "PROJECT_READ_FAILED", message: "结果读取失败" });
+  act(() => invalidateRuns("project-a"));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "启动运行" })).toBeNull());
+  expect(screen.getByRole("button", { name: "取消运行（中断正在生成的任务）" })).toBeTruthy();
+  expect(api.start).not.toHaveBeenCalled();
+});
+
+it("R56: historical Task retry navigates to the prepared queue without starting it", async () => {
+  api.get.mockResolvedValue({ ...run, availableActions: ["RETRY"], recoverability: { retryItemIds: ["failed-item"], reviewRequired: 0 } });
+  const queueRef = { source: "queue-batch", id: "prepared-queue" } as const;
+  api.retry.mockResolvedValue({ ...run, ref: queueRef, status: "PAUSED", availableActions: ["START"] });
+  const navigate = vi.fn();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={navigate} />);
+  fireEvent.click(await screen.findByRole("button", { name: "重试原运行的可恢复失败项" }));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: "runs", projectId: "project-a", run: queueRef }));
+  expect(api.start).not.toHaveBeenCalled();
+  confirm.mockRestore();
+});
+it("R19: legacy production retry explicitly confirms immediate generation", async () => {
+  api.get.mockResolvedValue({ ...run, ref: { source: "production-run", id: "legacy" }, availableActions: ["RETRY"], recoverability: { retryItemIds: ["failed-item"], reviewRequired: 0 } });
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: { source: "production-run", id: "legacy" } }} navigate={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "重试原运行的可恢复失败项" }));
+  expect(confirm).toHaveBeenCalledWith("将按原快照重试失败项并立即启动生成。历史尝试与已完成结果会保留。确定重试并启动？");
+  expect(screen.queryByText(/重试只会把失败项重新放入待启动队列/)).toBeNull();
+  expect(api.retry).not.toHaveBeenCalled();
+  confirm.mockRestore();
+});

@@ -7,7 +7,7 @@ import { toUserMessage } from "../../i18n/errorMessages";
 /** Owns project task requests, not task data: TaskStore remains authoritative. */
 export interface ProjectTaskRecoveryServices {
   listRecentTasks: (projectId: string, limit: number) => Promise<TaskView[]>;
-  reconcileActiveTasks: () => Promise<{ examined: number; succeeded: number; deferred: number; unresolved: number }>;
+  reconcileActiveTasks: () => Promise<{ examined: number; succeeded: number; failed: number; deferred: number; unresolved: number }>;
 }
 export function useProjectTaskRecovery(activeProjectId: string | undefined, setError: (error: string | null) => void, services: ProjectTaskRecoveryServices) {
   const { listRecentTasks, reconcileActiveTasks } = services;
@@ -59,7 +59,7 @@ export function useProjectTaskRecovery(activeProjectId: string | undefined, setE
       if (!current()) return;
       setRecentTasks(tasks);
       setRecoveryNotice(
-        `已检查 ${report.examined} 个任务：${report.succeeded} 个已更新，${report.deferred} 个等待后续同步，${report.unresolved} 个状态未确定。`,
+        `已检查 ${report.examined} 个任务：${report.succeeded} 个已更新，${report.failed} 个失败，${report.deferred} 个等待后续同步，${report.unresolved} 个状态未确定。`,
       );
     } catch (recoveryError: unknown) {
       if (current()) setRecoveryNotice(toUserMessage(recoveryError));

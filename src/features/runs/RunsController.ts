@@ -29,25 +29,38 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (inflight.current === epoch.current) { queued.current = true; return; }
     const token = ++epoch.current; inflight.current = token; queued.current = false;
     try {
-      // Product list is a recent projection only; never request or invent a mixed-history cursor.
-      const page = await productClient.run.list(route.projectId, filter, null);
-      if (token !== epoch.current) return;
-      setList(page); // Keep coverage/nextCursor evidence; UI never paginates mixed history.
-      if (route.run) {
-        try {
-          const run = await productClient.run.get(route.projectId, route.run);
-          const outputs = await productClient.run.resultsGet(route.projectId, route.run);
-          if (token !== epoch.current) return;
-          setDetail(run); setResults(outputs); setMissing(false);
-        } catch (error) {
-          if (token !== epoch.current) return;
-          const issue = normalizeProductError(error);
-          if (issue.code !== "RUN_NOT_FOUND" && issue.code !== "PROJECT_SCOPE_VIOLATION") throw issue;
-          setMissing(true); setDetail(undefined); setResults([]);
-        }
-      }
-      if (token === epoch.current) setError(undefined);
-    } catch (error) { if (token === epoch.current) setError(normalizeProductError(error).message); }
+      const issues: string[] = [];
+      // Recent history and a directly addressed Run are independent reads.
+      // A broken list must not suppress the selected Run's authoritative state.
+      await Promise.all([
+        (async () => {
+          try {
+            const page = await productClient.run.list(route.projectId, filter, null);
+            if (token === epoch.current) setList(page);
+          } catch (cause) { issues.push(normalizeProductError(cause).message); }
+        })(),
+        (async () => {
+          if (!route.run) return;
+          try {
+            const run = await productClient.run.get(route.projectId, route.run);
+            if (token !== epoch.current) return;
+            // Commit known state before fetching optional results: never retain
+            // stale READY actions when resultsGet fails after a RUNNING read.
+            setDetail(run); setMissing(false);
+            const outputs = await productClient.run.resultsGet(route.projectId, route.run);
+            if (token === epoch.current) setResults(outputs);
+          } catch (cause) {
+            if (token !== epoch.current) return;
+            const issue = normalizeProductError(cause);
+            setResults([]);
+            if (issue.code === "RUN_NOT_FOUND" || issue.code === "PROJECT_SCOPE_VIOLATION") {
+              setMissing(true); setDetail(undefined);
+            } else { issues.push(issue.message); }
+          }
+        })(),
+      ]);
+      if (token === epoch.current) setError(issues.length ? issues.join("；") : undefined);
+    }
     finally {
       if (token === epoch.current) {
         setLoading(false); inflight.current = undefined;
@@ -82,7 +95,11 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (kind === "RETRY") {
       const confirm = runRecoveryPresentation(detail).retry?.confirm;
       if (confirm && !window.confirm(confirm)) return;
-      await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: detail.recoverability.retryItemIds });
+      const prepared = await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: detail.recoverability.retryItemIds });
+      if (mounted.current && scope === liveScope.current && prepared.projectId === route.projectId
+        && (prepared.ref.source !== detail.ref.source || prepared.ref.id !== detail.ref.id)) {
+        await navigate({ ...route, run: prepared.ref });
+      }
     }
     else await productClient.run[kind === "START" ? "start" : kind === "PAUSE" ? "pause" : "cancel"](route.projectId, detail.ref);
   });

@@ -400,6 +400,21 @@ async fn product_contract_partial_retry_idempotent_preserves_history_and_scope()
     };
     facade.retry(PROJECT_ID, retry.clone()).await.unwrap();
     facade.retry(PROJECT_ID, retry).await.unwrap();
+    let task_retry = facade
+        .retry(
+            PROJECT_ID,
+            RunRetryRequest {
+                run_ref: RunRef {
+                    source: RunSource::Task,
+                    id: before.items[1].task_id.clone().unwrap(),
+                },
+                selected_item_ids: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(task_retry.run_ref, locator);
+    assert!(task_retry.available_actions.iter().any(|a| a == "START"));
     let prepared = services.queue.get(PROJECT_ID, batch).await.unwrap();
     assert_eq!(prepared.items.len(), 4);
     assert_eq!(count(&pool, "tasks").await, 3);

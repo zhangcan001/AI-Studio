@@ -674,3 +674,150 @@ async fn resume_during_old_worker_exit_keeps_pending_items_executing() {
     assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 2);
     assert_eq!(count(&pool, "tasks").await, 2);
 }
+
+#[tokio::test]
+async fn retry_cancelled_unstarted_item_submits_once_and_releases_admission() {
+    let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Success));
+    let (_directory, pool, services, batch, item) = fixture(comfy.clone()).await;
+    services
+        .queue
+        .cancel_batch(PROJECT_ID, &batch)
+        .await
+        .unwrap();
+    let cancelled = services.queue.get(PROJECT_ID, &batch).await.unwrap();
+    assert_eq!(
+        cancelled.items[0].status,
+        ProductionBatchItemStatus::Cancelled
+    );
+    assert!(cancelled.items[0].task_id.is_none());
+    assert_eq!(count(&pool, "tasks").await, 0);
+    let retried = services
+        .queue
+        .retry_item(PROJECT_ID, &batch, &item)
+        .await
+        .unwrap();
+    let child = retried
+        .items
+        .iter()
+        .find(|candidate| candidate.retry_of_item_id.as_deref() == Some(&item))
+        .unwrap();
+    let child_id = child.id.as_str().to_owned();
+    // Repeating the same preparation must not create a second child.
+    let repeated = services
+        .queue
+        .retry_item(PROJECT_ID, &batch, &item)
+        .await
+        .unwrap();
+    assert_eq!(repeated.items.len(), 2);
+    services
+        .queue
+        .start_for_test(PROJECT_ID, &batch)
+        .await
+        .unwrap();
+    wait_for_item_status(&pool, &child_id, ProductionBatchItemStatus::Succeeded).await;
+    wait_for_batch_status(&pool, &batch, ProductionBatchStatus::Completed).await;
+    assert!(!services.queue.admission_status().await.unwrap().busy);
+    assert_eq!(count(&pool, "tasks").await, 1);
+    assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn retry_invalid_task_identity_settles_claimed_item_without_remote_submit() {
+    let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Success));
+    let (_directory, pool, services, batch, item) = fixture(comfy.clone()).await;
+    services
+        .queue
+        .cancel_batch(PROJECT_ID, &batch)
+        .await
+        .unwrap();
+    let retried = services
+        .queue
+        .retry_item(PROJECT_ID, &batch, &item)
+        .await
+        .unwrap();
+    let child_id = retried
+        .items
+        .iter()
+        .find(|candidate| candidate.retry_of_item_id.as_deref() == Some(&item))
+        .unwrap()
+        .id
+        .as_str()
+        .to_owned();
+    // Simulate a historical failed source with no Task, not an unstarted cancellation.
+    sqlx::query("UPDATE production_batch_items SET status = 'FAILED' WHERE id = ?")
+        .bind(&item)
+        .execute(&pool)
+        .await
+        .unwrap();
+    services
+        .queue
+        .start_for_test(PROJECT_ID, &batch)
+        .await
+        .unwrap();
+    wait_for_item_status(&pool, &child_id, ProductionBatchItemStatus::Failed).await;
+    wait_for_batch_status(&pool, &batch, ProductionBatchStatus::Paused).await;
+    let detail = services.queue.get(PROJECT_ID, &batch).await.unwrap();
+    let child = detail
+        .items
+        .iter()
+        .find(|candidate| candidate.id.as_str() == child_id)
+        .unwrap();
+    assert_eq!(
+        child.error_code.as_deref(),
+        Some("QUEUE_RETRY_IDENTITY_INVALID")
+    );
+    assert!(!services.queue.admission_status().await.unwrap().busy);
+    assert_eq!(count(&pool, "tasks").await, 0);
+    assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn paused_disconnect_retry_preserves_pending_sibling_until_explicit_start() {
+    let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Offline));
+    let (_directory, pool, services, batch, item) = fixture(comfy.clone()).await;
+    // Add an untouched sibling using the same frozen queue values.
+    let sibling = ProductionBatchItemId::new().as_str().to_owned();
+    sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, created_at, updated_at) SELECT ?, batch_id, ordinal + 1, workflow_version_id, recipe_id, values_json, 'PENDING', created_at, updated_at FROM production_batch_items WHERE id = ?")
+        .bind(&sibling).bind(&item).execute(&pool).await.unwrap();
+    services
+        .queue
+        .start_for_test(PROJECT_ID, &batch)
+        .await
+        .unwrap();
+    wait_for_item_status(&pool, &item, ProductionBatchItemStatus::Failed).await;
+    wait_for_batch_status(&pool, &batch, ProductionBatchStatus::Paused).await;
+    let before = services.queue.get(PROJECT_ID, &batch).await.unwrap();
+    let untouched = before
+        .items
+        .iter()
+        .find(|i| i.id.as_str() == sibling)
+        .unwrap()
+        .clone();
+    let prepared = services
+        .queue
+        .partial_resume(PROJECT_ID, &batch, &[item.clone()])
+        .await
+        .unwrap();
+    assert_eq!(prepared.created_count, 1);
+    assert_eq!(prepared.detail.batch.status, ProductionBatchStatus::Paused);
+    assert_eq!(
+        prepared
+            .detail
+            .items
+            .iter()
+            .find(|i| i.id.as_str() == sibling)
+            .unwrap(),
+        &untouched
+    );
+    assert_eq!(count(&pool, "tasks").await, 1);
+    let submits = comfy.submit_calls.load(Ordering::SeqCst);
+    let repeated = services
+        .queue
+        .partial_resume(PROJECT_ID, &batch, &[item])
+        .await
+        .unwrap();
+    assert_eq!(repeated.created_count, 0);
+    assert_eq!(repeated.already_prepared_count, 1);
+    assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), submits);
+    assert!(!services.queue.admission_status().await.unwrap().busy);
+}

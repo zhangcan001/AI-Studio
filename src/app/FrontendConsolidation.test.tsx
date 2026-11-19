@@ -27,7 +27,7 @@ const tasks=(id:string)=>[{id,projectId:id}] as TaskView[];
 function deferred<T>() { let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve}; }
 beforeEach(()=>{
   vi.clearAllMocks();useProjectStore.setState({activeProjectId:'a'});useTaskStore.getState().clear();
-  api.listRecentTasks.mockResolvedValue([]);api.reconcileActiveTasks.mockResolvedValue({examined:2,succeeded:1,deferred:1,unresolved:0});
+  api.listRecentTasks.mockResolvedValue([]);api.reconcileActiveTasks.mockResolvedValue({examined:2,succeeded:1,failed:0,deferred:1,unresolved:0});
   api.listConsistencyProfiles.mockResolvedValue([]);api.listReferenceSets.mockResolvedValue([]);api.listCostumeVariants.mockResolvedValue([]);
 });
 afterEach(()=>cleanup());
@@ -45,11 +45,11 @@ it('phase10_target2 reconciles through the original authority and abandons forme
   await waitFor(()=>expect(h.result.current.projectContextLoading).toBe(false));
   api.listRecentTasks.mockResolvedValue(tasks('a'));
   await act(async()=>h.result.current.reconcileTasks());expect(h.result.current.recoveryNotice).toContain('已检查 2 个任务');
-  const old=deferred<{examined:number,succeeded:number,deferred:number,unresolved:number}>();api.reconcileActiveTasks.mockReturnValue(old.promise);
+  const old=deferred<{examined:number,succeeded:number,failed:number,deferred:number,unresolved:number}>();api.reconcileActiveTasks.mockReturnValue(old.promise);
   let request!:Promise<void>;act(()=>{request=h.result.current.reconcileTasks();});
   useProjectStore.setState({activeProjectId:'b'});api.listRecentTasks.mockResolvedValue(tasks('b'));h.rerender({id:'b'});
   await waitFor(()=>expect(useTaskStore.getState().recentTasks[0]?.id).toBe('b'));
-  await act(async()=>{old.resolve({examined:99,succeeded:0,deferred:0,unresolved:0});await request;});
+  await act(async()=>{old.resolve({examined:99,succeeded:0,failed:0,deferred:0,unresolved:0});await request;});
   expect(useTaskStore.getState().recentTasks[0].id).toBe('b');expect(h.result.current.recoveryNotice).toBeNull();expect(h.result.current.reconciling).toBe(false);
 });
 it('phase10_target3 cancels pending task-store writes on unmount',async()=>{
@@ -108,3 +108,11 @@ it('phase10_target9 rejects import and root responsibility growth while keeping 
   const regressed={...manifest,retiredRootResponsibilities:['<NormalProductPages']};expect(frontendBoundary('.',regressed).violations).toContain('root-responsibility:<NormalProductPages');
   const inventory=frontendInventory('.');expect(inventory.metrics.crossFeature).toBeLessThan(manifest.before.crossFeature);
 },15000);
+
+it("R03: manual synchronization reports failed tasks rather than three misleading zeros", async () => {
+  api.reconcileActiveTasks.mockResolvedValue({ examined: 1, succeeded: 0, failed: 1, deferred: 0, unresolved: 0 });
+  const h = renderHook(() => useProjectTaskRecovery("a", reportError, api));
+  await waitFor(() => expect(h.result.current.projectContextLoading).toBe(false));
+  await act(async () => h.result.current.reconcileTasks());
+  expect(h.result.current.recoveryNotice).toBe("已检查 1 个任务：0 个已更新，1 个失败，0 个等待后续同步，0 个状态未确定。");
+});

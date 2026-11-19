@@ -14,8 +14,12 @@ export function runRecoveryPresentation(run: ProductRun) {
     retry: showRecovery && retryCount > 0 ? {
       count: retryCount,
       label: "重试原运行的可恢复失败项",
-      explanation: "重试使用这些失败项原来的运行快照，不会采用当前 Create 中尚未提交的修改；历史尝试仍会保留。重试只会把失败项重新放入待启动队列，仍需再点「启动运行」后才会开始生成。",
-      confirm: "重试只会按原快照把失败项重新放入待启动队列，不会自动开始生成。仍需再点「启动运行」。确定继续？",
+      explanation: run.ref.source === "production-run"
+        ? "旧生产运行的重试会按原快照立即启动生成，不会采用当前 Create 中的修改；历史尝试与已完成结果会保留。"
+        : "重试使用这些失败项原来的运行快照，不会采用当前 Create 中尚未提交的修改；历史尝试仍会保留。重试只会把失败项重新放入待启动队列，仍需再点「启动运行」后才会开始生成。",
+      confirm: run.ref.source === "production-run"
+        ? "将按原快照重试失败项并立即启动生成。历史尝试与已完成结果会保留。确定重试并启动？"
+        : "重试只会按原快照把失败项重新放入待启动队列，不会自动开始生成。仍需再点「启动运行」。确定继续？",
     } : undefined,
     needsInputEdit: showRecovery && needsInputEdit,
     inputEditExplanation: "有失败项需要修改输入。这类问题不能通过原快照重试解决，请在下方选择具体输入进行编辑。",

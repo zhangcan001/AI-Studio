@@ -575,3 +575,19 @@ it("returns to the remaining page after the last shot on page two is removed", a
   expect(screen.queryByText("开始你的第一个镜头")).toBeNull();
   expect(screen.getByRole("button", { name: "上一页镜头" }).hasAttribute("disabled")).toBe(true);
 });
+
+it("R13: an unbound DISPATCHING queue item is queued, not available for generation", async () => {
+  localStorage.setItem("ai-studio.storyboard.view", "shots");
+  const board = workbenchFrom(id => idleContext(id, false));
+  board.items = board.items.map(item => ({ ...item, shot: { ...item.shot, selectionRef: "sel" } }));
+  api.workbench.mockResolvedValue(board);
+  api.generatorsList.mockResolvedValue([{ selectionRef: "sel", name: "H3", mode: "T2V", version: "1", availability: true, fields: [] }]);
+  const queue = { ...run("RUNNING", 0, 1), detail: { sources: [], inputs: [{ shotId: "s3", taskId: null, itemId: "dispatching", executionStatus: "DISPATCHING" }] } };
+  api.runList.mockResolvedValue({ items: [queue], nextCursor: null, coverage: "FINITE" });
+  api.runGet.mockResolvedValue(queue);
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  const card = await screen.findByRole("article", { name: /分镜 .* 镜头03/ });
+  expect(card.getAttribute("data-status")).toBe("QUEUED");
+  expect(within(card).getByRole("button", { name: "生成视频" }).hasAttribute("disabled")).toBe(true);
+  expect(api.generate).not.toHaveBeenCalled();
+});

@@ -718,6 +718,17 @@ impl ProductRunFacade {
                     .partial_resume(project_id, &batch, &[item])
                     .await
                     .map_err(queue_error)?;
+                // The Task is immutable history. The prepared queue is the
+                // actionable result and owns the explicit START capability.
+                return self
+                    .get(
+                        project_id,
+                        RunRef {
+                            source: RunSource::QueueBatch,
+                            id: batch,
+                        },
+                    )
+                    .await;
             }
         }
         self.get(project_id, request.run_ref).await

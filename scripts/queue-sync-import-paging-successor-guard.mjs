@@ -1,3 +1,4 @@
+import { audit70RecoveryParentReader, audit70RecoveryScopeSince, audit70RecoveryFixtureFiles, AUDIT70_RECOVERY_BASE } from "./audit70-recovery-successor-guard.mjs";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -84,10 +85,11 @@ export function queueSyncImportPagingScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF,
+    ...audit70RecoveryScopeSince(root, AUDIT70_RECOVERY_BASE),
   ])].sort();
 }
 export function queueSyncImportPagingFixtureFiles(root) {
-  return [...facts(root, QUEUE_SYNC_IMPORT_PAGING_BASE).paths, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF];
+  return [...new Set([...facts(root, QUEUE_SYNC_IMPORT_PAGING_BASE).paths, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF, ...audit70RecoveryFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -97,9 +99,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, QUEUE_SYNC_IMPORT_PAGING_BASE);
+  const successor = audit70RecoveryParentReader(root, override);
+  const workspace = resolve(root), violations = [...successor.violations], parent = facts(workspace, QUEUE_SYNC_IMPORT_PAGING_BASE);
   const fail = id => violations.push("queue-sync-import-paging-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(QUEUE_SYNC_IMPORT_PAGING_PROOF));
@@ -113,10 +116,10 @@ function validate(root, override) {
     const allowed = [...scope, QUEUE_SYNC_IMPORT_PAGING_PROOF].sort();
     const expected = [...parent.paths, ...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -131,9 +134,9 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: QUEUE_SYNC_IMPORT_PAGING_CHANGED,
-    addedPaths: [...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF],
-    afterHashes: Object.fromEntries([...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...QUEUE_SYNC_IMPORT_PAGING_ADDED, QUEUE_SYNC_IMPORT_PAGING_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...QUEUE_SYNC_IMPORT_PAGING_CHANGED, ...QUEUE_SYNC_IMPORT_PAGING_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: sessionMemoRead(workspace, p => QUEUE_SYNC_IMPORT_PAGING_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function queueSyncImportPagingParentReader(root, override = undefined) {

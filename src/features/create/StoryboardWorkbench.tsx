@@ -138,7 +138,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       for (const {key,run} of activeDetails) {
         if (!run || run.projectId !== projectId) continue;
         for (const input of run.detail?.inputs ?? []) {
-          if (!input.shotId || input.taskId || input.executionStatus !== "PENDING") continue;
+          if (!input.shotId || input.taskId || !["PENDING", "DISPATCHING"].includes(input.executionStatus ?? "")) continue;
           if (!activeByShot.has(input.shotId)) activeByShot.set(input.shotId, { ...run, status: run.status === "PAUSED" ? "PAUSED" : "QUEUED" });
           if (runErrors.has(key)) errorsByShot.set(input.shotId,runErrors.get(key)!.message);
         }
