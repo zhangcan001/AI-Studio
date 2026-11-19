@@ -8,6 +8,8 @@
 
 #[path = "support/migration_head.rs"]
 mod migration_head;
+use std::path::Path;
+
 use ai_studio_lib::application::{
     comfy_preflight_service::ComfyPreflightService,
     comfy_service::{ComfyRuntime, ComfyService},

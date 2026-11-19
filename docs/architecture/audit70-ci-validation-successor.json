@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "AUDIT70_CI_VALIDATION",
+  "parentHead": "ad7ffcb571f2dd1e02a3aef4cf41a6f8ff458b92",
+  "planningParentHead": "ad7ffcb571f2dd1e02a3aef4cf41a6f8ff458b92",
+  "contracts": {
+    "schemaChanged": false,
+    "backupFormatChanged": false,
+    "historicalRuntimeBytesUnchanged": true,
+    "historicalProofBytesUnchanged": true,
+    "productionQueueOnlyExecution": true,
+    "gpuExecuted": false,
+    "guardsRelaxed": false,
+    "explicitSelectionAndReview": true,
+    "boundedWorkbenchPaging": true,
+    "noImplicitStart": true
+  },
+  "files": {
+    "scripts/audit70-ci-repair-successor-guard.mjs": {
+      "beforeHash": "ca4b07aa15237c1966de66045b9048af05e8dcc148d67ea495dda37676f4d268",
+      "afterHash": "1512048d6316133124d303a34beeeac614148373cb946a1b9aa4f3babe544005"
+    },
+    "scripts/testing/audit-repair.test.mjs": {
+      "beforeHash": "75e3c4d2ece4820176571d4dd1f2f911dd8f23d4f475d01cff499d59b24d3af3",
+      "afterHash": "960724b2b34e793e3ae162625fdd52330300ca928069442b017e2a1646de36ab"
+    },
+    "scripts/testing/audit70-ci-repair.test.mjs": {
+      "beforeHash": "fa9d11cd7891d55e0593844cb94f403bda794de624580125459124acf0bf4ff8",
+      "afterHash": "bac4ea826bde94d4686739d82ff16bd23cff89c23e2b31629095ba6014add541"
+    },
+    "scripts/testing/audit70-completion.test.mjs": {
+      "beforeHash": "74fb633388703aee9fab6605dcae1b132cc3468d285db6fa592551f69b89716a",
+      "afterHash": "a480444d3541303a547d878408df9bf48150a1aa5d74b5ea2812d23d8a449fb2"
+    },
+    "scripts/testing/audit70-recovery.test.mjs": {
+      "beforeHash": "b3c5c40432db5593f07ce66685106c6aed72feb292c0aff9d0775380b86fdb8c",
+      "afterHash": "bbe3d18480c2e43477d9e16e39662d8a797617c1c1be70463a06af71c74279e6"
+    },
+    "scripts/testing/ci-chain-consolidated.test.mjs": {
+      "beforeHash": "41e1c38a06d80ba745079df57f654c97216052d9d35b5f47202af50a942a57a3",
+      "afterHash": "01edf50ab520032e7ba7b7167ebfd235a79bf1ea67756ab26f6ddcfbc4515079"
+    },
+    "scripts/testing/convenience.test.mjs": {
+      "beforeHash": "dfa9738afc0304d54166ae41f98834990c56d35a25d0688d1cc721f50f8dd771",
+      "afterHash": "a4866f492e05af9af105396a5181cc5c61627feaac08312ecd7fd45d8d5d08ce"
+    },
+    "scripts/testing/create-rerun-safety.test.mjs": {
+      "beforeHash": "e7b3ff498374f2cfb13fc83f3a3880782d8c012a3d24e383d26ba186c530a528",
+      "afterHash": "088bbd512e143d977403006c467db456b8012ba8e1e40ac6d89c2f1f113d13e9"
+    },
+    "scripts/testing/input-refresh-safety.test.mjs": {
+      "beforeHash": "2f20b3573f894ffb0b480e3dfc136c3215ef0c233dc39e3d4e6dc167d488adb1",
+      "afterHash": "813b194e5eb0a9c61a116c818233303a9afd1d957d8c8df66a98346c6c6e8b84"
+    },
+    "scripts/testing/library-hidden-prompts.test.mjs": {
+      "beforeHash": "52f1d02b4b85967c5475f0d61713bd52b23412add608ebf8737e01ddff54884b",
+      "afterHash": "3a2c7bf7ef9c534f28b5edeb0c614283413650526003f94692a3e9dba49260ea"
+    },
+    "scripts/testing/pika-flex-reference.test.mjs": {
+      "beforeHash": "749a31a964a33b882cc03f6a4f796bb417490840b1c9131150ff7eee400c8210",
+      "afterHash": "0387de29269a06fabe399420c379b046a07620e2017883d343e95d86e7f6822e"
+    },
+    "scripts/testing/production-safety.test.mjs": {
+      "beforeHash": "71be089eda11d6253bb32429656f723bace0170e5a713d4ab71c2ea3b25e90d6",
+      "afterHash": "ab30e04946ca24b1c823fa4613a5cc11ef880cd13e0d67794b93c3326b53dc30"
+    },
+    "scripts/testing/queue-sync-import-paging.test.mjs": {
+      "beforeHash": "870b4eb9a326e3bc7fe06e1d1272a9516f819ac814cf612b94255c9fa2237480",
+      "afterHash": "edb1e09a4875b066d18f33ee76dc157c1efdfa2c3a2bdc9a5fbd3d3706ad3037"
+    },
+    "scripts/testing/reference-authority.test.mjs": {
+      "beforeHash": "20861490e9730283005c4d915de1de08f51656caeee77c0d3114b4a92f240c60",
+      "afterHash": "f5deff6231de4bd612345fdeed3017f67462aa75a456b0c5c39189ad9fff459a"
+    },
+    "scripts/testing/run-recovery-polish.test.mjs": {
+      "beforeHash": "37b5ef156fccb3a94e8420f3217934ceb831877d65fa9f30e168d04105b0dcdf",
+      "afterHash": "7160ec8a6aae727615e2f9539d76eb7fc6698888fbbd434617c46d34beb9c9d8"
+    },
+    "scripts/testing/storyboard-feedback.test.mjs": {
+      "beforeHash": "bb364dfeb7901d83b52bb01b019dbfcf6a521a56f8a3934ce1922a4ef449592f",
+      "afterHash": "29c786408453793d9e83521113cfdcc014ee8ee724c25b6b406dd5876380dc22"
+    },
+    "scripts/testing/storyboard-integrity.test.mjs": {
+      "beforeHash": "9908d0c87fab9ae44dc994b67e169aec850508b766fd1dde48fd121b7e9c995a",
+      "afterHash": "78eace80989960e14f8523a94726d45b6157b648122fe6ede1254371994c7cf4"
+    },
+    "scripts/testing/storyboard-usage.test.mjs": {
+      "beforeHash": "9632414d249ee684fd0007d3a1a75272516add2e8386fc22830ad60409b9686e",
+      "afterHash": "c0a139fdf24a7dc84cbee54dd60a4dc23af24e2e7bb71a871b1b9dec3d753fd1"
+    },
+    "scripts/testing/usability-completion.test.mjs": {
+      "beforeHash": "88108e8acd8d1850cfbeeb4dea035f3191fce39db30d0b418374906de2695f15",
+      "afterHash": "f600181731288a45a4591d685b9ff4c5a56a3b1bae855b8254e918dce8c0e71b"
+    },
+    "scripts/testing/usage-flow.test.mjs": {
+      "beforeHash": "a0ce3318b3034a81d35c62a1fe2d0e3ea549db2560ff7b59cebbc0d0cd2a641e",
+      "afterHash": "a5518589357d0d2d9ca88539656f06d5f02950e29b0284dbf124467d12460a9f"
+    },
+    "scripts/testing/usage-polish.test.mjs": {
+      "beforeHash": "0c1a4b4faa17974a92b84700ba9db3828ac5af93ddb986c2b7fa209671deab47",
+      "afterHash": "89d50ea695aebf00f74a6064d24d400d4fc4e1f22478384690e39da4e07c0e1d"
+    },
+    "src-tauri/tests/dev052_runtime_integration.rs": {
+      "beforeHash": "dcfddaecf0324ae055d38ed4d02a1d88c6635288a160f5d52e2fbd225756ffdc",
+      "afterHash": "5801a2dd3f1b1981d6218c3abe8cc0d5f0a983636d241d85a102959c203ad211"
+    },
+    "scripts/audit70-ci-validation-successor-guard.mjs": {
+      "beforeHash": null,
+      "afterHash": "b1020c852550dad3d2292ab6efa55a432f92529059465ba34ec64b1a25ea43cf"
+    },
+    "scripts/testing/audit70-ci-validation.test.mjs": {
+      "beforeHash": null,
+      "afterHash": "0289c0c22ec0d083e50df15b33aff34b015197b78e89be34aaf694bc94585a02"
+    }
+  }
+}
