@@ -3,6 +3,8 @@ import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobText, sessionLiveRead, sessionGit, sessionMemoRead, immutableBlobBytes } from "./boundary-validation-cache.mjs";
 
+import { audit70CiRepairParentReader, audit70CiRepairScopeSince, audit70CiRepairFixtureFiles, AUDIT70_CI_REPAIR_BASE } from "./audit70-ci-repair-successor-guard.mjs";
+
 export const AUDIT70_COMPLETION_BASE = "7a2cee65ae793204e9c7d04677b69852d1ff67eb";
 export const AUDIT70_COMPLETION_PROOF = "docs/architecture/audit70-completion-successor.json";
 export const AUDIT70_COMPLETION_CHANGED = [
@@ -141,10 +143,11 @@ export function audit70CompletionScopeSince(root, base) {
   return [...new Set([
     ...tip.paths.filter(p => !old.paths.includes(p) || tip.read(p) !== old.read(p)),
     ...AUDIT70_COMPLETION_CHANGED, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF,
+    ...audit70CiRepairScopeSince(root, AUDIT70_CI_REPAIR_BASE),
   ])].sort();
 }
 export function audit70CompletionFixtureFiles(root) {
-  return [...facts(root, AUDIT70_COMPLETION_BASE).paths, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF];
+  return [...new Set([...facts(root, AUDIT70_COMPLETION_BASE).paths, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF, ...audit70CiRepairFixtureFiles(root)])];
 }
 function files(root, dir) {
   return readdirSync(join(root, dir), { withFileTypes: true }).flatMap(e => {
@@ -154,9 +157,10 @@ function files(root, dir) {
   });
 }
 function validate(root, override) {
-  const workspace = resolve(root), violations = [], parent = facts(workspace, AUDIT70_COMPLETION_BASE);
+  const successor = audit70CiRepairParentReader(root, override);
+  const workspace = resolve(root), violations = [...successor.violations], parent = facts(workspace, AUDIT70_COMPLETION_BASE);
   const fail = id => violations.push("audit70-completion-" + id);
-  const live = p => canonical(override && Object.hasOwn(override, p) ? override[p] : sessionLiveRead(workspace, p));
+  const live = p => canonical(successor.read(p));
   let proof;
   try {
     proof = JSON.parse(live(AUDIT70_COMPLETION_PROOF));
@@ -170,10 +174,10 @@ function validate(root, override) {
     const allowed = [...scope, AUDIT70_COMPLETION_PROOF].sort();
     const expected = [...parent.paths, ...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF].sort();
     const inventory = git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"])
-      .trim().split(/\r?\n/).filter(relevant);
+      .trim().split(/\r?\n/).filter(p => relevant(p) && !successor.addedPaths.includes(p));
     if (JSON.stringify([...new Set(inventory)].sort()) !== JSON.stringify(expected)) fail("inventory");
     const actualFiles = [".github/workflows", "src", "scripts", "docs/architecture", "src-tauri/runtime_packages", "src-tauri/src", "src-tauri/migrations", "src-tauri/tests"].flatMap(d => files(workspace, d));
-    if (actualFiles.some(p => !expected.includes(p))) fail("illegal-file");
+    if (actualFiles.some(p => !expected.includes(p) && !successor.addedPaths.includes(p))) fail("illegal-file");
     const changed = parent.paths.filter(p => live(p) !== parent.read(p));
     const added = inventory.filter(p => !parent.paths.includes(p));
     if (JSON.stringify([...new Set([...changed, ...added])].sort()) !== JSON.stringify(allowed)) fail("unapproved-source");
@@ -188,9 +192,9 @@ function validate(root, override) {
       if (!parent.paths.includes(p) || live(p) !== parent.read(p)) fail("undeclared:" + p);
     }
   } catch (error) { fail("validation:" + String(error).slice(0, 180)); }
-  return { violations, changedPaths: AUDIT70_COMPLETION_CHANGED,
-    addedPaths: [...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF],
-    afterHashes: Object.fromEntries([...AUDIT70_COMPLETION_CHANGED, ...AUDIT70_COMPLETION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])),
+  return { violations, changedPaths: [...new Set([...AUDIT70_COMPLETION_CHANGED, ...successor.changedPaths])].sort(),
+    addedPaths: [...new Set([...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF, ...successor.addedPaths])].sort(),
+    afterHashes: { ...Object.fromEntries([...AUDIT70_COMPLETION_CHANGED, ...AUDIT70_COMPLETION_ADDED].map(p => [p, proof?.files?.[p]?.afterHash ?? ""])), ...successor.afterHashes },
     read: sessionMemoRead(workspace, p => AUDIT70_COMPLETION_CHANGED.includes(p) ? parent.read(p) : live(p)) };
 }
 export function audit70CompletionParentReader(root, override = undefined) {

@@ -73,11 +73,11 @@ it("applies a Comfy MP target through the existing draft without media or genera
 });
 it("keeps manual parameter overrides when unrelated prompt wording changes", async () => {
   await start("opaque-0");
-  setPrompt("９：１６，８秒，街道"); fireEvent.blur(promptEditor());
+  setPrompt("画幅：９：１６，时长８秒，街道"); fireEvent.blur(promptEditor());
   await waitFor(() => expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 768 }));
   fireEvent.change(screen.getByLabelText("时长（秒）"), { target: { value: "6" } });
   fireEvent.change(screen.getByLabelText("画面比例"), { target: { value: "16:9" } });
-  setPrompt("９：１６，８秒，街道上的灯光"); fireEvent.blur(promptEditor());
+  setPrompt("画幅：９：１６，时长８秒，街道上的灯光"); fireEvent.blur(promptEditor());
   expect(useStudioStore.getState().values.width).toEqual({ type: "integer", value: 1344 });
   expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 6 });
   expect(api.generate).not.toHaveBeenCalled();

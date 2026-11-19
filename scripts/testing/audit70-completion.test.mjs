@@ -1,3 +1,4 @@
+import { AUDIT70_CI_REPAIR_CHANGED, AUDIT70_CI_REPAIR_ADDED, AUDIT70_CI_REPAIR_PROOF } from "../audit70-ci-repair-successor-guard.mjs";
 // @vitest-environment node
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -13,8 +14,8 @@ import { AUDIT70_RECOVERY_PROOF } from "../audit70-recovery-successor-guard.mjs"
 it("projects exact parent bytes and preserves its frozen proof", () => {
   const result = audit70CompletionParentReader(".");
   expect(result.violations).toEqual([]);
-  expect(result.changedPaths).toEqual(AUDIT70_COMPLETION_CHANGED);
-  expect(result.addedPaths).toEqual([...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF]);
+  expect(result.changedPaths).toEqual([...new Set([...AUDIT70_COMPLETION_CHANGED, ...AUDIT70_CI_REPAIR_CHANGED])].sort());
+  expect(result.addedPaths).toEqual([...new Set([...AUDIT70_COMPLETION_ADDED, AUDIT70_COMPLETION_PROOF, ...AUDIT70_CI_REPAIR_ADDED, AUDIT70_CI_REPAIR_PROOF])].sort());
   const parent = path => execFileSync("git", ["show", `${AUDIT70_COMPLETION_BASE}:${path}`]);
   for (const path of AUDIT70_COMPLETION_CHANGED) {
     expect(result.read(path)).toBe(parent(path).toString().replaceAll("\r\n", "\n"));

@@ -10521,7 +10521,10 @@ mod tests {
 
     #[tokio::test]
     async fn r62_source_replacement_during_dependency_lookup_restores_only_inspected_bytes() {
-        use crate::application::ports::ProjectBackupSnapshot;
+        use crate::application::ports::{
+            ProjectBackupRepository, ProjectBackupRestorePlan, ProjectBackupRestoreResult,
+            ProjectBackupSnapshot, RepositoryError,
+        };
         struct ReplacingRepository {
             inner: SqliteProjectBackupRepository,
             source: PathBuf,

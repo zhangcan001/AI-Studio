@@ -2739,7 +2739,7 @@ pub mod folder_batch_import_service {
                     return Err(stage_failure(
                         "D",
                         "INPUT_SAVE_FAILED",
-                        format!("正式输入保存失败：{error}"),
+                        &format!("正式输入保存失败：{error}"),
                     ));
                 }
             }
@@ -5082,6 +5082,18 @@ pub mod folder_batch_import_service {
             );
             f.pool.close().await;
         }
+        fn reversed_composition_references(f: &PreviewFixture) {
+            let path = f.root.join("manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["shots"][1]["references"] = serde_json::json!([
+                "images/c.png",
+                "images/结尾.png",
+                "images/alice.png",
+                "images/开场.png"
+            ]);
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        }
         #[tokio::test]
         async fn r11_handwritten_picture_tags_are_rejected_when_usage_reorders_references() {
             let f = preview_fixture().await;
@@ -5091,6 +5103,7 @@ pub mod folder_batch_import_service {
                 "结尾",
                 "按 <Picture 3> 和 @开场，@Alice 走近，最后停在 @结尾 的构图",
             );
+            reversed_composition_references(&f);
             let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
             assert!(
                 p.rows[1]
@@ -5111,16 +5124,14 @@ pub mod folder_batch_import_service {
                 "结尾",
                 "按 @开场 的构图，@Alice 走近，最后停在 @结尾 的构图",
             );
+            reversed_composition_references(&f);
             let p = f.service.pick(TEST_PROJECT, f.root.clone()).await.unwrap();
             assert!(p.rows[1].errors.is_empty(), "{:?}", p.rows[1].errors);
             let preview = &p.rows[1].reference_preview;
-            assert!(
-                preview.first().is_some_and(|path| path.contains("开场")),
-                "{preview:?}"
-            );
-            assert!(
-                preview.last().is_some_and(|path| path.contains("结尾")),
-                "{preview:?}"
+            assert_eq!(
+                preview,
+                &["images/c.png", "images/开场.png", "images/alice.png", "images/结尾.png"],
+                "only composition slots move; the unrelated and character pictures retain their slots"
             );
             f.pool.close().await;
         }

@@ -491,9 +491,6 @@ impl ArtifactService {
         comment: String,
         expected_revision: i64,
     ) -> Result<ArtifactReviewView, ArtifactServiceError> {
-        if decision == ArtifactReviewDecision::Approved {
-            self.resolve_artifact_path(project_id, artifact_id).await?;
-        }
         let comment = comment.trim().to_owned();
         let artifact_id = AssetId::parse(artifact_id.to_owned())
             .map_err(|error| ArtifactServiceError::NotFound(error.to_string()))?;
@@ -501,6 +498,9 @@ impl ArtifactService {
             .find_artifact(project_id, &artifact_id)
             .await?
             .ok_or_else(|| ArtifactServiceError::NotFound(artifact_id.as_str().to_owned()))?;
+        if decision == ArtifactReviewDecision::Approved {
+            self.resolve_artifact_path(artifact_id.as_str()).await?;
+        }
         let mut review = self
             .artifact_repository
             .find_review(project_id, &artifact_id)

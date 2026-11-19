@@ -1244,8 +1244,8 @@ pub fn upload_name_at(task_id: &TaskId, asset: &Asset, position: Option<usize>) 
 #[cfg(test)]
 mod tests {
     use super::{
-        prepare_image_bytes_for_comfy, upload_name, upload_name_at, GenerationInputPreparer,
-        GenerationInputValue, MAX_COMFY_IMAGE_UPLOAD_BYTES,
+        prepare_image_bytes_for_comfy, upload_name, upload_name_at, GenerationInputPrepareError,
+        GenerationInputPreparer, GenerationInputValue, MAX_COMFY_IMAGE_UPLOAD_BYTES,
     };
     use crate::application::ports::{
         AssetReadStream, AssetRepository, AssetStore, AssetStoreError, ComfyAdapter,
