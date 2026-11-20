@@ -290,7 +290,11 @@ it("editing the second imported input generates one new Shot run and never resta
   api.generate.mockResolvedValue({ accepted: true, runRef: { source: "queue-batch", id: "new-single-shot-run" }, startOutcome: "QUEUED", startIssue: null });
   function Harness() { const [route,setRoute]=useState<AppRoute>({kind:"runs",projectId:"project-a",run:batchRef}); return route.kind==="create"?<CreatePage runtime={{status:"CONNECTED",endpoint:"http://fixture.invalid",devices:[],runtimeGeneration:1}} route={route} navigate={setRoute}/>:route.kind==="runs"?<RunsPage route={route} navigate={setRoute}/>:null; }
   render(<Harness/>);fireEvent.click((await screen.findAllByRole("button",{name:"编辑这些输入并创建新运行"}))[1]);
-  await screen.findByRole("button",{name:"生成"});setPrompt("只重做镜头二的新提示词");
+  await waitFor(() => {
+    expect(useStudioStore.getState().pendingRunIntent).toBeUndefined();
+    expect(screen.getByRole("textbox", { name: "提示词" }).textContent).toBe("原输入b");
+  });
+  setPrompt("只重做镜头二的新提示词");
   await waitFor(()=>expect(screen.getByRole("button",{name:"生成"}).hasAttribute("disabled")).toBe(false));fireEvent.click(screen.getByRole("button",{name:"生成"}));
   await waitFor(()=>expect(api.generate).toHaveBeenCalledTimes(1));
   expect(api.generate).toHaveBeenCalledWith(expect.objectContaining({projectId:"project-a",shotId:"shot-b",selectionRef:"exact-pair",values:expect.objectContaining({prompt:{type:"string",value:"只重做镜头二的新提示词"}})}));

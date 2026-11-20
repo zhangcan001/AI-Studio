@@ -61,6 +61,7 @@ const REPAIR_SCOPE = [
   "src/features/projects/ExternalAgentHandoffPanel.tsx",
   "src/features/projects/ProjectImportDryRunWorkspace.test.tsx",
   "src/features/projects/ProjectImportDryRunWorkspace.tsx",
+  "src/features/runs/RunsPage.test.tsx",
 ].sort();
 export const PROJECT_AUDIT_REPAIR_PROOF = "docs/architecture/project-audit-repair-successor.json";
 export const AUDIT70_CI_INTEGRATION_BASE = "1650cc570591f06c8811603f98c61e19488c5b1b";

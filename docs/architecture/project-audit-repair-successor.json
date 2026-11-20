@@ -4,7 +4,7 @@
   "files": {
     "scripts/audit70-ci-integration-successor-guard.mjs": {
       "beforeHash": "438a4f81dfdf0460453b3ca1e99873a3ab4a3a62feac63b7f9e2eb357ed38cc7",
-      "afterHash": "a417db5e1d75f9d3c8f74532e3e9a0cd09d6a703477856cc1d0b01e30d5d715b"
+      "afterHash": "3c481549e8453d59a43140c3940c543ca8f35504d1c00ad7d2b1fb8fd662cef5"
     },
     "scripts/testing/audit-repair.test.mjs": {
       "beforeHash": "53a48b2ebad6583e3c267eea71d3ab6d48b58b09f359bb0e2c684da498fb9133",
@@ -225,6 +225,10 @@
     "src/features/projects/ProjectImportDryRunWorkspace.tsx": {
       "beforeHash": "1f42c81e5974372c7ab96f6718382489d9cae4077a773c9f74059448fe99d5d1",
       "afterHash": "2145d32d067d5a25df5ad3a9230df557ae6241a7dfb468b1d46408562365cd34"
+    },
+    "src/features/runs/RunsPage.test.tsx": {
+      "beforeHash": "7c9dd2ab8f37424f0dc73c619ea54225efa31ddde327c152cf1689d8a92c08e8",
+      "afterHash": "a84a69914d30b499abd47d0d42704b0e7a9a1a2c5f7bf36d9ad1597b643e95c4"
     }
   }
 }
