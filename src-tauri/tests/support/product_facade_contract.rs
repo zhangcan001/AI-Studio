@@ -498,7 +498,7 @@ async fn product_contract_partial_retry_idempotent_preserves_history_and_scope()
     let repository = SqliteProductionOrchestratorRepository::new(pool.clone());
     let stage = repository.load_stage(&run.id, 1).await.unwrap().unwrap();
     repository
-        .attach_image_batch_atomic(&run.id, &stage.id, batch, &[], CREATED_AT)
+        .attach_image_batch_atomic(&run.id, &stage.id, batch, &[], CREATED_AT, None)
         .await
         .unwrap();
     assert_eq!(

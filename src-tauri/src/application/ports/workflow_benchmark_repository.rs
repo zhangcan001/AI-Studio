@@ -176,6 +176,7 @@ pub trait WorkflowBenchmarkRepository: Send + Sync {
         batch_id: &str,
         links: &[WorkflowBenchmarkQueueLink],
         updated_at: &str,
+        new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError>;
 
     async fn mark_queue_link_failed(

@@ -127,7 +127,11 @@ export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported, o
       const imported = await commitShotBulkImport({ projectId, format, content });
       setExecutionResult(imported);
       setStage("completed");
-      await onImported?.();
+      try {
+        await onImported?.();
+      } catch {
+        setError(new Error("镜头已写入，但列表刷新失败。请刷新项目列表，无需重新导入。"));
+      }
     } catch (executionError: unknown) {
       setResult(failedImportResult(importIssueFromError(executionError)));
       setError(executionError);

@@ -262,6 +262,10 @@ pub trait AssetStore: Send + Sync {
         Ok(())
     }
 
+    async fn pending_deletion_files(&self, _project_root: &Path) -> Result<Vec<(AssetId, Vec<StagedAssetFile>)>, AssetStoreError> {
+        Ok(Vec::new())
+    }
+
     async fn stage_for_delete(
         &self,
         _project_root: &Path,

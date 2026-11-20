@@ -176,6 +176,7 @@ pub trait ProductionOrchestratorRepository: Send + Sync {
         batch_id: &str,
         items: &[ProductionStageItemDraft],
         now: &str,
+        new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError>;
 
     async fn save_selection_atomic(
@@ -193,6 +194,7 @@ pub trait ProductionOrchestratorRepository: Send + Sync {
         batch_id: &str,
         items: &[ProductionStageItemDraft],
         now: &str,
+        new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError>;
 
     async fn find_retry_source_item(

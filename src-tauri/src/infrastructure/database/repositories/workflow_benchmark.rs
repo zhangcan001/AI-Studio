@@ -669,10 +669,18 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         batch_id: &str,
         links: &[WorkflowBenchmarkQueueLink],
         updated_at: &str,
+        new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError> {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
-        sqlx::query(
-            "UPDATE benchmark_experiments SET production_batch_id = ?, status = 'QUEUED', updated_at = ? WHERE id = ?",
+        if let Some(detail) = new_batch {
+            if detail.batch.id.as_str() != batch_id {
+                return Err(RepositoryError::integrity("benchmark batch identity mismatch"));
+            }
+            super::production_queue::insert_batch_records(&mut transaction, &detail.batch, &detail.items).await?;
+        }
+        let updated = sqlx::query(
+            "UPDATE benchmark_experiments SET production_batch_id = ?, status = 'QUEUED', updated_at = ?
+             WHERE id = ? AND status = 'DRAFT' AND production_batch_id IS NULL",
         )
         .bind(batch_id)
         .bind(updated_at)
@@ -680,6 +688,9 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         .execute(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
+        if updated.rows_affected() != 1 {
+            return Err(RepositoryError::integrity("benchmark was already queued or is no longer a draft"));
+        }
         for link in links {
             sqlx::query(
                 "UPDATE benchmark_candidates
@@ -723,7 +734,7 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         sqlx::query(
             "UPDATE benchmark_experiments
              SET production_batch_id = ?, status = 'FAILED_TO_QUEUE', updated_at = ?
-             WHERE id = ?",
+             WHERE id = ? AND status = 'DRAFT' AND production_batch_id IS NULL",
         )
         .bind(batch_id)
         .bind(updated_at)
@@ -918,6 +929,7 @@ mod tests {
                     values_json: "{\"prompt\":\"test\"}".to_owned(),
                 }],
                 NOW,
+                None,
             )
             .await;
         assert!(

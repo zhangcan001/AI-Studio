@@ -513,7 +513,7 @@ impl ProductionQueueService {
         request: CreateProductionBatchRequest,
         provenance: Option<ProductionPackageProvenance>,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
-        self.create_internal(request, provenance, None).await
+        self.create_internal(request, provenance, None, true).await
     }
 
     pub async fn create_direct_generation(
@@ -828,6 +828,7 @@ impl ProductionQueueService {
                 },
                 None,
                 Some(contexts),
+                true,
             )
             .await;
         match result {
@@ -885,11 +886,19 @@ impl ProductionQueueService {
         ))
     }
 
+    pub(crate) async fn draft_unpersisted_batch(
+        &self,
+        request: CreateProductionBatchRequest,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        self.create_internal(request, None, None, false).await
+    }
+
     async fn create_internal(
         &self,
         request: CreateProductionBatchRequest,
         provenance: Option<ProductionPackageProvenance>,
         direct_contexts: Option<Vec<DirectGenerationContext>>,
+        persist: bool,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
         if provenance.is_some() && direct_contexts.is_some() {
             return Err(ProductionQueueError::InvalidInput(
@@ -1006,6 +1015,9 @@ impl ProductionQueueService {
                 created_at: now,
                 updated_at: now,
             });
+        }
+        if !persist {
+            return Ok(ProductionBatchDetail { batch, items });
         }
         if let Some(provenance) = provenance.as_ref() {
             let expected_package_key = crate::domain::production_package_source_key(
@@ -1300,24 +1312,30 @@ impl ProductionQueueService {
                 "completed production batches cannot be restarted".to_owned(),
             ));
         }
-        for item in detail
-            .items
-            .iter()
-            .filter(|item| item.status == ProductionBatchItemStatus::Pending)
-        {
-            self.prepare_queue_values(
-                &detail.batch.project_id,
-                &item.workflow_version_id,
-                &item.recipe_id,
-                &item.values_json,
-            )
-            .await?;
+        // Keep retirement enforcement at the admission boundary. Validate each
+        // exact pair once; only the slow per-item compile and media checks run
+        // outside this gate.
+        let mut checked = std::collections::HashSet::new();
+        for item in detail.items.iter().filter(|item| item.status == ProductionBatchItemStatus::Pending) {
+            if checked.insert((&item.workflow_version_id, &item.recipe_id)) {
+                self.ensure_new_generation_allowed(&item.workflow_version_id, &item.recipe_id).await?;
+            }
         }
         let blocker = self.admission_status_excluding(Some(&batch_id)).await?;
         if blocker.busy {
             return Err(ProductionQueueError::Busy(blocker));
         }
         Ok(detail)
+    }
+
+    pub(crate) async fn validate_start_inputs(
+        &self,
+        detail: &ProductionBatchDetail,
+    ) -> Result<(), ProductionQueueError> {
+        for item in detail.items.iter().filter(|item| item.status == ProductionBatchItemStatus::Pending) {
+            self.prepare_queue_values(&detail.batch.project_id, &item.workflow_version_id, &item.recipe_id, &item.values_json).await?;
+        }
+        Ok(())
     }
 
     /// Commit a previously admitted start while the caller holds
@@ -1327,8 +1345,8 @@ impl ProductionQueueService {
         self: &Arc<Self>,
         detail: &ProductionBatchDetail,
     ) -> Result<(), ProductionQueueError> {
-        // The inspected detail is not an authorization token. Re-read pending
-        // identities and live packages before the write, without re-locking.
+        // Re-read only queue state while holding the lock. The worker checks
+        // execution availability and media again before submitting.
         let current = self
             .inspect_start_admitted(&detail.batch.project_id, detail.batch.id.as_str())
             .await
@@ -1338,6 +1356,9 @@ impl ProductionQueueService {
                 ),
                 other => other,
             })?;
+        if &current != detail {
+            return Err(ProductionQueueError::InvalidState("queue changed during start".to_owned()));
+        }
         let updated = self
             .repository
             .set_batch_status(
@@ -1365,8 +1386,9 @@ impl ProductionQueueService {
         project_id: &str,
         batch_id: &str,
     ) -> Result<(), ProductionQueueError> {
-        let _admission = self.acquire_runtime_configuration_admission().await;
         let detail = self.inspect_start_admitted(project_id, batch_id).await?;
+        self.validate_start_inputs(&detail).await?;
+        let _admission = self.acquire_runtime_configuration_admission().await;
         self.commit_start_admitted(&detail).await
     }
 

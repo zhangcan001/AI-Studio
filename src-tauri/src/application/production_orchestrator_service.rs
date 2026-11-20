@@ -543,7 +543,7 @@ impl ProductionOrchestratorService {
             .collect::<Result<Vec<_>, ProductionOrchestratorError>>()?;
         let queue = self
             .production_queue_service
-            .create(CreateProductionBatchRequest {
+            .draft_unpersisted_batch(CreateProductionBatchRequest {
                 project_id: project_id.to_owned(),
                 name: format!("Production Run · {} · Krea2", run.name),
                 continue_on_failure: true,
@@ -576,6 +576,7 @@ impl ProductionOrchestratorService {
                 queue.batch.id.as_str(),
                 &stage_items,
                 &now,
+                Some(&queue),
             )
             .await
             .map_err(repo_error)?;
@@ -802,7 +803,7 @@ impl ProductionOrchestratorService {
             .map_err(repo_error)?;
         let queue = self
             .production_queue_service
-            .create(CreateProductionBatchRequest {
+            .draft_unpersisted_batch(CreateProductionBatchRequest {
                 project_id: project_id.to_owned(),
                 name: format!("Production Run · {} · H3", run.name),
                 continue_on_failure: true,
@@ -838,6 +839,7 @@ impl ProductionOrchestratorService {
                 queue.batch.id.as_str(),
                 &stage_items,
                 &now,
+                Some(&queue),
             )
             .await
             .map_err(repo_error)?;
@@ -982,6 +984,7 @@ impl ProductionOrchestratorService {
         project_id: &str,
         run_id: &str,
     ) -> Result<ProductionRunView, ProductionOrchestratorError> {
+        let _trigger_gate = self.stage_trigger_gate.lock().await;
         validate_project_id(project_id)?;
         let run = self.load_run(project_id, run_id).await?;
         if matches!(run.status.as_str(), "SUCCEEDED" | "CANCELLED") {

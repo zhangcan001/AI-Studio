@@ -371,13 +371,17 @@ impl SettingsService {
             return Err(AppError::invalid_input("ComfyUI 环境档案地址不能重复。"));
         }
 
+        if next_settings.comfy_environment_profiles.len() >= 20
+            && !next_settings.comfy_environment_profiles.iter().any(|current| current.id == profile.id)
+        {
+            return Err(AppError::invalid_input("最多保存 20 个 ComfyUI 环境档案，请先删除不再使用的档案。"));
+        }
         next_settings
             .comfy_environment_profiles
             .retain(|current| current.id != profile.id);
         next_settings
             .comfy_environment_profiles
             .insert(0, profile.clone());
-        next_settings.comfy_environment_profiles.truncate(20);
         self.store
             .save(&next_settings)
             .await

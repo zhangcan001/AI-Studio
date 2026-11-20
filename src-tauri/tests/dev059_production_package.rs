@@ -1065,7 +1065,9 @@ fn package_paths_are_revalidated_before_h3_commit() {
             "current.manifest_sha256 != session.inspection.manifest_sha256",
             "ensure_item_unchanged(item, current_item)",
             "revalidate_media(&session.root_path, media)",
-            "sha256(&bytes)",
+            "std::io::copy(&mut input, &mut digest)",
+            "digest.finalize()",
+            "source.size_bytes != Some(size)",
             "media.relative_path.clone()",
         ],
     );

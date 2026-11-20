@@ -54,7 +54,7 @@ describe("ExternalAgentHandoffPanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("previews and confirms a valid handoff through the typed client", async () => {
+  it.each([false, true])("previews and confirms a valid handoff through the typed client (refresh failure: %s)", async (refreshFails) => {
     vi.mocked(previewExternalProductionHandoff).mockResolvedValue(validPreview());
     vi.mocked(confirmExternalProductionHandoff).mockResolvedValue({
       projectId: "project-1",
@@ -67,7 +67,7 @@ describe("ExternalAgentHandoffPanel", () => {
       shotCount: 1,
       mappings: [],
     });
-    const onImported = vi.fn();
+    const onImported = vi.fn(async () => { if (refreshFails) throw new Error("refresh failed"); });
     const onOpenStructure = vi.fn();
     const actor = userEvent.setup();
     render(<ExternalAgentHandoffPanel projectId="project-1" onBack={vi.fn()} onImported={onImported} onOpenStructure={onOpenStructure} />);
@@ -85,6 +85,7 @@ describe("ExternalAgentHandoffPanel", () => {
       expectedDocumentSha256: "a".repeat(64),
     }));
     expect(onImported).toHaveBeenCalledTimes(1);
+    if (refreshFails) await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("列表刷新失败"));
     await actor.click(screen.getByRole("button", { name: "打开项目结构" }));
     expect(onOpenStructure).toHaveBeenCalledTimes(1);
   });

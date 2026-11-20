@@ -752,6 +752,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_repository.clone(),
                 asset_store.clone(),
             ));
+            if let Err(error) = tauri::async_runtime::block_on(asset_deletion_service.recover_pending_deletions()) {
+                tracing::warn!(error = %error, "asset deletion recovery needs attention");
+            }
             let asset_video_prompt_service = Arc::new(AssetVideoPromptService::new(
                 asset_video_prompt_repository,
                 asset_repository.clone(),

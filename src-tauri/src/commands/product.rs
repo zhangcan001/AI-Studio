@@ -1148,13 +1148,13 @@ async fn selected_video_export_sources(
                 state
                     .assets
                     .artifact
-                    .resolve_artifact_path(&id)
+                    .resolve_artifact_file(&id)
                     .await
                     .map_err(ProductError::internal)
             }
             .await;
             let (path, error) = match source {
-                Ok(path) => (Some(path), None),
+                Ok(file) => (Some(file), None),
                 Err(_) => (
                     None,
                     Some(

@@ -324,6 +324,7 @@ impl AssetStore for FileSystemAssetStore {
         }
 
         let trash_root = root.join(".project-trash").join(operation_id);
+        let mut planned = Vec::new();
         for path in paths {
             let Some(original) = Self::validated_delete_path(&root, &path)? else {
                 continue;
@@ -343,6 +344,22 @@ impl AssetStore for FileSystemAssetStore {
                     ))
                 })?;
             }
+            planned.push((original, staged_path));
+        }
+        if !planned.is_empty() {
+            use std::io::Write;
+            let journal = trash_root.join(format!("{}.plan.json", asset.id.as_str()));
+            let temporary = trash_root.join(format!(".{}.partial", uuid::Uuid::new_v4()));
+            let relative = planned.iter().map(|(original, _)| original.strip_prefix(&root).expect("validated root")).collect::<Vec<_>>();
+            let bytes = serde_json::to_vec(&relative).map_err(|error| AssetStoreError::Delete(error.to_string()))?;
+            let mut file = fs::OpenOptions::new().create_new(true).write(true).open(&temporary)
+                .map_err(|error| AssetStoreError::Delete(error.to_string()))?;
+            let result = file.write_all(&bytes).and_then(|()| file.sync_all());
+            drop(file);
+            result.and_then(|()| fs::rename(&temporary, &journal))
+                .map_err(|error| AssetStoreError::Delete(error.to_string()))?;
+        }
+        for (original, staged_path) in planned {
             if let Err(error) = fs::rename(&original, &staged_path) {
                 let restore_error = Self::restore_staged_files(&staged);
                 if let Err(restore_error) = restore_error {
@@ -362,6 +379,57 @@ impl AssetStore for FileSystemAssetStore {
             });
         }
         Ok(staged)
+    }
+
+    async fn pending_deletion_files(&self, project_root: &Path) -> Result<Vec<(AssetId, Vec<StagedAssetFile>)>, AssetStoreError> {
+        let root = Self::canonical_root(project_root)?;
+        let trash = root.join(".project-trash");
+        let to_error = |error: std::io::Error| AssetStoreError::Delete(error.to_string());
+        let folders = match fs::symlink_metadata(&trash) {
+            Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => fs::read_dir(&trash).map_err(to_error)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            _ => return Err(AssetStoreError::FilesystemBoundary("unsafe deletion trash".into())),
+        };
+        let mut result = Vec::new();
+        for folder in folders {
+            let folder = folder.map_err(to_error)?;
+            if !folder.file_type().map_err(to_error)?.is_dir() { continue; }
+            let folder_path = folder.path();
+            for file in fs::read_dir(&folder_path).map_err(to_error)? {
+                let file = file.map_err(to_error)?;
+                if !file.file_type().map_err(to_error)?.is_file() { continue; }
+                let name = file.file_name();
+                let Some(id) = name.to_str().and_then(|name| name.strip_suffix(".plan.json")) else { continue; };
+                let id = AssetId::parse(id.to_owned()).map_err(|e| AssetStoreError::Delete(e.to_string()))?;
+                if file.metadata().map_err(to_error)?.len() > 64 * 1024 {
+                    return Err(AssetStoreError::Delete("deletion journal is too large".into()));
+                }
+                let content = fs::read(file.path()).map_err(to_error)?;
+                let paths: Vec<PathBuf> = serde_json::from_slice(&content).map_err(|e| AssetStoreError::Delete(e.to_string()))?;
+                let mut staged = Vec::new();
+                for relative in paths {
+                    if relative.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+                        || relative.starts_with(".project-trash") {
+                        return Err(AssetStoreError::FilesystemBoundary("unsafe deletion journal entry".into()));
+                    }
+                    let moved = folder_path.join(&relative);
+                    if let Some(moved) = Self::validated_delete_path(&root, &moved)? {
+                        if !moved.starts_with(&folder_path) {
+                            return Err(AssetStoreError::FilesystemBoundary("unsafe staged deletion file".into()));
+                        }
+                        let original = root.join(relative);
+                        let _ = Self::validated_delete_path(&root, &original)?;
+                        staged.push(StagedAssetFile { original_path: original, staged_path: moved });
+                    }
+                }
+                if !staged.is_empty() {
+                    result.push((id, staged));
+                } else {
+                    let _ = fs::remove_file(file.path());
+                }
+            }
+        }
+        Ok(result)
     }
 
     async fn restore_staged_delete(
@@ -733,6 +801,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_second_path_keeps_original_asset_in_place() {
+        let root = tempfile::tempdir().unwrap();
+        let store = FileSystemAssetStore::new();
+        let id = AssetId::parse("ast_valid".to_owned()).unwrap();
+        let original = store.write_source_image(root.path(), &id, "png", b"original").await.unwrap();
+        let asset = source_asset(&id, original.path.to_string_lossy().into(), Some("z/../invalid.png".into()));
+        assert!(store.stage_for_delete(root.path(), "operation-1", &asset).await.is_err());
+        assert_eq!(std::fs::read(original.path).unwrap(), b"original");
+    }
+
+    #[tokio::test]
     async fn stages_and_restores_main_file_and_thumbnail_as_one_operation() {
         let root = tempdir().expect("temp root");
         let store = FileSystemAssetStore::new();
@@ -758,6 +837,8 @@ mod tests {
         assert_eq!(staged.len(), 2);
         assert!(!main.path.exists());
         assert!(!thumbnail.path.exists());
+        let pending = store.pending_deletion_files(root.path()).await.unwrap();
+        assert_eq!(pending, vec![(asset_id.clone(), staged.clone())]);
         store
             .restore_staged_delete(&staged)
             .await

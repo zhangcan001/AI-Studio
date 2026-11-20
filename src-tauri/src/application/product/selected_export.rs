@@ -11,7 +11,7 @@ pub struct ExportSource {
     pub shot_id: String,
     pub shot_name: String,
     pub asset_id: String,
-    pub path: Option<PathBuf>,
+    pub path: Option<(PathBuf, String, u64)>,
     pub error: Option<String>,
 }
 #[derive(Debug, Serialize)]
@@ -95,7 +95,7 @@ pub fn copy_selected_videos(
         };
         if entry.error.is_none() {
             let result = (|| -> io::Result<String> {
-                let path = source
+                let (path, sha256, size) = source
                     .path
                     .as_ref()
                     .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "source unavailable"))?;
@@ -121,14 +121,30 @@ pub fn copy_selected_videos(
                 if !metadata.is_file() || metadata.len() == 0 {
                     return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a file"));
                 }
-                let mut output = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(directory.join(&file_name))?;
-                if io::copy(&mut input, &mut output)? == 0 {
-                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "empty video"));
+                if metadata.len() != *size {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "video size changed"));
                 }
-                output.sync_all()?;
+                publish_new_file(&directory, &file_name, |output| {
+                    use std::io::{Read, Write};
+                    use sha2::{Digest, Sha256};
+                    let mut hash = Sha256::new();
+                    let mut buffer = [0; 64 * 1024];
+                    let mut copied = 0u64;
+                    loop {
+                        let count = input.read(&mut buffer)?;
+                        if count == 0 { break; }
+                        copied += count as u64;
+                        if copied > *size {
+                            return Err(io::Error::new(io::ErrorKind::InvalidData, "video size changed"));
+                        }
+                        hash.update(&buffer[..count]);
+                        output.write_all(&buffer[..count])?;
+                    }
+                    if copied != *size || !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(sha256) {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "video content changed"));
+                    }
+                    Ok(())
+                })?;
                 Ok(file_name)
             })();
             match result{Ok(name)=>entry.file_name=Some(name),Err(e)=>entry.error=Some(format!("视频复制失败（{:?}），请检查源文件、目录权限及剩余空间；同名未完成文件不可当作成功视频。",e.kind()))}
@@ -139,17 +155,12 @@ pub fn copy_selected_videos(
         .iter()
         .filter(|e| e.error.is_none() && e.file_name.is_some())
         .count();
-    let manifest_result = (|| -> io::Result<()> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(directory.join("export-manifest.json"))?;
+    let manifest_result = publish_new_file(&directory, "export-manifest.json", |file| {
         serde_json::to_writer_pretty(
-            &mut file,
+            file,
             &serde_json::json!({"format":"AI_STUDIO_SELECTED_VIDEOS_V1","entries":entries}),
-        )?;
-        file.sync_all()
-    })();
+        ).map_err(io::Error::from)
+    });
     Ok(SelectedVideoExport {
         exported,
         failed: entries.len() - exported,
@@ -160,6 +171,27 @@ pub fn copy_selected_videos(
             .map(|_| "导出映射清单写入失败；已复制视频保留，请勿误认为全部未导出。".into()),
         open_error: None,
     })
+}
+fn publish_new_file(
+    directory: &Path,
+    name: &str,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    let temporary = directory.join(format!(".{}.partial", uuid::Uuid::new_v4()));
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+    let result = write(&mut file).and_then(|()| file.sync_all());
+    drop(file);
+    let result = result.and_then(|()| {
+        let destination = directory.join(name);
+        if destination.exists() {
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "export file already exists"));
+        }
+        fs::rename(&temporary, destination)
+    });
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 /// Identity of the videos actually selected for export. Unselected shots never
 /// participate; a name or ordinal change of a selected shot is a new identity.
@@ -249,7 +281,11 @@ mod tests {
             shot_id: format!("shot-{ordinal}"),
             shot_name: name.into(),
             asset_id: format!("asset-{ordinal}"),
-            path: Some(path),
+            path: {
+                use sha2::{Digest, Sha256};
+                let bytes = fs::read(&path).unwrap_or_default();
+                Some((path, format!("{:x}", Sha256::digest(&bytes)), bytes.len() as u64))
+            },
             error: None,
         }
     }
@@ -299,6 +335,18 @@ mod tests {
         assert!(!name.contains(':'));
         assert!(!name.contains('*'));
         assert!(copy_selected_videos(dir.path(), &[]).is_err());
+    }
+    #[test]
+    fn rejects_replaced_video_and_removes_partial_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("video.mp4");
+        fs::write(&path, b"original").unwrap();
+        let item = source(0, "镜头", path.clone());
+        fs::write(&path, b"replaced").unwrap();
+        let receipt = copy_selected_videos(dir.path(), &[item]).unwrap();
+        assert_eq!((receipt.exported, receipt.failed), (0, 1));
+        let names: Vec<_> = fs::read_dir(receipt.directory).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        assert_eq!(names, ["export-manifest.json"]);
     }
     #[test]
     fn r23_empty_video_is_a_failed_manifest_entry_not_success() {

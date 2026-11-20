@@ -620,18 +620,9 @@ impl ComfyHttpAdapter {
             .iter()
             .any(|candidate| candidate == prompt_id)
         {
-            let url = self.config.route_url("interrupt");
-            let response = self
-                .client
-                .post(&url)
-                .json(&serde_json::json!({}))
-                .send()
-                .await
-                .map_err(|error| request_error("POST", &url, error))?;
-            if !response.status().is_success() {
-                return Err(http_status_error("POST", &url, response.status()));
-            }
-            return Ok(CancelPromptResult::CancellationRequested);
+            return Err(ComfyAdapterError::Protocol(
+                "This ComfyUI version cannot safely cancel a specific running task.".to_owned(),
+            ));
         }
 
         Ok(CancelPromptResult::NotFoundOrAlreadyFinished)
@@ -2735,7 +2726,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn modern_cancel_404_interrupts_only_the_target_running_prompt() {
+    async fn modern_cancel_fallback_refuses_global_interrupt() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/jobs/prompt-1/cancel"))
@@ -2753,14 +2744,12 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/interrupt"))
             .respond_with(ResponseTemplate::new(200))
+            .expect(0)
             .mount(&server)
             .await;
 
         let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
-        assert_eq!(
-            adapter.cancel_prompt("prompt-1").await.unwrap(),
-            CancelPromptResult::CancellationRequested
-        );
+        assert!(adapter.cancel_prompt("prompt-1").await.is_err());
     }
 
     #[tokio::test]

@@ -635,6 +635,7 @@ export function ProductionPackageWorkspace({
           </details>
           {isPartialCreate && remainingCount > 0 && (
             <div className="production-package-workspace-remaining">
+              {(createdResult.warnings ?? []).map((issue, index) => <p key={index}>{issue.code}：{issue.message}</p>)}
               <p>保留 {remainingCount} 个未加入项目的外部 ID；重新检查后只会按最新检查结果选择仍可生产的剩余项目。</p>
               <button type="button" onClick={reinspectRemaining} disabled={busy || !currentFolderPath}>
                 重新检查剩余项目

@@ -12,7 +12,7 @@ use crate::application::h3_local_import_service::{
 };
 use crate::application::ports::Clock;
 use crate::application::production_package_inspector::{
-    ProductionPackageDiagnostic, ProductionPackageInspection, ProductionPackageInspectionError,
+    ProductionPackageDiagnostic, ProductionPackageDiagnosticSeverity, ProductionPackageInspection, ProductionPackageInspectionError,
     ProductionPackageInspector, ProductionPackageItemInspection, ProductionPackageItemStatus,
 };
 use crate::application::production_queue_service::ProductionQueueService;
@@ -552,7 +552,14 @@ impl ProductionPackageService {
                     item_mappings.extend(batch.item_mappings.iter().cloned());
                     batches.push(batch);
                 }
-                Err(_error) if !batches.is_empty() => {
+                Err(error) if !batches.is_empty() => {
+                    let mut warnings = current.warnings;
+                    warnings.push(ProductionPackageDiagnostic {
+                        code: error.code().into(),
+                        message: format!("第 {} 批未能创建：{}", chunk_index + 1, partial_failure_hint(&error)),
+                        severity: ProductionPackageDiagnosticSeverity::Warning,
+                        field: None,
+                    });
                     let remaining_item_ids = remaining_selected[chunk_index * chunk_size..]
                         .iter()
                         .map(|item| item.id.clone())
@@ -564,7 +571,7 @@ impl ProductionPackageService {
                         batches,
                         item_mappings,
                         remaining_item_ids,
-                        current.warnings,
+                        warnings,
                     ));
                 }
                 Err(error) => return Err(error),
@@ -1187,10 +1194,14 @@ fn copy_staged_media(
         .ok_or_else(|| ProductionPackageError::MediaChanged(source.relative_path.clone()))?;
     fs::copy(source_path, destination)
         .map_err(|_| ProductionPackageError::MediaChanged(source.relative_path.clone()))?;
-    let bytes = fs::read(destination)
+    let mut input = fs::File::open(destination)
         .map_err(|error| ProductionPackageError::Filesystem(error.to_string()))?;
-    if source.sha256.as_deref() != Some(sha256(&bytes).as_str())
-        || source.size_bytes != Some(bytes.len() as u64)
+    let mut digest = Sha256::new();
+    let size = std::io::copy(&mut input, &mut digest)
+        .map_err(|error| ProductionPackageError::Filesystem(error.to_string()))?;
+    let actual = format!("{:x}", digest.finalize());
+    if source.sha256.as_deref() != Some(actual.as_str())
+        || source.size_bytes != Some(size)
     {
         return Err(ProductionPackageError::MediaChanged(
             source.relative_path.clone(),
@@ -1199,8 +1210,13 @@ fn copy_staged_media(
     Ok(())
 }
 
-fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+fn partial_failure_hint(error: &ProductionPackageError) -> &'static str {
+    match error {
+        ProductionPackageError::MediaChanged(_) => "参考素材在检查后变化，请重新检查文件。",
+        ProductionPackageError::Filesystem(_) => "无法读写暂存文件，请检查磁盘空间和目录权限。",
+        ProductionPackageError::Queue(_) => "生产队列写入失败，请检查队列状态后重试剩余项。",
+        _ => "请根据错误编码检查剩余项目并重新预检。",
+    }
 }
 
 fn asset_ids_from_values(values: &Value) -> Vec<String> {

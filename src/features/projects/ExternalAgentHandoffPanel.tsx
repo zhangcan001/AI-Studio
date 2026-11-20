@@ -87,8 +87,13 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
         expectedDocumentSha256: preview.documentSha256,
       });
       setCompleted(true);
-      setHistory(await listExternalProductionHandoffs(projectId));
-      await onImported?.();
+      const refreshes = await Promise.allSettled([
+        listExternalProductionHandoffs(projectId).then(setHistory),
+        Promise.resolve().then(() => onImported?.()),
+      ]);
+      if (refreshes.some(result => result.status === "rejected")) {
+        setError(new Error("交接已写入，但列表刷新失败。请刷新项目或重新打开历史，无需重复写入。"));
+      }
     } catch (confirmError) {
       setError(confirmError);
     } finally {

@@ -315,6 +315,7 @@ pub struct WorkflowBenchmarkService {
     preset_repository: Arc<dyn PresetRepository>,
     production_queue_service: Arc<ProductionQueueService>,
     production_start_admission_service: Option<Arc<ProductionStartAdmissionService>>,
+    queue_mutation: Arc<tokio::sync::Mutex<()>>,
     clock: Arc<dyn Clock>,
 }
 
@@ -332,6 +333,7 @@ impl WorkflowBenchmarkService {
             preset_repository,
             production_queue_service,
             production_start_admission_service: None,
+            queue_mutation: Arc::new(tokio::sync::Mutex::new(())),
             clock,
         }
     }
@@ -430,7 +432,7 @@ impl WorkflowBenchmarkService {
             continue_on_failure: true,
             items: queue_items,
         };
-        let queue = match self.production_queue_service.create(queue_request).await {
+        let queue = match self.production_queue_service.draft_unpersisted_batch(queue_request).await {
             Ok(queue) => queue,
             Err(error) => {
                 self.set_experiment_status(&experiment_id, "FAILED_TO_QUEUE")
@@ -442,23 +444,11 @@ impl WorkflowBenchmarkService {
         if let Err(error) = self
             .link_queue(
                 &experiment_id,
-                queue.batch.id.as_str(),
-                &queue.items,
+                &queue,
                 request.repeat_count,
             )
             .await
         {
-            if let Err(compensation_error) = self
-                .mark_queue_link_failed(&experiment_id, queue.batch.id.as_str())
-                .await
-            {
-                tracing::error!(
-                    error = %compensation_error,
-                    experiment_id = %experiment_id,
-                    batch_id = queue.batch.id.as_str(),
-                    "failed to record benchmark queue link compensation"
-                );
-            }
             return Err(WorkflowBenchmarkError::Queue(error.to_string()));
         }
 
@@ -689,6 +679,7 @@ impl WorkflowBenchmarkService {
         experiment_id: &str,
         auto_start: bool,
     ) -> Result<WorkflowBenchmarkView, WorkflowBenchmarkError> {
+        let _queue_mutation = self.queue_mutation.lock().await;
         validate_project_id(project_id)?;
         let snapshot = self
             .repository
@@ -743,7 +734,7 @@ impl WorkflowBenchmarkService {
 
         let queue = match self
             .production_queue_service
-            .create(CreateProductionBatchRequest {
+            .draft_unpersisted_batch(CreateProductionBatchRequest {
                 project_id: project_id.to_owned(),
                 name: format!("Benchmark · {}", row.name.trim()),
                 continue_on_failure: true,
@@ -762,23 +753,11 @@ impl WorkflowBenchmarkService {
         if let Err(error) = self
             .link_queue(
                 experiment_id,
-                queue.batch.id.as_str(),
-                &queue.items,
+                &queue,
                 u32::try_from(row.repeat_count).unwrap_or(1),
             )
             .await
         {
-            if let Err(compensation_error) = self
-                .mark_queue_link_failed(experiment_id, queue.batch.id.as_str())
-                .await
-            {
-                tracing::error!(
-                    error = %compensation_error,
-                    experiment_id = %experiment_id,
-                    batch_id = queue.batch.id.as_str(),
-                    "failed to record benchmark queue link compensation"
-                );
-            }
             return Err(WorkflowBenchmarkError::Queue(error.to_string()));
         }
 
@@ -803,6 +782,7 @@ impl WorkflowBenchmarkService {
         project_id: &str,
         experiment_id: &str,
     ) -> Result<WorkflowBenchmarkDeleteView, WorkflowBenchmarkError> {
+        let _queue_mutation = self.queue_mutation.lock().await;
         validate_project_id(project_id)?;
         if !self
             .repository
@@ -1012,10 +992,10 @@ impl WorkflowBenchmarkService {
     async fn link_queue(
         &self,
         experiment_id: &str,
-        batch_id: &str,
-        items: &[crate::domain::ProductionBatchItem],
+        batch: &crate::domain::ProductionBatchDetail,
         repeat_count: u32,
     ) -> Result<(), WorkflowBenchmarkError> {
+        let items = &batch.items;
         let repeat_count = usize::try_from(repeat_count)
             .map_err(|_| WorkflowBenchmarkError::InvalidInput("运行次数溢出。".to_owned()))?;
         let mut links = Vec::with_capacity(items.len());
@@ -1034,21 +1014,11 @@ impl WorkflowBenchmarkService {
         self.repository
             .link_queue_atomic(
                 experiment_id,
-                batch_id,
+                batch.batch.id.as_str(),
                 &links,
                 &self.clock.now().to_rfc3339(),
+                Some(batch),
             )
-            .await?;
-        Ok(())
-    }
-
-    async fn mark_queue_link_failed(
-        &self,
-        experiment_id: &str,
-        batch_id: &str,
-    ) -> Result<(), WorkflowBenchmarkError> {
-        self.repository
-            .mark_queue_link_failed(experiment_id, batch_id, &self.clock.now().to_rfc3339())
             .await?;
         Ok(())
     }

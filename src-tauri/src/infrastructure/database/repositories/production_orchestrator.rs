@@ -408,8 +408,15 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
         batch_id: &str,
         items: &[ProductionStageItemDraft],
         now: &str,
+        new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError> {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        if let Some(detail) = new_batch {
+            if detail.batch.id.as_str() != batch_id {
+                return Err(RepositoryError::integrity("production batch identity mismatch"));
+            }
+            super::production_queue::insert_batch_records(&mut transaction, &detail.batch, &detail.items).await?;
+        }
         sqlx::query(
             "UPDATE production_stages SET production_batch_id = ?, status = 'READY', updated_at = ?
              WHERE run_id = ? AND ordinal = 0",
@@ -478,8 +485,15 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
         batch_id: &str,
         items: &[ProductionStageItemDraft],
         now: &str,
+        new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError> {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        if let Some(detail) = new_batch {
+            if detail.batch.id.as_str() != batch_id {
+                return Err(RepositoryError::integrity("production batch identity mismatch"));
+            }
+            super::production_queue::insert_batch_records(&mut transaction, &detail.batch, &detail.items).await?;
+        }
         sqlx::query(
             "UPDATE production_stages SET production_batch_id = ?, status = 'READY', updated_at = ? WHERE id = ?",
         )

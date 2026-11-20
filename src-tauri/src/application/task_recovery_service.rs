@@ -410,28 +410,32 @@ impl TaskRecoveryService {
                 })?;
             existing_assets.push(asset);
         }
+        let mut checked = HashSet::new();
         for asset in &existing_assets {
+            if !checked.insert(&asset.id) {
+                continue;
+            }
             if asset.project_id != task.project_id {
                 return Err(TaskRecoveryError::Unresolved(
                     "output asset project mismatch".to_owned(),
                 ));
             }
-            let bytes = self
-                .asset_store
-                .read_range(
-                    &project_root,
-                    std::path::Path::new(&asset.storage_path),
-                    0,
-                    1,
-                )
-                .await
-                .map_err(|error| {
-                    TaskRecoveryError::Unresolved(format!("output asset is unavailable: {error}"))
-                })?;
-            if bytes.is_empty() {
-                return Err(TaskRecoveryError::Unresolved(
-                    "output asset is empty".to_owned(),
-                ));
+            use sha2::{Digest, Sha256};
+            let unavailable = |error| TaskRecoveryError::Unresolved(format!("output asset is unavailable: {error}"));
+            let mut input = self.asset_store
+                .open_read_stream(&project_root, std::path::Path::new(&asset.storage_path))
+                .await.map_err(unavailable)?;
+            let mut hash = Sha256::new();
+            let mut size = 0u64;
+            while let Some(bytes) = input.next_chunk().await.map_err(unavailable)? {
+                size += bytes.len() as u64;
+                if size > asset.file_size { break; }
+                hash.update(&bytes);
+            }
+            if size == 0 || size != asset.file_size
+                || !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(&asset.sha256)
+            {
+                return Err(TaskRecoveryError::Unresolved("output asset content changed".to_owned()));
             }
         }
         if mappings.is_empty() && !assets.is_empty() {
@@ -1282,11 +1286,11 @@ outputs:
             "Generated Image 1",
             "ComfyUI_00001.png",
             "existing.png",
-            "hash",
+            { use sha2::{Digest, Sha256}; format!("{:x}", Sha256::digest(png_bytes())) },
             "image/png",
             2,
             2,
-            4,
+            png_bytes().len() as u64,
             task.id.clone(),
             json!({}),
             task.created_at + Duration::seconds(7),
@@ -1731,7 +1735,7 @@ outputs:
 
     #[tokio::test]
     async fn history_success_with_existing_mapping_does_not_download_again() {
-        for missing in [false, true] {
+        for (missing, corrupt) in [(false, false), (true, false), (false, true)] {
             let harness = setup(adapter(
                 true,
                 Some(success_history()),
@@ -1748,11 +1752,11 @@ outputs:
                 "Generated Image 1",
                 "ComfyUI_00001.png",
                 "existing-mapped.png",
-                "hash-mapped",
+                { use sha2::{Digest, Sha256}; format!("{:x}", Sha256::digest(png_bytes())) },
                 "image/png",
                 2,
                 2,
-                4,
+                png_bytes().len() as u64,
                 task.id.clone(),
                 json!({}),
                 task.created_at + Duration::seconds(7),
@@ -1781,6 +1785,12 @@ outputs:
                 )
                 .unwrap();
             }
+            if corrupt {
+                let path = harness._directory.path().join("project/existing-mapped.png");
+                let mut changed = std::fs::read(&path).unwrap();
+                changed[0] ^= 0xff;
+                std::fs::write(path, changed).unwrap();
+            }
             let report = harness.service.reconcile_active().await.unwrap();
             let found = harness
                 .task_repository
@@ -1790,13 +1800,13 @@ outputs:
                 .unwrap();
             assert_eq!(
                 found.status,
-                if missing {
+                if missing || corrupt {
                     TaskStatus::Failed
                 } else {
                     TaskStatus::Succeeded
                 }
             );
-            assert_eq!(report.failed, u32::from(missing));
+            assert_eq!(report.failed, u32::from(missing || corrupt));
             assert_eq!(
                 harness
                     .asset_repository

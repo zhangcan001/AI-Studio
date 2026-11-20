@@ -466,6 +466,13 @@ impl ArtifactService {
         &self,
         artifact_id: &str,
     ) -> Result<PathBuf, ArtifactServiceError> {
+        Ok(self.resolve_artifact_file(artifact_id).await?.0)
+    }
+
+    pub async fn resolve_artifact_file(
+        &self,
+        artifact_id: &str,
+    ) -> Result<(PathBuf, String, u64), ArtifactServiceError> {
         let artifact_id = AssetId::parse(artifact_id.to_owned())
             .map_err(|error| ArtifactServiceError::NotFound(error.to_string()))?;
         let artifact = self
@@ -480,7 +487,8 @@ impl ArtifactService {
             .ok_or_else(|| {
                 ArtifactServiceError::PathInvalid("project storage root is unavailable".to_owned())
             })?;
-        validate_output_path(&root, Path::new(&artifact.asset.storage_path))
+        let path = validate_output_path(&root, Path::new(&artifact.asset.storage_path))?;
+        Ok((path, artifact.asset.sha256, artifact.asset.file_size))
     }
 
     pub async fn submit_review(

@@ -322,6 +322,7 @@ impl ProductionStartAdmissionService {
                 (snapshot.runtime_generation, snapshot)
             };
 
+            self.queue.validate_start_inputs(&detail).await?;
             let preflight_issues = self
                 .queue
                 .preflight_saved_execution_batch(project_id, &detail)

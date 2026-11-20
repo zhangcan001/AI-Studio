@@ -222,7 +222,13 @@ impl WorkflowLifecycleCoordinator {
                 return Ok(restored);
             }
             Err(error) if error.code() == "WORKFLOW_NOT_ARCHIVED" => {}
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                tracing::warn!(%error, "workflow restored but current version needs attention");
+                restored.enabled = false;
+                restored.capability = "NOT_CHECKED".to_owned();
+                restored.readiness = "RESTORED_NEEDS_ATTENTION".to_owned();
+                return Ok(restored);
+            }
         }
 
         match self.lifecycle.recheck_capability(&version_id).await {
@@ -246,9 +252,11 @@ impl WorkflowLifecycleCoordinator {
                 restored.enabled = false;
             }
         }
-        self.lifecycle
-            .set_enabled(&version_id, restored.enabled)
-            .await?;
+        if let Err(error) = self.lifecycle.set_enabled(&version_id, restored.enabled).await {
+            tracing::warn!(%error, "workflow restored but current version could not be enabled");
+            restored.enabled = false;
+            restored.capability = "NOT_CHECKED".to_owned();
+        }
         restored.readiness = if restored.enabled {
             "ACTIVE"
         } else {

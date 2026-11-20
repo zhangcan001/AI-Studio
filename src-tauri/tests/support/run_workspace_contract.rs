@@ -626,6 +626,7 @@ async fn phase4_target_2_persisted_parent_dedupe_read_only() {
         detail.batch.id.as_str(),
         &[],
         CREATED_AT,
+        None,
     )
     .await
     .unwrap();

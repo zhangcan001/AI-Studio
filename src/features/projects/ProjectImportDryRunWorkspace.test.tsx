@@ -56,7 +56,7 @@ describe("ProjectImportDryRunWorkspace", () => {
     expect(screen.queryByText("导入文件摘要")).toBeNull();
   });
 
-  it("reads a JSON file, previews it, and executes once only after confirmation", async () => {
+  it.each([false, true])("reads a JSON file, previews it, and executes once only after confirmation (refresh failure: %s)", async (refreshFails) => {
     vi.mocked(previewShotBulkImport).mockResolvedValue(preview());
     vi.mocked(commitShotBulkImport).mockResolvedValue({
       projectId: "project-1",
@@ -65,7 +65,7 @@ describe("ProjectImportDryRunWorkspace", () => {
         { shotId: "shot-2", ordinal: 1, name: "镜头 02" },
       ],
     });
-    const onImported = vi.fn();
+    const onImported = vi.fn(async () => { if (refreshFails) throw new Error("refresh failed"); });
     const actor = user();
     render(<ProjectImportDryRunWorkspace projectId="project-1" onClose={vi.fn()} onImported={onImported} />);
 
@@ -89,6 +89,7 @@ describe("ProjectImportDryRunWorkspace", () => {
       content: "{\"shots\":[]}",
     });
     expect(onImported).toHaveBeenCalledTimes(1);
+    if (refreshFails) await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("列表刷新失败"));
     expect(screen.getByRole("status", { name: "导入完成" })).toBeTruthy();
     expect(screen.getByText("已写入 2 个镜头；本次没有自动生成任务。")).toBeTruthy();
   });
