@@ -122,26 +122,39 @@ pub fn copy_selected_videos(
                     return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a file"));
                 }
                 if metadata.len() != *size {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "video size changed"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "video size changed",
+                    ));
                 }
                 publish_new_file(&directory, &file_name, |output| {
-                    use std::io::{Read, Write};
                     use sha2::{Digest, Sha256};
+                    use std::io::{Read, Write};
                     let mut hash = Sha256::new();
                     let mut buffer = [0; 64 * 1024];
                     let mut copied = 0u64;
                     loop {
                         let count = input.read(&mut buffer)?;
-                        if count == 0 { break; }
+                        if count == 0 {
+                            break;
+                        }
                         copied += count as u64;
                         if copied > *size {
-                            return Err(io::Error::new(io::ErrorKind::InvalidData, "video size changed"));
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "video size changed",
+                            ));
                         }
                         hash.update(&buffer[..count]);
                         output.write_all(&buffer[..count])?;
                     }
-                    if copied != *size || !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(sha256) {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, "video content changed"));
+                    if copied != *size
+                        || !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(sha256)
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "video content changed",
+                        ));
                     }
                     Ok(())
                 })?;
@@ -159,7 +172,8 @@ pub fn copy_selected_videos(
         serde_json::to_writer_pretty(
             file,
             &serde_json::json!({"format":"AI_STUDIO_SELECTED_VIDEOS_V1","entries":entries}),
-        ).map_err(io::Error::from)
+        )
+        .map_err(io::Error::from)
     });
     Ok(SelectedVideoExport {
         exported,
@@ -178,13 +192,19 @@ fn publish_new_file(
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> io::Result<()> {
     let temporary = directory.join(format!(".{}.partial", uuid::Uuid::new_v4()));
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
     let result = write(&mut file).and_then(|()| file.sync_all());
     drop(file);
     let result = result.and_then(|()| {
         let destination = directory.join(name);
         if destination.exists() {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "export file already exists"));
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "export file already exists",
+            ));
         }
         fs::rename(&temporary, destination)
     });
@@ -284,7 +304,11 @@ mod tests {
             path: {
                 use sha2::{Digest, Sha256};
                 let bytes = fs::read(&path).unwrap_or_default();
-                Some((path, format!("{:x}", Sha256::digest(&bytes)), bytes.len() as u64))
+                Some((
+                    path,
+                    format!("{:x}", Sha256::digest(&bytes)),
+                    bytes.len() as u64,
+                ))
             },
             error: None,
         }
@@ -345,7 +369,10 @@ mod tests {
         fs::write(&path, b"replaced").unwrap();
         let receipt = copy_selected_videos(dir.path(), &[item]).unwrap();
         assert_eq!((receipt.exported, receipt.failed), (0, 1));
-        let names: Vec<_> = fs::read_dir(receipt.directory).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        let names: Vec<_> = fs::read_dir(receipt.directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
         assert_eq!(names, ["export-manifest.json"]);
     }
     #[test]

@@ -252,7 +252,11 @@ impl WorkflowLifecycleCoordinator {
                 restored.enabled = false;
             }
         }
-        if let Err(error) = self.lifecycle.set_enabled(&version_id, restored.enabled).await {
+        if let Err(error) = self
+            .lifecycle
+            .set_enabled(&version_id, restored.enabled)
+            .await
+        {
             tracing::warn!(%error, "workflow restored but current version could not be enabled");
             restored.enabled = false;
             restored.capability = "NOT_CHECKED".to_owned();

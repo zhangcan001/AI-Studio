@@ -875,14 +875,22 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
                  LEFT JOIN production_episodes ep ON ep.id = sc.episode_id
                  LEFT JOIN production_series se ON se.id = ep.series_id
                  WHERE sh.id = ? AND sh.project_id = ?",
-            ).bind(&snapshot.shot_id).bind(&batch.project_id)
-                .fetch_one(&mut *transaction).await.map_err(map_sqlx_error)?;
+            )
+            .bind(&snapshot.shot_id)
+            .bind(&batch.project_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
             let frozen = &snapshot.snapshot.structure;
-            if (current.0.as_deref(), current.1.as_deref(), current.2.as_deref())
-                != (frozen.scene.as_ref().map(|x| x.id.as_str()),
-                    frozen.episode.as_ref().map(|x| x.id.as_str()),
-                    frozen.series.as_ref().map(|x| x.id.as_str()))
-            {
+            if (
+                current.0.as_deref(),
+                current.1.as_deref(),
+                current.2.as_deref(),
+            ) != (
+                frozen.scene.as_ref().map(|x| x.id.as_str()),
+                frozen.episode.as_ref().map(|x| x.id.as_str()),
+                frozen.series.as_ref().map(|x| x.id.as_str()),
+            ) {
                 return Err(RepositoryError::integrity(
                     "PREPARATION_SCOPE_CHANGED: Shot hierarchy changed before queue creation",
                 ));

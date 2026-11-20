@@ -46,7 +46,11 @@ pub async fn comfy_save_endpoint(
 pub async fn comfy_free_memory(
     state: tauri::State<'_, AppState>,
 ) -> Result<ComfyMemoryReleaseResult, AppError> {
-    let _admission = state.production.queue.acquire_runtime_configuration_admission().await;
+    let _admission = state
+        .production
+        .queue
+        .acquire_runtime_configuration_admission()
+        .await;
     state
         .system
         .comfy_memory

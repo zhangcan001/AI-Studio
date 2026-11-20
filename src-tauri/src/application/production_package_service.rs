@@ -12,8 +12,9 @@ use crate::application::h3_local_import_service::{
 };
 use crate::application::ports::Clock;
 use crate::application::production_package_inspector::{
-    ProductionPackageDiagnostic, ProductionPackageDiagnosticSeverity, ProductionPackageInspection, ProductionPackageInspectionError,
-    ProductionPackageInspector, ProductionPackageItemInspection, ProductionPackageItemStatus,
+    ProductionPackageDiagnostic, ProductionPackageDiagnosticSeverity, ProductionPackageInspection,
+    ProductionPackageInspectionError, ProductionPackageInspector, ProductionPackageItemInspection,
+    ProductionPackageItemStatus,
 };
 use crate::application::production_queue_service::ProductionQueueService;
 use crate::application::project_workflow_binding_service::{
@@ -556,7 +557,11 @@ impl ProductionPackageService {
                     let mut warnings = current.warnings;
                     warnings.push(ProductionPackageDiagnostic {
                         code: error.code().into(),
-                        message: format!("第 {} 批未能创建：{}", chunk_index + 1, partial_failure_hint(&error)),
+                        message: format!(
+                            "第 {} 批未能创建：{}",
+                            chunk_index + 1,
+                            partial_failure_hint(&error)
+                        ),
                         severity: ProductionPackageDiagnosticSeverity::Warning,
                         field: None,
                     });
@@ -1200,9 +1205,7 @@ fn copy_staged_media(
     let size = std::io::copy(&mut input, &mut digest)
         .map_err(|error| ProductionPackageError::Filesystem(error.to_string()))?;
     let actual = format!("{:x}", digest.finalize());
-    if source.sha256.as_deref() != Some(actual.as_str())
-        || source.size_bytes != Some(size)
-    {
+    if source.sha256.as_deref() != Some(actual.as_str()) || source.size_bytes != Some(size) {
         return Err(ProductionPackageError::MediaChanged(
             source.relative_path.clone(),
         ));

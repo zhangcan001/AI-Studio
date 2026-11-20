@@ -432,7 +432,11 @@ impl WorkflowBenchmarkService {
             continue_on_failure: true,
             items: queue_items,
         };
-        let queue = match self.production_queue_service.draft_unpersisted_batch(queue_request).await {
+        let queue = match self
+            .production_queue_service
+            .draft_unpersisted_batch(queue_request)
+            .await
+        {
             Ok(queue) => queue,
             Err(error) => {
                 self.set_experiment_status(&experiment_id, "FAILED_TO_QUEUE")
@@ -442,11 +446,7 @@ impl WorkflowBenchmarkService {
         };
 
         if let Err(error) = self
-            .link_queue(
-                &experiment_id,
-                &queue,
-                request.repeat_count,
-            )
+            .link_queue(&experiment_id, &queue, request.repeat_count)
             .await
         {
             return Err(WorkflowBenchmarkError::Queue(error.to_string()));

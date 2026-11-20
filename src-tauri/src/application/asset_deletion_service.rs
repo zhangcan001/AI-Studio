@@ -79,26 +79,64 @@ pub struct AssetDeletionService {
 
 impl AssetDeletionService {
     pub(crate) async fn recover_pending_deletions(&self) -> Result<(), AssetDeletionError> {
-        for project in self.project_repository.list().await.map_err(AssetDeletionError::Repository)? {
-            for (id, files) in self.asset_store.pending_deletion_files(&project.root_path).await.map_err(map_store_error)? {
-                match self.asset_repository.find_by_id(&id).await.map_err(AssetDeletionError::Repository)? {
+        for project in self
+            .project_repository
+            .list()
+            .await
+            .map_err(AssetDeletionError::Repository)?
+        {
+            for (id, files) in self
+                .asset_store
+                .pending_deletion_files(&project.root_path)
+                .await
+                .map_err(map_store_error)?
+            {
+                match self
+                    .asset_repository
+                    .find_by_id(&id)
+                    .await
+                    .map_err(AssetDeletionError::Repository)?
+                {
                     Some(asset) if asset.project_id == project.id => {
-                        let expected = [Some(asset.storage_path.as_str()), asset.thumbnail_path.as_deref()];
-                        if files.iter().any(|file| !expected.into_iter().flatten().any(|path| {
-                            let path = std::path::Path::new(path);
-                            let path = if path.is_absolute() { path.to_path_buf() } else { project.root_path.join(path) };
-                            // Windows canonical paths may use the extended prefix; compare
-                            // validated project-relative paths to the persisted asset paths.
-                            path == file.original_path || path.strip_prefix(&project.root_path).ok().is_some_and(|relative| {
-                                file.original_path.ends_with(relative)
+                        let expected = [
+                            Some(asset.storage_path.as_str()),
+                            asset.thumbnail_path.as_deref(),
+                        ];
+                        if files.iter().any(|file| {
+                            !expected.into_iter().flatten().any(|path| {
+                                let path = std::path::Path::new(path);
+                                let path = if path.is_absolute() {
+                                    path.to_path_buf()
+                                } else {
+                                    project.root_path.join(path)
+                                };
+                                // Windows canonical paths may use the extended prefix; compare
+                                // validated project-relative paths to the persisted asset paths.
+                                path == file.original_path
+                                    || path.strip_prefix(&project.root_path).ok().is_some_and(
+                                        |relative| file.original_path.ends_with(relative),
+                                    )
                             })
-                        })) {
-                            return Err(AssetDeletionError::InvalidInput("staged deletion identity changed".into()));
+                        }) {
+                            return Err(AssetDeletionError::InvalidInput(
+                                "staged deletion identity changed".into(),
+                            ));
                         }
-                        self.asset_store.restore_staged_delete(&files).await.map_err(map_store_error)?;
-                    },
-                    None => self.asset_store.commit_staged_delete(&files).await.map_err(map_store_error)?,
-                    Some(_) => return Err(AssetDeletionError::InvalidInput("staged deletion belongs to another project".into())),
+                        self.asset_store
+                            .restore_staged_delete(&files)
+                            .await
+                            .map_err(map_store_error)?;
+                    }
+                    None => self
+                        .asset_store
+                        .commit_staged_delete(&files)
+                        .await
+                        .map_err(map_store_error)?,
+                    Some(_) => {
+                        return Err(AssetDeletionError::InvalidInput(
+                            "staged deletion belongs to another project".into(),
+                        ))
+                    }
                 }
             }
         }

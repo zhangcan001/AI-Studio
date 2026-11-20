@@ -421,21 +421,30 @@ impl TaskRecoveryService {
                 ));
             }
             use sha2::{Digest, Sha256};
-            let unavailable = |error| TaskRecoveryError::Unresolved(format!("output asset is unavailable: {error}"));
-            let mut input = self.asset_store
+            let unavailable = |error| {
+                TaskRecoveryError::Unresolved(format!("output asset is unavailable: {error}"))
+            };
+            let mut input = self
+                .asset_store
                 .open_read_stream(&project_root, std::path::Path::new(&asset.storage_path))
-                .await.map_err(unavailable)?;
+                .await
+                .map_err(unavailable)?;
             let mut hash = Sha256::new();
             let mut size = 0u64;
             while let Some(bytes) = input.next_chunk().await.map_err(unavailable)? {
                 size += bytes.len() as u64;
-                if size > asset.file_size { break; }
+                if size > asset.file_size {
+                    break;
+                }
                 hash.update(&bytes);
             }
-            if size == 0 || size != asset.file_size
+            if size == 0
+                || size != asset.file_size
                 || !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(&asset.sha256)
             {
-                return Err(TaskRecoveryError::Unresolved("output asset content changed".to_owned()));
+                return Err(TaskRecoveryError::Unresolved(
+                    "output asset content changed".to_owned(),
+                ));
             }
         }
         if mappings.is_empty() && !assets.is_empty() {
@@ -1286,7 +1295,10 @@ outputs:
             "Generated Image 1",
             "ComfyUI_00001.png",
             "existing.png",
-            { use sha2::{Digest, Sha256}; format!("{:x}", Sha256::digest(png_bytes())) },
+            {
+                use sha2::{Digest, Sha256};
+                format!("{:x}", Sha256::digest(png_bytes()))
+            },
             "image/png",
             2,
             2,
@@ -1752,7 +1764,10 @@ outputs:
                 "Generated Image 1",
                 "ComfyUI_00001.png",
                 "existing-mapped.png",
-                { use sha2::{Digest, Sha256}; format!("{:x}", Sha256::digest(png_bytes())) },
+                {
+                    use sha2::{Digest, Sha256};
+                    format!("{:x}", Sha256::digest(png_bytes()))
+                },
                 "image/png",
                 2,
                 2,
@@ -1786,7 +1801,10 @@ outputs:
                 .unwrap();
             }
             if corrupt {
-                let path = harness._directory.path().join("project/existing-mapped.png");
+                let path = harness
+                    ._directory
+                    .path()
+                    .join("project/existing-mapped.png");
                 let mut changed = std::fs::read(&path).unwrap();
                 changed[0] ^= 0xff;
                 std::fs::write(path, changed).unwrap();

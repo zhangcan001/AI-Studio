@@ -1316,9 +1316,14 @@ impl ProductionQueueService {
         // exact pair once; only the slow per-item compile and media checks run
         // outside this gate.
         let mut checked = std::collections::HashSet::new();
-        for item in detail.items.iter().filter(|item| item.status == ProductionBatchItemStatus::Pending) {
+        for item in detail
+            .items
+            .iter()
+            .filter(|item| item.status == ProductionBatchItemStatus::Pending)
+        {
             if checked.insert((&item.workflow_version_id, &item.recipe_id)) {
-                self.ensure_new_generation_allowed(&item.workflow_version_id, &item.recipe_id).await?;
+                self.ensure_new_generation_allowed(&item.workflow_version_id, &item.recipe_id)
+                    .await?;
             }
         }
         let blocker = self.admission_status_excluding(Some(&batch_id)).await?;
@@ -1332,8 +1337,18 @@ impl ProductionQueueService {
         &self,
         detail: &ProductionBatchDetail,
     ) -> Result<(), ProductionQueueError> {
-        for item in detail.items.iter().filter(|item| item.status == ProductionBatchItemStatus::Pending) {
-            self.prepare_queue_values(&detail.batch.project_id, &item.workflow_version_id, &item.recipe_id, &item.values_json).await?;
+        for item in detail
+            .items
+            .iter()
+            .filter(|item| item.status == ProductionBatchItemStatus::Pending)
+        {
+            self.prepare_queue_values(
+                &detail.batch.project_id,
+                &item.workflow_version_id,
+                &item.recipe_id,
+                &item.values_json,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -1357,7 +1372,9 @@ impl ProductionQueueService {
                 other => other,
             })?;
         if &current != detail {
-            return Err(ProductionQueueError::InvalidState("queue changed during start".to_owned()));
+            return Err(ProductionQueueError::InvalidState(
+                "queue changed during start".to_owned(),
+            ));
         }
         let updated = self
             .repository

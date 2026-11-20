@@ -372,9 +372,14 @@ impl SettingsService {
         }
 
         if next_settings.comfy_environment_profiles.len() >= 20
-            && !next_settings.comfy_environment_profiles.iter().any(|current| current.id == profile.id)
+            && !next_settings
+                .comfy_environment_profiles
+                .iter()
+                .any(|current| current.id == profile.id)
         {
-            return Err(AppError::invalid_input("最多保存 20 个 ComfyUI 环境档案，请先删除不再使用的档案。"));
+            return Err(AppError::invalid_input(
+                "最多保存 20 个 ComfyUI 环境档案，请先删除不再使用的档案。",
+            ));
         }
         next_settings
             .comfy_environment_profiles

@@ -674,9 +674,16 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
         if let Some(detail) = new_batch {
             if detail.batch.id.as_str() != batch_id {
-                return Err(RepositoryError::integrity("benchmark batch identity mismatch"));
+                return Err(RepositoryError::integrity(
+                    "benchmark batch identity mismatch",
+                ));
             }
-            super::production_queue::insert_batch_records(&mut transaction, &detail.batch, &detail.items).await?;
+            super::production_queue::insert_batch_records(
+                &mut transaction,
+                &detail.batch,
+                &detail.items,
+            )
+            .await?;
         }
         let updated = sqlx::query(
             "UPDATE benchmark_experiments SET production_batch_id = ?, status = 'QUEUED', updated_at = ?
@@ -689,7 +696,9 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         .await
         .map_err(map_sqlx_error)?;
         if updated.rows_affected() != 1 {
-            return Err(RepositoryError::integrity("benchmark was already queued or is no longer a draft"));
+            return Err(RepositoryError::integrity(
+                "benchmark was already queued or is no longer a draft",
+            ));
         }
         for link in links {
             sqlx::query(
