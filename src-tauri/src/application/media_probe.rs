@@ -8,6 +8,11 @@ const PROBE_BUDGET: Duration = Duration::from_secs(20);
 const POSTER_BUDGET: Duration = Duration::from_secs(30);
 
 async fn bounded_output(command: &mut Command, budget: Duration) -> Option<std::process::Output> {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     command.kill_on_drop(true);
     command.stdin(Stdio::null());
     command.stderr(Stdio::null());

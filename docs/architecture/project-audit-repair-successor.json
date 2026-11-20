@@ -4,7 +4,7 @@
   "files": {
     "scripts/audit70-ci-integration-successor-guard.mjs": {
       "beforeHash": "438a4f81dfdf0460453b3ca1e99873a3ab4a3a62feac63b7f9e2eb357ed38cc7",
-      "afterHash": "3c481549e8453d59a43140c3940c543ca8f35504d1c00ad7d2b1fb8fd662cef5"
+      "afterHash": "64f0a7903daa750bfc43acd43d04636f5386651251062bbb1c205336785b703e"
     },
     "scripts/testing/audit-repair.test.mjs": {
       "beforeHash": "53a48b2ebad6583e3c267eea71d3ab6d48b58b09f359bb0e2c684da498fb9133",
@@ -106,6 +106,10 @@
       "beforeHash": "c2efe3466a2793213a1a538c464e79fd4cf65fad9e9c92bee304e1f828741b47",
       "afterHash": "4ce47b82f2cb53b2782f76ac222cbd65983de1379d912a9282e9715da937dc06"
     },
+    "src-tauri/src/application/media_probe.rs": {
+      "beforeHash": "2b2f7d8bfc11772b732d25e7f8ceda9ee5d760a9b303c739a8168b6463db1ffb",
+      "afterHash": "513c2124c6de4962281fcbaedd1de22c8e3fb0ad53c1b3d1db179b9474db76a1"
+    },
     "src-tauri/src/application/ports/asset_store.rs": {
       "beforeHash": "087e71e24215de79dc05e5ffb0e66443b8f61d6c83a1f345dc52e74c96e3d514",
       "afterHash": "c01ba31b485e71f77571c951d6c198f05f344d4e524471d7f3ce55f162af0d46"
@@ -193,6 +197,10 @@
     "src-tauri/src/lib.rs": {
       "beforeHash": "66737eea07b9b590e9b1e7a357f428f1b4179e9f03d556e29b6b478b45e86ada",
       "afterHash": "a18f199f9b1d71d21b0a272e6dfe2a843a2dc7401f11257d9a728cc0468b2bbe"
+    },
+    "src-tauri/src/main.rs": {
+      "beforeHash": "18aa37e5a471e3aa530085574b2a371602901ac2116138a7617937de4bf357f6",
+      "afterHash": "a62297e4a4851b771dbabbcb67e91f5f8d192233d67ce5a330fa9d3639420ea1"
     },
     "src-tauri/tests/dev059_production_package.rs": {
       "beforeHash": "6102a5e8f81c540d0c6826f6482ce7a98a5b8895530ab726833a53af418c2e81",

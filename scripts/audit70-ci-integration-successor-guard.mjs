@@ -5,6 +5,8 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobT
 
 const REPAIR_BASE = "587633960100382e2b23df0cca0fb0b98f72ffa0";
 const REPAIR_SCOPE = [
+  "src-tauri/src/main.rs",
+  "src-tauri/src/application/media_probe.rs",
   "scripts/audit70-ci-integration-successor-guard.mjs",
   "scripts/testing/audit-repair.test.mjs",
   "scripts/testing/audit70-ci-fixtures.test.mjs",
