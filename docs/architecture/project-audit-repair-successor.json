@@ -148,7 +148,7 @@
     },
     "src-tauri/src/application/project_backup_service.rs": {
       "beforeHash": "849ae26dac868ab22cbe31bc77c1a916ee7a6cdb2f1fdc97827804127dfc3da1",
-      "afterHash": "3bcbadae44c01a7beb9e6ce8a15f12cf2c9152f6bedf4b0d3691d96320dcaed6"
+      "afterHash": "159868d2fe20cfe22b33457aa3825999858f96482e168e5c8262c7f629abac5b"
     },
     "src-tauri/src/application/settings_service.rs": {
       "beforeHash": "f2d50da72fea9c70c100eb193aabd66bcef9eb9440de24365fe40595c99a09bf",

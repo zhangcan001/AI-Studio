@@ -493,6 +493,24 @@ fn create_restore_staging(path: &Path, project_id: &str) -> io::Result<()> {
     result
 }
 
+fn discard_restore_staging(path: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        if entry.file_name() == RESTORE_MARKER {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(entry.path())?;
+        } else {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    // Keep the ownership marker until the payload is gone so an interrupted
+    // cleanup can resume on the next startup.
+    fs::remove_file(path.join(RESTORE_MARKER))?;
+    fs::remove_dir(path)
+}
+
 pub struct ProjectBackupService {
     repository: Arc<dyn ProjectBackupRepository>,
     projects_dir: PathBuf,
@@ -588,7 +606,23 @@ impl ProjectBackupService {
             .await
             .map_err(map_repository_error)?;
         match project {
-            None => fs::remove_dir_all(path).map_err(filesystem),
+            None => {
+                let staging = if staging_id.is_some() {
+                    path
+                } else {
+                    let staging = root.join(format!("{RESTORE_STAGING_PREFIX}{project_id}"));
+                    match fs::symlink_metadata(&staging) {
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(filesystem(error)),
+                        Ok(_) => {
+                            return Err(AppError::filesystem("恢复暂存目录已存在，已保留两个目录"))
+                        }
+                    }
+                    fs::rename(path, &staging).map_err(filesystem)?;
+                    staging
+                };
+                discard_restore_staging(&staging).map_err(filesystem)
+            }
             Some(project)
                 if staging_id.is_none()
                     && fs::canonicalize(&project.root_path).ok().as_deref()
@@ -999,12 +1033,12 @@ impl ProjectBackupService {
         let restored_assets = match copy_result {
             Ok(assets) => assets,
             Err(error) => {
-                let _ = fs::remove_dir_all(&staging_root);
+                let _ = discard_restore_staging(&staging_root);
                 return Err(error);
             }
         };
         if let Err(error) = fs::rename(&staging_root, &final_root) {
-            let _ = fs::remove_dir_all(&staging_root);
+            let _ = discard_restore_staging(&staging_root);
             return Err(AppError::filesystem(format!(
                 "恢复项目目录发布失败：{error}"
             )));
@@ -5581,6 +5615,30 @@ mod tests {
             .recover_interrupted_restores(&projects)
             .await
             .unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_restore_cleanup_preserves_the_marker_for_retry() {
+        use super::{create_restore_staging, discard_restore_staging, RESTORE_MARKER};
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let staged = temp.path().join("staged");
+        create_restore_staging(&staged, &format!("prj_{}", Uuid::new_v4())).unwrap();
+        let asset = staged.join("asset");
+        fs::write(&asset, b"interrupted restore").unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&asset)
+            .unwrap();
+
+        assert!(discard_restore_staging(&staged).is_err());
+        assert!(staged.join(RESTORE_MARKER).is_file());
+        drop(lock);
+        discard_restore_staging(&staged).unwrap();
+        assert!(!staged.exists());
     }
 
     #[test]
