@@ -5,6 +5,7 @@ import type { ProjectOverview } from "../../product/types";
 import type { AppRoute } from "../routes/types";
 import { projectDisplayName } from "../../i18n/statusLabels";
 import { runtimeReadinessPresentation } from "./projectOverviewReadiness";
+import { subscribeRunInvalidation } from "../../product/runInvalidation";
 
 /** Translate the backend's chosen action, never recompute project priorities. */
 export function overviewAction(projectId: string, action: ProjectOverview["nextAction"]): { label: string; route: AppRoute } {
@@ -26,19 +27,51 @@ export function ProjectOverviewPage({ projectId, navigate }: { projectId: string
   const [state, setState] = useState<{ projectId: string; data?: ProjectOverview; error?: string }>({ projectId });
   useEffect(() => {
     let cancelled = false;
+    let reading = false;
+    let pending = false;
     setState({ projectId });
-    void productClient.project.getOverview(projectId).then((data) => {
-      if (!cancelled) setState({ projectId, data });
-    }).catch((error: unknown) => { if (!cancelled) setState({ projectId, error: normalizeProductError(error).message }); });
-    return () => { cancelled = true; };
+    async function refresh() {
+      reading = true;
+      try {
+        const data = await productClient.project.getOverview(projectId);
+        if (!cancelled) setState({ projectId, data });
+      } catch (error: unknown) {
+        if (!cancelled) setState(previous => ({
+          projectId,
+          data: previous.projectId === projectId ? previous.data : undefined,
+          error: normalizeProductError(error).message,
+        }));
+      } finally {
+        reading = false;
+        if (!cancelled && pending) {
+          pending = false;
+          void refresh();
+        }
+      }
+    }
+    const unsubscribe = subscribeRunInvalidation((changed, options) => {
+      if (changed !== projectId || options?.statusOnly) return;
+      if (reading) pending = true;
+      else void refresh();
+    });
+    const timer = window.setInterval(() => {
+      if (!reading && document.visibilityState !== "hidden") void refresh();
+    }, 5000);
+    void refresh();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      window.clearInterval(timer);
+    };
   }, [projectId]);
   // A late response or one render during project switching cannot show A in B.
   if (state.projectId !== projectId || (!state.data && !state.error)) return <p role="status">正在加载项目概览…</p>;
-  if (state.error) return <p role="alert">{state.error}</p>;
+  if (!state.data) return <p role="alert">{state.error}</p>;
   const data = state.data!;
   const action = overviewAction(projectId, data.nextAction);
   const readiness = runtimeReadinessPresentation(data.runtimeReadiness);
   return <section className="v3-overview" aria-label="项目概览">
+    {state.error && <p role="status">暂时无法刷新项目概览。{state.error}</p>}
     <header className="v3-overview-header"><span className="v3-eyebrow">MINIMAX VIDEO · 项目概览</span><h1>{projectDisplayName(data.project.id, data.project.name)}</h1>{data.project.description && <p>{data.project.description}</p>}</header>
     <section className="v3-next-action"><div><h2>下一步</h2><p>从当前项目继续创作，或处理需要关注的运行。</p></div><button type="button" className="primary-button" onClick={() => navigate(action.route)}>{action.label}</button></section>
     <div className="v3-overview-grid">

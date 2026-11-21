@@ -5,8 +5,6 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobT
 
 const REPAIR_BASE = "587633960100382e2b23df0cca0fb0b98f72ffa0";
 const REPAIR_SCOPE = [
-  "src-tauri/src/main.rs",
-  "src-tauri/src/application/media_probe.rs",
   "scripts/audit70-ci-integration-successor-guard.mjs",
   "scripts/testing/audit-repair.test.mjs",
   "scripts/testing/audit70-ci-fixtures.test.mjs",
@@ -33,7 +31,9 @@ const REPAIR_SCOPE = [
   "scripts/testing/usage-polish.test.mjs",
   "src-tauri/src/application/artifact_service.rs",
   "src-tauri/src/application/asset_deletion_service.rs",
+  "src-tauri/src/application/media_probe.rs",
   "src-tauri/src/application/ports/asset_store.rs",
+  "src-tauri/src/application/ports/mod.rs",
   "src-tauri/src/application/ports/production_orchestrator_repository.rs",
   "src-tauri/src/application/ports/workflow_benchmark_repository.rs",
   "src-tauri/src/application/product/selected_export.rs",
@@ -41,6 +41,7 @@ const REPAIR_SCOPE = [
   "src-tauri/src/application/production_package_service.rs",
   "src-tauri/src/application/production_queue_service.rs",
   "src-tauri/src/application/production_start_admission_service.rs",
+  "src-tauri/src/application/project_backup_service.rs",
   "src-tauri/src/application/settings_service.rs",
   "src-tauri/src/application/task_recovery_service.rs",
   "src-tauri/src/application/workflow_benchmark_service.rs",
@@ -55,15 +56,22 @@ const REPAIR_SCOPE = [
   "src-tauri/src/infrastructure/filesystem/workflow_file_store.rs",
   "src-tauri/src/infrastructure/settings/mod.rs",
   "src-tauri/src/lib.rs",
+  "src-tauri/src/main.rs",
   "src-tauri/tests/dev059_production_package.rs",
   "src-tauri/tests/support/product_facade_contract.rs",
   "src-tauri/tests/support/run_workspace_contract.rs",
+  "src/app/v3/ProjectOverviewPage.test.tsx",
+  "src/app/v3/ProjectOverviewPage.tsx",
+  "src/features/library/LibraryController.performance.test.tsx",
+  "src/features/library/LibraryController.ts",
   "src/features/production/ProductionPackageWorkspace.tsx",
   "src/features/projects/ExternalAgentHandoffPanel.test.tsx",
   "src/features/projects/ExternalAgentHandoffPanel.tsx",
   "src/features/projects/ProjectImportDryRunWorkspace.test.tsx",
   "src/features/projects/ProjectImportDryRunWorkspace.tsx",
   "src/features/runs/RunsPage.test.tsx",
+  "src/features/studio/ProductionQueuePanel.sync.test.tsx",
+  "src/features/studio/ProductionQueuePanel.tsx"
 ].sort();
 export const PROJECT_AUDIT_REPAIR_PROOF = "docs/architecture/project-audit-repair-successor.json";
 export const AUDIT70_CI_INTEGRATION_BASE = "1650cc570591f06c8811603f98c61e19488c5b1b";

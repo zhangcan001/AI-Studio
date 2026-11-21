@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ProjectOverviewPage, overviewAction } from "./ProjectOverviewPage";
 import { runtimeReadinessPresentation } from "./projectOverviewReadiness";
+import { invalidateRuns } from "../../product/runInvalidation";
 import type { ProjectOverview } from "../../product/types";
 const mocks = vi.hoisted(() => ({ getOverview: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { project: mocks } }));
@@ -76,4 +77,15 @@ it.each(["resolve", "reject"])("does not leak late A readiness or error into B (
   rerender(<ProjectOverviewPage projectId="B" navigate={vi.fn()} />); await screen.findByRole("heading", { name: "项目 B" });
   await act(async () => { if (outcome === "resolve") resolveA(fixture({ ...unknown, connection: "OFFLINE" })); else rejectA(new Error("A private error")); });
   expect(screen.queryByText("连接：离线")).toBeNull(); expect(screen.queryByRole("alert")).toBeNull(); expect(screen.getByText("连接：已连接")).toBeTruthy();
+});
+
+it("refreshes the overview after same-project completion", async () => {
+  mocks.getOverview
+    .mockResolvedValueOnce(fixture(ready, "A", "ACTIVE_PRODUCTION"))
+    .mockResolvedValueOnce(fixture(ready, "A", "COMPLETE"));
+  render(<ProjectOverviewPage projectId="A" navigate={vi.fn()} />);
+  await screen.findByRole("button", { name: "查看进行中的运行" });
+  await act(async () => { invalidateRuns("A"); });
+  expect(mocks.getOverview).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole("button", { name: "查看完成的结果" })).toBeTruthy();
 });

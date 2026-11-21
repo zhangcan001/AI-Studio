@@ -1,6 +1,6 @@
 use crate::application::ports::{
     AssetDeletionReferences, AssetDeletionRepository, AssetRepository, AssetStore, AssetStoreError,
-    ProjectRepository, RepositoryError, StagedAssetFile,
+    ProjectRecord, ProjectRepository, RepositoryError, StagedAssetFile,
 };
 use crate::domain::{validate_project_id, Asset, AssetId};
 use serde::Serialize;
@@ -85,59 +85,82 @@ impl AssetDeletionService {
             .await
             .map_err(AssetDeletionError::Repository)?
         {
-            for (id, files) in self
+            match self
                 .asset_store
                 .pending_deletion_files(&project.root_path)
                 .await
-                .map_err(map_store_error)?
             {
-                match self
-                    .asset_repository
-                    .find_by_id(&id)
-                    .await
-                    .map_err(AssetDeletionError::Repository)?
-                {
-                    Some(asset) if asset.project_id == project.id => {
-                        let expected = [
-                            Some(asset.storage_path.as_str()),
-                            asset.thumbnail_path.as_deref(),
-                        ];
-                        if files.iter().any(|file| {
-                            !expected.into_iter().flatten().any(|path| {
-                                let path = std::path::Path::new(path);
-                                let path = if path.is_absolute() {
-                                    path.to_path_buf()
-                                } else {
-                                    project.root_path.join(path)
-                                };
-                                // Windows canonical paths may use the extended prefix; compare
-                                // validated project-relative paths to the persisted asset paths.
-                                path == file.original_path
-                                    || path.strip_prefix(&project.root_path).ok().is_some_and(
-                                        |relative| file.original_path.ends_with(relative),
-                                    )
-                            })
-                        }) {
-                            return Err(AssetDeletionError::InvalidInput(
-                                "staged deletion identity changed".into(),
-                            ));
+                Ok(plans) => {
+                    for plan in plans {
+                        let result = match plan {
+                            Ok((id, files)) => self.recover_deletion(&project, &id, &files).await,
+                            Err(error) => Err(map_store_error(error)),
+                        };
+                        if let Err(error) = result {
+                            tracing::warn!(project_id = %project.id, error = %error, "asset deletion plan retained for retry");
                         }
-                        self.asset_store
-                            .restore_staged_delete(&files)
-                            .await
-                            .map_err(map_store_error)?;
-                    }
-                    None => self
-                        .asset_store
-                        .commit_staged_delete(&files)
-                        .await
-                        .map_err(map_store_error)?,
-                    Some(_) => {
-                        return Err(AssetDeletionError::InvalidInput(
-                            "staged deletion belongs to another project".into(),
-                        ))
                     }
                 }
+                Err(error) => {
+                    tracing::warn!(project_id = %project.id, error = %error, "asset deletion recovery deferred for project")
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn recover_deletion(
+        &self,
+        project: &ProjectRecord,
+        id: &AssetId,
+        files: &[StagedAssetFile],
+    ) -> Result<(), AssetDeletionError> {
+        match self
+            .asset_repository
+            .find_by_id(id)
+            .await
+            .map_err(AssetDeletionError::Repository)?
+        {
+            Some(asset) if asset.project_id == project.id => {
+                let expected = [
+                    Some(asset.storage_path.as_str()),
+                    asset.thumbnail_path.as_deref(),
+                ];
+                if files.iter().any(|file| {
+                    !expected.into_iter().flatten().any(|path| {
+                        let path = std::path::Path::new(path);
+                        let path = if path.is_absolute() {
+                            path.to_path_buf()
+                        } else {
+                            project.root_path.join(path)
+                        };
+                        // Windows canonical paths may use the extended prefix; compare
+                        // validated project-relative paths to the persisted asset paths.
+                        path == file.original_path
+                            || path
+                                .strip_prefix(&project.root_path)
+                                .ok()
+                                .is_some_and(|relative| file.original_path.ends_with(relative))
+                    })
+                }) {
+                    return Err(AssetDeletionError::InvalidInput(
+                        "staged deletion identity changed".into(),
+                    ));
+                }
+                self.asset_store
+                    .restore_staged_delete(files)
+                    .await
+                    .map_err(map_store_error)?;
+            }
+            None => self
+                .asset_store
+                .commit_staged_delete(files)
+                .await
+                .map_err(map_store_error)?,
+            Some(_) => {
+                return Err(AssetDeletionError::InvalidInput(
+                    "staged deletion belongs to another project".into(),
+                ))
             }
         }
         Ok(())
@@ -564,7 +587,10 @@ mod tests {
     #[async_trait]
     impl ProjectRepository for FakeProjectRepository {
         async fn list(&self) -> Result<Vec<ProjectRecord>, RepositoryError> {
-            Ok(Vec::new())
+            let mut offline = self.record();
+            offline.id = "prj_00000000-0000-4000-8000-000000000001".into();
+            offline.root_path = self.root.join("offline");
+            Ok(vec![offline, self.record()])
         }
 
         async fn find_by_id(
@@ -703,6 +729,28 @@ mod tests {
             }),
             store,
         )
+    }
+
+    #[tokio::test]
+    async fn startup_restores_valid_deletion_despite_offline_project_and_malformed_plan() {
+        let root = tempdir().unwrap();
+        let store = Arc::new(crate::infrastructure::filesystem::FileSystemAssetStore::new());
+        let asset = image_asset(root.path(), "prj_default", "ast_startup");
+        let path = PathBuf::from(&asset.storage_path);
+        std::fs::write(&path, b"original").unwrap();
+        let staged = store
+            .stage_for_delete(root.path(), "valid-plan", &asset)
+            .await
+            .unwrap();
+        let staged_dir = staged[0].journal_path.parent().unwrap().to_path_buf();
+        let malformed = staged_dir.join("ast_malformed.plan.json");
+        std::fs::write(&malformed, b"{").unwrap();
+
+        let app = service(root.path(), asset, vec![], false, store);
+        app.recover_pending_deletions().await.unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), b"original");
+        assert!(malformed.exists());
+        assert!(!staged[0].journal_path.exists());
     }
 
     #[tokio::test]

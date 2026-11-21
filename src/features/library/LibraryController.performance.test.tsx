@@ -116,3 +116,24 @@ it("background polling retains the displayed Library without repeating the initi
  await act(async()=>complete(list));await drain();
  expect(view.result.current.loading).toBe(false);
 });
+
+it("status-only updates preserve a pending full Library read", async () => {
+  vi.useFakeTimers();
+  state.library.list.mockReset();
+  const first = { items: [], nextCursor: null, coverage: "initial" };
+  state.library.list.mockResolvedValueOnce(first);
+  const view = renderHook(() => useLibraryController({
+    route: { kind: "library", projectId: "a", filter: "prompts" }, navigate: vi.fn()
+  }));
+  await drain();
+  let stale!: (v: typeof first) => void;
+  state.library.list
+    .mockImplementationOnce(() => new Promise(resolve => { stale = resolve; }));
+  act(() => invalidateRuns("a"));
+  await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+  act(() => invalidateRuns("a", { statusOnly: true }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+  expect(state.library.list).toHaveBeenCalledTimes(2);
+  await act(async () => { stale({ ...first, coverage: "fresh result" }); });
+  expect(view.result.current.list?.coverage).toBe("fresh result");
+});

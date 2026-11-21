@@ -922,6 +922,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 projects_dir: data_dirs.projects.clone(),
                 cache_dir: data_dirs.cache.clone(),
             });
+            if let Err(error) = tauri::async_runtime::block_on(
+                project_context.backup.recover_interrupted_restores(project_repository.as_ref()),
+            ) {
+                tracing::warn!(error = %error, "project restore recovery needs attention");
+            }
             let organization_service = Arc::new(OrganizationService::new(
                 organization_repository.clone(),
                 clock.clone(),

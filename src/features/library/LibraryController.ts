@@ -111,7 +111,11 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     let event:ReturnType<typeof setTimeout>|undefined;
     // External notifications preserve the current view just like polling. Keep
     // their existing invalidation semantics: real edits must supersede old reads.
-    const unsubscribe=subscribeRunInvalidation((project,options)=>{if(project!==route.projectId)return;if(options?.library===false)return;if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}clearTimeout(event);event=setTimeout(()=>void refresh({background:true}),150);});
+    const unsubscribe=subscribeRunInvalidation((project,options)=>{
+      if(project!==route.projectId||options?.library===false||options?.statusOnly)return;
+      if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}
+      clearTimeout(event);event=setTimeout(()=>void refresh({background:true}),150);
+    });
     const timer=setInterval(()=>{if(!readInFlight.current)void refresh({tags:false,background:true});},5000);
     return()=>{++epoch.current;unsubscribe();clearTimeout(event);clearInterval(timer);};
   },[refresh]);

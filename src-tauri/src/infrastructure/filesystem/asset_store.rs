@@ -1,6 +1,7 @@
 use crate::application::ports::{
     inspect_asset_read_path, validate_asset_read_path, AssetReadInspection, AssetReadStream,
-    AssetStore, AssetStoreError, AssetWriteSession, StagedAssetFile, StoredAssetFile,
+    AssetStore, AssetStoreError, AssetWriteSession, PendingAssetDeletion, StagedAssetFile,
+    StoredAssetFile,
 };
 use crate::domain::{Asset, AssetId};
 use async_trait::async_trait;
@@ -11,6 +12,10 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+fn delete_io(error: std::io::Error) -> AssetStoreError {
+    AssetStoreError::Delete(error.to_string())
+}
 
 const ASSET_READ_CHUNK_BYTES: usize = 1024 * 1024;
 
@@ -346,9 +351,8 @@ impl AssetStore for FileSystemAssetStore {
             }
             planned.push((original, staged_path));
         }
+        let journal = trash_root.join(format!("{}.plan.json", asset.id.as_str()));
         if !planned.is_empty() {
-            use std::io::Write;
-            let journal = trash_root.join(format!("{}.plan.json", asset.id.as_str()));
             let temporary = trash_root.join(format!(".{}.partial", uuid::Uuid::new_v4()));
             let relative = planned
                 .iter()
@@ -369,7 +373,8 @@ impl AssetStore for FileSystemAssetStore {
         }
         for (original, staged_path) in planned {
             if let Err(error) = fs::rename(&original, &staged_path) {
-                let restore_error = Self::restore_staged_files(&staged);
+                let restore_error = Self::restore_staged_files(&staged)
+                    .and_then(|()| Self::finish_delete_journal(&journal));
                 if let Err(restore_error) = restore_error {
                     return Err(AssetStoreError::Delete(format!(
                         "stage {} failed: {error}; restore failed: {restore_error}",
@@ -382,6 +387,7 @@ impl AssetStore for FileSystemAssetStore {
                 )));
             }
             staged.push(StagedAssetFile {
+                journal_path: journal.clone(),
                 original_path: original,
                 staged_path,
             });
@@ -392,13 +398,12 @@ impl AssetStore for FileSystemAssetStore {
     async fn pending_deletion_files(
         &self,
         project_root: &Path,
-    ) -> Result<Vec<(AssetId, Vec<StagedAssetFile>)>, AssetStoreError> {
+    ) -> Result<Vec<PendingAssetDeletion>, AssetStoreError> {
         let root = Self::canonical_root(project_root)?;
         let trash = root.join(".project-trash");
-        let to_error = |error: std::io::Error| AssetStoreError::Delete(error.to_string());
         let folders = match fs::symlink_metadata(&trash) {
             Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
-                fs::read_dir(&trash).map_err(to_error)?
+                fs::read_dir(&trash).map_err(delete_io)?
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             _ => {
@@ -409,64 +414,35 @@ impl AssetStore for FileSystemAssetStore {
         };
         let mut result = Vec::new();
         for folder in folders {
-            let folder = folder.map_err(to_error)?;
-            if !folder.file_type().map_err(to_error)?.is_dir() {
-                continue;
-            }
-            let folder_path = folder.path();
-            for file in fs::read_dir(&folder_path).map_err(to_error)? {
-                let file = file.map_err(to_error)?;
-                if !file.file_type().map_err(to_error)?.is_file() {
-                    continue;
+            let entries = folder.map_err(delete_io).and_then(|folder| {
+                if !folder.file_type().map_err(delete_io)?.is_dir() {
+                    return Ok(None);
                 }
-                let name = file.file_name();
-                let Some(id) = name
-                    .to_str()
-                    .and_then(|name| name.strip_suffix(".plan.json"))
-                else {
-                    continue;
-                };
-                let id = AssetId::parse(id.to_owned())
-                    .map_err(|e| AssetStoreError::Delete(e.to_string()))?;
-                if file.metadata().map_err(to_error)?.len() > 64 * 1024 {
-                    return Err(AssetStoreError::Delete(
-                        "deletion journal is too large".into(),
+                let path = folder.path();
+                if fs::canonicalize(&path).map_err(delete_io)? != path {
+                    return Err(AssetStoreError::FilesystemBoundary(
+                        "unsafe deletion operation directory".into(),
                     ));
                 }
-                let content = fs::read(file.path()).map_err(to_error)?;
-                let paths: Vec<PathBuf> = serde_json::from_slice(&content)
-                    .map_err(|e| AssetStoreError::Delete(e.to_string()))?;
-                let mut staged = Vec::new();
-                for relative in paths {
-                    if relative
-                        .components()
-                        .any(|c| !matches!(c, std::path::Component::Normal(_)))
-                        || relative.starts_with(".project-trash")
-                    {
-                        return Err(AssetStoreError::FilesystemBoundary(
-                            "unsafe deletion journal entry".into(),
-                        ));
-                    }
-                    let moved = folder_path.join(&relative);
-                    if let Some(moved) = Self::validated_delete_path(&root, &moved)? {
-                        if !moved.starts_with(&folder_path) {
-                            return Err(AssetStoreError::FilesystemBoundary(
-                                "unsafe staged deletion file".into(),
-                            ));
+                fs::read_dir(&path).map(Some).map_err(delete_io)
+            });
+            match entries {
+                Ok(Some(entries)) => {
+                    for entry in entries {
+                        match entry.map_err(delete_io).and_then(|entry| {
+                            if !entry.file_type().map_err(delete_io)?.is_file() {
+                                return Ok(None);
+                            }
+                            Self::pending_delete_journal(&root, &entry.path())
+                        }) {
+                            Ok(Some(plan)) => result.push(Ok(plan)),
+                            Ok(None) => {}
+                            Err(error) => result.push(Err(error)),
                         }
-                        let original = root.join(relative);
-                        let _ = Self::validated_delete_path(&root, &original)?;
-                        staged.push(StagedAssetFile {
-                            original_path: original,
-                            staged_path: moved,
-                        });
                     }
                 }
-                if !staged.is_empty() {
-                    result.push((id, staged));
-                } else {
-                    let _ = fs::remove_file(file.path());
-                }
+                Ok(None) => {}
+                Err(error) => result.push(Err(error)),
             }
         }
         Ok(result)
@@ -477,6 +453,7 @@ impl AssetStore for FileSystemAssetStore {
         staged: &[StagedAssetFile],
     ) -> Result<(), AssetStoreError> {
         Self::restore_staged_files(staged)
+            .and_then(|()| Self::finish_delete_journals(staged))
             .map_err(|error| AssetStoreError::Delete(format!("restore staged assets: {error}")))
     }
 
@@ -496,31 +473,7 @@ impl AssetStore for FileSystemAssetStore {
                 }
             }
         }
-        let mut directories = BTreeSet::new();
-        for file in staged {
-            let mut current = file.staged_path.parent();
-            while let Some(directory) = current {
-                if directory.file_name().and_then(|name| name.to_str()) == Some(".project-trash") {
-                    break;
-                }
-                directories.insert(directory.to_path_buf());
-                current = directory.parent();
-            }
-        }
-        for directory in directories.into_iter().rev() {
-            match fs::remove_dir(&directory) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
-                Err(error) => {
-                    return Err(AssetStoreError::Delete(format!(
-                        "remove trash directory {}: {error}",
-                        directory.display()
-                    )))
-                }
-            }
-        }
-        Ok(())
+        Self::finish_delete_journals(staged).map_err(delete_io)
     }
 
     async fn read(&self, project_root: &Path, path: &Path) -> Result<Vec<u8>, AssetStoreError> {
@@ -676,12 +629,120 @@ impl FileSystemAssetStore {
         Ok(Some(canonical))
     }
 
-    fn restore_staged_files(staged: &[StagedAssetFile]) -> Result<(), std::io::Error> {
-        for file in staged.iter().rev() {
-            if !file.staged_path.exists() {
+    fn pending_delete_journal(
+        root: &Path,
+        journal: &Path,
+    ) -> Result<Option<(AssetId, Vec<StagedAssetFile>)>, AssetStoreError> {
+        let Some(id) = journal
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".plan.json"))
+        else {
+            return Ok(None);
+        };
+        let id = AssetId::parse(id.to_owned())
+            .map_err(|error| AssetStoreError::Delete(error.to_string()))?;
+        let folder = journal
+            .parent()
+            .expect("journal has an operation directory");
+        let mut staged = Vec::new();
+        for relative in Self::delete_journal_paths(journal).map_err(delete_io)? {
+            let moved = folder.join(&relative);
+            if let Some(staged_path) = Self::validated_delete_path(root, &moved)? {
+                if !staged_path.starts_with(folder) {
+                    return Err(AssetStoreError::FilesystemBoundary(
+                        "unsafe staged deletion file".into(),
+                    ));
+                }
+                let original_path = root.join(relative);
+                let _ = Self::validated_delete_path(root, &original_path)?;
+                staged.push(StagedAssetFile {
+                    journal_path: journal.to_path_buf(),
+                    original_path,
+                    staged_path,
+                });
+            }
+        }
+        if staged.is_empty() {
+            Self::finish_delete_journal(journal).map_err(delete_io)?;
+            return Ok(None);
+        }
+        Ok(Some((id, staged)))
+    }
+
+    fn delete_journal_paths(journal: &Path) -> std::io::Result<Vec<PathBuf>> {
+        let bytes = fs::metadata(journal)?.len();
+        if bytes > 64 * 1024 {
+            return Err(std::io::Error::other("deletion journal is too large"));
+        }
+        let paths: Vec<PathBuf> = serde_json::from_slice(&fs::read(journal)?)?;
+        if paths.iter().any(|path| {
+            path.as_os_str().is_empty()
+                || path
+                    .components()
+                    .any(|part| !matches!(part, std::path::Component::Normal(_)))
+                || path.starts_with(".project-trash")
+        }) {
+            return Err(std::io::Error::other("unsafe deletion journal entry"));
+        }
+        Ok(paths)
+    }
+
+    fn finish_delete_journals(staged: &[StagedAssetFile]) -> std::io::Result<()> {
+        for journal in staged
+            .iter()
+            .map(|file| &file.journal_path)
+            .collect::<BTreeSet<_>>()
+        {
+            match Self::finish_delete_journal(journal) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                result => result?,
+            }
+        }
+        Ok(())
+    }
+
+    fn finish_delete_journal(journal: &Path) -> std::io::Result<()> {
+        let folder = journal
+            .parent()
+            .expect("journal has an operation directory");
+        let mut directories = BTreeSet::new();
+        for relative in Self::delete_journal_paths(journal)? {
+            let mut current = relative.parent();
+            while let Some(directory) = current.filter(|path| !path.as_os_str().is_empty()) {
+                directories.insert(folder.join(directory));
+                current = directory.parent();
+            }
+        }
+        for directory in directories
+            .into_iter()
+            .rev()
+            .chain(std::iter::once(folder.to_path_buf()))
+        {
+            if directory == folder {
+                fs::remove_file(journal)?;
+            } else if fs::canonicalize(&directory).is_ok_and(|path| path != directory) {
                 continue;
             }
-            if file.original_path.exists() {
+            match fs::remove_dir(&directory) {
+                Ok(()) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                    ) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    fn restore_staged_files(staged: &[StagedAssetFile]) -> Result<(), std::io::Error> {
+        for file in staged.iter().rev() {
+            if !file.staged_path.try_exists()? {
+                continue;
+            }
+            if file.original_path.try_exists()? {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
                     format!(
@@ -887,7 +948,13 @@ mod tests {
         assert_eq!(staged.len(), 2);
         assert!(!main.path.exists());
         assert!(!thumbnail.path.exists());
-        let pending = store.pending_deletion_files(root.path()).await.unwrap();
+        let pending: Vec<_> = store
+            .pending_deletion_files(root.path())
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<Result<_, _>>()
+            .unwrap();
         assert_eq!(pending, vec![(asset_id.clone(), staged.clone())]);
         store
             .restore_staged_delete(&staged)
@@ -895,6 +962,11 @@ mod tests {
             .expect("staged files should restore");
         assert_eq!(std::fs::read(&main.path).expect("main file"), b"main");
         assert_eq!(std::fs::read(&thumbnail.path).expect("thumbnail"), b"thumb");
+        assert!(!root
+            .path()
+            .join(".project-trash")
+            .join("operation-1")
+            .exists());
 
         let staged = store
             .stage_for_delete(root.path(), "operation-2", &asset)
@@ -906,6 +978,11 @@ mod tests {
             .expect("staged files should commit");
         assert!(!main.path.exists());
         assert!(!thumbnail.path.exists());
+        assert!(!root
+            .path()
+            .join(".project-trash")
+            .join("operation-2")
+            .exists());
     }
 
     #[tokio::test]

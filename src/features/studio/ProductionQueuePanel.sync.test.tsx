@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, waitFor, act } from "@testing-library/react";
+import { cleanup, render, waitFor, act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProductionQueuePanel } from "./ProductionQueuePanel";
 import { invalidateRuns, subscribeRunInvalidation } from "../../product/runInvalidation";
@@ -100,4 +100,72 @@ it("invalidateRuns library:false is the cheap generate/start contract", () => {
   invalidateRuns("x");
   stop();
   expect(hits).toEqual([false, undefined]);
+});
+
+it("ignores a manually opened queue from the previous project", async () => {
+  let resolveA!: (v: unknown) => void;
+  const a = summary("a", "a1", "Queue from project A");
+  const b = summary("b", "b1", "Only current queue B");
+  api.list.mockImplementation(async (projectId: string) => [projectId === "a" ? a : b]);
+  api.overview.mockResolvedValue(overview);
+  api.get.mockImplementation((projectId: string) => projectId === "a"
+    ? new Promise((resolve) => { resolveA = resolve; })
+    : Promise.resolve({ ...b, items: [] }));
+  const props = { batchItems: [] as [], comfyConnected: true,
+    onAdmissionChanged: async () => {}, onFocusedBatchOpened: () => {}, onOpenTask: () => {} };
+  const view = render(<ProductionQueuePanel projectId="a" {...props} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Queue from project A/ }));
+  expect(api.get).toHaveBeenCalledWith("a", "a1");
+  view.rerender(<ProductionQueuePanel projectId="b" {...props} />);
+  await screen.findByRole("button", { name: /Only current queue B/ });
+  await act(async () => { resolveA({ ...a, items: [] }); });
+  expect(view.container.textContent).not.toContain("Queue from project A");
+  expect(view.container.textContent).toContain("Only current queue B");
+});
+
+it("preserves the explicit inline queue selection against an older refresh", async () => {
+  const a = summary("p", "a", "Queue A");
+  const b = summary("p", "b", "Queue B");
+  api.list.mockResolvedValue([a, b]);
+  api.overview.mockResolvedValue(overview);
+  api.get.mockResolvedValueOnce({ ...a, items: [] });
+  const props = { batchItems: [] as [], comfyConnected: true,
+    onAdmissionChanged: async () => {}, onFocusedBatchOpened: () => {}, onOpenTask: () => {} };
+  render(<ProductionQueuePanel projectId="p" variant="inline" {...props} />);
+  const buttonA = await screen.findByRole("button", { name: /Queue A/ });
+  const buttonB = await screen.findByRole("button", { name: /Queue B/ });
+  await waitFor(() => expect(buttonA.classList.contains("is-active")).toBe(true));
+  let finishRefresh!: (v: unknown) => void;
+  api.get.mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve; }));
+  api.get.mockResolvedValueOnce({ ...b, items: [] });
+  fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+  await waitFor(() => expect(api.get).toHaveBeenLastCalledWith("p", "a"));
+  fireEvent.click(buttonB);
+  await waitFor(() => expect(buttonB.classList.contains("is-active")).toBe(true));
+  await act(async () => { finishRefresh({ ...a, items: [] }); });
+  expect(buttonA.classList.contains("is-active")).toBe(false);
+  expect(buttonB.classList.contains("is-active")).toBe(true);
+});
+
+it("polls persisted batch changes without receiving a task event", async () => {
+  vi.useFakeTimers();
+  try {
+    const batch = summary("poll-project", "q", "Persisted queue");
+    const running = { ...batch, status: "RUNNING", items: [] };
+    const completed = { ...batch, status: "COMPLETED", pending: 0, succeeded: 1, items: [] };
+    api.list.mockResolvedValueOnce([running]).mockResolvedValue([completed]);
+    api.overview.mockResolvedValue(overview);
+    api.get.mockResolvedValueOnce(running).mockResolvedValue(completed);
+    await act(async () => {
+      render(<ProductionQueuePanel projectId="poll-project" variant="inline" batchItems={[]} comfyConnected
+        onAdmissionChanged={async () => {}} onFocusedBatchOpened={() => {}} onOpenTask={() => {}} />);
+    });
+    expect(api.list).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: /Persisted queue/ }).textContent).toContain("已结束");
+  } finally {
+    cleanup();
+    vi.useRealTimers();
+  }
 });

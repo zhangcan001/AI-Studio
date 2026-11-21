@@ -12,9 +12,12 @@ pub struct StoredAssetFile {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StagedAssetFile {
+    pub journal_path: PathBuf,
     pub original_path: PathBuf,
     pub staged_path: PathBuf,
 }
+
+pub type PendingAssetDeletion = Result<(AssetId, Vec<StagedAssetFile>), AssetStoreError>;
 
 #[async_trait]
 pub trait AssetWriteSession: Send {
@@ -265,7 +268,7 @@ pub trait AssetStore: Send + Sync {
     async fn pending_deletion_files(
         &self,
         _project_root: &Path,
-    ) -> Result<Vec<(AssetId, Vec<StagedAssetFile>)>, AssetStoreError> {
+    ) -> Result<Vec<PendingAssetDeletion>, AssetStoreError> {
         Ok(Vec::new())
     }
 

@@ -1,6 +1,6 @@
 use crate::application::ports::{
     ProjectBackupRepository, ProjectBackupRepositorySource, ProjectBackupRestorePlan,
-    ProjectBackupRestoreResult, ProjectRecord, RepositoryError,
+    ProjectBackupRestoreResult, ProjectRecord, ProjectRepository, RepositoryError,
 };
 use crate::application::product::h3_resolution::MAX_SHOT_DURATION_SECONDS;
 use crate::domain::consistency::{
@@ -469,6 +469,30 @@ fn build_restore_warnings(
     warnings
 }
 
+const RESTORE_STAGING_PREFIX: &str = ".restore-pending-";
+const RESTORE_MARKER: &str = ".ai-studio-restore";
+const RESTORE_MARKER_VERSION: &str = "ai-studio-restore-v1";
+
+fn restore_marker_bytes(project_id: &str) -> String {
+    format!("{RESTORE_MARKER_VERSION}\n{project_id}\n")
+}
+
+fn create_restore_staging(path: &Path, project_id: &str) -> io::Result<()> {
+    fs::create_dir(path)?;
+    let result = (|| {
+        let mut marker = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(path.join(RESTORE_MARKER))?;
+        marker.write_all(restore_marker_bytes(project_id).as_bytes())?;
+        marker.sync_all()
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(path);
+    }
+    result
+}
+
 pub struct ProjectBackupService {
     repository: Arc<dyn ProjectBackupRepository>,
     projects_dir: PathBuf,
@@ -488,6 +512,93 @@ impl ProjectBackupService {
             projects_dir,
             inspection_dir: cache_dir.join("backup-inspections"),
             inspections: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub(crate) async fn recover_interrupted_restores(
+        &self,
+        projects: &dyn ProjectRepository,
+    ) -> Result<(), AppError> {
+        let root = fs::canonicalize(&self.projects_dir)
+            .map_err(|error| AppError::filesystem(error.to_string()))?;
+        let entries =
+            fs::read_dir(&root).map_err(|error| AppError::filesystem(error.to_string()))?;
+        for entry in entries {
+            let result = match entry {
+                Ok(entry) => Self::recover_restore_entry(&root, entry, projects).await,
+                Err(error) => Err(AppError::filesystem(error.to_string())),
+            };
+            if let Err(error) = result {
+                tracing::warn!(error = %error, "interrupted project restore retained for retry");
+            }
+        }
+        Ok(())
+    }
+
+    async fn recover_restore_entry(
+        root: &Path,
+        entry: fs::DirEntry,
+        projects: &dyn ProjectRepository,
+    ) -> Result<(), AppError> {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            return Ok(());
+        };
+        let staging_id = name.strip_prefix(RESTORE_STAGING_PREFIX);
+        let project_id = staging_id.unwrap_or(name);
+        let Some(raw_id) = project_id.strip_prefix("prj_") else {
+            return Ok(());
+        };
+        if Uuid::parse_str(raw_id).is_err() || raw_id.len() != 36 {
+            return Ok(());
+        }
+        let filesystem = |error: io::Error| AppError::filesystem(error.to_string());
+        if !entry.file_type().map_err(filesystem)?.is_dir() {
+            return Ok(());
+        }
+        let path = entry.path();
+        if fs::canonicalize(&path).map_err(filesystem)? != path {
+            return Ok(());
+        }
+        let marker = path.join(RESTORE_MARKER);
+        let expected = restore_marker_bytes(project_id);
+        let metadata = match fs::symlink_metadata(&marker) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // A process may have stopped between creating the staging directory and its marker.
+                if staging_id.is_some() {
+                    match fs::remove_dir(&path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {}
+                        Err(error) => return Err(filesystem(error)),
+                    }
+                }
+                return Ok(());
+            }
+            Err(error) => return Err(filesystem(error)),
+        };
+        if !metadata.is_file()
+            || metadata.len() != expected.len() as u64
+            || fs::read(&marker).map_err(filesystem)? != expected.as_bytes()
+        {
+            return Ok(());
+        }
+        let project = projects
+            .find_by_id(project_id)
+            .await
+            .map_err(map_repository_error)?;
+        match project {
+            None => fs::remove_dir_all(path).map_err(filesystem),
+            Some(project)
+                if staging_id.is_none()
+                    && fs::canonicalize(&project.root_path).ok().as_deref()
+                        == Some(root.join(project_id).as_path()) =>
+            {
+                fs::remove_file(marker).map_err(filesystem)
+            }
+            Some(_) => Err(AppError::filesystem(
+                "恢复目录与已登记项目不一致，已保留目录",
+            )),
         }
     }
 
@@ -654,9 +765,9 @@ impl ProjectBackupService {
 
         let new_project_id = format!("prj_{}", Uuid::new_v4());
         let final_root = self.projects_dir.join(&new_project_id);
-        let staging_root =
-            self.projects_dir
-                .join(format!(".restore-{}-{}", new_project_id, Uuid::new_v4()));
+        let staging_root = self
+            .projects_dir
+            .join(format!("{RESTORE_STAGING_PREFIX}{new_project_id}"));
         let mut archive = ZipArchive::new(
             File::open(&inspection.archive_path)
                 .map_err(|error| AppError::filesystem(error.to_string()))?,
@@ -874,6 +985,10 @@ impl ProjectBackupService {
         }
 
         let restored_snapshots = prepare_restored_snapshots(&document, &asset_ids)?;
+        fs::create_dir_all(&self.projects_dir)
+            .map_err(|error| AppError::filesystem(error.to_string()))?;
+        create_restore_staging(&staging_root, &new_project_id)
+            .map_err(|error| AppError::filesystem(error.to_string()))?;
         let copy_result = copy_assets(
             &mut archive,
             &staging_root,
@@ -946,13 +1061,11 @@ impl ProjectBackupService {
             })
             .await
             .map_err(map_repository_error);
-        let restore_meta = match restore_result {
-            Ok(meta) => meta,
-            Err(error) => {
-                let _ = fs::remove_dir_all(&final_root);
-                return Err(error);
-            }
-        };
+        // On a commit error the startup pass resolves the marker against SQLite.
+        let restore_meta = restore_result?;
+        if let Err(error) = fs::remove_file(final_root.join(RESTORE_MARKER)) {
+            tracing::warn!(%error, "restore marker cleanup deferred");
+        }
         let _ = fs::remove_file(&inspection.archive_path);
         let missing_models = restore_meta.unresolved_model_version_ids.clone();
         let missing_tools = restore_meta.unresolved_tool_instance_ids.clone();
@@ -5408,6 +5521,67 @@ mod tests {
 
     use super::{prune_inspection_archives, Inspection, Uuid, INSPECTION_TTL};
     use std::fs;
+
+    #[tokio::test]
+    async fn interrupted_restore_cleans_owned_directories_and_preserves_committed_project() {
+        use super::{
+            create_restore_staging, ProjectBackupService, RESTORE_MARKER, RESTORE_STAGING_PREFIX,
+        };
+        use crate::application::ports::{ProjectRecord, ProjectRepository};
+        use crate::infrastructure::database::{initialize, SqliteProjectRepository};
+
+        let temp = tempfile::tempdir().unwrap();
+        let pool = initialize(&temp.path().join("db.sqlite")).await.unwrap();
+        let projects = SqliteProjectRepository::new(pool.clone());
+        let root = temp.path().join("projects");
+        fs::create_dir(&root).unwrap();
+        let service = ProjectBackupService::new(pool, root.clone(), temp.path().join("cache"));
+
+        let staged_id = format!("prj_{}", Uuid::new_v4());
+        let staged = root.join(format!("{RESTORE_STAGING_PREFIX}{staged_id}"));
+        create_restore_staging(&staged, &staged_id).unwrap();
+        fs::write(staged.join("unpacked"), b"unfinished").unwrap();
+
+        let orphan_id = format!("prj_{}", Uuid::new_v4());
+        let orphan = root.join(&orphan_id);
+        create_restore_staging(&orphan, &orphan_id).unwrap();
+        fs::write(orphan.join("unpacked"), b"before commit").unwrap();
+
+        let saved_id = format!("prj_{}", Uuid::new_v4());
+        let saved = root.join(&saved_id);
+        create_restore_staging(&saved, &saved_id).unwrap();
+        fs::write(saved.join("asset"), b"after commit").unwrap();
+        let now = chrono::Utc::now();
+        projects
+            .insert(&ProjectRecord {
+                id: saved_id,
+                name: "Restored".into(),
+                description: None,
+                root_path: saved.clone(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+
+        let unowned = root.join(format!("prj_{}", Uuid::new_v4()));
+        fs::create_dir(&unowned).unwrap();
+        fs::write(unowned.join("asset"), b"unowned").unwrap();
+
+        service
+            .recover_interrupted_restores(&projects)
+            .await
+            .unwrap();
+        assert!(!staged.exists());
+        assert!(!orphan.exists());
+        assert!(!saved.join(RESTORE_MARKER).exists());
+        assert_eq!(fs::read(saved.join("asset")).unwrap(), b"after commit");
+        assert_eq!(fs::read(unowned.join("asset")).unwrap(), b"unowned");
+        service
+            .recover_interrupted_restores(&projects)
+            .await
+            .unwrap();
+    }
 
     #[test]
     fn phase14_restore_report_serializes_empty_issue_lists_for_typed_ui() {

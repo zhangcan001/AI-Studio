@@ -68,7 +68,8 @@ pub use asset_deletion_repository::{AssetDeletionReferences, AssetDeletionReposi
 pub use asset_repository::{AssetRepository, ExternalAssetImportRecord, TaskOutputAssetMapping};
 pub use asset_store::{
     inspect_asset_read_path, validate_asset_read_path, AssetReadInspection, AssetReadStream,
-    AssetStore, AssetStoreError, AssetWriteSession, StagedAssetFile, StoredAssetFile,
+    AssetStore, AssetStoreError, AssetWriteSession, PendingAssetDeletion, StagedAssetFile,
+    StoredAssetFile,
 };
 pub use asset_usage_repository::{
     AssetUsageItem, AssetUsageRepository, AssetUsageSummary, ProfileUsageSummary,
