@@ -104,3 +104,22 @@ it("hides the unreachable prompts category and explains leftover deep links",asy
   expect(within(screen.getByRole("navigation",{name:"资源分类"})).queryByRole("button",{name:"提示词"})).toBeNull();
   expect(await screen.findByText("first")).toBeTruthy();
 });
+
+it("supports batch selection and safe inspection-gated batch delete in media categories",async()=>{
+  const inspect=vi.fn(async(_p:string,ref:{id:string})=>({allowed:ref.id==="a1",blockers:ref.id==="a1"?[]:["referenced"],warnings:[],relations:[],consequences:[]}));
+  const del=vi.fn(async()=>undefined);
+  Object.assign(api,{deletionInspect:inspect,delete:del});
+  api.list.mockResolvedValue({items:[
+    {resourceRef:{kind:"asset",id:"a1"},title:"可删图",subtype:"image",createdAt:"2026-10-01",updatedAt:"2026-10-01",thumbnailAvailable:false},
+    {resourceRef:{kind:"asset",id:"a2"},title:"受保护图",subtype:"image",createdAt:"2026-10-01",updatedAt:"2026-10-01",thumbnailAvailable:false},
+  ],nextCursor:null,coverage:"keyset-page",coverageMessage:"当前分类数据库分页结果。"});
+  render(<LibraryPage route={{kind:"library",projectId:"batch-del",filter:"images"}} navigate={vi.fn()}/>);
+  await screen.findByText("可删图");
+  fireEvent.click(screen.getByRole("button",{name:"批量管理"}));
+  fireEvent.click(screen.getByRole("button",{name:"全选本页"}));
+  fireEvent.click(screen.getByRole("button",{name:"检查并批量删除"}));
+  const confirmBtn=await screen.findByRole("button",{name:/确认删除可删项（1 项，跳过受保护 1 项）/});
+  fireEvent.click(confirmBtn);
+  await waitFor(()=>expect(del).toHaveBeenCalledTimes(1));
+  expect(del).toHaveBeenCalledWith("batch-del",{kind:"asset",id:"a1"},true);
+});

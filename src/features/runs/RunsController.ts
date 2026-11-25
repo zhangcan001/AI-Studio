@@ -109,6 +109,16 @@ export function useRunsController({ route, navigate }: RunsProps) {
     await productClient.run.delete(route.projectId, detail.ref);
     if (mounted.current && scope === liveScope.current) navigate({ ...route, run: undefined });
   });
+  const retryAndStart = () => mutate(async () => {
+    if (!detail?.availableActions.includes("RETRY") || detail.ref.source === "production-run" || !detail.recoverability.retryItemIds.length) return;
+    if (!window.confirm("将按原快照重新准备失败项并立即启动生产队列，已完成结果会保留。确定重试并立即启动？")) return;
+    const prepared = await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: detail.recoverability.retryItemIds });
+    if (!mounted.current || scope !== liveScope.current || prepared.projectId !== route.projectId) return;
+    if (prepared.ref.source !== detail.ref.source || prepared.ref.id !== detail.ref.id) {
+      await navigate({ ...route, run: prepared.ref });
+    }
+    await productClient.run.start(route.projectId, prepared.ref);
+  });
   const retryInput = (input: RunInput) => mutate(async () => {
     if (!detail || detail.projectId !== route.projectId || detail.ref.source !== "queue-batch"
       || detail.ref.id !== route.run?.id || route.run?.source !== "queue-batch"
@@ -118,6 +128,17 @@ export function useRunsController({ route, navigate }: RunsProps) {
     const confirm = runRecoveryPresentation(detail).retry?.confirm;
     if (confirm && !window.confirm(confirm)) return;
     await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: [input.itemId] });
+  });
+  const retryInputAndStart = (input: RunInput) => mutate(async () => {
+    if (!detail || detail.projectId !== route.projectId || detail.ref.source !== "queue-batch"
+      || detail.ref.id !== route.run?.id || route.run?.source !== "queue-batch"
+      || !detail.availableActions.includes("RETRY") || !input.itemId
+      || !detail.recoverability.retryItemIds.includes(input.itemId)
+      || !detail.detail?.inputs.some(item => item.itemId === input.itemId && item.taskId === input.taskId)) return;
+    if (!window.confirm("仅重试此镜头并立即启动队列？其他镜头和已完成结果保持不变。")) return;
+    const prepared = await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: [input.itemId] });
+    if (!mounted.current || scope !== liveScope.current || prepared.projectId !== route.projectId) return;
+    await productClient.run.start(route.projectId, prepared.ref);
   });
   const openShot = (input: RunInput) => {
     if (!input.shotId || detail?.projectId !== route.projectId || detail.ref.id !== route.run?.id || detail.ref.source !== route.run?.source
@@ -163,6 +184,6 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!detail || result.reviewRevision === null || !window.confirm("重新打开审核？原审核记录保留。")) return;
     await productClient.run.resultReviewReset(route.projectId, detail.ref, result.assetId, result.reviewRevision);
   });
-  return { reopenReview, list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, remove, retryInput, openShot, reuse, review, refresh };
+  return { reopenReview, list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, retryAndStart, remove, retryInput, retryInputAndStart, openShot, reuse, review, refresh };
 }
 export type RunsController = ReturnType<typeof useRunsController>;

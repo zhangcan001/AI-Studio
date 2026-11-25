@@ -1,6 +1,6 @@
 import { reviewLabel } from "./storyboardModel";
 import { ResultFileActions } from "../../components/ResultFileActions";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import type { ProductRun } from "../../product/types";
 import { queueRunLabel } from "./createModel";
@@ -25,6 +25,11 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
   // This component is keyed by project/Shot/Recipe. Preview is not Studio selection.
   const candidates = c.context?.candidates.filter(a => a.mediaKind === "video") ?? [];
   const [previewId, setPreviewId] = useState<string>();
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareLeftId, setCompareLeftId] = useState<string>();
+  const [compareRightId, setCompareRightId] = useState<string>();
+  const leftVideoRef = useRef<HTMLVideoElement>(null);
+  const rightVideoRef = useRef<HTMLVideoElement>(null);
   const [unavailable, setUnavailable] = useState(new Set<string>());
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [inspectorOpen, setInspectorOpen] = useState(() => typeof window === "undefined" || !window.matchMedia?.("(max-width: 1100px)").matches);
@@ -34,8 +39,12 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
     query?.addEventListener("change", resize);
     return () => query?.removeEventListener("change", resize);
   }, []);
+  useEffect(() => { if (candidates.length < 2 && compareMode) setCompareMode(false); }, [candidates.length, compareMode]);
   const current = candidates.find(a => a.id === previewId)
     ?? candidates.find(a => a.selected) ?? candidates[0];
+  const compareLeft = candidates.find(a => a.id === compareLeftId) ?? current ?? candidates[0];
+  const compareRight = candidates.find(a => a.id === compareRightId && a.id !== compareLeft?.id)
+    ?? candidates.find(a => a.id !== compareLeft?.id) ?? candidates[1] ?? candidates[0];
   // Execution comes from the existing RunRef projection, not candidate presence
   // or readiness. An acceptance receipt alone must never claim GPU completion.
   const runLabel = c.run ? c.run.status === "RUNNING" ? "生成中" : queueRunLabel(c.run)
@@ -59,12 +68,29 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
   return <>
     <div className="create-preview-column">
       <section className="create-video-stage" aria-label="视频预览">
-        <header><h2>视频预览</h2><span className="create-state-pill" role={current ? undefined : "status"} aria-label={current ? undefined : "视频生成状态"}>{current ? current.selected ? "已选用结果" : "候选预览" : runLabel ?? "等待生成"}</span></header>
+        <header><h2>视频预览</h2><div className="create-stage-head-actions">{candidates.length >= 2 && <button type="button" aria-pressed={compareMode} onClick={() => setCompareMode(v => !v)}>A/B 对比</button>}<span className="create-state-pill" role={current ? undefined : "status"} aria-label={current ? undefined : "视频生成状态"}>{current ? current.selected ? "已选用结果" : "候选预览" : runLabel ?? "等待生成"}</span></div></header>
         {current && runLabel && <p role="status" aria-label="视频生成状态">{runLabel}</p>}
-        <div className="create-video-screen">{current
+        {compareMode && compareLeft && compareRight ? <div className="create-ab-wrap" role="region" aria-label="候选视频 A/B 对比">
+          <div className="create-ab-grid">
+            {([{ slot: "A", asset: compareLeft, setAsset: setCompareLeftId, ref: leftVideoRef }, { slot: "B", asset: compareRight, setAsset: setCompareRightId, ref: rightVideoRef }] as const).map(side => <div key={side.slot} className="create-ab-pane">
+              <div className="create-ab-bar">
+                <select aria-label={`对比视频 ${side.slot}`} value={side.asset.id} onChange={e => side.setAsset(e.target.value)}>{candidates.map(item => <option key={item.id} value={item.id}>{item.name}{item.selected ? "（已选用）" : ""}</option>)}</select>
+                <button type="button" disabled={c.busy || side.asset.selected || side.asset.reviewState === "REJECTED" || unavailable.has(side.asset.id)} onClick={() => void c.selectResult(side.asset.id)}>{side.asset.selected ? "当前已选用" : `选用 ${side.slot}`}</button>
+              </div>
+              <video ref={side.ref} controls preload="metadata" aria-label={`对比预览 ${side.asset.name}`} src={productClient.creation.mediaUrl(route.projectId, side.asset.id, "video")} />
+            </div>)}
+          </div>
+          <div className="create-ab-bar">
+            <div className="create-stage-head-actions">
+              <button type="button" onClick={() => { const l = leftVideoRef.current, r = rightVideoRef.current; if (!l || !r) return; if (l.paused) { void l.play?.().catch(() => {}); void r.play?.().catch(() => {}); } else { l.pause(); r.pause(); } }}>同步播放 / 暂停</button>
+              <button type="button" onClick={() => { for (const v of [leftVideoRef.current, rightVideoRef.current]) { if (v) { v.currentTime = 0; void v.play?.().catch(() => {}); } } }}>从头同步对比</button>
+            </div>
+            <small>左右并排比对候选画面，选用不会自动修改审核状态。</small>
+          </div>
+        </div> : <div className="create-video-screen">{current
           ? <CreateMediaPreview key={`${route.projectId}:${current.id}:${previewAttempt}`} projectId={route.projectId} asset={current} onUnavailable={() => setUnavailable(previous => new Set([...previous,current.id]))} />
           : <div className="create-video-empty"><span aria-hidden="true">▷</span><h3>{c.run?.status === "RUNNING" ? "正在生成视频" : runLabel ? "查看本次运行" : "让创意开始流动"}</h3><p>{runMessage}</p><small>没有视频时不显示演示素材或模拟进度。</small></div>}
-        </div>
+        </div>}
         {current && <div className="create-preview-actions"><div><strong>{current.name}</strong><small>{current.selected ? "已选用；审核状态请在运行详情查看。" : "预览不会选用；选用不等于审核。"}</small></div><button type="button" disabled={c.busy || current.selected || current.reviewState==="REJECTED" || unavailable.has(current.id)} onClick={() => void c.selectResult(current.id)}>选用此结果</button></div>}
         <div className="create-action-row" aria-label="结果操作">
           {current && <ResultFileActions projectId={route.projectId} assetId={current.id}/>}
@@ -79,7 +105,7 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
       <section className="create-candidate-strip" aria-label="当前镜头候选"><header><h2>当前镜头候选 <small>{candidates.length} 个视频</small></h2><div><button type="button" disabled={c.busy} onClick={() => { void c.refresh(); setUnavailable(new Set()); setPreviewAttempt(n => n+1); }}>刷新结果</button><button type="button" aria-label="在资源库查看视频" onClick={() => c.openLibrary("videos")}>资源库</button></div></header>
         {c.run?.status === "FAILED" && <p>本次生成失败；已有候选和选用状态不会删除。</p>}
         {!candidates.length && <p>尚无此阶段的生成候选。</p>}
-        <div className="create-video-candidates">{candidates.map(asset => <button key={asset.id} type="button" className={`create-candidate-card ${current?.id === asset.id ? "previewing" : ""}`} aria-label={`预览${asset.name}`} aria-pressed={current?.id === asset.id} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /><strong>{asset.name}</strong><span>{asset.selected ? "已选用" : "候选"} · {reviewLabel(asset.reviewState)}</span></button>)}</div>
+        <div className="create-video-candidates">{candidates.map(asset => <button key={asset.id} type="button" className={`create-candidate-card ${current?.id === asset.id ? "previewing" : ""}`} draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId: route.projectId, assetId: asset.id, mediaKind: "video" })); e.dataTransfer.effectAllowed = "copy"; }} aria-label={`预览${asset.name}`} aria-pressed={current?.id === asset.id} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /><strong>{asset.name}</strong><span>{asset.selected ? "已选用" : "候选"} · {reviewLabel(asset.reviewState)}</span></button>)}</div>
         <small>切换仅预览 · 选用不等于审核 · 其他候选和历史运行保留</small>
       </section>
     </div>

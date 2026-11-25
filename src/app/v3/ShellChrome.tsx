@@ -3,7 +3,13 @@ import type { ComfyStatus } from "../../types/comfy";
 import type { AppRoute } from "../routes/types";
 import { routeTitle } from "../routes/selectors";
 
-type IconName = "overview" | "create" | "runs" | "library" | "settings" | "collapse";
+export interface TopbarQueueSummary {
+  label: string;
+  detail?: string;
+  onOpen: () => void;
+}
+
+type IconName = "overview" | "create" | "runs" | "library" | "settings" | "collapse" | "search" | "queue";
 const iconPaths: Record<IconName, string> = {
   overview: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
   create: "m8 5 11 7-11 7z M3 4v16",
@@ -11,6 +17,8 @@ const iconPaths: Record<IconName, string> = {
   library: "M3 6h7l2 2h9v12H3z M3 6V4h7l2 2",
   settings: "M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
   collapse: "M3 4h18v16H3z M8 4v16 M15 9l-3 3 3 3",
+  search: "M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14z M20 20l-4.35-4.35",
+  queue: "M5 6h14 M5 12h9 M5 18h9 M17 11l4 3.5-4 3.5z",
 };
 export function ShellIcon({ name }: { name: IconName }) {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={iconPaths[name]} /></svg>;
@@ -23,12 +31,17 @@ export function RuntimeConnectionIndicator({ runtime }: { runtime?: ComfyStatus 
     <span className="v3-runtime-dot" aria-hidden="true" /><span>ComfyUI <span>{label}</span></span>
   </span>;
 }
-export function ShellTopbar({ route, projectName, projectSelector, runtime, back }: {
+export function ShellTopbar({ route, projectName, projectSelector, runtime, back, queueSummary, onOpenPalette }: {
   route: AppRoute; projectName?: string; projectSelector: ReactNode; runtime?: ComfyStatus; back: () => void;
+  queueSummary?: TopbarQueueSummary; onOpenPalette?: () => void;
 }) {
   return <header className="v3-header">
-    <button type="button" className="v3-back" onClick={back} aria-label="返回">←</button>
+    <button type="button" className="v3-back" onClick={back} aria-label="返回" title="返回上一页"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5 M12 19l-7-7 7-7" /></svg></button>
     <nav className="v3-breadcrumbs" aria-label="当前位置"><span title={projectName}>{projectName ?? "项目空间"}</span><span aria-hidden="true">/</span><strong aria-current="page">{routeTitle(route)}</strong></nav>
+    {queueSummary && <button type="button" className="v3-queue-pill" onClick={queueSummary.onOpen} title={queueSummary.detail ?? "点击查看活动运行与生产队列"}>
+      <span className="v3-queue-pulse" aria-hidden="true" /><span>{queueSummary.label}</span>
+    </button>}
+    {onOpenPalette && <button type="button" className="v3-quick-jump" onClick={onOpenPalette} aria-label="快速跳转" title="快速跳转页面或镜头（Alt+K / Ctrl+Shift+K）"><ShellIcon name="search" /><span>快速跳转</span></button>}
     <label className="v3-project-picker"><span>项目切换</span>{projectSelector}</label>
     <RuntimeConnectionIndicator runtime={runtime} />
   </header>;

@@ -32,6 +32,7 @@ interface RowsProps {
   onQueue: (ref?: RunRef) => void;
   onReview?: (shotId: string) => void;
   onMove?: (shotId: string, delta: -1 | 1) => void;
+  onMoveTo?: (shotId: string, targetIndex: number) => void;
   onInsert?: (shotId: string) => void;
   shotIndex?: CreationShotSummary[];
   focusId?: string;
@@ -47,9 +48,17 @@ interface RowsProps {
  * duration and aspect/resolution persist through creation.updateShot (stage
  * prompt + generator scalar values validated by the selected recipe).
  */
-export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, onMove, onInsert, focusId, shotIndex = [], overview=items, onLocate }: RowsProps) {
+export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, onMove, onMoveTo, onInsert, focusId, shotIndex = [], overview=items, onLocate }: RowsProps) {
   const [query, setQuery] = useProjectSessionState(projectId, "storyboard.search", "", (v): v is string => typeof v === "string");
   const [filter, setFilter] = useProjectSessionState<(typeof FILTERS)[number]>(projectId, "storyboard.filter", "ALL", (v): v is (typeof FILTERS)[number] => FILTERS.includes(v as (typeof FILTERS)[number]));
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchDuration, setBatchDuration] = useState("");
+  const [batchPresetId, setBatchPresetId] = useState("");
+  const [batchWorking, setBatchWorking] = useState(false);
+  const [batchNotice, setBatchNotice] = useState<string>();
+  const [batchError, setBatchError] = useState<string>();
+  useEffect(() => { setSelectMode(false); setSelectedIds([]); setBatchNotice(undefined); setBatchError(undefined); }, [projectId]);
   const [entities, setEntities] = useState<StoryEntity[]>([]);
   const [entitiesOwner, setEntitiesOwner] = useState<string>();
   const [entitiesError, setEntitiesError] = useState<{ projectId: string; message: string }>();
@@ -91,6 +100,35 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   // Compatibility for standalone callers which only have the old name index;
   // never invent status matches when global metadata is unavailable.
   const nameOnly=overview===items&&q&&filter==="ALL"?shotIndex.filter(s=>!items.some(i=>i.id===s.id)&&s.name.toLowerCase().includes(q)):[];
+  const batchGen = rowGenerator(generators, null);
+  const batchPresets = batchGen?.resolutionPresets ?? [];
+  const applyBatchConfig = async () => {
+    if (batchWorking || !selectedIds.length || !batchGen) return;
+    const values: import("../../types/shot").ShotInputValues = {};
+    if (batchDuration.trim()) {
+      const durField = batchGen.fields.find(f => f.key === "duration_seconds" && (f.type === "integer" || f.type === "number"));
+      const num = Number(batchDuration);
+      const issue = editableDurationIssue(num, durField);
+      if (issue) { setBatchError(issue); return; }
+      if (durField) values.duration_seconds = { type: durField.type === "number" ? "number" : "integer", value: num };
+    }
+    if (batchPresetId) {
+      const preset = batchPresets.find(p => p.id === batchPresetId);
+      if (preset) {
+        values.width = { type: "integer", value: preset.width };
+        values.height = { type: "integer", value: preset.height };
+      }
+    }
+    if (!Object.keys(values).length) { setBatchError("请至少选择要批量应用的时长或分辨率预设。"); return; }
+    setBatchWorking(true); setBatchError(undefined); setBatchNotice(undefined);
+    try {
+      await productClient.creation.shotsConfigure(projectId, { shotIds: selectedIds, selectionRef: batchGen.selectionRef, values });
+      setBatchNotice(`已为 ${selectedIds.length} 个分镜批量更新设置。`);
+      onChanged();
+    } catch (cause) { setBatchError(normalizeProductError(cause).message); }
+    finally { setBatchWorking(false); }
+  };
+  const totalShotCount = shotIndex.length || items.length;
   return <section className="storyboard-shot-rows" aria-label="分镜编辑">
     <div className="storyboard-shot-toolbar">
       <input type="search" aria-label="搜索分镜" placeholder="全项目镜头名 / 提示词" value={query} onChange={e => setQuery(e.target.value)} />
@@ -98,13 +136,26 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       <div role="group" aria-label="状态筛选" className="storyboard-shot-filters">
         {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : key === "REVIEW" ? "待审核" : key === "UNSELECTED" ? "待选用" : storyboardStatusLabels[key]}</button>)}
       </div>
+      <button type="button" aria-pressed={selectMode} onClick={() => { setSelectMode(v => !v); setSelectedIds([]); setBatchError(undefined); setBatchNotice(undefined); }}>批量选择</button>
       <button type="button" onClick={() => onQueue()}>任务队列</button>
       <button type="button" onClick={() => setRev(v => v + 1)}>刷新角色与场景</button>
     </div>
+    {selectMode && <div className="storyboard-batch-bar" role="region" aria-label="分镜批量操作">
+      <span>已选 {selectedIds.length} 镜</span>
+      <button type="button" disabled={!visible.length || batchWorking} onClick={() => setSelectedIds(visible.map(i => i.id))}>全选本页</button>
+      <button type="button" disabled={!selectedIds.length || batchWorking} onClick={() => setSelectedIds([])}>清空选择</button>
+      <input type="number" aria-label="批量时长（秒）" placeholder="时长(秒)" min={1} max={shotDurationMax()} value={batchDuration} onChange={e => setBatchDuration(e.target.value)} />
+      {batchPresets.length > 0 && <select aria-label="批量分辨率预设" value={batchPresetId} onChange={e => setBatchPresetId(e.target.value)}><option value="">不改分辨率</option>{batchPresets.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select>}
+      <button type="button" className="primary" disabled={!selectedIds.length || batchWorking || !batchGen} onClick={() => void applyBatchConfig()}>{batchWorking ? "正在应用…" : "批量应用参数"}</button>
+      {batchNotice && <span role="status">{batchNotice}</span>}
+      {batchError && <span role="alert" className="storyboard-error">{batchError}</span>}
+    </div>}
     {entityFailure && <p role="alert" className="storyboard-error">角色与场景读取失败：{entityFailure} <button type="button" onClick={() => setRev(v => v + 1)}>重试角色与场景</button></p>}
     {generatorFailure && <p role="alert" className="storyboard-error">生成器读取失败：{generatorFailure} <button type="button" onClick={() => setGeneratorsRev(v => v + 1)}>重试生成器</button></p>}
     {visible.map(item => <ShotRowCard focused={focusId===item.id} key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
+      selectable={selectMode} selected={selectedIds.includes(item.id)} onToggleSelect={() => setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id])}
+      totalCount={totalShotCount} onMoveTo={onMoveTo}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} isFirst={shotIndex.length ? item.id === shotIndex[0]?.id : item.id === items[0]?.id} isLast={shotIndex.length ? item.id === shotIndex[shotIndex.length-1]?.id : item.id === items[items.length-1]?.id} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} onMove={onMove ? delta => onMove(item.id, delta) : undefined} onInsert={onInsert ? () => onInsert(item.id) : undefined} />)}
     {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>其他页符合条件的镜头，点击定位后编辑；筛选覆盖全项目。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onLocate ? onLocate(s.id) : onOpen(s.id)}>定位{s.name} · {storyboardStatusText(s)}</button>)}</section>}
     {nameOnly.length>0&&<section aria-label="未加载镜头名称搜索结果"><p>以下仅匹配名称，尚无状态详情。</p>{nameOnly.map(s=><button type="button" key={s.id} onClick={()=>onOpen(s.id)}>打开{s.name}</button>)}</section>}
@@ -196,7 +247,7 @@ const SECTION_FIELDS: [keyof ShotPromptSections, string, string][] = [
   ["music", "配乐", "1 句英文；没有配乐留空即可"],
 ];
 
-function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview, onMove, onInsert, isFirst, isLast, focused }: {
+function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview, onMove, onMoveTo, totalCount = 0, selectable = false, selected = false, onToggleSelect, onInsert, isFirst, isLast, focused }: {
   projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
   onRun: (ref: RunRef) => void;
@@ -204,10 +255,19 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   isFirst?: boolean;
   isLast?: boolean;
   focused?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  totalCount?: number;
   onMove?: (delta: -1 | 1) => void;
+  onMoveTo?: (shotId: string, targetIndex: number) => void;
   onInsert?: () => void;
 }) {
   const lightbox = useMediaLightbox();
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [atMention, setAtMention] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [atIdx, setAtIdx] = useState(0);
+  const [dragOver, setDragOver] = useState(false);
   const [entityQuery, setEntityQuery] = useState("");
   const [bound, setBound] = useState<StoryEntity[]>([]);
   const draftKey = JSON.stringify([projectId, item.id, item.shot?.selectionRef ?? null]);
@@ -608,8 +668,48 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   const byKind = useMemo(() => Object.fromEntries(KINDS.map(k => [k, bound.filter(e => e.kind === k)])) as Record<StoryEntityKind, StoryEntity[]>, [bound]);
   const chips = (list: StoryEntity[]) => list.length ? list.map(e => <span key={e.id} className="shot-row-inline-chip"><Avatar entity={e} url={(entityAvatarAssetId(e) && urls[entityAvatarAssetId(e)!]) || undefined} />{e.name}</span>) : <span className="muted">未绑定</span>;
   const content = renderPrompt(prompt, entities, urls);
-  return <article id={`storyboard-shot-${item.id}`} data-focused={focused||undefined} className="shot-row-card" aria-label={`分镜 ${item.ordinal + 1} ${item.name}`} data-status={item.status}>
-    <div className="shot-row-index">{item.ordinal + 1}</div>
+  const atMatches = useMemo(() => {
+    if (!atMention || !entities.length) return [];
+    const q = atMention.query.toLowerCase();
+    return entities.filter(e => !q || e.name.toLowerCase().includes(q));
+  }, [atMention, entities]);
+  const updateAtState = (text: string, caretPos: number | null) => {
+    if (caretPos === null || !entities.length) { setAtMention(null); return; }
+    const prefix = text.slice(0, caretPos);
+    const match = /(?:^|\s)@([^\s@]*)$/.exec(prefix);
+    if (!match) { setAtMention(null); return; }
+    const start = caretPos - match[1].length - 1;
+    setAtMention({ start, end: caretPos, query: match[1] });
+    setAtIdx(0);
+  };
+  const applyAtEntity = (entity: StoryEntity) => {
+    if (!atMention) return;
+    const token = `@${entity.name} `;
+    const next = `${prompt.slice(0, atMention.start)}${token}${prompt.slice(atMention.end)}`;
+    setPrompt(next);
+    setAtMention(null);
+    const nextPos = atMention.start + token.length;
+    setTimeout(() => { if (promptRef.current) { promptRef.current.focus(); promptRef.current.setSelectionRange(nextPos, nextPos); } }, 0);
+  };
+  return <article id={`storyboard-shot-${item.id}`} data-focused={focused||undefined} data-drag-over={dragOver||undefined} className="shot-row-card" aria-label={`分镜 ${item.ordinal + 1} ${item.name}`} data-status={item.status}
+    onDragOver={e => { if (disabled || !onMoveTo || !e.dataTransfer.types.includes("application/x-aistudio-shot")) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!dragOver) setDragOver(true); }}
+    onDragLeave={() => { if (dragOver) setDragOver(false); }}
+    onDrop={e => {
+      setDragOver(false);
+      if (disabled || !onMoveTo) return;
+      const raw = e.dataTransfer.getData("application/x-aistudio-shot");
+      if (!raw) return;
+      e.preventDefault();
+      try {
+        const payload = JSON.parse(raw) as { projectId?: string; shotId?: string };
+        if (payload.projectId === projectId && payload.shotId && payload.shotId !== item.id) onMoveTo(payload.shotId, item.ordinal);
+      } catch { /* ignore malformed drag payload */ }
+    }}>
+    <div className="shot-row-index-col">
+      {selectable && <input type="checkbox" aria-label={`选择分镜 ${item.name}`} checked={selected} onChange={onToggleSelect} />}
+      <div className="shot-row-index">{item.ordinal + 1}</div>
+      {onMoveTo && totalCount > 1 && <span className="shot-row-drag" draggable={!disabled} title="按住拖拽调整分镜顺序" aria-hidden="true" onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-shot", JSON.stringify({ projectId, shotId: item.id })); e.dataTransfer.effectAllowed = "move"; }}>⋮⋮</span>}
+    </div>
     <div className="shot-row-media">
       <div className="shot-row-preview">{cover ? <CandidateThumbnail asset={cover} playable /> : <span className="storyboard-cover-empty">暂无结果</span>}
         {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} title="任务完成比例，不是视频推理百分比" aria-label={runProgressText(item.run)}>{item.run ? `${item.run.progress.succeeded+item.run.progress.failed+item.run.progress.cancelled}/${item.run.progress.total}` : "—"}</span>}</div>
@@ -626,8 +726,24 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.filter(e => bound.some(b => b.id === e.id) || (entityQuery.trim() && e.name.toLowerCase().includes(entityQuery.trim().toLowerCase()))).map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button><button type="button" disabled={bindingsDisabled} aria-label={`插入 @${e.name}`} onClick={() => { const next = `${prompt}${prompt && !/\s$/.test(prompt) ? " " : ""}@${e.name}`; setPrompt(next); useStudioStore.getState().setStoryboardPrompt(draftKey, next); }}>插入 @{e.name}</button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>
     <div className="shot-row-prompt">
-      <textarea aria-label={`${item.name} 提示词`} placeholder="续写提示词...（可写 5秒 / 16:9 / 0.98MP / 50万像素 / @角色名，自动识别）" value={prompt} disabled={bindingsDisabled}
-        onChange={e => setPrompt(e.target.value)} onBlur={e => { deferredPromptBlur.current = e.relatedTarget === generateButton.current; if (!deferredPromptBlur.current && !(e.relatedTarget instanceof HTMLElement && e.relatedTarget.closest("[data-discard-prompt]"))) savePrompt(); }} onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); savePrompt(); } }} title="失焦或 Ctrl+Enter 保存；时长、画幅、分辨率、@角色 会被自动识别并填入" />
+      <div className="shot-row-prompt-box">
+        <textarea ref={promptRef} aria-label={`${item.name} 提示词`} placeholder="续写提示词...（输入 @ 唤起角色/场景补全，可写 5秒 / 16:9 / 0.98MP / 50万像素，自动识别）" value={prompt} disabled={bindingsDisabled}
+          onChange={e => { setPrompt(e.target.value); updateAtState(e.target.value, e.target.selectionStart); }}
+          onClick={e => updateAtState(e.currentTarget.value, e.currentTarget.selectionStart)}
+          onBlur={e => { setAtMention(null); deferredPromptBlur.current = e.relatedTarget === generateButton.current; if (!deferredPromptBlur.current && !(e.relatedTarget instanceof HTMLElement && e.relatedTarget.closest("[data-discard-prompt]"))) savePrompt(); }}
+          onKeyDown={e => {
+            if (atMatches.length > 0 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+              if (e.key === "ArrowDown") { e.preventDefault(); setAtIdx(i => (i + 1) % atMatches.length); return; }
+              if (e.key === "ArrowUp") { e.preventDefault(); setAtIdx(i => (i - 1 + atMatches.length) % atMatches.length); return; }
+              if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); applyAtEntity(atMatches[atIdx] ?? atMatches[0]); return; }
+              if (e.key === "Escape") { e.preventDefault(); setAtMention(null); return; }
+            }
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); setAtMention(null); savePrompt(); }
+          }} title="输入 @ 自动补全角色/场景；失焦或 Ctrl+Enter 保存；时长、画幅、分辨率会被自动识别并填入" />
+        {atMatches.length > 0 && <ul className="shot-row-at-menu" role="listbox" aria-label={`${item.name} 插入实体`}>
+          {atMatches.map((entity, idx) => <li key={entity.id}><button type="button" role="option" aria-selected={idx === atIdx} className={idx === atIdx ? "shot-row-at-active" : undefined} onMouseDown={e => e.preventDefault()} onMouseEnter={() => setAtIdx(idx)} onClick={() => applyAtEntity(entity)}><Avatar entity={entity} url={(entityAvatarAssetId(entity) && urls[entityAvatarAssetId(entity)!]) || undefined} /><span>@{entity.name}</span><small className="muted">{KIND_LABEL[entity.kind]}</small></button></li>)}
+        </ul>}
+      </div>
       {fieldsDraft && <section aria-label="未保存的镜头字段"><p role="status">名称、时长或提示词分段尚未保存；本次会话内筛选、翻页后可恢复。</p>
         {fieldsDraft.name!==undefined&&<button type="button" disabled={bindingsDisabled} onClick={saveName}>重试保存名称</button>}
         {fieldsDraft.duration!==undefined&&<button type="button" disabled={bindingsDisabled} onClick={saveDuration}>重试保存时长</button>}
@@ -694,6 +810,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       {KINDS.map(kind => <label key={kind}><span>{KIND_LABEL[kind]}</span><output>{byKind[kind].map(e => `@${e.name}`).join("、") || "—"}</output></label>)}
       <div className="shot-row-field-actions">
         {onMove && <><button type="button" disabled={disabled || isFirst} onClick={() => onMove(-1)}>上移</button><button type="button" disabled={disabled || isLast} onClick={() => onMove(1)}>下移</button></>}
+        {onMoveTo && totalCount > 1 && <label className="shot-row-jump">移至<select aria-label={`${item.name} 移至镜号`} value={item.ordinal} disabled={disabled} onChange={e => onMoveTo(item.id, Number(e.target.value))}>{Array.from({ length: totalCount }, (_, idx) => <option key={idx} value={idx}>第 {idx + 1} 镜</option>)}</select></label>}
         {onInsert && <button type="button" disabled={disabled} onClick={onInsert}>在此后插入</button>}
         <button type="button" className="success" disabled={disabled} title="新分镜追加到末尾" onClick={onCreate}>末尾新建分镜</button>
         <button type="button" className="danger" disabled={disabled} onClick={remove}>删除分镜</button>

@@ -181,13 +181,13 @@ export function ImageAssetPicker({
       {busy && <p role="status">正在加载图片…</p>}
       {!busy && !libraryRows.length && !localRows.length && <p className="image-asset-picker-empty">没有可选用的图片。可从电脑导入，或先在资源库添加素材。</p>}
       <div className="image-asset-picker-grid" role="listbox" aria-label="图片网格">
-        {localRows.map(a => <button key={`local-${a.id}`} type="button" role="option" aria-selected="false" className="image-asset-tile" onClick={() => { onSelect(a.id); onClose(); }}>
+        {localRows.map(a => <button key={`local-${a.id}`} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: a.id, mediaKind: "image" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(a.id); onClose(); }}>
           <AssetImageThumb projectId={projectId} assetId={a.id} name={a.name} size="lg" interactive={false} />
           <span className="image-asset-tile-name">{a.name}</span>
         </button>)}
         {libraryRows.map(item => {
           const id = item.resourceRef.kind === "asset" ? item.resourceRef.id : "";
-          return <button key={id} type="button" role="option" aria-selected="false" className="image-asset-tile" onClick={() => { onSelect(id); onClose(); }}>
+          return <button key={id} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: id, mediaKind: "image" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(id); onClose(); }}>
             <AssetImageThumb projectId={projectId} assetId={id} name={item.title} size="lg" interactive={false} />
             <span className="image-asset-tile-name">{item.title}</span>
           </button>;

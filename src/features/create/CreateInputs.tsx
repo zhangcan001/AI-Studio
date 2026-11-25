@@ -6,10 +6,10 @@ import { fieldLabel, packageOptionLabel } from "./createModel";
 import { AssetImageThumb } from "./CreateMediaPreview";
 import { modeLabel } from "../../product/generatorPresentation";
 const VIDEO_MODE_CARDS = [
-  { label: "文生视频", hint: "通过文字描述生成视频", icon: "Aa" },
-  { label: "图生视频", hint: "基于图片生成动态视频", icon: "▣" },
-  { label: "首尾帧", hint: "指定首尾帧生成过渡视频", icon: "◧" },
-  { label: "混合参考", hint: "结合多种参考生成视频", icon: "✣" },
+  { label: "文生视频", hint: "通过文字描述生成视频", path: "M4 7V5h16v2 M12 5v14 M9 19h6" },
+  { label: "图生视频", hint: "基于图片生成动态视频", path: "M4 5h16v14H4z M8.5 10a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3z M20 15l-4.5-4.5L6 19" },
+  { label: "首尾帧", hint: "指定首尾帧生成过渡视频", path: "M3 5h7v14H3z M14 5h7v14h-7z M10 12h4" },
+  { label: "混合参考", hint: "结合多种参考生成视频", path: "M12 3l3 6 6 3-6 3-3 6-3-6-6-3 6-3z" },
 ] as const;
 export function GeneratorPanel({ controller: c }: { controller: CreateController }) {
   const currentMode = c.generator ? modeLabel(c.generator) : undefined;
@@ -22,7 +22,7 @@ export function GeneratorPanel({ controller: c }: { controller: CreateController
     <div className="create-mode-cards" role="radiogroup" aria-label="视频模式卡片">{VIDEO_MODE_CARDS.map(card => {
       const available = c.generators.some(item => item.mediaKind === "video" && item.availability && modeLabel(item) === card.label);
       return <button key={card.label} type="button" role="radio" aria-checked={currentMode === card.label} className="create-mode-card" disabled={c.busy || c.videoInputs.busy || !available} title={available ? card.hint : "当前项目没有可用的此模式生成器"} onClick={() => pick(card.label)}>
-        <span aria-hidden="true" className="create-mode-icon">{card.icon}</span><strong>{card.label}</strong><small>{available ? card.hint : "暂无可用生成器"}</small></button>;
+        <span aria-hidden="true" className="create-mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={card.path} /></svg></span><strong>{card.label}</strong><small>{available ? card.hint : "暂无可用生成器"}</small></button>;
     })}</div>
     <label className="create-generator-select">生成器<select id="create-field-selectionRef" aria-label="选择生成器" value={c.selection} disabled={c.busy || c.videoInputs.busy} onChange={e => c.chooseGenerator(e.target.value)}>
     <option value="">请选择</option>{c.generators.filter(item => item.mediaKind === "video" || item.selectionRef === c.selection).map((item, index) => <option key={item.selectionRef} value={item.selectionRef} disabled={!item.availability}>{packageOptionLabel(item, index)}{!item.availability ? "（不可用）" : ""}</option>)}
@@ -95,7 +95,7 @@ export function ResolutionPicker({ controller: c, presets, current }: { controll
   const tiers = resolutionTierPresets(presets, current);
   const currentMp = current ? presetMegapixels(current) : null;
   return <span className="composer-resolution-group">
-    <label className="composer-pick" title="分辨率">▣<select id="create-field-resolution" aria-label="视频分辨率" value={current?.id ?? ""} disabled={c.busy} onChange={e => c.chooseResolution(e.target.value)}>{!current && <option value="" disabled>自定义</option>}{list.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label>
+    <label className="composer-pick" title="分辨率"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z M8 10h8" /></svg><select id="create-field-resolution" aria-label="视频分辨率" value={current?.id ?? ""} disabled={c.busy} onChange={e => c.chooseResolution(e.target.value)}>{!current && <option value="" disabled>自定义</option>}{list.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label>
     {tiers.preview && <button type="button" className="composer-tier" aria-pressed={current?.id === tiers.preview.id || currentMp === PREVIEW_MP} disabled={c.busy || current?.id === tiers.preview.id} title={`预览约 ${PREVIEW_MP}MP（仍为高质量工作流，不是已退役的快速预览包）`} onClick={() => c.chooseResolution(tiers.preview!.id)}>预览</button>}
     {tiers.final && <button type="button" className="composer-tier" aria-pressed={current?.id === tiers.final.id || currentMp === FINAL_MP} disabled={c.busy || current?.id === tiers.final.id} title={`成片约 ${FINAL_MP}MP`} onClick={() => c.chooseResolution(tiers.final!.id)}>成片</button>}
   </span>;

@@ -86,4 +86,13 @@ describe("project-first shell and facade overview", () => {
     expect(useStudioStore.getState().values.prompt).toEqual({ type: "string", value: "unsaved draft" });
     await waitFor(() => expect(localStorage.getItem("aistudio.appRoute.v2")).toContain('"create"'));
   });
+  it("opens the quick jump palette via Alt+K and navigates to the selected page", async () => {
+    const navigate = vi.fn();
+    render(<AppShellV3 route={{ kind: "project", projectId: "A", page: "overview" }} projectName="项目 A" projectSelector={null} navigate={navigate} back={vi.fn()}><p>content</p></AppShellV3>);
+    fireEvent.keyDown(window, { key: "k", altKey: true });
+    const searchInput = await screen.findByLabelText("搜索页面或镜头");
+    fireEvent.change(searchInput, { target: { value: "素材库" } });
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+    expect(navigate).toHaveBeenLastCalledWith({ kind: "library", projectId: "A" });
+  });
 });

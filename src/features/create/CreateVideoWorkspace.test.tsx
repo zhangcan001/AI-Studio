@@ -343,3 +343,18 @@ it("R14: only explicit Start availability marks a READY queue projection as wait
  expect(queueRunLabel({status:"QUEUED",errorSummary:null,availableActions:["START"]})).toBe("待启动");
  expect(queueRunLabel({status:"QUEUED",errorSummary:null,availableActions:["PAUSE"]})).toBe("排队中");
 });
+
+it("supports side-by-side A/B candidate comparison and internal asset drag-drop into media slots",async()=>{
+ candidates=[{id:"a",name:"候选A",mediaKind:"video",selected:false},{id:"b",name:"候选B",mediaKind:"video",selected:false}];
+ await start();
+ fireEvent.click(screen.getByRole("button",{name:"A/B 对比"}));
+ const abRegion=screen.getByRole("region",{name:"候选视频 A/B 对比"});
+ expect(abRegion.querySelectorAll("video")).toHaveLength(2);
+ fireEvent.click(within(abRegion).getByRole("button",{name:"选用 B"}));
+ await waitFor(()=>expect(api.selectResult).toHaveBeenCalledWith("owned","one","video","b"));
+ await mode("opaque-1");
+ const slot=document.querySelector('[aria-label="首帧输入"]')!;
+ expect(slot).toBeTruthy();
+ fireEvent.drop(slot,{dataTransfer:{getData:(t:string)=>t==="application/x-aistudio-asset"?JSON.stringify({projectId:"owned",assetId:"first",mediaKind:"image"}):"",types:["application/x-aistudio-asset"]}});
+ expect(useStudioStore.getState().values.first_frame).toEqual({type:"image_asset",assetId:"first"});
+});

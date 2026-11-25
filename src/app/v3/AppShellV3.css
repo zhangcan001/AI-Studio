@@ -79,3 +79,18 @@
 .v3-primary-nav button[aria-current="page"] { box-shadow:inset 3px 0 0 var(--studio-accent); }
 .v3-secondary button, .v3-secondary summary { font-size:11px; padding:4px; text-align:center; }
 .v3-collapse .v3-nav-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.v3-back { display:inline-flex; align-items:center; justify-content:center; min-width:36px; min-height:36px; }
+.v3-queue-pill { display:inline-flex; align-items:center; gap:var(--studio-space-2); padding:6px 12px; border-radius:999px; border:1px solid var(--studio-accent); background:var(--studio-accent-soft); color:var(--studio-accent-hover); font-size:var(--studio-font-xs); font-weight:600; font-variant-numeric:tabular-nums; }
+.v3-queue-pulse { width:8px; height:8px; border-radius:50%; background:var(--studio-accent); box-shadow:0 0 0 3px var(--studio-accent-soft); }
+.v3-quick-jump { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; font-size:var(--studio-font-xs); color:var(--studio-text-secondary); }
+.v3-quick-jump svg { width:15px; height:15px; }
+.v3-palette { width:min(560px,92vw); max-height:76vh; margin:10vh auto auto; padding:0; border:1px solid var(--studio-border-strong); border-radius:var(--studio-radius-lg); background:var(--studio-surface-1); color:var(--studio-text); box-shadow:var(--studio-shadow-popover); }
+.v3-palette::backdrop { background:rgba(0,0,0,.55); }
+.v3-palette-box { display:flex; flex-direction:column; max-height:76vh; }
+.v3-palette-head { display:flex; gap:var(--studio-space-2); padding:var(--studio-space-3); border-bottom:1px solid var(--studio-border); }
+.v3-palette-head input { flex:1; min-width:0; }
+.v3-palette-list { list-style:none; margin:0; padding:var(--studio-space-2); overflow:auto; display:grid; gap:4px; }
+.v3-palette-list button { width:100%; display:flex; align-items:center; justify-content:space-between; gap:var(--studio-space-3); text-align:left; background:transparent; border-color:transparent; }
+.v3-palette-list button.v3-palette-active { background:var(--studio-accent-soft); border-color:var(--studio-accent); color:var(--studio-text); }
+.v3-palette-list small { color:var(--studio-text-muted); font-size:var(--studio-font-xs); }
+.v3-palette-empty { padding:var(--studio-space-4); text-align:center; color:var(--studio-text-muted); font-size:var(--studio-font-sm); }

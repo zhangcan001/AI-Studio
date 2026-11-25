@@ -434,3 +434,21 @@ it("R19: legacy production retry explicitly confirms immediate generation", asyn
   expect(api.retry).not.toHaveBeenCalled();
   confirm.mockRestore();
 });
+
+it("1-click retryAndStart prepares the retry queue and immediately starts it", async () => {
+  const queueRef = { source: "queue-batch", id: "prepared-queue" } as const;
+  api.get.mockResolvedValue({ ...run, availableActions: ["RETRY"], recoverability: { retryItemIds: ["failed-item"], reviewRequired: 0 } });
+  api.retry.mockResolvedValue({ ...run, ref: queueRef, status: "PAUSED", availableActions: ["START"] });
+  api.start.mockResolvedValue({ ...run, ref: queueRef, status: "RUNNING", availableActions: ["CANCEL"] });
+  const navigate = vi.fn();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={navigate} />);
+    fireEvent.click(await screen.findByRole("button", { name: "重试并立即启动" }));
+    await waitFor(() => expect(api.start).toHaveBeenCalledWith("project-a", queueRef));
+    expect(api.retry).toHaveBeenCalledWith("project-a", { ref, selectedItemIds: ["failed-item"] });
+    expect(navigate).toHaveBeenCalledWith({ kind: "runs", projectId: "project-a", run: queueRef });
+  } finally {
+    confirm.mockRestore();
+  }
+});

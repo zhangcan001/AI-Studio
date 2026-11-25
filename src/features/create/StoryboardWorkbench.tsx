@@ -61,6 +61,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const [reviewId, setReviewId] = useState<string>();
   const [reviewRun, setReviewRun] = useState<{projectId:string;shotId:string;run:ProductRun}>();
   const [selectedId, setSelectedId] = useState<string>();
+  const [roughCutOpen, setRoughCutOpen] = useState(false);
   const [runRoute, setRunRoute] = useState<Extract<AppRoute, { kind: "runs" }>>();
   const [shotQuery, setShotQuery] = useProjectSessionState(route.projectId, "storyboard.inline-search", "", (v): v is string => typeof v === "string");
   const libraryIntent = useStudioStore(state => state.pendingLibraryIntent);
@@ -199,6 +200,11 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
 
   const allItems=overview?.projectId===projectId?overview.items:items??[];
   const stats = useMemo(() => storyboardStats(allItems), [allItems]);
+  const playableSequence = useMemo(() => allItems.flatMap(item => {
+    const asset = coverAsset(item);
+    return asset && asset.mediaKind === "video" ? [{ item, asset }] : [];
+  }), [allItems]);
+  useEffect(() => { setRoughCutOpen(false); }, [projectId]);
   const shotIndex = index?.projectId === projectId ? index.shots : [];
   useEffect(() => {
     if (!route.shotId || index?.projectId !== projectId) return;
@@ -278,6 +284,22 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
       if (mounted.current && scope.current === projectId) locateOrderedShot(id,ids,"镜头已移动");
     } catch(cause) { if (mounted.current && scope.current === projectId) setOrderError(normalizeProductError(cause).message); }
     finally { orderLock.current=false; setOrderPending(false); }
+  };
+  const moveShotTo = async (id: string, targetPosition: number) => {
+    if (orderLock.current) return;
+    orderLock.current = true; setOrderPending(true); setOrderError(undefined); setOrderNotice(undefined);
+    try {
+      const shots = await productClient.creation.shotsList(projectId);
+      const ids = shots.filter(s => s.projectId === projectId).sort((a,b) => a.ordinal-b.ordinal || a.id.localeCompare(b.id)).map(s => s.id);
+      const from = ids.indexOf(id);
+      const to = Math.max(0, Math.min(ids.length - 1, targetPosition));
+      if (from < 0 || from === to) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, id);
+      await productClient.creation.shotsReorder(projectId, ids);
+      if (mounted.current && scope.current === projectId) locateOrderedShot(id, ids, "镜头已移动");
+    } catch (cause) { if (mounted.current && scope.current === projectId) setOrderError(normalizeProductError(cause).message); }
+    finally { orderLock.current = false; setOrderPending(false); }
   };
   const insertShot = async (afterId: string) => {
     if (orderLock.current) return;
@@ -363,7 +385,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <button type="button" disabled={busy} onClick={() => void load()}>刷新</button>
         </div></header>
         {!items.length && shotIndex.length === 0 ? <div className="storyboard-empty"><h3>开始你的第一个镜头</h3><p>分镜工作台只显示真实镜头和真实生成结果，不会显示演示素材。</p><button type="button" className="primary" disabled={busy || creating} onClick={() => void createShot()}>创建第一个镜头</button></div>
-          : view === "shots" ? <StoryboardShotRows focusId={focusId} projectId={projectId} items={items.map(item => statusUncertain ? {...item,error:"运行状态读取失败，确认恢复前不能重复生成。"} : item)} shotIndex={shotIndex} overview={allItems} onLocate={locateShot} busy={busy || creating || orderPending} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
+          : view === "shots" ? <StoryboardShotRows focusId={focusId} projectId={projectId} items={items.map(item => statusUncertain ? {...item,error:"运行状态读取失败，确认恢复前不能重复生成。"} : item)} shotIndex={shotIndex} overview={allItems} onLocate={locateShot} busy={busy || creating || orderPending} onOpen={openShot} onCreate={() => void createShot(false)} onChanged={() => void load()} onReview={id => setReviewId(id)} onMove={(id,d)=>void moveShot(id,d)} onMoveTo={(id,pos)=>void moveShotTo(id,pos)} onInsert={id=>void insertShot(id)} onQueue={ref => setRunRoute({ kind: "runs", projectId, run: ref })} />
           : view === "grid" ? <div className="storyboard-cards grid" data-view="grid">{items.map(item => <ShotCard key={item.id} item={item} selected={selected?.id === item.id} onSelect={() => setSelectedId(item.id)} onOpen={() => openShot(item.id)} onRun={() => openRun(item)} onReview={() => setReviewId(item.id)} />)}</div>
           : <div className="storyboard-rows" role="table" aria-label="镜头列表（列表模式）" data-view="list">
             <div role="row" className="storyboard-row head"><span role="columnheader">缩略图</span><span role="columnheader">镜头</span><span role="columnheader">状态</span><span role="columnheader">时长</span><span role="columnheader">分辨率</span><span role="columnheader">候选</span><span role="columnheader">操作</span></div>
@@ -376,12 +398,13 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
         <section className="storyboard-panel storyboard-detail" aria-label="镜头详情"><header><h2>镜头详情</h2>{selected && <span className="storyboard-detail-actions">{canReview(selected) && <button type="button" onClick={() => setReviewId(selected.id)}>审核</button>}<button type="button" onClick={() => openShot(selected.id)}>设置与生成</button></span>}</header>
           {selected ? <ShotDetail item={selected} /> : <p className="storyboard-empty-note">选择一个镜头查看详情。</p>}
         </section>
-        <section className="storyboard-panel storyboard-sequence" aria-label="镜头序列"><header><h2>镜头序列 <small>{stats.total}</small></h2></header>
+        <section className="storyboard-panel storyboard-sequence" aria-label="镜头序列"><header><h2>镜头序列 <small>{stats.total}</small></h2><button type="button" disabled={!playableSequence.length} title={playableSequence.length ? "按分镜顺序连续预览已有视频" : "尚无已生成的视频可连播"} onClick={() => setRoughCutOpen(true)}>顺片连播{playableSequence.length ? ` (${playableSequence.length})` : ""}</button></header>
           <ol>{items.map((item, index) => <li key={item.id}>{index > 0 && <span aria-hidden="true" className="storyboard-arrow">→</span>}<button type="button" aria-label={`选择${item.name}`} aria-current={selected?.id === item.id ? "true" : undefined} onClick={() => setSelectedId(item.id)}><Cover item={item} playable={false} /><StatusBadge item={item} compact /></button></li>)}</ol>
           {!items.length && <p className="storyboard-empty-note">暂无镜头序列。</p>}
         </section>
       </aside>
     </div>}
+    {roughCutOpen && playableSequence.length > 0 && <RoughCutDialog projectId={projectId} entries={playableSequence} onClose={() => setRoughCutOpen(false)} />}
     {reviewItem && <ShotReviewDialog key={`${projectId}:${reviewItem.id}`} projectId={projectId} item={reviewItem} onClose={() => {setReviewId(undefined);setReviewRun(undefined);}} onChanged={() => void load()} onEdit={() => { void Promise.resolve(openShot(reviewItem.id)).then(ok => { if (ok !== false && mounted.current && scope.current === projectId) setReviewId(undefined); }); }} onNext={async()=>{
       const current=reviewItem.id, owner=projectId;
       const position=(items??[]).findIndex(i=>i.id===current);
@@ -415,6 +438,44 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
 }
 
 /** Native dialog supplies focus trapping/Escape without unmounting the Create draft. */
+function RoughCutDialog({ projectId, entries, onClose }: { projectId: string; entries: { item: StoryboardShot; asset: import("../../product/types").CreationAsset }[]; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [index, setIndex] = useState(0);
+  const [autoAdvance, setAutoAdvance] = useState(true);
+  const safeIndex = Math.min(index, entries.length - 1);
+  const current = entries[safeIndex];
+  useEffect(() => { dialog.current?.showModal?.(); }, []);
+  useEffect(() => {
+    const player = videoRef.current;
+    if (!player || !current) return;
+    player.src = productClient.creation.mediaUrl(projectId, current.asset.id, "video");
+    player.load();
+    void player.play?.().catch(() => { /* autoplay may be blocked in headless environments */ });
+    return () => { player.pause(); player.removeAttribute("src"); player.load(); };
+  }, [projectId, current?.asset.id]);
+  if (!current) return null;
+  return <dialog ref={dialog} open={typeof HTMLDialogElement.prototype.showModal !== "function" ? true : undefined} className="storyboard-roughcut" aria-label="顺片连播预览" onCancel={e => { e.preventDefault(); onClose(); }}>
+    <div className="storyboard-roughcut-box">
+      <header className="storyboard-roughcut-head">
+        <div><strong>顺片连播 · 第 {current.item.ordinal + 1} 镜：{current.item.name}</strong> <small>（{safeIndex + 1} / {entries.length} · {current.asset.selected ? "已选用结果" : "最新候选"}）</small></div>
+        <div className="storyboard-detail-actions">
+          <label><input type="checkbox" checked={autoAdvance} onChange={e => setAutoAdvance(e.target.checked)} /> 自动连播下一镜</label>
+          <button type="button" disabled={safeIndex === 0} onClick={() => setIndex(i => Math.max(0, i - 1))}>上一镜</button>
+          <button type="button" disabled={safeIndex >= entries.length - 1} onClick={() => setIndex(i => Math.min(entries.length - 1, i + 1))}>下一镜</button>
+          <button type="button" onClick={onClose}>关闭</button>
+        </div>
+      </header>
+      <div className="storyboard-roughcut-stage">
+        <video ref={videoRef} controls playsInline aria-label={`顺片播放 ${current.item.name}`} onEnded={() => { if (autoAdvance && safeIndex < entries.length - 1) setIndex(i => i + 1); }} />
+      </div>
+      <div className="storyboard-roughcut-strip" role="group" aria-label="连播镜头列表">
+        {entries.map((entry, idx) => <button key={entry.item.id} type="button" aria-current={idx === safeIndex ? "true" : undefined} onClick={() => setIndex(idx)}>第 {entry.item.ordinal + 1} 镜 · {entry.item.name}</button>)}
+      </div>
+    </div>
+  </dialog>;
+}
+
 function WorkbenchRuns({ route, navigate, renderRuns, onClose }: { route: Extract<AppRoute, { kind: "runs" }>; navigate: Props["navigate"]; renderRuns: Props["renderRuns"]; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { dialog.current?.showModal(); }, []);
