@@ -68,7 +68,11 @@ impl WorkflowRuntimeArtifactRepository for SqliteWorkflowRuntimeArtifactReposito
         artifact: &WorkflowRuntimeArtifactRecord,
     ) -> Result<(), RepositoryError> {
         validate_artifact(artifact)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
 
         let hashes = sqlx::query_as::<_, DefinitionHashes>(
             "SELECT wv.workflow_sha256, r.recipe_sha256

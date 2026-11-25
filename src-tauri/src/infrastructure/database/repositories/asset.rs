@@ -36,7 +36,11 @@ impl AssetRepository for SqliteAssetRepository {
                 "external source cannot be a generated Asset",
             ));
         }
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         insert_asset(&mut tx, asset).await?;
         sqlx::query(
             "INSERT INTO external_asset_imports
@@ -91,7 +95,11 @@ impl AssetRepository for SqliteAssetRepository {
             return Ok(());
         }
 
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         for asset in assets {
             asset
                 .validate()
@@ -107,7 +115,11 @@ impl AssetRepository for SqliteAssetRepository {
         assets: &[Asset],
         mappings: &[TaskOutputAssetMapping],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         for asset in assets {
             asset
                 .validate()
@@ -267,7 +279,11 @@ impl AssetRepository for SqliteAssetRepository {
     }
 
     async fn insert_asset_version(&self, version: &AssetVersion) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         insert_asset_version(&mut transaction, version).await?;
         transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(())
@@ -423,7 +439,11 @@ impl AssetRepository for SqliteAssetRepository {
             return Ok(());
         }
 
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         for asset_id in asset_ids {
             let exists: Option<String> =
                 sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")

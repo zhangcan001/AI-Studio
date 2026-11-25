@@ -173,7 +173,11 @@ impl PromptLibraryRepository for SqlitePromptLibraryRepository {
         entry: &PromptEntryRecord,
         first_version: &PromptVersionRecord,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "INSERT INTO prompt_entries
              (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at)
@@ -216,7 +220,11 @@ impl PromptLibraryRepository for SqlitePromptLibraryRepository {
         model_version_id: Option<&str>,
         created_at: &str,
     ) -> Result<PromptVersionRecord, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let owned: Option<String> =
             sqlx::query_scalar("SELECT id FROM prompt_entries WHERE project_id = ? AND id = ?")
                 .bind(project_id)

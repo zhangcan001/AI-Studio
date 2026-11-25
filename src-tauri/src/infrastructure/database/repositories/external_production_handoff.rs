@@ -96,7 +96,12 @@ impl ExternalProductionHandoffRepository for SqliteExternalProductionHandoffRepo
         &self,
         plan: &ExternalProductionHandoffImportPlan,
     ) -> Result<ExternalProductionHandoffImportResult, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        // Immediate write lock upgrades deferred self.pool.begin() so WAL busy_timeout applies.
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         if let Some(row) = sqlx::query_as::<_, HandoffRow>(
             "SELECT id, project_id, schema_version, source_agent, source_revision, document_sha256, imported_at
              FROM external_production_handoffs WHERE project_id = ? AND document_sha256 = ?",

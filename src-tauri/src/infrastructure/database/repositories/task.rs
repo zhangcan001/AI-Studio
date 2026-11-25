@@ -64,7 +64,11 @@ impl TaskRepository for SqliteTaskRepository {
         }
         validate_event(task, created_event, TaskEventType::TaskCreated)?;
         let values = TaskDbValues::from_task(task)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
 
         sqlx::query(
             "INSERT INTO tasks (
@@ -142,7 +146,11 @@ impl TaskRepository for SqliteTaskRepository {
         })?;
         validate_event(task, event, expected_event)?;
         let values = TaskDbValues::from_task(task)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
 
         let result = sqlx::query(
             "UPDATE tasks SET
@@ -236,7 +244,11 @@ impl TaskRepository for SqliteTaskRepository {
     ) -> Result<StoredTaskEvent, RepositoryError> {
         validate_runtime_event(task, event)?;
         let values = TaskDbValues::from_task(task)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
 
         let result = sqlx::query(
             "UPDATE tasks SET

@@ -105,7 +105,11 @@ impl OrganizationRepository for SqliteOrganizationRepository {
     }
 
     async fn create_tag(&self, tag: AssetTag) -> Result<AssetTag, RepositoryError> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM asset_tags WHERE project_id = ?")
             .bind(&tag.project_id)
             .fetch_one(&mut *tx)
@@ -144,7 +148,11 @@ impl OrganizationRepository for SqliteOrganizationRepository {
     }
 
     async fn delete_tag(&self, project_id: &str, tag_id: &str) -> Result<bool, RepositoryError> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query("DELETE FROM asset_tag_links WHERE project_id = ? AND tag_id = ?")
             .bind(project_id)
             .bind(tag_id)
@@ -168,7 +176,11 @@ impl OrganizationRepository for SqliteOrganizationRepository {
         tag_id: &str,
         created_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let asset_project: Option<String> =
             sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")
                 .bind(asset_id)
@@ -269,7 +281,11 @@ impl OrganizationRepository for SqliteOrganizationRepository {
         favorite: bool,
         created_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         for asset_id in asset_ids {
             let asset_project: Option<String> =
                 sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")
@@ -307,7 +323,11 @@ impl OrganizationRepository for SqliteOrganizationRepository {
         tag_id: &str,
         created_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let tag_project: Option<String> =
             sqlx::query_scalar("SELECT project_id FROM asset_tags WHERE id = ?")
                 .bind(tag_id)
@@ -368,7 +388,11 @@ impl OrganizationRepository for SqliteOrganizationRepository {
         asset_ids: &[String],
         tag_id: &str,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let tag_project: Option<String> =
             sqlx::query_scalar("SELECT project_id FROM asset_tags WHERE id = ?")
                 .bind(tag_id)

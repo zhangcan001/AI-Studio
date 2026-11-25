@@ -2,13 +2,13 @@ import { ResultFileActions } from "../../components/ResultFileActions";
 import { SingleMediaInspection } from "./MediaIntegrityPanel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
-import type { LibraryDetail as Detail, LibraryEditRequest } from "../../product/libraryTypes";
+import { toMediaByteArray, type LibraryDetail as Detail, type LibraryEditRequest } from "../../product/libraryTypes";
 import type { LibraryController, LibraryProps } from "./LibraryController";
 import { detailTitle, profileValue, relationRoute, subtypeLabel, resourceKey, deletionMessage } from "./libraryModel";
 function MediaPreview({projectId,detail}:{projectId:string;detail:Extract<Detail,{kind:"asset"}>}) {
   const [image,setImage]=useState<string>();const [failed,setFailed]=useState(false);const a=detail.asset;
   useEffect(()=>{let alive=true;let objectUrl:string|undefined;setImage(undefined);setFailed(false);
-    if(a.assetType==="image")void productClient.library.imageGet(projectId,{kind:"asset",id:a.id}).then(bytes=>{if(!alive)return;objectUrl=URL.createObjectURL(new Blob([Uint8Array.from(bytes)],{type:a.mimeType}));setImage(objectUrl);}).catch(()=>{if(alive)setFailed(true);});
+    if(a.assetType==="image")void productClient.library.imageGet(projectId,{kind:"asset",id:a.id}).then(bytes=>{if(!alive)return;objectUrl=URL.createObjectURL(new Blob([toMediaByteArray(bytes)],{type:a.mimeType}));setImage(objectUrl);}).catch(()=>{if(alive)setFailed(true);});
     return()=>{alive=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};
   },[projectId,a.id,a.assetType,a.mimeType]);
   if(failed)return <p role="status">媒体无法预览；使用关系和历史仍可查看。</p>;

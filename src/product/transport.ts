@@ -32,9 +32,9 @@ interface ProductCommands {
   product_shot_prompt_sections_get: { args: { projectId: string; shotId: string }; result: import("../types/storyEntity").ShotPromptSections };
   product_shot_prompt_sections_set: { args: { request: { projectId: string; shotId: string; sections: import("../types/storyEntity").ShotPromptSections } }; result: import("../types/storyEntity").ShotPromptSections };
   product_library_tags_list: { args: { projectId: string }; result: import("./libraryTypes").LibraryTag[] };
-  product_library_image_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: number[] };
+  product_library_image_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").BinaryMediaPayload };
   product_library_media_verify: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").MediaIntegrityReport };
-  product_library_thumbnail_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: number[] };
+  product_library_thumbnail_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").BinaryMediaPayload };
   product_library_relations_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryRelation[] };
   product_library_versions_get: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryVersions };
   product_library_use_in_creation: { args: { projectId: string; resource: import("./libraryTypes").ResourceRef }; result: import("./libraryTypes").LibraryCreateIntent };

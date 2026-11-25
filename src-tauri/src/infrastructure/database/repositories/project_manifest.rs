@@ -30,7 +30,11 @@ impl ProjectManifestRepository for SqliteProjectManifestRepository {
         &self,
         project_id: &str,
     ) -> Result<ProjectManifestSnapshot, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let project = sqlx::query_as::<_, DbProject>(
             "SELECT id, name, description FROM projects WHERE id = ?",
         )

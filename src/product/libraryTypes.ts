@@ -45,6 +45,18 @@ export type LibraryEditRequest =
 
 export type LibraryTag = import("../types/organization").AssetTag;
 
+export type BinaryMediaPayload = ArrayBuffer | Uint8Array | number[];
+
+export function toMediaByteArray(bytes: BinaryMediaPayload): Uint8Array<ArrayBuffer> {
+  if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+  if (bytes instanceof Uint8Array) {
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    return copy;
+  }
+  return Uint8Array.from(bytes);
+}
+
 export interface MediaIntegrityReport {
   assetId: string;
   assetType: "image" | "video" | "audio";

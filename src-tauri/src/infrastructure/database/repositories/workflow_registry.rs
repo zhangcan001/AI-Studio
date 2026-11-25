@@ -58,7 +58,11 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
             ));
         }
 
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE workflows
              SET name = ?, updated_at = ?
@@ -87,7 +91,11 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
         workflow_version_id: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_workflow_version(&mut transaction, workflow_id, workflow_version_id).await?;
 
         sqlx::query(
@@ -110,7 +118,11 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
         workflow_id: &str,
         removed_at: DateTime<Utc>,
     ) -> Result<Option<WorkflowRegistryRecord>, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         if read_workflow_in_transaction(&mut transaction, workflow_id)
             .await?
             .is_none()
@@ -194,7 +206,11 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
         workflow_id: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<Option<WorkflowRegistryRecord>, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         // W-03 legacy: workflows removed before this fix had every version
         // archived at exactly `removed_at`. Un-archive exactly those rows
         // while the removal timestamp is still known; versions archived at
@@ -300,7 +316,11 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
     }
 
     async fn purge(&self, workflow_id: &str) -> Result<bool, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let Some(workflow) = read_workflow_in_transaction(&mut transaction, workflow_id).await?
         else {
             transaction.rollback().await.map_err(map_sqlx_error)?;
@@ -637,7 +657,11 @@ impl RegistryRepairRepository for SqliteWorkflowRegistryRepository {
         workflow_version_ids: &[String],
         updated_at: DateTime<Utc>,
     ) -> Result<u64, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let mut updated = 0;
         for workflow_version_id in workflow_version_ids {
             updated += sqlx::query(

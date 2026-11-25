@@ -195,7 +195,11 @@ impl ReferenceSetRepository for SqliteReferenceSetRepository {
         project_id: &str,
         reference_set_id: &str,
     ) -> Result<bool, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let exists = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM reference_sets WHERE project_id = ? AND id = ?",
         )
@@ -279,7 +283,11 @@ impl ReferenceSetRepository for SqliteReferenceSetRepository {
         reference_set_id: &str,
         items: &[ReferenceSetItem],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let exists =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM reference_sets WHERE id = ?")
                 .bind(reference_set_id)

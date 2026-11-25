@@ -137,3 +137,31 @@ it("status-only updates preserve a pending full Library read", async () => {
   await act(async () => { stale({ ...first, coverage: "fresh result" }); });
   expect(view.result.current.list?.coverage).toBe("fresh result");
 });
+
+it("pauses background polling in Library and Runs while document visibilityState is hidden", async () => {
+  vi.useFakeTimers();
+  state.library.list.mockReset();
+  state.run.list.mockReset();
+  state.library.list.mockResolvedValue({ items: [], nextCursor: null, coverage: "complete-category" });
+  state.run.list.mockResolvedValue({ items: [], nextCursor: null, coverage: "recent" });
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  try {
+    const navigate = vi.fn();
+    renderHook(() => useLibraryController({ route: { kind: "library", projectId: "project-a", filter: "prompts" }, navigate }));
+    renderHook(() => useRunsController({ route: { kind: "runs", projectId: "project-a" }, navigate }));
+    await drain();
+    expect(state.library.list).toHaveBeenCalledTimes(1);
+    expect(state.run.list).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+    await drain();
+    expect(state.library.list).toHaveBeenCalledTimes(1);
+    expect(state.run.list).toHaveBeenCalledTimes(1);
+    visibility.mockReturnValue("visible");
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await drain();
+    expect(state.library.list).toHaveBeenCalledTimes(2);
+    expect(state.run.list).toHaveBeenCalledTimes(2);
+  } finally {
+    visibility.mockRestore();
+  }
+});

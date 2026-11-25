@@ -258,7 +258,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         batch: &ProductionBatch,
         items: &[ProductionBatchItem],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         insert_batch_records(&mut transaction, batch, items).await?;
         transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(())
@@ -286,7 +290,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
                 "production package binding must contain one unique id for every batch item",
             ));
         }
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         insert_batch_records(&mut transaction, batch, items).await?;
         insert_package_binding(&mut transaction, batch, provenance).await?;
         transaction.commit().await.map_err(map_sqlx_error)?;
@@ -396,7 +404,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         // item transitions settle the batch status in the same write
         // transaction, so two independent reads could otherwise observe a
         // torn state (old batch status next to newly terminal items).
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let batch = sqlx::query_as::<_, BatchRow>(
             "SELECT id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at
              FROM production_batches WHERE project_id = ? AND id = ?",
@@ -504,7 +516,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         batch_id: &ProductionBatchId,
         updated_at: DateTime<Utc>,
     ) -> Result<u64, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let cancelled = sqlx::query(
             "UPDATE production_batch_items
              SET status = 'CANCELLED', error_code = NULL, error_message = NULL, updated_at = ?
@@ -625,7 +641,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
             ));
         }
         let at = format_datetime(updated_at);
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let finished = sqlx::query(
             "UPDATE production_batch_items
              SET status = ?, error_code = ?, error_message = ?, updated_at = ?
@@ -741,7 +761,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
             .ok_or_else(|| {
                 RepositoryError::serialization("production batch item values", "missing value")
             })?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "INSERT INTO production_batch_items
              (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at, project_id, submission_idempotency_key, execution_type)
@@ -821,7 +845,11 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
             return Ok(Vec::new());
         }
         let at = format_datetime(updated_at);
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         for batch_id in &rows {
             sqlx::query(
                 "UPDATE production_batch_items
@@ -865,7 +893,11 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
     ) -> Result<(), RepositoryError> {
         validate_prepared_insert(batch, items, bindings, snapshots)?;
 
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         validate_shot_batch_bindings(&mut transaction, batch, items, bindings).await?;
         for snapshot in snapshots {
             let current = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
@@ -1077,7 +1109,11 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
             }
         }
 
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         for binding in bindings {
             let shot_project =
                 sqlx::query_scalar::<_, String>("SELECT project_id FROM shots WHERE id = ?")
@@ -1145,7 +1181,11 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
         task_id: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<bool, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let links = sqlx::query_as::<_, (String, Option<String>)>(
             "SELECT id, task_id FROM shot_generation_links
              WHERE production_batch_item_id = ?",
@@ -1208,7 +1248,11 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
         source_item_id: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<bool, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let link = sqlx::query_as::<_, (String, String, String)>(
             "SELECT id, shot_id, stage FROM shot_generation_links
              WHERE production_batch_item_id = ?",
@@ -1299,7 +1343,11 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
             ));
         }
 
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let batch_exists =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches WHERE id = ?")
                 .bind(first_item.batch_id.as_str())

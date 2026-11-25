@@ -324,7 +324,11 @@ impl ShotRepository for SqliteShotRepository {
             ));
         }
 
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let max_ordinal = sqlx::query_scalar::<_, Option<i64>>(
             "SELECT MAX(ordinal) FROM shots WHERE project_id = ?",
         )
@@ -416,7 +420,11 @@ impl ShotRepository for SqliteShotRepository {
                 "shot reference assets must not contain duplicates",
             ));
         }
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let shot_exists = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM shots WHERE id = ? AND project_id = ?",
         )
@@ -496,7 +504,11 @@ impl ShotRepository for SqliteShotRepository {
         production_batch_item_id: Option<&str>,
         created_at: DateTime<Utc>,
     ) -> Result<ShotGenerationLinkRecord, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let shot_exists = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM shots WHERE id = ? AND project_id = ?",
         )
@@ -623,7 +635,11 @@ impl ShotBulkRepository for SqliteShotRepository {
         shots: &[ShotRecord],
         stage_prompts: &[ShotStagePromptRecord],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let mut shot_ids = HashSet::new();
         let existing_names =
             sqlx::query_scalar::<_, String>("SELECT name FROM shots WHERE project_id = ?")
@@ -676,7 +692,11 @@ impl ShotBulkRepository for SqliteShotRepository {
         project_id: &str,
         updates: &[ShotStagePromptRecord],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         insert_stage_prompts(&mut transaction, project_id, updates).await?;
         transaction.commit().await.map_err(map_sqlx_error)
     }
@@ -686,7 +706,11 @@ impl ShotBulkRepository for SqliteShotRepository {
         shot: &ShotRecord,
         stage_prompts: &[ShotStagePromptRecord],
     ) -> Result<bool, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE shots SET name = ?, prompt_text = ?, prompt_entry_id = ?,
                     prompt_version_id = ?, selected_image_asset_id = ?,
@@ -721,7 +745,11 @@ impl ShotBulkRepository for SqliteShotRepository {
         configs: &[ShotStageConfigRecord],
         prompt_updates: &[ShotStagePromptRecord],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         for config in configs {
             let exists = sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM shots WHERE id = ? AND project_id = ?",
@@ -815,7 +843,10 @@ async fn select_asset(
     asset_type: &str,
     clear_video: bool,
 ) -> Result<(), RepositoryError> {
-    let mut transaction = pool.begin().await.map_err(map_sqlx_error)?;
+    let mut transaction = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(map_sqlx_error)?;
     let shot_exists =
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM shots WHERE id = ? AND project_id = ?")
             .bind(shot_id)

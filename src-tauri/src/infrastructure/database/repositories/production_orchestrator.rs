@@ -208,7 +208,11 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
         run: &ProductionRunRecord,
         stages: &[ProductionStageRecord],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "INSERT INTO production_runs
              (id, project_id, name, status, current_stage_ordinal, template_id, created_at, updated_at)
@@ -410,7 +414,11 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
         now: &str,
         new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         if let Some(detail) = new_batch {
             if detail.batch.id.as_str() != batch_id {
                 return Err(RepositoryError::integrity(
@@ -447,7 +455,11 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
         items: &[ProductionStageItemDraft],
         now: &str,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query("DELETE FROM production_stage_items WHERE stage_id = ?")
             .bind(selection_stage_id)
             .execute(&mut *transaction)
@@ -494,7 +506,11 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
         now: &str,
         new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         if let Some(detail) = new_batch {
             if detail.batch.id.as_str() != batch_id {
                 return Err(RepositoryError::integrity(
@@ -580,7 +596,11 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
         items: &[ProductionStageItemDraft],
         now: &str,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         for item in items {
             let parent_stage_item_id = if item.parent_stage_item_id.is_some() {
                 item.parent_stage_item_id.clone()
@@ -646,7 +666,11 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
     }
 
     async fn cancel_run_atomic(&self, run_id: &str, now: &str) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "UPDATE production_stages SET status = CASE WHEN status IN ('SUCCEEDED', 'SKIPPED') THEN status ELSE 'CANCELLED' END,
                     updated_at = ? WHERE run_id = ?",
@@ -827,7 +851,11 @@ impl ProductionOrchestratorRepository for SqliteProductionOrchestratorRepository
         ordinal: i64,
         now: &str,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "UPDATE production_stages SET status = 'RUNNING', started_at = COALESCE(started_at, ?), updated_at = ?
              WHERE run_id = ? AND ordinal = ?",

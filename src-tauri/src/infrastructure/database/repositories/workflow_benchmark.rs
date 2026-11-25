@@ -213,7 +213,11 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         experiment_id: &str,
         updated_at: &str,
     ) -> Result<Option<WorkflowBenchmarkSnapshot>, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let Some(experiment) = sqlx::query_as::<_, DbExperiment>(
             "SELECT id, project_id, name, media_type, status, base_values_json,
                     asset_ids_json, winner_candidate_id, production_batch_id,
@@ -351,7 +355,11 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         &self,
         draft: &WorkflowBenchmarkDraft,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let experiment = &draft.experiment;
         sqlx::query(
             "INSERT INTO benchmark_experiments
@@ -536,7 +544,11 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         name: &str,
         now: &str,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let experiment = sqlx::query_as::<_, DbExperiment>(
             "SELECT id, project_id, name, media_type, status, base_values_json,
                     asset_ids_json, winner_candidate_id, production_batch_id,
@@ -671,7 +683,11 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         updated_at: &str,
         new_batch: Option<&crate::domain::ProductionBatchDetail>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         if let Some(detail) = new_batch {
             if detail.batch.id.as_str() != batch_id {
                 return Err(RepositoryError::integrity(
@@ -775,7 +791,11 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         project_id: &str,
         experiment_id: &str,
     ) -> Result<bool, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let result =
             sqlx::query("DELETE FROM benchmark_experiments WHERE id = ? AND project_id = ?")
                 .bind(experiment_id)

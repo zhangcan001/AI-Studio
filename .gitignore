@@ -35,3 +35,13 @@ local-fixtures/*
 
 # Ephemeral Codex probe checkouts (must not enter inventory)
 .codex-*-probe-*/
+
+# Local Serena project metadata
+.serena/
+
+# Local backup/scratch artifacts
+node_modules_broken_bak/
+/_*.ps1
+/_*.txt
+/test.txt
+/test11.txt

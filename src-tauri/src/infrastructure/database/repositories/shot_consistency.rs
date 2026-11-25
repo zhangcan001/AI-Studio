@@ -148,7 +148,11 @@ impl ShotConsistencyRepository for SqliteShotConsistencyRepository {
         shot_id: &str,
         bindings: &[ShotProfileBinding],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_shot_exists(&mut transaction, shot_id).await?;
         for binding in bindings {
             if binding.shot_id != shot_id {
@@ -248,7 +252,11 @@ impl ShotConsistencyRepository for SqliteShotConsistencyRepository {
         shot_id: &str,
         bindings: &[ShotReferenceSetBinding],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_shot_exists(&mut transaction, shot_id).await?;
         for binding in bindings {
             if binding.shot_id != shot_id {
@@ -293,7 +301,11 @@ impl ShotConsistencyRepository for SqliteShotConsistencyRepository {
         profile_bindings: &[ShotProfileBinding],
         reference_set_bindings: &[ShotReferenceSetBinding],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_shot_exists(&mut transaction, shot_id).await?;
         for binding in profile_bindings {
             if binding.shot_id != shot_id {

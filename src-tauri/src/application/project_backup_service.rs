@@ -216,6 +216,7 @@ pub(crate) mod queue_metadata {
 mod video_inputs;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+const MAX_JSON_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
 const INSPECTION_TTL: Duration = Duration::from_secs(20 * 60);
 /// Root JSON entries written for v19+ packages: manifest, project, history,
@@ -3153,15 +3154,36 @@ fn hash_zip_entry(archive: &mut ZipArchive<File>, path: &str) -> Result<(u64, St
     Ok((total, sha256))
 }
 
-fn read_zip_bytes_entry(archive: &mut ZipArchive<File>, path: &str) -> Result<Vec<u8>, AppError> {
+fn read_zip_bytes_entry<R: Read + io::Seek>(
+    archive: &mut ZipArchive<R>,
+    path: &str,
+) -> Result<Vec<u8>, AppError> {
+    read_zip_bytes_entry_bounded(archive, path, MAX_JSON_ENTRY_BYTES)
+}
+
+fn read_zip_bytes_entry_bounded<R: Read + io::Seek>(
+    archive: &mut ZipArchive<R>,
+    path: &str,
+    limit: u64,
+) -> Result<Vec<u8>, AppError> {
     let entry = archive
         .by_name(path)
         .map_err(|_| AppError::backup_invalid(format!("备份缺少 {path}")))?;
+    if entry.size() > limit {
+        return Err(AppError::backup_invalid(format!(
+            "备份 JSON 条目超过大小限制：{path}"
+        )));
+    }
     let mut bytes = Vec::new();
     entry
-        .take(MAX_ENTRY_BYTES)
+        .take(limit.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|error| AppError::backup_invalid(format!("备份 JSON 读取失败：{error}")))?;
+    if bytes.len() as u64 > limit {
+        return Err(AppError::backup_invalid(format!(
+            "备份 JSON 条目超过大小限制：{path}"
+        )));
+    }
     Ok(bytes)
 }
 
@@ -10074,6 +10096,7 @@ mod tests {
         assert_eq!(prompt_model.as_deref(), Some("mdv_existing"));
     }
 
+    #[tokio::test]
     async fn project_backup_v15_restores_without_project_workflow_bindings() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
@@ -10250,7 +10273,6 @@ mod tests {
         assert_eq!(inventory.lineage, 2);
     }
 
-    #[test]
     #[test]
     fn w04_backup_workflow_version_serde_defaults_provenance() {
         #[allow(unused_imports)]
@@ -10643,6 +10665,20 @@ mod tests {
         assert_eq!(versions, 1);
     }
 
+    #[test]
+    fn oversized_or_forged_json_zip_entry_is_rejected_without_truncation() {
+        let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        writer.start_file("project.json", options).unwrap();
+        let oversized = format!("{{\"pad\":\"{}\"}}", "a".repeat(2048));
+        writer.write_all(oversized.as_bytes()).unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert!(super::read_zip_bytes_entry_bounded(&mut archive, "project.json", 1024).is_err());
+        assert!(super::read_zip_bytes_entry_bounded(&mut archive, "project.json", 4096).is_ok());
+    }
+
+    #[test]
     fn inspect_accepts_historical_v18_zip_without_provenance() {
         let directory = tempdir().unwrap();
         let archive_path = directory.path().join("legacy-v18.zip");

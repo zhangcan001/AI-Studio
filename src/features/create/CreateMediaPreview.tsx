@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { productClient } from "../../product/client";
+import { toMediaByteArray } from "../../product/libraryTypes";
 import type { CreationAsset } from "../../product/types";
 
 const IMAGE_CACHE_CAP = 32;
@@ -35,7 +36,7 @@ function libraryImageEntry(projectId: string, assetId: string) {
       promise: Promise.resolve()
         .then(() => productClient.library.imageGet(projectId, { kind: "asset", id: assetId }))
         .then(bytes => {
-          const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes as number[])], { type: "image/png" }));
+          const url = URL.createObjectURL(new Blob([toMediaByteArray(bytes)], { type: "image/png" }));
           if (imageCache.get(key) !== entry) { URL.revokeObjectURL(url); return undefined; }
           entry.url = url;
           return url;
@@ -163,7 +164,7 @@ export function CreateMediaPreview({ projectId, asset, onUnavailable }: {
       if (detail.kind !== "asset" || detail.asset.assetType !== "image") throw Error("Unavailable image");
       const bytes = await productClient.library.imageGet(projectId, { kind: "asset", id: asset.id });
       if (!alive) return;
-      url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)], { type: detail.asset.mimeType }));
+      url = URL.createObjectURL(new Blob([toMediaByteArray(bytes)], { type: detail.asset.mimeType }));
       setImage(url);
     }).catch(() => { if (alive) { setFailed(true); onUnavailable?.(); } });
     return () => {

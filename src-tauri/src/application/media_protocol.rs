@@ -115,6 +115,7 @@ impl MediaProtocolService {
                 ("Accept-Ranges".to_owned(), "bytes".to_owned()),
                 ("Content-Type".to_owned(), asset.mime_type),
                 ("Content-Length".to_owned(), length.to_string()),
+                ("X-Content-Type-Options".to_owned(), "nosniff".to_owned()),
             ]),
             body: Vec::new(),
         };
@@ -443,6 +444,13 @@ mod tests {
         assert_eq!(
             response.headers.get("Content-Range").unwrap(),
             "bytes 4-9/64"
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("X-Content-Type-Options")
+                .map(String::as_str),
+            Some("nosniff")
         );
         let head = service
             .handle("HEAD", "prj_default", "ast_media", None)

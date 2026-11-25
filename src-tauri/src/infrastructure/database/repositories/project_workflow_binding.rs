@@ -42,7 +42,11 @@ impl ProjectWorkflowBindingRepository for SqliteProjectWorkflowBindingRepository
         project_id: &str,
         bindings: &[ProjectWorkflowBindingRecord],
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query("DELETE FROM project_workflow_bindings WHERE project_id = ?")
             .bind(project_id)
             .execute(&mut *transaction)
@@ -144,7 +148,11 @@ impl ProjectWorkflowBindingRepository for SqliteProjectWorkflowBindingRepository
         &self,
         bindings: &[ProjectWorkflowBindingRecord],
     ) -> Result<u64, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let mut cleared = 0;
         for binding in bindings {
             let result = sqlx::query(

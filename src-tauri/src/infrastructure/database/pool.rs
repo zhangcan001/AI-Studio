@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use sqlx::{
     migrate::Migrator,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
     SqlitePool,
 };
 use std::{path::Path, time::Duration};
@@ -14,6 +14,7 @@ pub async fn initialize(database_path: &Path) -> Result<SqlitePool, AppError> {
         .create_if_missing(true)
         .foreign_keys(true)
         .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(5));
 
     let pool = SqlitePoolOptions::new()

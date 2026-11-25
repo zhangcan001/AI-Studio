@@ -237,7 +237,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         &self,
         series: &ProductionSeries,
     ) -> Result<ProductionSeries, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let next = next_ordinal(
             &mut transaction,
             "production_series",
@@ -313,7 +317,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         ordered_ids: &[ProductionSeriesId],
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         reorder_table(
             &mut transaction,
             "production_series",
@@ -335,7 +343,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         project_id: &str,
         episode: &ProductionEpisode,
     ) -> Result<ProductionEpisode, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_series(&mut transaction, project_id, &episode.series_id).await?;
         let next = next_ordinal(
             &mut transaction,
@@ -424,7 +436,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         ordered_ids: &[ProductionEpisodeId],
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_series(&mut transaction, project_id, series_id).await?;
         reorder_table(
             &mut transaction,
@@ -447,7 +463,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         project_id: &str,
         scene: &ProductionScene,
     ) -> Result<ProductionScene, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_episode(&mut transaction, project_id, &scene.episode_id).await?;
         let next = next_ordinal(
             &mut transaction,
@@ -540,7 +560,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         ordered_ids: &[ProductionSceneId],
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_episode(&mut transaction, project_id, episode_id).await?;
         reorder_table(
             &mut transaction,
@@ -566,7 +590,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
         validate_shot_ids(shot_ids)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_scene(&mut transaction, project_id, scene_id).await?;
         ensure_shots_in_project(&mut transaction, project_id, shot_ids).await?;
 
@@ -594,7 +622,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         shot_ids: &[String],
     ) -> Result<(), RepositoryError> {
         validate_shot_ids(shot_ids)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         ensure_shots_in_project(&mut transaction, project_id, shot_ids).await?;
         delete_shot_ids(&mut transaction, shot_ids).await?;
         transaction.commit().await.map_err(map_sqlx_error)
@@ -607,7 +639,11 @@ impl ProductionStructureRepository for SqliteProductionStructureRepository {
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
         validate_ordered_shot_ids(ordered_shot_ids)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         if !scene_exists(&mut transaction, scene_id).await? {
             return Err(RepositoryError::not_found(
                 "production scene",

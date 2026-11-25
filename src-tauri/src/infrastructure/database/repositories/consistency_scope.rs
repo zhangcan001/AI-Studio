@@ -155,7 +155,11 @@ impl ConsistencyScopeRepository for SqliteConsistencyScopeRepository {
         bindings: &[ScopedProfileBinding],
     ) -> Result<(), RepositoryError> {
         validate_profile_binding_scope(project_id, scope_type, scope_id, bindings)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "DELETE FROM consistency_scope_profile_bindings
              WHERE project_id = ? AND scope_type = ? AND scope_id = ?",
@@ -179,7 +183,11 @@ impl ConsistencyScopeRepository for SqliteConsistencyScopeRepository {
         bindings: &[ScopedReferenceSetBinding],
     ) -> Result<(), RepositoryError> {
         validate_reference_binding_scope(project_id, scope_type, scope_id, bindings)?;
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "DELETE FROM consistency_scope_reference_set_bindings
              WHERE project_id = ? AND scope_type = ? AND scope_id = ?",
@@ -206,7 +214,11 @@ impl ConsistencyScopeRepository for SqliteConsistencyScopeRepository {
         validate_profile_binding_scope(project_id, scope_type, scope_id, profile_bindings)?;
         validate_reference_binding_scope(project_id, scope_type, scope_id, reference_set_bindings)?;
 
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "DELETE FROM consistency_scope_profile_bindings
              WHERE project_id = ? AND scope_type = ? AND scope_id = ?",

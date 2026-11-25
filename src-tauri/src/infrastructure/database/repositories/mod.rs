@@ -97,7 +97,15 @@ pub use workflow_runtime_state::SqliteWorkflowRuntimeStateRepository;
 use crate::application::ports::RepositoryError;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx::{Sqlite, Transaction};
+use sqlx::{Sqlite, SqlitePool, Transaction};
+
+pub(super) async fn begin_immediate(
+    pool: &SqlitePool,
+) -> Result<Transaction<'static, Sqlite>, RepositoryError> {
+    pool.begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(map_sqlx_error)
+}
 
 pub(super) fn map_sqlx_error(error: sqlx::Error) -> RepositoryError {
     if let sqlx::Error::Database(database_error) = &error {
@@ -704,13 +712,7 @@ pub mod story_entity {
             }
             let id = Uuid::new_v4().to_string();
             let now = chrono::Utc::now().to_rfc3339();
-            let mut tx = self
-                .pool
-                .begin()
-                .await
-                .map_err(|e| RepositoryError::Database {
-                    message: e.to_string(),
-                })?;
+            let mut tx = super::begin_immediate(&self.pool).await?;
             Self::validate_images(&mut tx, project_id, &input).await?;
             sqlx::query(
                 "INSERT INTO story_entities (id, project_id, kind, name, description, cover_asset_id, created_at, updated_at)
@@ -759,13 +761,7 @@ pub mod story_entity {
                 });
             }
             let now = chrono::Utc::now().to_rfc3339();
-            let mut tx = self
-                .pool
-                .begin()
-                .await
-                .map_err(|e| RepositoryError::Database {
-                    message: e.to_string(),
-                })?;
+            let mut tx = super::begin_immediate(&self.pool).await?;
             Self::validate_images(&mut tx, project_id, &input).await?;
             // All editable references and the alias change share one SQLite
             // transaction. Concurrent writers cannot commit a partial rename.
@@ -920,13 +916,7 @@ pub mod story_entity {
             entity_ids: &[String],
         ) -> Result<Vec<StoryEntity>, RepositoryError> {
             let now = chrono::Utc::now().to_rfc3339();
-            let mut tx = self
-                .pool
-                .begin()
-                .await
-                .map_err(|e| RepositoryError::Database {
-                    message: e.to_string(),
-                })?;
+            let mut tx = super::begin_immediate(&self.pool).await?;
             replace_shot_bindings_tx(&mut tx, project_id, shot_id, entity_ids, &now).await?;
             tx.commit().await.map_err(|e| RepositoryError::Database {
                 message: e.to_string(),
@@ -954,7 +944,7 @@ pub mod story_entity {
         ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
             let db = |e: sqlx::Error| RepositoryError::database(e.to_string());
             let now = chrono::Utc::now().to_rfc3339();
-            let mut tx = self.pool.begin().await.map_err(db)?;
+            let mut tx = super::begin_immediate(&self.pool).await?;
             let exists: i64 = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM shots WHERE id = ? AND project_id = ?)",
             )

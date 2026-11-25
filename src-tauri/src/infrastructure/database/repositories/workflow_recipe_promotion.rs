@@ -40,7 +40,11 @@ impl WorkflowRecipePromotionRepository for SqliteWorkflowRecipePromotionReposito
         recipe_id: &str,
         promoted_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         promote_in_transaction(
             &mut transaction,
             workflow_version_id,
@@ -56,7 +60,11 @@ impl WorkflowRecipePromotionRepository for SqliteWorkflowRecipePromotionReposito
         workflow_version_id: &str,
         recipe_id: &str,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         clear_in_transaction(&mut transaction, workflow_version_id, recipe_id).await?;
         transaction.commit().await.map_err(map_sqlx_error)
     }

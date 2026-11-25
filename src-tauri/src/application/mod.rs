@@ -2701,7 +2701,10 @@ pub mod folder_batch_import_service {
                         }
                     }));
                 }
-                let pair = row.generator.as_ref().unwrap();
+                let pair = row
+                    .generator
+                    .as_ref()
+                    .ok_or_else(|| stage_failure("D", "GENERATOR_MISSING", "镜头缺少生成器绑定"))?;
                 let input_scope = ShotVideoInputScope {
                     project_id: project.clone(),
                     shot_id: id.clone(),
@@ -2804,11 +2807,7 @@ pub mod folder_batch_import_service {
                 }
                 self.injection("E_AFTER")?;
                 if request.auto_start {
-                    match services
-                        .start
-                        .start(project, result.batch_id.as_deref().unwrap())
-                        .await
-                    {
+                    match services.start.start(project, batch.batch.id.as_str()).await {
                         Ok(()) => result.auto_started = true,
                         Err(error) => result.warnings.push(error.to_string()),
                     }

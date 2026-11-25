@@ -31,5 +31,9 @@ describe('personal release Windows bundle compatibility', () => {
     expect(config.bundle.targets).toBe('all');
     expect(config.identifier).toBe('com.aistudio.desktop');
     expect(config.productName).toBe('AI Studio');
+    expect(config.app.security.csp).toContain("script-src 'self'");
+    expect(config.app.security.csp).toContain('http://aistudio-media.localhost');
+    expect(config.app.security.csp).toContain('http://ipc.localhost');
+    expect(config.app.security.csp).toContain("object-src 'none'");
   });
 });

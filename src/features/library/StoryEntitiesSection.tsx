@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
+import { toMediaByteArray } from "../../product/libraryTypes";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
@@ -28,7 +29,7 @@ function EntityThumb({ projectId, assetId, name }: { projectId: string; assetId:
     void productClient.library.imageGet(projectId, { kind: "asset", id: assetId })
       .then(bytes => {
         if (!alive) return;
-        objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes as number[])], { type: "image/png" }));
+        objectUrl = URL.createObjectURL(new Blob([toMediaByteArray(bytes)], { type: "image/png" }));
         setUrl(objectUrl);
       })
       .catch(() => undefined);

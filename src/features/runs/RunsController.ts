@@ -79,7 +79,7 @@ export function useRunsController({ route, navigate }: RunsProps) {
       notification = setTimeout(() => void refresh(), 200);
     });
     // Fallback for authorities without their own batch/review event channel.
-    const timer = setInterval(() => void refresh(), 5000);
+    const timer = setInterval(() => { if (document.visibilityState !== "hidden") void refresh(); }, 5000);
     return () => { ++epoch.current; unsubscribe(); clearTimeout(notification); clearInterval(timer); };
   }, [refresh]);
   async function mutate(action: () => Promise<unknown>) {

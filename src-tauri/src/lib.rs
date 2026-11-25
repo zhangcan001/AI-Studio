@@ -1,6 +1,7 @@
 #[cfg(all(feature = "native-acceptance-delay", not(debug_assertions)))]
 compile_error!("native acceptance latency is forbidden in release builds");
 #[cfg(any(test, feature = "native-acceptance-delay"))]
+#[cfg_attr(not(feature = "native-acceptance-delay"), allow(dead_code))]
 mod native_acceptance {
     //! Read-only, bounded actual IPC response delay for owned debug Native acceptance.
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -270,8 +271,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             "aistudio-media",
             move |_context, request, responder| {
                 let slot = Arc::clone(&media_protocol_slot);
-                std::thread::spawn(move || {
-                    let response = if !matches!(request.uri().path(), "/video" | "/audio") {
+                tauri::async_runtime::spawn(async move {
+                    let path = request.uri().path().to_owned();
+                    let response = if !matches!(path.as_str(), "/video" | "/audio") {
                         application::media_protocol::MediaResponse {
                             status: 404,
                             headers: Default::default(),
@@ -280,6 +282,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     } else {
                         let project_id = query_param(request.uri().query(), "projectId");
                         let asset_id = query_param(request.uri().query(), "assetId");
+                        let method = request.method().as_str().to_owned();
                         let range = request
                             .headers()
                             .get("range")
@@ -297,13 +300,15 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                         };
                         match (project_id, asset_id) {
                             (Some(project_id), Some(asset_id)) => {
-                                tauri::async_runtime::block_on(protocol.handle_path(
-                                    Some(request.uri().path()),
-                                    request.method().as_str(),
-                                    &project_id,
-                                    &asset_id,
-                                    range.as_deref(),
-                                ))
+                                protocol
+                                    .handle_path(
+                                        Some(path.as_str()),
+                                        &method,
+                                        &project_id,
+                                        &asset_id,
+                                        range.as_deref(),
+                                    )
+                                    .await
                             }
                             _ => application::media_protocol::MediaResponse {
                                 status: 404,

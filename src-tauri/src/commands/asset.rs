@@ -14,7 +14,7 @@ use crate::{
             SourceAssetImportError, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_VIDEO_BYTES,
         },
     },
-    domain::{AssetRelation, AssetVersion},
+    domain::AssetVersion,
     error::AppError,
 };
 use chrono::{DateTime, Utc};
@@ -252,37 +252,6 @@ pub struct AssetRelationView {
     pub created_at: DateTime<Utc>,
 }
 
-impl AssetRelationView {
-    async fn from_relation(
-        state: &AppState,
-        project_id: &str,
-        relation: AssetRelation,
-    ) -> Result<Self, AppError> {
-        let source_asset = state
-            .assets
-            .query
-            .get(project_id, relation.source_asset_id.as_str())
-            .await
-            .map_err(map_asset_error)?;
-        let target_asset = state
-            .assets
-            .query
-            .get(project_id, relation.target_asset_id.as_str())
-            .await
-            .map_err(map_asset_error)?;
-        Ok(Self {
-            id: relation.id.as_str().to_owned(),
-            project_id: relation.project_id,
-            source_asset_id: relation.source_asset_id.as_str().to_owned(),
-            target_asset_id: relation.target_asset_id.as_str().to_owned(),
-            source_asset_name: source_asset.name,
-            target_asset_name: target_asset.name,
-            relation_type: relation.relation_type.as_str().to_owned(),
-            created_at: relation.created_at,
-        })
-    }
-}
-
 #[tauri::command(rename_all = "camelCase")]
 pub async fn asset_versions_list(
     state: State<'_, AppState>,
@@ -312,9 +281,48 @@ pub async fn asset_relations_list(
         .list_relations(&project_id, &asset_id)
         .await
         .map_err(map_asset_data_error)?;
+    let mut names_by_id: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     let mut views = Vec::with_capacity(relations.len());
     for relation in relations {
-        views.push(AssetRelationView::from_relation(&state, &project_id, relation).await?);
+        let source_id = relation.source_asset_id.as_str().to_owned();
+        let source_asset_name = if let Some(existing) = names_by_id.get(&source_id) {
+            existing.clone()
+        } else {
+            let fetched = state
+                .assets
+                .query
+                .get(&project_id, &source_id)
+                .await
+                .map_err(map_asset_error)?
+                .name;
+            names_by_id.insert(source_id.clone(), fetched.clone());
+            fetched
+        };
+        let target_id = relation.target_asset_id.as_str().to_owned();
+        let target_asset_name = if let Some(existing) = names_by_id.get(&target_id) {
+            existing.clone()
+        } else {
+            let fetched = state
+                .assets
+                .query
+                .get(&project_id, &target_id)
+                .await
+                .map_err(map_asset_error)?
+                .name;
+            names_by_id.insert(target_id.clone(), fetched.clone());
+            fetched
+        };
+        views.push(AssetRelationView {
+            id: relation.id.as_str().to_owned(),
+            project_id: relation.project_id,
+            source_asset_id: source_id,
+            target_asset_id: target_id,
+            source_asset_name,
+            target_asset_name,
+            relation_type: relation.relation_type.as_str().to_owned(),
+            created_at: relation.created_at,
+        });
     }
     Ok(views)
 }

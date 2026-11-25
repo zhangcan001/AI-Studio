@@ -24,7 +24,11 @@ impl WorkflowLibraryRepository for SqliteWorkflowLibraryRepository {
         &self,
         package: &WorkflowPackageRecord,
     ) -> Result<WorkflowPackageRegistration, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let registration = register_package(&mut transaction, package).await?;
         transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(registration)

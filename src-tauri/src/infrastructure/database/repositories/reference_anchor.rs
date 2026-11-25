@@ -147,7 +147,11 @@ impl ReferenceAnchorRepository for SqliteReferenceAnchorRepository {
         anchor: &ReferenceAnchor,
         asset_ids: &[AssetId],
     ) -> Result<ReferenceAnchorRecord, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         insert_anchor(&mut transaction, anchor).await?;
         insert_memberships(&mut transaction, anchor, asset_ids).await?;
         transaction.commit().await.map_err(map_sqlx_error)?;
@@ -159,7 +163,11 @@ impl ReferenceAnchorRepository for SqliteReferenceAnchorRepository {
         anchor: &ReferenceAnchor,
         asset_ids: &[AssetId],
     ) -> Result<ReferenceAnchorRecord, RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE reference_anchors
              SET kind = ?, name = ?, normalized_name = ?, description = ?, updated_at = ?

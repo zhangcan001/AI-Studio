@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { productClient } from "../../product/client";
-import type { LibraryItem } from "../../product/libraryTypes";
+import { toMediaByteArray, type LibraryItem } from "../../product/libraryTypes";
 
 // One transient IO limiter per mounted Library. It survives page/query changes
 // so outstanding old reads and new reads together remain bounded, without cache.
@@ -46,7 +46,7 @@ export function LibraryThumbnail({ projectId, item }: { projectId: string; item:
           const bytes = await productClient.library.thumbnailGet(projectId, item.resourceRef);
           if (!live) return;
           // Existing read contract contains bytes only, not authoritative MIME.
-          objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
+          objectUrl = URL.createObjectURL(new Blob([toMediaByteArray(bytes)]));
           setUrl(objectUrl);
         } catch { if (live) setFailed(true); }
       });

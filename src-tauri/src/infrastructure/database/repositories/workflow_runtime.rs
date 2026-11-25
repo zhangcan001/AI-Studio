@@ -206,7 +206,11 @@ impl WorkflowRuntimeRepository for SqliteWorkflowRuntimeRepository {
         workflow_id: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
-        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
         delete_version(
             &mut transaction,
             workflow_version_id,

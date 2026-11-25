@@ -524,13 +524,11 @@ impl ProductRunFacade {
                 // Parent lifecycle persistence can lag its child queue. Project current
                 // facts without invoking the legacy synchronizing read or changing state.
                 if run.status != "CANCELLED" {
-                    if let Some(stage) = run
-                        .stages
-                        .iter()
-                        .rev()
-                        .find(|stage| stage.ordinal != 1 && stage.production_batch_id.is_some())
-                    {
-                        let batch_id = stage.production_batch_id.as_deref().unwrap();
+                    if let Some((stage, batch_id)) = run.stages.iter().rev().find_map(|stage| {
+                        (stage.ordinal != 1)
+                            .then_some(stage.production_batch_id.as_deref().map(|id| (stage, id)))
+                            .flatten()
+                    }) {
                         let batch = self
                             .queue
                             .get(project_id, batch_id)

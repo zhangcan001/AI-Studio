@@ -116,7 +116,7 @@ export function useLibraryController({route,navigate}:LibraryProps) {
       if(selfEditInvalidation.current){selfEditInvalidation.current=false;return;}
       clearTimeout(event);event=setTimeout(()=>void refresh({background:true}),150);
     });
-    const timer=setInterval(()=>{if(!readInFlight.current)void refresh({tags:false,background:true});},5000);
+    const timer=setInterval(()=>{if(!readInFlight.current&&document.visibilityState!=="hidden")void refresh({tags:false,background:true});},5000);
     return()=>{++epoch.current;unsubscribe();clearTimeout(event);clearInterval(timer);};
   },[refresh]);
   const current=projection?.scope===scope?projection:undefined;
