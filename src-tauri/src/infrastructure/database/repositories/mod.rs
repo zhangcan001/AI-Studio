@@ -568,7 +568,7 @@ pub mod story_entity {
             {
                 return Err(RepositoryError::integrity("镜头行保存不能为空"));
             }
-            let mut tx = self.pool.begin().await.map_err(db)?;
+            let mut tx = super::begin_immediate(&self.pool).await?;
             let exists: i64 = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM shots WHERE id = ? AND project_id = ?)",
             )
@@ -930,7 +930,7 @@ pub mod story_entity {
             shot_id: &str,
         ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
             let db = |e: sqlx::Error| RepositoryError::database(e.to_string());
-            let mut tx = self.pool.begin().await.map_err(db)?;
+            let mut tx = super::begin_immediate(&self.pool).await?;
             let usage = shot_composition_usage_tx(&mut tx, project_id, shot_id).await?;
             tx.commit().await.map_err(db)?;
             Ok(usage)

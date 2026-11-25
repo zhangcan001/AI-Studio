@@ -39,9 +39,9 @@
 .v3-runtime[data-status="OFFLINE"] .v3-runtime-dot, .v3-runtime[data-status="INCOMPATIBLE"] .v3-runtime-dot { background:var(--studio-warning); }
 .v3-main { flex:1; min-width:0; min-height:0; padding:var(--studio-space-6); overflow:auto; overflow-wrap:anywhere; }
 .v3-main > .app-main-content { min-width:0; width:100%; max-width:100%; margin:0; padding:0; }
-.v3-main .comfy-status-warning { display:flex; flex:none; align-items:center; justify-content:space-between; gap:var(--studio-space-4); padding:var(--studio-space-3) var(--studio-space-4); margin-bottom:var(--studio-space-4); background:var(--studio-surface-1); border:1px solid var(--studio-border); border-radius:var(--studio-radius-md); flex-wrap:wrap; }
-.v3-main .comfy-status-warning .section-label { display:block; color:var(--studio-warning); font-size:var(--studio-font-xs); }
-.v3-main .comfy-status-warning p { margin:var(--studio-space-2) 0 0; font-size:var(--studio-font-sm); color:var(--studio-text-secondary); }
+.v3-main .comfy-status-warning { display:flex; flex:none; align-items:center; justify-content:space-between; gap:var(--studio-space-3); padding:8px 14px; margin-bottom:var(--studio-space-3); background:var(--studio-surface-1); border:1px solid var(--studio-border); border-radius:var(--studio-radius-md); flex-wrap:wrap; }
+.v3-main .comfy-status-warning .section-label { display:inline; margin-right:8px; color:var(--studio-warning); font-size:var(--studio-font-xs); }
+.v3-main .comfy-status-warning p { display:inline; margin:0; font-size:var(--studio-font-xs); color:var(--studio-text-secondary); }
 .v3-shell button { cursor:pointer; white-space:normal; font:inherit; color:inherit; border:1px solid var(--studio-border-strong); border-radius:var(--studio-radius-sm); padding:var(--studio-space-2) var(--studio-space-3); background:var(--studio-surface-2); transition:background-color var(--studio-motion-fast), border-color var(--studio-motion-fast); }
 .v3-shell button:hover:not(:disabled) { background:var(--studio-surface-3); border-color:var(--studio-accent); }
 .v3-shell button:disabled { cursor:not-allowed; opacity:.5; }
@@ -52,7 +52,9 @@
 .v3-skip { position:absolute; top:-100px; }
 .v3-skip:focus { top:8px; left:8px; z-index:100; background:var(--studio-surface-2); padding:var(--studio-space-3); color:var(--studio-text); }
 .v3-overview { width:100%; max-width:1180px; margin-inline:auto; }
-.v3-overview-header { margin-bottom:var(--studio-space-6); }
+.v3-overview-header { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--studio-space-4); flex-wrap:wrap; margin-bottom:var(--studio-space-6); }
+.v3-overview-title { min-width:0; flex:1 1 280px; }
+.v3-overview-shortcuts { display:flex; align-items:center; gap:var(--studio-space-2); flex-wrap:wrap; }
 .v3-overview-header h1 { font-size:var(--studio-font-title); margin:var(--studio-space-2) 0; overflow-wrap:anywhere; }
 .v3-eyebrow { font-size:var(--studio-font-xs); color:var(--studio-accent-hover); letter-spacing:.08em; }
 .v3-overview p { color:var(--studio-text-secondary); line-height:var(--studio-line-height); }
@@ -94,3 +96,7 @@
 .v3-palette-list button.v3-palette-active { background:var(--studio-accent-soft); border-color:var(--studio-accent); color:var(--studio-text); }
 .v3-palette-list small { color:var(--studio-text-muted); font-size:var(--studio-font-xs); }
 .v3-palette-empty { padding:var(--studio-space-4); text-align:center; color:var(--studio-text-muted); font-size:var(--studio-font-sm); }
+.v3-projects-btn { padding:6px 10px; font-size:var(--studio-font-xs); color:var(--studio-text-secondary); white-space:nowrap; }
+.v3-settings-bar { display:flex; align-items:center; gap:var(--studio-space-2); padding:8px var(--studio-space-6); border-bottom:1px solid var(--studio-border); background:var(--studio-surface-1); overflow-x:auto; flex:none; }
+.v3-settings-bar button { padding:5px 12px; font-size:var(--studio-font-xs); white-space:nowrap; background:transparent; border-color:transparent; color:var(--studio-text-secondary); }
+.v3-settings-bar button[aria-current="page"] { background:var(--studio-accent-soft); border-color:var(--studio-accent); color:var(--studio-accent-hover); }

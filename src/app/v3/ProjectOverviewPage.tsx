@@ -72,7 +72,10 @@ export function ProjectOverviewPage({ projectId, navigate }: { projectId: string
   const readiness = runtimeReadinessPresentation(data.runtimeReadiness);
   return <section className="v3-overview" aria-label="项目概览">
     {state.error && <p role="status">暂时无法刷新项目概览。{state.error}</p>}
-    <header className="v3-overview-header"><span className="v3-eyebrow">MINIMAX VIDEO · 项目概览</span><h1>{projectDisplayName(data.project.id, data.project.name)}</h1>{data.project.description && <p>{data.project.description}</p>}</header>
+    <header className="v3-overview-header">
+      <div className="v3-overview-title"><span className="v3-eyebrow">MINIMAX VIDEO · 项目概览</span><h1>{projectDisplayName(data.project.id, data.project.name)}</h1>{data.project.description && <p>{data.project.description}</p>}</div>
+      <div className="v3-overview-shortcuts"><button type="button" onClick={() => navigate({ kind: "project-list" })}>项目管理与归档</button><button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>默认生成器</button></div>
+    </header>
     <section className="v3-next-action"><div><h2>下一步</h2><p>从当前项目继续创作，或处理需要关注的运行。</p></div><button type="button" className="primary-button" onClick={() => navigate(action.route)}>{action.label}</button></section>
     <div className="v3-overview-grid">
       <section><h2>视频生产进度</h2><dl className="v3-metrics"><div><dt>镜头</dt><dd>{data.progress.total}</dd></div><div><dt>已完成</dt><dd>{data.progress.completed}</dd></div><div><dt>失败</dt><dd>{data.progress.failed}</dd></div></dl></section>

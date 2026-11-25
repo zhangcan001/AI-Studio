@@ -1254,6 +1254,19 @@ pub mod folder_batch_import_service {
                         format!("实体 {} 与项目中已有的同名实体类型不同", entity.name),
                     ));
                 }
+                if let Some(conflict) = existing.iter().find(|e| {
+                    e.kind.as_str() == declared_kind
+                        && e.name != entity.name
+                        && e.name.to_lowercase() == entity.name.to_lowercase()
+                }) {
+                    return Err(failure(
+                        "INVALID_MANIFEST",
+                        format!(
+                            "实体 {} 与项目中已有同类型实体「{}」仅大小写不同；同类型名称不区分大小写，请统一大小写复用或修改名称",
+                            entity.name, conflict.name
+                        ),
+                    ));
+                }
                 if !existing.iter().any(|e| {
                     e.name == entity.name
                         && e.kind.as_str() == entity.kind.as_deref().unwrap_or("character")

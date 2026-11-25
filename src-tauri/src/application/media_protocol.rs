@@ -101,10 +101,14 @@ impl MediaProtocolService {
                 partial: total > MAX_MEDIA_RESPONSE_BYTES,
             },
         };
-        let length = requested
-            .end
-            .saturating_sub(requested.start)
-            .saturating_add(1);
+        let length = if total == 0 {
+            0
+        } else {
+            requested
+                .end
+                .saturating_sub(requested.start)
+                .saturating_add(1)
+        };
         if length > MAX_MEDIA_RESPONSE_BYTES {
             return MediaResponse::range_not_satisfiable(total);
         }
@@ -138,14 +142,29 @@ impl MediaProtocolService {
             response.body.clear();
             return response;
         }
-        response.body = match self
-            .asset_store
-            .read_range(&project_root, &asset_path, requested.start, length)
-            .await
-        {
-            Ok(bytes) => bytes,
-            Err(error) => return MediaResponse::server_error(error.to_string()),
+        response.body = if length == 0 {
+            Vec::new()
+        } else {
+            match self
+                .asset_store
+                .read_range(&project_root, &asset_path, requested.start, length)
+                .await
+            {
+                Ok(bytes) => bytes,
+                Err(error) => return MediaResponse::server_error(error.to_string()),
+            }
         };
+        let actual_len = response.body.len() as u64;
+        response
+            .headers
+            .insert("Content-Length".to_owned(), actual_len.to_string());
+        if requested.partial && actual_len > 0 {
+            let actual_end = requested.start.saturating_add(actual_len - 1);
+            response.headers.insert(
+                "Content-Range".to_owned(),
+                format!("bytes {}-{}/{}", requested.start, actual_end, total),
+            );
+        }
         response
     }
 }
@@ -205,7 +224,8 @@ fn parse_range(value: &str, total: u64) -> Result<ByteRange, ()> {
         if suffix == 0 {
             return Err(());
         }
-        (total.saturating_sub(suffix), total - 1)
+        let capped = suffix.min(MAX_MEDIA_RESPONSE_BYTES);
+        (total.saturating_sub(capped), total - 1)
     } else {
         let start = start.parse::<u64>().map_err(|_| ())?;
         if start >= total {
@@ -593,5 +613,13 @@ mod tests {
                 .status,
             404
         );
+    }
+
+    #[test]
+    fn suffix_range_over_cap_preserves_true_file_tail_for_mp4_moov() {
+        let total = 20 * 1024 * 1024;
+        let range = parse_range("bytes=-16777216", total).unwrap();
+        assert_eq!(range.end, total - 1);
+        assert_eq!(range.end - range.start + 1, MAX_MEDIA_RESPONSE_BYTES);
     }
 }

@@ -497,10 +497,17 @@ impl AssetStore for FileSystemAssetStore {
         let length = usize::try_from(length)
             .map_err(|_| AssetStoreError::Read("range length is too large".to_owned()))?;
         let mut bytes = vec![0; length];
-        let read = file.read(&mut bytes).map_err(|error| {
-            AssetStoreError::Read(format!("read range {}: {error}", path.display()))
-        })?;
-        bytes.truncate(read);
+        let mut total_read = 0usize;
+        while total_read < length {
+            let count = file.read(&mut bytes[total_read..]).map_err(|error| {
+                AssetStoreError::Read(format!("read range {}: {error}", path.display()))
+            })?;
+            if count == 0 {
+                break;
+            }
+            total_read += count;
+        }
+        bytes.truncate(total_read);
         Ok(bytes)
     }
 }

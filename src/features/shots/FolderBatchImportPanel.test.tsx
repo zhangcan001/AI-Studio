@@ -138,3 +138,14 @@ it("R49/R70: full prompt and Picture identities are inspectable and receipts nev
  fireEvent.click(screen.getByRole("checkbox",{name:"导入 镜头0"}));fireEvent.click(screen.getByRole("button",{name:"确认导入"}));
  expect(await screen.findByRole("button",{name:"编辑「原回执镜头名」"})).toBeTruthy();
 });
+
+it("filters preview rows by errors/selected without altering the committed includeRowKeys", async () => {
+  render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} />);
+  await pick();
+  fireEvent.click(screen.getByRole("button", { name: "仅看报错（1）" }));
+  expect(screen.queryByRole("checkbox", { name: "导入 镜头0" })).toBeNull();
+  expect(screen.getByRole("checkbox", { name: "导入 镜头2" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+  await screen.findByText("导入完成");
+  expect(api.commit).toHaveBeenCalledWith(expect.objectContaining({ includeRowKeys: ["r0", "r1"] }));
+});

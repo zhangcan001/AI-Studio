@@ -10,19 +10,30 @@ function Thumbnail({ bytes }: { bytes: number[] }) {
   return <img src={url} alt="生成结果" />;
 }
 const reviewLabels: Record<string, string> = { PENDING: "待审核", APPROVED: "已通过", REJECTED: "已退回" };
-function ReviewActions({ result, controller: c, route }: { result: RunResult; controller: RunsController; route:RunsProps["route"] }) {
+function ReviewActions({ result, controller: c, route, singleShot }: { result: RunResult; controller: RunsController; route:RunsProps["route"]; singleShot?: { id: string; name: string } }) {
   const key=JSON.stringify([route.projectId,route.run?.source,route.run?.id,result.assetId]);
   const comment=useStudioStore(state=>state.reviewComments[key]??"");
   const setComment=(text:string)=>useStudioStore.getState().setReviewComment(key,text);
   const submit=async(decision:"APPROVED"|"REJECTED")=>{if(await c.review(result,decision,comment)===true&&useStudioStore.getState().reviewComments[key]===comment)useStudioStore.getState().setReviewComment(key,undefined);};
-  return <div className="run-review-actions"><label>审核说明<input value={comment} onChange={event => setComment(event.target.value)} disabled={c.busy} /></label><small>未提交说明仅在本次会话内保留，切换记录后可恢复。</small><button type="button" disabled={c.busy} onClick={() => void submit("APPROVED")}>审核通过</button><button type="button" disabled={c.busy || !comment.trim()} onClick={() => void submit("REJECTED")}>审核退回</button></div>;
+  const submitAndSelect=async()=>{if(!singleShot)return;if(await c.approveAndSelectForShot(result,singleShot.id,comment)===true&&useStudioStore.getState().reviewComments[key]===comment)useStudioStore.getState().setReviewComment(key,undefined);};
+  const chosen=Boolean(singleShot&&result.selectedShotIds.includes(singleShot.id));
+  return <div className="run-review-actions"><label>审核说明<input value={comment} onChange={event => setComment(event.target.value)} disabled={c.busy} /></label><small>未提交说明仅在本次会话内保留，切换记录后可恢复。</small><button type="button" disabled={c.busy} onClick={() => void submit("APPROVED")}>审核通过</button>{singleShot && !chosen && result.mediaKind === "video" && result.availability !== "missing" && result.availability !== "unavailable" && <button type="button" className="primary" disabled={c.busy} onClick={() => void submitAndSelect()}>通过并选为「{singleShot.name}」结果</button>}<button type="button" disabled={c.busy || !comment.trim()} onClick={() => void submit("REJECTED")}>审核退回</button></div>;
 }
 export function RunResults({ controller: c, route, navigate }: RunsProps & { controller: RunsController }) {
-  return <section><h3>结果</h3><p>执行成功、素材存在、审核通过与镜头选用是四个独立事实。</p><div className="run-results">{c.results.map(result => <article key={result.assetId}>
-    {result.thumbnailBytes && <Thumbnail bytes={result.thumbnailBytes} />}
-    {result.mediaKind === "video" && result.assetExists && result.availability === "available" && <video controls preload="metadata" src={productClient.creation.mediaUrl(route.projectId, result.assetId)} />}
-    {result.mediaKind === "video" && result.assetExists && <ResultFileActions projectId={route.projectId} assetId={result.assetId}/>}<strong>{result.name}</strong><p>{result.assetExists ? result.availability === "missing" ? "素材文件缺失" : "素材存在" : "素材不存在"} · {result.reviewState ? reviewLabels[result.reviewState] ?? "审核状态未知" : "无审核记录"} · {result.selectedShotIds.length ? "镜头已选用" : "镜头未选用"}</p>
-    <button type="button" disabled={!result.assetExists} onClick={() => navigate({ kind: "library", projectId: route.projectId, resource: { kind: "asset", id: result.assetId } })}>在素材库查看</button>
-    {result.reviewRevision !== null && result.assetExists && (result.reviewState === "PENDING" ? <ReviewActions result={result} controller={c} route={route} /> : <button type="button" disabled={c.busy} onClick={() => void c.reopenReview(result)}>重新审核</button>)}
-  </article>)}</div>{!c.results.length && <p>暂无结果。不会把任务成功当作素材已存在。</p>}</section>;
+  const videoSources = (c.detail?.detail?.sources ?? []).filter(source => source.stage === "video");
+  const singleShot = videoSources.length === 1 ? videoSources[0] : undefined;
+  return <section><h3>结果</h3><p>执行成功、素材存在、审核通过与镜头选用是四个独立事实。</p><div className="run-results">{c.results.map(result => {
+    const canSelectForShot = Boolean(singleShot && result.mediaKind === "video" && result.assetExists && result.availability !== "missing" && result.availability !== "unavailable" && result.reviewState !== "REJECTED");
+    const chosen = Boolean(singleShot && result.selectedShotIds.includes(singleShot.id));
+    return <article key={result.assetId}>
+      {result.thumbnailBytes && <Thumbnail bytes={result.thumbnailBytes} />}
+      {result.mediaKind === "video" && result.assetExists && result.availability === "available" && <video controls preload="metadata" src={productClient.creation.mediaUrl(route.projectId, result.assetId)} />}
+      {result.mediaKind === "video" && result.assetExists && <ResultFileActions projectId={route.projectId} assetId={result.assetId}/>}<strong>{result.name}</strong><p>{result.assetExists ? result.availability === "missing" ? "素材文件缺失" : "素材存在" : "素材不存在"} · {result.reviewState ? reviewLabels[result.reviewState] ?? "审核状态未知" : "无审核记录"} · {result.selectedShotIds.length ? "镜头已选用" : "镜头未选用"}</p>
+      <div className="run-inline-actions">
+        <button type="button" disabled={!result.assetExists} onClick={() => navigate({ kind: "library", projectId: route.projectId, resource: { kind: "asset", id: result.assetId } })}>在素材库查看</button>
+        {singleShot && (canSelectForShot || chosen) && <button type="button" disabled={c.busy || chosen || !canSelectForShot} onClick={() => void c.selectForShot(singleShot.id, result.assetId)}>{chosen ? `已选为「${singleShot.name}」结果` : `选为「${singleShot.name}」结果`}</button>}
+      </div>
+      {result.reviewRevision !== null && result.assetExists && (result.reviewState === "PENDING" ? <ReviewActions result={result} controller={c} route={route} singleShot={singleShot} /> : <button type="button" disabled={c.busy} onClick={() => void c.reopenReview(result)}>重新审核</button>)}
+    </article>;
+  })}</div>{!c.results.length && <p>暂无结果。不会把任务成功当作素材已存在。</p>}</section>;
 }

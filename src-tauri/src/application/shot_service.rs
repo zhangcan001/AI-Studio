@@ -269,6 +269,17 @@ impl ShotService {
         self.views(data).await
     }
 
+    /// Lightweight shot projection for Storyboard workbench: skips per-link TaskQueryService
+    /// output/YAML queries since workbench_page already batches candidate assets by task IDs.
+    pub async fn list_for_workbench(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ShotView>, ShotServiceError> {
+        validate_project(project_id)?;
+        let data = self.repository.list(project_id).await?;
+        self.views_with_mode(data, false).await
+    }
+
     pub async fn get(&self, project_id: &str, shot_id: &str) -> Result<ShotView, ShotServiceError> {
         validate_project(project_id)?;
         let data = self
@@ -282,14 +293,31 @@ impl ShotService {
     pub async fn create(&self, project_id: &str) -> Result<ShotView, ShotServiceError> {
         validate_project(project_id)?;
         let existing = self.repository.list(project_id).await?;
-        let ordinal = i64::try_from(existing.len())
-            .map_err(|_| ShotServiceError::InvalidInput("镜头序号超出范围".to_owned()))?;
+        let ordinal = existing
+            .iter()
+            .map(|item| item.shot.ordinal)
+            .max()
+            .map(|max_ordinal| max_ordinal.checked_add(1))
+            .unwrap_or(Some(0))
+            .ok_or_else(|| ShotServiceError::InvalidInput("镜头序号超出范围".to_owned()))?;
+        let existing_names = existing
+            .iter()
+            .map(|item| item.shot.name.to_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        let mut name_index = ordinal.saturating_add(1).max(1);
+        let name = loop {
+            let candidate = canonical_shot_name(&format!("镜头 {:02}", name_index))?;
+            if !existing_names.contains(&candidate.to_lowercase()) {
+                break candidate;
+            }
+            name_index = name_index.saturating_add(1);
+        };
         let now = self.clock.now();
         let shot = ShotRecord {
             id: format!("sht_{}", Uuid::new_v4()),
             project_id: project_id.to_owned(),
             ordinal,
-            name: canonical_shot_name(&format!("镜头 {:02}", ordinal + 1))?,
+            name,
             prompt_text: String::new(),
             prompt_entry_id: None,
             prompt_version_id: None,
@@ -941,6 +969,14 @@ impl ShotService {
     }
 
     async fn views(&self, data: Vec<ShotData>) -> Result<Vec<ShotView>, ShotServiceError> {
+        self.views_with_mode(data, true).await
+    }
+
+    async fn views_with_mode(
+        &self,
+        data: Vec<ShotData>,
+        hydrate_task_outputs: bool,
+    ) -> Result<Vec<ShotView>, ShotServiceError> {
         let task_ids = data
             .iter()
             .flat_map(|item| item.generation_links.iter())
@@ -957,7 +993,10 @@ impl ShotService {
             .collect::<HashMap<_, _>>();
         let mut result = Vec::with_capacity(data.len());
         for item in data {
-            result.push(self.view_with_tasks(item, &tasks_by_id).await?);
+            result.push(
+                self.view_with_tasks_mode(item, &tasks_by_id, hydrate_task_outputs)
+                    .await?,
+            );
         }
         Ok(result)
     }
@@ -977,13 +1016,14 @@ impl ShotService {
             .into_iter()
             .map(|task| (task.id.to_string(), task))
             .collect::<HashMap<_, _>>();
-        self.view_with_tasks(data, &tasks_by_id).await
+        self.view_with_tasks_mode(data, &tasks_by_id, true).await
     }
 
-    async fn view_with_tasks(
+    async fn view_with_tasks_mode(
         &self,
         data: ShotData,
         tasks_by_id: &HashMap<String, crate::domain::Task>,
+        hydrate_task_outputs: bool,
     ) -> Result<ShotView, ShotServiceError> {
         let stage_prompts = if self.stage_prompt_repository.is_some() {
             data.stage_prompts
@@ -1003,12 +1043,16 @@ impl ShotService {
                     ));
                 }
                 task_statuses.insert(task.id.to_string(), task.status);
-                Some(
-                    self.task_query_service
-                        .view(task.clone())
-                        .await
-                        .map_err(|error| ShotServiceError::TaskView(error.to_string()))?,
-                )
+                if hydrate_task_outputs {
+                    Some(
+                        self.task_query_service
+                            .view(task.clone())
+                            .await
+                            .map_err(|error| ShotServiceError::TaskView(error.to_string()))?,
+                    )
+                } else {
+                    Some(crate::application::ports::TaskUpdatePayload::from_task(task))
+                }
             } else {
                 None
             };

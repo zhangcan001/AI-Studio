@@ -2,6 +2,7 @@ import { defaultGenerationValues } from "../../stores/studioStore";
 import type { GeneratorOption } from "../../product/types";
 import type { ShotInputValues } from "../../types/shot";
 import { shotDurationMax } from "../../product/shotDuration";
+import { generatorLabel } from "../../product/generatorPresentation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import type { ShotView } from "../../types/shot";
@@ -39,7 +40,7 @@ function ScopedStoryboardBatchDialog({projectId,onClose,onQueue,onShot}:Props) {
     setSelection("");setError(undefined);
   };
   const configurationEditor=<fieldset disabled={busy}><legend>批量生成器与参数</legend><p>只修改明确勾选的镜头；媒体仍需按各自正式槽位绑定，不会复制首帧到尾帧。</p>
-    <label>批量生成器<select aria-label="批量生成器" value={selection} onChange={e=>{const g=generators.find(g=>g.selectionRef===e.target.value);setSelection(e.target.value);const f=g?.fields.find(f=>f.key==="duration_seconds"&&(f.type==="integer"||f.type==="number"));setDuration(f&&"default" in f&&f.default!==undefined?String(f.default):"");setPresetId(g?.resolutionPresets?.[0]?.id??"");}}><option value="">请选择要应用的生成器</option>{generators.map(g=><option key={g.selectionRef} value={g.selectionRef} disabled={!g.availability}>{g.name} · {g.mode} · {g.version}</option>)}</select></label>
+    <label>批量生成器<select aria-label="批量生成器" value={selection} onChange={e=>{const g=generators.find(g=>g.selectionRef===e.target.value);setSelection(e.target.value);const f=g?.fields.find(f=>f.key==="duration_seconds"&&(f.type==="integer"||f.type==="number"));setDuration(f&&"default" in f&&f.default!==undefined?String(f.default):"");setPresetId(g?.resolutionPresets?.[0]?.id??"");}}><option value="">请选择要应用的生成器</option>{generators.map((g,idx)=><option key={g.selectionRef} value={g.selectionRef} disabled={!g.availability}>{g.name.startsWith("wfl_") ? generatorLabel({ ...g, mediaKind: g.mediaKind ?? "video" }, idx) : `${g.name} · ${g.mode} · ${g.version}`}</option>)}</select></label>
     {durationField&&<label>批量时长（秒）<input aria-label="批量时长（秒）" type="number" min={"min" in durationField?durationField.min:undefined} max={shotDurationMax("max" in durationField?durationField.max:undefined)} step={durationField.type==="integer"?1:"any"} value={duration} onChange={e=>setDuration(e.target.value)}/></label>}
     {generator?.resolutionPresets?.length? <label>批量画幅与分辨率<select aria-label="批量画幅与分辨率" value={presetId} onChange={e=>setPresetId(e.target.value)}>{generator.resolutionPresets.map(p=><option key={p.id} value={p.id}>{p.label} · {p.width}×{p.height}</option>)}</select></label>:null}
     <small>应用会采用所选生成器的默认标量参数（含种子），再覆盖所填时长和分辨率；原提示词与媒体输入不变，冻结历史不变。</small></fieldset>;

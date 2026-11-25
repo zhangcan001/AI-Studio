@@ -20,7 +20,8 @@ import type { CreationShotSummary } from "../../product/types";
 
 const KIND_LABEL: Record<StoryEntityKind, string> = { character: "角色", scene: "场景", prop: "物品", composition: "构图" };
 const KINDS: StoryEntityKind[] = ["scene", "character", "prop", "composition"];
-const FILTERS: (StoryboardShotStatus | "ALL" | "UNSELECTED")[] = ["ALL", "TODO", "QUEUED", "GENERATING", "PAUSED", "REVIEW", "UNSELECTED", "COMPLETED", "FAILED"];
+export const STORYBOARD_FILTERS = ["ALL", "TODO", "QUEUED", "GENERATING", "PAUSED", "REVIEW", "UNSELECTED", "COMPLETED", "FAILED"] as const;
+const FILTERS: (StoryboardShotStatus | "ALL" | "UNSELECTED")[] = [...STORYBOARD_FILTERS];
 
 interface RowsProps {
   projectId: string;
@@ -34,6 +35,11 @@ interface RowsProps {
   onMove?: (shotId: string, delta: -1 | 1) => void;
   onMoveTo?: (shotId: string, targetIndex: number) => void;
   onInsert?: (shotId: string) => void;
+  onClone?: (shotId: string) => void;
+  searchQuery?: string;
+  onSearchQueryChange?: (next: string) => void;
+  statusFilter?: (typeof FILTERS)[number];
+  onStatusFilterChange?: (next: (typeof FILTERS)[number]) => void;
   shotIndex?: CreationShotSummary[];
   focusId?: string;
   overview?: StoryboardShot[];
@@ -48,9 +54,13 @@ interface RowsProps {
  * duration and aspect/resolution persist through creation.updateShot (stage
  * prompt + generator scalar values validated by the selected recipe).
  */
-export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, onMove, onMoveTo, onInsert, focusId, shotIndex = [], overview=items, onLocate }: RowsProps) {
-  const [query, setQuery] = useProjectSessionState(projectId, "storyboard.search", "", (v): v is string => typeof v === "string");
-  const [filter, setFilter] = useProjectSessionState<(typeof FILTERS)[number]>(projectId, "storyboard.filter", "ALL", (v): v is (typeof FILTERS)[number] => FILTERS.includes(v as (typeof FILTERS)[number]));
+export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, onChanged, onQueue, onReview, onMove, onMoveTo, onInsert, onClone, searchQuery, onSearchQueryChange, statusFilter, onStatusFilterChange, focusId, shotIndex = [], overview=items, onLocate }: RowsProps) {
+  const [localQuery, setLocalQuery] = useProjectSessionState(projectId, "storyboard.search", "", (v): v is string => typeof v === "string");
+  const [localFilter, setLocalFilter] = useProjectSessionState<(typeof FILTERS)[number]>(projectId, "storyboard.filter", "ALL", (v): v is (typeof FILTERS)[number] => FILTERS.includes(v as (typeof FILTERS)[number]));
+  const query = searchQuery ?? localQuery;
+  const setQuery = onSearchQueryChange ?? setLocalQuery;
+  const filter = statusFilter ?? localFilter;
+  const setFilter = onStatusFilterChange ?? setLocalFilter;
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchDuration, setBatchDuration] = useState("");
@@ -194,13 +204,13 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     </div>}
     {entityFailure && <p role="alert" className="storyboard-error">角色与场景读取失败：{entityFailure} <button type="button" onClick={() => setRev(v => v + 1)}>重试角色与场景</button></p>}
     {generatorFailure && <p role="alert" className="storyboard-error">生成器读取失败：{generatorFailure} <button type="button" onClick={() => setGeneratorsRev(v => v + 1)}>重试生成器</button></p>}
-    {visible.map(item => <ShotRowCard focused={focusId===item.id} key={`${projectId}:${item.id}`} projectId={projectId} item={item} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
+    {visible.map(item => { const pos = shotIndex.findIndex(s => s.id === item.id); return <ShotRowCard focused={focusId===item.id} key={`${projectId}:${item.id}`} projectId={projectId} item={item} position={pos >= 0 ? pos : item.ordinal} entities={currentEntities} entitiesReady={entitiesOwner === projectId} entitiesFailed={Boolean(entityFailure)} generatorsFailed={Boolean(generatorFailure)} urls={urls} busy={busy} generators={generators}
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
       selectable={selectMode} selected={selectedIds.includes(item.id)} onToggleSelect={() => setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id])}
       totalCount={totalShotCount} onMoveTo={onMoveTo}
       movePickerOpen={movePicker?.projectId === projectId && movePicker.shotId === item.id}
       onMovePickerChange={open => setMovePicker(open ? { projectId, shotId: item.id } : undefined)}
-      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} isFirst={shotIndex.length ? item.id === shotIndex[0]?.id : item.id === items[0]?.id} isLast={shotIndex.length ? item.id === shotIndex[shotIndex.length-1]?.id : item.id === items[items.length-1]?.id} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} onMove={onMove ? delta => onMove(item.id, delta) : undefined} onInsert={onInsert ? () => onInsert(item.id) : undefined} />)}
+      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} isFirst={shotIndex.length ? item.id === shotIndex[0]?.id : item.id === items[0]?.id} isLast={shotIndex.length ? item.id === shotIndex[shotIndex.length-1]?.id : item.id === items[items.length-1]?.id} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} onMove={onMove ? delta => onMove(item.id, delta) : undefined} onInsert={onInsert ? () => onInsert(item.id) : undefined} onClone={onClone ? () => onClone(item.id) : undefined} />; })}
     {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>其他页符合条件的镜头，点击定位后编辑；筛选覆盖全项目。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onLocate ? onLocate(s.id) : onOpen(s.id)}>定位{s.name} · {storyboardStatusText(s)}</button>)}</section>}
     {nameOnly.length>0&&<section aria-label="未加载镜头名称搜索结果"><p>以下仅匹配名称，尚无状态详情。</p>{nameOnly.map(s=><button type="button" key={s.id} onClick={()=>onOpen(s.id)}>打开{s.name}</button>)}</section>}
     {!visible.length && !unloaded.length && !nameOnly.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
@@ -291,8 +301,8 @@ const SECTION_FIELDS: [keyof ShotPromptSections, string, string][] = [
   ["music", "配乐", "1 句英文；没有配乐留空即可"],
 ];
 
-function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview, onMove, onMoveTo, movePickerOpen, onMovePickerChange, totalCount = 0, selectable = false, selected = false, onToggleSelect, onInsert, isFirst, isLast, focused }: {
-  projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
+function ShotRowCard({ projectId, item, position, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview, onMove, onMoveTo, movePickerOpen, onMovePickerChange, totalCount = 0, selectable = false, selected = false, onToggleSelect, onInsert, onClone, isFirst, isLast, focused }: {
+  projectId: string; item: StoryboardShot; position?: number; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
   onRun: (ref: RunRef) => void;
   onReview?: () => void;
@@ -308,6 +318,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   movePickerOpen: boolean;
   onMovePickerChange: (open: boolean) => void;
   onInsert?: () => void;
+  onClone?: () => void;
 }) {
   const lightbox = useMediaLightbox();
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -748,7 +759,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       e.preventDefault();
       try {
         const payload = JSON.parse(raw) as { projectId?: string; shotId?: string };
-        if (payload.projectId === projectId && payload.shotId && payload.shotId !== item.id) onMoveTo(payload.shotId, item.ordinal);
+        if (payload.projectId === projectId && payload.shotId && payload.shotId !== item.id) onMoveTo(payload.shotId, position ?? item.ordinal);
       } catch { /* ignore malformed drag payload */ }
     }}>
     <div className="shot-row-index-col">
@@ -859,7 +870,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
         {onMoveTo && totalCount > 1 && <>
           <button type="button" aria-expanded={movePickerOpen} disabled={disabled} onClick={() => onMovePickerChange(!movePickerOpen)}>移至镜号</button>
           {movePickerOpen && <label className="shot-row-jump">
-            <select aria-label={`${item.name} 移至镜号`} value={item.ordinal} disabled={disabled} onChange={event => {
+            <select aria-label={`${item.name} 移至镜号`} value={position ?? item.ordinal} disabled={disabled} onChange={event => {
               const target = Number(event.currentTarget.value);
               onMovePickerChange(false);
               onMoveTo(item.id, target);
@@ -869,6 +880,7 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
           </label>}
         </>}
         {onInsert && <button type="button" disabled={disabled} onClick={onInsert}>在此后插入</button>}
+        {onClone && <button type="button" disabled={disabled} title="在此镜头后插入副本，复制生成器、画幅时长与绑定实体（不复制生成结果）" onClick={onClone}>复制此镜</button>}
         <button type="button" className="success" disabled={disabled} title="新分镜追加到末尾" onClick={onCreate}>末尾新建分镜</button>
         <button type="button" className="danger" disabled={disabled} onClick={remove}>删除分镜</button>
         {item.status === "GENERATING" && item.run?.availableActions.includes("CANCEL") && <button type="button" className="danger" disabled={busy} onClick={cancelGeneration}>取消生成</button>}

@@ -2,6 +2,7 @@ import { reviewLabel } from "./storyboardModel";
 import { ResultFileActions } from "../../components/ResultFileActions";
 import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
+import { subscribeRunInvalidation } from "../../product/runInvalidation";
 import type { ProductRun } from "../../product/types";
 import { queueRunLabel } from "./createModel";
 import type { CreateController } from "./CreateController";
@@ -145,8 +146,17 @@ function RunQueueCard({ controller: c, projectId }: { controller: CreateControll
   const signal = `${c.runRef?.id ?? ""}:${c.run?.status ?? ""}`;
   useEffect(() => {
     let alive = true;
-    Promise.resolve().then(() => productClient.run.list(projectId, "active")).then(list => { if (alive) { setRuns(list.items.slice(0, 3)); setFailed(false); } }).catch(() => { if (alive) setFailed(true); });
-    return () => { alive = false; };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loadActive = () => {
+      void Promise.resolve().then(() => productClient.run.list(projectId, "active")).then(list => { if (alive) { setRuns(list.items.slice(0, 3)); setFailed(false); } }).catch(() => { if (alive) setFailed(true); });
+    };
+    loadActive();
+    const unsubscribe = subscribeRunInvalidation(changedProject => {
+      if (changedProject !== projectId) return;
+      clearTimeout(timer);
+      timer = setTimeout(loadActive, 300);
+    });
+    return () => { alive = false; clearTimeout(timer); unsubscribe(); };
   }, [projectId, signal]);
   return <section className="create-run-queue" aria-label="运行队列"><header><h2>运行队列 <small>{runs?.length ?? 0}</small></h2><button type="button" className="create-link" onClick={() => c.openRunsList()}>全部任务</button></header>
     {failed ? <p className="create-muted">无法读取运行队列，可在运行页查看。</p> : !runs ? <p className="create-muted">正在读取…</p> : !runs.length ? <p className="create-muted">当前没有进行中的运行</p>

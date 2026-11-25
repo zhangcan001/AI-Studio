@@ -74,3 +74,17 @@ it("imported user video generators are selectable; stray image options never rea
   const values = [...select.options].map(o => o.value);
   expect(values).toContain("user-i2v"); expect(values).not.toContain("stray-img");
 });
+
+it("marks dirty generator slots and batch-saves all modified bindings with exact OCC tokens", async () => {
+  api.list.mockImplementation(async (_project, stage) => stage === "video" ? [...options, { ...options[0], selectionRef: "video-t2v", mode: "fl2va_text_to_video" }] : []);
+  render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+  const def = await screen.findByLabelText("默认视频生成器");
+  const t2v = await screen.findByLabelText("文生视频生成器");
+  fireEvent.change(def, { target: { value: "two" } });
+  fireEvent.change(t2v, { target: { value: "video-t2v" } });
+  expect(screen.getAllByText("未保存修改")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "保存全部修改（2）" }));
+  await waitFor(() => expect(api.set).toHaveBeenCalledTimes(2));
+  expect(api.set).toHaveBeenNthCalledWith(1, "p", { stage: "VIDEO", mode: "DEFAULT", selectionRef: "two", expectedRevision: 3, expectedBindingInstanceId: "instance-A" });
+  expect(api.set).toHaveBeenNthCalledWith(2, "p", { stage: "VIDEO", mode: "FL2VA_TEXT_TO_VIDEO", selectionRef: "video-t2v", expectedRevision: null, expectedBindingInstanceId: null });
+});

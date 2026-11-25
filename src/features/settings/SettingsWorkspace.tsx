@@ -314,6 +314,14 @@ export function SettingsWorkspace({
           <p className="section-description">查看本地运行状态，或导出不包含私密内容的诊断摘要。</p>
         </div>
         <div className="settings-actions">
+          <button
+            type="button"
+            onClick={() => void releaseComfyMemory()}
+            disabled={memoryReleasing || connectionLoading || comfy?.status !== "CONNECTED"}
+            title="调用官方接口卸载模型释放显存/内存，不删除模型文件"
+          >
+            {memoryReleasing ? "正在释放……" : "快速释放显存"}
+          </button>
           <button type="button" onClick={() => void refresh()} disabled={loading}>
             {loading ? "正在刷新……" : "刷新诊断"}
           </button>
@@ -322,6 +330,13 @@ export function SettingsWorkspace({
           </button>
         </div>
       </div>
+
+      <nav className="settings-quick-anchors" aria-label="设置快捷定位">
+        <a href="#comfy-endpoint">ComfyUI 连接配置</a>
+        <a href="#settings-preflight-title">运行预检</a>
+        <a href="#settings-environment-profiles-title">多环境档案</a>
+        <a href="#comfy-memory-release-title">显存与内存释放</a>
+      </nav>
 
       {error !== undefined && <UiErrorNotice error={error} />}
       {notice && <p className="settings-notice" role="status">{notice}</p>}

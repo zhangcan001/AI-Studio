@@ -50,6 +50,8 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
   const [projectWorkflowConfig, setProjectWorkflowConfig] = useState<ProjectWorkflowConfigView>();
+  const [projectQuery, setProjectQuery] = useState("");
+  const [projectSort, setProjectSort] = useState<"updated" | "created" | "name">("updated");
 
   async function reloadTemplates() {
     setTemplates(await listProjectTemplates());
@@ -320,6 +322,25 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
         </form>}
       </section>
 
+      {projects.length > 0 && (
+        <div className="project-list-toolbar">
+          <input
+            type="search"
+            aria-label="搜索项目"
+            placeholder="搜索项目名称或说明…"
+            value={projectQuery}
+            onChange={(event) => setProjectQuery(event.target.value)}
+          />
+          <label>
+            <span>排序</span>
+            <select aria-label="项目排序" value={projectSort} onChange={(event) => setProjectSort(event.target.value as "updated" | "created" | "name")}>
+              <option value="updated">按最近更新</option>
+              <option value="created">按创建时间</option>
+              <option value="name">按项目名称</option>
+            </select>
+          </label>
+        </div>
+      )}
       <div className="project-table" role="table" aria-label="项目列表">
         <div className="project-table-row project-table-header" role="row">
           <span role="columnheader">名称</span>
@@ -329,18 +350,30 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
           <span role="columnheader">状态</span>
           <span role="columnheader">操作</span>
         </div>
-        {projects.map((project) => {
+        {[...projects]
+          .filter((project) => {
+            const q = projectQuery.trim().toLowerCase();
+            if (!q) return true;
+            return `${projectDisplayName(project.id, project.name)} ${project.description ?? ""}`.toLowerCase().includes(q);
+          })
+          .sort((a, b) => {
+            if (projectSort === "name") return projectDisplayName(a.id, a.name).localeCompare(projectDisplayName(b.id, b.name), "zh-CN");
+            if (projectSort === "created") return b.createdAt.localeCompare(a.createdAt);
+            return b.updatedAt.localeCompare(a.updatedAt);
+          })
+          .map((project) => {
           const active = project.id === activeProjectId;
+          const canOpenRow = (!active || !showWorkflowSettings) && !saving && !backupBusy;
           return (
-            <div className="project-table-row" role="row" key={project.id}>
+            <div className="project-table-row" role="row" key={project.id} onDoubleClick={() => { if (canOpenRow) onOpen(project.id); }}>
               <strong role="cell">{projectDisplayName(project.id, project.name)}</strong>
               <span role="cell" className="project-description-cell">{project.description || "—"}</span>
               <span role="cell">{formatDateTime(project.createdAt)}</span>
               <span role="cell">{formatDateTime(project.updatedAt)}</span>
               <span role="cell">{active ? <span className="active-project-badge">当前项目</span> : ""}</span>
               <span role="cell" className="project-row-actions">
-                <button type="button" onClick={() => onOpen(project.id)} disabled={active || saving || backupBusy}>
-                  打开
+                <button type="button" onClick={() => onOpen(project.id)} disabled={!canOpenRow}>
+                  {active && !showWorkflowSettings ? "进入项目" : "打开"}
                 </button>
                 <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving || backupBusy}>编辑</button>
                 <button type="button" className="quiet-button" onClick={() => void exportBackup(project.id)} disabled={saving || backupBusy}>导出归档</button>

@@ -134,3 +134,15 @@ it("only guards actual entity edits and preserves the current editor when replac
  render(<StoryEntityCategorySection projectId="p" kind="character" onDirtyChange={dirty}/>);await screen.findByText("A");fireEvent.click(screen.getAllByRole("button",{name:"编辑"})[0]);expect(dirty).not.toHaveBeenLastCalledWith(true);
  fireEvent.change(screen.getByLabelText("角色名称"),{target:{value:"A edited"}});await waitFor(()=>expect(dirty).toHaveBeenLastCalledWith(true));fireEvent.click(screen.getAllByRole("button",{name:"编辑"})[1]);expect(confirm).toHaveBeenCalledOnce();expect((screen.getByLabelText("角色名称") as HTMLInputElement).value).toBe("A edited");
 });
+
+it("shows non-blocking English prompt hint for Chinese entity description and allows 1-click cover switch", async () => {
+  const entity = { id: "e-1", projectId: "p", kind: "character" as const, name: "Lin", description: "红衣长发剑客", coverAssetId: "img-1", imageAssetIds: ["img-1", "img-2"], createdAt: "", updatedAt: "" };
+  api.list.mockResolvedValue([entity]);
+  api.update.mockResolvedValue(entity);
+  render(<StoryEntityCategorySection projectId="p" kind="character" />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+  expect(screen.getByLabelText("描述语言建议").textContent).toContain("英文");
+  fireEvent.click(screen.getByRole("button", { name: "将图片 img-2 设为封面" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(api.update).toHaveBeenCalledWith(expect.objectContaining({ id: "e-1", coverAssetId: "img-2" })));
+});

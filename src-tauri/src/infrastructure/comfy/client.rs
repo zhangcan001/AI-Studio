@@ -37,7 +37,8 @@ const COMFY_CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 // model; health checks should not classify a live endpoint as offline after
 // the ordinary request timeout.
 const COMFY_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
-const COMFY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
+// Streaming large rendered videos from ComfyUI /view may exceed 30s on busy disks or high bitrates.
+const COMFY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(300);
 // Input uploads may include large media and wait for a busy ComfyUI while it
 // loads nodes/models. A 60s budget was still too short after the full request
 // body had been sent, so keep a bounded but practical three-minute budget
@@ -486,6 +487,7 @@ impl ComfyHttpAdapter {
         let response = self
             .client
             .post(&url)
+            .timeout(COMFY_CONTROL_TIMEOUT)
             .json(&PromptRequestDto {
                 prompt: workflow,
                 client_id: client_id.to_owned(),
@@ -683,6 +685,7 @@ impl ComfyHttpAdapter {
         let response = self
             .client
             .get(&url)
+            .timeout(COMFY_CONTROL_TIMEOUT)
             .send()
             .await
             .map_err(|error| request_error("GET", &url, error))?;

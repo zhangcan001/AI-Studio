@@ -228,6 +228,44 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const setField = (field: RecipeField, ids: string[]) => { pendingSave.current = true; if (ids.length) c.setValue(field.key, mediaValue(field, ids)); else c.removeValue(field.key); };
   const plural = (f: RecipeField) => ["images", "videos", "audios"].includes(f.type);
   const add = (field: RecipeField, id: string) => { const ids = assetIds(c.values[field.key]); setField(field, plural(field) ? [...ids.filter(x => x !== id), id] : [id]); };
+  const firstFrameField = mediaFields.find(f => f.key === "first_frame" && f.type === "image");
+  const lastFrameField = mediaFields.find(f => f.key === "last_frame" && f.type === "image");
+  const canSwapFrames = Boolean(firstFrameField && lastFrameField && (assetIds(c.values.first_frame).length > 0 || assetIds(c.values.last_frame).length > 0));
+  const swapFirstLast = () => {
+    if (!firstFrameField || !lastFrameField || locked) return;
+    const firstIds = assetIds(c.values.first_frame);
+    const lastIds = assetIds(c.values.last_frame);
+    if (!firstIds.length && !lastIds.length) return;
+    pendingSave.current = true;
+    if (lastIds.length) c.setValue("first_frame", mediaValue(firstFrameField, lastIds)); else c.removeValue("first_frame");
+    if (firstIds.length) c.setValue("last_frame", mediaValue(lastFrameField, firstIds)); else c.removeValue("last_frame");
+    setRecognitionNote("已互换首帧与尾帧图片");
+  };
+  const currentShotIdx = (c.context?.shots ?? []).findIndex(s => s.id === shotId);
+  const prevShotSummary = currentShotIdx > 0 ? c.context?.shots[currentShotIdx - 1] : undefined;
+  const carryFromPreviousShot = async () => {
+    if (!firstFrameField || !prevShotSummary || !projectId || locked) return;
+    try {
+      const prevCtx = await productClient.creation.get(projectId, prevShotSummary.id, "video");
+      const prevRef = prevCtx.selectedShot?.selectionRef ?? c.selection;
+      let pickedId: string | undefined;
+      if (prevRef && typeof productClient.creation?.inputsGet === "function") {
+        const prevView = await productClient.creation.inputsGet({ projectId, shotId: prevShotSummary.id, selectionRef: prevRef });
+        pickedId = prevView.inputs.find(i => i.inputKey === "last_frame")?.assetId
+          ?? prevView.inputs.find(i => i.inputKey === "first_frame")?.assetId
+          ?? prevView.inputs.find(i => i.inputKey === "reference_images")?.assetId;
+      }
+      pickedId ??= prevCtx.selectedShot?.referenceAssetIds?.[0];
+      if (!pickedId) {
+        setRecognitionNote(`上一镜「${prevShotSummary.name}」尚未绑定首尾帧或参考图片`);
+        return;
+      }
+      setField(firstFrameField, [pickedId]);
+      setRecognitionNote(`已沿用上一镜「${prevShotSummary.name}」的参考画面作为当前首帧`);
+    } catch {
+      setRecognitionNote("读取上一镜参考画面失败，请手动选择图片");
+    }
+  };
   const importInto = async (field: RecipeField, folder: boolean) => {
     setPicker(null);
     const imported = await vi.importAssets(folder);
@@ -355,6 +393,8 @@ export function CreateComposer({ controller: c }: { controller: CreateController
             <select id={`create-field-${field.key}`} aria-label={label} value={plural(field) ? "" : ids[0] ?? ""} disabled={locked || (plural(field) && !capacity(field, ids))} onChange={e => { const id = e.target.value; if (plural(field)) { if (id) add(field, id); } else setField(field, id ? [id] : []); }}>
               <option value="">{plural(field) ? "添加素材" : "未选择"}</option>{choices.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select></label>}
+          {field.key === "first_frame" && canSwapFrames && <button type="button" className="composer-slot-util" disabled={locked} title="调换首帧与尾帧图片" onClick={swapFirstLast}>⇄ 互换首尾帧</button>}
+          {field.key === "first_frame" && prevShotSummary && typeof productClient.creation?.inputsGet === "function" && <button type="button" className="composer-slot-util" disabled={locked} title={`读取上一镜「${prevShotSummary.name}」的尾帧或首帧填入当前首帧`} onClick={() => void carryFromPreviousShot()}>沿用上一镜画面</button>}
         </div>;
       })}
     </div>}
@@ -367,7 +407,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
           else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); }
         }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />
-      <span className="composer-count" aria-hidden="true">{prompt.length} 字</span>
+      <span className="composer-count">{prompt.length} 字{prompt.trim().length > 0 && <button type="button" className="composer-copy-btn" onClick={() => { void Promise.resolve().then(() => navigator.clipboard.writeText(prompt)).then(() => setRecognitionNote("提示词已复制")); }}>复制提示词</button>}</span>
     </div>}
     {promptWarnings.length > 0 && <p role="status" aria-label="提示词识别提示">{promptWarnings.join(" ")}</p>}
     {recognitionNote && <p role="status">{recognitionNote}</p>}

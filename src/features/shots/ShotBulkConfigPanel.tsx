@@ -420,7 +420,7 @@ function ScopedShotBulkConfigPanel({
       <div className="pipeline-shot-table-wrap">
         <table className="pipeline-shot-table">
           <thead>
-            <tr><th aria-label="选择" /><th>镜头</th><th>当前提示词快照</th><th>当前阶段计划</th><th>工作流 / Recipe</th><th>参考</th><th>图片状态</th><th>视频状态</th></tr>
+            <tr><th aria-label="选择" /><th>镜头</th><th>当前提示词快照</th><th>当前阶段计划</th><th>工作流 / Recipe</th><th>参考</th>{!videoOnly && <th>图片状态</th>}<th>视频状态</th></tr>
           </thead>
           <tbody>
             {visibleShots.map((shot) => (
@@ -434,16 +434,16 @@ function ScopedShotBulkConfigPanel({
                     aria-label={`选择 ${shot.name}`}
                   />
                 </td>
-                <td><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong><small>{shot.id}</small>{onOpenShot && <button type="button" className="quiet-button" onClick={() => onOpenShot(shot.id)}>编辑输入与查看结果</button>}</td>
+                <td><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong>{!videoOnly && <small>{shot.id}</small>}{onOpenShot && <button type="button" className="quiet-button" onClick={() => onOpenShot(shot.id)}>编辑输入与查看结果</button>}</td>
                 <td><span className="pipeline-prompt-preview">{promptPreview(shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptText ?? shot.promptText)}</span><small>{shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptEntryId && shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId ? `提示词库版本 ${shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId?.slice(-8)}` : "手工/导入阶段快照"}</small></td>
                 <td><strong>{planByShotId.get(shot.id)?.status ? preparationStatusLabel(planByShotId.get(shot.id)!.status) : "等待正式预检"}</strong><small>{planByShotId.get(shot.id)?.alreadyPrepared ? "已准备，待启动" : planByShotId.get(shot.id)?.blockers?.join("；") ?? "可继续检查"}</small>{Boolean(planByShotId.get(shot.id)?.stalePreparedBatchIds?.length) && <small>陈旧准备版本；旧批次快照保留</small>}</td>
                 <td><small>{planByShotId.get(shot.id)?.workflowVersionId && planByShotId.get(shot.id)?.recipeId ? `${planByShotId.get(shot.id)?.workflowVersionId} / ${planByShotId.get(shot.id)?.recipeId}` : "未配置精确配对"}</small></td>
                 <td>{planByShotId.get(shot.id)?.referenceCount ?? 0}</td>
-                <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "image"))}</span></td>
+                {!videoOnly && <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "image"))}</span></td>}
                 <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "video"))}</span></td>
               </tr>
             ))}
-            {!visibleShots.length && <tr><td colSpan={8}><p className="empty-state">当前筛选没有匹配的镜头。</p></td></tr>}
+            {!visibleShots.length && <tr><td colSpan={videoOnly ? 7 : 8}><p className="empty-state">当前筛选没有匹配的镜头。</p></td></tr>}
           </tbody>
         </table>
       </div>

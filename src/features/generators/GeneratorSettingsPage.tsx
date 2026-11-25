@@ -48,6 +48,15 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
   const slots = [{ stage: "VIDEO", mode: "DEFAULT", label: "默认视频生成器" },
     ...Array.from(new Set([...options.filter(o => o.mediaKind === "video").flatMap(bindingModes), ...bindings.filter(b => b.stage === "VIDEO").map(b => b.mode)]))
       .filter(mode => mode !== "DEFAULT").map(mode => ({ stage: "VIDEO", mode, label: `${bindingModeLabels[mode] ?? "历史视频模式"}生成器` }))];
+  const dirtySlots = slots.flatMap(slot => {
+    const key = `${slot.stage}:${slot.mode}`;
+    const binding = bindings.find(b => b.stage === slot.stage && b.mode === slot.mode);
+    const available = options.filter(o => o.mediaKind === (slot.stage === "IMAGE" ? "image" : "video") && (slot.mode === "DEFAULT" || bindingModes(o).includes(slot.mode)));
+    const selected = choices[key];
+    if (!selected || selected === binding?.selectionRef) return [];
+    const option = available.find(o => o.selectionRef === selected);
+    return option?.availability ? [{ ...slot, key, selected, binding }] : [];
+  });
   async function save(stage: string, mode: string, selectionRef: string) {
     if (locked.current || !selectionRef) return;
     locked.current = true; setBusy(true); setError(undefined); setNotice(undefined);
@@ -64,8 +73,31 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
       try { await refresh(token); } catch { setNotice("刷新失败，请重新打开生成器设置。尚未重试保存。"); }
     } finally { locked.current = false; if (token === generation.current) setBusy(false); }
   }
+  async function saveAll() {
+    if (locked.current || !dirtySlots.length) return;
+    locked.current = true; setBusy(true); setError(undefined); setNotice(undefined);
+    const token = generation.current;
+    let savedCount = 0;
+    try {
+      for (const item of dirtySlots) {
+        await productClient.project.generatorBindingSet(projectId, {
+          stage: item.stage,
+          mode: item.mode,
+          selectionRef: item.selected,
+          expectedRevision: item.binding?.revision ?? null,
+          expectedBindingInstanceId: item.binding?.bindingInstanceId ?? null,
+        });
+        savedCount += 1;
+      }
+      if (token === generation.current) { await refresh(token); setNotice(`已批量保存 ${savedCount} 项生成器设置；已有镜头与历史运行不变。`); }
+    } catch (e) {
+      if (token !== generation.current) return;
+      setError(normalizeProductError(e).message);
+      try { await refresh(token); } catch { setNotice("刷新失败，请重新打开生成器设置。尚未重试保存。"); }
+    } finally { locked.current = false; if (token === generation.current) setBusy(false); }
+  }
   return <section className="generator-settings" aria-label="项目生成器设置" aria-busy={loading || busy}>
-    <header><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p></header>
+    <header className="generator-settings-head"><div><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p></div>{dirtySlots.length > 0 && <button type="button" className="primary" disabled={busy || !!error} onClick={() => void saveAll()}>保存全部修改（{dirtySlots.length}）</button>}</header>
     {loading && <p role="status">正在读取生成器…</p>}{error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {!loading && !error && !options.length && <p role="status" data-testid="no-video-generators">暂无可用的视频生成器。请刷新设置并检查本地运行环境，或更新包含所需内置生成器的软件版本。</p>}
     {!loading && slots.map(slot => {
@@ -73,8 +105,9 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
       const binding = bindings.find(b => b.stage === slot.stage && b.mode === slot.mode);
       const available = options.filter(o => o.mediaKind === (slot.stage === "IMAGE" ? "image" : "video") && (slot.mode === "DEFAULT" || bindingModes(o).includes(slot.mode)));
       const selected = choices[key] ?? binding?.selectionRef ?? "";
+      const isDirty = choices[key] !== undefined && choices[key] !== (binding?.selectionRef ?? "") && choices[key] !== "";
       const option = available.find(o => o.selectionRef === selected);
-      return <article key={key}><h2>{slot.label}</h2><label>生成器<select aria-label={slot.label} disabled={busy || !!error} value={selected} onChange={e => setChoices(c => ({ ...c, [key]: e.target.value }))}>
+      return <article key={key}><h2>{slot.label}{isDirty && <span className="generator-dirty-badge">未保存修改</span>}</h2><label>生成器<select aria-label={slot.label} disabled={busy || !!error} value={selected} onChange={e => setChoices(c => ({ ...c, [key]: e.target.value }))}>
         <option value="">未配置</option>{binding && !available.some(o => o.selectionRef === binding.selectionRef) && <option value={binding.selectionRef}>原生成器不可用，请检查本地运行环境或明确选择其他生成器</option>}
         {available.map((o, i) => <option key={o.selectionRef} value={o.selectionRef}>{generatorLabel(o, i)}{!o.availability ? " · 不可用" : ""}</option>)}
       </select></label>

@@ -127,6 +127,7 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
         { id: "page-runs", label: "近期运行与生产队列", group: "页面", target: { kind: "runs", projectId } },
         { id: "page-library", label: "素材库（媒体 / 角色 / 场景 / 道具 / 构图）", group: "页面", target: { kind: "library", projectId } },
         { id: "page-generators", label: "项目生成器设置", group: "页面", target: { kind: "project-settings", projectId, section: "generators" } },
+        { id: "page-projects", label: "项目管理与归档备份", group: "页面", target: { kind: "project-list" } },
       );
       const shots = paletteShots?.projectId === projectId ? paletteShots.items : [];
       for (const shot of shots) {
@@ -177,7 +178,13 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
       <button type="button" className="v3-collapse" aria-label={collapsed ? "展开导航" : "折叠导航"} title={collapsed ? "展开导航" : "折叠导航"} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}><ShellIcon name="collapse" /><span className="v3-nav-label">折叠导航</span></button>
     </aside>
     <div className="v3-layout">
-      <ShellTopbar route={route} projectName={projectName} projectSelector={projectSelector} runtime={runtime} back={back} queueSummary={queueSummary} onOpenPalette={projectId ? () => setPaletteOpen(true) : undefined} />
+      <ShellTopbar route={route} projectName={projectName} projectSelector={projectSelector} runtime={runtime} back={back} queueSummary={queueSummary} onOpenPalette={projectId ? () => setPaletteOpen(true) : undefined} onOpenProjects={route.kind !== "project-list" ? () => navigate({ kind: "project-list" }) : undefined} />
+      {(route.kind === "system-settings" || route.kind === "project-settings") && <nav className="v3-settings-bar" aria-label="设置分区切换">
+        <button type="button" aria-current={route.kind === "system-settings" && route.section === "general" ? "page" : undefined} onClick={() => navigate({ kind: "system-settings", section: "general", returnTo: settingsReturn })}>运行环境与诊断</button>
+        {projectId && <button type="button" aria-current={route.kind === "project-settings" && route.section === "general" ? "page" : undefined} onClick={() => navigate({ kind: "project-settings", projectId, section: "general" })}>当前项目与备份</button>}
+        {projectId && <button type="button" aria-current={route.kind === "project-settings" && route.section === "generators" ? "page" : undefined} onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>默认视频生成器</button>}
+        <button type="button" aria-current={route.kind === "system-settings" && route.section === "advanced-tools" ? "page" : undefined} onClick={() => navigate({ kind: "system-settings", section: "advanced-tools", returnTo: settingsReturn })}>本地工具中心</button>
+      </nav>}
       <main id="v3-main" className="v3-main" tabIndex={-1}>{children}</main>
     </div>
     {paletteOpen && <dialog ref={paletteDialog} open={typeof HTMLDialogElement.prototype.showModal !== "function" ? true : undefined} className="v3-palette" aria-label="快速跳转面板" onCancel={e => { e.preventDefault(); setPaletteOpen(false); }} onClick={e => { if (e.target === paletteDialog.current) setPaletteOpen(false); }}>

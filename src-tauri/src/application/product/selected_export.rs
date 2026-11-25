@@ -81,8 +81,20 @@ pub fn copy_selected_videos(
             "没有已选用的视频",
         ));
     }
-    let directory = parent.join(format!("AI-Studio-selected-{}", uuid::Uuid::new_v4()));
-    fs::create_dir(&directory)?;
+    let directory = {
+        let mut attempt = 0u32;
+        loop {
+            let short = &uuid::Uuid::new_v4().simple().to_string()[..8];
+            let candidate = parent.join(format!("AI-Studio-selected-{short}"));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists && attempt < 16 => {
+                    attempt += 1;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    };
     let mut entries = Vec::new();
     for source in sources {
         let mut entry = ExportEntry {
@@ -191,7 +203,8 @@ fn publish_new_file(
     name: &str,
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> io::Result<()> {
-    let temporary = directory.join(format!(".{}.partial", uuid::Uuid::new_v4()));
+    let short = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let temporary = directory.join(format!(".{short}.part"));
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

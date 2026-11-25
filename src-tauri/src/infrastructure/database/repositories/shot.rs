@@ -264,16 +264,13 @@ impl ShotRepository for SqliteShotRepository {
     async fn update(&self, shot: &ShotRecord) -> Result<bool, RepositoryError> {
         let result = sqlx::query(
             "UPDATE shots SET name = ?, prompt_text = ?, prompt_entry_id = ?,
-                    prompt_version_id = ?, selected_image_asset_id = ?,
-                    selected_video_asset_id = ?, updated_at = ?
+                    prompt_version_id = ?, updated_at = ?
              WHERE id = ? AND project_id = ?",
         )
         .bind(&shot.name)
         .bind(&shot.prompt_text)
         .bind(&shot.prompt_entry_id)
         .bind(&shot.prompt_version_id)
-        .bind(&shot.selected_image_asset_id)
-        .bind(&shot.selected_video_asset_id)
         .bind(format_datetime(shot.updated_at))
         .bind(&shot.id)
         .bind(&shot.project_id)
@@ -713,16 +710,13 @@ impl ShotBulkRepository for SqliteShotRepository {
             .map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE shots SET name = ?, prompt_text = ?, prompt_entry_id = ?,
-                    prompt_version_id = ?, selected_image_asset_id = ?,
-                    selected_video_asset_id = ?, updated_at = ?
+                    prompt_version_id = ?, updated_at = ?
              WHERE id = ? AND project_id = ?",
         )
         .bind(&shot.name)
         .bind(&shot.prompt_text)
         .bind(&shot.prompt_entry_id)
         .bind(&shot.prompt_version_id)
-        .bind(&shot.selected_image_asset_id)
-        .bind(&shot.selected_video_asset_id)
         .bind(format_datetime(shot.updated_at))
         .bind(&shot.id)
         .bind(&shot.project_id)

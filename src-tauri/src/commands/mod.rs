@@ -327,7 +327,14 @@ pub mod folder_batch_import {
         project_id: String,
     ) -> Result<Option<Preview>, AppError> {
         super::validate_project_id(&project_id)?;
-        let Some(folder) = app_handle.dialog().file().blocking_pick_folder() else {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app_handle.dialog().file().pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+        let Some(folder) = rx
+            .await
+            .map_err(|_| AppError::filesystem("文件夹选择已中断"))?
+        else {
             return Ok(None);
         };
         let root = folder

@@ -55,6 +55,28 @@ impl LibraryOperations<'_> {
                             location: None,
                         });
                     }
+                    for name in reference.story_entity_cover_names {
+                        items.push(LibraryRelation {
+                            kind: LibraryRelationKind::ProfileRelation,
+                            title: format!("故事实体封面：{name}"),
+                            description: format!(
+                                "该素材正被角色/场景/道具/构图实体「{name}」用作封面图；更换或清除实体封面后方可删除。"
+                            ),
+                            blocking: true,
+                            location: None,
+                        });
+                    }
+                    for name in reference.story_entity_image_names {
+                        items.push(LibraryRelation {
+                            kind: LibraryRelationKind::ProfileRelation,
+                            title: format!("故事实体关联图：{name}"),
+                            description: format!(
+                                "该素材正被角色/场景/道具/构图实体「{name}」用作关联参考图；从实体移除后方可删除。"
+                            ),
+                            blocking: true,
+                            location: None,
+                        });
+                    }
                     for shot_id in reference.shot_video_input_ids {
                         items.push(LibraryRelation {
                             kind: LibraryRelationKind::ShotReference,

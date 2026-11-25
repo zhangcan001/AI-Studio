@@ -1,7 +1,78 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { productClient } from "../product/client";
-import type { LibraryCursor, LibraryItem, LibraryQuery, LibraryTag } from "../product/libraryTypes";
-import { AssetImageThumb } from "../features/create/CreateMediaPreview";
+import { toMediaByteArray, type LibraryCursor, type LibraryItem, type LibraryQuery, type LibraryTag } from "../product/libraryTypes";
+import { loadLibraryImageUrl, retainLibraryImage } from "../features/create/CreateMediaPreview";
+
+function createPickerThumbQueue(concurrency = 4) {
+  let active = 0;
+  const queue: Array<() => Promise<void>> = [];
+  const pump = () => {
+    while (active < concurrency && queue.length) {
+      const job = queue.shift()!;
+      active += 1;
+      void job().finally(() => { active -= 1; pump(); });
+    }
+  };
+  return (job: () => Promise<void>) => {
+    queue.push(job);
+    pump();
+    return () => { const idx = queue.indexOf(job); if (idx >= 0) queue.splice(idx, 1); };
+  };
+}
+
+function PickerTileThumb({ projectId, assetId, name, thumbnailAvailable, enqueue }: {
+  projectId: string;
+  assetId: string;
+  name: string;
+  thumbnailAvailable?: boolean;
+  enqueue: ReturnType<typeof createPickerThumbQueue>;
+}) {
+  const hostRef = useRef<HTMLSpanElement>(null);
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    setUrl(undefined);
+    let alive = true;
+    let started = false;
+    let ownedThumbUrl: string | undefined;
+    let releaseFull: (() => void) | undefined;
+    let cancelQueue: (() => void) | undefined;
+    const trigger = () => {
+      if (!alive || started) return;
+      started = true;
+      cancelQueue = enqueue(async () => {
+        if (!alive) return;
+        const thumbFn = productClient.library?.thumbnailGet;
+        if (thumbnailAvailable && typeof thumbFn === "function") {
+          try {
+            const bytes = await thumbFn(projectId, { kind: "asset", id: assetId });
+            if (!alive) return;
+            ownedThumbUrl = URL.createObjectURL(new Blob([toMediaByteArray(bytes)]));
+            setUrl(ownedThumbUrl);
+            return;
+          } catch { /* fall back to full image read */ }
+        }
+        if (!alive) return;
+        releaseFull = retainLibraryImage(projectId, assetId);
+        const fullUrl = await loadLibraryImageUrl(projectId, assetId);
+        if (alive && fullUrl) setUrl(fullUrl);
+      });
+    };
+    if (typeof IntersectionObserver === "undefined" || !hostRef.current) {
+      trigger();
+      return () => { alive = false; cancelQueue?.(); releaseFull?.(); if (ownedThumbUrl) URL.revokeObjectURL(ownedThumbUrl); };
+    }
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        observer.disconnect();
+        trigger();
+      }
+    }, { root: hostRef.current.closest(".image-asset-picker-grid"), rootMargin: "160px", threshold: 0 });
+    observer.observe(hostRef.current);
+    return () => { alive = false; observer.disconnect(); cancelQueue?.(); releaseFull?.(); if (ownedThumbUrl) URL.revokeObjectURL(ownedThumbUrl); };
+  }, [projectId, assetId, thumbnailAvailable, enqueue]);
+  if (!url) return <span ref={hostRef} className="asset-image-thumb size-lg pending" title={name} aria-label={name}>{name.slice(0, 1)}</span>;
+  return <span ref={hostRef} className="asset-image-thumb size-lg" title={name}><img src={url} alt={`${name}缩略图`} /></span>;
+}
 
 export type ImagePickTab = "all" | "character" | "scene" | "prop" | "composition" | "untagged";
 const TABS: { id: ImagePickTab; label: string; tagHints: string[] }[] = [
@@ -160,6 +231,8 @@ export function ImageAssetPicker({
     return rows;
   }, [localChoices, keyword, excludeIds, items, tab, entityHints, loadedScope, scope]);
 
+  const thumbQueue = useRef<ReturnType<typeof createPickerThumbQueue> | undefined>(undefined);
+  if (!thumbQueue.current) thumbQueue.current = createPickerThumbQueue(4);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -182,13 +255,13 @@ export function ImageAssetPicker({
       {!busy && !libraryRows.length && !localRows.length && <p className="image-asset-picker-empty">没有可选用的图片。可从电脑导入，或先在资源库添加素材。</p>}
       <div className="image-asset-picker-grid" role="listbox" aria-label="图片网格">
         {localRows.map(a => <button key={`local-${a.id}`} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: a.id, mediaKind: "image" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(a.id); onClose(); }}>
-          <AssetImageThumb projectId={projectId} assetId={a.id} name={a.name} size="lg" interactive={false} />
+          <PickerTileThumb projectId={projectId} assetId={a.id} name={a.name} enqueue={thumbQueue.current!} />
           <span className="image-asset-tile-name">{a.name}</span>
         </button>)}
         {libraryRows.map(item => {
           const id = item.resourceRef.kind === "asset" ? item.resourceRef.id : "";
           return <button key={id} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: id, mediaKind: "image" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(id); onClose(); }}>
-            <AssetImageThumb projectId={projectId} assetId={id} name={item.title} size="lg" interactive={false} />
+            <PickerTileThumb projectId={projectId} assetId={id} name={item.title} thumbnailAvailable={item.thumbnailAvailable} enqueue={thumbQueue.current!} />
             <span className="image-asset-tile-name">{item.title}</span>
           </button>;
         })}

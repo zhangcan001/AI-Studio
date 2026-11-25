@@ -31,9 +31,9 @@ export function RuntimeConnectionIndicator({ runtime }: { runtime?: ComfyStatus 
     <span className="v3-runtime-dot" aria-hidden="true" /><span>ComfyUI <span>{label}</span></span>
   </span>;
 }
-export function ShellTopbar({ route, projectName, projectSelector, runtime, back, queueSummary, onOpenPalette }: {
+export function ShellTopbar({ route, projectName, projectSelector, runtime, back, queueSummary, onOpenPalette, onOpenProjects }: {
   route: AppRoute; projectName?: string; projectSelector: ReactNode; runtime?: ComfyStatus; back: () => void;
-  queueSummary?: TopbarQueueSummary; onOpenPalette?: () => void;
+  queueSummary?: TopbarQueueSummary; onOpenPalette?: () => void; onOpenProjects?: () => void;
 }) {
   return <header className="v3-header">
     <button type="button" className="v3-back" onClick={back} aria-label="返回" title="返回上一页"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5 M12 19l-7-7 7-7" /></svg></button>
@@ -43,6 +43,7 @@ export function ShellTopbar({ route, projectName, projectSelector, runtime, back
     </button>}
     {onOpenPalette && <button type="button" className="v3-quick-jump" onClick={onOpenPalette} aria-label="快速跳转" title="快速跳转页面或镜头（Alt+K / Ctrl+Shift+K）"><ShellIcon name="search" /><span>快速跳转</span></button>}
     <label className="v3-project-picker"><span>项目切换</span>{projectSelector}</label>
+    {onOpenProjects && <button type="button" className="v3-projects-btn" onClick={onOpenProjects} title="进入项目管理、新建项目或导入导出归档">项目管理</button>}
     <RuntimeConnectionIndicator runtime={runtime} />
   </header>;
 }

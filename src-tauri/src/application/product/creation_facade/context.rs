@@ -419,7 +419,11 @@ impl ProductCreationFacade {
             .await
             .map_err(ProductError::internal)?
             .project;
-        let mut shots = self.shots.list(project_id).await.map_err(shot_error)?;
+        let mut shots = self
+            .shots
+            .list_for_workbench(project_id)
+            .await
+            .map_err(shot_error)?;
         shots.sort_by_key(|shot| (shot.ordinal, shot.id.clone()));
         let summaries: Vec<_> = shots.iter().map(summary).collect();
         let limit = limit.clamp(1, 60);

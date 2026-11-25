@@ -179,13 +179,16 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             query_production_item_reviews(&mut transaction, project_id).await?;
         let mut artifact_reviews = query_artifact_reviews(&mut transaction, project_id).await?;
         let mut shots = query_shots(&mut transaction, project_id).await?;
-        let mut shot_stage_configs = query_shot_stage_configs(&mut transaction).await?;
+        let mut shot_stage_configs =
+            query_shot_stage_configs(&mut transaction, project_id).await?;
         let mut shot_stage_prompts = query_shot_stage_prompts(&mut transaction, project_id).await?;
         materialize_legacy_shot_stage_prompts(&shots, &mut shot_stage_prompts);
-        let mut shot_reference_assets = query_shot_reference_assets(&mut transaction).await?;
+        let mut shot_reference_assets =
+            query_shot_reference_assets(&mut transaction, project_id).await?;
         let (shot_video_input_sets, external_asset_imports) =
             video_inputs::export(&mut transaction, project_id).await?;
-        let mut shot_generation_links = query_shot_generation_links(&mut transaction).await?;
+        let mut shot_generation_links =
+            query_shot_generation_links(&mut transaction, project_id).await?;
         let asset_tags = sqlx::query_as::<_, BackupAssetTag>(
             "SELECT id, project_id, name, normalized_name, created_at, updated_at FROM asset_tags WHERE project_id = ? ORDER BY created_at, id",
         ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| RepositoryError::database(error.to_string()))?;
@@ -2511,14 +2514,18 @@ async fn query_shots(
 
 async fn query_shot_stage_configs(
     transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
 ) -> Result<Vec<BackupShotStageConfig>, RepositoryError> {
     let rows = sqlx::query_as::<_, DbShotStageConfig>(
         "SELECT c.shot_id, c.stage, v.workflow_id, c.workflow_version_id, c.recipe_id,
                 c.scalar_values_json, c.updated_at
          FROM shot_stage_configs c
+         JOIN shots s ON s.id = c.shot_id
          JOIN workflow_versions v ON v.id = c.workflow_version_id
+         WHERE s.project_id = ?
          ORDER BY c.shot_id, c.stage",
     )
+    .bind(project_id)
     .fetch_all(&mut **transaction)
     .await
     .map_err(|error| RepositoryError::database(error.to_string()))?;
@@ -2601,11 +2608,16 @@ fn materialize_legacy_shot_stage_prompts(
 
 async fn query_shot_reference_assets(
     transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
 ) -> Result<Vec<BackupShotReferenceAsset>, RepositoryError> {
     let rows = sqlx::query_as::<_, DbShotReferenceAsset>(
-        "SELECT shot_id, stage, asset_id, ordinal
-         FROM shot_reference_assets ORDER BY shot_id, stage, ordinal, asset_id",
+        "SELECT r.shot_id, r.stage, r.asset_id, r.ordinal
+         FROM shot_reference_assets r
+         JOIN shots s ON s.id = r.shot_id
+         WHERE s.project_id = ?
+         ORDER BY r.shot_id, r.stage, r.ordinal, r.asset_id",
     )
+    .bind(project_id)
     .fetch_all(&mut **transaction)
     .await
     .map_err(|error| RepositoryError::database(error.to_string()))?;
@@ -2622,11 +2634,16 @@ async fn query_shot_reference_assets(
 
 async fn query_shot_generation_links(
     transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
 ) -> Result<Vec<BackupShotGenerationLink>, RepositoryError> {
     let rows = sqlx::query_as::<_, DbShotGenerationLink>(
-        "SELECT id, shot_id, stage, task_id, production_batch_item_id, created_at
-         FROM shot_generation_links ORDER BY shot_id, created_at, id",
+        "SELECT l.id, l.shot_id, l.stage, l.task_id, l.production_batch_item_id, l.created_at
+         FROM shot_generation_links l
+         JOIN shots s ON s.id = l.shot_id
+         WHERE s.project_id = ?
+         ORDER BY l.shot_id, l.created_at, l.id",
     )
+    .bind(project_id)
     .fetch_all(&mut **transaction)
     .await
     .map_err(|error| RepositoryError::database(error.to_string()))?;

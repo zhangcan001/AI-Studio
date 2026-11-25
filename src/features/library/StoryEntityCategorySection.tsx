@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
+import { appearanceLanguageHint } from "../../product/promptLanguage";
 import { entityAvatarAssetId, STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
 import { storyboardDraftKeys, useStudioStore } from "../../stores/studioStore";
@@ -202,8 +203,21 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
 
   const visibleItems = items.filter(item => !search.trim() || `${item.name} ${item.description}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const formOpen = creating || Boolean(editing);
+  const langHint = kind !== "composition" ? appearanceLanguageHint(draftDesc) : undefined;
 
   useEffect(() => { onDirtyChange?.(editorDirty); return () => onDirtyChange?.(false); }, [editorDirty, onDirtyChange]);
+  useEffect(() => {
+    if (!formOpen || picking) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy && allowReplace()) {
+        e.preventDefault();
+        setCreating(false);
+        setEditing(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [formOpen, picking, busy, editorDirty]);
 
   return <LibraryThumbnailScope><section className="story-entities-section" aria-label={`${label}管理`}>
     <header className="story-entities-header">
@@ -239,29 +253,34 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
         </div>
       </li>)}
     </ul>
-    {formOpen && <div className="story-entity-editor" role="dialog" aria-label={editing ? `编辑${label}` : `新建${label}`}>
-      <h3>{editing ? `编辑「${editing.name}」` : `新建${label}`}</h3>
-      <label>名称<input aria-label={`${label}名称`} value={draftName} onChange={event => setDraftName(event.target.value)} /></label>
-      <label>描述<textarea aria-label={`${label}描述`} value={draftDesc} onChange={event => setDraftDesc(event.target.value)} rows={3} /></label>
-      <div className="story-entity-cover-row">
-        <span>封面</span>
-        {draftCover ? <EntityThumb projectId={projectId} assetId={draftCover} name="封面" /> : <span>未选择</span>}
-        <button type="button" onClick={() => setPicking("cover")}>选择封面</button>
-        {draftCover && <button type="button" onClick={() => setDraftCover(null)}>清除</button>}
+    {formOpen && <>
+      <div className="story-entity-backdrop" role="presentation" onClick={() => { if (!busy && allowReplace()) { setCreating(false); setEditing(null); } }} />
+      <div className="story-entity-editor" role="dialog" aria-label={editing ? `编辑${label}` : `新建${label}`}>
+        <h3>{editing ? `编辑「${editing.name}」` : `新建${label}`}</h3>
+        <label>名称<input aria-label={`${label}名称`} value={draftName} onChange={event => setDraftName(event.target.value)} /></label>
+        <label>描述<textarea aria-label={`${label}描述`} value={draftDesc} placeholder={kind === "composition" ? "描述画面构图、景别或镜头运动关系" : "建议使用英文填写外貌/场景/材质特征，生成时将自动注入提示词"} onChange={event => setDraftDesc(event.target.value)} rows={3} /></label>
+        {langHint && <small className="story-entity-lang-hint" aria-label="描述语言建议">{langHint}</small>}
+        <div className="story-entity-cover-row">
+          <span>封面</span>
+          {draftCover ? <EntityThumb projectId={projectId} assetId={draftCover} name="封面" /> : <span>未选择</span>}
+          <button type="button" onClick={() => setPicking("cover")}>选择封面</button>
+          {draftCover && <button type="button" onClick={() => setDraftCover(null)}>清除</button>}
+        </div>
+        <div className="story-entity-images-row">
+          <span>关联图片（{draftImages.length}）</span>
+          <div className="story-entity-image-chips">{draftImages.map(id => <span key={id} className="story-entity-image-chip">
+            <EntityThumb projectId={projectId} assetId={id} name={id} />
+            {draftCover === id ? <small className="story-entity-cover-tag">封面</small> : <button type="button" className="story-entity-set-cover" aria-label={`将图片 ${id} 设为封面`} onClick={() => setDraftCover(id)}>设封面</button>}
+            <button type="button" className="story-entity-remove-img" aria-label={`移除图片 ${id}`} onClick={() => { setDraftImages(ids => ids.filter(value => value !== id)); if (draftCover === id) setDraftCover(null); }}>×</button>
+          </span>)}</div>
+          <button type="button" onClick={() => setPicking("images")}>添加图片</button>
+        </div>
+        <footer>
+          <button type="button" className="primary" onClick={() => void save()} disabled={busy || !draftName.trim()}>保存</button>
+          <button type="button" onClick={() => { if(allowReplace()){setCreating(false); setEditing(null);} }} disabled={busy}>取消</button>
+        </footer>
       </div>
-      <div className="story-entity-images-row">
-        <span>关联图片（{draftImages.length}）</span>
-        <div className="story-entity-image-chips">{draftImages.map(id => <span key={id} className="story-entity-image-chip">
-          <EntityThumb projectId={projectId} assetId={id} name={id} />
-          <button type="button" aria-label={`移除图片 ${id}`} onClick={() => setDraftImages(ids => ids.filter(value => value !== id))}>×</button>
-        </span>)}</div>
-        <button type="button" onClick={() => setPicking("images")}>添加图片</button>
-      </div>
-      <footer>
-        <button type="button" onClick={() => void save()} disabled={busy || !draftName.trim()}>保存</button>
-        <button type="button" onClick={() => { if(allowReplace()){setCreating(false); setEditing(null);} }} disabled={busy}>取消</button>
-      </footer>
-    </div>}
+    </>}
     {picking && <ImageAssetPicker
       projectId={projectId}
       open
@@ -269,8 +288,34 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       excludeIds={picking === "images" ? draftImages : []}
       onSelect={id => {
         if (picking === "cover") setDraftCover(id);
-        else setDraftImages(ids => ids.includes(id) ? ids : [...ids, id]);
+        else {
+          setDraftImages(ids => ids.includes(id) ? ids : [...ids, id]);
+          setDraftCover(current => current ?? id);
+        }
         setPicking(null);
+      }}
+      onImportFile={() => {
+        const target = picking;
+        void (async () => {
+          setBusy(true); setError(undefined);
+          try {
+            const res = await productClient.storyEntities.importImages(projectId);
+            if (!mounted.current || res.cancelled || !res.imported.length) return;
+            const ids = res.imported.map(a => a.id);
+            if (target === "cover") {
+              setDraftCover(ids[0]);
+              setDraftImages(prev => prev.includes(ids[0]) ? prev : [...prev, ids[0]]);
+            } else {
+              setDraftImages(prev => [...prev, ...ids.filter(id => !prev.includes(id))]);
+              setDraftCover(prev => prev ?? ids[0]);
+            }
+            setNotice(`已从电脑导入 ${ids.length} 张图片并填入当前表单，确认后点击保存即可生效。`);
+          } catch (cause) {
+            if (mounted.current) setError(entityError(cause));
+          } finally {
+            if (mounted.current) setBusy(false);
+          }
+        })();
       }}
       onClose={() => setPicking(null)}
     />}

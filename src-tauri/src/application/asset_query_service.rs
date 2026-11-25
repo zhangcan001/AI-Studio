@@ -422,6 +422,32 @@ impl AssetQueryService {
         Ok(AssetBinary { bytes })
     }
 
+    /// Resolves a verified, symlink-free file path inside `project_root` for any project-owned asset (imported or generated).
+    pub async fn resolve_managed_file(
+        &self,
+        project_id: &str,
+        asset_id: &str,
+    ) -> Result<(std::path::PathBuf, String, u64), AssetQueryError> {
+        validate_project_id(project_id)?;
+        let asset_id = AssetId::parse(asset_id.to_owned())
+            .map_err(|error| AssetQueryError::InvalidAssetId(error.to_string()))?;
+        let asset = self
+            .asset_repository
+            .find_by_id(&asset_id)
+            .await?
+            .ok_or_else(|| AssetQueryError::NotFound(asset_id.as_str().to_owned()))?;
+        if asset.project_id != project_id {
+            return Err(AssetQueryError::NotFound(asset_id.as_str().to_owned()));
+        }
+        let project_root = self.project_root(project_id).await?;
+        let path = crate::application::ports::validate_asset_read_path(
+            &project_root,
+            std::path::Path::new(&asset.storage_path),
+        )
+        .map_err(AssetQueryError::Read)?;
+        Ok((path, asset.sha256, asset.file_size))
+    }
+
     async fn project_root(&self, project_id: &str) -> Result<std::path::PathBuf, AssetQueryError> {
         self.project_repository
             .get_storage_root(project_id)

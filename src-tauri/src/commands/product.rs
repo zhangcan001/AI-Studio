@@ -1151,12 +1151,16 @@ async fn selected_video_export_sources(
                         None,
                     ));
                 }
-                state
-                    .assets
-                    .artifact
-                    .resolve_artifact_file(&id)
-                    .await
-                    .map_err(ProductError::internal)
+                match state.assets.artifact.resolve_artifact_file(&id).await {
+                    Ok(file) => Ok(file),
+                    Err(_) if asset.source_task_id.is_none() => state
+                        .assets
+                        .query
+                        .resolve_managed_file(&project_id, &id)
+                        .await
+                        .map_err(ProductError::internal),
+                    Err(error) => Err(ProductError::internal(error)),
+                }
             }
             .await;
             let (path, error) = match source {
@@ -1325,13 +1329,31 @@ pub async fn product_asset_reveal(
     project_id: String,
     asset_id: String,
 ) -> Result<(), ProductError> {
-    state
+    let asset = state
         .assets
         .query
         .get(&project_id, &asset_id)
         .await
         .map_err(ProductError::internal)?;
-    super::artifact::artifact_reveal(app, state, asset_id)
+    if asset.source_task_id.is_some() {
+        if let Ok(()) = super::artifact::artifact_reveal(app.clone(), state.clone(), asset_id.clone()).await {
+            return Ok(());
+        }
+    }
+    let (path, _, _) = state
+        .assets
+        .query
+        .resolve_managed_file(&project_id, &asset_id)
         .await
+        .map_err(|_| {
+            ProductError::new(
+                "INVALID_INPUT",
+                "素材文件不存在或不可访问，请在资源库检查媒体完整性。",
+                None,
+            )
+        })?;
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(path)
         .map_err(ProductError::internal)
 }

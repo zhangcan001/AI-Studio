@@ -465,3 +465,16 @@ body::after {
 .folder-import small { font-size: 12px; line-height: 1.5; }
 .folder-import fieldset { display: grid; gap: 12px; margin-block: 16px; border: 1px solid var(--studio-border); }
 .folder-import select { min-height: 44px; padding: 8px; max-width: 100%; color: var(--studio-text); background: var(--studio-surface-1); border: 1px solid var(--studio-border); }
+.folder-import-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 10px; }
+.folder-import-row-filters { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-right: 8px; }
+.folder-import-row-filters button[aria-pressed="true"] { border-color: var(--studio-accent); background: var(--studio-accent-soft); color: var(--studio-accent-hover); }
+.v3-main .production-admission-banner, .v3-main .task-recovery-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; margin-bottom: 12px; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-md); background: var(--studio-surface-1); }
+.v3-main .production-admission-banner p, .v3-main .task-recovery-bar p { display: inline; margin: 0 0 0 8px; font-size: var(--studio-font-xs); color: var(--studio-text-secondary); }
+.settings-quick-anchors { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--studio-space-4); }
+.settings-quick-anchors a { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--studio-border-strong); background: var(--studio-surface-2); color: var(--studio-text-secondary); font-size: var(--studio-font-xs); text-decoration: none; }
+.settings-quick-anchors a:hover { border-color: var(--studio-accent); color: var(--studio-text); }
+.generator-settings-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.generator-dirty-badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--studio-warning); color: var(--studio-warning); font-size: var(--studio-font-xs); font-weight: 500; vertical-align: middle; }
+.project-list-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.project-list-toolbar > input { flex: 1 1 240px; max-width: 380px; }
+.project-list-toolbar > label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--studio-font-sm); color: var(--studio-text-secondary); }

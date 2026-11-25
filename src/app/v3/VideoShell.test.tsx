@@ -117,3 +117,13 @@ it("retains responsive zero-min grids, tokens, focus and reduced motion rather t
     expect(readFileSync(path,"utf8")).not.toMatch(/\.v3-shell:has|\.v3-layout:has/);
   }
 });
+
+it("exposes topbar project-management button and horizontal settings section bar", () => {
+  const { navigate, rerender } = shell();
+  fireEvent.click(screen.getByRole("button", { name: "项目管理" }));
+  expect(navigate).toHaveBeenLastCalledWith({ kind: "project-list" });
+  rerender(<AppShellV3 route={{ kind: "system-settings", section: "general", returnTo: create }} projectSelector={null} navigate={navigate} back={vi.fn()}>设置内容</AppShellV3>);
+  const bar = within(screen.getByRole("navigation", { name: "设置分区切换" }));
+  fireEvent.click(bar.getByRole("button", { name: "默认视频生成器" }));
+  expect(navigate).toHaveBeenLastCalledWith({ kind: "project-settings", projectId: "p", section: "generators" });
+});

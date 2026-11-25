@@ -183,6 +183,29 @@ export function useRunsController({ route, navigate }: RunsProps) {
       }
     }
   });
+  const selectForShot = (shotId: string, assetId: string) => mutate(async () => {
+    if (!detail || detail.projectId !== route.projectId || detail.ref.id !== route.run?.id || detail.ref.source !== route.run?.source) return;
+    if (!detail.detail?.sources.some(source => source.id === shotId && source.stage === "video")) return;
+    const target = results.find(r => r.assetId === assetId);
+    if (!target || !target.assetExists || target.availability === "missing" || target.availability === "unavailable" || target.reviewState === "REJECTED") return;
+    await productClient.creation.selectResult(route.projectId, shotId, "video", assetId);
+  });
+  const approveAndSelectForShot = async (result: RunResult, shotId: string, comment = "") => {
+    if (!detail || result.reviewRevision === null) return false;
+    if (detail.projectId !== route.projectId || !detail.detail?.sources.some(source => source.id === shotId && source.stage === "video")) return false;
+    const expectedRevision = result.reviewRevision;
+    let reviewed = false;
+    return mutate(async () => {
+      try {
+        await productClient.run.resultReview(route.projectId, { runRef: detail.ref, assetId: result.assetId, decision: "APPROVED", comment, expectedRevision });
+        reviewed = true;
+        await productClient.creation.selectResult(route.projectId, shotId, "video", result.assetId);
+      } catch (cause) {
+        if (reviewed) invalidateRuns(route.projectId);
+        throw cause;
+      }
+    });
+  };
   const review = async (result: RunResult, decision: "APPROVED" | "REJECTED", comment = "") => {
     if (!detail || result.reviewRevision === null) return false;
     const expectedRevision=result.reviewRevision;
@@ -194,6 +217,6 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!detail || result.reviewRevision === null || !window.confirm("重新打开审核？原审核记录保留。")) return;
     await productClient.run.resultReviewReset(route.projectId, detail.ref, result.assetId, result.reviewRevision);
   });
-  return { reopenReview, list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, retryAndStart, remove, retryInput, retryInputAndStart, openShot, reuse, review, refresh };
+  return { reopenReview, list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, retryAndStart, remove, retryInput, retryInputAndStart, openShot, reuse, review, selectForShot, approveAndSelectForShot, refresh };
 }
 export type RunsController = ReturnType<typeof useRunsController>;

@@ -13,8 +13,8 @@ import { invalidateRuns } from "../../product/runInvalidation";
 import { useStudioStore } from "../../stores/studioStore";
 import type { AppRoute } from "../../app/routes/types";
 import type { ProductRun, GeneratorOption, CreationContext, RunResult } from "../../product/types";
-const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), resultsGet: vi.fn(), start: vi.fn(), pause: vi.fn(), cancel: vi.fn(), retry: vi.fn(), resultReview: vi.fn(), creationGet: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), delete: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { run: api, creation: { get: api.creationGet, generatorsList: api.generatorsList, readinessGet: api.readinessGet, generate: api.generate, mediaUrl: () => "http://fixture.invalid/video" } } }));
+const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), resultsGet: vi.fn(), start: vi.fn(), pause: vi.fn(), cancel: vi.fn(), retry: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), creationGet: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), generate: vi.fn(), delete: vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { run: api, creation: { get: api.creationGet, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet, generate: api.generate, mediaUrl: () => "http://fixture.invalid/video" } } }));
 const ref = { source: "task", id: "task-secret" } as const;
 const run: ProductRun = { ref, projectId: "project-a", title: "生成视频", status: "FAILED", phase: "FAILED", createdAt: "2026-10-02T00:00:00Z", updatedAt: "2026-10-02T00:00:00Z", progress: { total: 1, succeeded: 0, failed: 1, cancelled: 0 }, recoverability: { retryItemIds: [], reviewRequired: 1 }, resultsSummary: [], errorSummary: "请修改输入", preferredParent: null, availableActions: ["EDIT_INPUT"], detail: { sources: [{ id: "shot-a", name: "镜头一", stage: "video" }], inputs: [{ taskId: "task-secret", generatorName: "H3 高质量", selectionRef: "exact-pair", values: { prompt: { type: "string", value: "原始提示词" }, duration_seconds: { type: "integer", value: 5 } }, errorMessage: "时长超出范围", reuseUnavailableReason: null }] } };
 const generator: GeneratorOption = { selectionRef: "exact-pair", name: "H3 高质量", mode: "T2V", mediaKind: "video", version: "1", availability: true, availabilityReason: null, recommended: true, fields: [{ key: "prompt", type: "textarea", label: "提示词", default: "", required: true }, { key: "duration_seconds", type: "integer", label: "时长（秒）", default: 1, required: true }] };
@@ -480,4 +480,24 @@ it("U04: single-shot retryInputAndStart explicitly warns when a paused batch has
   } finally {
     confirm.mockRestore();
   }
+});
+
+it("approves and selects a single-shot video result via explicit distinct review and select calls, and filters run list instantly", async () => {
+  const b = { ...run, ref: { source: "task" as const, id: "task-b" }, title: "批次B特写", errorSummary: "显存不足" };
+  api.list.mockResolvedValue({ items: [run, b], nextCursor: null, coverage: "FINITE" });
+  api.resultReview.mockResolvedValue(undefined);
+  api.selectResult.mockResolvedValue(undefined);
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "通过并选为「镜头一」结果" }));
+  await waitFor(() => expect(api.selectResult).toHaveBeenCalledWith("project-a", "shot-a", "video", "asset-secret"));
+  expect(api.resultReview).toHaveBeenCalledWith("project-a", {
+    runRef: ref,
+    assetId: "asset-secret",
+    decision: "APPROVED",
+    comment: "",
+    expectedRevision: 0,
+  });
+  fireEvent.change(screen.getByLabelText("筛选运行记录"), { target: { value: "显存不足" } });
+  expect(screen.getByRole("button", { name: /批次B特写/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /生成视频/ })).toBeNull();
 });

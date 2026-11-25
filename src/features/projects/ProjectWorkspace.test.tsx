@@ -186,4 +186,35 @@ describe("ProjectWorkspace archive UX", () => {
     expect(exportProjectBackup).toHaveBeenCalledWith("project-1");
     expect(await screen.findByText(/项目归档已保存：AI-Studio-Project.aiarchive/)).toBeTruthy();
   });
+
+  it("allows entering the active project on project-list view and filters projects by keyword", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const second: ProjectView = {
+      id: "project-2",
+      name: "科幻短剧",
+      description: "赛博雨夜",
+      createdAt: "2026-02-01T00:00:00Z",
+      updatedAt: "2026-02-02T00:00:00Z",
+    };
+    render(
+      <ProjectWorkspace
+        showWorkflowSettings={false}
+        projects={[project, second]}
+        activeProjectId={project.id}
+        catalog={[]}
+        onOpen={onOpen}
+        onProjectUpdated={vi.fn()}
+        onProjectRestored={vi.fn()}
+        onTemplateProjectCreated={vi.fn()}
+      />,
+    );
+    const enterActive = screen.getByRole("button", { name: "进入项目" });
+    expect(enterActive.hasAttribute("disabled")).toBe(false);
+    await user.click(enterActive);
+    expect(onOpen).toHaveBeenCalledWith("project-1");
+    await user.type(screen.getByLabelText("搜索项目"), "赛博雨夜");
+    expect(screen.getByText("科幻短剧")).toBeTruthy();
+    expect(screen.queryByText("测试项目")).toBeNull();
+  });
 });
