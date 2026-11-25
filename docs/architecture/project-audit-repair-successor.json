@@ -4,7 +4,7 @@
   "files": {
     "scripts/audit70-ci-integration-successor-guard.mjs": {
       "beforeHash": "438a4f81dfdf0460453b3ca1e99873a3ab4a3a62feac63b7f9e2eb357ed38cc7",
-      "afterHash": "f710284b7887f119cfe2a74a77586fb42c5b01f57c3958ab92947d1eda6c7e8e"
+      "afterHash": "b1b4fe20c110f3234aa79bcc9515ea93d153e9b4538ea851fb2ba9b80ddd5320"
     },
     "scripts/testing/audit-repair.test.mjs": {
       "beforeHash": "53a48b2ebad6583e3c267eea71d3ab6d48b58b09f359bb0e2c684da498fb9133",
@@ -164,7 +164,7 @@
     },
     "src-tauri/src/application/project_backup_service.rs": {
       "beforeHash": "849ae26dac868ab22cbe31bc77c1a916ee7a6cdb2f1fdc97827804127dfc3da1",
-      "afterHash": "1311943a2aad1fb7f99f40001bbe93f681f2ae34deb3197e3f83599eed265d70"
+      "afterHash": "f86b19949a506e5b56517802546f8d2ea05f220a585d04d1eabe8176c321cee2"
     },
     "src-tauri/src/application/settings_service.rs": {
       "beforeHash": "f2d50da72fea9c70c100eb193aabd66bcef9eb9440de24365fe40595c99a09bf",
@@ -314,6 +314,10 @@
       "beforeHash": "b6a7ac13877eb68b050472180c1b302e6d6fdaa7a4e44083291dfc72559974f4",
       "afterHash": "32620b002284f97104ab28335e5b9eadb558269d23612d39da6d7a1198c3aeb2"
     },
+    "src-tauri/tests/dev052_production_preparation.rs": {
+      "beforeHash": "41bc345a54ff02b438680d8f741666437f7332d0ead61241050bc1ce1231e9d3",
+      "afterHash": "f128fd634c8f7bca944a4c00203ae7b6c17d246c80070fca4fcee95d78fcdb66"
+    },
     "src-tauri/tests/dev059_production_package.rs": {
       "beforeHash": "6102a5e8f81c540d0c6826f6482ce7a98a5b8895530ab726833a53af418c2e81",
       "afterHash": "82409e03154a94c140da9eae7e515ad9aa61af328b8f8baf6ae0940497a08cce"
@@ -386,9 +390,13 @@
       "beforeHash": "dd1719db6b530c215e7d818e3838ebaff5272fe21c437ccea6ca61ca1a33fc19",
       "afterHash": "5359f5a44c18538e5d5691e558a72b95c83e8c7df91562e1f626f80ee68b3c2e"
     },
+    "src/features/create/StoryboardShotRows.test.tsx": {
+      "beforeHash": "62961c6c377af542325dc96516607a9f608c156b37df9244a8c7de8b4e9ee83d",
+      "afterHash": "559eb4d435972949fe2d52fb4d3af81a959adfec30700f30a68b54b245c047f7"
+    },
     "src/features/create/StoryboardShotRows.tsx": {
       "beforeHash": "28fc915a8ee7ae2ae145d4cb6ce82dd6b322f143266b1fa2fd513ff0ef795911",
-      "afterHash": "a54bcb259b54c3db00d6de8a75e7b80d1cdb4187d39492a1779a8a98f8f40174"
+      "afterHash": "c297138b1a0e6325b86ca504261c16737035639d5b294d63f1502969acdbf87d"
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": "ac36fad794e010a860524aa325643f6da5d87375066e858491e80525f8dfe18d",
@@ -408,7 +416,7 @@
     },
     "src/features/library/LibraryFindability.test.tsx": {
       "beforeHash": "d068a0be86f5b8da47bc3fb69ab51be24beb7a9e7dae7f05165ca3d2aaebde76",
-      "afterHash": "5476392544263b36f42875b7b11f67a347b693dfca99dc795f55c8effae8ea8e"
+      "afterHash": "aa5e941ec39c073688cc4e2a882024116d457686d63af530c855c640e0f04e1f"
     },
     "src/features/library/LibraryPage.css": {
       "beforeHash": "1d9e2668a03ea066a655cc417f44670efc147747636ee2518b6759170cbdb813",
@@ -416,7 +424,7 @@
     },
     "src/features/library/LibraryPage.tsx": {
       "beforeHash": "803714d3cda1fb7f4490267dba52166bed97f51d9d6a3215b958075f31d31628",
-      "afterHash": "15682453d64a23cb678a7eed12aa125c8f88720615ee8398360fb0d25f8484e4"
+      "afterHash": "541068c4d1374f4808e4a208fc878021ab5da6a95ec1932b72e4a5f7f56190e0"
     },
     "src/features/library/LibraryThumbnail.tsx": {
       "beforeHash": "47ad5f284d2c4c3b498346fef8d60d7d47ca571fb21234f0f4ca9ac638263509",
@@ -448,11 +456,11 @@
     },
     "src/features/runs/RunDetail.tsx": {
       "beforeHash": "f0e6415d67dfc0c670629cda105cb8c015708aa602312564d8c6e4d02181cd73",
-      "afterHash": "0d005aecd87bfdf8df36192e1cb4ca46eb90c6fbd7306d7da48b62c11cf9aeb5"
+      "afterHash": "dd9d0870230028c37581eecbcc085c616d99ac1c1da1d3ef66b2f12bf1ea3be2"
     },
     "src/features/runs/RunsController.ts": {
       "beforeHash": "b2edd5c0d5233fa483c9888fa98fa7576665f764adf022eed8486d4352e9d0b9",
-      "afterHash": "8b05769863712d631e15ab7ab9215a2fd0a1c75940d0639c7ef712d96f92eeda"
+      "afterHash": "9a1377fe6f6aaabe64e8e28a02e581467bbf55271fd6f00d654235de9f043df4"
     },
     "src/features/runs/RunsPage.css": {
       "beforeHash": "e4509e846e52faa84bdc44362fce9ee0a48ff7c36479b5589618d57d1d900b77",
@@ -460,7 +468,7 @@
     },
     "src/features/runs/RunsPage.test.tsx": {
       "beforeHash": "7c9dd2ab8f37424f0dc73c619ea54225efa31ddde327c152cf1689d8a92c08e8",
-      "afterHash": "5e7f5f1ae88c869972ac452a6ff777fd460dad368a40a78926a672b388677229"
+      "afterHash": "8cd37b16a9184a1461bbc3c4a0823c21a0caa841bd361f95d7ddc5b7599bcf3e"
     },
     "src/features/runs/RunsPage.tsx": {
       "beforeHash": "5eabe71d472cfd19de02f77e267f79134672172b44bae1117c36225d1383843a",

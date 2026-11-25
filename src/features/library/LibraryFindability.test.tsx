@@ -123,3 +123,50 @@ it("supports batch selection and safe inspection-gated batch delete in media cat
   await waitFor(()=>expect(del).toHaveBeenCalledTimes(1));
   expect(del).toHaveBeenCalledWith("batch-del",{kind:"asset",id:"a1"},true);
 });
+
+it("U02: stale in-flight deletionInspect cannot publish confirm button after category/selection changes",async()=>{
+  let resolveInspect!:(v:{allowed:boolean;blockers:string[];warnings:string[];relations:unknown[];consequences:string[]})=>void;
+  const inspect=vi.fn(()=>new Promise<ReturnType<typeof resolveInspect extends (v:infer T)=>void ? ()=>T : never>>(r=>{resolveInspect=r;}));
+  const del=vi.fn(async()=>undefined);
+  Object.assign(api,{deletionInspect:inspect,delete:del});
+  api.list.mockResolvedValue({items:[
+    {resourceRef:{kind:"asset",id:"a1"},title:"测试素材A",subtype:"image",createdAt:"2026-10-01",updatedAt:"2026-10-01",thumbnailAvailable:false},
+  ],nextCursor:null,coverage:"keyset-page",coverageMessage:"当前分类数据库分页结果。"});
+  const view=render(<LibraryPage route={{kind:"library",projectId:"u02-proj",filter:"images"}} navigate={vi.fn()}/>);
+  await screen.findByText("测试素材A");
+  fireEvent.click(screen.getByRole("button",{name:"批量管理"}));
+  fireEvent.click(screen.getByRole("button",{name:"全选本页"}));
+  fireEvent.click(screen.getByRole("button",{name:"检查并批量删除"}));
+  // Card selection is locked while batchBusy is true
+  expect((screen.getByRole("button",{name:/测试素材A/}) as HTMLButtonElement).disabled).toBe(true);
+  // Route category change invalidates in-flight inspection epoch
+  view.rerender(<LibraryPage route={{kind:"library",projectId:"u02-proj",filter:"videos"}} navigate={vi.fn()}/>);
+  await act(async()=>{resolveInspect({allowed:true,blockers:[],warnings:[],relations:[],consequences:[]});});
+  expect(screen.queryByRole("button",{name:/确认删除可删项/})).toBeNull();
+  expect(del).not.toHaveBeenCalled();
+});
+
+it("U03: partial batch delete prunes already-deleted targets so retry only deletes remaining items",async()=>{
+  const inspect=vi.fn(async()=>({allowed:true,blockers:[],warnings:[],relations:[],consequences:[]}));
+  let failBOnce=true;
+  const del=vi.fn(async(_p:string,ref:{id:string})=>{
+    if(ref.id==="b"&&failBOnce){failBOnce=false;throw {code:"INTERNAL_ERROR",message:"磁盘占用"};}
+  });
+  Object.assign(api,{deletionInspect:inspect,delete:del});
+  api.list.mockResolvedValue({items:[
+    {resourceRef:{kind:"asset",id:"a"},title:"素材A",subtype:"image",createdAt:"2026-10-01",updatedAt:"2026-10-01",thumbnailAvailable:false},
+    {resourceRef:{kind:"asset",id:"b"},title:"素材B",subtype:"image",createdAt:"2026-10-01",updatedAt:"2026-10-01",thumbnailAvailable:false},
+    {resourceRef:{kind:"asset",id:"c"},title:"素材C",subtype:"image",createdAt:"2026-10-01",updatedAt:"2026-10-01",thumbnailAvailable:false},
+  ],nextCursor:null,coverage:"keyset-page",coverageMessage:"当前分类数据库分页结果。"});
+  render(<LibraryPage route={{kind:"library",projectId:"u03-proj",filter:"images"}} navigate={vi.fn()}/>);
+  await screen.findByText("素材A");
+  fireEvent.click(screen.getByRole("button",{name:"批量管理"}));
+  fireEvent.click(screen.getByRole("button",{name:"全选本页"}));
+  fireEvent.click(screen.getByRole("button",{name:"检查并批量删除"}));
+  fireEvent.click(await screen.findByRole("button",{name:/确认删除可删项（3 项）/}));
+  await screen.findByText(/已删除 1 项，剩余 2 项未删除/);
+  expect(del.mock.calls.map(call=>call[1].id)).toEqual(["a","b"]);
+  // Retry confirm only attempts remaining b and c, never repeating already-deleted a
+  fireEvent.click(await screen.findByRole("button",{name:/确认删除可删项（2 项）/}));
+  await waitFor(()=>expect(del.mock.calls.map(call=>call[1].id)).toEqual(["a","b","b","c"]));
+});

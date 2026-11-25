@@ -1154,3 +1154,33 @@ it("R50/R68: first surviving ordinal cannot move up and inserting an @ token is 
   fireEvent.click(insert);expect((screen.getByLabelText("镜头4 提示词") as HTMLTextAreaElement).value).toContain("@阿离");
   expect(api.bindShot).not.toHaveBeenCalled();expect(api.saveShotRow).not.toHaveBeenCalled();
 });
+it("U01: batch duration edit preserves each shot's exact generator and unedited scalar values", async () => {
+  const customGen = { ...generator, selectionRef: "custom-gen", name: "Custom I2V", mode: "i2v", recommended: false };
+  api.generatorsList.mockResolvedValue([generator, customGen]);
+  const customShot = shot("custom-a", 0, "custom-gen");
+  customShot.shot!.values = {
+    duration_seconds: { type: "integer", value: 5 },
+    width: { type: "integer", value: 768 },
+    height: { type: "integer", value: 1344 },
+    seed: { type: "seed_fixed", value: "42" },
+  };
+  render(<StoryboardShotRows {...props()} items={[customShot]} />);
+  await screen.findByLabelText("镜头1 生成器");
+  fireEvent.click(screen.getByRole("button", { name: "批量选择" }));
+  fireEvent.click(screen.getByRole("button", { name: "全选本页" }));
+  fireEvent.change(screen.getByLabelText("批量时长（秒）"), { target: { value: "8" } });
+  fireEvent.click(screen.getByRole("button", { name: "批量应用参数" }));
+  await waitFor(() => expect(api.updateShot).toHaveBeenCalledTimes(1));
+  expect(api.updateShot).toHaveBeenCalledWith("p", {
+    shotId: "custom-a",
+    name: "镜头1",
+    stage: "video",
+    selectionRef: "custom-gen",
+    values: {
+      duration_seconds: { type: "integer", value: 8 },
+      width: { type: "integer", value: 768 },
+      height: { type: "integer", value: 1344 },
+      seed: { type: "seed_fixed", value: "42" },
+    },
+  });
+});

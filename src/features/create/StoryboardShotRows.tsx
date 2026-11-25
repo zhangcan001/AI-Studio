@@ -100,33 +100,74 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   // Compatibility for standalone callers which only have the old name index;
   // never invent status matches when global metadata is unavailable.
   const nameOnly=overview===items&&q&&filter==="ALL"?shotIndex.filter(s=>!items.some(i=>i.id===s.id)&&s.name.toLowerCase().includes(q)):[];
-  const batchGen = rowGenerator(generators, null);
-  const batchPresets = batchGen?.resolutionPresets ?? [];
+  const batchRefGen = useMemo(() => {
+    const selectedItems = selectedIds.map(id => visible.find(i => i.id === id) ?? overview.find(i => i.id === id)).filter((x): x is StoryboardShot => Boolean(x));
+    const refs = [...new Set(selectedItems.map(item => rowGenerator(generators, item.shot?.selectionRef ?? null)?.selectionRef).filter((x): x is string => Boolean(x)))];
+    return refs.length === 1 ? generators.find(g => g.selectionRef === refs[0]) : rowGenerator(generators, null);
+  }, [selectedIds, visible, overview, generators]);
+  const batchPresets = batchRefGen?.resolutionPresets ?? [];
   const applyBatchConfig = async () => {
-    if (batchWorking || !selectedIds.length || !batchGen) return;
-    const values: import("../../types/shot").ShotInputValues = {};
-    if (batchDuration.trim()) {
-      const durField = batchGen.fields.find(f => f.key === "duration_seconds" && (f.type === "integer" || f.type === "number"));
-      const num = Number(batchDuration);
-      const issue = editableDurationIssue(num, durField);
-      if (issue) { setBatchError(issue); return; }
-      if (durField) values.duration_seconds = { type: durField.type === "number" ? "number" : "integer", value: num };
-    }
-    if (batchPresetId) {
-      const preset = batchPresets.find(p => p.id === batchPresetId);
-      if (preset) {
-        values.width = { type: "integer", value: preset.width };
-        values.height = { type: "integer", value: preset.height };
+    if (batchWorking || !selectedIds.length) return;
+    if (!batchDuration.trim() && !batchPresetId) { setBatchError("请至少选择要批量应用的时长或分辨率预设。"); return; }
+    const chosenPreset = batchPresetId ? batchPresets.find(p => p.id === batchPresetId) : undefined;
+    if (batchPresetId && !chosenPreset) { setBatchError("所选分辨率预设不可用，请重新选择。"); return; }
+    const store = useStudioStore.getState();
+    const plan: { item: StoryboardShot; selectionRef: string; values: Scalars }[] = [];
+    for (const id of selectedIds) {
+      const target = visible.find(i => i.id === id) ?? overview.find(i => i.id === id);
+      if (!target) { setBatchError("部分已选分镜当前尚未加载详情，请先翻到对应页或刷新后再批量修改。"); return; }
+      const rowDraftKey = JSON.stringify([projectId, target.id, target.shot?.selectionRef ?? null]);
+      if (Object.prototype.hasOwnProperty.call(store.storyboardPrompts, rowDraftKey) || store.storyboardFields[rowDraftKey]) {
+        setBatchError(`分镜「${target.name}」有未保存的行内草稿，请先保存或放弃后再批量修改。`);
+        return;
       }
+      const gen = rowGenerator(generators, target.shot?.selectionRef ?? null);
+      const exactRef = target.shot?.selectionRef ?? gen?.selectionRef;
+      if (!gen || !exactRef) { setBatchError(`分镜「${target.name}」尚无可用生成器，请先单独配置生成器。`); return; }
+      const baseScalars = target.shot?.selectionRef
+        ? scalarValues(target.shot.values)
+        : scalarValues(draftFor(gen, null, scalarValues(target.shot?.values)));
+      const nextScalars: Scalars = { ...baseScalars };
+      if (batchDuration.trim()) {
+        const durField = gen.fields.find(f => f.key === "duration_seconds" && (f.type === "integer" || f.type === "number"));
+        if (!durField) { setBatchError(`分镜「${target.name}」当前生成器不支持时长参数，未修改任何镜头。`); return; }
+        const num = Number(batchDuration);
+        const issue = editableDurationIssue(num, durField);
+        if (issue) { setBatchError(`分镜「${target.name}」：${issue}`); return; }
+        nextScalars.duration_seconds = { type: durField.type === "number" ? "number" : "integer", value: num };
+      }
+      if (chosenPreset) {
+        const matched = (gen.resolutionPresets ?? []).find(p => p.id === chosenPreset.id || (p.width === chosenPreset.width && p.height === chosenPreset.height));
+        if (!matched) { setBatchError(`分镜「${target.name}」当前生成器不支持分辨率 ${chosenPreset.width}×${chosenPreset.height}，未修改任何镜头。`); return; }
+        nextScalars.width = { type: "integer", value: matched.width };
+        nextScalars.height = { type: "integer", value: matched.height };
+      }
+      plan.push({ item: target, selectionRef: exactRef, values: nextScalars });
     }
-    if (!Object.keys(values).length) { setBatchError("请至少选择要批量应用的时长或分辨率预设。"); return; }
     setBatchWorking(true); setBatchError(undefined); setBatchNotice(undefined);
+    const updatedIds: string[] = [];
     try {
-      await productClient.creation.shotsConfigure(projectId, { shotIds: selectedIds, selectionRef: batchGen.selectionRef, values });
-      setBatchNotice(`已为 ${selectedIds.length} 个分镜批量更新设置。`);
+      for (const step of plan) {
+        await productClient.creation.updateShot(projectId, {
+          shotId: step.item.id,
+          name: step.item.name,
+          stage: "video",
+          selectionRef: step.selectionRef,
+          values: step.values,
+        });
+        updatedIds.push(step.item.id);
+      }
+      setBatchNotice(`已为 ${updatedIds.length} 个分镜更新参数（保留各镜头原有生成器与其余配置）。`);
       onChanged();
-    } catch (cause) { setBatchError(normalizeProductError(cause).message); }
-    finally { setBatchWorking(false); }
+    } catch (cause) {
+      if (updatedIds.length > 0) {
+        setSelectedIds(prev => prev.filter(id => !updatedIds.includes(id)));
+        onChanged();
+        setBatchError(`已更新 ${updatedIds.length} 个分镜，其余分镜保存失败：${normalizeProductError(cause).message}`);
+      } else {
+        setBatchError(normalizeProductError(cause).message);
+      }
+    } finally { setBatchWorking(false); }
   };
   const totalShotCount = shotIndex.length || items.length;
   return <section className="storyboard-shot-rows" aria-label="分镜编辑">
@@ -136,7 +177,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       <div role="group" aria-label="状态筛选" className="storyboard-shot-filters">
         {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : key === "REVIEW" ? "待审核" : key === "UNSELECTED" ? "待选用" : storyboardStatusLabels[key]}</button>)}
       </div>
-      <button type="button" aria-pressed={selectMode} onClick={() => { setSelectMode(v => !v); setSelectedIds([]); setBatchError(undefined); setBatchNotice(undefined); }}>批量选择</button>
+      <button type="button" aria-pressed={selectMode} disabled={batchWorking} onClick={() => { setSelectMode(v => !v); setSelectedIds([]); setBatchError(undefined); setBatchNotice(undefined); }}>批量选择</button>
       <button type="button" onClick={() => onQueue()}>任务队列</button>
       <button type="button" onClick={() => setRev(v => v + 1)}>刷新角色与场景</button>
     </div>
@@ -144,9 +185,9 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       <span>已选 {selectedIds.length} 镜</span>
       <button type="button" disabled={!visible.length || batchWorking} onClick={() => setSelectedIds(visible.map(i => i.id))}>全选本页</button>
       <button type="button" disabled={!selectedIds.length || batchWorking} onClick={() => setSelectedIds([])}>清空选择</button>
-      <input type="number" aria-label="批量时长（秒）" placeholder="时长(秒)" min={1} max={shotDurationMax()} value={batchDuration} onChange={e => setBatchDuration(e.target.value)} />
-      {batchPresets.length > 0 && <select aria-label="批量分辨率预设" value={batchPresetId} onChange={e => setBatchPresetId(e.target.value)}><option value="">不改分辨率</option>{batchPresets.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select>}
-      <button type="button" className="primary" disabled={!selectedIds.length || batchWorking || !batchGen} onClick={() => void applyBatchConfig()}>{batchWorking ? "正在应用…" : "批量应用参数"}</button>
+      <input type="number" aria-label="批量时长（秒）" placeholder="时长(秒)" min={1} max={shotDurationMax()} disabled={batchWorking} value={batchDuration} onChange={e => setBatchDuration(e.target.value)} />
+      {batchPresets.length > 0 && <select aria-label="批量分辨率预设" disabled={batchWorking} value={batchPresetId} onChange={e => setBatchPresetId(e.target.value)}><option value="">不改分辨率</option>{batchPresets.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select>}
+      <button type="button" className="primary" disabled={!selectedIds.length || batchWorking || !generators.length} title="保留每个镜头原有的精确生成器及未修改参数" onClick={() => void applyBatchConfig()}>{batchWorking ? "正在应用…" : "批量应用参数"}</button>
       {batchNotice && <span role="status">{batchNotice}</span>}
       {batchError && <span role="alert" className="storyboard-error">{batchError}</span>}
     </div>}

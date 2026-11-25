@@ -556,13 +556,20 @@ fn prepared_repository_commits_batch_bindings_and_snapshot_together() {
     assert_contains_all(
         insert,
         &[
-            "let mut transaction = self.pool.begin()",
+            "let mut transaction = self",
+            ".pool",
+            ".begin_with(\"BEGIN IMMEDIATE\")",
             "insert_batch_records(&mut transaction, batch, items)",
             "insert_shot_batch_bindings(&mut transaction, batch, bindings)",
             "for snapshot in snapshots",
             "INSERT INTO production_preparation_snapshots",
             "transaction.commit()",
         ],
+    );
+    assert!(
+        insert.find(".begin_with(\"BEGIN IMMEDIATE\")")
+            < insert.find("insert_batch_records(&mut transaction, batch, items)"),
+        "BEGIN IMMEDIATE transaction must open before writing batch records"
     );
     assert!(
         insert.find("for snapshot in snapshots") < insert.find("transaction.commit()"),

@@ -452,3 +452,32 @@ it("1-click retryAndStart prepares the retry queue and immediately starts it", a
     confirm.mockRestore();
   }
 });
+
+it("U04: single-shot retryInputAndStart explicitly warns when a paused batch has pending siblings", async () => {
+  const batchRef = { source: "queue-batch", id: "paused-batch" } as const;
+  api.get.mockResolvedValue({
+    ...run,
+    ref: batchRef,
+    status: "PAUSED",
+    availableActions: ["START", "RETRY"],
+    recoverability: { retryItemIds: ["item-a"], reviewRequired: 0 },
+    detail: {
+      sources: [],
+      inputs: [
+        { ...run.detail!.inputs[0], itemId: "item-a", taskId: "task-a", shotName: "镜头A", executionStatus: "DISPATCHED", errorMessage: "超时" },
+        { ...run.detail!.inputs[0], itemId: "item-b", taskId: null, shotName: "镜头B", executionStatus: "PENDING", errorMessage: null },
+      ],
+    },
+  });
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  try {
+    render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: batchRef }} navigate={vi.fn()} />);
+    const btn = await screen.findByRole("button", { name: "重试此镜头并启动批次" });
+    fireEvent.click(btn);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("其余 1 个未开始的待执行镜头也会按顺序继续生成"));
+    expect(api.retry).not.toHaveBeenCalled();
+    expect(api.start).not.toHaveBeenCalled();
+  } finally {
+    confirm.mockRestore();
+  }
+});

@@ -216,7 +216,7 @@ pub(crate) mod queue_metadata {
 mod video_inputs;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
-const MAX_JSON_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_JSON_ENTRY_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
 const INSPECTION_TTL: Duration = Duration::from_secs(20 * 60);
 /// Root JSON entries written for v19+ packages: manifest, project, history,
@@ -658,8 +658,11 @@ impl ProjectBackupService {
         let document = built.document.clone();
         let files = built.files.clone();
         let temporary_for_writer = temporary.clone();
-        let write_result = match tokio::task::spawn_blocking(move || {
-            write_zip_to_path(&document, &files, &temporary_for_writer)
+        let write_result = match tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+            write_zip_to_path(&document, &files, &temporary_for_writer)?;
+            let (manifest, inspected_doc, entry_names) = inspect_archive(&temporary_for_writer)?;
+            validate_document_entries(&inspected_doc, &entry_names, manifest.version)?;
+            Ok(())
         })
         .await
         {
@@ -2913,6 +2916,13 @@ fn write_source_to_zip<W: Write + io::Seek>(
     Ok(())
 }
 
+fn is_json_zip_entry(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+}
+
 fn write_zip_json<W: Write + io::Seek, T: Serialize>(
     writer: &mut ZipWriter<W>,
     path: &str,
@@ -2930,6 +2940,22 @@ fn write_zip_bytes<W: Write + io::Seek>(
     bytes: &[u8],
     options: FileOptions,
 ) -> Result<(), AppError> {
+    write_zip_bytes_bounded(writer, path, bytes, options, MAX_JSON_ENTRY_BYTES)
+}
+
+fn write_zip_bytes_bounded<W: Write + io::Seek>(
+    writer: &mut ZipWriter<W>,
+    path: &str,
+    bytes: &[u8],
+    options: FileOptions,
+    json_limit: u64,
+) -> Result<(), AppError> {
+    if is_json_zip_entry(path) && bytes.len() as u64 > json_limit {
+        return Err(AppError::backup_invalid(format!(
+            "备份 JSON 条目超过大小限制（上限 {} MiB）：{path}",
+            json_limit / (1024 * 1024)
+        )));
+    }
     writer
         .start_file(path, options)
         .map_err(|error| AppError::backup_invalid(format!("备份目录写入失败：{error}")))?;
@@ -2995,6 +3021,11 @@ fn validate_archive_entries<R: io::Read + io::Seek>(
         let name = entry.name().to_owned();
         if !safe_zip_path(&name) || entry.unix_mode().is_some_and(is_symlink_mode) {
             return Err(AppError::backup_invalid("备份包含不安全的文件路径"));
+        }
+        if is_json_zip_entry(&name) && entry.size() > entry_limit.min(MAX_JSON_ENTRY_BYTES) {
+            return Err(AppError::backup_invalid(format!(
+                "备份 JSON 条目超过大小限制：{name}"
+            )));
         }
         if entry.size() > entry_limit {
             return Err(AppError::backup_invalid("备份条目超过单文件大小限制"));
@@ -10669,11 +10700,27 @@ mod tests {
     fn oversized_or_forged_json_zip_entry_is_rejected_without_truncation() {
         let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
-        writer.start_file("project.json", options).unwrap();
         let oversized = format!("{{\"pad\":\"{}\"}}", "a".repeat(2048));
-        writer.write_all(oversized.as_bytes()).unwrap();
+        assert!(super::write_zip_bytes_bounded(
+            &mut writer,
+            "project.json",
+            oversized.as_bytes(),
+            options,
+            1024,
+        )
+        .is_err());
+        super::write_zip_bytes_bounded(
+            &mut writer,
+            "project.json",
+            oversized.as_bytes(),
+            options,
+            4096,
+        )
+        .unwrap();
         let bytes = writer.finish().unwrap().into_inner();
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert!(super::validate_archive_entries(&mut archive, 1024, 65536).is_err());
+        assert!(super::validate_archive_entries(&mut archive, 4096, 65536).is_ok());
         assert!(super::read_zip_bytes_entry_bounded(&mut archive, "project.json", 1024).is_err());
         assert!(super::read_zip_bytes_entry_bounded(&mut archive, "project.json", 4096).is_ok());
     }

@@ -111,7 +111,11 @@ export function useRunsController({ route, navigate }: RunsProps) {
   });
   const retryAndStart = () => mutate(async () => {
     if (!detail?.availableActions.includes("RETRY") || detail.ref.source === "production-run" || !detail.recoverability.retryItemIds.length) return;
-    if (!window.confirm("将按原快照重新准备失败项并立即启动生产队列，已完成结果会保留。确定重试并立即启动？")) return;
+    const pendingCount = (detail.detail?.inputs ?? []).filter(item => item.executionStatus === "PENDING" || item.executionStatus === "DISPATCHING").length;
+    const msg = pendingCount > 0
+      ? `将按原快照重新准备失败项并立即启动当前批次（批次内其余 ${pendingCount} 个待执行项也会继续派发），已完成结果会保留。确定重试并立即启动？`
+      : "将按原快照重新准备失败项并立即启动生产队列，已完成结果会保留。确定重试并立即启动？";
+    if (!window.confirm(msg)) return;
     const prepared = await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: detail.recoverability.retryItemIds });
     if (!mounted.current || scope !== liveScope.current || prepared.projectId !== route.projectId) return;
     if (prepared.ref.source !== detail.ref.source || prepared.ref.id !== detail.ref.id) {
@@ -135,7 +139,13 @@ export function useRunsController({ route, navigate }: RunsProps) {
       || !detail.availableActions.includes("RETRY") || !input.itemId
       || !detail.recoverability.retryItemIds.includes(input.itemId)
       || !detail.detail?.inputs.some(item => item.itemId === input.itemId && item.taskId === input.taskId)) return;
-    if (!window.confirm("仅重试此镜头并立即启动队列？其他镜头和已完成结果保持不变。")) return;
+    const pendingSiblings = (detail.detail?.inputs ?? []).filter(item => item.itemId !== input.itemId && (item.executionStatus === "PENDING" || item.executionStatus === "DISPATCHING")).length;
+    const confirmMessage = pendingSiblings > 0
+      ? `将准备此镜头的原快照重试并启动整个队列批次；当前批次中其余 ${pendingSiblings} 个未开始的待执行镜头也会按顺序继续生成，已完成结果保持不变。若只想准备此镜头而不启动其余待执行项，请取消并点「仅重试此镜头」。确定继续？`
+      : detail.status === "PAUSED"
+        ? "将准备此镜头的原快照重试并恢复启动当前队列批次（批次内如有其他待执行项也会继续派发），已完成结果保持不变。确定继续？"
+        : "将准备此镜头的原快照重试并立即启动当前队列批次，已完成结果保持不变。确定继续？";
+    if (!window.confirm(confirmMessage)) return;
     const prepared = await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: [input.itemId] });
     if (!mounted.current || scope !== liveScope.current || prepared.projectId !== route.projectId) return;
     await productClient.run.start(route.projectId, prepared.ref);
