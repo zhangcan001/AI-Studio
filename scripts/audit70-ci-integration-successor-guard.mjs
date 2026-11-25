@@ -114,6 +114,7 @@ const REPAIR_SCOPE = [
   "src/features/create/StoryboardShotRows.tsx",
   "src/features/create/StoryboardWorkbench.test.tsx",
   "src/features/create/StoryboardWorkbench.tsx",
+  "src/features/create/UsageFlowSafety.test.tsx",
   "src/features/generators/GeneratorSettingsPage.test.tsx",
   "src/features/generators/GeneratorSettingsPage.tsx",
   "src/features/library/LibraryController.performance.test.tsx",

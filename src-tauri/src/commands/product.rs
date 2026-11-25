@@ -1336,7 +1336,9 @@ pub async fn product_asset_reveal(
         .await
         .map_err(ProductError::internal)?;
     if asset.source_task_id.is_some() {
-        if let Ok(()) = super::artifact::artifact_reveal(app.clone(), state.clone(), asset_id.clone()).await {
+        if let Ok(()) =
+            super::artifact::artifact_reveal(app.clone(), state.clone(), asset_id.clone()).await
+        {
             return Ok(());
         }
     }

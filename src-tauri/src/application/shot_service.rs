@@ -1051,7 +1051,9 @@ impl ShotService {
                             .map_err(|error| ShotServiceError::TaskView(error.to_string()))?,
                     )
                 } else {
-                    Some(crate::application::ports::TaskUpdatePayload::from_task(task))
+                    Some(crate::application::ports::TaskUpdatePayload::from_task(
+                        task,
+                    ))
                 }
             } else {
                 None

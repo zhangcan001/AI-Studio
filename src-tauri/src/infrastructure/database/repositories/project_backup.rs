@@ -179,8 +179,7 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             query_production_item_reviews(&mut transaction, project_id).await?;
         let mut artifact_reviews = query_artifact_reviews(&mut transaction, project_id).await?;
         let mut shots = query_shots(&mut transaction, project_id).await?;
-        let mut shot_stage_configs =
-            query_shot_stage_configs(&mut transaction, project_id).await?;
+        let mut shot_stage_configs = query_shot_stage_configs(&mut transaction, project_id).await?;
         let mut shot_stage_prompts = query_shot_stage_prompts(&mut transaction, project_id).await?;
         materialize_legacy_shot_stage_prompts(&shots, &mut shot_stage_prompts);
         let mut shot_reference_assets =

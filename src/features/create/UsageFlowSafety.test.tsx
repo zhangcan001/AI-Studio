@@ -7,7 +7,16 @@ import { ShotReviewDialog } from "./ShotReviewDialog";
 import { deriveStoryboardStatus } from "./storyboardModel";
 import type { StoryboardShot } from "./storyboardModel";
 const api=vi.hoisted(()=>({results:vi.fn(),review:vi.fn(),select:vi.fn(),reset:vi.fn(),reveal:vi.fn()}));
-vi.mock("../../product/client",()=>({productClient:{library:{reveal:api.reveal},run:{resultsGet:api.results,resultReview:api.review,resultReviewReset:api.reset},creation:{selectResult:api.select}}}));
+vi.mock("../../product/client", () => ({
+  productClient: {
+    library: { reveal: api.reveal },
+    run: { resultsGet: api.results, resultReview: api.review, resultReviewReset: api.reset },
+    creation: {
+      selectResult: api.select,
+      mediaUrl: (projectId: string, assetId: string, kind: string) => `media://${projectId}/${kind}/${assetId}`,
+    },
+  },
+}));
 vi.mock("../../services/tauriClient",()=>({resetArtifactReview:api.reset}));
 vi.mock("./CreateMediaPreview",()=>({CandidateThumbnail:()=>null}));
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.clearAllMocks();});
@@ -17,6 +26,7 @@ it("restores a closed review draft through the shared project/run/asset Store",a
  useStudioStore.setState({reviewComments:{}});vi.spyOn(window,"confirm").mockReturnValue(true);
  const props={projectId:"p",item,onClose:vi.fn(),onChanged:vi.fn(),onEdit:vi.fn()};
  const view=render(<ShotReviewDialog {...props}/>);await screen.findByRole("button",{name:"通过"});
+ expect(screen.getByLabelText("审核主预览 候选").getAttribute("src")).toBe("media://p/video/a");
  fireEvent.change(screen.getByRole("textbox",{name:"审核说明"}),{target:{value:"保留草稿"}});fireEvent.click(screen.getByRole("button",{name:"关闭"}));view.unmount();
  render(<ShotReviewDialog {...props}/>);await screen.findByRole("button",{name:"通过"});
  expect((screen.getByRole("textbox",{name:"审核说明"}) as HTMLInputElement).value).toBe("保留草稿");

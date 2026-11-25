@@ -8,7 +8,7 @@
     },
     "scripts/audit70-ci-integration-successor-guard.mjs": {
       "beforeHash": "438a4f81dfdf0460453b3ca1e99873a3ab4a3a62feac63b7f9e2eb357ed38cc7",
-      "afterHash": "720cb3ba6bf4ef7b456617facf997b356e747db93719c5af4c049c5a514d0309"
+      "afterHash": "e43928222311c0ce16344a620bd109dfcacafe67f6037836dd89122bb0c581cb"
     },
     "scripts/testing/audit-repair.test.mjs": {
       "beforeHash": "53a48b2ebad6583e3c267eea71d3ab6d48b58b09f359bb0e2c684da498fb9133",
@@ -188,7 +188,7 @@
     },
     "src-tauri/src/application/shot_service.rs": {
       "beforeHash": "7fd527177335a79a3dffdaed5c912f8251dc4c4c90ba866e8d3a9d00fd22a686",
-      "afterHash": "d876325ef97e5b3dfa2a1e990134fdb266407c69e60a83f10a6874cb6d3393ec"
+      "afterHash": "2d16b8661e3a04c2e32c0f3fc22acd5246b7a7c9f62379532e5182c8345f6fd6"
     },
     "src-tauri/src/application/task_recovery_service.rs": {
       "beforeHash": "4e9d7fa028c223577d01496ee281a736f60186afd191317789a86ebf5c360d44",
@@ -216,7 +216,7 @@
     },
     "src-tauri/src/commands/product.rs": {
       "beforeHash": "ff91ab91d75bd4c6ecfa5a8210f040d986b985682c2addc4516fd61d2ac516f1",
-      "afterHash": "43013b4be6684aa9d61afef93f3cf17f1924009d3b8d23cc98d64f0f924c7902"
+      "afterHash": "1827d788487a214f2f1922e79a06770e1ae75578308d4e4582dc3c79317ba456"
     },
     "src-tauri/src/infrastructure/comfy/client.rs": {
       "beforeHash": "da0b98075c44246a7f8a0c96021e85fb345ae93f5b7e0d52bd38741ab0468faa",
@@ -260,7 +260,7 @@
     },
     "src-tauri/src/infrastructure/database/repositories/project_backup.rs": {
       "beforeHash": "1a8d681b657d4c93d9f0ad1c9c4e902694cd60f502ef62dc0df6bed5da5ce511",
-      "afterHash": "1047b09ef342c69db281da21865be999d42d4f602fffe50098926b8ff19d9d58"
+      "afterHash": "0e12b29bd3d21c98013c07d440ac62f470c6b529d77d685849b107620e43294b"
     },
     "src-tauri/src/infrastructure/database/repositories/project_manifest.rs": {
       "beforeHash": "d2d3a4d7a93f4322517ec97b321b4c47465be6de41992c4eb8d82681ce7687e9",
@@ -437,6 +437,10 @@
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": "ac36fad794e010a860524aa325643f6da5d87375066e858491e80525f8dfe18d",
       "afterHash": "65bf79441aa6f60c6ca614367b7d9ca7a44df6a6c635f964b068b731ef3d3000"
+    },
+    "src/features/create/UsageFlowSafety.test.tsx": {
+      "beforeHash": "ddbd9f2939a02cffd9f4161d8427b05793a6372d33aac0c9613b33a3ffa7a1e7",
+      "afterHash": "b650ab15ca2a7fdb9f4bd699a61b94fec8eda733364a35c7fd36ccf12bdba8b1"
     },
     "src/features/generators/GeneratorSettingsPage.test.tsx": {
       "beforeHash": "43ded809167aed838cbc2da635304ee73a48c214b33ecbb085d3533c36e4a0f2",
