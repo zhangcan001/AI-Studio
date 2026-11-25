@@ -6,6 +6,7 @@ import type { AssetView } from "../../types/asset";
 import type { StoryEntityKind } from "../../types/storyEntity";
 import { useStudioStore } from "../../stores/studioStore";
 
+const pickerMock = vi.hoisted(() => ({ onImportFile: undefined as (() => void) | undefined }));
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), imageGet: vi.fn(), thumbnailGet: vi.fn(), importImages: vi.fn() }));
 vi.mock("../../product/client", () => ({
   productClient: {
@@ -13,7 +14,12 @@ vi.mock("../../product/client", () => ({
     library: { imageGet: api.imageGet, thumbnailGet: api.thumbnailGet },
   },
 }));
-vi.mock("../../components/ImageAssetPicker", () => ({ ImageAssetPicker: () => null }));
+vi.mock("../../components/ImageAssetPicker", () => ({
+  ImageAssetPicker: (props: { open?: boolean; onImportFile?: () => void }) => {
+    pickerMock.onImportFile = props.open ? props.onImportFile : undefined;
+    return props.open ? <div data-testid="mock-picker" /> : null;
+  },
+}));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -145,4 +151,27 @@ it("shows non-blocking English prompt hint for Chinese entity description and al
   fireEvent.click(screen.getByRole("button", { name: "将图片 img-2 设为封面" }));
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(api.update).toHaveBeenCalledWith(expect.objectContaining({ id: "e-1", coverAssetId: "img-2" })));
+});
+
+it("ignores late importImages when switching project/kind and surfaces picker onImportFile failures", async () => {
+  let resolveOldImport!: (val: { imported: AssetView[]; failed: { displayName: string; error: string }[]; cancelled: boolean }) => void;
+  api.list.mockResolvedValue([]);
+  api.importImages.mockImplementationOnce(() => new Promise(resolve => { resolveOldImport = resolve; }));
+  const view = render(<StoryEntityCategorySection projectId="project-a" kind="character" />);
+  const bulkBtn = await screen.findByRole("button", { name: "批量导入角色图片" });
+  await waitFor(() => expect(bulkBtn.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(bulkBtn);
+  view.rerender(<StoryEntityCategorySection projectId="project-b" kind="scene" />);
+  await waitFor(() => expect(api.list).toHaveBeenCalledWith("project-b", "scene"));
+  await act(async () => {
+    resolveOldImport({ imported: [{ id: "old-asset", name: "old.png", originalName: "old.png" } as AssetView], failed: [], cancelled: false });
+  });
+  expect(api.create).not.toHaveBeenCalled();
+
+  api.importImages.mockResolvedValueOnce({ imported: [], failed: [{ displayName: "bad.png", error: "损坏的图片" }], cancelled: false });
+  fireEvent.click(screen.getByRole("button", { name: "新建场景" }));
+  fireEvent.click(screen.getByRole("button", { name: "选择封面" }));
+  expect(pickerMock.onImportFile).toBeTypeOf("function");
+  await act(async () => { pickerMock.onImportFile?.(); });
+  expect((await screen.findByRole("alert")).textContent).toContain("bad.png：损坏的图片");
 });

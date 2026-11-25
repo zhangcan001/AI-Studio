@@ -7,13 +7,53 @@ use crate::application::ports::{
 use crate::domain::{validate_scalar_values, ShotStage};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct SqliteShotRepository {
     pool: SqlitePool,
+}
+
+async fn persist_shot_order(
+    tx: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+    ordered_ids: &[String],
+    now: &str,
+) -> Result<(), RepositoryError> {
+    let max_ordinal =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(ordinal) FROM shots WHERE project_id = ?")
+            .bind(project_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(map_sqlx_error)?
+            .unwrap_or(-1);
+    let temporary_offset = max_ordinal
+        .checked_add(1)
+        .filter(|offset| max_ordinal.checked_add(*offset).is_some())
+        .ok_or_else(|| RepositoryError::integrity("shot ordinal overflow"))?;
+    sqlx::query("UPDATE shots SET ordinal = ordinal + ?, updated_at = ? WHERE project_id = ?")
+        .bind(temporary_offset)
+        .bind(now)
+        .bind(project_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(map_sqlx_error)?;
+    for (ordinal, shot_id) in ordered_ids.iter().enumerate() {
+        sqlx::query("UPDATE shots SET ordinal = ?, updated_at = ? WHERE project_id = ? AND id = ?")
+            .bind(
+                i64::try_from(ordinal)
+                    .map_err(|_| RepositoryError::integrity("shot ordinal overflow"))?,
+            )
+            .bind(now)
+            .bind(project_id)
+            .bind(shot_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(map_sqlx_error)?;
+    }
+    Ok(())
 }
 
 impl SqliteShotRepository {
@@ -261,6 +301,174 @@ impl ShotRepository for SqliteShotRepository {
         Ok(())
     }
 
+    async fn clone_video_after(
+        &self,
+        project_id: &str,
+        source_id: &str,
+        new_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<ShotRecord>, RepositoryError> {
+        let mut tx = super::begin_immediate(&self.pool).await?;
+        let shots = sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT id, name, ordinal FROM shots WHERE project_id = ? ORDER BY ordinal, id",
+        )
+        .bind(project_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let Some(source_index) = shots.iter().position(|(id, _, _)| id == source_id) else {
+            return Ok(None);
+        };
+        let source_name = &shots[source_index].1;
+        let root_name = source_name
+            .rsplit_once("副本")
+            .filter(|(_, suffix)| suffix.trim().chars().all(|c| c.is_ascii_digit()))
+            .map_or(source_name.as_str(), |(base, _)| base)
+            .trim_end();
+        let root_name: String = if root_name.is_empty() {
+            "镜头"
+        } else {
+            root_name
+        }
+        .chars()
+        .take(64)
+        .collect();
+        let names = shots
+            .iter()
+            .map(|(_, name, _)| name.to_lowercase())
+            .collect::<HashSet<_>>();
+        let mut name = format!("{root_name} 副本");
+        for index in 2.. {
+            if !names.contains(&name.to_lowercase()) {
+                break;
+            }
+            name = format!("{root_name} 副本 {index}");
+        }
+        let tail = shots
+            .last()
+            .and_then(|(_, _, ordinal)| ordinal.checked_add(1))
+            .ok_or_else(|| RepositoryError::integrity("shot ordinal overflow"))?;
+        let timestamp = format_datetime(now);
+        let mut clone = sqlx::query_as::<_, ShotRow>(
+            "INSERT INTO shots (id, project_id, ordinal, name, prompt_text, prompt_entry_id,
+                prompt_version_id, created_at, updated_at, prompt_style, prompt_summary,
+                prompt_soundscape, prompt_music)
+             SELECT ?, project_id, ?, ?, prompt_text, prompt_entry_id, prompt_version_id,
+                ?, ?, prompt_style, prompt_summary, prompt_soundscape, prompt_music
+             FROM shots WHERE project_id = ? AND id = ?
+             RETURNING id, project_id, ordinal, name, prompt_text, prompt_entry_id,
+                prompt_version_id, selected_image_asset_id, selected_video_asset_id,
+                created_at, updated_at",
+        )
+        .bind(new_id)
+        .bind(tail)
+        .bind(name)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .bind(project_id)
+        .bind(source_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .try_into_domain()?;
+
+        // Copy saved video settings verbatim, including historical exact pairs.
+        // Generation still validates the current pair before admitting production.
+        for statement in [
+            "INSERT INTO shot_stage_configs
+                (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
+             SELECT ?, stage, workflow_version_id, recipe_id, scalar_values_json, ?
+             FROM shot_stage_configs WHERE shot_id = ? AND stage = 'video'",
+            "INSERT INTO shot_stage_prompts
+                (shot_id, stage, prompt_text, prompt_entry_id, prompt_version_id, updated_at)
+             SELECT ?, stage, prompt_text, prompt_entry_id, prompt_version_id, ?
+             FROM shot_stage_prompts WHERE shot_id = ? AND stage = 'video'",
+        ] {
+            sqlx::query(statement)
+                .bind(new_id)
+                .bind(&timestamp)
+                .bind(source_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        }
+        sqlx::query(
+            "INSERT INTO shot_reference_assets (shot_id, stage, asset_id, ordinal)
+             SELECT ?, stage, asset_id, ordinal
+             FROM shot_reference_assets WHERE shot_id = ? AND stage = 'video'",
+        )
+        .bind(new_id)
+        .bind(source_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "INSERT INTO shot_story_entity_bindings
+                (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at, composition_usage)
+             SELECT lower(hex(randomblob(16))), project_id, ?, entity_id, ordinal, ?, ?, composition_usage
+             FROM shot_story_entity_bindings WHERE project_id = ? AND shot_id = ?",
+        )
+        .bind(new_id)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .bind(project_id)
+        .bind(source_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "INSERT INTO shot_video_input_sets
+                (project_id, shot_id, workflow_version_id, recipe_id, instance_id, revision, updated_at)
+             SELECT v.project_id, ?, v.workflow_version_id, v.recipe_id,
+                    'vin_' || lower(hex(randomblob(16))), 1, ?
+             FROM shot_video_input_sets v
+             WHERE v.project_id = ? AND v.shot_id = ?
+               AND (
+                 EXISTS (
+                   SELECT 1 FROM shot_stage_configs c
+                   WHERE c.shot_id = v.shot_id AND c.stage = 'video'
+                     AND c.workflow_version_id = v.workflow_version_id
+                     AND c.recipe_id = v.recipe_id
+                 )
+                 OR NOT EXISTS (
+                   SELECT 1 FROM shot_stage_configs c
+                   WHERE c.shot_id = v.shot_id AND c.stage = 'video'
+                 )
+               )",
+        )
+        .bind(new_id)
+        .bind(&timestamp)
+        .bind(project_id)
+        .bind(source_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "INSERT INTO shot_video_input_assets
+                (project_id, shot_id, workflow_version_id, recipe_id, input_key, ordinal, asset_id)
+             SELECT a.project_id, v.shot_id, a.workflow_version_id, a.recipe_id, a.input_key, a.ordinal, a.asset_id
+             FROM shot_video_input_assets a
+             JOIN shot_video_input_sets v ON v.project_id = a.project_id AND v.shot_id = ?
+                AND v.workflow_version_id = a.workflow_version_id AND v.recipe_id = a.recipe_id
+             WHERE a.project_id = ? AND a.shot_id = ?",
+        )
+        .bind(new_id)
+        .bind(project_id)
+        .bind(source_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut ids = shots.into_iter().map(|(id, _, _)| id).collect::<Vec<_>>();
+        let position = source_index + 1;
+        ids.insert(position, new_id.to_owned());
+        clone.ordinal = i64::try_from(position)
+            .map_err(|_| RepositoryError::integrity("shot ordinal overflow"))?;
+        persist_shot_order(&mut tx, project_id, &ids, &timestamp).await?;
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(Some(clone))
+    }
+
     async fn update(&self, shot: &ShotRecord) -> Result<bool, RepositoryError> {
         let result = sqlx::query(
             "UPDATE shots SET name = ?, prompt_text = ?, prompt_entry_id = ?,
@@ -305,11 +513,12 @@ impl ShotRepository for SqliteShotRepository {
         ordered_ids: &[String],
         updated_at: DateTime<Utc>,
     ) -> Result<Vec<ShotRecord>, RepositoryError> {
+        let mut transaction = super::begin_immediate(&self.pool).await?;
         let current = sqlx::query_scalar::<_, String>(
             "SELECT id FROM shots WHERE project_id = ? ORDER BY ordinal ASC, id ASC",
         )
         .bind(project_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
         if current.len() != ordered_ids.len()
@@ -321,44 +530,13 @@ impl ShotRepository for SqliteShotRepository {
             ));
         }
 
-        let mut transaction = self
-            .pool
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .map_err(map_sqlx_error)?;
-        let max_ordinal = sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT MAX(ordinal) FROM shots WHERE project_id = ?",
+        persist_shot_order(
+            &mut transaction,
+            project_id,
+            ordered_ids,
+            &format_datetime(updated_at),
         )
-        .bind(project_id)
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(map_sqlx_error)?
-        .unwrap_or(-1);
-        let temporary_offset = max_ordinal
-            .checked_add(1)
-            .ok_or_else(|| RepositoryError::integrity("shot ordinal overflow"))?;
-        sqlx::query("UPDATE shots SET ordinal = ordinal + ?, updated_at = ? WHERE project_id = ?")
-            .bind(temporary_offset)
-            .bind(format_datetime(updated_at))
-            .bind(project_id)
-            .execute(&mut *transaction)
-            .await
-            .map_err(map_sqlx_error)?;
-        for (ordinal, shot_id) in ordered_ids.iter().enumerate() {
-            sqlx::query(
-                "UPDATE shots SET ordinal = ?, updated_at = ? WHERE project_id = ? AND id = ?",
-            )
-            .bind(
-                i64::try_from(ordinal)
-                    .map_err(|_| RepositoryError::integrity("shot ordinal overflow"))?,
-            )
-            .bind(format_datetime(updated_at))
-            .bind(project_id)
-            .bind(shot_id)
-            .execute(&mut *transaction)
-            .await
-            .map_err(map_sqlx_error)?;
-        }
+        .await?;
         transaction.commit().await.map_err(map_sqlx_error)?;
         self.list(project_id)
             .await
@@ -1174,6 +1352,150 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn clone_video_shot_copies_exact_saved_inputs_and_rolls_back_a_failed_reorder() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let repository = SqliteShotRepository::new(pool.clone());
+        repository
+            .insert(&shot("sht-source", "project-1", 2))
+            .await
+            .unwrap();
+        repository
+            .insert(&shot("sht-next", "project-1", 7))
+            .await
+            .unwrap();
+        insert_asset(&pool, "frame", "project-1", "image").await;
+        insert_asset(&pool, "result", "project-1", "video").await;
+        repository
+            .select_video("project-1", "sht-source", "result")
+            .await
+            .unwrap();
+        repository.upsert_stage_config("project-1", &ShotStageConfigRecord {
+            shot_id: "sht-source".into(),
+            stage: ShotStage::Video,
+            workflow_version_id: "workflow-version-1".into(),
+            recipe_id: "recipe-1".into(),
+            scalar_values: json!({"width":{"type":"integer","value":1280},"height":{"type":"integer","value":736}}),
+            updated_at: Utc::now(),
+        }).await.unwrap();
+        repository
+            .replace_reference_assets(
+                "project-1",
+                "sht-source",
+                ShotStage::Video,
+                &["frame".into()],
+            )
+            .await
+            .unwrap();
+        for statement in [
+            "UPDATE shots SET prompt_style = 'cinematic' WHERE id = 'sht-source'",
+            "INSERT INTO shot_stage_prompts (shot_id, stage, prompt_text, updated_at)
+             VALUES ('sht-source', 'video', 'motion', '2026-01-01T00:00:00Z')",
+            "INSERT INTO story_entities (id, project_id, kind, name, description, created_at, updated_at)
+             VALUES ('comp', 'project-1', 'composition', 'Composition', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            "INSERT INTO shot_story_entity_bindings
+                (id, project_id, shot_id, entity_id, ordinal, created_at, updated_at, composition_usage)
+             VALUES ('bound', 'project-1', 'sht-source', 'comp', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'opening')",
+            "INSERT INTO shot_video_input_sets VALUES
+                ('project-1', 'sht-source', 'workflow-version-1', 'recipe-1', 'vin_source', 3, '2026-01-01T00:00:00Z')",
+            "INSERT INTO shot_video_input_assets VALUES
+                ('project-1', 'sht-source', 'workflow-version-1', 'recipe-1', 'first_frame', 0, 'frame')",
+            "CREATE TRIGGER fail_clone_order BEFORE UPDATE OF ordinal ON shots
+             WHEN NEW.id = 'sht-bad-copy' AND NEW.ordinal = 1
+             BEGIN SELECT RAISE(ABORT, 'clone reorder failure'); END",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        assert!(repository
+            .clone_video_after("project-1", "sht-source", "sht-bad-copy", Utc::now())
+            .await
+            .is_err());
+        let before = repository.list("project-1").await.unwrap();
+        assert_eq!(
+            before
+                .iter()
+                .map(|item| item.shot.ordinal)
+                .collect::<Vec<_>>(),
+            [2, 7]
+        );
+        assert!(repository
+            .clone_video_after("foreign", "sht-source", "sht-foreign-copy", Utc::now())
+            .await
+            .unwrap()
+            .is_none());
+
+        let copied = repository
+            .clone_video_after("project-1", "sht-source", "sht-copy", Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(copied.ordinal, 1);
+        assert_eq!(copied.name, "镜头 2 副本");
+        assert!(copied.selected_video_asset_id.is_none());
+        let after = repository.list("project-1").await.unwrap();
+        assert_eq!(
+            after
+                .iter()
+                .map(|item| item.shot.id.as_str())
+                .collect::<Vec<_>>(),
+            ["sht-source", "sht-copy", "sht-next"]
+        );
+        let clone = &after[1];
+        assert_eq!(
+            clone.stage_configs[0].workflow_version_id,
+            "workflow-version-1"
+        );
+        assert_eq!(clone.stage_configs[0].recipe_id, "recipe-1");
+        assert_eq!(
+            clone.stage_configs[0].scalar_values,
+            before[0].stage_configs[0].scalar_values
+        );
+        assert_eq!(clone.stage_prompts[0].prompt_text, "motion");
+        assert_eq!(clone.reference_assets[0].asset_id, "frame");
+        assert!(clone.generation_links.is_empty());
+        let (instance, revision, key, asset): (String, i64, String, String) = sqlx::query_as(
+            "SELECT v.instance_id, v.revision, a.input_key, a.asset_id
+             FROM shot_video_input_sets v JOIN shot_video_input_assets a USING (project_id, shot_id, workflow_version_id, recipe_id)
+             WHERE v.shot_id = 'sht-copy'",
+        ).fetch_one(&pool).await.unwrap();
+        assert_ne!(instance, "vin_source");
+        assert_eq!(
+            (revision, key.as_str(), asset.as_str()),
+            (1, "first_frame", "frame")
+        );
+        let (usage, style): (String, String) = sqlx::query_as(
+            "SELECT b.composition_usage, s.prompt_style FROM shot_story_entity_bindings b
+             JOIN shots s ON s.id = b.shot_id WHERE s.id = 'sht-copy'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((usage.as_str(), style.as_str()), ("opening", "cinematic"));
+    }
+
+    #[tokio::test]
+    async fn composition_read_does_not_wait_for_another_sqlite_writer() {
+        use crate::application::ports::StoryEntityRepository;
+        use crate::infrastructure::database::repositories::story_entity::SqliteStoryEntityRepository;
+        use std::time::Duration;
+
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let writer = super::super::begin_immediate(&pool).await.unwrap();
+        let repository = SqliteStoryEntityRepository::new(pool.clone());
+        let usage = tokio::time::timeout(
+            Duration::from_secs(2),
+            repository.composition_usage_for_shot("project-1", "sht-1"),
+        )
+        .await
+        .expect("a query should not wait for the writer lock")
+        .unwrap();
+        assert!(usage.opening_entity_id.is_none());
+        writer.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn conditional_delete_preserves_shot_when_an_active_binding_appears() {
         let directory = tempdir().unwrap();
         let pool = initialize(&directory.path().join("app.db")).await.unwrap();
@@ -1325,5 +1647,50 @@ mod tests {
             .expect_err("duplicate name should be rejected by the repository transaction");
         assert!(error.to_string().contains("duplicate shot name"));
         assert_eq!(repository.list("project-1").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn clone_video_shot_preserves_video_inputs_without_stage_config() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let repository = SqliteShotRepository::new(pool.clone());
+        repository
+            .insert(&shot("sht-default", "project-1", 0))
+            .await
+            .unwrap();
+        insert_asset(&pool, "frame", "project-1", "image").await;
+        for statement in [
+            "INSERT INTO shot_video_input_sets VALUES
+                ('project-1', 'sht-default', 'workflow-version-1', 'recipe-1', 'vin_default', 2, '2026-01-01T00:00:00Z')",
+            "INSERT INTO shot_video_input_assets VALUES
+                ('project-1', 'sht-default', 'workflow-version-1', 'recipe-1', 'first_frame', 0, 'frame')",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+
+        let copied = repository
+            .clone_video_after("project-1", "sht-default", "sht-copy", Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(copied.ordinal, 1);
+
+        let (instance, revision, key, asset): (String, i64, String, String) = sqlx::query_as(
+            "SELECT v.instance_id, v.revision, a.input_key, a.asset_id
+             FROM shot_video_input_sets v
+             JOIN shot_video_input_assets a
+               USING (project_id, shot_id, workflow_version_id, recipe_id)
+             WHERE v.project_id = 'project-1' AND v.shot_id = 'sht-copy'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(instance.starts_with("vin_"));
+        assert_ne!(instance, "vin_default");
+        assert_eq!(
+            (revision, key.as_str(), asset.as_str()),
+            (1, "first_frame", "frame")
+        );
     }
 }

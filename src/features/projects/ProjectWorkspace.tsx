@@ -341,48 +341,50 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
           </label>
         </div>
       )}
-      <div className="project-table" role="table" aria-label="项目列表">
-        <div className="project-table-row project-table-header" role="row">
-          <span role="columnheader">名称</span>
-          <span role="columnheader">说明</span>
-          <span role="columnheader">创建时间</span>
-          <span role="columnheader">更新时间</span>
-          <span role="columnheader">状态</span>
-          <span role="columnheader">操作</span>
-        </div>
-        {[...projects]
-          .filter((project) => {
-            const q = projectQuery.trim().toLowerCase();
-            if (!q) return true;
-            return `${projectDisplayName(project.id, project.name)} ${project.description ?? ""}`.toLowerCase().includes(q);
-          })
+      {(() => {
+        const q = projectQuery.trim().toLowerCase();
+        const filteredProjects = [...projects]
+          .filter((project) => !q || `${projectDisplayName(project.id, project.name)} ${project.description ?? ""}`.toLowerCase().includes(q))
           .sort((a, b) => {
             if (projectSort === "name") return projectDisplayName(a.id, a.name).localeCompare(projectDisplayName(b.id, b.name), "zh-CN");
             if (projectSort === "created") return b.createdAt.localeCompare(a.createdAt);
             return b.updatedAt.localeCompare(a.updatedAt);
-          })
-          .map((project) => {
-          const active = project.id === activeProjectId;
-          const canOpenRow = (!active || !showWorkflowSettings) && !saving && !backupBusy;
-          return (
-            <div className="project-table-row" role="row" key={project.id} onDoubleClick={() => { if (canOpenRow) onOpen(project.id); }}>
-              <strong role="cell">{projectDisplayName(project.id, project.name)}</strong>
-              <span role="cell" className="project-description-cell">{project.description || "—"}</span>
-              <span role="cell">{formatDateTime(project.createdAt)}</span>
-              <span role="cell">{formatDateTime(project.updatedAt)}</span>
-              <span role="cell">{active ? <span className="active-project-badge">当前项目</span> : ""}</span>
-              <span role="cell" className="project-row-actions">
-                <button type="button" onClick={() => onOpen(project.id)} disabled={!canOpenRow}>
-                  {active && !showWorkflowSettings ? "进入项目" : "打开"}
-                </button>
-                <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving || backupBusy}>编辑</button>
-                <button type="button" className="quiet-button" onClick={() => void exportBackup(project.id)} disabled={saving || backupBusy}>导出归档</button>
-              </span>
+          });
+        return (
+          <div className="project-table" role="table" aria-label="项目列表">
+            <div className="project-table-row project-table-header" role="row">
+              <span role="columnheader">名称</span>
+              <span role="columnheader">说明</span>
+              <span role="columnheader">创建时间</span>
+              <span role="columnheader">更新时间</span>
+              <span role="columnheader">状态</span>
+              <span role="columnheader">操作</span>
             </div>
-          );
-        })}
-        {!projects.length && <p className="empty-state">暂无项目。创建第一个项目后，可以导入 Production Handoff 或建立镜头。</p>}
-      </div>
+            {filteredProjects.map((project) => {
+              const active = project.id === activeProjectId;
+              const canOpenRow = (!active || !showWorkflowSettings) && !saving && !backupBusy;
+              return (
+                <div className="project-table-row" role="row" key={project.id} onDoubleClick={() => { if (canOpenRow) onOpen(project.id); }}>
+                  <strong role="cell">{projectDisplayName(project.id, project.name)}</strong>
+                  <span role="cell" className="project-description-cell">{project.description || "—"}</span>
+                  <span role="cell">{formatDateTime(project.createdAt)}</span>
+                  <span role="cell">{formatDateTime(project.updatedAt)}</span>
+                  <span role="cell">{active ? <span className="active-project-badge">当前项目</span> : ""}</span>
+                  <span role="cell" className="project-row-actions">
+                    <button type="button" onClick={() => onOpen(project.id)} disabled={!canOpenRow}>
+                      {active && !showWorkflowSettings ? "进入项目" : "打开"}
+                    </button>
+                    <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving || backupBusy}>编辑</button>
+                    <button type="button" className="quiet-button" onClick={() => void exportBackup(project.id)} disabled={saving || backupBusy}>导出归档</button>
+                  </span>
+                </div>
+              );
+            })}
+            {!projects.length && <p className="empty-state">暂无项目。创建第一个项目后，可以导入 Production Handoff 或建立镜头。</p>}
+            {projects.length > 0 && !filteredProjects.length && <p className="empty-state">没有匹配的项目。</p>}
+          </div>
+        );
+      })()}
     </section>
   );
 }

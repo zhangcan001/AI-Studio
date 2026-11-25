@@ -216,5 +216,8 @@ describe("ProjectWorkspace archive UX", () => {
     await user.type(screen.getByLabelText("搜索项目"), "赛博雨夜");
     expect(screen.getByText("科幻短剧")).toBeTruthy();
     expect(screen.queryByText("测试项目")).toBeNull();
+    await user.clear(screen.getByLabelText("搜索项目"));
+    await user.type(screen.getByLabelText("搜索项目"), "不存在的项目");
+    expect(screen.getByText("没有匹配的项目。")).toBeTruthy();
   });
 });

@@ -276,7 +276,10 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
     const element=document.getElementById(`storyboard-shot-${id}`);if(element){element.scrollIntoView?.({block:"nearest"});pendingScroll.current=undefined;}
   },[items]);
   const locateOrderedShot=(id:string,ids:string[],message:string)=>{
-    const position=ids.indexOf(id);if(position<0)return;
+    locateShotAt(id, ids.indexOf(id), message);
+  };
+  const locateShotAt=(id:string,position:number,message:string)=>{
+    if(position<0)return;
     const nextPage=Math.floor(position/STORYBOARD_MAX_DETAIL_SHOTS);
     pendingScroll.current=id;setFocusId(id);setSelectedId(id);setOrderNotice(`${message}：第 ${position+1} 镜，第 ${nextPage+1} 页。若被筛选隐藏，请清除筛选查看。`);
     if(nextPage!==page)setPage(nextPage);else void load();
@@ -328,73 +331,13 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const cloneShot = async (sourceId: string) => {
     if (orderLock.current) return;
     orderLock.current = true; setOrderPending(true); setOrderError(undefined); setOrderNotice(undefined);
-    let created: string | undefined; let positioned = false;
     try {
-      const source = allItems.find(i => i.id === sourceId) ?? items?.find(i => i.id === sourceId);
-      const srcShot = source?.shot ?? (typeof productClient.creation?.get === "function" ? (await productClient.creation.get(projectId, sourceId, "video")).selectedShot ?? undefined : undefined);
-      const shot = await productClient.creation.createShot(projectId); created = shot.id;
-      const shots = await productClient.creation.shotsList(projectId);
-      const projectShots = shots.filter(s => s.projectId === projectId);
-      const ids = projectShots.sort((a, b) => a.ordinal - b.ordinal || a.id.localeCompare(b.id)).map(s => s.id).filter(id => id !== created);
-      const pos = ids.indexOf(sourceId);
-      if (pos >= 0) {
-        ids.splice(pos + 1, 0, shot.id);
-        await productClient.creation.shotsReorder(projectId, ids);
-      } else {
-        ids.push(shot.id);
-      }
-      const existingNames = new Set(projectShots.filter(s => s.id !== created).map(s => s.name.toLowerCase()));
-      const baseName = (source?.name ?? srcShot?.summary.name ?? "镜头").replace(/\s*副本(?:\s*\d+)?$/, "").slice(0, 64);
-      let cloneName = `${baseName} 副本`;
-      let copySeq = 2;
-      while (existingNames.has(cloneName.toLowerCase())) {
-        cloneName = `${baseName} 副本 ${copySeq++}`;
-      }
-      const scalars = Object.fromEntries(Object.entries(srcShot?.values ?? {}).filter(([, v]) => ["integer", "number", "seed_random", "seed_fixed"].includes(v.type)));
-      await productClient.creation.updateShot(projectId, {
-        shotId: shot.id,
-        name: cloneName,
-        ...(srcShot ? {
-          stage: "video",
-          prompt: srcShot.prompt,
-          ...(srcShot.selectionRef ? { selectionRef: srcShot.selectionRef, values: scalars } : {}),
-        } : {}),
-      });
-      if (srcShot?.selectionRef && typeof productClient.creation?.inputsGet === "function" && typeof productClient.creation?.inputsSave === "function") {
-        const [srcInputs, dstInputs] = await Promise.all([
-          productClient.creation.inputsGet({ projectId, shotId: sourceId, selectionRef: srcShot.selectionRef }),
-          productClient.creation.inputsGet({ projectId, shotId: shot.id, selectionRef: srcShot.selectionRef }),
-        ]);
-        if (srcInputs?.inputs?.length) {
-          await productClient.creation.inputsSave({
-            selection: { projectId, shotId: shot.id, selectionRef: srcShot.selectionRef },
-            expected: dstInputs?.token ?? null,
-            inputs: srcInputs.inputs,
-          });
-        }
-      }
-      if (typeof productClient.storyEntities?.listForShot === "function" && typeof productClient.storyEntities?.bindShot === "function") {
-        const bound = await productClient.storyEntities.listForShot(projectId, sourceId);
-        const entityIds = (bound ?? []).filter(e => e.projectId === projectId).map(e => e.id);
-        if (entityIds.length) await productClient.storyEntities.bindShot(projectId, shot.id, entityIds);
-      }
-      if (typeof productClient.storyEntities?.compositionUsage === "function" && typeof productClient.storyEntities?.setCompositionUsage === "function") {
-        const usage = await productClient.storyEntities.compositionUsage(projectId, sourceId);
-        if (usage && (usage.openingEntityId || usage.endingEntityId)) await productClient.storyEntities.setCompositionUsage(projectId, shot.id, usage);
-      }
-      if (typeof productClient.storyEntities?.promptSections === "function" && typeof productClient.storyEntities?.setPromptSections === "function") {
-        const sections = await productClient.storyEntities.promptSections(projectId, sourceId);
-        if (sections && (sections.style || sections.summary || sections.soundscape || sections.music)) await productClient.storyEntities.setPromptSections(projectId, shot.id, sections);
-      }
-      if (srcShot?.referenceAssetIds?.length && typeof productClient.creation?.referencesSet === "function") {
-        await productClient.creation.referencesSet(projectId, shot.id, "video", srcShot.referenceAssetIds);
-      }
-      if (mounted.current && scope.current === projectId) { positioned = true; locateOrderedShot(shot.id, ids, "镜头已复制插入"); }
+      const shot = await productClient.creation.cloneShot(projectId, sourceId);
+      if (mounted.current && scope.current === projectId) locateShotAt(shot.id, shot.ordinal, "镜头已复制插入");
     } catch (cause) {
-      if (mounted.current && scope.current === projectId) setOrderError(`${created ? "副本镜头已创建；部分配置或排序未完成，请刷新后检查。" : ""}${normalizeProductError(cause).message}`);
+      if (mounted.current && scope.current === projectId) setOrderError(normalizeProductError(cause).message);
     } finally {
       orderLock.current = false; setOrderPending(false);
-      if (!positioned && mounted.current && scope.current === projectId) void load();
     }
   };
   const createShot = async (open = true) => {

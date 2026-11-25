@@ -67,6 +67,7 @@ export const productClient = {
     get: (projectId: string, shotId: string | null, stage: "image" | "video") => productRequest("product_creation_get", { projectId, shotId, stage }),
     workbench: (projectId: string, stage: "image" | "video", limit: number, offset?: number) => productRequest("product_creation_workbench_get", { projectId, stage, limit, ...(offset ? {offset} : {}) }),
     createShot: (projectId: string) => productRequest("product_creation_shot_create", { projectId }),
+    cloneShot: (projectId: string, sourceShotId: string) => productRequest("product_creation_shot_create", { projectId, sourceShotId }),
     saveShotRow: (projectId: string, request: import("./types").CreationShotRowSave) => productRequest("product_creation_shot_row_save", { projectId, request }),
     updateShot: (projectId: string, request: CreationShotUpdate) => productRequest("product_creation_shot_update", { projectId, request }),
     deleteShot: (projectId: string, shotId: string) => productRequest("product_creation_shot_delete", { projectId, shotId }),

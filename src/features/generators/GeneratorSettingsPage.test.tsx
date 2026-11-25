@@ -88,3 +88,47 @@ it("marks dirty generator slots and batch-saves all modified bindings with exact
   expect(api.set).toHaveBeenNthCalledWith(1, "p", { stage: "VIDEO", mode: "DEFAULT", selectionRef: "two", expectedRevision: 3, expectedBindingInstanceId: "instance-A" });
   expect(api.set).toHaveBeenNthCalledWith(2, "p", { stage: "VIDEO", mode: "FL2VA_TEXT_TO_VIDEO", selectionRef: "video-t2v", expectedRevision: null, expectedBindingInstanceId: null });
 });
+
+it("retains the failed and untouched generator choices and retries only those slots", async () => {
+  api.list.mockResolvedValue([...options,
+    { ...options[0], selectionRef: "video-t2v", mode: "fl2va_text_to_video" },
+    { ...options[0], selectionRef: "video-i2v", mode: "fl2va_image_to_video" },
+  ]);
+  api.set.mockImplementationOnce(async () => {
+    bindings = [{ ...bindings[0], selectionRef: "two", revision: 4 }];
+  }).mockRejectedValueOnce({ code: "GENERATOR_BINDING_CONFLICT", message: "revision" });
+  render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+  const defaultSlot = await screen.findByLabelText("默认视频生成器") as HTMLSelectElement;
+  const textSlot = await screen.findByLabelText("文生视频生成器") as HTMLSelectElement;
+  const imageSlot = await screen.findByLabelText("图生视频生成器") as HTMLSelectElement;
+  fireEvent.change(defaultSlot, { target: { value: "two" } });
+  fireEvent.change(textSlot, { target: { value: "video-t2v" } });
+  fireEvent.change(imageSlot, { target: { value: "video-i2v" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存全部修改（3）" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("已保存 1 项");
+  const retry = await screen.findByRole("button", { name: "保存全部修改（2）" });
+  expect(textSlot.value).toBe("video-t2v");
+  expect(imageSlot.value).toBe("video-i2v");
+  await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(retry);
+  await waitFor(() => expect(api.set).toHaveBeenCalledTimes(4));
+  expect(api.set.mock.calls.slice(2).map(([, request]) => request.selectionRef)).toEqual(["video-t2v", "video-i2v"]);
+});
+
+it("stops saveAll remaining writes when switching projects mid-batch", async () => {
+  api.list.mockResolvedValue([...options,
+    { ...options[0], selectionRef: "video-t2v", mode: "fl2va_text_to_video" },
+  ]);
+  let resolveFirst!: () => void;
+  api.set.mockImplementationOnce(() => new Promise<void>(resolve => { resolveFirst = resolve; }));
+  const view = render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+  fireEvent.change(await screen.findByLabelText("默认视频生成器"), { target: { value: "two" } });
+  fireEvent.change(screen.getByLabelText("文生视频生成器"), { target: { value: "video-t2v" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存全部修改（2）" }));
+  await waitFor(() => expect(api.set).toHaveBeenCalledTimes(1));
+  view.rerender(<GeneratorSettingsPage projectId="p2" navigate={vi.fn()} />);
+  await waitFor(() => expect(api.overview).toHaveBeenCalledWith("p2"));
+  resolveFirst();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(api.set).toHaveBeenCalledTimes(1);
+});

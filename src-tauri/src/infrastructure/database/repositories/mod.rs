@@ -930,7 +930,7 @@ pub mod story_entity {
             shot_id: &str,
         ) -> Result<crate::domain::story_entity::ShotCompositionUsage, RepositoryError> {
             let db = |e: sqlx::Error| RepositoryError::database(e.to_string());
-            let mut tx = super::begin_immediate(&self.pool).await?;
+            let mut tx = self.pool.begin().await.map_err(db)?;
             let usage = shot_composition_usage_tx(&mut tx, project_id, shot_id).await?;
             tx.commit().await.map_err(db)?;
             Ok(usage)

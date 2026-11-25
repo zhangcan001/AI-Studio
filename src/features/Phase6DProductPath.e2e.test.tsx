@@ -110,7 +110,7 @@ const run = {
 };
 const pendingResult: RunResult = {
   assetId: "ast-gen-video", name: "生成视频", mediaKind: "video", assetExists: true,
-  availability: "available", reviewState: "PENDING", reviewRevision: 1, selectedShotIds: [], thumbnailBytes: null,
+  availability: "available", reviewState: "PENDING", reviewRevision: 1, sourceShotIds: ["shot-a"], selectedShotIds: [], thumbnailBytes: null,
 };
 
 beforeEach(() => {

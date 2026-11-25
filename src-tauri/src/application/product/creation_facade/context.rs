@@ -285,7 +285,11 @@ impl ProductCreationFacade {
             .await
             .map_err(ProductError::internal)?
             .project;
-        let shots = self.shots.list(project_id).await.map_err(shot_error)?;
+        let shots = self
+            .shots
+            .list_for_workbench(project_id)
+            .await
+            .map_err(shot_error)?;
         let selected = match shot_id {
             Some(id) => Some(shots.iter().find(|shot| shot.id == id).ok_or_else(|| {
                 ProductError::new(
@@ -561,6 +565,27 @@ impl ProductCreationFacade {
             .await
             .map(|shot| summary(&shot))
             .map_err(shot_error)
+    }
+
+    pub async fn clone_video_shot(
+        &self,
+        project_id: &str,
+        source_id: &str,
+    ) -> Result<CreationShotSummary, ProductError> {
+        self.bindings
+            .get(project_id)
+            .await
+            .map_err(ProductError::binding)?;
+        let shot = self
+            .shots
+            .clone_video_shot(project_id, source_id)
+            .await
+            .map_err(shot_error)?;
+        Ok(CreationShotSummary {
+            id: shot.id,
+            name: shot.name,
+            ordinal: shot.ordinal,
+        })
     }
 
     pub async fn update_shot(

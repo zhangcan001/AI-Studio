@@ -597,8 +597,13 @@ pub async fn product_creation_get(
 pub async fn product_creation_shot_create(
     state: State<'_, AppState>,
     project_id: String,
+    source_shot_id: Option<String>,
 ) -> Result<CreationShotSummary, ProductError> {
-    creation(&state).create_shot(&project_id).await
+    let facade = creation(&state);
+    match source_shot_id {
+        Some(source_id) => facade.clone_video_shot(&project_id, &source_id).await,
+        None => facade.create_shot(&project_id).await,
+    }
 }
 
 #[tauri::command(rename_all = "camelCase")]

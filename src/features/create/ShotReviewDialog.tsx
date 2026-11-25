@@ -21,35 +21,66 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
   const [navigationNote,setNavigationNote]=useState<string>();
   const comments = useStudioStore(state => state.reviewComments);
   const commentKey = (assetId: string) => JSON.stringify([projectId, item.run?.ref.source, item.run?.ref.id, assetId]);
-  const hasDraft = item.candidates.some(asset => comments[commentKey(asset.id)]?.trim());
+  const hasDraft = () => {
+    const current = useStudioStore.getState().reviewComments;
+    return item.candidates.some(asset => current[commentKey(asset.id)]?.trim());
+  };
   const runRef = item.run?.ref;
   useEffect(() => {
     const opener = document.activeElement;
     dialog.current?.showModal();
     return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); };
   }, []);
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (keepError = false) => {
     if (!runRef) return;
     const token = ++epoch.current;
     try {
       const out = await productClient.run.resultsGet(projectId, runRef);
-      if (token === epoch.current) { setResults(out.filter(r => item.candidates.some(a => a.id === r.assetId))); setError(undefined); }
+      if (token === epoch.current) {
+        setResults(out.filter(r => item.candidates.some(a => a.id === r.assetId)));
+        if (!keepError) setError(undefined);
+      }
     } catch (cause) { if (token === epoch.current) { setError(normalizeProductError(cause).message); setResults([]); } }
   }, [projectId, runRef?.source, runRef?.id, item.id, JSON.stringify(item.candidates.map(a => a.id))]);
   useEffect(() => { setResults(undefined); void reload(); return () => { ++epoch.current; }; }, [reload]);
   const leave = (fn: () => void) => {
-    if (lock.current || (hasDraft && !window.confirm("审核说明尚未提交，本次会话会保留草稿。确定离开？"))) return;
+    if (lock.current || (hasDraft() && !window.confirm("审核说明尚未提交，本次会话会保留草稿。确定离开？"))) return;
     fn();
   };
-  const act = async (fn: () => Promise<unknown>, submitted?: { key: string; comment: string }) => {
-    if (lock.current) return;
+  const act = async (
+    fn: () => Promise<unknown>,
+    submitted?: { key: string; comment: string },
+    partialCommitted?: () => boolean,
+  ) => {
+    if (lock.current) return false;
     lock.current = true; setBusy(true); const token = epoch.current;
-    try { await fn(); if (token !== epoch.current) return; if (submitted && useStudioStore.getState().reviewComments[submitted.key] === submitted.comment) useStudioStore.getState().setReviewComment(submitted.key, undefined); await reload(); onChanged(); }
-    catch (cause) { if (token === epoch.current) setError(normalizeProductError(cause).message); }
+    try {
+      await fn();
+      if (token !== epoch.current) return false;
+      if (submitted && useStudioStore.getState().reviewComments[submitted.key] === submitted.comment) useStudioStore.getState().setReviewComment(submitted.key, undefined);
+      const refreshing = reload();
+      const refreshToken = epoch.current;
+      await refreshing;
+      if (refreshToken !== epoch.current) return false;
+      onChanged();
+      return true;
+    } catch (cause) {
+      if (token === epoch.current) setError(normalizeProductError(cause).message);
+      if (partialCommitted?.() && token === epoch.current) {
+        if (submitted && useStudioStore.getState().reviewComments[submitted.key] === submitted.comment) {
+          useStudioStore.getState().setReviewComment(submitted.key, undefined);
+        }
+        const refreshing = reload(true);
+        const refreshToken = epoch.current;
+        await refreshing;
+        if (refreshToken === epoch.current) onChanged();
+      }
+      return false;
+    }
     finally { lock.current = false; setBusy(false); }
   };
   const next = async()=>{
-    if(!onNext||lock.current||(hasDraft&&!window.confirm("审核说明尚未提交，本次会话会保留草稿。确定离开？")))return;
+    if(!onNext||lock.current||(hasDraft()&&!window.confirm("审核说明尚未提交，本次会话会保留草稿。确定离开？")))return;
     lock.current=true;setBusy(true);const token=epoch.current;setNavigationNote(undefined);
     try{const message=await onNext();if(token===epoch.current&&message)setNavigationNote(message);}
     catch(cause){if(token===epoch.current)setError(normalizeProductError(cause).message);}
@@ -64,7 +95,14 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
     ?? results?.[0];
   const stagePlayable = Boolean(focusedResult && focusedResult.mediaKind === "video" && focusedResult.assetExists && focusedResult.availability !== "missing" && focusedResult.availability !== "unavailable");
   return <dialog ref={dialog} className="storyboard-review" aria-label={`审核 ${item.name}`} onCancel={e => { e.preventDefault(); leave(onClose); }} onKeyDown={e => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || busy) return;
+    if (
+      e.target instanceof HTMLInputElement
+      || e.target instanceof HTMLTextAreaElement
+      || e.target instanceof HTMLSelectElement
+      || e.target instanceof HTMLMediaElement
+      || (e.target instanceof HTMLElement && e.target.isContentEditable)
+      || busy
+    ) return;
     if ((e.key.toLowerCase() === "n" || e.key === "ArrowRight") && onNext) { e.preventDefault(); void next(); }
     else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && results && results.length > 1) {
       e.preventDefault();
@@ -92,9 +130,18 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
           <div><strong>{r.name}</strong><small>{r.reviewState ? labels[r.reviewState] : "无审核记录"}{chosen ? " · 已选为结果" : ""}</small></div>
           <label className="storyboard-review-comment" onClick={e => e.stopPropagation()}>审核说明<input value={comment} disabled={busy} onChange={e => useStudioStore.getState().setReviewComment(key, e.target.value)} /></label>
           <div className="storyboard-card-actions" onClick={e => e.stopPropagation()}>
-            {pending && <><button type="button" disabled={busy} onClick={() => void review(r, "APPROVED")}>通过</button>{!chosen && <button type="button" className="primary" disabled={busy} onClick={() => { const key = commentKey(r.assetId), comment = comments[key] ?? ""; if (runRef && r.reviewRevision !== null) void act(async () => { await productClient.run.resultReview(projectId, { runRef, assetId: r.assetId, decision: "APPROVED", comment, expectedRevision: r.reviewRevision! }); await productClient.creation.selectResult(projectId, item.id, "video", r.assetId); }, { key, comment }).then(() => { if (autoNext && onNext) void next(); }); }}>通过并选为结果</button>}<button type="button" disabled={busy || !comment.trim()} onClick={() => void review(r, "REJECTED")}>退回</button></>}
+            {pending && <><button type="button" disabled={busy} onClick={() => void review(r, "APPROVED")}>通过</button>{!chosen && <button type="button" className="primary" disabled={busy} onClick={() => {
+              const key = commentKey(r.assetId), comment = comments[key] ?? "";
+              if (!runRef || r.reviewRevision === null) return;
+              let reviewed = false;
+              void act(async () => {
+                await productClient.run.resultReview(projectId, { runRef, assetId: r.assetId, decision: "APPROVED", comment, expectedRevision: r.reviewRevision! });
+                reviewed = true;
+                await productClient.creation.selectResult(projectId, item.id, "video", r.assetId);
+              }, { key, comment }, () => reviewed).then(saved => { if (saved && autoNext && onNext) void next(); });
+            }}>通过并选为结果</button>}<button type="button" disabled={busy || !comment.trim()} onClick={() => void review(r, "REJECTED")}>退回</button></>}
             {r.reviewState && !pending && r.reviewRevision !== null && <button type="button" disabled={busy || (!r.assetExists || r.availability === "missing" || r.availability === "unavailable")} onClick={() => { if (window.confirm("重新打开审核？原审核记录会保留，需要重新明确作出决定。")) void act(() => productClient.run.resultReviewReset(projectId, runRef!, r.assetId, r.reviewRevision!)); }}>重新审核</button>}
-            <button type="button" disabled={busy || chosen || !r.assetExists || r.availability === "missing" || r.availability === "unavailable" || r.reviewState === "REJECTED"} onClick={() => void act(() => productClient.creation.selectResult(projectId, item.id, "video", r.assetId)).then(() => { if (autoNext && onNext) void next(); })}>{chosen ? "当前结果" : "选为结果"}</button>
+            <button type="button" disabled={busy || chosen || !r.assetExists || r.availability === "missing" || r.availability === "unavailable" || r.reviewState === "REJECTED"} onClick={() => void act(() => productClient.creation.selectResult(projectId, item.id, "video", r.assetId)).then(saved => { if (saved && autoNext && onNext) void next(); })}>{chosen ? "当前结果" : "选为结果"}</button>
           </div>
         </li>;
       })}</ul>}

@@ -255,6 +255,7 @@ async fn phase4_target_10_results_project_asset_review_selection_as_independent_
     let result = &results[0];
     assert!(result.asset_exists);
     assert_eq!(result.review_state.as_deref(), Some("PENDING"));
+    assert!(result.source_shot_ids.is_empty());
     assert!(result.selected_shot_ids.is_empty());
     assert_eq!(
         facade
@@ -277,11 +278,27 @@ async fn phase4_target_10_results_project_asset_review_selection_as_independent_
         .await
         .unwrap();
     let selected = facade
+        .results_get(PROJECT_ID, locator.clone(), &authorities.projection())
+        .await
+        .unwrap();
+    assert_eq!(selected[0].selected_shot_ids, vec![shot.id.clone()]);
+    assert!(selected[0].source_shot_ids.is_empty());
+    assert_eq!(selected[0].review_state.as_deref(), Some("PENDING"));
+    sqlx::query(
+        "INSERT INTO shot_generation_links (id, shot_id, stage, task_id, created_at)
+         SELECT 'formal-origin', ?, 'video', source_task_id, ? FROM assets WHERE id = ?",
+    )
+    .bind(&shot.id)
+    .bind(CREATED_AT)
+    .bind(&result.asset_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let linked = facade
         .results_get(PROJECT_ID, locator, &authorities.projection())
         .await
         .unwrap();
-    assert_eq!(selected[0].selected_shot_ids, vec![shot.id]);
-    assert_eq!(selected[0].review_state.as_deref(), Some("PENDING"));
+    assert_eq!(linked[0].source_shot_ids, vec![shot.id]);
 }
 
 #[tokio::test]

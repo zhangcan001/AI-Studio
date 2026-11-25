@@ -37,7 +37,7 @@ const production: ProductRun = {
 };
 const result: RunResult = {
   assetId: "ast-1", name: "结果", mediaKind: "video", assetExists: true, availability: "available",
-  reviewState: "PENDING", reviewRevision: 1, selectedShotIds: [], thumbnailBytes: null,
+  reviewState: "PENDING", reviewRevision: 1, sourceShotIds: [], selectedShotIds: [], thumbnailBytes: null,
 };
 
 beforeEach(() => {

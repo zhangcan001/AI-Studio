@@ -187,12 +187,13 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!detail || detail.projectId !== route.projectId || detail.ref.id !== route.run?.id || detail.ref.source !== route.run?.source) return;
     if (!detail.detail?.sources.some(source => source.id === shotId && source.stage === "video")) return;
     const target = results.find(r => r.assetId === assetId);
-    if (!target || !target.assetExists || target.availability === "missing" || target.availability === "unavailable" || target.reviewState === "REJECTED") return;
+    if (!target || !isSelectableShotResult(target, shotId)) return;
     await productClient.creation.selectResult(route.projectId, shotId, "video", assetId);
   });
   const approveAndSelectForShot = async (result: RunResult, shotId: string, comment = "") => {
-    if (!detail || result.reviewRevision === null) return false;
-    if (detail.projectId !== route.projectId || !detail.detail?.sources.some(source => source.id === shotId && source.stage === "video")) return false;
+    if (!detail || result.reviewRevision === null || result.reviewState !== "PENDING" || !isSelectableShotResult(result, shotId)) return false;
+    if (detail.projectId !== route.projectId || detail.ref.id !== route.run?.id || detail.ref.source !== route.run?.source
+      || !detail.detail?.sources.some(source => source.id === shotId && source.stage === "video")) return false;
     const expectedRevision = result.reviewRevision;
     let reviewed = false;
     return mutate(async () => {
@@ -220,3 +221,9 @@ export function useRunsController({ route, navigate }: RunsProps) {
   return { reopenReview, list, detail, results, error: actionError ?? error, missing, loading, busy, filter, action, retryAndStart, remove, retryInput, retryInputAndStart, openShot, reuse, review, selectForShot, approveAndSelectForShot, refresh };
 }
 export type RunsController = ReturnType<typeof useRunsController>;
+
+function isSelectableShotResult(result: RunResult, shotId: string) {
+  return result.sourceShotIds?.length === 1 && result.sourceShotIds[0] === shotId
+    && result.mediaKind === "video" && result.assetExists && result.availability !== "missing"
+    && result.availability !== "unavailable" && result.reviewState !== "REJECTED";
+}

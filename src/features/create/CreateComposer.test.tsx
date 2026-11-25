@@ -98,6 +98,50 @@ it("does not interpret programmatic prompt restoration as an explicit edit", asy
   expect(useStudioStore.getState().values.duration_seconds).toEqual({ type: "integer", value: 5 });
 });
 function pending<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
+
+it.each(["switch shots", "edit the destination frame"])("ignores a late carry request when users %s", async action => {
+  const shots = [{ id: "prev", name: "上一镜", ordinal: 0 }, { id: "one", name: "镜头一", ordinal: 1 }, { id: "three", name: "镜头三", ordinal: 2 }];
+  const late = pending<VideoInputView>();
+  api.get.mockImplementation(async (projectId, id) => ({
+    ...context(projectId), shots,
+    selectedShot: { ...context(projectId).selectedShot, summary: shots.find(shot => shot.id === id) ?? shots[1], selectionRef: "opaque-1" },
+  }));
+  api.inputsGet.mockImplementation(scope => scope.shotId === "prev" ? late.promise : Promise.resolve(view(scope.selectionRef)));
+  const ui = render(<CreatePage route={route} runtime={{ ...runtime, devices: [] }} navigate={nav} />);
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  fireEvent.click(screen.getByRole("button", { name: "沿用上一镜画面" }));
+  await waitFor(() => expect(api.inputsGet).toHaveBeenCalledWith({ projectId: "owned", shotId: "prev", selectionRef: "opaque-1" }));
+  if (action === "switch shots") {
+    ui.rerender(<CreatePage route={{ ...route, shotId: "three" }} runtime={{ ...runtime, devices: [] }} navigate={nav} />);
+    await waitFor(() => expect(api.inputsGet).toHaveBeenCalledWith({ projectId: "owned", shotId: "three", selectionRef: "opaque-1" }));
+    await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  } else {
+    act(() => useStudioStore.getState().setValue("first_frame", { type: "image_asset", assetId: "second" }));
+  }
+  await act(async () => late.resolve({ ...view("opaque-1"), inputs: [{ inputKey: "first_frame", ordinal: 0, assetId: "first" }] }));
+  expect(useStudioStore.getState().values.first_frame).toEqual(
+    action === "switch shots" ? undefined : { type: "image_asset", assetId: "second" },
+  );
+  expect(api.inputsSave).not.toHaveBeenCalled();
+});
+
+it("falls back to image-only referenceAssetIds when carry inputsGet rejects and skips non-image assets", async () => {
+  const shots = [{ id: "prev", name: "上一镜", ordinal: 0 }, { id: "one", name: "镜头一", ordinal: 1 }];
+  api.get.mockImplementation(async (projectId, id) => id === "prev"
+    ? {
+      ...context(projectId), shots,
+      selectedShot: { ...context(projectId).selectedShot, summary: shots[0], selectionRef: "opaque-1", referenceAssetIds: ["vid-ref", "carry-img"] },
+      mediaInputs: [{ id: "vid-ref", name: "参考视频", mediaKind: "video" }, { id: "carry-img", name: "延续图片", mediaKind: "image" }],
+    }
+    : { ...context(projectId), shots, selectedShot: { ...context(projectId).selectedShot, summary: shots[1], selectionRef: "opaque-1" } });
+  api.inputsGet.mockImplementation(scope => scope.shotId === "prev"
+    ? Promise.reject(new Error("inputs unavailable"))
+    : Promise.resolve(view(scope.selectionRef)));
+  render(<CreatePage route={route} runtime={{ ...runtime, devices: [] }} navigate={nav} />);
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  fireEvent.click(screen.getByRole("button", { name: "沿用上一镜画面" }));
+  await waitFor(() => expect(useStudioStore.getState().values.first_frame).toEqual({ type: "image_asset", assetId: "carry-img" }));
+});
 const auditHero: StoryEntity = { id: "hero", projectId: "owned", kind: "character", name: "审计角色", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
 const auditScene: StoryEntity = { ...auditHero, id: "scene", kind: "scene", name: "审计场景" };
 

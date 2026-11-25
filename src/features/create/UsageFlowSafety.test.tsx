@@ -62,6 +62,59 @@ it("navigates to next review or edit without submitting work",async()=>{
  fireEvent.click(await screen.findByRole("button",{name:"下一个待审核镜头"}));await waitFor(()=>expect(screen.getByRole("button",{name:"修改此镜头"}).hasAttribute("disabled")).toBe(false));fireEvent.click(screen.getByRole("button",{name:"修改此镜头"}));expect(next).toHaveBeenCalledOnce();expect(edit).toHaveBeenCalledOnce();expect(api.review).not.toHaveBeenCalled();expect(api.select).not.toHaveBeenCalled();
 });
 
+it("keeps a failed selection in place and advances only after a successful selection", async () => {
+  const next = vi.fn();
+  api.select.mockRejectedValueOnce(new Error("selection failed")).mockResolvedValueOnce(undefined);
+  render(<ShotReviewDialog projectId="p" item={item} onClose={vi.fn()} onChanged={vi.fn()} onNext={next} onEdit={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("checkbox", { name: "选用后自动跳至下一待审镜头" }));
+  const select = await screen.findByRole("button", { name: /^选为结果$/ });
+  fireEvent.click(select);
+  await screen.findByRole("alert");
+  expect(next).not.toHaveBeenCalled();
+  fireEvent.click(select);
+  await waitFor(() => expect(next).toHaveBeenCalledOnce());
+});
+
+it("does not ask to abandon a review comment that was just saved", async () => {
+  const next = vi.fn();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  api.review.mockResolvedValueOnce(undefined);
+  api.select.mockResolvedValueOnce(undefined);
+  render(<ShotReviewDialog projectId="p" item={item} onClose={vi.fn()} onChanged={vi.fn()} onNext={next} onEdit={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("checkbox", { name: "选用后自动跳至下一待审镜头" }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "审核说明" }), { target: { value: "通过的说明" } });
+  fireEvent.click(screen.getByRole("button", { name: "通过并选为结果" }));
+  await waitFor(() => expect(next).toHaveBeenCalledOnce());
+  expect(confirm).not.toHaveBeenCalled();
+});
+
+it("refreshes review revision and clears submitted comment if approve succeeds but select fails", async () => {
+  const next = vi.fn(), changed = vi.fn();
+  api.review.mockResolvedValueOnce(undefined);
+  api.select.mockRejectedValueOnce({ code: "INVALID_INPUT", message: "选用结果失败" });
+  api.results
+    .mockResolvedValueOnce([{ assetId: "a", name: "候选", mediaKind: "video", assetExists: true, reviewState: "PENDING", reviewRevision: 7, selectedShotIds: [] }])
+    .mockResolvedValueOnce([{ assetId: "a", name: "候选", mediaKind: "video", assetExists: true, reviewState: "APPROVED", reviewRevision: 8, selectedShotIds: [] }]);
+  render(<ShotReviewDialog projectId="p" item={item} onClose={vi.fn()} onChanged={changed} onNext={next} onEdit={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("checkbox", { name: "选用后自动跳至下一待审镜头" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "审核说明" }), { target: { value: "已审意见" } });
+  fireEvent.click(screen.getByRole("button", { name: "通过并选为结果" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("输入无效，请检查后重试");
+  await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+  expect(screen.queryByRole("button", { name: "通过并选为结果" })).toBeNull();
+  expect(screen.getByText(/已通过/)).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: "审核说明" }) as HTMLInputElement).value).toBe("");
+  expect(next).not.toHaveBeenCalled();
+});
+
+it("does not hijack ArrowRight when focus is on the inline video preview element", async () => {
+  const next = vi.fn();
+  render(<ShotReviewDialog projectId="p" item={item} onClose={vi.fn()} onChanged={vi.fn()} onNext={next} onEdit={vi.fn()} />);
+  const video = await screen.findByLabelText("审核主预览 候选");
+  fireEvent.keyDown(video, { key: "ArrowRight", bubbles: true });
+  expect(next).not.toHaveBeenCalled();
+});
+
 it("file location uses a project-scoped product request and never selects or generates",async()=>{
  render(<ResultFileActions projectId="owned" assetId="video"/>);fireEvent.click(screen.getByRole("button",{name:"在文件夹中显示"}));
  await waitFor(()=>expect(api.reveal).toHaveBeenCalledWith("owned","video"));expect(api.select).not.toHaveBeenCalled();

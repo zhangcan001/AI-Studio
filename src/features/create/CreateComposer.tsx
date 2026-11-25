@@ -90,6 +90,13 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const editor = useRef<HTMLDivElement>(null);
   const emitted = useRef<string | null>(null);
   const editScope = JSON.stringify([projectId, c.context?.selectedShot?.summary.id, c.selection]);
+  const carryRevision = useRef(0);
+  useLayoutEffect(() => {
+    const unsubscribe = useStudioStore.subscribe((state, previous) => {
+      if (state.values.first_frame !== previous.values.first_frame) carryRevision.current++;
+    });
+    return () => { carryRevision.current++; unsubscribe(); };
+  }, [editScope]);
   const promptEdit = useRef<{ before: string; after: string; scope: string } | null>(null);
   const [recognitionNote, setRecognitionNote] = useState<string>();
   const caret = useRef<Range | null>(null);
@@ -245,17 +252,34 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const prevShotSummary = currentShotIdx > 0 ? c.context?.shots[currentShotIdx - 1] : undefined;
   const carryFromPreviousShot = async () => {
     if (!firstFrameField || !prevShotSummary || !projectId || locked) return;
+    const revision = ++carryRevision.current;
     try {
       const prevCtx = await productClient.creation.get(projectId, prevShotSummary.id, "video");
+      if (revision !== carryRevision.current) return;
       const prevRef = prevCtx.selectedShot?.selectionRef ?? c.selection;
       let pickedId: string | undefined;
       if (prevRef && typeof productClient.creation?.inputsGet === "function") {
-        const prevView = await productClient.creation.inputsGet({ projectId, shotId: prevShotSummary.id, selectionRef: prevRef });
-        pickedId = prevView.inputs.find(i => i.inputKey === "last_frame")?.assetId
-          ?? prevView.inputs.find(i => i.inputKey === "first_frame")?.assetId
-          ?? prevView.inputs.find(i => i.inputKey === "reference_images")?.assetId;
+        try {
+          const prevView = await productClient.creation.inputsGet({ projectId, shotId: prevShotSummary.id, selectionRef: prevRef });
+          if (revision !== carryRevision.current) return;
+          const candidateId = prevView.inputs.find(i => i.inputKey === "last_frame")?.assetId
+            ?? prevView.inputs.find(i => i.inputKey === "first_frame")?.assetId
+            ?? prevView.inputs.find(i => i.inputKey === "reference_images")?.assetId;
+          if (candidateId) {
+            const candidateMeta = prevView.assets?.find(a => a.id === candidateId)
+              ?? prevCtx.mediaInputs?.find(a => a.id === candidateId);
+            if (!candidateMeta || candidateMeta.mediaKind === "image") pickedId = candidateId;
+          }
+        } catch {
+          if (revision !== carryRevision.current) return;
+        }
       }
-      pickedId ??= prevCtx.selectedShot?.referenceAssetIds?.[0];
+      if (!pickedId && prevCtx.selectedShot?.referenceAssetIds?.length) {
+        pickedId = prevCtx.selectedShot.referenceAssetIds.find(id => {
+          const meta = prevCtx.mediaInputs?.find(a => a.id === id);
+          return !meta || meta.mediaKind === "image";
+        });
+      }
       if (!pickedId) {
         setRecognitionNote(`上一镜「${prevShotSummary.name}」尚未绑定首尾帧或参考图片`);
         return;
@@ -263,7 +287,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
       setField(firstFrameField, [pickedId]);
       setRecognitionNote(`已沿用上一镜「${prevShotSummary.name}」的参考画面作为当前首帧`);
     } catch {
-      setRecognitionNote("读取上一镜参考画面失败，请手动选择图片");
+      if (revision === carryRevision.current) setRecognitionNote("读取上一镜参考画面失败，请手动选择图片");
     }
   };
   const importInto = async (field: RecipeField, folder: boolean) => {

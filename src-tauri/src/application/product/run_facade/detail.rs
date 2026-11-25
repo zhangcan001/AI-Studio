@@ -89,6 +89,7 @@ pub struct RunResult {
     pub availability: Option<String>,
     pub review_state: Option<String>,
     pub review_revision: Option<i64>,
+    pub source_shot_ids: Vec<String>,
     pub selected_shot_ids: Vec<String>,
     pub thumbnail_bytes: Option<Vec<u8>>,
 }
@@ -190,7 +191,7 @@ impl ProductRunFacade {
         }
         let shots = services
             .shots
-            .list(project_id)
+            .list_for_workbench(project_id)
             .await
             .map_err(ProductError::internal)?;
         let mut sources = Vec::new();
@@ -365,7 +366,7 @@ impl ProductRunFacade {
         asset_ids.extend(records.iter().map(|record| record.id.clone()));
         let shots = services
             .shots
-            .list(project_id)
+            .list_for_workbench(project_id)
             .await
             .map_err(ProductError::internal)?;
         let mut results = Vec::new();
@@ -391,6 +392,23 @@ impl ProductRunFacade {
                 availability: record.map(|record| record.availability.as_str().to_owned()),
                 review_state: record.and_then(|record| record.review_status.clone()),
                 review_revision: record.and_then(|record| record.review_revision),
+                source_shot_ids: asset
+                    .as_ref()
+                    .and_then(|asset| asset.source_task_id.as_deref().map(|id| (asset, id)))
+                    .filter(|(_, task_id)| task_ids.iter().any(|id| id == task_id))
+                    .map(|(asset, task_id)| {
+                        shots
+                            .iter()
+                            .filter(|shot| {
+                                shot.generation_links.iter().any(|link| {
+                                    link.stage == asset.asset_type
+                                        && link.task_id.as_deref() == Some(task_id)
+                                })
+                            })
+                            .map(|shot| shot.id.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 selected_shot_ids: shots
                     .iter()
                     .filter(|shot| {

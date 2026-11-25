@@ -25,21 +25,24 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [batchError, setBatchError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const generation = useRef(0);
   const locked = useRef(false);
-  async function refresh(token: number) {
+  async function refresh(token: number, keepChoices = false) {
     const [overview, videos] = await Promise.all([
       productClient.project.getOverview(projectId), productClient.creation.generatorsList(projectId, "video"),
     ]);
     if (token !== generation.current) return;
     // No recommendation/name inference is a substitute for a persisted binding.
     if (!overview.generatorBindings) throw new Error("暂时无法读取生成器设置，请刷新。");
-    setBindings(overview.generatorBindings); setOptions(videos.filter(o => o.mediaKind === "video")); setChoices({});
+    setBindings(overview.generatorBindings);
+    setOptions(videos.filter(o => o.mediaKind === "video"));
+    if (!keepChoices) setChoices({});
   }
   useEffect(() => {
     const token = ++generation.current;
-    setLoading(true); setError(undefined); setNotice(undefined); setOptions([]); setBindings([]);
+    setLoading(true); setError(undefined); setBatchError(undefined); setNotice(undefined); setOptions([]); setBindings([]); setChoices({});
     void refresh(token).catch(e => { if (token === generation.current) setError(normalizeProductError(e).message); }).finally(() => { if (token === generation.current) setLoading(false); });
     return () => { generation.current++; };
   }, [projectId]);
@@ -60,26 +63,41 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
   async function save(stage: string, mode: string, selectionRef: string) {
     if (locked.current || !selectionRef) return;
     locked.current = true; setBusy(true); setError(undefined); setNotice(undefined);
+    const retainChoiceOnConflict = Boolean(batchError);
+    setBatchError(undefined);
     const token = generation.current;
     const current = bindings.find(b => b.stage === stage && b.mode === mode);
     try {
       await productClient.project.generatorBindingSet(projectId, { stage, mode, selectionRef, expectedRevision: current?.revision ?? null, expectedBindingInstanceId: current?.bindingInstanceId ?? null });
-      if (token === generation.current) { await refresh(token); setNotice("生成器设置已保存；已有镜头与历史运行不变。"); }
+      if (token === generation.current) {
+        await refresh(token, true);
+        if (token === generation.current) setNotice("生成器设置已保存；已有镜头与历史运行不变。");
+      }
     } catch (e) {
       if (token !== generation.current) return;
       const failure = normalizeProductError(e);
       setError(failure.message);
       // Refresh after a conflict, but never retry or silently overwrite it.
-      try { await refresh(token); } catch { setNotice("刷新失败，请重新打开生成器设置。尚未重试保存。"); }
-    } finally { locked.current = false; if (token === generation.current) setBusy(false); }
+      try { await refresh(token, true); } catch { setNotice("刷新失败，请重新打开生成器设置。尚未重试保存。"); }
+      if (retainChoiceOnConflict) return;
+    } finally {
+      locked.current = false;
+      if (token === generation.current) setBusy(false);
+    }
+    if (token === generation.current) {
+      const key = `${stage}:${mode}`;
+      setChoices(current => { const next = { ...current }; delete next[key]; return next; });
+    }
   }
   async function saveAll() {
     if (locked.current || !dirtySlots.length) return;
     locked.current = true; setBusy(true); setError(undefined); setNotice(undefined);
+    setBatchError(undefined);
     const token = generation.current;
     let savedCount = 0;
     try {
       for (const item of dirtySlots) {
+        if (token !== generation.current) return;
         await productClient.project.generatorBindingSet(projectId, {
           stage: item.stage,
           mode: item.mode,
@@ -87,18 +105,33 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
           expectedRevision: item.binding?.revision ?? null,
           expectedBindingInstanceId: item.binding?.bindingInstanceId ?? null,
         });
+        if (token !== generation.current) return;
         savedCount += 1;
       }
-      if (token === generation.current) { await refresh(token); setNotice(`已批量保存 ${savedCount} 项生成器设置；已有镜头与历史运行不变。`); }
+      if (token === generation.current) {
+        await refresh(token, true);
+        if (token === generation.current) setNotice(`已批量保存 ${savedCount} 项生成器设置。`);
+      }
     } catch (e) {
       if (token !== generation.current) return;
-      setError(normalizeProductError(e).message);
-      try { await refresh(token); } catch { setNotice("刷新失败，请重新打开生成器设置。尚未重试保存。"); }
-    } finally { locked.current = false; if (token === generation.current) setBusy(false); }
+      const pending = dirtySlots[savedCount];
+      setBatchError(pending
+        ? `已保存 ${savedCount} 项。「${pending.label}」保存失败：${normalizeProductError(e).message}。其余修改已保留。`
+        : `已保存 ${savedCount} 项，读取最新设置失败：${normalizeProductError(e).message}`);
+      try { await refresh(token, true); }
+      catch (cause) { if (token === generation.current) setError(normalizeProductError(cause).message); }
+    } finally {
+      locked.current = false;
+      if (token === generation.current) {
+        const committed = dirtySlots.slice(0, savedCount);
+        setChoices(current => Object.fromEntries(Object.entries(current).filter(([key]) => !committed.some(slot => slot.key === key))));
+        setBusy(false);
+      }
+    }
   }
   return <section className="generator-settings" aria-label="项目生成器设置" aria-busy={loading || busy}>
     <header className="generator-settings-head"><div><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p></div>{dirtySlots.length > 0 && <button type="button" className="primary" disabled={busy || !!error} onClick={() => void saveAll()}>保存全部修改（{dirtySlots.length}）</button>}</header>
-    {loading && <p role="status">正在读取生成器…</p>}{error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {loading && <p role="status">正在读取生成器…</p>}{(batchError || error) && <p role="alert">{[batchError, error].filter(Boolean).join(" ")}</p>}{notice && <p role="status">{notice}</p>}
     {!loading && !error && !options.length && <p role="status" data-testid="no-video-generators">暂无可用的视频生成器。请刷新设置并检查本地运行环境，或更新包含所需内置生成器的软件版本。</p>}
     {!loading && slots.map(slot => {
       const key = `${slot.stage}:${slot.mode}`;
@@ -114,7 +147,7 @@ export function GeneratorSettingsPage({ projectId, navigate }: { projectId: stri
       {option && <><p>{generatorLabel(option, available.indexOf(option))}</p><p>输入要求：{option.fields.filter(f => "required" in f && f.required).map(fieldLabel).join("、") || "无必填素材"}</p><p>{option.availability ? "可用" : "当前不可用，请检查本地节点、模型与运行环境"}</p></>}
       <button type="button" disabled={busy || !!error || !option?.availability || selected === binding?.selectionRef} onClick={() => void save(slot.stage, slot.mode, selected)}>保存设置</button>
     </article>; })}
-    <button type="button" disabled={busy} onClick={() => void refresh(generation.current).then(() => setError(undefined)).catch(e => setError(normalizeProductError(e).message))}>刷新设置</button>
+    <button type="button" disabled={busy} onClick={() => void refresh(generation.current, Boolean(batchError)).then(() => setError(undefined)).catch(e => setError(normalizeProductError(e).message))}>刷新设置</button>
     <button type="button" onClick={() => navigate({ kind: "system-settings", section: "general", returnTo: { kind: "project-settings", projectId, section: "generators" } })}>检查本地运行环境</button>
   </section>;
 }

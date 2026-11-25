@@ -8,8 +8,8 @@ import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent, storyboardStats } from "./storyboardModel";
 import { useStudioStore } from "../../stores/studioStore";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), updateShot: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), shotsList: vi.fn(), shotsReorder: vi.fn(), exportSelected:vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { creation: { exportSelected:api.exportSelected,shotsList:api.shotsList,shotsReorder:api.shotsReorder,mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, updateShot: api.updateShot, inputsGet: api.inputsGet, inputsSave: api.inputsSave, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
+const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), cloneShot: vi.fn(), updateShot: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), shotsList: vi.fn(), shotsReorder: vi.fn(), exportSelected:vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { creation: { exportSelected:api.exportSelected,shotsList:api.shotsList,shotsReorder:api.shotsReorder,mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, cloneShot: api.cloneShot, updateShot: api.updateShot, inputsGet: api.inputsGet, inputsSave: api.inputsSave, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); window.localStorage.clear(); });
 // Legacy card/list tests pin the grid view; the default shot-row view has its own test below.
 beforeEach(() => {
@@ -634,38 +634,19 @@ it("R61: a successful export clears the preceding failed export error",async()=>
  await screen.findByText("选用结果已变化，请重新导出。");fireEvent.click(button);await waitFor(()=>expect(api.exportSelected).toHaveBeenCalledTimes(2));await waitFor(()=>expect(screen.queryByText("选用结果已变化，请重新导出。")).toBeNull());
 });
 
-it("clones a shot right after the source shot with exact selectionRef, persistent video inputs, and deduplicated name without starting generation", async () => {
+it("clones a shot using one authoritative operation and focuses the inserted shot", async () => {
   localStorage.setItem("ai-studio.storyboard.view", "shots");
-  const board = workbenchFromContexts();
-  board.items[0].shot = { ...board.items[0].shot, selectionRef: "wfl_exact::rcp_exact", prompt: "雨夜街道跟拍", values: { duration_seconds: { type: "integer", value: 6 }, width: { type: "integer", value: 1280 } } };
-  api.workbench.mockResolvedValue(board);
-  api.createShot.mockResolvedValue({ id: "s-clone", name: "新镜头", ordinal: 5 });
-  api.shotsList.mockResolvedValue([...shots.map(s => ({ ...s, projectId: "p" })), { id: "s-existing-copy", name: "镜头01 副本", ordinal: 4, projectId: "p" }, { id: "s-clone", name: "新镜头", ordinal: 5, projectId: "p" }]);
-  api.shotsReorder.mockResolvedValue([]);
-  api.updateShot.mockResolvedValue({});
-  api.inputsGet.mockImplementation(async ({ shotId }: { shotId: string }) => shotId === "s1"
-    ? { selectionRef: "wfl_exact::rcp_exact", token: { instanceId: "i1", revision: 1 }, inputs: [{ inputKey: "first_frame", ordinal: 0, assetId: "img-first" }], assets: [] }
-    : { selectionRef: "wfl_exact::rcp_exact", token: null, inputs: [], assets: [] });
-  api.inputsSave.mockResolvedValue({});
+  api.cloneShot.mockResolvedValue({ id: "s-clone", name: "镜头01 副本", ordinal: 1 });
   render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
   const card = await screen.findByRole("article", { name: /分镜 .* 镜头01/ });
   fireEvent.click(within(card).getByRole("button", { name: "复制此镜" }));
-  await waitFor(() => expect(api.inputsSave).toHaveBeenCalledWith({
-    selection: { projectId: "p", shotId: "s-clone", selectionRef: "wfl_exact::rcp_exact" },
-    expected: null,
-    inputs: [{ inputKey: "first_frame", ordinal: 0, assetId: "img-first" }],
-  }));
-  expect(api.updateShot).toHaveBeenCalledWith("p", {
-    shotId: "s-clone",
-    name: "镜头01 副本 2",
-    stage: "video",
-    prompt: "雨夜街道跟拍",
-    selectionRef: "wfl_exact::rcp_exact",
-    values: { duration_seconds: { type: "integer", value: 6 }, width: { type: "integer", value: 1280 } },
-  });
-  expect(api.shotsReorder).toHaveBeenCalledWith("p", ["s1", "s-clone", "s2", "s3", "s-existing-copy"]);
+  await screen.findByText(/镜头已复制插入：第 2 镜/);
+  expect(api.cloneShot).toHaveBeenCalledWith("p", "s1");
+  expect(api.createShot).not.toHaveBeenCalled();
+  expect(api.shotsReorder).not.toHaveBeenCalled();
+  expect(api.updateShot).not.toHaveBeenCalled();
+  expect(api.inputsSave).not.toHaveBeenCalled();
   expect(api.generate).not.toHaveBeenCalled();
-  expect(api.selectResult).not.toHaveBeenCalled();
 });
 
 it("shares search and status filters across grid and list views and offers prev/next shot buttons when editing", async () => {

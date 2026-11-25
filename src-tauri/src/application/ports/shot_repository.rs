@@ -68,6 +68,16 @@ pub trait ShotRepository: Send + Sync {
 
     async fn insert(&self, shot: &ShotRecord) -> Result<(), RepositoryError>;
 
+    async fn clone_video_after(
+        &self,
+        _project_id: &str,
+        _source_id: &str,
+        _new_id: &str,
+        _now: DateTime<Utc>,
+    ) -> Result<Option<ShotRecord>, RepositoryError> {
+        Err(RepositoryError::integrity("镜头仓库不支持复制"))
+    }
+
     async fn update(&self, shot: &ShotRecord) -> Result<bool, RepositoryError>;
 
     async fn delete(&self, project_id: &str, shot_id: &str) -> Result<bool, RepositoryError>;

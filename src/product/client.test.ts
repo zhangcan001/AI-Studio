@@ -64,6 +64,7 @@ describe("product facade client", () => {
     invokeCommand.mockResolvedValue(undefined);
     await productClient.creation.get("project", null, "image");
     await productClient.creation.createShot("project");
+    await productClient.creation.cloneShot("project", "shot");
     await productClient.creation.updateShot("project", { shotId: "shot", name: "镜头二" });
     await productClient.creation.deleteShot("project", "shot");
     await productClient.creation.referencesSet("project", "shot", "video", ["first", "last"]);
@@ -71,6 +72,7 @@ describe("product facade client", () => {
     expect(invokeCommand.mock.calls).toEqual([
       ["product_creation_get", { projectId: "project", shotId: null, stage: "image" }],
       ["product_creation_shot_create", { projectId: "project" }],
+      ["product_creation_shot_create", { projectId: "project", sourceShotId: "shot" }],
       ["product_creation_shot_update", { projectId: "project", request: { shotId: "shot", name: "镜头二" } }],
       ["product_creation_shot_delete", { projectId: "project", shotId: "shot" }],
       ["product_creation_references_set", { projectId: "project", shotId: "shot", stage: "video", assetIds: ["first", "last"] }],

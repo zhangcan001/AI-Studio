@@ -118,7 +118,7 @@ export type RunListFilter = "all" | "active" | "failed" | "completed";
 export interface RunList { items: ProductRun[]; nextCursor: string | null; coverage: string }
 export interface RunShotContext { id: string; name: string; stage: string }
 export interface RunInput { executionStatus?: string; taskId: string | null; itemId?: string | null; shotId?: string | null; shotName?: string | null; generatorName: string; selectionRef: string | null; values: Record<string, import("../types/generation").DraftValue>; reuseUnavailableReason: string | null; errorMessage: string | null }
-export interface RunResult { assetId: string; name: string; mediaKind: string | null; assetExists: boolean; availability: string | null; reviewState: string | null; reviewRevision: number | null; selectedShotIds: string[]; thumbnailBytes: number[] | null }
+export interface RunResult { assetId: string; name: string; mediaKind: string | null; assetExists: boolean; availability: string | null; reviewState: string | null; reviewRevision: number | null; sourceShotIds: string[]; selectedShotIds: string[]; thumbnailBytes: number[] | null }
 export interface RunResultReviewRequest { runRef: RunRef; assetId: string; decision: "APPROVED" | "REJECTED"; comment: string; expectedRevision: number }
 
 export type CreationShotRowSave = { shotId: string; stage: "video"; prompt?: string; selectionRef?: string; values?: Record<string, Extract<import("../types/generation").DraftValue, { type: "string" | "integer" | "number" | "seed_random" | "seed_fixed" }>>; entityIds?: string[] };

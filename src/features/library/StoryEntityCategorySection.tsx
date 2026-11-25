@@ -52,6 +52,15 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   const [picking, setPicking] = useState<"cover" | "images" | null>(null);
   const mounted = useRef(false);
   const requestEpoch = useRef(0);
+  const scopeEpoch = useRef(0);
+  const editorSessionRef = useRef(0);
+
+  const closeEditor = () => {
+    editorSessionRef.current += 1;
+    setCreating(false);
+    setEditing(null);
+    setPicking(null);
+  };
 
   const reload = useCallback(async () => {
     const epoch = ++requestEpoch.current;
@@ -69,13 +78,24 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
 
   useEffect(() => {
     mounted.current = true;
+    editorSessionRef.current += 1;
+    setCreating(false);
+    setEditing(null);
+    setPicking(null);
+    setBusy(false);
     void reload();
-    return () => { mounted.current = false; ++requestEpoch.current; };
+    return () => {
+      mounted.current = false;
+      ++requestEpoch.current;
+      ++scopeEpoch.current;
+      editorSessionRef.current += 1;
+    };
   }, [reload]);
 
   const editorDirty=(creating||Boolean(editing)) && JSON.stringify([draftName,draftDesc,draftCover,draftImages])!==JSON.stringify(editing?[editing.name,editing.description,editing.coverAssetId,editing.imageAssetIds]:["","",null,[]]);
   const allowReplace=()=>!editorDirty||window.confirm("当前编辑尚未保存，确定放弃并切换？");
   function resetCreate() {
+    editorSessionRef.current += 1;
     setCreating(true);
     setEditing(null);
     setDraftName("");
@@ -89,6 +109,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   function openEdit(entity: StoryEntity) {
     if(editing?.id===entity.id&&!creating)return;
     if(!allowReplace())return;
+    editorSessionRef.current += 1;
     setCreating(false);
     setEditing(entity);
     setDraftName(entity.name);
@@ -106,6 +127,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
         setError("请先保存或放弃当前项目未保存的镜头草稿，再修改名称。保存改名会同步更新镜头正式提示词，历史批次和生成记录不会改写。");return;
       }
     }
+    const scope = scopeEpoch.current;
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -118,20 +140,21 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       };
       if (editing) await productClient.storyEntities.update({ projectId, id: editing.id, ...payload });
       else await productClient.storyEntities.create({ projectId, kind, ...payload });
+      if (!mounted.current || scope !== scopeEpoch.current) return;
       window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
-      setCreating(false);
-      setEditing(null);
+      closeEditor();
       await reload();
-      if (mounted.current) setNotice(`${editing ? "已更新" : "已创建"}${label}「${payload.name}」。${editing&&editing.name!==payload.name?"镜头正式提示词中的精确 @引用已同步；历史批次与结果保持不变。":""}`);
+      if (mounted.current && scope === scopeEpoch.current) setNotice(`${editing ? "已更新" : "已创建"}${label}「${payload.name}」。${editing&&editing.name!==payload.name?"镜头正式提示词中的精确 @引用已同步；历史批次与结果保持不变。":""}`);
     } catch (cause) {
-      if (mounted.current) setError(entityError(cause));
+      if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current && scope === scopeEpoch.current) setBusy(false);
     }
   }
 
   async function importImages() {
     if (busy || (editorDirty && !window.confirm("当前编辑尚未保存，确定放弃并导入图片？"))) return;
+    const scope = scopeEpoch.current;
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -139,10 +162,9 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     const failures: string[] = [];
     try {
       const result = await productClient.storyEntities.importImages(projectId);
-      if (result.cancelled) return;
+      if (!mounted.current || scope !== scopeEpoch.current || result.cancelled) return;
       failures.push(...result.failed.map(item => `${item.displayName}：${item.error}`));
       if (importMode === "group" && result.imported.length) {
-        if (!mounted.current) return;
         resetCreate();
         setDraftName(filenameStem(result.imported[0].originalName || result.imported[0].name));
         setDraftCover(result.imported[0].id);
@@ -151,6 +173,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
         return;
       }
       for (const asset of result.imported) {
+        if (!mounted.current || scope !== scopeEpoch.current) return;
         const name = filenameStem(asset.originalName || asset.name);
         if (!name) {
           failures.push(`${asset.originalName || asset.name}：无法从文件名生成名称。`);
@@ -170,17 +193,17 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
           failures.push(`${asset.originalName || asset.name}：${entityError(cause)}`);
         }
       }
+      if (!mounted.current || scope !== scopeEpoch.current) return;
       if (created) window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
-      if (!mounted.current) return;
       await reload();
-      if (!mounted.current) return;
+      if (!mounted.current || scope !== scopeEpoch.current) return;
       const details = failures.slice(0, 4).join("；");
       const remaining = failures.length > 4 ? `；另有 ${failures.length - 4} 项失败` : "";
       setNotice(`批量导入完成：成功创建 ${created} 个${label}。${failures.length ? `失败 ${failures.length} 项：${details}${remaining}。已导入的图片仍保留在媒体库。` : ""}`);
     } catch (cause) {
-      if (mounted.current) setError(entityError(cause));
+      if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current && scope === scopeEpoch.current) setBusy(false);
     }
   }
 
@@ -211,8 +234,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy && allowReplace()) {
         e.preventDefault();
-        setCreating(false);
-        setEditing(null);
+        closeEditor();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -254,7 +276,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       </li>)}
     </ul>
     {formOpen && <>
-      <div className="story-entity-backdrop" role="presentation" onClick={() => { if (!busy && allowReplace()) { setCreating(false); setEditing(null); } }} />
+      <div className="story-entity-backdrop" role="presentation" onClick={() => { if (!busy && allowReplace()) closeEditor(); }} />
       <div className="story-entity-editor" role="dialog" aria-label={editing ? `编辑${label}` : `新建${label}`}>
         <h3>{editing ? `编辑「${editing.name}」` : `新建${label}`}</h3>
         <label>名称<input aria-label={`${label}名称`} value={draftName} onChange={event => setDraftName(event.target.value)} /></label>
@@ -277,7 +299,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
         </div>
         <footer>
           <button type="button" className="primary" onClick={() => void save()} disabled={busy || !draftName.trim()}>保存</button>
-          <button type="button" onClick={() => { if(allowReplace()){setCreating(false); setEditing(null);} }} disabled={busy}>取消</button>
+          <button type="button" onClick={() => { if(allowReplace()) closeEditor(); }} disabled={busy}>取消</button>
         </footer>
       </div>
     </>}
@@ -295,12 +317,21 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
         setPicking(null);
       }}
       onImportFile={() => {
+        if (busy) return;
         const target = picking;
+        const scope = scopeEpoch.current;
+        const editorSession = editorSessionRef.current;
         void (async () => {
           setBusy(true); setError(undefined);
           try {
             const res = await productClient.storyEntities.importImages(projectId);
-            if (!mounted.current || res.cancelled || !res.imported.length) return;
+            if (!mounted.current || scope !== scopeEpoch.current || editorSession !== editorSessionRef.current) return;
+            if (res.cancelled) return;
+            const failedDetails = res.failed.map(item => `${item.displayName}：${item.error}`).join("；");
+            if (!res.imported.length) {
+              if (failedDetails) setError(failedDetails);
+              return;
+            }
             const ids = res.imported.map(a => a.id);
             if (target === "cover") {
               setDraftCover(ids[0]);
@@ -309,11 +340,11 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
               setDraftImages(prev => [...prev, ...ids.filter(id => !prev.includes(id))]);
               setDraftCover(prev => prev ?? ids[0]);
             }
-            setNotice(`已从电脑导入 ${ids.length} 张图片并填入当前表单，确认后点击保存即可生效。`);
+            setNotice(`已从电脑导入 ${ids.length} 张图片并填入当前表单，确认后点击保存即可生效。${failedDetails ? `部分失败：${failedDetails}` : ""}`);
           } catch (cause) {
-            if (mounted.current) setError(entityError(cause));
+            if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
           } finally {
-            if (mounted.current) setBusy(false);
+            if (mounted.current && scope === scopeEpoch.current) setBusy(false);
           }
         })();
       }}

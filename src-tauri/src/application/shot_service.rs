@@ -330,6 +330,19 @@ impl ShotService {
         self.get(project_id, &shot.id).await
     }
 
+    pub(crate) async fn clone_video_shot(
+        &self,
+        project_id: &str,
+        source_id: &str,
+    ) -> Result<ShotRecord, ShotServiceError> {
+        validate_project(project_id)?;
+        let new_id = format!("sht_{}", Uuid::new_v4());
+        self.repository
+            .clone_video_after(project_id, source_id, &new_id, self.clock.now())
+            .await?
+            .ok_or_else(|| ShotServiceError::NotFound(source_id.to_owned()))
+    }
+
     pub async fn update(&self, request: ShotUpdateRequest) -> Result<ShotView, ShotServiceError> {
         validate_project(&request.project_id)?;
         let mut shot = self

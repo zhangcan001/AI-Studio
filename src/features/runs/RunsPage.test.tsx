@@ -19,7 +19,7 @@ const ref = { source: "task", id: "task-secret" } as const;
 const run: ProductRun = { ref, projectId: "project-a", title: "生成视频", status: "FAILED", phase: "FAILED", createdAt: "2026-10-02T00:00:00Z", updatedAt: "2026-10-02T00:00:00Z", progress: { total: 1, succeeded: 0, failed: 1, cancelled: 0 }, recoverability: { retryItemIds: [], reviewRequired: 1 }, resultsSummary: [], errorSummary: "请修改输入", preferredParent: null, availableActions: ["EDIT_INPUT"], detail: { sources: [{ id: "shot-a", name: "镜头一", stage: "video" }], inputs: [{ taskId: "task-secret", generatorName: "H3 高质量", selectionRef: "exact-pair", values: { prompt: { type: "string", value: "原始提示词" }, duration_seconds: { type: "integer", value: 5 } }, errorMessage: "时长超出范围", reuseUnavailableReason: null }] } };
 const generator: GeneratorOption = { selectionRef: "exact-pair", name: "H3 高质量", mode: "T2V", mediaKind: "video", version: "1", availability: true, availabilityReason: null, recommended: true, fields: [{ key: "prompt", type: "textarea", label: "提示词", default: "", required: true }, { key: "duration_seconds", type: "integer", label: "时长（秒）", default: 1, required: true }] };
 const context: CreationContext = { projectId: "project-a", projectName: "Project A", stage: "video", shots: [{ id: "shot-a", name: "镜头一", ordinal: 1 }], selectedShot: { summary: { id: "shot-a", name: "镜头一", ordinal: 1 }, prompt: "默认", selectionRef: "exact-pair", values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null }, candidates: [], mediaInputs: [], promptChoices: [] };
-const result: RunResult = { assetId: "asset-secret", name: "视频结果", mediaKind: "video", assetExists: true, availability: "available", reviewState: "PENDING", reviewRevision: 0, selectedShotIds: [], thumbnailBytes: null };
+const result: RunResult = { assetId: "asset-secret", name: "视频结果", mediaKind: "video", assetExists: true, availability: "available", reviewState: "PENDING", reviewRevision: 0, sourceShotIds: ["shot-a"], selectedShotIds: [], thumbnailBytes: null };
 beforeEach(() => {
   for (const mock of Object.values(api)) mock.mockReset();
   api.list.mockResolvedValue({ items: [run], nextCursor: null, coverage: "FINITE" }); api.get.mockResolvedValue(run); api.resultsGet.mockResolvedValue([result]);
@@ -500,4 +500,23 @@ it("approves and selects a single-shot video result via explicit distinct review
   fireEvent.change(screen.getByLabelText("筛选运行记录"), { target: { value: "显存不足" } });
   expect(screen.getByRole("button", { name: /批次B特写/ })).toBeTruthy();
   expect(screen.queryByRole("button", { name: /生成视频/ })).toBeNull();
+});
+
+it("offers shot selection only on the results formally linked to a shot in a mixed batch", async () => {
+  const batchRef = { source: "queue-batch", id: "mixed" } as const;
+  const mixed = { ...run, ref: batchRef, detail: { sources: run.detail!.sources, inputs: [
+    { ...run.detail!.inputs[0], shotId: "shot-a" },
+    { ...run.detail!.inputs[0], taskId: "unlinked-task", shotId: null },
+  ] } };
+  const unlinked = { ...result, assetId: "output-unlinked", name: "未绑定产物", sourceShotIds: [] };
+  api.list.mockResolvedValue({ items: [mixed], nextCursor: null, coverage: "FINITE" });
+  api.get.mockResolvedValue(mixed);
+  api.resultsGet.mockResolvedValue([result, unlinked]);
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: batchRef }} navigate={vi.fn()} />);
+  const unlinkedCard = within((await screen.findByText(unlinked.name)).closest("article")!);
+  expect(unlinkedCard.queryByRole("button", { name: /选为.*结果/ })).toBeNull();
+  expect(unlinkedCard.getByRole("button", { name: "审核通过" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "通过并选为「镜头一」结果" })).toBeTruthy();
+  expect(api.resultReview).not.toHaveBeenCalled();
+  expect(api.selectResult).not.toHaveBeenCalled();
 });

@@ -149,3 +149,17 @@ it("filters preview rows by errors/selected without altering the committed inclu
   await screen.findByText("导入完成");
   expect(api.commit).toHaveBeenCalledWith(expect.objectContaining({ includeRowKeys: ["r0", "r1"] }));
 });
+
+it("returns to a valid selected-only page after removing the final row on page two", async () => {
+  const seed = preview("many", false);
+  const rows = Array.from({ length: 51 }, (_, i) => ({ ...seed.rows[0], rowKey: `r${i}`, rowNumber: i + 1, name: `镜头${i}` }));
+  api.pick.mockResolvedValue({ ...seed, rows, shotCount: 51, validCount: 51 });
+  render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} />);
+  await pick();
+  fireEvent.click(screen.getByRole("button", { name: "仅看已选（51）" }));
+  fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "导入 镜头50" }));
+  expect(screen.getByRole("button", { name: "仅看已选（50）" })).toBeTruthy();
+  expect(screen.getAllByRole("checkbox", { name: /导入 镜头/ })).toHaveLength(50);
+  expect(screen.queryByRole("navigation", { name: "导入预览分页" })).toBeNull();
+});

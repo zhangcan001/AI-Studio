@@ -21,8 +21,10 @@ function ReviewActions({ result, controller: c, route, singleShot }: { result: R
 }
 export function RunResults({ controller: c, route, navigate }: RunsProps & { controller: RunsController }) {
   const videoSources = (c.detail?.detail?.sources ?? []).filter(source => source.stage === "video");
-  const singleShot = videoSources.length === 1 ? videoSources[0] : undefined;
   return <section><h3>结果</h3><p>执行成功、素材存在、审核通过与镜头选用是四个独立事实。</p><div className="run-results">{c.results.map(result => {
+    const singleShot = result.sourceShotIds?.length === 1
+      ? videoSources.find(source => source.id === result.sourceShotIds[0])
+      : undefined;
     const canSelectForShot = Boolean(singleShot && result.mediaKind === "video" && result.assetExists && result.availability !== "missing" && result.availability !== "unavailable" && result.reviewState !== "REJECTED");
     const chosen = Boolean(singleShot && result.selectedShotIds.includes(singleShot.id));
     return <article key={result.assetId}>
