@@ -4,7 +4,7 @@
   "files": {
     ".github/workflows/ci.yml": {
       "beforeHash": "6257ef874b6622a1f598db8e60af78ed835efb5572bde0d62824c084e3539d65",
-      "afterHash": "cc1fd84f8be38e0fbfd867372e397cbfa9fcb4ccd188ea16c1985f60ca729c3d"
+      "afterHash": "5cc98e278d5bf7e429f0f9af42c3e3b382e03f22d51ae685610edf90df1f751f"
     },
     "scripts/audit70-ci-integration-successor-guard.mjs": {
       "beforeHash": "438a4f81dfdf0460453b3ca1e99873a3ab4a3a62feac63b7f9e2eb357ed38cc7",
