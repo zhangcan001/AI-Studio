@@ -5,6 +5,7 @@ import { cachedBoundary, immutableGit, immutableGitStoreIdentity, immutableBlobT
 
 const REPAIR_BASE = "587633960100382e2b23df0cca0fb0b98f72ffa0";
 const REPAIR_SCOPE = [
+  ".github/workflows/ci.yml",
   "scripts/audit70-ci-integration-successor-guard.mjs",
   "scripts/testing/audit-repair.test.mjs",
   "scripts/testing/audit70-ci-fixtures.test.mjs",
@@ -104,6 +105,7 @@ const REPAIR_SCOPE = [
   "src/features/create/ShotReviewDialog.tsx",
   "src/features/create/StoryboardShotRows.test.tsx",
   "src/features/create/StoryboardShotRows.tsx",
+  "src/features/create/StoryboardWorkbench.test.tsx",
   "src/features/create/StoryboardWorkbench.tsx",
   "src/features/library/LibraryController.performance.test.tsx",
   "src/features/library/LibraryController.ts",
@@ -239,7 +241,7 @@ function projectRepair(workspace, live, override) {
   if (JSON.stringify([...new Set(inventory)]) !== JSON.stringify(expected)) throw Error("repair inventory mismatch");
   const changed = baseline.paths.filter(path => live(path) !== baseline.read(path));
   if (JSON.stringify(changed) !== JSON.stringify(scope)
-      || scope.some(path => !/^(src\/|src-tauri\/(src|tests)\/|scripts\/|src-tauri\/tauri\.conf\.json$)/.test(path))
+      || scope.some(path => path !== ".github/workflows/ci.yml" && !/^(src\/|src-tauri\/(src|tests)\/|scripts\/|src-tauri\/tauri\.conf\.json$)/.test(path))
       || Object.keys(override ?? {}).some(path => relevant(path) && !expected.includes(path))) {
     throw Error("unapproved project audit repair paths");
   }

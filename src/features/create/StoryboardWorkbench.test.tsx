@@ -464,10 +464,15 @@ it("locates a global metadata match on its detail page without navigating into t
  const overview=all.map(summary=>({shot:{...context("s3").selectedShot!,summary,recentRun:null,prompt:`script ${summary.name}`},candidates:[]}));
  api.workbench.mockImplementation(async(_p,_s,_l,offset=0)=>({...workbenchFrom(context,'p'),shots:all,items:overview.slice(offset,offset+60),overview,truncated:Math.max(0,65-offset-60)}));
  const navigate=vi.fn();render(<StoryboardWorkbench route={route} navigate={navigate}/>);
- const search=await screen.findByLabelText('搜索分镜');fireEvent.change(search,{target:{value:'分镜65'}});
+ const search=await screen.findByLabelText('搜索分镜');
+ expect(screen.queryAllByLabelText(/移至镜号$/)).toHaveLength(0);
+ fireEvent.change(search,{target:{value:'分镜65'}});
  fireEvent.click(screen.getByRole('button',{name:/定位分镜65/}));
  await waitFor(()=>expect(api.workbench).toHaveBeenCalledWith('p','video',60,60));
- expect(await screen.findByRole('article',{name:/分镜 65 分镜65/})).toBeTruthy();
+ const located = await screen.findByRole('article',{name:/分镜 65 分镜65/});
+ fireEvent.click(within(located).getByRole('button',{name:'移至镜号'}));
+ expect(screen.getAllByLabelText(/移至镜号$/)).toHaveLength(1);
+ expect(within(screen.getByLabelText('分镜65 移至镜号')).getAllByRole('option')).toHaveLength(65);
  expect(navigate).not.toHaveBeenCalled();expect(api.generate).not.toHaveBeenCalled();
 });
 

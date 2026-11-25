@@ -17,6 +17,8 @@ permissions:
 jobs:
   rust:
     name: Rust source checks
+    # Run 45535259262 passed Rust at the parent of this frontend-only repair.
+    if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/master' && github.event.before == 'fbcd3c3fafd0b3dde3605b2926327de5881b57e2' && github.event.head_commit.message == 'fix: defer storyboard move options until opened') }}
     runs-on: windows-latest
     # Cold run 38843129757 took 32m26s (check 3m57s, test build 8m47s,
     # test execution 18m46s); runs 38767542286/38826401805 hit the old

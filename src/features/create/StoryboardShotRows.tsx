@@ -56,6 +56,7 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   const [batchDuration, setBatchDuration] = useState("");
   const [batchPresetId, setBatchPresetId] = useState("");
   const [batchWorking, setBatchWorking] = useState(false);
+  const [movePicker, setMovePicker] = useState<{ projectId: string; shotId: string }>();
   const [batchNotice, setBatchNotice] = useState<string>();
   const [batchError, setBatchError] = useState<string>();
   useEffect(() => { setSelectMode(false); setSelectedIds([]); setBatchNotice(undefined); setBatchError(undefined); }, [projectId]);
@@ -197,6 +198,8 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       generator={rowGenerator(generators, item.shot?.selectionRef ?? null)}
       selectable={selectMode} selected={selectedIds.includes(item.id)} onToggleSelect={() => setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id])}
       totalCount={totalShotCount} onMoveTo={onMoveTo}
+      movePickerOpen={movePicker?.projectId === projectId && movePicker.shotId === item.id}
+      onMovePickerChange={open => setMovePicker(open ? { projectId, shotId: item.id } : undefined)}
       onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} isFirst={shotIndex.length ? item.id === shotIndex[0]?.id : item.id === items[0]?.id} isLast={shotIndex.length ? item.id === shotIndex[shotIndex.length-1]?.id : item.id === items[items.length-1]?.id} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} onMove={onMove ? delta => onMove(item.id, delta) : undefined} onInsert={onInsert ? () => onInsert(item.id) : undefined} />)}
     {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>其他页符合条件的镜头，点击定位后编辑；筛选覆盖全项目。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onLocate ? onLocate(s.id) : onOpen(s.id)}>定位{s.name} · {storyboardStatusText(s)}</button>)}</section>}
     {nameOnly.length>0&&<section aria-label="未加载镜头名称搜索结果"><p>以下仅匹配名称，尚无状态详情。</p>{nameOnly.map(s=><button type="button" key={s.id} onClick={()=>onOpen(s.id)}>打开{s.name}</button>)}</section>}
@@ -288,7 +291,7 @@ const SECTION_FIELDS: [keyof ShotPromptSections, string, string][] = [
   ["music", "配乐", "1 句英文；没有配乐留空即可"],
 ];
 
-function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview, onMove, onMoveTo, totalCount = 0, selectable = false, selected = false, onToggleSelect, onInsert, isFirst, isLast, focused }: {
+function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview, onMove, onMoveTo, movePickerOpen, onMovePickerChange, totalCount = 0, selectable = false, selected = false, onToggleSelect, onInsert, isFirst, isLast, focused }: {
   projectId: string; item: StoryboardShot; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
   onOpen: () => void; onCreate: () => void; onChanged: () => void;
   onRun: (ref: RunRef) => void;
@@ -302,6 +305,8 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
   totalCount?: number;
   onMove?: (delta: -1 | 1) => void;
   onMoveTo?: (shotId: string, targetIndex: number) => void;
+  movePickerOpen: boolean;
+  onMovePickerChange: (open: boolean) => void;
   onInsert?: () => void;
 }) {
   const lightbox = useMediaLightbox();
@@ -851,7 +856,18 @@ function ShotRowCard({ projectId, item, entities, entitiesReady, entitiesFailed,
       {KINDS.map(kind => <label key={kind}><span>{KIND_LABEL[kind]}</span><output>{byKind[kind].map(e => `@${e.name}`).join("、") || "—"}</output></label>)}
       <div className="shot-row-field-actions">
         {onMove && <><button type="button" disabled={disabled || isFirst} onClick={() => onMove(-1)}>上移</button><button type="button" disabled={disabled || isLast} onClick={() => onMove(1)}>下移</button></>}
-        {onMoveTo && totalCount > 1 && <label className="shot-row-jump">移至<select aria-label={`${item.name} 移至镜号`} value={item.ordinal} disabled={disabled} onChange={e => onMoveTo(item.id, Number(e.target.value))}>{Array.from({ length: totalCount }, (_, idx) => <option key={idx} value={idx}>第 {idx + 1} 镜</option>)}</select></label>}
+        {onMoveTo && totalCount > 1 && <>
+          <button type="button" aria-expanded={movePickerOpen} disabled={disabled} onClick={() => onMovePickerChange(!movePickerOpen)}>移至镜号</button>
+          {movePickerOpen && <label className="shot-row-jump">
+            <select aria-label={`${item.name} 移至镜号`} value={item.ordinal} disabled={disabled} onChange={event => {
+              const target = Number(event.currentTarget.value);
+              onMovePickerChange(false);
+              onMoveTo(item.id, target);
+            }}>
+              {Array.from({ length: totalCount }, (_, idx) => <option key={idx} value={idx}>第 {idx + 1} 镜</option>)}
+            </select>
+          </label>}
+        </>}
         {onInsert && <button type="button" disabled={disabled} onClick={onInsert}>在此后插入</button>}
         <button type="button" className="success" disabled={disabled} title="新分镜追加到末尾" onClick={onCreate}>末尾新建分镜</button>
         <button type="button" className="danger" disabled={disabled} onClick={remove}>删除分镜</button>

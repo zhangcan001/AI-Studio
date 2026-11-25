@@ -2,9 +2,13 @@
   "schemaVersion": 1,
   "base": "587633960100382e2b23df0cca0fb0b98f72ffa0",
   "files": {
+    ".github/workflows/ci.yml": {
+      "beforeHash": "6257ef874b6622a1f598db8e60af78ed835efb5572bde0d62824c084e3539d65",
+      "afterHash": "cc1fd84f8be38e0fbfd867372e397cbfa9fcb4ccd188ea16c1985f60ca729c3d"
+    },
     "scripts/audit70-ci-integration-successor-guard.mjs": {
       "beforeHash": "438a4f81dfdf0460453b3ca1e99873a3ab4a3a62feac63b7f9e2eb357ed38cc7",
-      "afterHash": "b1b4fe20c110f3234aa79bcc9515ea93d153e9b4538ea851fb2ba9b80ddd5320"
+      "afterHash": "e15fe5ee1940220db3c46dfc628b1b91a7b7be1136514734770e598bdc5511d2"
     },
     "scripts/testing/audit-repair.test.mjs": {
       "beforeHash": "53a48b2ebad6583e3c267eea71d3ab6d48b58b09f359bb0e2c684da498fb9133",
@@ -396,7 +400,11 @@
     },
     "src/features/create/StoryboardShotRows.tsx": {
       "beforeHash": "28fc915a8ee7ae2ae145d4cb6ce82dd6b322f143266b1fa2fd513ff0ef795911",
-      "afterHash": "c297138b1a0e6325b86ca504261c16737035639d5b294d63f1502969acdbf87d"
+      "afterHash": "af04e226a8454504bb4d05c9e137421f1e7e74b368f9dad53b966d72b716f2e8"
+    },
+    "src/features/create/StoryboardWorkbench.test.tsx": {
+      "beforeHash": "f67906f46fbb15a9bdfd6f27deb38e0689e14a20deebb2bd781cebbaeff65686",
+      "afterHash": "fa17bd6ee915fe014cd8dc12540a461f8da600eab2cba4b12faaf35832b2af8d"
     },
     "src/features/create/StoryboardWorkbench.tsx": {
       "beforeHash": "ac36fad794e010a860524aa325643f6da5d87375066e858491e80525f8dfe18d",
