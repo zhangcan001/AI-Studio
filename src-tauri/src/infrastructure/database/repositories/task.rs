@@ -237,6 +237,92 @@ impl TaskRepository for SqliteTaskRepository {
         Ok(stored_event)
     }
 
+    async fn persist_cancel_request(
+        &self,
+        task_id: &TaskId,
+        event: &NewTaskEvent,
+        expected_previous_status: TaskStatus,
+    ) -> Result<Option<Task>, RepositoryError> {
+        if !matches!(
+            expected_previous_status,
+            TaskStatus::Created
+                | TaskStatus::Validating
+                | TaskStatus::Preparing
+                | TaskStatus::Queued
+                | TaskStatus::Running
+        ) {
+            return Err(RepositoryError::integrity(format!(
+                "invalid expected previous status {} for CANCEL_REQUESTED",
+                expected_previous_status.as_str()
+            )));
+        }
+        if event.id.trim().is_empty() {
+            return Err(RepositoryError::integrity(
+                "task event id must not be empty",
+            ));
+        }
+        if event.task_id != *task_id {
+            return Err(RepositoryError::integrity(
+                "task event task_id does not match task",
+            ));
+        }
+        if event.event_type != TaskEventType::TaskCancelRequested {
+            return Err(RepositoryError::integrity(format!(
+                "task status CANCEL_REQUESTED requires event {}, received {}",
+                TaskEventType::TaskCancelRequested.as_str(),
+                event.event_type.as_str()
+            )));
+        }
+
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(map_sqlx_error)?;
+
+        let result = sqlx::query("UPDATE tasks SET status = ? WHERE id = ? AND status = ?")
+            .bind(TaskStatus::CancelRequested.as_str())
+            .bind(task_id.as_str())
+            .bind(expected_previous_status.as_str())
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+
+        let Some(row) = sqlx::query_as::<_, TaskRow>(
+            "SELECT
+                id, project_id, workflow_id, workflow_version_id, recipe_id,
+                submission_idempotency_key, submission_attempt, parent_task_id,
+                app_version, build_commit, workflow_version, workflow_sha256,
+                recipe_version, recipe_sha256, package_name, package_source_path,
+                dynamic_binding_targets_json,
+                generation_execution_id, compiled_workflow_sha256, runtime_profile,
+                concurrency_class, prepare_started_at, prepared_at, submitted_at,
+                execution_started_at, execution_finished_at, collection_finished_at,
+                status, prompt_id, queue_number,
+                progress_mode, progress_current, progress_total, current_node_id,
+                error_code, error_message, raw_error_json,
+                created_at, queued_at, started_at, finished_at
+             FROM tasks WHERE id = ?",
+        )
+        .bind(task_id.as_str())
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?
+        else {
+            return Ok(None);
+        };
+
+        let updated = row.try_into_domain()?;
+        validate_event(&updated, event, TaskEventType::TaskCancelRequested)?;
+        insert_event(&mut transaction, event).await?;
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(Some(updated))
+    }
+
     async fn persist_runtime_update(
         &self,
         task: &Task,

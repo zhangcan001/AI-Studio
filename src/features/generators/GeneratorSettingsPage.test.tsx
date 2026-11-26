@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { GeneratorSettingsPage } from "./GeneratorSettingsPage";
-import type { GeneratorBindingSummary, GeneratorOption } from "../../product/types";
+import { GENERATOR_BINDINGS_CHANGED, LAST_GENERATOR_SESSION_KEY, type GeneratorBindingSummary, type GeneratorOption } from "../../product/types";
 const api = vi.hoisted(() => ({ overview: vi.fn(), list: vi.fn(), set: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { project: { getOverview: api.overview, generatorBindingSet: api.set }, creation: { generatorsList: api.list } } }));
 const options: GeneratorOption[] = ["one", "two"].map(selectionRef => ({ selectionRef, name: "wfl_krea2_fixture.json", version: "2", mode: "T2V", mediaKind: "video", availability: true, availabilityReason: null, recommended: true, fields: [{ type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" }] }));
@@ -131,4 +131,152 @@ it("stops saveAll remaining writes when switching projects mid-batch", async () 
   resolveFirst();
   await new Promise(resolve => setTimeout(resolve, 20));
   expect(api.set).toHaveBeenCalledTimes(1);
+});
+
+it("preserves remaining unsaved choices across consecutive single-slot conflicts and refreshes", async () => {
+  api.list.mockResolvedValue([
+    ...options,
+    { ...options[0], selectionRef: "video-t2v", mode: "fl2va_text_to_video" },
+    { ...options[0], selectionRef: "video-i2v", mode: "fl2va_image_to_video" },
+  ]);
+  api.set
+    .mockImplementationOnce(async () => {
+      bindings = [{ ...bindings[0], selectionRef: "two", revision: 4 }];
+    })
+    .mockRejectedValueOnce({ code: "GENERATOR_BINDING_CONFLICT", message: "conflict 1" })
+    .mockRejectedValueOnce({ code: "GENERATOR_BINDING_CONFLICT", message: "conflict 2" })
+    .mockRejectedValueOnce({ code: "GENERATOR_BINDING_CONFLICT", message: "conflict 3" })
+    .mockResolvedValueOnce([]);
+  render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+  const defaultSlot = await screen.findByLabelText("默认视频生成器") as HTMLSelectElement;
+  const textSlot = await screen.findByLabelText("文生视频生成器") as HTMLSelectElement;
+  const imageSlot = await screen.findByLabelText("图生视频生成器") as HTMLSelectElement;
+  fireEvent.change(defaultSlot, { target: { value: "two" } });
+  fireEvent.change(textSlot, { target: { value: "video-t2v" } });
+  fireEvent.change(imageSlot, { target: { value: "video-i2v" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存全部修改（3）" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("已保存 1 项");
+
+  const textSaveBtn = textSlot.closest("article")!.querySelector("button")!;
+  expect(textSaveBtn.disabled).toBe(false);
+  fireEvent.click(textSaveBtn);
+  await screen.findByRole("alert");
+  expect(textSaveBtn.disabled).toBe(true);
+  expect(textSlot.value).toBe("video-t2v");
+  expect(imageSlot.value).toBe("video-i2v");
+
+  fireEvent.click(screen.getByRole("button", { name: "刷新设置" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(textSlot.value).toBe("video-t2v");
+  expect(imageSlot.value).toBe("video-i2v");
+
+  fireEvent.click(textSaveBtn);
+  await screen.findByRole("alert");
+  expect(textSlot.value).toBe("video-t2v");
+  expect(imageSlot.value).toBe("video-i2v");
+
+  fireEvent.click(screen.getByRole("button", { name: "刷新设置" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  fireEvent.click(textSaveBtn);
+  await waitFor(() => expect(api.set).toHaveBeenCalledTimes(5));
+  expect(imageSlot.value).toBe("video-i2v");
+});
+
+it("locks controls while manual refresh is in flight to avoid racing with saves", async () => {
+  api.overview.mockResolvedValue({ generators: [{ selectionRef: "video-t2v", name: "Wan 2.2", mode: "T2V", mediaKind: "video", version: "1", availability: true, fields: [] }] });
+  api.list.mockResolvedValue([]);
+  render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+  const refreshBtn = await screen.findByRole("button", { name: "刷新设置" });
+
+  let resolveOverview!: (v: unknown) => void;
+  api.overview.mockReturnValueOnce(new Promise(resolve => { resolveOverview = resolve; }));
+  fireEvent.click(refreshBtn);
+  expect(refreshBtn.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(refreshBtn);
+  expect(api.overview).toHaveBeenCalledTimes(2);
+
+  resolveOverview({ generators: [{ selectionRef: "video-t2v", name: "Wan 2.2", mode: "T2V", mediaKind: "video", version: "1", availability: true, fields: [] }] });
+  await waitFor(() => expect(refreshBtn.hasAttribute("disabled")).toBe(false));
+});
+
+it("disables manual refresh during initial load and ignores a stale initial response", async () => {
+  type OverviewResult = { generatorBindings: GeneratorBindingSummary[] };
+  let resolveStale!: (v: OverviewResult) => void;
+  api.overview.mockImplementationOnce(() => new Promise<OverviewResult>(resolve => { resolveStale = resolve; }));
+
+  const ui = render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+  const refreshBtn = await screen.findByRole("button", { name: "刷新设置" }) as HTMLButtonElement;
+  expect(refreshBtn.disabled).toBe(true);
+  fireEvent.click(refreshBtn);
+  expect(api.overview).toHaveBeenCalledTimes(1);
+
+  api.overview.mockResolvedValue({
+    generatorBindings: [{ stage: "VIDEO", mode: "DEFAULT", selectionRef: "one", bindingInstanceId: "instance-A", revision: 4 }],
+  });
+  ui.rerender(<GeneratorSettingsPage projectId="p2" navigate={vi.fn()} />);
+  await screen.findByLabelText("默认视频生成器");
+  ui.rerender(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+  const select = await screen.findByLabelText("默认视频生成器");
+
+  resolveStale({
+    generatorBindings: [{ stage: "VIDEO", mode: "DEFAULT", selectionRef: "one", bindingInstanceId: "instance-A", revision: 3 }],
+  });
+  await waitFor(() => expect((screen.getByRole("button", { name: "刷新设置" }) as HTMLButtonElement).disabled).toBe(false));
+
+  fireEvent.change(select, { target: { value: "two" } });
+  fireEvent.click(screen.getAllByRole("button", { name: "保存设置" })[0]);
+  await waitFor(() => expect(api.set).toHaveBeenCalledWith("p", expect.objectContaining({ expectedRevision: 4 })));
+});
+
+it("treats committed save as saved even if post-save refresh fails, clears stale session key and notifies listeners", async () => {
+  api.list.mockResolvedValue([
+    ...options,
+    { ...options[0], selectionRef: "video-t2v", mode: "fl2va_text_to_video" },
+  ]);
+  sessionStorage.setItem(`${LAST_GENERATOR_SESSION_KEY}:p:video`, "one");
+  const listener = vi.fn();
+  window.addEventListener(GENERATOR_BINDINGS_CHANGED, listener);
+  try {
+    api.set
+      .mockImplementationOnce(async () => {
+        bindings = [{ ...bindings[0], selectionRef: "two", revision: 4 }];
+      })
+      .mockRejectedValueOnce({ code: "GENERATOR_BINDING_CONFLICT", message: "conflict" })
+      .mockResolvedValueOnce([]);
+    render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
+    const defaultSlot = await screen.findByLabelText("默认视频生成器") as HTMLSelectElement;
+    const textSlot = await screen.findByLabelText("文生视频生成器") as HTMLSelectElement;
+
+    // Partial saveAll retains VIDEO:FL2VA_TEXT_TO_VIDEO in retainedConflictKeysRef
+    fireEvent.change(defaultSlot, { target: { value: "two" } });
+    fireEvent.change(textSlot, { target: { value: "video-t2v" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存全部修改（2）" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("已保存 1 项");
+
+    // Retrying single save commits, then follow-up refresh fails
+    api.overview.mockRejectedValueOnce(new Error("temporary refresh failure"));
+    const textSaveBtn = textSlot.closest("article")!.querySelector("button")!;
+    fireEvent.click(textSaveBtn);
+
+    expect(await screen.findByText("生成器设置已保存，但读取最新设置失败；请点击刷新设置。")).toBeTruthy();
+    expect(screen.queryByText("未保存修改")).toBeNull();
+    expect(sessionStorage.getItem(`${LAST_GENERATOR_SESSION_KEY}:p:video`)).toBeNull();
+    expect(listener).toHaveBeenCalled();
+  } finally {
+    window.removeEventListener(GENERATOR_BINDINGS_CHANGED, listener);
+    sessionStorage.clear();
+  }
+});
+
+it("reports unsaved dirty state via onDirtyChange and clears it after saving", async () => {
+  const onDirtyChange = vi.fn();
+  render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} onDirtyChange={onDirtyChange} />);
+  const select = await screen.findByLabelText("默认视频生成器");
+  expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+  fireEvent.change(select, { target: { value: "two" } });
+  await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+
+  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
 });

@@ -111,10 +111,23 @@ export function useRunsController({ route, navigate }: RunsProps) {
   });
   const retryAndStart = () => mutate(async () => {
     if (!detail?.availableActions.includes("RETRY") || detail.ref.source === "production-run" || !detail.recoverability.retryItemIds.length) return;
-    const pendingCount = (detail.detail?.inputs ?? []).filter(item => item.executionStatus === "PENDING" || item.executionStatus === "DISPATCHING").length;
+    let scopeRun = detail;
+    let isParentBatch = false;
+    if (detail.ref.source === "task" && detail.preferredParent?.source === "queue-batch") {
+      const parentRun = await productClient.run.get(route.projectId, detail.preferredParent);
+      if (!mounted.current || scope !== liveScope.current) return;
+      scopeRun = parentRun;
+      isParentBatch = true;
+    }
+    const retryIds = new Set(detail.recoverability.retryItemIds);
+    const pendingCount = (scopeRun.detail?.inputs ?? []).filter(
+      item => (item.itemId ? !retryIds.has(item.itemId) : true) && (item.executionStatus === "PENDING" || item.executionStatus === "DISPATCHING"),
+    ).length;
     const msg = pendingCount > 0
-      ? `将按原快照重新准备失败项并立即启动当前批次（批次内其余 ${pendingCount} 个待执行项也会继续派发），已完成结果会保留。确定重试并立即启动？`
-      : "将按原快照重新准备失败项并立即启动生产队列，已完成结果会保留。确定重试并立即启动？";
+      ? `将按原快照重新准备失败项并立即启动${isParentBatch ? "所属批次" : "当前批次"}（批次内其余 ${pendingCount} 个待执行项也会继续派发），已完成结果会保留。确定重试并立即启动？`
+      : scopeRun.status === "PAUSED"
+        ? `将按原快照重新准备失败项并恢复启动${isParentBatch ? "所属批次" : "当前批次"}（批次内如有其他待执行项也会继续派发），已完成结果会保留。确定重试并立即启动？`
+        : "将按原快照重新准备失败项并立即启动生产队列，已完成结果会保留。确定重试并立即启动？";
     if (!window.confirm(msg)) return;
     const prepared = await productClient.run.retry(route.projectId, { ref: detail.ref, selectedItemIds: detail.recoverability.retryItemIds });
     if (!mounted.current || scope !== liveScope.current || prepared.projectId !== route.projectId) return;
@@ -190,7 +203,7 @@ export function useRunsController({ route, navigate }: RunsProps) {
     if (!target || !isSelectableShotResult(target, shotId)) return;
     await productClient.creation.selectResult(route.projectId, shotId, "video", assetId);
   });
-  const approveAndSelectForShot = async (result: RunResult, shotId: string, comment = "") => {
+  const approveAndSelectForShot = async (result: RunResult, shotId: string, comment = "", onReviewed?: () => void) => {
     if (!detail || result.reviewRevision === null || result.reviewState !== "PENDING" || !isSelectableShotResult(result, shotId)) return false;
     if (detail.projectId !== route.projectId || detail.ref.id !== route.run?.id || detail.ref.source !== route.run?.source
       || !detail.detail?.sources.some(source => source.id === shotId && source.stage === "video")) return false;
@@ -200,6 +213,7 @@ export function useRunsController({ route, navigate }: RunsProps) {
       try {
         await productClient.run.resultReview(route.projectId, { runRef: detail.ref, assetId: result.assetId, decision: "APPROVED", comment, expectedRevision });
         reviewed = true;
+        onReviewed?.();
         await productClient.creation.selectResult(route.projectId, shotId, "video", result.assetId);
       } catch (cause) {
         if (reviewed) invalidateRuns(route.projectId);

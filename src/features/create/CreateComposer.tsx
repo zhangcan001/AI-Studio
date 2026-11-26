@@ -253,35 +253,63 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const carryFromPreviousShot = async () => {
     if (!firstFrameField || !prevShotSummary || !projectId || locked) return;
     const revision = ++carryRevision.current;
+    const currentLastFrameId = () => lastFrameField ? assetIds(useStudioStore.getState().values.last_frame)[0] : undefined;
     try {
       const prevCtx = await productClient.creation.get(projectId, prevShotSummary.id, "video");
       if (revision !== carryRevision.current) return;
       const prevRef = prevCtx.selectedShot?.selectionRef ?? c.selection;
       let pickedId: string | undefined;
+      let skippedDuplicateLastFrame = false;
+      let prevEligibleAssets: { id: string; mediaKind: string }[] | undefined;
+      const rejectedPrevInputIds = new Set<string>();
       if (prevRef && typeof productClient.creation?.inputsGet === "function") {
         try {
           const prevView = await productClient.creation.inputsGet({ projectId, shotId: prevShotSummary.id, selectionRef: prevRef });
           if (revision !== carryRevision.current) return;
-          const candidateId = prevView.inputs.find(i => i.inputKey === "last_frame")?.assetId
-            ?? prevView.inputs.find(i => i.inputKey === "first_frame")?.assetId
-            ?? prevView.inputs.find(i => i.inputKey === "reference_images")?.assetId;
-          if (candidateId) {
-            const candidateMeta = prevView.assets?.find(a => a.id === candidateId)
-              ?? prevCtx.mediaInputs?.find(a => a.id === candidateId);
-            if (!candidateMeta || candidateMeta.mediaKind === "image") pickedId = candidateId;
+          prevEligibleAssets = prevView.assets ?? [];
+          const orderedIds = (["last_frame", "first_frame", "reference_images"] as const).flatMap(key =>
+            prevView.inputs
+              .filter(i => i.inputKey === key)
+              .sort((a, b) => a.ordinal - b.ordinal)
+              .map(i => i.assetId),
+          );
+          for (const candidateId of orderedIds) {
+            const candidateMeta = prevView.assets?.find(a => a.id === candidateId);
+            if (candidateMeta?.mediaKind !== "image") {
+              rejectedPrevInputIds.add(candidateId);
+              continue;
+            }
+            if (candidateId === currentLastFrameId()) {
+              skippedDuplicateLastFrame = true;
+              continue;
+            }
+            pickedId = candidateId;
+            break;
           }
         } catch {
           if (revision !== carryRevision.current) return;
         }
       }
       if (!pickedId && prevCtx.selectedShot?.referenceAssetIds?.length) {
-        pickedId = prevCtx.selectedShot.referenceAssetIds.find(id => {
-          const meta = prevCtx.mediaInputs?.find(a => a.id === id);
-          return !meta || meta.mediaKind === "image";
-        });
+        const fallbackAssets = prevEligibleAssets ?? prevCtx.mediaInputs ?? [];
+        for (const id of prevCtx.selectedShot.referenceAssetIds) {
+          if (rejectedPrevInputIds.has(id)) continue;
+          const meta = fallbackAssets.find(a => a.id === id);
+          if (meta?.mediaKind !== "image") continue;
+          if (id === currentLastFrameId()) {
+            skippedDuplicateLastFrame = true;
+            continue;
+          }
+          pickedId = id;
+          break;
+        }
       }
       if (!pickedId) {
-        setRecognitionNote(`上一镜「${prevShotSummary.name}」尚未绑定首尾帧或参考图片`);
+        setRecognitionNote(
+          skippedDuplicateLastFrame
+            ? `上一镜「${prevShotSummary.name}」的参考画面与当前尾帧相同，无法同时作为首帧，请手动选择图片`
+            : `上一镜「${prevShotSummary.name}」尚未绑定首尾帧或参考图片`,
+        );
         return;
       }
       setField(firstFrameField, [pickedId]);
@@ -396,8 +424,22 @@ export function CreateComposer({ controller: c }: { controller: CreateController
             if (!raw) return;
             e.preventDefault();
             try {
-              const payload = JSON.parse(raw) as { projectId?: string; assetId?: string; mediaKind?: string };
+              const payload = JSON.parse(raw) as { projectId?: string; assetId?: string; mediaKind?: string; sourceOrigin?: string };
               if (payload.projectId !== projectId || payload.mediaKind !== kind || !payload.assetId) return;
+              if (kind === "image") {
+                if (payload.sourceOrigin === "generated") {
+                  setRecognitionNote("历史生成图片不能作为首帧/尾帧或参考图，请使用外部导入图片");
+                  return;
+                }
+                if (vi.enabled && vi.view && !allChoices.some(a => a.id === payload.assetId && a.mediaKind === "image")) {
+                  setRecognitionNote("该图片不在当前可用的外部导入素材中，请从外部导入图片选择");
+                  return;
+                }
+              }
+              if (kind === "video" && payload.sourceOrigin === "generated" && typeof window !== "undefined"
+                && !window.confirm("生成视频仅可作为视频参考绑定（不会抽帧作为首帧）。确定将其添加到当前参考视频槽？")) {
+                return;
+              }
               if (plural(field)) { if (capacity(field, ids)) add(field, payload.assetId); }
               else setField(field, [payload.assetId]);
             } catch { /* ignore malformed drag payload */ }

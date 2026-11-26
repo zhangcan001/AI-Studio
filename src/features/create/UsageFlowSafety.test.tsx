@@ -1,7 +1,7 @@
 import { ResultFileActions } from "../../components/ResultFileActions";
 import { useStudioStore } from "../../stores/studioStore";
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ShotReviewDialog } from "./ShotReviewDialog";
 import { deriveStoryboardStatus } from "./storyboardModel";
@@ -125,4 +125,21 @@ it("resets file action state for B while A's locate request is pending and ignor
  const view=render(<ResultFileActions projectId="p" assetId="A"/>);fireEvent.click(screen.getByRole("button",{name:"在文件夹中显示"}));expect(screen.getByRole("button",{name:"正在定位…"}).hasAttribute("disabled")).toBe(true);
  view.rerender(<ResultFileActions projectId="p" assetId="B"/>);fireEvent.click(screen.getByRole("button",{name:"在文件夹中显示"}));await waitFor(()=>expect(api.reveal).toHaveBeenCalledWith("p","B"));
  rejectA({code:"INVALID_INPUT"});await waitFor(()=>expect(screen.getByRole("button",{name:"在文件夹中显示"}).hasAttribute("disabled")).toBe(false));expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("clears busy and shows navigationNote even if reload runs while onNext is pending", async () => {
+  let resolveNext!: (msg?: string) => void;
+  const onNext = vi.fn(() => new Promise<string | undefined>(resolve => { resolveNext = resolve; }));
+  const view = render(<ShotReviewDialog projectId="p" item={item} onClose={vi.fn()} onChanged={vi.fn()} onNext={onNext} onEdit={vi.fn()} />);
+  const nextBtn = await screen.findByRole("button", { name: "下一个待审核镜头" });
+  fireEvent.click(nextBtn);
+  expect(nextBtn.hasAttribute("disabled")).toBe(true);
+
+  const refreshed = { ...item, candidates: [...item.candidates, { id: "b", name: "候选B", mediaKind: "video" as const, selected: false }] };
+  view.rerender(<ShotReviewDialog projectId="p" item={refreshed} onClose={vi.fn()} onChanged={vi.fn()} onNext={onNext} onEdit={vi.fn()} />);
+
+  await act(async () => { resolveNext("已到本页末尾，后面没有待审核候选。"); });
+  await waitFor(() => expect(screen.getByRole("button", { name: "下一个待审核镜头" }).hasAttribute("disabled")).toBe(false));
+  expect(screen.getByRole("button", { name: "关闭" }).hasAttribute("disabled")).toBe(false);
+  expect(screen.getByText("已到本页末尾，后面没有待审核候选。")).toBeTruthy();
 });

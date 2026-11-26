@@ -90,7 +90,7 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
           </div>
         </div> : <div className="create-video-screen">{current
           ? <CreateMediaPreview key={`${route.projectId}:${current.id}:${previewAttempt}`} projectId={route.projectId} asset={current} onUnavailable={() => setUnavailable(previous => new Set([...previous,current.id]))} />
-          : <div className="create-video-empty"><span aria-hidden="true">▷</span><h3>{c.run?.status === "RUNNING" ? "正在生成视频" : runLabel ? "查看本次运行" : "让创意开始流动"}</h3><p>{runMessage}</p><small>没有视频时不显示演示素材或模拟进度。</small></div>}
+          : <div className="create-video-empty"><span aria-hidden="true">▷</span><h3>{c.run?.status === "RUNNING" ? "正在生成视频" : runLabel ? "查看本次运行" : "让创意开始流动"}</h3><p>{runMessage}</p></div>}
         </div>}
         {current && <div className="create-preview-actions"><div><strong>{current.name}</strong><small>{current.selected ? "已选用；审核状态请在运行详情查看。" : "预览不会选用；选用不等于审核。"}</small></div><button type="button" disabled={c.busy || current.selected || current.reviewState==="REJECTED" || unavailable.has(current.id)} onClick={() => void c.selectResult(current.id)}>选用此结果</button></div>}
         <div className="create-action-row" aria-label="结果操作">
@@ -106,15 +106,12 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
       <section className="create-candidate-strip" aria-label="当前镜头候选"><header><h2>当前镜头候选 <small>{candidates.length} 个视频</small></h2><div><button type="button" disabled={c.busy} onClick={() => { void c.refresh(); setUnavailable(new Set()); setPreviewAttempt(n => n+1); }}>刷新结果</button><button type="button" aria-label="在资源库查看视频" onClick={() => c.openLibrary("videos")}>资源库</button></div></header>
         {c.run?.status === "FAILED" && <p>本次生成失败；已有候选和选用状态不会删除。</p>}
         {!candidates.length && <p>尚无此阶段的生成候选。</p>}
-        <div className="create-video-candidates">{candidates.map(asset => <button key={asset.id} type="button" className={`create-candidate-card ${current?.id === asset.id ? "previewing" : ""}`} draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId: route.projectId, assetId: asset.id, mediaKind: "video" })); e.dataTransfer.effectAllowed = "copy"; }} aria-label={`预览${asset.name}`} aria-pressed={current?.id === asset.id} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /><strong>{asset.name}</strong><span>{asset.selected ? "已选用" : "候选"} · {reviewLabel(asset.reviewState)}</span></button>)}</div>
+        <div className="create-video-candidates">{candidates.map(asset => <button key={asset.id} type="button" className={`create-candidate-card ${current?.id === asset.id ? "previewing" : ""}`} draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId: route.projectId, assetId: asset.id, mediaKind: "video", sourceOrigin: "generated" })); e.dataTransfer.effectAllowed = "copy"; }} aria-label={`预览${asset.name}`} aria-pressed={current?.id === asset.id} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /><strong>{asset.name}</strong><span>{asset.selected ? "已选用" : "候选"} · {reviewLabel(asset.reviewState)}</span></button>)}</div>
         <small>切换仅预览 · 选用不等于审核 · 其他候选和历史运行保留</small>
       </section>
     </div>
     <aside className="create-run-inspector" aria-label="镜头与运行信息"><details open={inspectorOpen} onToggle={e => setInspectorOpen(e.currentTarget.open)}><summary>镜头与运行信息</summary>
       <ShotInfoCard controller={c} candidates={candidates} />
-      <section className="create-recent" aria-label="最近生成"><header><h2>最近生成</h2><button type="button" className="create-link" onClick={() => c.openLibrary("videos")}>查看更多</button></header>
-        {candidates.length ? <div className="create-recent-grid">{candidates.slice(0, 3).map(asset => <button key={asset.id} type="button" aria-label={`最近生成${asset.name}`} className={current?.id === asset.id ? "previewing" : ""} onClick={() => setPreviewId(asset.id)}><CandidateThumbnail asset={asset} projectId={route.projectId} /></button>)}</div> : <p className="create-muted">尚无生成结果</p>}
-      </section>
       <RunStatusCard controller={c} />
       <RunQueueCard controller={c} projectId={route.projectId} />
     </details></aside>
@@ -134,10 +131,10 @@ function ShotInfoCard({ controller: c, candidates }: { controller: CreateControl
     <dl>
       <div><dt>镜头时长</dt><dd>{duration ? `${duration} 秒` : "未设置"}</dd></div>
       <div><dt>画面尺寸</dt><dd>{w && h ? `${w} × ${h}` : "未设置"}</dd></div>
-      <div><dt>生成模式</dt><dd>{c.generator ? `MiniMax 视频 · ${modeLabel(c.generator)}` : "未选择模式"}</dd></div>
+      <div><dt>生成模式</dt><dd>{c.generator ? modeLabel(c.generator) : "未选择模式"}</dd></div>
       <div><dt>参考素材</dt><dd>{images.length ? <div className="storyboard-ref-thumbs" aria-label="参考素材缩略图">{images.map((id, index) => <AssetImageThumb key={`${index}:${id}`} projectId={c.context!.projectId} assetId={id} name={`参考 ${index + 1}`} size="lg" />)}<small>{images.length} 张图片</small></div> : "0 张图片"}{` · ${videoCount} 个视频 · ${audioCount} 个音频`}</dd></div>
       <div><dt>生成候选</dt><dd>{candidates.length} 个</dd></div>
-    </dl><small>当前 Recipe 的草稿与原运行快照独立。</small></section>;
+    </dl></section>;
 }
 /** Read-only view of active project runs; the Production Queue stays the only executor. */
 function RunQueueCard({ controller: c, projectId }: { controller: CreateController; projectId: string }) {

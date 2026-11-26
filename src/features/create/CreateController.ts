@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
-import { invalidateRuns } from "../../product/runInvalidation";
+import { invalidateRuns, subscribeRunInvalidation } from "../../product/runInvalidation";
 import { normalizeProductError } from "../../product/errors";
-import type { CreationAccepted, CreationContext, CreationReadiness, GeneratorOption, ProductRun, RunRef, CreationPromptChoice, CreationPromptProvenance } from "../../product/types";
+import { GENERATOR_BINDINGS_CHANGED, LAST_GENERATOR_SESSION_KEY, type CreationAccepted, type CreationContext, type CreationReadiness, type GeneratorOption, type ProductRun, type RunRef, type CreationPromptChoice, type CreationPromptProvenance } from "../../product/types";
 import type { GenerationValues, DraftValue } from "../../types/generation";
 import type { AppRoute } from "../../app/routes/types";
 import { useStudioStore } from "../../stores/studioStore";
@@ -11,7 +11,7 @@ import { assetIds, defaultGenerator, draftFor, mediaKind, mediaValue, packageKin
 import { modeLabel } from "../../product/generatorPresentation";
 import { usePersistentVideoInputs } from "./usePersistentVideoInputs";
 
-const LAST_GENERATOR_KEY = "aistudio.create.lastGenerator.v1";
+const LAST_GENERATOR_KEY = LAST_GENERATOR_SESSION_KEY;
 function readLastGenerator(projectId: string, stage: string): string | undefined {
   try {
     const raw = sessionStorage.getItem(`${LAST_GENERATOR_KEY}:${projectId}:${stage}`);
@@ -46,7 +46,14 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const [libraryMetaFailed, setLibraryMetaFailed] = useState(false);
   const [generatedVideoConfirm, setGeneratedVideoConfirm] = useState(false);
   const snapshots = useRef(new Map<string, StageView>());
-  const live = useRef({ selection, runRef, accepted }); live.current = { selection, runRef, accepted };
+  const live = useRef<{ selection: string; runRef: RunRef | null; accepted: CreationAccepted | null; context?: CreationContext }>({ selection, runRef, accepted, context });
+  live.current = { selection, runRef, accepted, context };
+  const selfInvalidation = useRef(false);
+  function notifyRuns(options?: { library?: boolean }) {
+    selfInvalidation.current = true;
+    try { invalidateRuns(route.projectId, options); }
+    finally { selfInvalidation.current = false; }
+  }
   const epoch = useRef(0);
   const readinessEpoch = useRef(0);
   const mounted = useRef(false);
@@ -179,6 +186,45 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     const next = await productClient.creation.get(route.projectId, route.shotId ?? null, route.stage);
     if (mounted.current && token === epoch.current) setContext(next);
   }
+  const latestMeta = useRef({ loading, projectId: route.projectId });
+  latestMeta.current = { loading, projectId: route.projectId };
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = subscribeRunInvalidation?.((changedProject, options) => {
+      if (changedProject !== route.projectId || options?.statusOnly || selfInvalidation.current) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!mounted.current || latestMeta.current.loading || actionLock.current) return;
+        void refreshContext(epoch.current).catch(() => {});
+      }, 250);
+    });
+    return () => { clearTimeout(timer); unsubscribe?.(); };
+  }, [key]);
+  useEffect(() => {
+    const onBindingsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId && detail.projectId !== route.projectId) return;
+      const token = epoch.current;
+      void Promise.resolve(productClient.creation.generatorsList(route.projectId, route.stage, route.shotId ?? null))
+        .then(options => {
+          if (!mounted.current || token !== epoch.current) return;
+          setGenerators(options);
+          const store = useStudioStore.getState();
+          const selectedShot = live.current.context?.selectedShot;
+          if (!latestMeta.current.loading && !actionLock.current && !store.draftDirty && !selectedShot?.selectionRef) {
+            const lastUsedRef = readLastGenerator(route.projectId, route.stage);
+            const nextSelected = defaultGenerator(options, lastUsedRef);
+            if (nextSelected && nextSelected.selectionRef !== live.current.selection) {
+              setSelection(nextSelected.selectionRef);
+              store.loadCreationDraft(draftFor(nextSelected, selectedShot ?? null), false);
+            }
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener(GENERATOR_BINDINGS_CHANGED, onBindingsChanged);
+    return () => window.removeEventListener(GENERATOR_BINDINGS_CHANGED, onBindingsChanged);
+  }, [key]);
   useEffect(() => {
     if (loading || !runRef) return;
     let cancelled = false; let timer: ReturnType<typeof setTimeout>;
@@ -425,7 +471,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     const unchanged = matchesDraft(draft);
     setAccepted(unchanged ? ack : null); setRunRef(ack.runRef); setRun(undefined);
     // Runs must see the new batch immediately; Library thrash waits for task://updated assets.
-    invalidateRuns(route.projectId, { library: false });
+    notifyRuns({ library: false });
     if (!unchanged) return;
     useStudioStore.getState().loadCreationDraft(request.values, false, request.promptId && request.promptVersionId ? {promptId:request.promptId,promptVersionId:request.promptVersionId} : undefined);
   }
@@ -491,8 +537,8 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
         throw cause;
       }
     };
-  const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); if (token === epoch.current) await selectShot(shot.id); });
-  const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); await refreshContext(token); });
+  const createShot = () => mutate(async () => { const token = epoch.current; const shot = await productClient.creation.createShot(route.projectId); notifyRuns({ library: false }); if (token === epoch.current) await selectShot(shot.id); });
+  const selectResult = (id: string) => mutate(async () => { const token = epoch.current; await productClient.creation.selectResult(route.projectId, route.shotId!, route.stage, id); notifyRuns({ library: false }); await refreshContext(token); });
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const token = epoch.current; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); if (!mounted.current || token !== epoch.current) return; setRun(next); setRunRef(next.ref); setAccepted(null); });
   return { videoInputs, libraryIntent, librarySlots, libraryRejectReason, libraryNeedsGeneratedVideoConfirm, libraryApplyReady, generatedVideoConfirm, setGeneratedVideoConfirm, libraryAssetMeta, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy: busy || Boolean(pendingStandardRun),

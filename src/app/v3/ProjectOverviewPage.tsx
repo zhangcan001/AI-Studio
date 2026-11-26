@@ -29,13 +29,16 @@ export function ProjectOverviewPage({ projectId, navigate }: { projectId: string
     let cancelled = false;
     let reading = false;
     let pending = false;
+    let shouldPoll = false;
     setState({ projectId });
     async function refresh() {
       reading = true;
       try {
         const data = await productClient.project.getOverview(projectId);
+        shouldPoll = (data.activeRuns.runningBatches + data.activeRuns.pausedBatches + data.activeRuns.activeTasks) > 0;
         if (!cancelled) setState({ projectId, data });
       } catch (error: unknown) {
+        shouldPoll = true;
         if (!cancelled) setState(previous => ({
           projectId,
           data: previous.projectId === projectId ? previous.data : undefined,
@@ -50,12 +53,13 @@ export function ProjectOverviewPage({ projectId, navigate }: { projectId: string
       }
     }
     const unsubscribe = subscribeRunInvalidation((changed, options) => {
-      if (changed !== projectId || options?.statusOnly) return;
+      if (changed !== projectId) return;
+      if (options?.statusOnly && shouldPoll) return;
       if (reading) pending = true;
       else void refresh();
     });
     const timer = window.setInterval(() => {
-      if (!reading && document.visibilityState !== "hidden") void refresh();
+      if (shouldPoll && !reading && document.visibilityState !== "hidden") void refresh();
     }, 5000);
     void refresh();
     return () => {
@@ -73,7 +77,7 @@ export function ProjectOverviewPage({ projectId, navigate }: { projectId: string
   return <section className="v3-overview" aria-label="项目概览">
     {state.error && <p role="status">暂时无法刷新项目概览。{state.error}</p>}
     <header className="v3-overview-header">
-      <div className="v3-overview-title"><span className="v3-eyebrow">MINIMAX VIDEO · 项目概览</span><h1>{projectDisplayName(data.project.id, data.project.name)}</h1>{data.project.description && <p>{data.project.description}</p>}</div>
+      <div className="v3-overview-title"><span className="v3-eyebrow">项目概览</span><h1>{projectDisplayName(data.project.id, data.project.name)}</h1>{data.project.description && <p>{data.project.description}</p>}</div>
       <div className="v3-overview-shortcuts"><button type="button" onClick={() => navigate({ kind: "project-list" })}>项目管理与归档</button><button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>默认生成器</button></div>
     </header>
     <section className="v3-next-action"><div><h2>下一步</h2><p>从当前项目继续创作，或处理需要关注的运行。</p></div><button type="button" className="primary-button" onClick={() => navigate(action.route)}>{action.label}</button></section>

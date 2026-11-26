@@ -5,6 +5,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderBatchImportPanel, FolderBatchImportDialog } from "./FolderBatchImportPanel";
 import type { FolderImportPreview, FolderImportResult } from "../../types/folderBatchImport";
+import { subscribeRunInvalidation } from "../../product/runInvalidation";
+import { subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
+import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 const api=vi.hoisted(()=>({pick:vi.fn(),rescan:vi.fn(),discard:vi.fn(),commit:vi.fn(),generators:vi.fn()}));
 vi.mock("../../product/client",()=>({productClient:{creation:{generatorsList:api.generators},folderImport:{pick:api.pick,rescan:api.rescan,discard:api.discard,commit:api.commit}}}));
 function preview(id="session",bad=true):FolderImportPreview{return {sessionId:id,previewVersion:1,nameSuffix:null,displayRootName:"fixture",manifestSha256:"abc",formatSource:"manifest",shotCount:3,validCount:bad?2:3,errorCount:bad?1:0,warningCount:0,maxQueueItems:100,createQueueDefault:true,characters:[],errors:[],warnings:[],rows:[0,1,2].map(i=>({rowKey:`r${i}`,rowNumber:i+1,manifestId:null,mode:i===0?"firstLast":"reference",name:`镜头${i}`,prompt:"真实完整原文",promptSections:{style:null,summary:null,soundscape:null,music:null},referencePreview:["a.png","b.png"],promptPreview:"真实原文",durationSeconds:6,width:1280,height:768,generatorLabel:"Exact",firstFrame:i===0?"a.png":null,lastFrame:i===0?"b.png":null,referenceCount:2,entityNames:[],errors:i===2&&bad?[{code:"FILE_NOT_FOUND",message:"图片缺失"}]:[],warnings:[]}))};}
@@ -162,4 +165,37 @@ it("returns to a valid selected-only page after removing the final row on page t
   expect(screen.getByRole("button", { name: "仅看已选（50）" })).toBeTruthy();
   expect(screen.getAllByRole("checkbox", { name: /导入 镜头/ })).toHaveLength(50);
   expect(screen.queryByRole("navigation", { name: "导入预览分页" })).toBeNull();
+});
+
+it("broadcasts entity, run, and video input invalidations on completed folder import commit", async () => {
+  const onRun = vi.fn();
+  const onInput = vi.fn();
+  const onEntity = vi.fn();
+  const unsubRun = subscribeRunInvalidation(onRun);
+  const unsubInput = subscribeVideoInputInvalidation(onInput);
+  window.addEventListener(STORY_ENTITIES_CHANGED, onEntity);
+  try {
+    api.commit.mockResolvedValueOnce({ ...result("completed"), createdEntityIds: ["ent-1"], importedAssetIds: ["ast-1"], batchId: "batch-1" });
+    const view = render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} />);
+    await pick();
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    await screen.findByText("导入完成");
+    expect(onEntity).toHaveBeenCalledTimes(1);
+    expect(onInput).toHaveBeenCalledWith("p");
+    expect(onRun).toHaveBeenCalledWith("p", { library: true });
+
+    onEntity.mockClear(); onInput.mockClear(); onRun.mockClear();
+    api.commit.mockResolvedValueOnce(result("compensated"));
+    view.rerender(<FolderBatchImportPanel projectId="p2" onImported={vi.fn()} onCancel={vi.fn()} />);
+    await pick();
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    await screen.findByText("导入失败，本次新增的数据已撤回");
+    expect(onEntity).not.toHaveBeenCalled();
+    expect(onInput).not.toHaveBeenCalled();
+    expect(onRun).not.toHaveBeenCalled();
+  } finally {
+    unsubRun();
+    unsubInput();
+    window.removeEventListener(STORY_ENTITIES_CHANGED, onEntity);
+  }
 });

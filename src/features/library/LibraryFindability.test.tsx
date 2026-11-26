@@ -170,3 +170,15 @@ it("U03: partial batch delete prunes already-deleted targets so retry only delet
   fireEvent.click(await screen.findByRole("button",{name:/确认删除可删项（2 项）/}));
   await waitFor(()=>expect(del.mock.calls.map(call=>call[1].id)).toEqual(["a","b","b","c"]));
 });
+
+it("offers one-click filter reset when filtered library query yields no items", async () => {
+  api.list.mockImplementation(async (_p, q) => q.sourceKind === "generated"
+    ? { items: [], nextCursor: null, coverage: "keyset-page", coverageMessage: "当前分类数据库分页结果。" }
+    : page("first"));
+  render(<LibraryPage route={{ kind: "library", projectId: "clear-proj", filter: "images" }} navigate={vi.fn()} />);
+  await screen.findByText("first");
+  fireEvent.change(screen.getByLabelText("素材来源"), { target: { value: "generated" } });
+  const resetBtn = await screen.findByRole("button", { name: "清除筛选条件" });
+  fireEvent.click(resetBtn);
+  await screen.findByText("first");
+});

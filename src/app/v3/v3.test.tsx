@@ -7,8 +7,8 @@ import { useAppRoute } from "../routes/useAppRoute";
 import { useDraftConfirmation } from "../routes/useDraftConfirmation";
 import { useStudioStore } from "../../stores/studioStore";
 import type { ProjectOverview } from "../../product/types";
-const mocks = vi.hoisted(() => ({ getOverview: vi.fn() }));
-vi.mock("../../product/client", () => ({ productClient: { project: mocks } }));
+const mocks = vi.hoisted(() => ({ getOverview: vi.fn(), shotsList: vi.fn() }));
+vi.mock("../../product/client", () => ({ productClient: { project: mocks, creation: { shotsList: mocks.shotsList } } }));
 beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 afterEach(() => { cleanup(); useStudioStore.getState().resetDraft(); });
 const overview: ProjectOverview = {
@@ -94,5 +94,28 @@ describe("project-first shell and facade overview", () => {
     fireEvent.change(searchInput, { target: { value: "素材库" } });
     fireEvent.keyDown(searchInput, { key: "Enter" });
     expect(navigate).toHaveBeenLastCalledWith({ kind: "library", projectId: "A" });
+  });
+  it("numbers Alt+K palette shots consecutively starting at 1 regardless of 1-based ordinals", async () => {
+    mocks.shotsList.mockResolvedValue([
+      { id: "s1", projectId: "A", name: "开场", ordinal: 1 },
+      { id: "s2", projectId: "A", name: "转场", ordinal: 5 },
+    ]);
+    render(<AppShellV3 route={{ kind: "project", projectId: "A", page: "overview" }} projectName="项目 A" projectSelector={null} navigate={vi.fn()} back={vi.fn()}><p>content</p></AppShellV3>);
+    fireEvent.keyDown(window, { key: "k", altKey: true });
+    expect(await screen.findByRole("option", { name: /第 1 镜 · 开场/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /第 2 镜 · 转场/ })).toBeTruthy();
+  });
+
+  it("opens the quick jump palette with Ctrl+K on a single-shot Create route and ignores global shortcuts when another dialog is open", async () => {
+    const navigate = vi.fn();
+    const { rerender } = render(<AppShellV3 route={{ kind: "create", projectId: "A", stage: "video", shotId: "s1" }} projectName="项目 A" projectSelector={null} navigate={navigate} back={vi.fn()}><p>content</p></AppShellV3>);
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(navigate).not.toHaveBeenCalled();
+    expect(await screen.findByLabelText("搜索页面或镜头")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    rerender(<AppShellV3 route={{ kind: "create", projectId: "A", stage: "video", shotId: "s1" }} projectName="项目 A" projectSelector={null} navigate={navigate} back={vi.fn()}><dialog open aria-label="其他弹窗"><p>modal</p></dialog></AppShellV3>);
+    fireEvent.keyDown(window, { key: "k", altKey: true });
+    expect(screen.queryByLabelText("搜索页面或镜头")).toBeNull();
   });
 });

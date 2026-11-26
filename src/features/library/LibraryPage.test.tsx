@@ -137,6 +137,7 @@ it("M2-2 invalid return project falls back to explicit standalone choice, audio 
  render(<LibraryPage route={{...route,resource:{kind:"asset",id:"audio"}}} navigate={vi.fn()}/>);
  await screen.findByText(/当前普通视频创作未启用纯音频输入/);
  expect(document.querySelector("audio")).toBeTruthy(); expect(screen.queryByRole("button",{name:/用于.*创作/})).toBeNull();
+ expect(screen.queryByText(/0 × 0/)).toBeNull();
 });
 it("A08 historical images remain readable while ordinary Library blocks new image generation",async()=>{
  const navigate=vi.fn();

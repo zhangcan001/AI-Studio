@@ -5,11 +5,12 @@ import type { ShotCompositionUsage, ShotPromptSections, StoryEntity, StoryEntity
 import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { CandidateThumbnail, loadLibraryImageUrl, retainLibraryImage, useMediaLightbox } from "./CreateMediaPreview";
 import "./CreatePage.css";
-import type { GeneratorOption, RunRef } from "../../product/types";
+import { GENERATOR_BINDINGS_CHANGED, type GeneratorOption, type RunRef } from "../../product/types";
 import type { DraftValue } from "../../types/generation";
 import { explicitEntityMentions, parseShotPrompt, resolvePreset, resolvePromptSettings, type ParsedShotPrompt, type ResolutionPresetLike } from "./shotPromptParser";
 import { defaultGenerator, draftFor } from "./createModel";
 import type { VideoInputView } from "../../types/shotVideoInput";
+import { invalidateRuns } from "../../product/runInvalidation";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { candidateReviewSummary, hasPendingReview, reviewLabel, coverAsset, runProgressText, runPercent, shotDuration, shotResolution, storyboardStatusLabels, storyboardStatusText, selectedResultRejected, type StoryboardShot, type StoryboardShotStatus } from "./storyboardModel";
 import { shotDurationMax, editableDurationIssue } from "../../product/shotDuration";
@@ -79,6 +80,15 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
     window.addEventListener(STORY_ENTITIES_CHANGED, bump);
     return () => window.removeEventListener(STORY_ENTITIES_CHANGED, bump);
   }, []);
+  useEffect(() => {
+    const onBindingsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId && detail.projectId !== projectId) return;
+      setGeneratorsRev(v => v + 1);
+    };
+    window.addEventListener(GENERATOR_BINDINGS_CHANGED, onBindingsChanged);
+    return () => window.removeEventListener(GENERATOR_BINDINGS_CHANGED, onBindingsChanged);
+  }, [projectId]);
   useEffect(() => {
     let alive = true;
     setEntities([]); setEntitiesOwner(undefined); setEntitiesError(undefined);
@@ -391,9 +401,9 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
     const active = item.run;
     if (!active || !active.availableActions.includes("CANCEL")) return;
     if (!window.confirm(`取消分镜「${item.name}」的生成？正在生成的视频会被中断，已生成的视频和素材会保留。`)) return;
-    void run(async () => { await productClient.run.cancel(projectId, active.ref); setNote("已取消生成"); onChanged(); });
+    void run(async () => { await productClient.run.cancel(projectId, active.ref); invalidateRuns(projectId, { library: false }); setNote("已取消生成"); onChanged(); });
   };
-  const remove = () => { if (!window.confirm(`删除分镜「${item.name}」？此操作不可撤销。`)) return; void run(async () => { await productClient.creation.deleteShot(projectId, item.id); onChanged(); }); };
+  const remove = () => { if (!window.confirm(`删除分镜「${item.name}」？此操作不可撤销。`)) return; void run(async () => { await productClient.creation.deleteShot(projectId, item.id); invalidateRuns(projectId, { library: false }); onChanged(); }); };
   const selectionRef = item.shot?.selectionRef ?? null;
   useEffect(() => { if (pendingSelection === selectionRef) setPendingSelection(undefined); }, [pendingSelection, selectionRef]);
   const acknowledgedShot = useRef<{ base: string; shot: NonNullable<StoryboardShot["shot"]> } | undefined>(undefined);
@@ -706,7 +716,10 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
     const attempt = generationAttempt.current?.draft === fingerprint ? generationAttempt.current : { draft: fingerprint, key: newKey() };
     generationAttempt.current = attempt;
     const ack = await productClient.creation.generate({ ...base, submissionIdempotencyKey: attempt.key });
-    if (ack.accepted && generationAttempt.current === attempt) generationAttempt.current = null;
+    if (ack.accepted) {
+      if (generationAttempt.current === attempt) generationAttempt.current = null;
+      invalidateRuns(projectId, { library: false });
+    }
     if (token !== scopeEpoch.current) return; // Accepted Queue work remains owned by the backend.
     if (ack.accepted) setAcceptedRun(ack.runRef);
     if (!isCurrent()) { onChanged(); return; }
@@ -748,7 +761,8 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
     const nextPos = atMention.start + token.length;
     setTimeout(() => { if (promptRef.current) { promptRef.current.focus(); promptRef.current.setSelectionRange(nextPos, nextPos); } }, 0);
   };
-  return <article id={`storyboard-shot-${item.id}`} data-focused={focused||undefined} data-drag-over={dragOver||undefined} className="shot-row-card" aria-label={`分镜 ${item.ordinal + 1} ${item.name}`} data-status={item.status}
+  const shotNumber = (position ?? item.ordinal) + 1;
+  return <article id={`storyboard-shot-${item.id}`} data-focused={focused||undefined} data-drag-over={dragOver||undefined} className="shot-row-card" aria-label={`分镜 ${shotNumber} ${item.name}`} data-status={item.status}
     onDragOver={e => { if (disabled || !onMoveTo || !e.dataTransfer.types.includes("application/x-aistudio-shot")) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!dragOver) setDragOver(true); }}
     onDragLeave={() => { if (dragOver) setDragOver(false); }}
     onDrop={e => {
@@ -764,7 +778,7 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
     }}>
     <div className="shot-row-index-col">
       {selectable && <input type="checkbox" aria-label={`选择分镜 ${item.name}`} checked={selected} onChange={onToggleSelect} />}
-      <div className="shot-row-index">{item.ordinal + 1}</div>
+      <div className="shot-row-index">{shotNumber}</div>
       {onMoveTo && totalCount > 1 && <span className="shot-row-drag" draggable={!disabled} title="按住拖拽调整分镜顺序" aria-hidden="true" onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-shot", JSON.stringify({ projectId, shotId: item.id })); e.dataTransfer.effectAllowed = "move"; }}>⋮⋮</span>}
     </div>
     <div className="shot-row-media">
@@ -772,7 +786,7 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
         {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} title="任务完成比例，不是视频推理百分比" aria-label={runProgressText(item.run)}>{item.run ? `${item.run.progress.succeeded+item.run.progress.failed+item.run.progress.cancelled}/${item.run.progress.total}` : "—"}</span>}</div>
       {item.candidates.length > 0 && <div className="shot-row-strip" aria-label="候选结果">{item.candidates.map(asset => <div key={asset.id}>
         <button type="button" title={`预览：${asset.name}`} aria-label={`预览候选 ${asset.name}`} onClick={() => lightbox?.open({kind:"video",projectId,asset})}><CandidateThumbnail asset={asset} playable={false} /></button>
-        <button type="button" title={asset.reviewState==="REJECTED"?"此视频已退回，请先重新审核后再选用。":undefined} disabled={disabled || asset.reviewState==="REJECTED" || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? asset.reviewState === "REJECTED" ? "已选用（已退回）" : "已选用" : `选用 ${asset.name}`}</button>
+        <button type="button" title={asset.reviewState==="REJECTED"?"此视频已退回，请先重新审核后再选用。":undefined} disabled={disabled || asset.reviewState==="REJECTED" || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); invalidateRuns(projectId, { library: false }); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? asset.reviewState === "REJECTED" ? "已选用（已退回）" : "已选用" : `选用 ${asset.name}`}</button>
         <small>{reviewLabel(asset.reviewState)}</small>
       </div>)}</div>}
       <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
@@ -826,7 +840,7 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
         <small>使用封面图（无封面时使用第一张关联图）；保留已有参考顺序及音视频输入，不复制首尾帧，不自动生成。</small>
       </section>}
       <dl className="shot-row-structured" aria-label="分镜描述">
-        <div><dt>镜号</dt><dd>{item.ordinal + 1}</dd></div>
+        <div><dt>镜号</dt><dd>{shotNumber}</dd></div>
         <div><dt>时长</dt><dd>{shotDuration(item.shot)}</dd></div>
         <div><dt>画幅</dt><dd>{shotResolution(item.shot)}</dd></div>
         <div><dt>场景</dt><dd>{chips(byKind.scene)}</dd></div>
@@ -854,7 +868,7 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
         {generators.map(g => <option key={g.selectionRef} value={g.selectionRef} disabled={!g.availability}>{g.mode.toUpperCase()} · {g.name}</option>)}
       </select></label>
       {pendingSelection && !working && <button type="button" onClick={onChanged}>刷新已保存的镜头设置</button>}
-      <label><span>镜号</span><output>{item.ordinal + 1}</output></label>
+      <label><span>镜号</span><output>{shotNumber}</output></label>
       <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => {setName(e.target.value);setField(draftKey,"name",e.target.value===item.name?undefined:e.target.value);}} onBlur={e => { if(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]"))return; if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "name"; else saveName(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
       {durationField
         ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} aria-invalid={Boolean(durationIssue)} aria-describedby={durationIssue ? `duration-issue-${projectId}-${item.id}` : undefined} onChange={e => changeDuration(e.currentTarget)} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "duration"; else if(!(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]")))saveDuration(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>

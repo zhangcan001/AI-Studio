@@ -153,12 +153,12 @@ export function ImageAssetPicker({
         }
         const query: LibraryQuery = {
           category: "images", keyword: keyword.trim() || null, favoriteOnly: null,
-          tagId, sourceKind: null, cursor: null, limit: 100,
+          tagId, sourceKind: "source", cursor: null, limit: 100,
         };
         currentQuery.current = query;
         const page = await listFn(projectId, query);
         if (!alive || !current()) return;
-        setItems(page.items.filter(i => i.resourceRef.kind === "asset"));
+        setItems(page.items.filter(i => i.resourceRef.kind === "asset" && i.sourceOrigin !== "generated"));
         setNextCursor(page.nextCursor ?? null); setLoadedScope(scope);
       } catch (cause) {
         if (alive && current()) {
@@ -184,7 +184,7 @@ export function ImageAssetPicker({
       setItems(previous => {
         const ids = new Set(previous.map(item => item.resourceRef.id));
         return [...previous, ...page.items.filter(item => {
-          if (item.resourceRef.kind !== "asset" || ids.has(item.resourceRef.id)) return false;
+          if (item.resourceRef.kind !== "asset" || item.sourceOrigin === "generated" || ids.has(item.resourceRef.id)) return false;
           ids.add(item.resourceRef.id); return true;
         })];
       });
@@ -254,13 +254,13 @@ export function ImageAssetPicker({
       {busy && <p role="status">正在加载图片…</p>}
       {!busy && !libraryRows.length && !localRows.length && <p className="image-asset-picker-empty">没有可选用的图片。可从电脑导入，或先在资源库添加素材。</p>}
       <div className="image-asset-picker-grid" role="listbox" aria-label="图片网格">
-        {localRows.map(a => <button key={`local-${a.id}`} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: a.id, mediaKind: "image" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(a.id); onClose(); }}>
+        {localRows.map(a => <button key={`local-${a.id}`} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: a.id, mediaKind: "image", sourceOrigin: "source" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(a.id); onClose(); }}>
           <PickerTileThumb projectId={projectId} assetId={a.id} name={a.name} enqueue={thumbQueue.current!} />
           <span className="image-asset-tile-name">{a.name}</span>
         </button>)}
         {libraryRows.map(item => {
           const id = item.resourceRef.kind === "asset" ? item.resourceRef.id : "";
-          return <button key={id} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: id, mediaKind: "image" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(id); onClose(); }}>
+          return <button key={id} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: id, mediaKind: "image", sourceOrigin: item.sourceOrigin ?? "source" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(id); onClose(); }}>
             <PickerTileThumb projectId={projectId} assetId={id} name={item.title} thumbnailAvailable={item.thumbnailAvailable} enqueue={thumbQueue.current!} />
             <span className="image-asset-tile-name">{item.title}</span>
           </button>;

@@ -54,11 +54,24 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
       clearTimeout(timer);
       timer = setTimeout(loadActive, 250);
     });
-    const poll = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") loadActive();
-    }, 8000);
-    return () => { alive = false; clearTimeout(timer); window.clearInterval(poll); unsubscribe(); };
+    return () => { alive = false; clearTimeout(timer); unsubscribe(); };
   }, [projectId]);
+
+  const hasActiveRuns = Boolean(projectId && activeRuns?.projectId === projectId && activeRuns.items.length > 0);
+  useEffect(() => {
+    const listRuns = productClient.run?.list;
+    if (!projectId || !hasActiveRuns || typeof listRuns !== "function") return;
+    let alive = true;
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      void Promise.resolve().then(() => listRuns(projectId, "active", null)).then(page => {
+        if (!alive || !page?.items) return;
+        const owned = page.items.filter(item => item.projectId === projectId && ["QUEUED", "RUNNING", "PAUSED"].includes(item.status));
+        setActiveRuns({ projectId, items: owned });
+      }).catch(() => { /* Topbar pill is strictly opportunistic and never blocks workspace rendering */ });
+    }, 8000);
+    return () => { alive = false; window.clearInterval(poll); };
+  }, [projectId, hasActiveRuns]);
 
   useEffect(() => {
     if (!paletteOpen) return;
@@ -80,16 +93,22 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
     return () => { alive = false; };
   }, [paletteOpen, projectId]);
 
+  const createShotId = route.kind === "create" ? route.shotId : undefined;
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (event.repeat) return;
       const key = event.key.toLowerCase();
-      if ((event.altKey && key === "k") || ((event.ctrlKey || event.metaKey) && event.shiftKey && key === "k")) {
+      const isPaletteShortcut = (event.altKey && key === "k") || ((event.ctrlKey || event.metaKey) && event.shiftKey && key === "k");
+      const isQuickCreateShortcut = (event.ctrlKey || event.metaKey) && !event.shiftKey && key === "k" && Boolean(projectId);
+      if (!isPaletteShortcut && !isQuickCreateShortcut) return;
+      const openDialog = document.querySelector("dialog[open]");
+      if (openDialog && openDialog !== paletteDialog.current) return;
+      if (isPaletteShortcut || (isQuickCreateShortcut && route.kind === "create" && createShotId)) {
         event.preventDefault();
         setPaletteOpen(open => !open);
         return;
       }
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && key === "k" && projectId) {
+      if (isQuickCreateShortcut && projectId) {
         event.preventDefault();
         // All exits use the host's existing draft/project navigation guard.
         navigate({ kind: "create", projectId, stage: "video" });
@@ -97,7 +116,7 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, [projectId, navigate]);
+  }, [projectId, navigate, route.kind, createShotId]);
 
   useEffect(() => { document.getElementById("v3-main")?.focus({ preventScroll: true }); }, [route]);
   const settingsReturn = route.kind === "system-settings" ? route.returnTo : route;
@@ -130,14 +149,14 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
         { id: "page-projects", label: "项目管理与归档备份", group: "页面", target: { kind: "project-list" } },
       );
       const shots = paletteShots?.projectId === projectId ? paletteShots.items : [];
-      for (const shot of shots) {
+      shots.forEach((shot, idx) => {
         items.push({
           id: `shot-${shot.id}`,
-          label: `第 ${shot.ordinal + 1} 镜 · ${shot.name}`,
+          label: `第 ${idx + 1} 镜 · ${shot.name}`,
           group: "镜头",
           target: { kind: "create", projectId, stage: "video", shotId: shot.id },
         });
-      }
+      });
     } else {
       items.push({ id: "page-projects", label: "项目列表", group: "页面", target: { kind: "project-list" } });
     }
@@ -154,8 +173,8 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
   return <div className="v3-shell" data-collapsed={collapsed}>
     <a className="v3-skip" href="#v3-main">跳到主要内容</a>
     <aside className="v3-sidebar">
-      <button type="button" className="v3-brand" title="AI Studio · MiniMax Video" onClick={() => navigate({ kind: "project-list" })}>
-        <span className="v3-brand-mark" aria-hidden="true">AI</span><span className="v3-nav-label"><strong>AI Studio</strong><small>MiniMax Video</small></span>
+      <button type="button" className="v3-brand" title="AI Studio · 视频创作工作台" onClick={() => navigate({ kind: "project-list" })}>
+        <span className="v3-brand-mark" aria-hidden="true">AI</span><span className="v3-nav-label"><strong>AI Studio</strong><small>视频创作工作台</small></span>
       </button>
       <div className="v3-project-context" title={projectName ?? "选择项目"}><span className="v3-nav-label">当前项目</span><strong className="v3-nav-label">{projectName ?? "选择项目"}</strong></div>
       <ShellNavigation route={route} projectId={projectId} navigate={navigate} />
@@ -173,7 +192,6 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
           </>}
           <button type="button" title="高级工具" onClick={() => navigate({ kind: "system-settings", section: "advanced-tools", returnTo: settingsReturn })}>高级工具</button>
         </nav>}
-        {route.kind === "library" && projectId && <button type="button" title="提示词" onClick={() => navigate({ kind: "library", projectId, filter: "prompts" })}>提示词</button>}
       </div>
       <button type="button" className="v3-collapse" aria-label={collapsed ? "展开导航" : "折叠导航"} title={collapsed ? "展开导航" : "折叠导航"} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}><ShellIcon name="collapse" /><span className="v3-nav-label">折叠导航</span></button>
     </aside>

@@ -131,7 +131,7 @@ function App() {
       return { ...current, comfy: status };
     });
   }, []);
-  useRuntimeStatusMonitor(Boolean(bootstrapState) && route.kind === "create", applyRuntimeStatus, getComfyStatus);
+  useRuntimeStatusMonitor(Boolean(bootstrapState), applyRuntimeStatus, getComfyStatus);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
@@ -290,7 +290,7 @@ function App() {
     const preserveCreateDraft = preservesCreateDraftForSettings(route, next, useStudioStore.getState().creationLabReturn?.scope);
     let discardApproved=false;
     if (leavesStoryboardWithDrafts(route,next) || (!preserveCreateDraft && shotDraftDirty && (nextLegacy.workspace !== "shots" || nextLegacy.projectId !== activeProjectId || nextLegacy.shotId !== resumeShotId || nextLegacy.section !== activeStudioSection))) {
-      if (!await confirmDraftDiscard(hasRowDrafts()?rowLeaveMessage:route.kind==="library"?"当前页面及项目有未保存的修改。离开会放弃这些修改，是否继续？":"镜头有未保存的修改。离开会放弃这些修改，是否继续？")) return false;
+      if (!await confirmDraftDiscard(hasRowDrafts()?rowLeaveMessage:route.kind==="library"?"当前页面及项目有未保存的修改。离开会放弃这些修改，是否继续？":route.kind==="project-settings"&&route.section==="generators"?"当前生成器设置有未保存的修改。离开会放弃这些修改，是否继续？":"镜头有未保存的修改。离开会放弃这些修改，是否继续？")) return false;
       discardApproved=true;
     }
     if (!await allowProjectSwitch(routeProjectId(next),discardApproved)) return false;
@@ -326,7 +326,7 @@ function App() {
     if (!projects.some((project) => project.id === projectId)) return;
     if (destination) { await navigateLegacy({ projectId, workspace: destination, section }); return; }
     const discardApproved=(shotDraftDirty||hasRowDrafts()) && projectId !== activeProjectId;
-    if (discardApproved && !await confirmDraftDiscard(hasRowDrafts()?rowLeaveMessage:route.kind==="library"?"当前页面及项目有未保存的修改。切换项目会放弃这些修改，是否继续？":"镜头有未保存的修改。切换项目会放弃这些修改，是否继续？")) return;
+    if (discardApproved && !await confirmDraftDiscard(hasRowDrafts()?rowLeaveMessage:route.kind==="library"?"当前页面及项目有未保存的修改。切换项目会放弃这些修改，是否继续？":route.kind==="project-settings"&&route.section==="generators"?"当前生成器设置有未保存的修改。切换项目会放弃这些修改，是否继续？":"镜头有未保存的修改。切换项目会放弃这些修改，是否继续？")) return;
     if (!await allowProjectSwitch(projectId,discardApproved)) return;
     setError(null);
     switchProject(projectId);
@@ -501,7 +501,7 @@ function App() {
       <ShellHost
         route={route}
         navigate={navigate}
-        back={async () => { if ((!shotDraftDirty&&!hasRowDrafts()) || await confirmDraftDiscard(hasRowDrafts()?rowLeaveMessage:"镜头有未保存的修改。返回会放弃这些修改，是否继续？")) back(); }}
+        back={async () => { if ((!shotDraftDirty&&!hasRowDrafts()) || await confirmDraftDiscard(hasRowDrafts()?rowLeaveMessage:route.kind==="project-settings"&&route.section==="generators"?"当前生成器设置有未保存的修改。离开会放弃这些修改，是否继续？":"镜头有未保存的修改。返回会放弃这些修改，是否继续？")) back(); }}
         projectName={activeProject ? projectDisplayName(activeProject.id, activeProject.name) : undefined}
         projectSelector={projectSelector}
         runtime={comfy}
@@ -660,7 +660,7 @@ function App() {
             onOpenShot={(shotId) => openShot(shotId)}
           />
         )}
-        {route.kind === "project-settings" && route.section === "generators" && <GeneratorSettingsPage key={route.projectId} projectId={route.projectId} navigate={navigate} />}
+        {route.kind === "project-settings" && route.section === "generators" && <GeneratorSettingsPage key={route.projectId} projectId={route.projectId} navigate={navigate} onDirtyChange={setShotDraftDirty} />}
         {(route.kind === "project-list" || (route.kind === "project-settings" && !["generators", "advanced-workflows", "advanced-project", "advanced-shots", "advanced-production", "advanced-review", "advanced-tasks"].includes(route.section))) && (
           <ProjectWorkspace
             showWorkflowSettings={false}

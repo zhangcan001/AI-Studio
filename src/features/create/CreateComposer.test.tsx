@@ -614,3 +614,227 @@ it("edits Flex six-step resolution, duration and mixed references without changi
   expect(screen.getByLabelText("包变体")).toHaveProperty("value", flex.selectionRef);
   expect(api.generate).not.toHaveBeenCalled();
 });
+
+it("skips unavailable/non-saveable assets and duplicate last_frame when carrying from previous shot", async () => {
+  const flOptions = [
+    ...options,
+    {
+      ...options[1],
+      selectionRef: "opaque-fl",
+      mode: "FL2V",
+      fields: [prompt, { type: "image", key: "first_frame", label: "First", required: true }, { type: "image", key: "last_frame", label: "Last", required: true }],
+    } as unknown as GeneratorOption,
+  ];
+  api.generatorsList.mockResolvedValue(flOptions);
+  const shots = [{ id: "prev", name: "上一镜", ordinal: 0 }, { id: "one", name: "镜头一", ordinal: 1 }];
+  api.get.mockImplementation(async (projectId, id) => id === "prev"
+    ? {
+      ...context(projectId),
+      shots,
+      selectedShot: { ...context(projectId).selectedShot!, summary: shots[0], selectionRef: "opaque-fl", referenceAssetIds: ["deleted-asset", "same-as-last"] },
+      mediaInputs: [{ id: "same-as-last", name: "当前尾帧", mediaKind: "image" }],
+    }
+    : { ...context(projectId), shots, selectedShot: { ...context(projectId).selectedShot!, summary: shots[1], selectionRef: "opaque-fl" } });
+  saved.set("opaque-fl", {
+    selectionRef: "opaque-fl",
+    token: null,
+    inputs: [{ inputKey: "last_frame", ordinal: 0, assetId: "same-as-last" }],
+    assets: [{ id: "same-as-last", name: "当前尾帧", mediaKind: "image" }, { id: "valid-first", name: "可用首帧", mediaKind: "image" }],
+  });
+  api.inputsGet.mockImplementation(scope => scope.shotId === "prev"
+    ? Promise.resolve({
+      selectionRef: "opaque-fl",
+      token: null,
+      inputs: [
+        { inputKey: "last_frame", ordinal: 0, assetId: "deleted-asset" },
+        { inputKey: "first_frame", ordinal: 0, assetId: "same-as-last" },
+      ],
+      assets: [{ id: "same-as-last", name: "当前尾帧", mediaKind: "image" }],
+    })
+    : Promise.resolve(view(scope.selectionRef)));
+  render(<CreatePage route={route} runtime={{ ...runtime, devices: [] }} navigate={nav} />);
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  fireEvent.click(screen.getByRole("button", { name: "沿用上一镜画面" }));
+  expect(await screen.findByText(/与当前尾帧相同/)).toBeTruthy();
+  expect(useStudioStore.getState().values.first_frame).toBeUndefined();
+  expect(api.inputsSave).not.toHaveBeenCalled();
+
+  api.get.mockImplementation(async (projectId, id) => id === "prev"
+    ? {
+      ...context(projectId),
+      shots,
+      selectedShot: { ...context(projectId).selectedShot!, summary: shots[0], selectionRef: "opaque-fl", referenceAssetIds: ["deleted-asset"] },
+      mediaInputs: [],
+    }
+    : { ...context(projectId), shots, selectedShot: { ...context(projectId).selectedShot!, summary: shots[1], selectionRef: "opaque-fl" } });
+  api.inputsGet.mockImplementation(scope => scope.shotId === "prev"
+    ? Promise.reject(new Error("inputs unavailable"))
+    : Promise.resolve(view(scope.selectionRef)));
+  fireEvent.click(screen.getByRole("button", { name: "沿用上一镜画面" }));
+  expect(await screen.findByText(/尚未绑定首尾帧或参考图片/)).toBeTruthy();
+  expect(useStudioStore.getState().values.first_frame).toBeUndefined();
+  expect(api.inputsSave).not.toHaveBeenCalled();
+
+  api.inputsGet.mockImplementation(scope => scope.shotId === "prev"
+    ? Promise.resolve({
+      selectionRef: "opaque-fl",
+      token: null,
+      inputs: [
+        { inputKey: "last_frame", ordinal: 0, assetId: "deleted-asset" },
+        { inputKey: "first_frame", ordinal: 0, assetId: "same-as-last" },
+        { inputKey: "reference_images", ordinal: 0, assetId: "valid-first" },
+      ],
+      assets: [
+        { id: "same-as-last", name: "当前尾帧", mediaKind: "image" },
+        { id: "valid-first", name: "可用首帧", mediaKind: "image" },
+      ],
+    })
+    : Promise.resolve(view(scope.selectionRef)));
+  fireEvent.click(screen.getByRole("button", { name: "沿用上一镜画面" }));
+  await waitFor(() => expect(useStudioStore.getState().values.first_frame).toEqual({ type: "image_asset", assetId: "valid-first" }));
+});
+
+it("does not resurrect an ineligible prevView input via selectedShot referenceAssetIds", async () => {
+  const flOptions = [
+    ...options,
+    {
+      ...options[1],
+      selectionRef: "opaque-fl",
+      mode: "FL2V",
+      fields: [prompt, { type: "image", key: "first_frame", label: "First", required: true }, { type: "image", key: "last_frame", label: "Last", required: true }],
+    } as unknown as GeneratorOption,
+  ];
+  api.generatorsList.mockResolvedValue(flOptions);
+  const shots = [{ id: "prev", name: "上一镜", ordinal: 0 }, { id: "one", name: "镜头一", ordinal: 1 }];
+  api.get.mockImplementation(async (projectId, id) => id === "prev"
+    ? {
+      ...context(projectId),
+      shots,
+      selectedShot: { ...context(projectId).selectedShot!, summary: shots[0], selectionRef: "opaque-fl", referenceAssetIds: ["gen-img"] },
+      mediaInputs: [{ id: "gen-img", name: "generated.png", mediaKind: "image" }],
+    }
+    : { ...context(projectId), shots, selectedShot: { ...context(projectId).selectedShot!, summary: shots[1], selectionRef: "opaque-fl" } });
+  saved.set("opaque-fl", {
+    selectionRef: "opaque-fl",
+    token: null,
+    inputs: [],
+    assets: [],
+  });
+  api.inputsGet.mockImplementation(scope => scope.shotId === "prev"
+    ? Promise.resolve({
+      selectionRef: "opaque-fl",
+      token: null,
+      inputs: [{ inputKey: "first_frame", ordinal: 0, assetId: "gen-img" }],
+      assets: [],
+    })
+    : Promise.resolve(view(scope.selectionRef)));
+  render(<CreatePage route={{ kind: "create", projectId: "p", stage: "video", shotId: "one" }} runtime={{ ...runtime, devices: [] }} navigate={vi.fn()} />);
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  fireEvent.click(screen.getByRole("button", { name: "沿用上一镜画面" }));
+  expect(await screen.findByText(/尚未绑定首尾帧或参考图片/)).toBeTruthy();
+  expect(useStudioStore.getState().values.first_frame).toBeUndefined();
+});
+
+it("filters legacy referenceAssetIds fallback against eligible prevView.assets when prevView has no inputs", async () => {
+  const flOptions = [
+    ...options,
+    {
+      ...options[1],
+      selectionRef: "opaque-fl",
+      mode: "FL2V",
+      fields: [prompt, { type: "image", key: "first_frame", label: "First", required: true }, { type: "image", key: "last_frame", label: "Last", required: true }],
+    } as unknown as GeneratorOption,
+  ];
+  api.generatorsList.mockResolvedValue(flOptions);
+  const shots = [{ id: "prev", name: "上一镜", ordinal: 0 }, { id: "one", name: "镜头一", ordinal: 1 }];
+  api.get.mockImplementation(async (projectId, id) => id === "prev"
+    ? {
+      ...context(projectId),
+      shots,
+      selectedShot: { ...context(projectId).selectedShot!, summary: shots[0], selectionRef: "opaque-fl", referenceAssetIds: ["gen-img", "imported-img"] },
+      mediaInputs: [
+        { id: "gen-img", name: "generated.png", mediaKind: "image" },
+        { id: "imported-img", name: "imported.png", mediaKind: "image" },
+      ],
+    }
+    : { ...context(projectId), shots, selectedShot: { ...context(projectId).selectedShot!, summary: shots[1], selectionRef: "opaque-fl" } });
+  saved.set("opaque-fl", {
+    selectionRef: "opaque-fl",
+    token: null,
+    inputs: [],
+    assets: [{ id: "imported-img", name: "imported.png", mediaKind: "image" }],
+  });
+  api.inputsGet.mockImplementation(scope => scope.shotId === "prev"
+    ? Promise.resolve({
+      selectionRef: "opaque-fl",
+      token: null,
+      inputs: [],
+      assets: [{ id: "imported-img", name: "imported.png", mediaKind: "image" }],
+    })
+    : Promise.resolve(view(scope.selectionRef)));
+  render(<CreatePage route={{ kind: "create", projectId: "p", stage: "video", shotId: "one" }} runtime={{ ...runtime, devices: [] }} navigate={vi.fn()} />);
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  fireEvent.click(screen.getByRole("button", { name: "沿用上一镜画面" }));
+  await waitFor(() => expect(useStudioStore.getState().values.first_frame).toEqual({ type: "image_asset", assetId: "imported-img" }));
+  expect(api.inputsSave).not.toHaveBeenCalledWith(expect.objectContaining({
+    inputs: expect.arrayContaining([expect.objectContaining({ assetId: "gen-img" })]),
+  }));
+});
+
+it("rejects dropping a generated image into first_frame and confirms generated video drops", async () => {
+  const flAndRefOptions = [
+    ...options,
+    {
+      ...options[1],
+      selectionRef: "opaque-fl",
+      mode: "FL2V",
+      fields: [prompt, { type: "image", key: "first_frame", label: "First", required: true }],
+    },
+    {
+      ...options[2],
+      selectionRef: "opaque-refv",
+      mode: "REF2VA",
+      fields: [prompt, { type: "videos", key: "reference_videos", label: "Videos", required: false, minItems: 0, maxItems: 3 }],
+    },
+  ] as unknown as GeneratorOption[];
+  api.generatorsList.mockResolvedValue(flAndRefOptions);
+  saved.set("opaque-refv", {
+    selectionRef: "opaque-refv",
+    token: null,
+    inputs: [],
+    assets: [{ id: "gen-vid", name: "候选视频", mediaKind: "video" }],
+  });
+
+  await start("opaque-fl");
+  const frameSlot = document.querySelector('[aria-label="首帧输入"]')!;
+  fireEvent.drop(frameSlot, {
+    dataTransfer: {
+      types: ["application/x-aistudio-asset"],
+      getData: (t: string) => t === "application/x-aistudio-asset"
+        ? JSON.stringify({ projectId: "owned", assetId: "gen-img", mediaKind: "image", sourceOrigin: "generated" })
+        : "",
+    },
+  });
+  expect(await screen.findByText(/历史生成图片不能作为首帧\/尾帧或参考图/)).toBeTruthy();
+  expect(useStudioStore.getState().values.first_frame).toBeUndefined();
+
+  fireEvent.change(screen.getByLabelText("选择生成器"), { target: { value: "opaque-refv" } });
+  await waitFor(() => expect(composer().getAttribute("data-inputs")).toBe("saved"));
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  const videoSlot = document.querySelector('[aria-label="参考视频输入"]')!;
+  const dropVideo = () => fireEvent.drop(videoSlot, {
+    dataTransfer: {
+      types: ["application/x-aistudio-asset"],
+      getData: (t: string) => t === "application/x-aistudio-asset"
+        ? JSON.stringify({ projectId: "owned", assetId: "gen-vid", mediaKind: "video", sourceOrigin: "generated" })
+        : "",
+    },
+  });
+  dropVideo();
+  expect(confirmSpy).toHaveBeenCalledTimes(1);
+  expect(useStudioStore.getState().values.reference_videos).toBeUndefined();
+
+  dropVideo();
+  expect(confirmSpy).toHaveBeenCalledTimes(2);
+  expect(useStudioStore.getState().values.reference_videos).toEqual({ type: "video_assets", assetIds: ["gen-vid"] });
+});

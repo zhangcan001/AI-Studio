@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
+import { invalidateRuns } from "../../product/runInvalidation";
 import { invalidateVideoInputs, subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import type { GeneratorOption } from "../../product/types";
 import type { VideoInputAsset, VideoInputKey, VideoInputView } from "../../types/shotVideoInput";
@@ -160,6 +161,7 @@ export function usePersistentVideoInputs(route: CreateRoute, generator: Generato
     try {
       const result = await productClient.creation.assetsImport(route.projectId, folder);
       if (own !== currentOwner.current || token !== epoch.current) return [];
+      if (!result.cancelled && result.imported.length > 0) invalidateRuns(route.projectId);
       setImportReceipt(result.cancelled ? "已取消导入，未应用素材。" : `已导入 ${result.imported.length} 项；失败 ${result.failed.length} 项。请选择明确输入槽。`);
       const previous = liveState.current;
       if (previous?.owner === own) acceptView(own, { ...previous.view, assets: [...previous.view.assets, ...result.imported.filter(a => !previous.view.assets.some(b=>b.id===a.id))] });

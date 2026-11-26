@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import type { StoryEntity } from "../../types/storyEntity";
-import { entityAvatarAssetId } from "../../types/storyEntity";
+import { STORY_ENTITIES_CHANGED, entityAvatarAssetId } from "../../types/storyEntity";
 import { normalizeProductError } from "../../product/errors";
 import { useLibraryImageUrl } from "./CreateMediaPreview";
 
@@ -58,7 +58,17 @@ function EntityAvatar({ projectId, entity }: { projectId: string; entity: StoryE
 
 /** Avatar chips for story entities bound to a shot (storyboard cards / detail). */
 export function ShotEntityChips({ projectId, shotId, editable = false }: { projectId: string; shotId: string; editable?: boolean }) {
-  const binding = useShotEntityBindings(projectId, shotId);
+  const [entityRev, setEntityRev] = useState(0);
+  useEffect(() => {
+    const onEntitiesChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId && detail.projectId !== projectId) return;
+      setEntityRev(v => v + 1);
+    };
+    window.addEventListener(STORY_ENTITIES_CHANGED, onEntitiesChanged);
+    return () => window.removeEventListener(STORY_ENTITIES_CHANGED, onEntitiesChanged);
+  }, [projectId]);
+  const binding = useShotEntityBindings(projectId, shotId, entityRev);
   const { entities, busy } = binding;
   const [all, setAll] = useState<StoryEntity[]>([]);
 
@@ -68,7 +78,7 @@ export function ShotEntityChips({ projectId, shotId, editable = false }: { proje
     setAll([]);
     if (editable && typeof listAll === "function") void listAll(projectId, null).then(list => { if (alive) setAll(list); }).catch(() => undefined);
     return () => { alive = false; };
-  }, [projectId, shotId, editable]);
+  }, [projectId, shotId, editable, entityRev]);
 
   async function toggle(entityId: string) {
     if (!editable || busy || !binding.ready) return;

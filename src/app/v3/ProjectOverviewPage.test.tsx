@@ -89,3 +89,17 @@ it("refreshes the overview after same-project completion", async () => {
   expect(mocks.getOverview).toHaveBeenCalledTimes(2);
   expect(screen.getByRole("button", { name: "查看完成的结果" })).toBeTruthy();
 });
+
+it("refreshes an idle overview immediately when statusOnly invalidation signals new active work", async () => {
+  const activeOverview = { ...fixture(ready, "A", "ACTIVE_PRODUCTION"), activeRuns: { runningBatches: 1, pausedBatches: 0, activeTasks: 1 } };
+  mocks.getOverview
+    .mockResolvedValueOnce(fixture(ready, "A", "NO_SHOTS"))
+    .mockResolvedValueOnce(activeOverview);
+  render(<ProjectOverviewPage projectId="A" navigate={vi.fn()} />);
+  await screen.findByRole("button", { name: "创建第一个镜头" });
+  expect(screen.getByText("运行中队列 0 · 暂停队列 0 · 活动任务 0")).toBeTruthy();
+
+  await act(async () => { invalidateRuns("A", { statusOnly: true }); });
+  expect(mocks.getOverview).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("运行中队列 1 · 暂停队列 0 · 活动任务 1")).toBeTruthy();
+});

@@ -18,7 +18,12 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const lock = useRef(false), epoch = useRef(0);
+  const mounted = useRef(true);
+  const navEpoch = useRef(0);
   const [navigationNote,setNavigationNote]=useState<string>();
+  const navScope = `${projectId}:${item.id}`;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { ++navEpoch.current; setNavigationNote(undefined); }, [navScope]);
   const comments = useStudioStore(state => state.reviewComments);
   const commentKey = (assetId: string) => JSON.stringify([projectId, item.run?.ref.source, item.run?.ref.id, assetId]);
   const hasDraft = () => {
@@ -81,10 +86,10 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
   };
   const next = async()=>{
     if(!onNext||lock.current||(hasDraft()&&!window.confirm("审核说明尚未提交，本次会话会保留草稿。确定离开？")))return;
-    lock.current=true;setBusy(true);const token=epoch.current;setNavigationNote(undefined);
-    try{const message=await onNext();if(token===epoch.current&&message)setNavigationNote(message);}
-    catch(cause){if(token===epoch.current)setError(normalizeProductError(cause).message);}
-    finally{lock.current=false;if(token===epoch.current)setBusy(false);}
+    lock.current=true;setBusy(true);const navToken=++navEpoch.current;setNavigationNote(undefined);
+    try{const message=await onNext();if(mounted.current&&navToken===navEpoch.current&&message)setNavigationNote(message);}
+    catch(cause){if(mounted.current&&navToken===navEpoch.current)setError(normalizeProductError(cause).message);}
+    finally{lock.current=false;if(mounted.current)setBusy(false);}
   };
   const review = (r: RunResult, decision: "APPROVED" | "REJECTED") => {
     const key = commentKey(r.assetId), comment = comments[key] ?? "";

@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { StoryEntityCategorySection } from "./StoryEntityCategorySection";
 import type { AssetView } from "../../types/asset";
-import type { StoryEntityKind } from "../../types/storyEntity";
+import { STORY_ENTITIES_CHANGED, type StoryEntityKind } from "../../types/storyEntity";
 import { useStudioStore } from "../../stores/studioStore";
 
-const pickerMock = vi.hoisted(() => ({ onImportFile: undefined as (() => void) | undefined }));
+const pickerMock = vi.hoisted(() => ({
+  onImportFile: undefined as (() => void) | undefined,
+  onSelect: undefined as ((id: string) => void) | undefined,
+}));
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), imageGet: vi.fn(), thumbnailGet: vi.fn(), importImages: vi.fn() }));
 vi.mock("../../product/client", () => ({
   productClient: {
@@ -15,8 +18,9 @@ vi.mock("../../product/client", () => ({
   },
 }));
 vi.mock("../../components/ImageAssetPicker", () => ({
-  ImageAssetPicker: (props: { open?: boolean; onImportFile?: () => void }) => {
+  ImageAssetPicker: (props: { open?: boolean; onImportFile?: () => void; onSelect?: (id: string) => void }) => {
     pickerMock.onImportFile = props.open ? props.onImportFile : undefined;
+    pickerMock.onSelect = props.open ? props.onSelect : undefined;
     return props.open ? <div data-testid="mock-picker" /> : null;
   },
 }));
@@ -173,5 +177,208 @@ it("ignores late importImages when switching project/kind and surfaces picker on
   fireEvent.click(screen.getByRole("button", { name: "选择封面" }));
   expect(pickerMock.onImportFile).toBeTypeOf("function");
   await act(async () => { pickerMock.onImportFile?.(); });
-  expect((await screen.findByRole("alert")).textContent).toContain("bad.png：损坏的图片");
+  const dialog = screen.getByRole("dialog", { name: "新建场景" });
+  expect(within(dialog).getByRole("alert").textContent).toContain("bad.png：损坏的图片");
+});
+
+it("still dispatches STORY_ENTITIES_CHANGED when unmounted immediately after saving", async () => {
+  const entity = { id: "e-save", projectId: "p", kind: "character" as const, name: "林风", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
+  api.list.mockResolvedValue([entity]);
+  let resolveUpdate!: () => void;
+  api.update.mockImplementationOnce(() => new Promise<void>(resolve => { resolveUpdate = resolve; }));
+  const listener = vi.fn();
+  window.addEventListener(STORY_ENTITIES_CHANGED, listener);
+  try {
+    const view = render(<StoryEntityCategorySection projectId="p" kind="character" />);
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "林风新版" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+    view.unmount();
+    await act(async () => { resolveUpdate(); });
+    expect(listener).toHaveBeenCalledTimes(1);
+  } finally {
+    window.removeEventListener(STORY_ENTITIES_CHANGED, listener);
+  }
+});
+
+it("does not let an earlier cover import overwrite a newer explicit cover selection", async () => {
+  const entity = { id: "e-cover", projectId: "p", kind: "character" as const, name: "Lin", description: "", coverAssetId: "img-1", imageAssetIds: ["img-1", "img-2"], createdAt: "", updatedAt: "" };
+  api.list.mockResolvedValue([entity]);
+  api.update.mockResolvedValue(entity);
+  let resolveImport!: (val: { imported: AssetView[]; failed: { displayName: string; error: string }[]; cancelled: boolean }) => void;
+  api.importImages.mockImplementationOnce(() => new Promise(resolve => { resolveImport = resolve; }));
+
+  render(<StoryEntityCategorySection projectId="p" kind="character" />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+  fireEvent.click(screen.getByRole("button", { name: "选择封面" }));
+  act(() => { pickerMock.onImportFile?.(); });
+  await waitFor(() => expect(api.importImages).toHaveBeenCalledTimes(1));
+
+  fireEvent.click(screen.getByRole("button", { name: "将图片 img-2 设为封面" }));
+  await act(async () => {
+    resolveImport({
+      imported: [{ id: "late-cover", name: "late.png", originalName: "late.png" } as AssetView],
+      failed: [],
+      cancelled: false,
+    });
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(api.update).toHaveBeenCalledWith(expect.objectContaining({ id: "e-cover", coverAssetId: "img-2" })));
+});
+
+it("keeps import lock isolated per import operation across project switches", async () => {
+  const eA = { id: "e-a", projectId: "p-a", kind: "character" as const, name: "甲", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
+  const eB = { id: "e-b", projectId: "p-b", kind: "character" as const, name: "乙", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
+  api.list.mockImplementation(async (projectId: string) => (projectId === "p-a" ? [eA] : [eB]));
+  type ImportResult = { imported: AssetView[]; failed: { displayName: string; error: string }[]; cancelled: boolean };
+  let resolveA!: (v: ImportResult) => void;
+  let resolveB!: (v: ImportResult) => void;
+  api.importImages
+    .mockImplementationOnce(() => new Promise<ImportResult>(resolve => { resolveA = resolve; }))
+    .mockImplementationOnce(() => new Promise<ImportResult>(resolve => { resolveB = resolve; }));
+
+  const { rerender } = render(<StoryEntityCategorySection projectId="p-a" kind="character" />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+  fireEvent.click(screen.getByRole("button", { name: "选择封面" }));
+  act(() => { pickerMock.onImportFile?.(); });
+  await waitFor(() => expect(api.importImages).toHaveBeenCalledWith("p-a"));
+
+  rerender(<StoryEntityCategorySection projectId="p-b" kind="character" />);
+  await screen.findByText("乙");
+  fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+  fireEvent.click(screen.getByRole("button", { name: "选择封面" }));
+  act(() => { pickerMock.onImportFile?.(); });
+  await waitFor(() => expect(api.importImages).toHaveBeenCalledWith("p-b"));
+
+  await act(async () => { resolveA({ imported: [], failed: [], cancelled: true }); });
+  act(() => { pickerMock.onImportFile?.(); });
+  expect(api.importImages).toHaveBeenCalledTimes(2);
+
+  await act(async () => { resolveB({ imported: [], failed: [], cancelled: true }); });
+});
+
+it("clears previous notice when opening another entity editor", async () => {
+  const e1 = { id: "e-1", projectId: "p", kind: "character" as const, name: "角色一", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
+  const e2 = { id: "e-2", projectId: "p", kind: "character" as const, name: "角色二", description: "", coverAssetId: null, imageAssetIds: [], createdAt: "", updatedAt: "" };
+  api.list.mockResolvedValue([e1, e2]);
+  api.update.mockResolvedValueOnce({ ...e1, name: "角色一新" });
+
+  render(<StoryEntityCategorySection projectId="p" kind="character" />);
+  const editButtons = await screen.findAllByRole("button", { name: "编辑" });
+  fireEvent.click(editButtons[0]);
+  fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "角色一新" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  await screen.findByText(/已更新角色「角色一新」/);
+
+  const refreshedEdits = screen.getAllByRole("button", { name: "编辑" });
+  fireEvent.click(refreshedEdits[1]);
+  const dialog = screen.getByRole("dialog", { name: "编辑角色" });
+  expect(within(dialog).queryByRole("status")).toBeNull();
+  expect(screen.queryByText(/已更新角色「角色一新」/)).toBeNull();
+});
+
+it("locks form inputs and image controls while save is in flight so edits are not lost", async () => {
+  const entity = {
+    id: "e-lock",
+    projectId: "p",
+    kind: "character" as const,
+    name: "初版名称",
+    description: "初版描述",
+    coverAssetId: "img-1",
+    imageAssetIds: ["img-1", "img-2"],
+    createdAt: "",
+    updatedAt: "",
+  };
+  api.list.mockResolvedValue([entity]);
+  let resolveUpdate!: () => void;
+  api.update.mockImplementationOnce(() => new Promise<void>(resolve => { resolveUpdate = resolve; }));
+
+  render(<StoryEntityCategorySection projectId="p" kind="character" />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+  const nameInput = screen.getByLabelText("角色名称") as HTMLInputElement;
+  const descInput = screen.getByLabelText("角色描述") as HTMLTextAreaElement;
+  fireEvent.change(nameInput, { target: { value: "第一版" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+  await waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+  expect(nameInput.disabled).toBe(true);
+  expect(descInput.disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "选择封面" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "清除" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "将图片 img-2 设为封面" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "移除图片 img-1" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "添加图片" }) as HTMLButtonElement).disabled).toBe(true);
+
+  await act(async () => { resolveUpdate(); });
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "编辑角色" })).toBeNull());
+  expect(api.update).toHaveBeenCalledWith(expect.objectContaining({ id: "e-lock", name: "第一版" }));
+});
+
+it("disables new picker file import while an import is already in flight and supports Ctrl+Enter save", async () => {
+  const entity = {
+    id: "e-hotkey",
+    projectId: "p",
+    kind: "character" as const,
+    name: "捷径",
+    description: "",
+    coverAssetId: "img-1",
+    imageAssetIds: ["img-1", "img-2"],
+    createdAt: "",
+    updatedAt: "",
+  };
+  api.list.mockResolvedValue([entity]);
+  api.update.mockResolvedValue({ ...entity, name: "捷径新版" });
+  let resolveImport!: (val: { imported: AssetView[]; failed: { displayName: string; error: string }[]; cancelled: boolean }) => void;
+  api.importImages.mockImplementationOnce(() => new Promise(resolve => { resolveImport = resolve; }));
+
+  render(<StoryEntityCategorySection projectId="p" kind="character" />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+  fireEvent.click(screen.getByRole("button", { name: "选择封面" }));
+  expect(pickerMock.onImportFile).toBeTypeOf("function");
+
+  act(() => { pickerMock.onImportFile?.(); });
+  await waitFor(() => expect(api.importImages).toHaveBeenCalledTimes(1));
+
+  // Existing controls like "将图片 img-2 设为封面" remain usable, while picker omits onImportFile when reopened during busy import
+  expect((screen.getByRole("button", { name: "将图片 img-2 设为封面" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "选择封面" }));
+  expect(pickerMock.onImportFile).toBeUndefined();
+
+  await act(async () => { resolveImport({ imported: [], failed: [], cancelled: true }); });
+  await waitFor(() => expect(pickerMock.onImportFile).toBeTypeOf("function"));
+
+  // Close mock picker via onSelect, then trigger Ctrl+Enter save
+  act(() => { pickerMock.onSelect?.("img-2"); });
+  fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "捷径新版" } });
+  fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+  await waitFor(() => expect(api.update).toHaveBeenCalledWith(expect.objectContaining({ id: "e-hotkey", name: "捷径新版", coverAssetId: "img-2" })));
+});
+
+it("adds all imported images from multi-file cover import to associated images and explains it accurately", async () => {
+  api.list.mockResolvedValue([]);
+  api.importImages.mockResolvedValue({
+    imported: [
+      { id: "cov-1", name: "封面图.png", originalName: "封面图.png" } as AssetView,
+      { id: "cov-2", name: "侧视图.png", originalName: "侧视图.png" } as AssetView,
+    ],
+    failed: [],
+    cancelled: false,
+  });
+  api.create.mockResolvedValue({});
+  render(<StoryEntityCategorySection projectId="p" kind="character" />);
+  fireEvent.click(await screen.findByRole("button", { name: "新建角色" }));
+  fireEvent.click(screen.getByRole("button", { name: "选择封面" }));
+  await act(async () => { pickerMock.onImportFile?.(); });
+
+  expect(await screen.findByText(/已从电脑导入 2 张图片，已将第 1 张设为封面并全部加入关联图片/)).toBeTruthy();
+  expect(screen.getByText("关联图片（2）")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "多图封面角色" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(api.create).toHaveBeenCalledWith(expect.objectContaining({
+    name: "多图封面角色",
+    coverAssetId: "cov-1",
+    imageAssetIds: ["cov-1", "cov-2"],
+  })));
 });

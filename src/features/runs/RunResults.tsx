@@ -14,8 +14,9 @@ function ReviewActions({ result, controller: c, route, singleShot }: { result: R
   const key=JSON.stringify([route.projectId,route.run?.source,route.run?.id,result.assetId]);
   const comment=useStudioStore(state=>state.reviewComments[key]??"");
   const setComment=(text:string)=>useStudioStore.getState().setReviewComment(key,text);
-  const submit=async(decision:"APPROVED"|"REJECTED")=>{if(await c.review(result,decision,comment)===true&&useStudioStore.getState().reviewComments[key]===comment)useStudioStore.getState().setReviewComment(key,undefined);};
-  const submitAndSelect=async()=>{if(!singleShot)return;if(await c.approveAndSelectForShot(result,singleShot.id,comment)===true&&useStudioStore.getState().reviewComments[key]===comment)useStudioStore.getState().setReviewComment(key,undefined);};
+  const clearSubmittedComment=()=>{if(useStudioStore.getState().reviewComments[key]===comment)useStudioStore.getState().setReviewComment(key,undefined);};
+  const submit=async(decision:"APPROVED"|"REJECTED")=>{if(await c.review(result,decision,comment)===true)clearSubmittedComment();};
+  const submitAndSelect=async()=>{if(!singleShot)return;await c.approveAndSelectForShot(result,singleShot.id,comment,clearSubmittedComment);};
   const chosen=Boolean(singleShot&&result.selectedShotIds.includes(singleShot.id));
   return <div className="run-review-actions"><label>审核说明<input value={comment} onChange={event => setComment(event.target.value)} disabled={c.busy} /></label><small>未提交说明仅在本次会话内保留，切换记录后可恢复。</small><button type="button" disabled={c.busy} onClick={() => void submit("APPROVED")}>审核通过</button>{singleShot && !chosen && result.mediaKind === "video" && result.availability !== "missing" && result.availability !== "unavailable" && <button type="button" className="primary" disabled={c.busy} onClick={() => void submitAndSelect()}>通过并选为「{singleShot.name}」结果</button>}<button type="button" disabled={c.busy || !comment.trim()} onClick={() => void submit("REJECTED")}>审核退回</button></div>;
 }

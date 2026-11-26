@@ -94,53 +94,57 @@ impl TaskCancellationService {
     }
 
     async fn persist_request(&self, mut task: Task) -> Result<Task, TaskCancellationError> {
+        const MAX_CANCEL_TRANSITION_ATTEMPTS: usize = 5;
         let mut last_error = None;
-        for _attempt in 0..4 {
+        for _attempt in 0..MAX_CANCEL_TRANSITION_ATTEMPTS {
             let previous_status = task.status;
             let mut next = task.clone();
             let event = next.request_cancel(self.clock.now())?;
-            match self
+            let error = match self
                 .task_repository
-                .persist_transition(&next, &event, previous_status)
+                .persist_cancel_request(&task.id, &event, previous_status)
                 .await
             {
-                Ok(_) => {
-                    self.task_update_sink.publish(&next);
-                    self.execution_registry.signal_cancel(&next.id);
-                    return Ok(next);
+                Ok(Some(updated)) => {
+                    self.task_update_sink.publish(&updated);
+                    self.execution_registry.signal_cancel(&updated.id);
+                    return Ok(updated);
                 }
-                Err(error) => {
-                    let Some(current) = self.task_repository.find_by_id(&next.id).await? else {
-                        return Err(TaskCancellationError::NotFound(next.id.to_string()));
-                    };
-                    match current.status {
-                        TaskStatus::CancelRequested
-                        | TaskStatus::Cancelled
-                        | TaskStatus::Succeeded
-                        | TaskStatus::Failed => {
-                            self.execution_registry.signal_cancel(&current.id);
-                            return Ok(current);
-                        }
-                        TaskStatus::Collecting => {
-                            return Err(TaskCancellationError::NotCancellable {
-                                task_id: current.id.to_string(),
-                                status: current.status,
-                            });
-                        }
-                        TaskStatus::Created
-                        | TaskStatus::Validating
-                        | TaskStatus::Preparing
-                        | TaskStatus::Queued
-                        | TaskStatus::Running
-                            if current.status != previous_status =>
-                        {
-                            task = current;
-                            last_error = Some(error);
-                            continue;
-                        }
-                        _ => return Err(TaskCancellationError::Repository(error)),
-                    }
+                Ok(None) => RepositoryError::integrity(
+                    "stale task cancel transition or task does not exist",
+                ),
+                Err(error) => error,
+            };
+
+            let Some(current) = self.task_repository.find_by_id(&next.id).await? else {
+                return Err(TaskCancellationError::NotFound(next.id.to_string()));
+            };
+            match current.status {
+                TaskStatus::CancelRequested
+                | TaskStatus::Cancelled
+                | TaskStatus::Succeeded
+                | TaskStatus::Failed => {
+                    self.execution_registry.signal_cancel(&current.id);
+                    return Ok(current);
                 }
+                TaskStatus::Collecting => {
+                    return Err(TaskCancellationError::NotCancellable {
+                        task_id: current.id.to_string(),
+                        status: current.status,
+                    });
+                }
+                TaskStatus::Created
+                | TaskStatus::Validating
+                | TaskStatus::Preparing
+                | TaskStatus::Queued
+                | TaskStatus::Running
+                    if current.status != previous_status =>
+                {
+                    task = current;
+                    last_error = Some(error);
+                    continue;
+                }
+                _ => return Err(TaskCancellationError::Repository(error)),
             }
         }
         Err(TaskCancellationError::Repository(
@@ -428,10 +432,21 @@ mod tests {
                 event: &NewTaskEvent,
                 expected_previous_status: TaskStatus,
             ) -> Result<StoredTaskEvent, RepositoryError> {
+                self.inner
+                    .persist_transition(task, event, expected_previous_status)
+                    .await
+            }
+
+            async fn persist_cancel_request(
+                &self,
+                task_id: &TaskId,
+                event: &NewTaskEvent,
+                expected_previous_status: TaskStatus,
+            ) -> Result<Option<Task>, RepositoryError> {
                 if expected_previous_status == TaskStatus::Created
                     && !self.raced_once.swap(true, Ordering::SeqCst)
                 {
-                    if let Some(mut moved) = self.inner.find_by_id(&task.id).await? {
+                    if let Some(mut moved) = self.inner.find_by_id(task_id).await? {
                         let moved_at = moved.created_at + chrono::Duration::seconds(1);
                         let moved_event = TaskStateMachine::transition(
                             &mut moved,
@@ -445,7 +460,7 @@ mod tests {
                     }
                 }
                 self.inner
-                    .persist_transition(task, event, expected_previous_status)
+                    .persist_cancel_request(task_id, event, expected_previous_status)
                     .await
             }
 
@@ -495,6 +510,304 @@ mod tests {
         let repo = Arc::new(AdvancingTaskRepo {
             inner: repository.clone(),
             raced_once: AtomicBool::new(false),
+        });
+        let registry = TaskExecutionRegistry::default();
+        let (mut signal, _guard) = registry.register(task.id.clone());
+        let service = TaskCancellationService::new(
+            repo,
+            registry,
+            Arc::new(FixedClock),
+            Arc::new(RecordingSink::default()),
+        );
+
+        let cancelled = service
+            .request_cancel(&task.project_id, task.id.as_str())
+            .await
+            .unwrap();
+        assert_eq!(cancelled.status, TaskStatus::CancelRequested);
+        assert!(signal.changed().await.is_ok());
+        assert!(*signal.borrow());
+        assert_eq!(
+            repository
+                .find_by_id(&task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::CancelRequested
+        );
+    }
+
+    #[tokio::test]
+    async fn request_cancel_preserves_concurrently_persisted_prompt_id() {
+        use crate::application::ports::RepositoryError;
+        use crate::domain::{NewTaskEvent, StoredTaskEvent, TaskId, TaskStateMachine};
+        use async_trait::async_trait;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct PromptIdRacingRepo {
+            inner: Arc<SqliteTaskRepository>,
+            raced_once: AtomicBool,
+        }
+
+        #[async_trait]
+        impl TaskRepository for PromptIdRacingRepo {
+            async fn create(
+                &self,
+                task: &Task,
+                created_event: &NewTaskEvent,
+            ) -> Result<StoredTaskEvent, RepositoryError> {
+                self.inner.create(task, created_event).await
+            }
+
+            async fn persist_transition(
+                &self,
+                task: &Task,
+                event: &NewTaskEvent,
+                expected_previous_status: TaskStatus,
+            ) -> Result<StoredTaskEvent, RepositoryError> {
+                self.inner
+                    .persist_transition(task, event, expected_previous_status)
+                    .await
+            }
+
+            async fn persist_cancel_request(
+                &self,
+                task_id: &TaskId,
+                event: &NewTaskEvent,
+                expected_previous_status: TaskStatus,
+            ) -> Result<Option<Task>, RepositoryError> {
+                if expected_previous_status == TaskStatus::Preparing
+                    && !self.raced_once.swap(true, Ordering::SeqCst)
+                {
+                    if let Some(mut live) = self.inner.find_by_id(task_id).await? {
+                        let prepared_event = live
+                            .prepare_submission_with_identity(
+                                "prompt-live-1",
+                                "client-1",
+                                Some("exec-1"),
+                                Some("idem-1"),
+                                Some("compiled-sha"),
+                                live.created_at + chrono::Duration::seconds(3),
+                            )
+                            .map_err(|e| RepositoryError::database(e.to_string()))?;
+                        self.inner
+                            .persist_runtime_update(&live, &prepared_event)
+                            .await?;
+                    }
+                }
+                self.inner
+                    .persist_cancel_request(task_id, event, expected_previous_status)
+                    .await
+            }
+
+            async fn persist_runtime_update(
+                &self,
+                task: &Task,
+                event: &NewTaskEvent,
+            ) -> Result<StoredTaskEvent, RepositoryError> {
+                self.inner.persist_runtime_update(task, event).await
+            }
+
+            async fn find_by_id(&self, task_id: &TaskId) -> Result<Option<Task>, RepositoryError> {
+                self.inner.find_by_id(task_id).await
+            }
+
+            async fn find_by_submission_idempotency_key(
+                &self,
+                project_id: &str,
+                key: &str,
+            ) -> Result<Option<Task>, RepositoryError> {
+                self.inner
+                    .find_by_submission_idempotency_key(project_id, key)
+                    .await
+            }
+
+            async fn list_recent(
+                &self,
+                project_id: &str,
+                limit: u32,
+            ) -> Result<Vec<Task>, RepositoryError> {
+                self.inner.list_recent(project_id, limit).await
+            }
+
+            async fn list_active(&self) -> Result<Vec<Task>, RepositoryError> {
+                self.inner.list_active().await
+            }
+
+            async fn list_events(
+                &self,
+                task_id: &TaskId,
+            ) -> Result<Vec<StoredTaskEvent>, RepositoryError> {
+                self.inner.list_events(task_id).await
+            }
+        }
+
+        let (_directory, repository, mut task) = setup().await;
+        for (target, secs) in [(TaskStatus::Validating, 1), (TaskStatus::Preparing, 2)] {
+            let previous = task.status;
+            let at = task.created_at + chrono::Duration::seconds(secs);
+            let event = TaskStateMachine::transition(&mut task, target, at).unwrap();
+            repository
+                .persist_transition(&task, &event, previous)
+                .await
+                .unwrap();
+        }
+        assert!(task.prompt_id.is_none());
+
+        let repo = Arc::new(PromptIdRacingRepo {
+            inner: repository.clone(),
+            raced_once: AtomicBool::new(false),
+        });
+        let published = Arc::new(Mutex::new(Vec::<Option<String>>::new()));
+        #[derive(Clone)]
+        struct PromptRecordingSink(Arc<Mutex<Vec<Option<String>>>>);
+        impl TaskUpdateSink for PromptRecordingSink {
+            fn publish(&self, task: &Task) {
+                self.0.lock().unwrap().push(task.prompt_id.clone());
+            }
+        }
+
+        let service = TaskCancellationService::new(
+            repo,
+            TaskExecutionRegistry::default(),
+            Arc::new(FixedClock),
+            Arc::new(PromptRecordingSink(published.clone())),
+        );
+        let cancelled = service
+            .request_cancel(&task.project_id, task.id.as_str())
+            .await
+            .unwrap();
+        assert_eq!(cancelled.status, TaskStatus::CancelRequested);
+        assert_eq!(cancelled.prompt_id.as_deref(), Some("prompt-live-1"));
+        assert_eq!(
+            repository
+                .find_by_id(&task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .prompt_id
+                .as_deref(),
+            Some("prompt-live-1")
+        );
+        assert_eq!(
+            published.lock().unwrap().as_slice(),
+            &[Some("prompt-live-1".to_owned())]
+        );
+    }
+
+    #[tokio::test]
+    async fn request_cancel_succeeds_when_task_advances_through_all_cancellable_statuses_to_running(
+    ) {
+        use crate::application::ports::RepositoryError;
+        use crate::domain::{NewTaskEvent, StoredTaskEvent, TaskId, TaskStateMachine};
+        use async_trait::async_trait;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FiveStepAdvancingRepo {
+            inner: Arc<SqliteTaskRepository>,
+            races: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl TaskRepository for FiveStepAdvancingRepo {
+            async fn create(
+                &self,
+                task: &Task,
+                created_event: &NewTaskEvent,
+            ) -> Result<StoredTaskEvent, RepositoryError> {
+                self.inner.create(task, created_event).await
+            }
+
+            async fn persist_transition(
+                &self,
+                task: &Task,
+                event: &NewTaskEvent,
+                expected_previous_status: TaskStatus,
+            ) -> Result<StoredTaskEvent, RepositoryError> {
+                self.inner
+                    .persist_transition(task, event, expected_previous_status)
+                    .await
+            }
+
+            async fn persist_cancel_request(
+                &self,
+                task_id: &TaskId,
+                event: &NewTaskEvent,
+                expected_previous_status: TaskStatus,
+            ) -> Result<Option<Task>, RepositoryError> {
+                let step = self.races.fetch_add(1, Ordering::SeqCst);
+                let next_status = match step {
+                    0 => Some((TaskStatus::Created, TaskStatus::Validating, 1)),
+                    1 => Some((TaskStatus::Validating, TaskStatus::Preparing, 2)),
+                    2 => Some((TaskStatus::Preparing, TaskStatus::Queued, 3)),
+                    3 => Some((TaskStatus::Queued, TaskStatus::Running, 4)),
+                    _ => None,
+                };
+                if let Some((from, to, secs)) = next_status {
+                    if expected_previous_status == from {
+                        if let Some(mut moved) = self.inner.find_by_id(task_id).await? {
+                            let moved_at = moved.created_at + chrono::Duration::seconds(secs);
+                            let moved_event =
+                                TaskStateMachine::transition(&mut moved, to, moved_at)
+                                    .map_err(|e| RepositoryError::database(e.to_string()))?;
+                            self.inner
+                                .persist_transition(&moved, &moved_event, from)
+                                .await?;
+                        }
+                    }
+                }
+                self.inner
+                    .persist_cancel_request(task_id, event, expected_previous_status)
+                    .await
+            }
+
+            async fn persist_runtime_update(
+                &self,
+                task: &Task,
+                event: &NewTaskEvent,
+            ) -> Result<StoredTaskEvent, RepositoryError> {
+                self.inner.persist_runtime_update(task, event).await
+            }
+
+            async fn find_by_id(&self, task_id: &TaskId) -> Result<Option<Task>, RepositoryError> {
+                self.inner.find_by_id(task_id).await
+            }
+
+            async fn find_by_submission_idempotency_key(
+                &self,
+                project_id: &str,
+                key: &str,
+            ) -> Result<Option<Task>, RepositoryError> {
+                self.inner
+                    .find_by_submission_idempotency_key(project_id, key)
+                    .await
+            }
+
+            async fn list_recent(
+                &self,
+                project_id: &str,
+                limit: u32,
+            ) -> Result<Vec<Task>, RepositoryError> {
+                self.inner.list_recent(project_id, limit).await
+            }
+
+            async fn list_active(&self) -> Result<Vec<Task>, RepositoryError> {
+                self.inner.list_active().await
+            }
+
+            async fn list_events(
+                &self,
+                task_id: &TaskId,
+            ) -> Result<Vec<StoredTaskEvent>, RepositoryError> {
+                self.inner.list_events(task_id).await
+            }
+        }
+
+        let (_directory, repository, task) = setup().await;
+        let repo = Arc::new(FiveStepAdvancingRepo {
+            inner: repository.clone(),
+            races: AtomicUsize::new(0),
         });
         let registry = TaskExecutionRegistry::default();
         let (mut signal, _guard) = registry.register(task.id.clone());

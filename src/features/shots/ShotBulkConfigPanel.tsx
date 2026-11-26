@@ -3,6 +3,7 @@ import {
   admitProjectProduction,
   getProjectProductionPreflight,
 } from "../../services/tauriClient";
+import { invalidateRuns } from "../../product/runInvalidation";
 import type { ShotStage, ShotView } from "../../types/shot";
 import type {
   ProjectPreparationView,
@@ -321,6 +322,7 @@ function ScopedShotBulkConfigPanel({
           allowPartial,
           ...(scope ? { scope } : {}),
         });
+        invalidateRuns(projectId, { library: false });
         if (!isCurrent(requestedOwner)) return;
         if (result.projectId !== projectId || result.stage !== nextStage) throw new PreparationUiError("批次准入回执归属不一致。");
         setPreparationResult(result);

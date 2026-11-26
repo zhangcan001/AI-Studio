@@ -1,3 +1,6 @@
+export const GENERATOR_BINDINGS_CHANGED = "ai-studio:generator-bindings-changed";
+export const LAST_GENERATOR_SESSION_KEY = "aistudio.create.lastGenerator.v1";
+
 export interface RunRef { source: "production-run" | "queue-batch" | "task"; id: string }
 export interface GeneratorOption {
   selectionRef: string;

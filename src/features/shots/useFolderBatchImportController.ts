@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { GeneratorOption } from "../../product/types";
 import type { FolderImportLegacyDefaults } from "../../types/folderBatchImport";
 import { productClient } from "../../product/client";
+import { invalidateRuns } from "../../product/runInvalidation";
+import { invalidateVideoInputs } from "../../product/videoInputInvalidation";
+import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 import { IpcError } from "../../services/ipc";
 import { toUserMessage } from "../../i18n/errorMessages";
 function importError(e:unknown):string {if(e instanceof IpcError && typeof e.details==="object" && e.details!==null && "code" in e.details && typeof e.details.code==="string")return e.message || toUserMessage(e);return toUserMessage(e);}
@@ -76,6 +79,21 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
     const project = projectId, ticket = begin("commit"); if (ticket === undefined) return;
     try {
       const r = await productClient.folderImport.commit({ sessionId: preview.sessionId, previewVersion: preview.previewVersion, manifestSha256: preview.manifestSha256, includeRowKeys: preview.rows.filter(row => selected.has(row.rowKey) && !row.errors.length).map(row => row.rowKey), createQueue, autoStart: createQueue && autoStart, nameSuffix: preview.nameSuffix });
+      if (r.outcome !== "compensated") {
+        if (r.createdEntityIds.length > 0 || r.residual.entityIds.length > 0) {
+          window.dispatchEvent(new CustomEvent(STORY_ENTITIES_CHANGED, { detail: { projectId: project } }));
+        }
+        if (r.importedAssetIds.length > 0 || r.residual.assetIds.length > 0) {
+          invalidateVideoInputs(project);
+        }
+        if (
+          r.batchId || r.residual.batchId
+          || r.createdShotIds.length > 0 || r.residual.shotIds.length > 0
+          || r.importedAssetIds.length > 0 || r.residual.assetIds.length > 0
+        ) {
+          invalidateRuns(project, { library: r.importedAssetIds.length > 0 || r.residual.assetIds.length > 0 });
+        }
+      }
       if (!current(project, ticket)) return;
       setResult(r);
       // Refresh failures must not turn a completed write into a retryable commit.

@@ -74,6 +74,28 @@ pub trait TaskRepository: Send + Sync {
         expected_previous_status: TaskStatus,
     ) -> Result<StoredTaskEvent, RepositoryError>;
 
+    /// Atomically transitions a cancellable task to `CANCEL_REQUESTED` via status-only CAS,
+    /// preserving any concurrently persisted runtime fields (such as `prompt_id` or telemetry)
+    /// and returning the freshly read `Task`. Returns `Ok(None)` when the task does not exist
+    /// or its status already moved past `expected_previous_status`.
+    async fn persist_cancel_request(
+        &self,
+        task_id: &TaskId,
+        event: &NewTaskEvent,
+        expected_previous_status: TaskStatus,
+    ) -> Result<Option<Task>, RepositoryError> {
+        let Some(mut current) = self.find_by_id(task_id).await? else {
+            return Ok(None);
+        };
+        if current.status != expected_previous_status {
+            return Ok(None);
+        }
+        current.status = TaskStatus::CancelRequested;
+        self.persist_transition(&current, event, expected_previous_status)
+            .await?;
+        Ok(Some(current))
+    }
+
     async fn persist_runtime_update(
         &self,
         task: &Task,

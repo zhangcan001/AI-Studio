@@ -115,3 +115,19 @@ it("shows thumbnail tiles with search and entity tabs, and selects an asset", as
   expect(onSelect).toHaveBeenCalledWith("a2");
   expect(onClose).toHaveBeenCalled();
 });
+
+it("queries only source images and filters out generated images", async () => {
+  api.list.mockResolvedValue({
+    items: [
+      { resourceRef: { kind: "asset", id: "src-1" }, title: "外导图", subtype: "image", sourceOrigin: "source", createdAt: "", updatedAt: "", thumbnailAvailable: true },
+      { resourceRef: { kind: "asset", id: "gen-1" }, title: "历史生成图", subtype: "image", sourceOrigin: "generated", createdAt: "", updatedAt: "", thumbnailAvailable: true },
+    ],
+    nextCursor: null,
+    coverage: "complete-category",
+    coverageMessage: "",
+  });
+  render(<ImageAssetPicker projectId="p1" open onSelect={vi.fn()} onClose={vi.fn()} />);
+  await screen.findByRole("option", { name: /外导图/ });
+  expect(screen.queryByRole("option", { name: /历史生成图/ })).toBeNull();
+  expect(api.list).toHaveBeenCalledWith("p1", expect.objectContaining({ category: "images", sourceKind: "source" }));
+});

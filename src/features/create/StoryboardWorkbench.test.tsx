@@ -7,6 +7,7 @@ import { ShotReviewDialog } from "./ShotReviewDialog";
 import { StoryboardWorkbench } from "./StoryboardWorkbench";
 import { deriveStoryboardStatus, runPercent, storyboardStats } from "./storyboardModel";
 import { useStudioStore } from "../../stores/studioStore";
+import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), workbench: vi.fn(), createShot: vi.fn(), cloneShot: vi.fn(), updateShot: vi.fn(), inputsGet: vi.fn(), inputsSave: vi.fn(), runGet: vi.fn(), generate: vi.fn(), resultsGet: vi.fn(), resultReview: vi.fn(), selectResult: vi.fn(), runList: vi.fn(), generatorsList: vi.fn(), readinessGet: vi.fn(), shotsList: vi.fn(), shotsReorder: vi.fn(), exportSelected:vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { creation: { exportSelected:api.exportSelected,shotsList:api.shotsList,shotsReorder:api.shotsReorder,mediaUrl: (p: string, id: string) => `media://${p}/${id}`, get: api.get, workbench: api.workbench, createShot: api.createShot, cloneShot: api.cloneShot, updateShot: api.updateShot, inputsGet: api.inputsGet, inputsSave: api.inputsSave, generate: api.generate, selectResult: api.selectResult, generatorsList: api.generatorsList, readinessGet: api.readinessGet }, run: { list: api.runList, get: api.runGet, resultsGet: api.resultsGet, resultReview: api.resultReview }, storyEntities: { promptSections: vi.fn(async () => ({ style: null, summary: null, soundscape: null, music: null })), list: vi.fn(async () => []), listForShot: vi.fn(async () => []), bindShot: vi.fn(async () => []) } } }));
@@ -514,20 +515,20 @@ it("moves only through the authoritative complete Shot ordering, not local displ
  localStorage.setItem("ai-studio.storyboard.view","shots");
  api.shotsList.mockResolvedValue(shots.map(s=>({...s,projectId:"p"})));api.shotsReorder.mockResolvedValue([]);
  render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
- const row=await screen.findByRole("article",{name:"分镜 3 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"上移"}));
+ const row=await screen.findByRole("article",{name:"分镜 2 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"上移"}));
  await waitFor(()=>expect(api.shotsReorder).toHaveBeenCalledWith("p",["s2","s1","s3"]));expect(api.generate).not.toHaveBeenCalled();
 });
 it("inserts after the requested Shot using a fresh full order and never starts production",async()=>{
  localStorage.setItem("ai-studio.storyboard.view","shots");api.createShot.mockResolvedValue({id:"inserted",name:"新镜头",ordinal:4});
  api.shotsList.mockResolvedValue([...shots.map(s=>({...s,projectId:"p"})),{id:"inserted",projectId:"p",ordinal:4}]);api.shotsReorder.mockResolvedValue([]);
  render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);
- const row=await screen.findByRole("article",{name:"分镜 3 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"在此后插入"}));
+ const row=await screen.findByRole("article",{name:"分镜 2 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"在此后插入"}));
  await waitFor(()=>expect(api.shotsReorder).toHaveBeenCalledWith("p",["s1","s2","inserted","s3"]));expect(api.generate).not.toHaveBeenCalled();
 });
 
 it("retains the insert failure receipt even after the automatic successful list refresh",async()=>{
  localStorage.setItem("ai-studio.storyboard.view","shots");api.createShot.mockResolvedValue({id:"retained",name:"已创建",ordinal:4});api.shotsList.mockRejectedValue({code:"PROJECT_READ_FAILED"});
- render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);const row=await screen.findByRole("article",{name:"分镜 3 镜头02"});
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);const row=await screen.findByRole("article",{name:"分镜 2 镜头02"});
  const reads=api.workbench.mock.calls.length;fireEvent.click(within(row).getByRole("button",{name:"在此后插入"}));
  await waitFor(()=>expect(api.workbench.mock.calls.length).toBeGreaterThan(reads));
  expect((await screen.findByRole("alert")).textContent).toContain("新镜头已创建；排序未完成");expect(api.generate).not.toHaveBeenCalled();
@@ -625,7 +626,7 @@ it.each(["missing","unavailable"])("R22: %s candidate has no approval or selecti
 it("R51: pending reorder disables insertion rather than silently dropping a second operation",async()=>{
  localStorage.setItem("ai-studio.storyboard.view","shots");api.shotsList.mockResolvedValue(shots.map(s=>({...s,projectId:"p"})));
  let resolve!:(v:unknown)=>void;api.shotsReorder.mockReturnValueOnce(new Promise(r=>{resolve=r;}));
- render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);const row=await screen.findByRole("article",{name:"分镜 3 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"上移"}));
+ render(<StoryboardWorkbench route={route} navigate={vi.fn()}/>);const row=await screen.findByRole("article",{name:"分镜 2 镜头02"});fireEvent.click(within(row).getByRole("button",{name:"上移"}));
  await waitFor(()=>expect(api.shotsReorder).toHaveBeenCalled());expect(within(row).getByRole("button",{name:"在此后插入"}).hasAttribute("disabled")).toBe(true);expect(api.createShot).not.toHaveBeenCalled();await act(async()=>resolve([]));
 });
 it("R61: a successful export clears the preceding failed export error",async()=>{
@@ -664,4 +665,72 @@ it("shares search and status filters across grid and list views and offers prev/
   expect(await screen.findByLabelText("当前镜号进度")).toHaveProperty("textContent", "第 2 / 3 镜");
   fireEvent.click(screen.getByRole("button", { name: "下一镜" }));
   await waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: "create", projectId: "p", stage: "video", shotId: "s3" }));
+});
+
+it("queues a refresh when STORY_ENTITIES_CHANGED arrives while workbench load is in flight", async () => {
+  let resolveFirst!: (v: ReturnType<typeof workbenchFromContexts>) => void;
+  api.workbench
+    .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+    .mockResolvedValueOnce(workbenchFrom(id => {
+      const base = context(id);
+      return {
+        ...base,
+        selectedShot: base.selectedShot ? { ...base.selectedShot, prompt: `${base.selectedShot.summary.name} synced prompt` } : null,
+      };
+    }));
+
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  await waitFor(() => expect(api.workbench).toHaveBeenCalledTimes(1));
+
+  act(() => {
+    window.dispatchEvent(new CustomEvent(STORY_ENTITIES_CHANGED, { detail: { projectId: "p" } }));
+  });
+  await act(async () => { resolveFirst(workbenchFromContexts()); });
+
+  expect((await screen.findAllByText("镜头01 synced prompt")).length).toBeGreaterThan(0);
+  expect(api.workbench).toHaveBeenCalledTimes(2);
+});
+
+it("collapses and expands left/right storyboard panels and shows cancelable library-intent prompt without shotId", async () => {
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  await screen.findByRole("article", { name: "镜头01" });
+  expect(screen.getByRole("complementary", { name: "剧集与场景" })).toBeTruthy();
+  expect(screen.getByRole("complementary", { name: "镜头详情与序列" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "收起目录" }));
+  expect(screen.queryByRole("complementary", { name: "剧集与场景" })).toBeNull();
+  expect(screen.getByRole("button", { name: "展开目录" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "收起详情" }));
+  expect(screen.queryByRole("complementary", { name: "镜头详情与序列" })).toBeNull();
+  expect(screen.getByRole("button", { name: "展开详情" })).toBeTruthy();
+
+  act(() => {
+    useStudioStore.getState().setPendingLibraryIntent({ kind: "prompt", projectId: "p", promptId: "prm-1", promptVersionId: "prv-1", text: "复用提示词", modelVersionId: null });
+  });
+  expect(await screen.findByText(/请先从左侧镜头列表选择要应用资源的目标镜头/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "取消复用" }));
+  await waitFor(() => expect(useStudioStore.getState().pendingLibraryIntent).toBeUndefined());
+});
+
+it("displays consecutive 1-based shot numbers on ShotRowCard and clones into position + 1 when ordinals have gaps", async () => {
+  localStorage.setItem("ai-studio.storyboard.view", "shots");
+  const gappedShots = [{ id: "s1", name: "镜头甲", ordinal: 5 }, { id: "s2", name: "镜头乙", ordinal: 10 }];
+  const gappedBoard = workbenchFrom(id => {
+    const s = gappedShots.find(item => item.id === id) ?? null;
+    return {
+      projectId: "p", projectName: "P", stage: "video", shots: gappedShots, promptChoices: [], mediaInputs: [],
+      selectedShot: s ? { summary: s, prompt: "", selectionRef: null, values: {}, referenceAssetIds: [], selectedResultId: null, recentRun: null } : null,
+      candidates: [],
+    };
+  });
+  api.workbench.mockResolvedValue(gappedBoard);
+  api.cloneShot.mockResolvedValue({ id: "s-clone", name: "镜头甲 副本", ordinal: 6 });
+
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  const firstCard = await screen.findByRole("article", { name: "分镜 1 镜头甲" });
+  expect(screen.getByRole("article", { name: "分镜 2 镜头乙" })).toBeTruthy();
+
+  fireEvent.click(within(firstCard).getByRole("button", { name: "复制此镜" }));
+  expect(await screen.findByText(/镜头已复制插入：第 2 镜/)).toBeTruthy();
 });

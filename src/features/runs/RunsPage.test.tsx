@@ -520,3 +520,60 @@ it("offers shot selection only on the results formally linked to a shot in a mix
   expect(api.resultReview).not.toHaveBeenCalled();
   expect(api.selectResult).not.toHaveBeenCalled();
 });
+
+it("clears submitted review comment when review succeeds even if selectResult fails", async () => {
+  const key = JSON.stringify(["project-a", ref.source, ref.id, result.assetId]);
+  api.resultReview.mockRejectedValueOnce({ code: "INTERNAL_ERROR", message: "审核失败" }).mockResolvedValueOnce(undefined);
+  api.selectResult.mockRejectedValueOnce({ code: "INVALID_INPUT", message: "选用结果失败" });
+  render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={vi.fn()} />);
+  const input = await screen.findByLabelText("审核说明") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "已提交审核说明" } });
+  fireEvent.click(screen.getByRole("button", { name: "通过并选为「镜头一」结果" }));
+  await screen.findByRole("alert");
+  expect(useStudioStore.getState().reviewComments[key]).toBe("已提交审核说明");
+  expect(input.value).toBe("已提交审核说明");
+
+  fireEvent.click(screen.getByRole("button", { name: "通过并选为「镜头一」结果" }));
+  await waitFor(() => expect(api.selectResult).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(useStudioStore.getState().reviewComments[key]).toBeUndefined());
+  expect(input.value).toBe("");
+});
+
+it("reads preferredParent batch pending siblings before confirming retryAndStart on a historical task", async () => {
+  const parentBatch = { source: "queue-batch", id: "parent-batch" } as const;
+  const taskRun: ProductRun = {
+    ...run,
+    status: "FAILED",
+    preferredParent: parentBatch,
+    availableActions: ["RETRY"],
+    recoverability: { retryItemIds: ["item-a"], reviewRequired: 0 },
+  };
+  const batchRun: ProductRun = {
+    ...run,
+    ref: parentBatch,
+    status: "PAUSED",
+    preferredParent: null,
+    availableActions: ["START", "RETRY"],
+    recoverability: { retryItemIds: ["item-a"], reviewRequired: 0 },
+    detail: {
+      sources: [],
+      inputs: [
+        { ...run.detail!.inputs[0], itemId: "item-a", taskId: "task-secret", shotName: "镜头A", executionStatus: "DISPATCHED" },
+        { ...run.detail!.inputs[0], itemId: "item-b", taskId: null, shotName: "镜头B", executionStatus: "PENDING" },
+      ],
+    },
+  };
+  api.list.mockResolvedValue({ items: [taskRun], nextCursor: null, coverage: "FINITE" });
+  api.get.mockImplementation(async (_p, target) => (target.source === "queue-batch" ? batchRun : taskRun));
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  try {
+    render(<RunsPage route={{ kind: "runs", projectId: "project-a", run: ref }} navigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "重试并立即启动" }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.stringContaining("其余 1 个待执行项")));
+    expect(api.get).toHaveBeenCalledWith("project-a", parentBatch);
+    expect(api.retry).not.toHaveBeenCalled();
+    expect(api.start).not.toHaveBeenCalled();
+  } finally {
+    confirm.mockRestore();
+  }
+});

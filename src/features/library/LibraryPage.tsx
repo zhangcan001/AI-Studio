@@ -1,6 +1,7 @@
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
 import { invalidateRuns } from "../../product/runInvalidation";
+import { invalidateVideoInputs } from "../../product/videoInputInvalidation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectSessionState } from "../../hooks/useProjectSessionState";
 import { StoryEntityCategorySection } from "./StoryEntityCategorySection";
@@ -29,6 +30,14 @@ const ICON_PATHS: Record<string, string> = {
 function LibraryNavIcon({ name }: { name: string }) {
   const d = ICON_PATHS[name] ?? "M12 12h.01";
   return <span aria-hidden="true" className="library-nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg></span>;
+}
+
+function formatCardTime(value: string): string {
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return value;
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** Library: toolbar + one-column category nav + responsive thumbnail grid + detail drawer column. */
@@ -72,7 +81,7 @@ export function LibraryPage(props:LibraryProps) {
   useEffect(()=>{++batchEpoch.current;setBatchMode(false);setSelectedKeys([]);setBatchPlan(undefined);setBatchNotice(undefined);setBatchBusy(false);},[props.route.projectId,c.category]);
   const [importing,setImporting]=useState(false),[importNotice,setImportNotice]=useState<string>();
   const importLock=useRef(false),owner=useRef(props.route.projectId); owner.current=props.route.projectId;
-  const importMedia=async(folder=false)=>{if(importLock.current)return;const project=props.route.projectId;importLock.current=true;setImporting(true);setImportNotice(undefined);try{const result=await productClient.creation.assetsImport(project,folder);if(owner.current!==project)return;if(!result.cancelled){setImportNotice(`导入成功 ${result.imported.length} 项，失败 ${result.failed.length} 项。${result.failed.map(f=>f.displayName+"："+f.error).join("；")}`);await c.refresh();}}catch(cause){if(owner.current===project)setImportNotice(normalizeProductError(cause).message);}finally{importLock.current=false;if(owner.current===project)setImporting(false);}};
+  const importMedia=async(folder=false)=>{if(importLock.current)return;const project=props.route.projectId;importLock.current=true;setImporting(true);setImportNotice(undefined);try{const result=await productClient.creation.assetsImport(project,folder);if(owner.current!==project)return;if(!result.cancelled){if(result.imported.length>0)invalidateVideoInputs(project);setImportNotice(`导入成功 ${result.imported.length} 项，失败 ${result.failed.length} 项。${result.failed.map(f=>f.displayName+"："+f.error).join("；")}`);await c.refresh();}}catch(cause){if(owner.current===project)setImportNotice(normalizeProductError(cause).message);}finally{importLock.current=false;if(owner.current===project)setImporting(false);}};
   const entityDirty = useRef(false);
   const onEntityDirty = useCallback((dirty: boolean) => { entityDirty.current = dirty; draftFlags.current.entity=dirty;props.onDirtyChange?.(dirty||draftFlags.current.detail); }, [props.onDirtyChange]);
   const onDetailDirty=useCallback((dirty:boolean)=>{draftFlags.current.detail=dirty;props.onDirtyChange?.(dirty||draftFlags.current.entity);},[props.onDirtyChange]);
@@ -152,6 +161,7 @@ export function LibraryPage(props:LibraryProps) {
         <select aria-label="标签" value={c.tagId} onChange={e=>c.setTagId(e.target.value)}><option value="">全部标签</option>{c.tags.map(tag=><option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>
         <label className="library-check"><input type="checkbox" checked={c.favoriteOnly} onChange={e=>c.setFavoriteOnly(e.target.checked)}/>仅收藏</label>
       </div>}
+      {!entityKind&&c.hasActiveFilters&&<button type="button" onClick={()=>{clearTimeout(searchTimer.current);setSearchDraft("");c.clearFilters();}}>清除筛选</button>}
       {!entityKind&&<><button type="button" disabled={importing||batchBusy} onClick={()=>void importMedia()}>导入素材</button><button type="button" disabled={importing||batchBusy} onClick={()=>void importMedia(true)}>导入素材文件夹</button>{c.mediaCategory&&<button type="button" disabled={batchBusy} aria-pressed={batchMode} onClick={()=>{resetBatchPlan();setBatchMode(v=>!v);setSelectedKeys([]);}}>批量管理</button>}<button type="button" disabled={batchBusy} onClick={()=>void c.refresh()}>刷新</button></>}
       {importNotice&&<p role="status">{importNotice}</p>}
       {batchNotice&&<p role="status">{batchNotice}</p>}
@@ -180,8 +190,8 @@ export function LibraryPage(props:LibraryProps) {
       {entityKind ? <StoryEntityCategorySection key={`${props.route.projectId}:${entityKind}`} projectId={props.route.projectId} kind={entityKind} onDirtyChange={onEntityDirty} /> : <LibraryThumbnailScope><section className="library-list" aria-label="资源列表">
         <header className="library-list-head"><h2>{categories.find(cat=>cat.key===c.category)?.label}</h2>{c.category==="all"&&<small>各类近期摘要；切换到媒体 / 图片 / 视频 / 音频后可按来源、收藏或标签查找。</small>}</header>
         {c.loading&&!c.list&&<div className="library-skeleton-grid" aria-hidden="true"><span className="library-skeleton-card"/><span className="library-skeleton-card"/><span className="library-skeleton-card"/><span className="library-skeleton-card"/></div>}
-        <div className="library-grid">{visibleResources?.map(item=>{const key=resourceKey(item.resourceRef);const checked=batchMode&&selectedKeys.includes(key);const assetMedia=item.resourceRef.kind==="asset"&&(item.subtype==="image"||item.subtype==="video"||item.subtype==="audio")?item.subtype:undefined;return <button type="button" className="library-card" disabled={batchMode&&batchBusy} data-selected={checked||undefined} draggable={Boolean(assetMedia)&&!batchBusy} onDragStart={e=>{if(assetMedia&&item.resourceRef.kind==="asset"){e.dataTransfer.setData("application/x-aistudio-asset",JSON.stringify({projectId:props.route.projectId,assetId:item.resourceRef.id,mediaKind:assetMedia}));e.dataTransfer.effectAllowed="copy";}}} key={`${c.category}:${c.search.trim()}:${c.sourceKind}:${c.favoriteOnly}:${c.tagId}:${props.route.projectId}:${c.pageIndex}:${key}`} aria-pressed={batchMode?checked:resourceKey(props.route.resource)===key} onClick={()=>{if(batchMode){if(batchBusy)return;resetBatchPlan();setSelectedKeys(prev=>prev.includes(key)?prev.filter(k=>k!==key):[...prev,key]);}else c.open(item.resourceRef);}}>{batchMode&&<span className="library-card-check" aria-hidden="true">{checked?"✓ 已选":"选择"}</span>}<LibraryThumbnail projectId={props.route.projectId} item={item}/><strong title={item.title}>{item.title}</strong><span className="library-card-meta">{item.resourceRef.kind==="reference-set"?"参考集":subtypeLabel(item.subtype)}{sourceOriginLabel(item.sourceOrigin)?<span className={`library-source-badge library-source-badge-${item.sourceOrigin}`}>{sourceOriginLabel(item.sourceOrigin)}</span>:null}</span><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString("zh-CN")}</time></button>;})}</div>
-        {c.list&&!visibleResources?.length&&<p className="library-empty">{c.mediaCategory&&c.sourceKind==="source"?"当前筛选下没有外部导入素材。请先导入图片/视频，或切换来源筛选。":c.mediaCategory&&c.sourceKind==="generated"?"当前筛选下没有生成结果。请切换来源或清除筛选。":"当前分类 / 搜索没有资源。"}</p>}
+        <div className="library-grid">{visibleResources?.map(item=>{const key=resourceKey(item.resourceRef);const checked=batchMode&&selectedKeys.includes(key);const assetMedia=item.resourceRef.kind==="asset"&&(item.subtype==="image"||item.subtype==="video"||item.subtype==="audio")?item.subtype:undefined;return <button type="button" className="library-card" disabled={batchMode&&batchBusy} data-selected={checked||undefined} draggable={Boolean(assetMedia)&&!batchBusy} onDragStart={e=>{if(assetMedia&&item.resourceRef.kind==="asset"){e.dataTransfer.setData("application/x-aistudio-asset",JSON.stringify({projectId:props.route.projectId,assetId:item.resourceRef.id,mediaKind:assetMedia,sourceOrigin:item.sourceOrigin}));e.dataTransfer.effectAllowed="copy";}}} key={`${c.category}:${c.search.trim()}:${c.sourceKind}:${c.favoriteOnly}:${c.tagId}:${props.route.projectId}:${c.pageIndex}:${key}`} aria-pressed={batchMode?checked:resourceKey(props.route.resource)===key} onClick={()=>{if(batchMode){if(batchBusy)return;resetBatchPlan();setSelectedKeys(prev=>prev.includes(key)?prev.filter(k=>k!==key):[...prev,key]);}else c.open(item.resourceRef);}}>{batchMode&&<span className="library-card-check" aria-hidden="true">{checked?"✓ 已选":"选择"}</span>}<LibraryThumbnail projectId={props.route.projectId} item={item}/><strong title={item.title}>{item.title}</strong><span className="library-card-meta">{item.resourceRef.kind==="reference-set"?"参考集":subtypeLabel(item.subtype)}{sourceOriginLabel(item.sourceOrigin)?<span className={`library-source-badge library-source-badge-${item.sourceOrigin}`}>{sourceOriginLabel(item.sourceOrigin)}</span>:null}</span><time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString("zh-CN")}>{formatCardTime(item.createdAt)}</time></button>;})}</div>
+        {c.list&&!visibleResources?.length&&<div className="library-empty-state"><p className="library-empty">{c.mediaCategory&&c.sourceKind==="source"?"当前筛选下没有外部导入素材。请先导入图片/视频，或切换来源筛选。":c.mediaCategory&&c.sourceKind==="generated"?"当前筛选下没有生成结果。请切换来源或清除筛选。":"当前分类 / 搜索没有资源。"}</p>{c.hasActiveFilters&&<button type="button" onClick={()=>{clearTimeout(searchTimer.current);setSearchDraft("");c.clearFilters();}}>清除筛选条件</button>}</div>}
         <footer className="library-list-foot">{pager}<small>{c.list?.coverageMessage}</small></footer>
       </section></LibraryThumbnailScope>}
       {showDetail&&<LibraryDetailPanel {...props} navigate={safeNavigate} onDirtyChange={onDetailDirty} controller={c}/>}

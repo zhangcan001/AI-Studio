@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ImageAssetPicker } from "../../components/ImageAssetPicker";
 import { productClient } from "../../product/client";
 import { normalizeProductError } from "../../product/errors";
+import { invalidateRuns } from "../../product/runInvalidation";
+import { invalidateVideoInputs } from "../../product/videoInputInvalidation";
 import { appearanceLanguageHint } from "../../product/promptLanguage";
 import { entityAvatarAssetId, STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
 import type { StoryEntity, StoryEntityKind } from "../../types/storyEntity";
@@ -39,6 +41,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   const [items, setItems] = useState<StoryEntity[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [importMode, setImportMode] = useState<"separate" | "group">("separate");
@@ -54,9 +57,12 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   const requestEpoch = useRef(0);
   const scopeEpoch = useRef(0);
   const editorSessionRef = useRef(0);
+  const coverRevisionRef = useRef(0);
+  const importInFlightRef = useRef<object | null>(null);
 
   const closeEditor = () => {
     editorSessionRef.current += 1;
+    coverRevisionRef.current += 1;
     setCreating(false);
     setEditing(null);
     setPicking(null);
@@ -79,9 +85,12 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   useEffect(() => {
     mounted.current = true;
     editorSessionRef.current += 1;
+    coverRevisionRef.current += 1;
+    importInFlightRef.current = null;
     setCreating(false);
     setEditing(null);
     setPicking(null);
+    setSaving(false);
     setBusy(false);
     void reload();
     return () => {
@@ -89,6 +98,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       ++requestEpoch.current;
       ++scopeEpoch.current;
       editorSessionRef.current += 1;
+      coverRevisionRef.current += 1;
     };
   }, [reload]);
 
@@ -96,6 +106,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   const allowReplace=()=>!editorDirty||window.confirm("当前编辑尚未保存，确定放弃并切换？");
   function resetCreate() {
     editorSessionRef.current += 1;
+    coverRevisionRef.current += 1;
     setCreating(true);
     setEditing(null);
     setDraftName("");
@@ -103,6 +114,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     setDraftCover(null);
     setDraftImages([]);
     setError(undefined);
+    setNotice(undefined);
   }
 
   function openCreate(){if(allowReplace())resetCreate();}
@@ -110,6 +122,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     if(editing?.id===entity.id&&!creating)return;
     if(!allowReplace())return;
     editorSessionRef.current += 1;
+    coverRevisionRef.current += 1;
     setCreating(false);
     setEditing(entity);
     setDraftName(entity.name);
@@ -117,6 +130,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     setDraftCover(entity.coverAssetId);
     setDraftImages([...entity.imageAssetIds]);
     setError(undefined);
+    setNotice(undefined);
   }
 
   async function save() {
@@ -128,7 +142,9 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       }
     }
     const scope = scopeEpoch.current;
+    setSaving(true);
     setBusy(true);
+    setPicking(null);
     setError(undefined);
     setNotice(undefined);
     try {
@@ -140,15 +156,18 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       };
       if (editing) await productClient.storyEntities.update({ projectId, id: editing.id, ...payload });
       else await productClient.storyEntities.create({ projectId, kind, ...payload });
+      window.dispatchEvent(new CustomEvent(STORY_ENTITIES_CHANGED, { detail: { projectId } }));
       if (!mounted.current || scope !== scopeEpoch.current) return;
-      window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
       closeEditor();
       await reload();
       if (mounted.current && scope === scopeEpoch.current) setNotice(`${editing ? "已更新" : "已创建"}${label}「${payload.name}」。${editing&&editing.name!==payload.name?"镜头正式提示词中的精确 @引用已同步；历史批次与结果保持不变。":""}`);
     } catch (cause) {
       if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
     } finally {
-      if (mounted.current && scope === scopeEpoch.current) setBusy(false);
+      if (mounted.current && scope === scopeEpoch.current) {
+        setSaving(false);
+        setBusy(false);
+      }
     }
   }
 
@@ -159,9 +178,20 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     setError(undefined);
     setNotice(undefined);
     let created = 0;
+    let notified = false;
+    const notifyEntitiesChanged = () => {
+      if (created > 0 && !notified) {
+        notified = true;
+        window.dispatchEvent(new CustomEvent(STORY_ENTITIES_CHANGED, { detail: { projectId } }));
+      }
+    };
     const failures: string[] = [];
     try {
       const result = await productClient.storyEntities.importImages(projectId);
+      if (result.imported.length > 0) {
+        invalidateRuns(projectId);
+        invalidateVideoInputs(projectId);
+      }
       if (!mounted.current || scope !== scopeEpoch.current || result.cancelled) return;
       failures.push(...result.failed.map(item => `${item.displayName}：${item.error}`));
       if (importMode === "group" && result.imported.length) {
@@ -173,7 +203,10 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
         return;
       }
       for (const asset of result.imported) {
-        if (!mounted.current || scope !== scopeEpoch.current) return;
+        if (!mounted.current || scope !== scopeEpoch.current) {
+          notifyEntitiesChanged();
+          return;
+        }
         const name = filenameStem(asset.originalName || asset.name);
         if (!name) {
           failures.push(`${asset.originalName || asset.name}：无法从文件名生成名称。`);
@@ -193,8 +226,8 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
           failures.push(`${asset.originalName || asset.name}：${entityError(cause)}`);
         }
       }
+      notifyEntitiesChanged();
       if (!mounted.current || scope !== scopeEpoch.current) return;
-      if (created) window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
       await reload();
       if (!mounted.current || scope !== scopeEpoch.current) return;
       const details = failures.slice(0, 4).join("；");
@@ -203,24 +236,27 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     } catch (cause) {
       if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
     } finally {
+      notifyEntitiesChanged();
       if (mounted.current && scope === scopeEpoch.current) setBusy(false);
     }
   }
 
   async function remove(entity: StoryEntity) {
     if (busy || !window.confirm(`删除「${entity.name}」？这不会删除原始图片素材。`)) return;
+    const scope = scopeEpoch.current;
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
     try {
       await productClient.storyEntities.delete(projectId, entity.id);
-      window.dispatchEvent(new Event(STORY_ENTITIES_CHANGED));
+      window.dispatchEvent(new CustomEvent(STORY_ENTITIES_CHANGED, { detail: { projectId } }));
+      if (!mounted.current || scope !== scopeEpoch.current) return;
       await reload();
-      if (mounted.current) setNotice(`已删除${label}「${entity.name}」。`);
+      if (mounted.current && scope === scopeEpoch.current) setNotice(`已删除${label}「${entity.name}」。`);
     } catch (cause) {
-      if (mounted.current) setError(entityError(cause));
+      if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current && scope === scopeEpoch.current) setBusy(false);
     }
   }
 
@@ -228,10 +264,18 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
   const formOpen = creating || Boolean(editing);
   const langHint = kind !== "composition" ? appearanceLanguageHint(draftDesc) : undefined;
 
+  const latestSaveRef = useRef(save);
+  latestSaveRef.current = save;
+
   useEffect(() => { onDirtyChange?.(editorDirty); return () => onDirtyChange?.(false); }, [editorDirty, onDirtyChange]);
   useEffect(() => {
     if (!formOpen || picking) return;
     const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !busy && draftName.trim()) {
+        e.preventDefault();
+        void latestSaveRef.current();
+        return;
+      }
       if (e.key === "Escape" && !busy && allowReplace()) {
         e.preventDefault();
         closeEditor();
@@ -239,7 +283,7 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [formOpen, picking, busy, editorDirty]);
+  }, [formOpen, picking, busy, editorDirty, draftName]);
 
   return <LibraryThumbnailScope><section className="story-entities-section" aria-label={`${label}管理`}>
     <header className="story-entities-header">
@@ -257,8 +301,8 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     <label className="story-entity-search">搜索{label}
       <input type="search" aria-label={`搜索${label}`} value={search} onChange={event => setSearch(event.target.value)} placeholder={`按${label}名称或描述筛选`} />
     </label>
-    {error && <p role="alert">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
+    {!formOpen && error && <p role="alert">{error}</p>}
+    {!formOpen && notice && <p role="status">{notice}</p>}
     {loading && !items.length && <p role="status">加载中…</p>}
     {!loading && !error && !visibleItems.length && <p className="library-empty">{items.length ? "没有符合搜索条件的项目。" : `还没有${label}。可以新建，也可以批量导入图片。`}</p>}
     <ul className="story-entities-list">
@@ -279,23 +323,25 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       <div className="story-entity-backdrop" role="presentation" onClick={() => { if (!busy && allowReplace()) closeEditor(); }} />
       <div className="story-entity-editor" role="dialog" aria-label={editing ? `编辑${label}` : `新建${label}`}>
         <h3>{editing ? `编辑「${editing.name}」` : `新建${label}`}</h3>
-        <label>名称<input aria-label={`${label}名称`} value={draftName} onChange={event => setDraftName(event.target.value)} /></label>
-        <label>描述<textarea aria-label={`${label}描述`} value={draftDesc} placeholder={kind === "composition" ? "描述画面构图、景别或镜头运动关系" : "建议使用英文填写外貌/场景/材质特征，生成时将自动注入提示词"} onChange={event => setDraftDesc(event.target.value)} rows={3} /></label>
+        {error && <p role="alert">{error}</p>}
+        {notice && <p role="status">{notice}</p>}
+        <label>名称<input aria-label={`${label}名称`} disabled={saving} value={draftName} onChange={event => setDraftName(event.target.value)} /></label>
+        <label>描述<textarea aria-label={`${label}描述`} disabled={saving} value={draftDesc} placeholder={kind === "composition" ? "描述画面构图、景别或镜头运动关系" : "建议使用英文填写外貌/场景/材质特征，生成时将自动注入提示词"} onChange={event => setDraftDesc(event.target.value)} rows={3} /></label>
         {langHint && <small className="story-entity-lang-hint" aria-label="描述语言建议">{langHint}</small>}
         <div className="story-entity-cover-row">
           <span>封面</span>
           {draftCover ? <EntityThumb projectId={projectId} assetId={draftCover} name="封面" /> : <span>未选择</span>}
-          <button type="button" onClick={() => setPicking("cover")}>选择封面</button>
-          {draftCover && <button type="button" onClick={() => setDraftCover(null)}>清除</button>}
+          <button type="button" disabled={saving} onClick={() => setPicking("cover")}>选择封面</button>
+          {draftCover && <button type="button" disabled={saving} onClick={() => { coverRevisionRef.current += 1; setDraftCover(null); }}>清除</button>}
         </div>
         <div className="story-entity-images-row">
           <span>关联图片（{draftImages.length}）</span>
           <div className="story-entity-image-chips">{draftImages.map(id => <span key={id} className="story-entity-image-chip">
             <EntityThumb projectId={projectId} assetId={id} name={id} />
-            {draftCover === id ? <small className="story-entity-cover-tag">封面</small> : <button type="button" className="story-entity-set-cover" aria-label={`将图片 ${id} 设为封面`} onClick={() => setDraftCover(id)}>设封面</button>}
-            <button type="button" className="story-entity-remove-img" aria-label={`移除图片 ${id}`} onClick={() => { setDraftImages(ids => ids.filter(value => value !== id)); if (draftCover === id) setDraftCover(null); }}>×</button>
+            {draftCover === id ? <small className="story-entity-cover-tag">封面</small> : <button type="button" className="story-entity-set-cover" aria-label={`将图片 ${id} 设为封面`} disabled={saving} onClick={() => { coverRevisionRef.current += 1; setDraftCover(id); }}>设封面</button>}
+            <button type="button" className="story-entity-remove-img" aria-label={`移除图片 ${id}`} disabled={saving} onClick={() => { setDraftImages(ids => ids.filter(value => value !== id)); if (draftCover === id) { coverRevisionRef.current += 1; setDraftCover(null); } }}>×</button>
           </span>)}</div>
-          <button type="button" onClick={() => setPicking("images")}>添加图片</button>
+          <button type="button" disabled={saving} onClick={() => setPicking("images")}>添加图片</button>
         </div>
         <footer>
           <button type="button" className="primary" onClick={() => void save()} disabled={busy || !draftName.trim()}>保存</button>
@@ -309,22 +355,35 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       title={picking === "cover" ? "选择封面" : "添加关联图片"}
       excludeIds={picking === "images" ? draftImages : []}
       onSelect={id => {
-        if (picking === "cover") setDraftCover(id);
-        else {
+        if (saving) return;
+        if (picking === "cover") {
+          coverRevisionRef.current += 1;
+          setDraftCover(id);
+        } else {
           setDraftImages(ids => ids.includes(id) ? ids : [...ids, id]);
-          setDraftCover(current => current ?? id);
+          if (!draftCover) {
+            coverRevisionRef.current += 1;
+            setDraftCover(id);
+          }
         }
         setPicking(null);
       }}
-      onImportFile={() => {
-        if (busy) return;
+      onImportFile={saving || busy ? undefined : () => {
+        if (saving || busy || importInFlightRef.current) return;
+        const importOp = {};
+        importInFlightRef.current = importOp;
         const target = picking;
         const scope = scopeEpoch.current;
         const editorSession = editorSessionRef.current;
+        const coverRevision = target === "cover" ? ++coverRevisionRef.current : coverRevisionRef.current;
         void (async () => {
           setBusy(true); setError(undefined);
           try {
             const res = await productClient.storyEntities.importImages(projectId);
+            if (res.imported.length > 0) {
+              invalidateRuns(projectId);
+              invalidateVideoInputs(projectId);
+            }
             if (!mounted.current || scope !== scopeEpoch.current || editorSession !== editorSessionRef.current) return;
             if (res.cancelled) return;
             const failedDetails = res.failed.map(item => `${item.displayName}：${item.error}`).join("；");
@@ -334,16 +393,21 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
             }
             const ids = res.imported.map(a => a.id);
             if (target === "cover") {
+              if (coverRevision !== coverRevisionRef.current) return;
               setDraftCover(ids[0]);
-              setDraftImages(prev => prev.includes(ids[0]) ? prev : [...prev, ids[0]]);
+              setDraftImages(prev => [...prev, ...ids.filter(id => !prev.includes(id))]);
             } else {
               setDraftImages(prev => [...prev, ...ids.filter(id => !prev.includes(id))]);
-              setDraftCover(prev => prev ?? ids[0]);
+              if (coverRevision === coverRevisionRef.current) setDraftCover(prev => prev ?? ids[0]);
             }
-            setNotice(`已从电脑导入 ${ids.length} 张图片并填入当前表单，确认后点击保存即可生效。${failedDetails ? `部分失败：${failedDetails}` : ""}`);
+            const summary = target === "cover" && ids.length > 1
+              ? `已从电脑导入 ${ids.length} 张图片，已将第 1 张设为封面并全部加入关联图片，确认后点击保存即可生效。`
+              : `已从电脑导入 ${ids.length} 张图片并填入当前表单，确认后点击保存即可生效。`;
+            setNotice(`${summary}${failedDetails ? `部分失败：${failedDetails}` : ""}`);
           } catch (cause) {
-            if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
+            if (mounted.current && scope === scopeEpoch.current && editorSession === editorSessionRef.current) setError(entityError(cause));
           } finally {
+            if (importInFlightRef.current === importOp) importInFlightRef.current = null;
             if (mounted.current && scope === scopeEpoch.current) setBusy(false);
           }
         })();

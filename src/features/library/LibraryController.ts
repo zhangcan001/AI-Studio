@@ -142,7 +142,12 @@ export function useLibraryController({route,navigate}:LibraryProps) {
     const accepted=await navigate(returnRoute ? {...returnRoute, stage: "video"} : {kind:"create",projectId:route.projectId,stage:"video"});
     if(accepted!==false)useStudioStore.getState().setPendingLibraryIntent(intent);
   });
-  return {mediaInspection,returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,sourceKind,setSourceKind,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
+  const hasActiveFilters=Boolean(search.trim()||(mediaCategory&&(favoriteOnly||tagId||sourceKind!=="all")));
+  const clearFilters=()=>{
+    writeStickyLibraryFilters(route.projectId,{favoriteOnly:false,sourceKind:"all"});
+    setQueryState({projectId:route.projectId,search:"",favoriteOnly:false,tagId:"",sourceKind:"all"});
+  };
+  return {mediaInspection,returnRoute,category,search,setSearch,mediaCategory,favoriteOnly,setFavoriteOnly,tagId,setTagId,sourceKind,setSourceKind,hasActiveFilters,clearFilters,tags:tagProjection?.projectId===route.projectId?tagProjection.items:[],list:current?.list,detail:current?.detail,relations:current?.relations??[],versions:current?.versions,queryError,actionError,notice,inspection,busy,loading,refresh,inspectDelete,confirmDelete,edit,useInCreation,
     pageIndex,canPrevious:pageIndex>0,
     nextPage:()=>{if(current?.list.nextCursor)void refresh({tags:false,page:pages.current.index+1,cursor:current.list.nextCursor});},
     previousPage:()=>{if(pages.current.index>0)void refresh({tags:false,page:pages.current.index-1});},
