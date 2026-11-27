@@ -526,26 +526,46 @@ pub(crate) fn media_values(
             .iter()
             .map(|i| AssetId::parse(&i.asset_id).map_err(invalid))
             .collect::<Result<Vec<_>, _>>()?;
-        let value = match (key, recipe.inputs.get(key)) {
-            ("first_frame" | "last_frame", Some(InputDefinition::Image { .. }))
-                if ids.len() == 1 =>
+        let (target_key, value) = match (key, recipe.inputs.get(key)) {
+            (
+                "first_frame" | "last_frame" | "image" | "reference_image",
+                Some(InputDefinition::Image { .. }),
+            ) if ids.len() == 1 => (key, GenerationInputValue::ImageAsset(ids[0].clone())),
+            ("first_frame", None)
+                if ids.len() == 1
+                    && matches!(
+                        recipe.inputs.get("image"),
+                        Some(InputDefinition::Image { .. })
+                    ) =>
             {
-                GenerationInputValue::ImageAsset(ids[0].clone())
+                ("image", GenerationInputValue::ImageAsset(ids[0].clone()))
+            }
+            ("first_frame", None)
+                if ids.len() == 1
+                    && matches!(
+                        recipe.inputs.get("reference_image"),
+                        Some(InputDefinition::Image { .. })
+                    ) =>
+            {
+                (
+                    "reference_image",
+                    GenerationInputValue::ImageAsset(ids[0].clone()),
+                )
             }
             ("reference_images", Some(InputDefinition::Images { max_items, .. }))
                 if ids.len() <= *max_items =>
             {
-                GenerationInputValue::ImageAssets(ids)
+                (key, GenerationInputValue::ImageAssets(ids))
             }
             ("reference_videos", Some(InputDefinition::Videos { max_items, .. }))
                 if ids.len() <= *max_items =>
             {
-                GenerationInputValue::VideoAssets(ids)
+                (key, GenerationInputValue::VideoAssets(ids))
             }
             ("reference_audios", Some(InputDefinition::Audios { max_items, .. }))
                 if ids.len() <= *max_items =>
             {
-                GenerationInputValue::AudioAssets(ids)
+                (key, GenerationInputValue::AudioAssets(ids))
             }
             _ => {
                 return Err(invalid(format!(
@@ -553,7 +573,7 @@ pub(crate) fn media_values(
                 )))
             }
         };
-        values.insert(key.into(), value);
+        values.insert(target_key.into(), value);
     }
     Ok(values)
 }
@@ -2453,5 +2473,47 @@ N/A";
             ));
         }
         assert!(media_values(&recipe, &images).is_err());
+    }
+
+    #[test]
+    fn first_frame_input_maps_to_custom_i2v_recipe_image_slot() {
+        let recipe = crate::compiler::RecipeParser::parse(
+            r#"
+schema_version: 1
+id: custom_i2v
+name: Custom I2V
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+  image:
+    type: image
+    label: Image
+    required: true
+bindings:
+  - input: prompt
+    target: { node: "1", input: "text" }
+  - input: image
+    target: { node: "2", input: "image" }
+outputs:
+  - id: video
+    type: video
+    node: "3"
+"#,
+        )
+        .unwrap();
+        let values = media_values(
+            &recipe,
+            &[asset(
+                "first_frame",
+                0,
+                "ast_00000000-0000-4000-8000-000000000001",
+            )],
+        )
+        .unwrap();
+        assert!(values.contains_key("image"), "{values:?}");
     }
 }

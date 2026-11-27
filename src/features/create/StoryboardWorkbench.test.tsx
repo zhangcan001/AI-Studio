@@ -580,7 +580,7 @@ it("returns to the remaining page after the last shot on page two is removed", a
   fireEvent.click(screen.getByRole("button", { name: "刷新" }));
   expect(await screen.findByRole("article", { name: "分页镜头1" })).toBeTruthy();
   expect(screen.queryByText("开始你的第一个镜头")).toBeNull();
-  expect(screen.getByRole("button", { name: "上一页镜头" }).hasAttribute("disabled")).toBe(true);
+  expect(screen.queryByRole("button", { name: "上一页镜头" })).toBeNull();
 });
 
 it("R13: an unbound DISPATCHING queue item is queued, not available for generation", async () => {
@@ -694,16 +694,18 @@ it("queues a refresh when STORY_ENTITIES_CHANGED arrives while workbench load is
 it("collapses and expands left/right storyboard panels and shows cancelable library-intent prompt without shotId", async () => {
   render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
   await screen.findByRole("article", { name: "镜头01" });
-  expect(screen.getByRole("complementary", { name: "剧集与场景" })).toBeTruthy();
-  expect(screen.getByRole("complementary", { name: "镜头详情与序列" })).toBeTruthy();
+  expect(screen.queryByRole("complementary", { name: "剧集与场景" })).toBeNull();
+  expect(screen.queryByRole("complementary", { name: "镜头详情与序列" })).toBeNull();
 
+  fireEvent.click(screen.getByRole("button", { name: "展开目录" }));
+  expect(screen.getByRole("complementary", { name: "剧集与场景" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "收起目录" }));
   expect(screen.queryByRole("complementary", { name: "剧集与场景" })).toBeNull();
-  expect(screen.getByRole("button", { name: "展开目录" })).toBeTruthy();
 
+  fireEvent.click(screen.getByRole("button", { name: "展开详情" }));
+  expect(screen.getByRole("complementary", { name: "镜头详情与序列" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "收起详情" }));
   expect(screen.queryByRole("complementary", { name: "镜头详情与序列" })).toBeNull();
-  expect(screen.getByRole("button", { name: "展开详情" })).toBeTruthy();
 
   act(() => {
     useStudioStore.getState().setPendingLibraryIntent({ kind: "prompt", projectId: "p", promptId: "prm-1", promptVersionId: "prv-1", text: "复用提示词", modelVersionId: null });
@@ -733,4 +735,24 @@ it("displays consecutive 1-based shot numbers on ShotRowCard and clones into pos
 
   fireEvent.click(within(firstCard).getByRole("button", { name: "复制此镜" }));
   expect(await screen.findByText(/镜头已复制插入：第 2 镜/)).toBeTruthy();
+});
+
+it("clamps long prompts in ShotDetail with an expand/collapse toggle", async () => {
+  const longPrompt = "A sweeping cinematic tracking shot through a neon-lit rain-drenched cyberpunk alleyway with reflections shimmering across wet cobblestones. ".repeat(3).trim();
+  const board = workbenchFrom(id => {
+    const base = context(id);
+    return {
+      ...base,
+      selectedShot: base.selectedShot ? { ...base.selectedShot, prompt: id === "s1" ? longPrompt : "short" } : null,
+    };
+  });
+  api.workbench.mockResolvedValue(board);
+  render(<StoryboardWorkbench route={route} navigate={vi.fn()} />);
+  await screen.findByRole("article", { name: "镜头01" });
+  fireEvent.click(screen.getByRole("button", { name: "展开详情" }));
+  const detail = screen.getByRole("region", { name: "镜头详情" });
+  const expandBtn = within(detail).getByRole("button", { name: "展开全文" });
+  expect(expandBtn).toBeTruthy();
+  fireEvent.click(expandBtn);
+  expect(within(detail).getByRole("button", { name: "收起" })).toBeTruthy();
 });

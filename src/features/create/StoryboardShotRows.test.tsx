@@ -275,7 +275,7 @@ it("binds/unbinds entities, renames via updateShot, deletes with confirm and gen
   fireEvent.click(within(row).getByRole("button", { name: "删除分镜" }));
   await waitFor(() => expect(api.deleteShot).toHaveBeenCalledWith("p", "a"));
   expect(confirm).toHaveBeenCalledTimes(2);
-  fireEvent.click(within(row).getByRole("button", { name: "末尾新建分镜" })); expect(p.onCreate).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "末尾新建分镜" })); expect(p.onCreate).toHaveBeenCalled();
   fireEvent.click(within(row).getByRole("button", { name: "编辑与详情" })); expect(p.onOpen).toHaveBeenCalled();
 });
 

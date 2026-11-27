@@ -268,6 +268,7 @@ pub mod folder_batch_import_service {
         FirstLast,
         Reference,
         Image,
+        Text,
     }
     #[derive(Clone, Debug, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -645,6 +646,13 @@ pub mod folder_batch_import_service {
                             && shot.characters.is_empty()
                             && !has_at
                     }
+                    Mode::Text => {
+                        shot.first_frame.is_none()
+                            && shot.last_frame.is_none()
+                            && shot.references.is_empty()
+                            && shot.characters.is_empty()
+                            && !has_at
+                    }
                     Mode::Reference => {
                         shot.first_frame.is_none()
                             && shot.last_frame.is_none()
@@ -900,6 +908,973 @@ pub mod folder_batch_import_service {
         )
     }
 
+    fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+        let mut ia = a.chars().peekable();
+        let mut ib = b.chars().peekable();
+        loop {
+            match (ia.peek(), ib.peek()) {
+                (None, None) => return std::cmp::Ordering::Equal,
+                (None, Some(_)) => return std::cmp::Ordering::Less,
+                (Some(_), None) => return std::cmp::Ordering::Greater,
+                (Some(&ca), Some(&cb)) if ca.is_ascii_digit() && cb.is_ascii_digit() => {
+                    let mut na = String::new();
+                    while let Some(&c) = ia.peek() {
+                        if c.is_ascii_digit() {
+                            na.push(c);
+                            ia.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    let mut nb = String::new();
+                    while let Some(&c) = ib.peek() {
+                        if c.is_ascii_digit() {
+                            nb.push(c);
+                            ib.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    let za = na.trim_start_matches('0');
+                    let zb = nb.trim_start_matches('0');
+                    let ord = za
+                        .len()
+                        .cmp(&zb.len())
+                        .then_with(|| za.cmp(zb))
+                        .then_with(|| na.len().cmp(&nb.len()));
+                    if ord != std::cmp::Ordering::Equal {
+                        return ord;
+                    }
+                }
+                (Some(&ca), Some(&cb)) => {
+                    let ord = ca.to_ascii_lowercase().cmp(&cb.to_ascii_lowercase());
+                    if ord != std::cmp::Ordering::Equal {
+                        return ord;
+                    }
+                    ia.next();
+                    ib.next();
+                }
+            }
+        }
+    }
+
+    fn strip_bom_and_code_fence(raw: &str) -> &str {
+        let trimmed = raw.trim_start_matches('\u{feff}').trim();
+        if let Some(rest) = trimmed.strip_prefix("```") {
+            let body = rest.split_once('\n').map(|(_, b)| b).unwrap_or(rest);
+            if let Some(inner) = body.trim_end().strip_suffix("```") {
+                return inner.trim();
+            }
+        }
+        trimmed
+    }
+
+    #[derive(Clone, Debug, Default)]
+    struct AutoShotMeta {
+        duration_seconds: Option<i64>,
+        aspect_ratio: Option<String>,
+        resolution_preset: Option<String>,
+        width: Option<i64>,
+        height: Option<i64>,
+        mode: Option<Mode>,
+        first_frame: Option<String>,
+        last_frame: Option<String>,
+        references: Vec<String>,
+        notes: Vec<String>,
+    }
+
+    impl AutoShotMeta {
+        fn has_any(&self) -> bool {
+            self.duration_seconds.is_some()
+                || self.aspect_ratio.is_some()
+                || self.resolution_preset.is_some()
+                || self.width.is_some()
+                || self.mode.is_some()
+                || self.first_frame.is_some()
+                || self.last_frame.is_some()
+                || !self.references.is_empty()
+        }
+        fn merge_from(&mut self, other: AutoShotMeta) {
+            if other.duration_seconds.is_some() {
+                self.duration_seconds = other.duration_seconds;
+            }
+            if other.width.is_some() && other.height.is_some() {
+                self.width = other.width;
+                self.height = other.height;
+                self.aspect_ratio = None;
+                self.resolution_preset = None;
+            } else {
+                if other.aspect_ratio.is_some() {
+                    self.aspect_ratio = other.aspect_ratio;
+                    self.width = None;
+                    self.height = None;
+                }
+                if other.resolution_preset.is_some() {
+                    self.resolution_preset = other.resolution_preset;
+                    self.width = None;
+                    self.height = None;
+                }
+            }
+            if other.mode.is_some() {
+                self.mode = other.mode;
+            }
+            if other.first_frame.is_some() {
+                self.first_frame = other.first_frame;
+            }
+            if other.last_frame.is_some() {
+                self.last_frame = other.last_frame;
+            }
+            for r in other.references {
+                if !self.references.contains(&r) {
+                    self.references.push(r);
+                }
+            }
+            self.notes.extend(other.notes);
+        }
+    }
+
+    fn snap_h3_resolution(w: i64, h: i64) -> (i64, i64, bool) {
+        if super::product::h3_resolution::is_supported_h3_base_resolution(w, h) {
+            return (w, h, false);
+        }
+        let target_area = (w as f64) * (h as f64);
+        let target_ratio = (w as f64) / (h.max(1) as f64);
+        let presets = super::product::h3_resolution::h3_base_presets();
+        let best = presets.iter().min_by(|a, b| {
+            let ra = ((a.width as f64) / (a.height.max(1) as f64) - target_ratio).abs();
+            let rb = ((b.width as f64) / (b.height.max(1) as f64) - target_ratio).abs();
+            // Prefer presets with matching aspect ratio first, then closest pixel area.
+            let ratio_diff = (ra - rb).abs();
+            if ratio_diff > 0.05 {
+                ra.total_cmp(&rb)
+            } else {
+                let da = ((a.width as f64) * (a.height as f64) - target_area).abs();
+                let db = ((b.width as f64) * (b.height as f64) - target_area).abs();
+                da.total_cmp(&db)
+            }
+        });
+        if let Some(p) = best {
+            (p.width, p.height, true)
+        } else {
+            (1344, 768, true)
+        }
+    }
+
+    fn extract_wxh(text: &str) -> Option<(i64, i64)> {
+        let chars: Vec<char> = text.chars().collect();
+        for i in 0..chars.len() {
+            if !matches!(chars[i], 'x' | 'X' | '×' | '*') {
+                continue;
+            }
+            if i == 0 || i + 1 >= chars.len() {
+                continue;
+            }
+            let mut l = i;
+            while l > 0 && chars[l - 1].is_ascii_digit() {
+                l -= 1;
+            }
+            let mut r = i + 1;
+            while r < chars.len() && chars[r].is_ascii_digit() {
+                r += 1;
+            }
+            let w_len = i - l;
+            let h_len = r - (i + 1);
+            if (3..=4).contains(&w_len) && (3..=4).contains(&h_len) {
+                let w_str: String = chars[l..i].iter().collect();
+                let h_str: String = chars[i + 1..r].iter().collect();
+                if let (Ok(w), Ok(h)) = (w_str.parse::<i64>(), h_str.parse::<i64>()) {
+                    if (256..=4096).contains(&w) && (256..=4096).contains(&h) {
+                        return Some((w, h));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_duration_from_meta(text: &str) -> Option<i64> {
+        let lower = text.to_ascii_lowercase();
+        for key in ["时长", "duration", "--duration", "--dur"] {
+            if let Some(pos) = lower.find(key) {
+                let rest = &text[pos + key.len()..];
+                let rest = rest
+                    .trim_start()
+                    .trim_start_matches([':', '：', '='])
+                    .trim_start();
+                let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(v) = digits.parse::<i64>() {
+                    if (1..=60).contains(&v) {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i].is_ascii_digit() {
+                let prev_ok = i == 0
+                    || !(chars[i - 1].is_ascii_alphanumeric()
+                        || matches!(chars[i - 1], '.' | ':' | '：' | '_' | '/' | '-'));
+                let start = i;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+                if prev_ok && (1..=2).contains(&(i - start)) {
+                    let mut j = i;
+                    while j < chars.len() && chars[j] == ' ' {
+                        j += 1;
+                    }
+                    let rest: String = chars[j..].iter().take(7).collect();
+                    let rest_l = rest.to_ascii_lowercase();
+                    let unit_match = rest.starts_with('秒')
+                        || (rest_l.starts_with('s')
+                            && !rest_l.chars().nth(1).is_some_and(|c| {
+                                c.is_ascii_alphabetic() && !rest_l.starts_with("sec")
+                            }))
+                        || rest_l.starts_with("sec");
+                    if unit_match {
+                        let digits: String = chars[start..i].iter().collect();
+                        if let Ok(v) = digits.parse::<i64>() {
+                            if (1..=60).contains(&v) {
+                                return Some(v);
+                            }
+                        }
+                    }
+                }
+            } else {
+                i += 1;
+            }
+        }
+        None
+    }
+
+    fn split_media_tokens(raw: &str) -> Vec<String> {
+        raw.split([',', '，', '、', '+'])
+            .map(|s| {
+                s.trim()
+                    .trim_matches(['"', '\'', '`', '「', '」', '《', '》'])
+                    .trim()
+            })
+            .filter(|s| !s.is_empty())
+            .map(|s| s.replace('\\', "/"))
+            .collect()
+    }
+
+    fn parse_meta_text(text: &str) -> AutoShotMeta {
+        let mut meta = AutoShotMeta::default();
+        let normalized = text
+            .replace('：', ":")
+            .replace('｜', "|")
+            .replace('；', ";");
+        // Parse segment-based key: value pairs first so media filenames don't confuse duration/aspect parsing.
+        let mut non_media_parts = Vec::new();
+        for seg in normalized.split(['|', ';', '\n']) {
+            let trimmed = seg.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let stripped = trimmed
+                .strip_prefix("参数:")
+                .or_else(|| trimmed.strip_prefix("设置:"))
+                .or_else(|| trimmed.strip_prefix("配置:"))
+                .or_else(|| trimmed.strip_prefix("全局:"))
+                .or_else(|| trimmed.strip_prefix("默认:"))
+                .or_else(|| trimmed.strip_prefix("defaults:"))
+                .unwrap_or(trimmed)
+                .trim();
+            let lower = stripped.to_ascii_lowercase();
+            if let Some(val) = stripped
+                .strip_prefix("首帧:")
+                .or_else(|| stripped.strip_prefix("首帧图:"))
+                .or_else(|| {
+                    lower
+                        .starts_with("firstframe:")
+                        .then(|| &stripped["firstframe:".len()..])
+                })
+                .or_else(|| {
+                    lower
+                        .starts_with("first:")
+                        .then(|| &stripped["first:".len()..])
+                })
+            {
+                if let Some(tok) = split_media_tokens(val).into_iter().next() {
+                    meta.first_frame = Some(tok);
+                }
+            } else if let Some(val) = stripped
+                .strip_prefix("尾帧:")
+                .or_else(|| stripped.strip_prefix("尾帧图:"))
+                .or_else(|| {
+                    lower
+                        .starts_with("lastframe:")
+                        .then(|| &stripped["lastframe:".len()..])
+                })
+                .or_else(|| {
+                    lower
+                        .starts_with("last:")
+                        .then(|| &stripped["last:".len()..])
+                })
+            {
+                if let Some(tok) = split_media_tokens(val).into_iter().next() {
+                    meta.last_frame = Some(tok);
+                }
+            } else if let Some(val) = stripped
+                .strip_prefix("参考图:")
+                .or_else(|| stripped.strip_prefix("参考:"))
+                .or_else(|| stripped.strip_prefix("图片:"))
+                .or_else(|| stripped.strip_prefix("图:"))
+                .or_else(|| {
+                    lower
+                        .starts_with("references:")
+                        .then(|| &stripped["references:".len()..])
+                })
+                .or_else(|| {
+                    lower
+                        .starts_with("refs:")
+                        .then(|| &stripped["refs:".len()..])
+                })
+                .or_else(|| lower.starts_with("ref:").then(|| &stripped["ref:".len()..]))
+                .or_else(|| {
+                    lower
+                        .starts_with("images:")
+                        .then(|| &stripped["images:".len()..])
+                })
+                .or_else(|| {
+                    lower
+                        .starts_with("image:")
+                        .then(|| &stripped["image:".len()..])
+                })
+            {
+                let is_explicit_ref = stripped.starts_with("参考") || lower.starts_with("ref");
+                let toks = split_media_tokens(val);
+                if is_explicit_ref && !toks.is_empty() && meta.mode.is_none() {
+                    meta.mode = Some(Mode::Reference);
+                }
+                for tok in toks {
+                    if !meta.references.contains(&tok) {
+                        meta.references.push(tok);
+                    }
+                }
+            } else {
+                non_media_parts.push(stripped.to_owned());
+            }
+        }
+        // Also parse inline space-separated media tokens inside bracketed tags (e.g. "[6s 16:9 首帧:a.png 尾帧:b.png]")
+        let mut clean_scan = Vec::new();
+        for part in non_media_parts {
+            let mut kept_tokens = Vec::new();
+            for token in part.split_whitespace() {
+                let tl = token.to_ascii_lowercase();
+                if let Some(val) = token
+                    .strip_prefix("首帧:")
+                    .or_else(|| tl.starts_with("first:").then(|| &token["first:".len()..]))
+                {
+                    if let Some(f) = split_media_tokens(val).into_iter().next() {
+                        meta.first_frame = Some(f);
+                    }
+                } else if let Some(val) = token
+                    .strip_prefix("尾帧:")
+                    .or_else(|| tl.starts_with("last:").then(|| &token["last:".len()..]))
+                {
+                    if let Some(f) = split_media_tokens(val).into_iter().next() {
+                        meta.last_frame = Some(f);
+                    }
+                } else if let Some(val) = token
+                    .strip_prefix("参考图:")
+                    .or_else(|| token.strip_prefix("参考:"))
+                    .or_else(|| token.strip_prefix("图:"))
+                    .or_else(|| tl.starts_with("ref:").then(|| &token["ref:".len()..]))
+                    .or_else(|| tl.starts_with("refs:").then(|| &token["refs:".len()..]))
+                {
+                    if token.starts_with("参考") || tl.starts_with("ref") {
+                        meta.mode.get_or_insert(Mode::Reference);
+                    }
+                    for f in split_media_tokens(val) {
+                        if !meta.references.contains(&f) {
+                            meta.references.push(f);
+                        }
+                    }
+                } else {
+                    kept_tokens.push(token);
+                }
+            }
+            clean_scan.push(kept_tokens.join(" "));
+        }
+        let joined = clean_scan.join(" | ");
+        let lower = joined.to_ascii_lowercase();
+
+        meta.duration_seconds = extract_duration_from_meta(&joined);
+
+        if let Some((w, h)) = extract_wxh(&joined) {
+            let (sw, sh, snapped) = snap_h3_resolution(w, h);
+            meta.width = Some(sw);
+            meta.height = Some(sh);
+            if snapped {
+                meta.notes.push(format!(
+                    "分辨率 {w}×{h} 已自动对齐到工作流正式档位 {sw}×{sh}"
+                ));
+            }
+        } else {
+            if joined.contains("16:9") || joined.contains("横屏") {
+                meta.aspect_ratio = Some("16:9".into());
+            } else if joined.contains("9:16") || joined.contains("竖屏") {
+                meta.aspect_ratio = Some("9:16".into());
+            } else if joined.contains("1:1") || joined.contains("方屏") || joined.contains("正方")
+            {
+                meta.aspect_ratio = Some("1:1".into());
+            } else if joined.contains("4:3") {
+                meta.aspect_ratio = Some("4:3".into());
+            } else if joined.contains("3:4") {
+                meta.aspect_ratio = Some("3:4".into());
+            }
+
+            if lower.contains("1080p")
+                || joined.contains("超清")
+                || lower.contains("fhd")
+                || lower.contains("2.0mp")
+            {
+                meta.resolution_preset = Some("2.0".into());
+            } else if lower.contains("720p")
+                || joined.contains("高清")
+                || joined.contains("标准")
+                || lower.contains("0.98mp")
+                || joined.contains("0.98")
+            {
+                meta.resolution_preset = Some("0.98".into());
+            } else if lower.contains("480p")
+                || joined.contains("标清")
+                || joined.contains("省显存")
+                || joined.contains("快速")
+                || lower.contains("0.5mp")
+                || joined.contains("0.5")
+            {
+                meta.resolution_preset = Some("0.5".into());
+            } else {
+                for mp in [
+                    "2.0", "1.8", "1.5", "1.2", "1.0", "0.9", "0.8", "0.7", "0.6", "0.4", "0.3",
+                    "0.2",
+                ] {
+                    if joined.contains(&format!("分辨率:{mp}"))
+                        || joined.contains(&format!("分辨率: {mp}"))
+                        || lower.contains(&format!("{mp}mp"))
+                    {
+                        meta.resolution_preset = Some(mp.into());
+                        break;
+                    }
+                }
+            }
+        }
+
+        if meta.mode.is_none() {
+            if joined.contains("纯文生")
+                || joined.contains("文生")
+                || lower
+                    .split_whitespace()
+                    .any(|w| w == "t2v" || w == "mode:text")
+            {
+                meta.mode = Some(Mode::Text);
+            } else if joined.contains("首尾帧")
+                || lower
+                    .split_whitespace()
+                    .any(|w| w == "fl2v" || w == "firstlast")
+            {
+                meta.mode = Some(Mode::FirstLast);
+            } else if joined.contains("混合参考")
+                || joined.contains("参考模式")
+                || lower
+                    .split_whitespace()
+                    .any(|w| w == "ref2va" || w == "reference")
+            {
+                meta.mode = Some(Mode::Reference);
+            } else if joined.contains("单图")
+                || joined.contains("图生")
+                || lower.split_whitespace().any(|w| w == "i2v")
+            {
+                meta.mode = Some(Mode::Image);
+            }
+        }
+        meta
+    }
+
+    fn is_meta_line(line: &str) -> bool {
+        let t = line.trim().trim_start_matches(['-', '*', '•']).trim();
+        let norm = t.replace('：', ":");
+        let lower = norm.to_ascii_lowercase();
+        const PREFIXES: &[&str] = &[
+            "参数:",
+            "设置:",
+            "配置:",
+            "时长:",
+            "画幅:",
+            "比例:",
+            "分辨率:",
+            "清晰度:",
+            "画质:",
+            "模式:",
+            "首帧:",
+            "首帧图:",
+            "尾帧:",
+            "尾帧图:",
+            "参考图:",
+            "参考:",
+            "图片:",
+            "图:",
+            "duration:",
+            "aspect:",
+            "size:",
+            "res:",
+            "resolution:",
+            "mode:",
+            "first:",
+            "firstframe:",
+            "last:",
+            "lastframe:",
+            "ref:",
+            "refs:",
+            "references:",
+            "image:",
+            "images:",
+        ];
+        PREFIXES.iter().any(|p| lower.starts_with(p))
+    }
+
+    fn strip_leading_numbering(text: &str) -> &str {
+        let trimmed = text.trim();
+        for prefix in ["镜头", "分镜", "镜", "Shot", "shot", "SHOT"] {
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                let rest = rest.trim_start().trim_start_matches('#');
+                let after_digits = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+                if after_digits.len() < rest.len() {
+                    let after_sep = after_digits.trim_start();
+                    if let Some(body) = after_sep
+                        .strip_prefix(':')
+                        .or_else(|| after_sep.strip_prefix('：'))
+                        .or_else(|| after_sep.strip_prefix('-'))
+                        .or_else(|| after_sep.strip_prefix('—'))
+                        .or_else(|| after_sep.strip_prefix('.'))
+                    {
+                        return body.trim();
+                    }
+                }
+            }
+        }
+        let after_digits = trimmed.trim_start_matches(|c: char| c.is_ascii_digit());
+        if after_digits.len() < trimmed.len() && (trimmed.len() - after_digits.len()) <= 4 {
+            if let Some(body) = after_digits
+                .strip_prefix('.')
+                .or_else(|| after_digits.strip_prefix(')'))
+                .or_else(|| after_digits.strip_prefix('、'))
+                .or_else(|| after_digits.strip_prefix(':'))
+                .or_else(|| after_digits.strip_prefix('：'))
+            {
+                let candidate = body.trim();
+                if !candidate.is_empty() {
+                    return candidate;
+                }
+            }
+        }
+        trimmed
+    }
+
+    fn parse_auto_shot_block(raw: &str) -> (Option<String>, String, AutoShotMeta) {
+        let trimmed = raw.trim_start_matches('\u{feff}').trim();
+        if trimmed.is_empty() {
+            return (None, String::new(), AutoShotMeta::default());
+        }
+        let mut lines: Vec<&str> = trimmed
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        let mut title: Option<String> = None;
+        if lines.len() >= 2 {
+            let first = lines[0];
+            let clean_first = first
+                .trim_start_matches('#')
+                .trim()
+                .trim_matches('*')
+                .trim();
+            let looks_like_heading = first.starts_with('#')
+                || (clean_first.chars().count() <= 32
+                    && (clean_first.starts_with("镜头")
+                        || clean_first.starts_with("分镜")
+                        || clean_first.starts_with("镜")
+                        || clean_first.to_ascii_lowercase().starts_with("shot"))
+                    && !clean_first.contains('。')
+                    && !clean_first.contains(','));
+            if looks_like_heading && !clean_first.is_empty() {
+                title = Some(clean_first.to_owned());
+                lines.remove(0);
+            }
+        }
+        let mut meta = AutoShotMeta::default();
+        let mut body_lines = Vec::new();
+        for line in lines {
+            if is_meta_line(line) {
+                let m = parse_meta_text(line);
+                if m.has_any() {
+                    meta.merge_from(m);
+                    continue;
+                }
+            }
+            body_lines.push(line);
+        }
+        let mut body = body_lines.join("\n").trim().to_owned();
+        body = strip_leading_numbering(&body).to_owned();
+
+        // Check leading bracketed tag block like "[6s 16:9 参考:01.png] prompt..." or "【6秒 竖屏】prompt..."
+        for (open, close) in [('[', ']'), ('【', '】')] {
+            if let Some(rest) = body.strip_prefix(open) {
+                if let Some((inside, after)) = rest.split_once(close) {
+                    let m = parse_meta_text(inside);
+                    if m.has_any() {
+                        meta.merge_from(m);
+                        body = after.trim().to_owned();
+                    }
+                }
+            }
+        }
+        // Check trailing CLI-style flags (--dur 6 --ar 16:9)
+        if body.contains("--dur") || body.contains("--ar") || body.contains("--res") {
+            let mut kept = Vec::new();
+            let tokens: Vec<&str> = body.split_whitespace().collect();
+            let mut idx = 0;
+            let mut flag_parts = Vec::new();
+            while idx < tokens.len() {
+                let tl = tokens[idx].to_ascii_lowercase();
+                if matches!(tl.as_str(), "--dur" | "--duration" | "--ar" | "--res")
+                    && idx + 1 < tokens.len()
+                {
+                    flag_parts.push(format!("{} {}", tokens[idx], tokens[idx + 1]));
+                    idx += 2;
+                } else {
+                    kept.push(tokens[idx]);
+                    idx += 1;
+                }
+            }
+            if !flag_parts.is_empty() {
+                let m = parse_meta_text(&flag_parts.join(" "));
+                if m.has_any() {
+                    meta.merge_from(m);
+                    body = kept.join(" ");
+                }
+            }
+        }
+        (title, body.trim().to_owned(), meta)
+    }
+
+    fn split_smart_script(
+        raw: &str,
+        image_count: usize,
+    ) -> (AutoShotMeta, Vec<(Option<String>, String, AutoShotMeta)>) {
+        let text = raw.trim_start_matches('\u{feff}').replace("\r\n", "\n");
+        let mut global_meta = AutoShotMeta::default();
+        let mut remaining_lines = Vec::new();
+        let mut in_header = true;
+        for line in text.lines() {
+            let t = line.trim();
+            if in_header && t.is_empty() {
+                continue;
+            }
+            let norm = t.trim_start_matches('#').trim().replace('：', ":");
+            let lower = norm.to_ascii_lowercase();
+            if in_header
+                && (lower.starts_with("全局:")
+                    || lower.starts_with("默认:")
+                    || lower.starts_with("defaults:")
+                    || lower.starts_with("全局参数:")
+                    || lower.starts_with("全局默认"))
+            {
+                let m = parse_meta_text(&norm);
+                if m.has_any() {
+                    global_meta.merge_from(m);
+                    continue;
+                }
+            }
+            in_header = false;
+            remaining_lines.push(line);
+        }
+        let body = remaining_lines.join("\n").trim().to_owned();
+        if body.is_empty() {
+            return (global_meta, vec![]);
+        }
+        let has_md_headings = body
+            .lines()
+            .filter(|l| {
+                let t = l.trim();
+                t.starts_with("## ") || t.starts_with("### ")
+            })
+            .count()
+            >= 1;
+        let blocks: Vec<String> = if has_md_headings {
+            let mut out = Vec::new();
+            let mut cur = Vec::new();
+            for line in body.lines() {
+                let t = line.trim();
+                if t == "---" || t == "***" {
+                    if !cur.is_empty() {
+                        out.push(cur.join("\n"));
+                        cur.clear();
+                    }
+                    continue;
+                }
+                if (t.starts_with("## ") || t.starts_with("### ")) && !cur.is_empty() {
+                    out.push(cur.join("\n"));
+                    cur.clear();
+                }
+                cur.push(line);
+            }
+            if !cur.is_empty() {
+                out.push(cur.join("\n"));
+            }
+            out.into_iter()
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .collect()
+        } else {
+            let paragraphs: Vec<String> = body
+                .split("\n\n")
+                .map(|chunk| chunk.trim().to_owned())
+                .filter(|s| !s.is_empty() && s != "---")
+                .collect();
+            let lines: Vec<String> = body
+                .lines()
+                .map(|l| l.trim().to_owned())
+                .filter(|s| !s.is_empty() && s != "---")
+                .collect();
+            if image_count > 0 && paragraphs.len() == image_count {
+                paragraphs
+            } else if image_count > 0 && lines.len() == image_count {
+                lines
+            } else if paragraphs.len() == 1 && lines.len() > 1 {
+                lines
+            } else {
+                paragraphs
+            }
+        };
+        let shots = blocks
+            .into_iter()
+            .map(|b| parse_auto_shot_block(&b))
+            .filter(|(_, p, m)| !p.is_empty() || m.has_any())
+            .collect();
+        (global_meta, shots)
+    }
+
+    fn resolve_image_hint(hint: &str, images: &[String]) -> String {
+        let clean = hint.trim().replace('\\', "/");
+        let hl = clean.to_ascii_lowercase();
+        if let Some(found) = images.iter().find(|img| img.to_ascii_lowercase() == hl) {
+            return found.clone();
+        }
+        if let Some(found) = images.iter().find(|img| {
+            Path::new(img)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|f| f.to_ascii_lowercase() == hl)
+        }) {
+            return found.clone();
+        }
+        if let Some(found) = images.iter().find(|img| {
+            Path::new(img)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|st| st.to_ascii_lowercase() == hl)
+        }) {
+            return found.clone();
+        }
+        clean
+    }
+
+    fn parse_auto_json_prompts(
+        raw: &str,
+    ) -> Option<(AutoShotMeta, Vec<(Option<String>, String, AutoShotMeta)>)> {
+        let cleaned = strip_bom_and_code_fence(raw);
+        let value: serde_json::Value = serde_json::from_str(cleaned).ok()?;
+        let items = match &value {
+            serde_json::Value::Array(arr) => arr.as_slice(),
+            serde_json::Value::Object(map) => map
+                .get("shots")
+                .or_else(|| map.get("items"))
+                .or_else(|| map.get("prompts"))
+                .and_then(|v| v.as_array())
+                .map(|a| a.as_slice())?,
+            _ => return None,
+        };
+        let mut out = Vec::new();
+        for item in items {
+            match item {
+                serde_json::Value::String(s) if !s.trim().is_empty() => {
+                    out.push(parse_auto_shot_block(s));
+                }
+                serde_json::Value::Object(obj) => {
+                    let prompt_raw = obj
+                        .get("prompt")
+                        .or_else(|| obj.get("description"))
+                        .or_else(|| obj.get("text"))
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty());
+                    let Some(prompt_raw) = prompt_raw else {
+                        continue;
+                    };
+                    let (parsed_title, clean_prompt, mut meta) = parse_auto_shot_block(prompt_raw);
+                    let name = obj
+                        .get("name")
+                        .or_else(|| obj.get("title"))
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned)
+                        .or(parsed_title);
+                    if let Some(d) = obj
+                        .get("durationSeconds")
+                        .or_else(|| obj.get("duration"))
+                        .and_then(|v| v.as_i64())
+                    {
+                        meta.duration_seconds = Some(d);
+                    }
+                    if let Some(ar) = obj
+                        .get("aspectRatio")
+                        .or_else(|| obj.get("aspect"))
+                        .and_then(|v| v.as_str())
+                    {
+                        meta.aspect_ratio = Some(ar.trim().to_owned());
+                    }
+                    if let Some(rp) = obj
+                        .get("resolutionPreset")
+                        .or_else(|| obj.get("resolution"))
+                        .and_then(|v| v.as_str())
+                    {
+                        let m2 = parse_meta_text(rp);
+                        meta.merge_from(m2);
+                    }
+                    if let (Some(w), Some(h)) = (
+                        obj.get("width").and_then(|v| v.as_i64()),
+                        obj.get("height").and_then(|v| v.as_i64()),
+                    ) {
+                        let (sw, sh, snapped) = snap_h3_resolution(w, h);
+                        meta.width = Some(sw);
+                        meta.height = Some(sh);
+                        meta.aspect_ratio = None;
+                        meta.resolution_preset = None;
+                        if snapped {
+                            meta.notes
+                                .push(format!("分辨率 {w}×{h} 已自动对齐到 {sw}×{sh}"));
+                        }
+                    }
+                    if let Some(ff) = obj
+                        .get("firstFrame")
+                        .or_else(|| obj.get("first_frame"))
+                        .or_else(|| obj.get("image"))
+                        .or_else(|| obj.get("file"))
+                        .or_else(|| obj.get("filename"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().replace('\\', "/"))
+                        .filter(|s| !s.is_empty())
+                    {
+                        meta.first_frame = Some(ff);
+                    }
+                    if let Some(lf) = obj
+                        .get("lastFrame")
+                        .or_else(|| obj.get("last_frame"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().replace('\\', "/"))
+                        .filter(|s| !s.is_empty())
+                    {
+                        meta.last_frame = Some(lf);
+                    }
+                    if let Some(refs) = obj.get("references").and_then(|v| v.as_array()) {
+                        for r in refs {
+                            if let Some(s) = r
+                                .as_str()
+                                .map(|v| v.trim().replace('\\', "/"))
+                                .filter(|v| !v.is_empty())
+                            {
+                                if !meta.references.contains(&s) {
+                                    meta.references.push(s);
+                                }
+                            }
+                        }
+                    }
+                    out.push((name, clean_prompt, meta));
+                }
+                _ => {}
+            }
+        }
+        (!out.is_empty()).then_some((AutoShotMeta::default(), out))
+    }
+
+    fn find_auto_prompt_file(
+        root: &Path,
+        sidecar_names: &BTreeSet<String>,
+    ) -> Option<(String, bool)> {
+        let entries = std::fs::read_dir(root).ok()?;
+        let mut json_files: Vec<String> = Vec::new();
+        let mut text_files: Vec<String> = Vec::new();
+        for entry in entries.flatten() {
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if !meta.file_type().is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || !safe_relative_path(&name) {
+                continue;
+            }
+            let lower = name.to_ascii_lowercase();
+            if lower.ends_with(".json")
+                && !matches!(
+                    lower.as_str(),
+                    "manifest.json" | "h3-batch.json" | "h3-omni-batch.json"
+                )
+            {
+                json_files.push(name);
+            } else if (lower.ends_with(".txt") || lower.ends_with(".md"))
+                && !sidecar_names.contains(&lower)
+            {
+                text_files.push(name);
+            }
+        }
+        json_files.sort_by(|a, b| natural_cmp(a, b));
+        text_files.sort_by(|a, b| natural_cmp(a, b));
+        const JSON_PRIORITY: &[&str] = &[
+            "prompts.json",
+            "shots.json",
+            "storyboard.json",
+            "提示词.json",
+            "分镜.json",
+        ];
+        for wanted in JSON_PRIORITY {
+            if let Some(found) = json_files.iter().find(|n| n.eq_ignore_ascii_case(wanted)) {
+                return Some((found.clone(), true));
+            }
+        }
+        const TEXT_PRIORITY: &[&str] = &[
+            "prompts.txt",
+            "prompt.txt",
+            "shots.txt",
+            "storyboard.txt",
+            "提示词.txt",
+            "分镜.txt",
+            "prompts.md",
+            "提示词.md",
+            "分镜.md",
+        ];
+        for wanted in TEXT_PRIORITY {
+            if let Some(found) = text_files.iter().find(|n| n.eq_ignore_ascii_case(wanted)) {
+                return Some((found.clone(), false));
+            }
+        }
+        if json_files.len() == 1 {
+            return Some((json_files[0].clone(), true));
+        }
+        if text_files.len() == 1 {
+            return Some((text_files[0].clone(), false));
+        }
+        None
+    }
+
     #[derive(Clone, Debug, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct EntityPreview {
@@ -1144,6 +2119,599 @@ pub mod folder_batch_import_service {
             }
             Ok(false)
         }
+        async fn resolve_auto_generators(
+            &self,
+        ) -> Result<BTreeMap<Mode, Generator>, ImportFailure> {
+            use super::shot_workflow_compatibility::{classify_shot_recipe, ShotVideoInputMode};
+            let available = self
+                .definitions
+                .list_available()
+                .await
+                .map_err(|_| failure("GENERATOR_UNAVAILABLE", "无法读取可用生成器列表"))?;
+            let mut by_mode: BTreeMap<Mode, Generator> = BTreeMap::new();
+            for def in available {
+                let admitted = self
+                    .admission
+                    .is_available_for_new_generation(&def.workflow_version_id, &def.recipe_id)
+                    .await
+                    .unwrap_or(false);
+                if !admitted {
+                    continue;
+                }
+                let Ok(recipe) = crate::compiler::RecipeParser::parse(&def.recipe_yaml) else {
+                    continue;
+                };
+                let Ok(compat) = classify_shot_recipe(
+                    crate::domain::ShotStage::Video,
+                    &def.workflow_id,
+                    &recipe,
+                ) else {
+                    continue;
+                };
+                let mode = match compat.input_mode {
+                    ShotVideoInputMode::TextOnly => Mode::Text,
+                    ShotVideoInputMode::SingleImage { ref key }
+                        if matches!(key.as_str(), "first_frame" | "image" | "reference_image") =>
+                    {
+                        Mode::Image
+                    }
+                    ShotVideoInputMode::FirstLast => Mode::FirstLast,
+                    ShotVideoInputMode::ReferenceMedia => Mode::Reference,
+                    ShotVideoInputMode::ReferenceImages { ref key, .. }
+                        if key == "reference_images" =>
+                    {
+                        Mode::Reference
+                    }
+                    _ => continue,
+                };
+                by_mode.entry(mode).or_insert_with(|| Generator {
+                    workflow_version_id: def.workflow_version_id.clone(),
+                    recipe_id: def.recipe_id.clone(),
+                });
+            }
+            Ok(by_mode)
+        }
+        async fn auto_folder_manifest(
+            &self,
+            root: &Path,
+            scanned: &[String],
+            options: &PreviewOptions,
+        ) -> Result<(Manifest, Vec<u8>, Vec<String>), ImportFailure> {
+            let mut images = scanned.to_vec();
+            images.sort_by(|a, b| natural_cmp(a, b));
+            let mut auto_warnings = Vec::new();
+            if images.len() > 500 {
+                auto_warnings.push(format!(
+                    "文件夹共有 {} 张图片，超过单次导入上限 500，已截取前 500 张。",
+                    images.len()
+                ));
+                images.truncate(500);
+            }
+
+            // Auto-discover admitted video generators for all supported modes (Text/Image/FirstLast/Reference)
+            let mut generators = self.resolve_auto_generators().await?;
+            let mut override_mode: Option<Mode> = None;
+            let mut override_legacy_params: Option<(i64, i64, i64)> = None;
+            if let Some(selected) = &options.legacy {
+                let pair = super::product::selection_ref::ExactGeneratorSelection::decode(
+                    &selected.selection_ref,
+                )
+                .map_err(|_| {
+                    failure(
+                        "GENERATOR_UNAVAILABLE",
+                        "请选择正式生成器，不能由名称猜测身份",
+                    )
+                })?;
+                let mut picked_mode = Mode::Image;
+                if let Some(def) = self
+                    .definitions
+                    .find_active(&pair.workflow_version_id, &pair.recipe_id)
+                    .await
+                    .map_err(|_| failure("GENERATOR_UNAVAILABLE", "无法读取生成器"))?
+                {
+                    if let Ok(recipe) = crate::compiler::RecipeParser::parse(&def.recipe_yaml) {
+                        if let Ok(compat) = super::shot_workflow_compatibility::classify_shot_recipe(
+                            crate::domain::ShotStage::Video,
+                            &def.workflow_id,
+                            &recipe,
+                        ) {
+                            picked_mode = match compat.input_mode {
+                                super::shot_workflow_compatibility::ShotVideoInputMode::ReferenceMedia
+                                | super::shot_workflow_compatibility::ShotVideoInputMode::ReferenceImages { .. } => Mode::Reference,
+                                super::shot_workflow_compatibility::ShotVideoInputMode::FirstLast => Mode::FirstLast,
+                                super::shot_workflow_compatibility::ShotVideoInputMode::TextOnly => Mode::Text,
+                                _ => Mode::Image,
+                            };
+                        }
+                    }
+                }
+                generators.insert(
+                    picked_mode.clone(),
+                    Generator {
+                        workflow_version_id: pair.workflow_version_id,
+                        recipe_id: pair.recipe_id,
+                    },
+                );
+                override_mode = Some(picked_mode);
+                override_legacy_params =
+                    Some((selected.duration_seconds, selected.width, selected.height));
+            }
+
+            let mut fingerprint = Vec::new();
+            fingerprint.extend_from_slice(b"folder-auto:v2\n");
+            fingerprint.extend_from_slice(
+                format!("{override_mode:?}:{override_legacy_params:?}\n").as_bytes(),
+            );
+            for img in &images {
+                fingerprint.extend_from_slice(img.as_bytes());
+                fingerprint.push(b'\n');
+            }
+
+            // 1) Check per-image sidecar .txt files (same dir or root with same stem)
+            let mut sidecar_shots: Vec<Option<(Option<String>, String, AutoShotMeta)>> =
+                vec![None; images.len()];
+            let mut sidecar_root_names: BTreeSet<String> = BTreeSet::new();
+            let mut sidecar_matched = 0usize;
+            for (idx, img) in images.iter().enumerate() {
+                let p = Path::new(img);
+                let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                let same_dir = match p.parent().and_then(|d| d.to_str()) {
+                    Some(dir) if !dir.is_empty() => format!("{dir}/{stem}.txt"),
+                    _ => format!("{stem}.txt"),
+                };
+                let root_txt = format!("{stem}.txt");
+                let candidates = if same_dir == root_txt {
+                    vec![same_dir]
+                } else {
+                    vec![same_dir, root_txt]
+                };
+                for candidate in candidates {
+                    if let Ok(bytes) = read_file(root, &candidate, 64 * 1024) {
+                        if let Ok(text) = String::from_utf8(bytes.clone()) {
+                            let parsed = parse_auto_shot_block(&text);
+                            if !parsed.1.is_empty() {
+                                fingerprint.extend_from_slice(b"sidecar:");
+                                fingerprint.extend_from_slice(candidate.as_bytes());
+                                fingerprint.push(b':');
+                                fingerprint.extend_from_slice(&bytes);
+                                fingerprint.push(b'\n');
+                                if !candidate.contains('/') {
+                                    sidecar_root_names.insert(candidate.to_ascii_lowercase());
+                                }
+                                sidecar_shots[idx] = Some(parsed);
+                                sidecar_matched += 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2) Check shared smart script file in root (prompts.txt / 分镜.md / prompts.json)
+            let mut shared_source_name: Option<String> = None;
+            let mut global_meta = AutoShotMeta::default();
+            let mut shared_entries: Vec<(Option<String>, String, AutoShotMeta)> = Vec::new();
+            if sidecar_matched < images.len() || images.is_empty() {
+                if let Some((prompt_file, is_json)) =
+                    find_auto_prompt_file(root, &sidecar_root_names)
+                {
+                    if let Ok(bytes) = read_file(root, &prompt_file, 1024 * 1024) {
+                        if let Ok(text) = String::from_utf8(bytes.clone()) {
+                            fingerprint.extend_from_slice(b"shared:");
+                            fingerprint.extend_from_slice(prompt_file.as_bytes());
+                            fingerprint.push(b':');
+                            fingerprint.extend_from_slice(&bytes);
+                            fingerprint.push(b'\n');
+                            shared_source_name = Some(prompt_file);
+                            if is_json {
+                                if let Some((gm, entries)) = parse_auto_json_prompts(&text) {
+                                    global_meta = gm;
+                                    shared_entries = entries;
+                                }
+                            } else {
+                                let missing_count = images.len().saturating_sub(sidecar_matched);
+                                let (gm, entries) = split_smart_script(&text, missing_count);
+                                global_meta = gm;
+                                shared_entries = entries;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3) Assemble shot specs:
+            //    - If shared script exists and either has explicit media hints OR has no sidecars and script drives the shot list,
+            //      let script shots drive count (falling back to natural-order unused images for shots without explicit media).
+            //    - Otherwise (sidecar .txt or images-only folder), let images drive count.
+            struct RawShotSpec {
+                name: String,
+                prompt: String,
+                meta: AutoShotMeta,
+                auto_image: Option<String>,
+            }
+            let mut specs: Vec<RawShotSpec> = Vec::new();
+            let script_has_explicit_media = shared_entries.iter().any(|(_, _, m)| {
+                m.first_frame.is_some()
+                    || m.last_frame.is_some()
+                    || !m.references.is_empty()
+                    || m.mode == Some(Mode::Text)
+            });
+
+            if !shared_entries.is_empty()
+                && (sidecar_matched == 0 && (script_has_explicit_media || images.is_empty()))
+            {
+                // Resolve explicit media hints first so we know which images remain for positional pairing
+                let mut used_imgs: BTreeSet<String> = BTreeSet::new();
+                let mut resolved_entries: Vec<(Option<String>, String, AutoShotMeta)> = Vec::new();
+                for (title, prompt, mut meta) in shared_entries {
+                    if let Some(ff) = meta.first_frame.take() {
+                        let r = resolve_image_hint(&ff, &images);
+                        used_imgs.insert(r.clone());
+                        meta.first_frame = Some(r);
+                    }
+                    if let Some(lf) = meta.last_frame.take() {
+                        let r = resolve_image_hint(&lf, &images);
+                        used_imgs.insert(r.clone());
+                        meta.last_frame = Some(r);
+                    }
+                    if !meta.references.is_empty() {
+                        meta.references = meta
+                            .references
+                            .into_iter()
+                            .map(|h| {
+                                let r = resolve_image_hint(&h, &images);
+                                used_imgs.insert(r.clone());
+                                r
+                            })
+                            .collect();
+                    }
+                    resolved_entries.push((title, prompt, meta));
+                }
+                let mut remaining_imgs = images
+                    .iter()
+                    .filter(|img| !used_imgs.contains(*img))
+                    .cloned();
+                for (i, (title, prompt, meta)) in resolved_entries.into_iter().enumerate() {
+                    let has_explicit = meta.first_frame.is_some()
+                        || meta.last_frame.is_some()
+                        || !meta.references.is_empty()
+                        || meta.mode == Some(Mode::Text);
+                    let auto_image = if has_explicit {
+                        None
+                    } else {
+                        remaining_imgs.next()
+                    };
+                    let fallback_stem = auto_image
+                        .as_deref()
+                        .or(meta.first_frame.as_deref())
+                        .or_else(|| meta.references.first().map(String::as_str))
+                        .and_then(|p| Path::new(p).file_stem().and_then(|s| s.to_str()))
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned);
+                    let name = title
+                        .or(fallback_stem)
+                        .unwrap_or_else(|| format!("镜头 {:02}", i + 1));
+                    specs.push(RawShotSpec {
+                        name,
+                        prompt,
+                        meta,
+                        auto_image,
+                    });
+                }
+            } else {
+                // Image-driven pairing (sidecars + positional shared prompts)
+                let mut shared_iter = shared_entries.into_iter();
+                for (i, img) in images.iter().enumerate() {
+                    let (title, prompt, mut meta) = if let Some(sc) = sidecar_shots[i].take() {
+                        sc
+                    } else if let Some(sh) = shared_iter.next() {
+                        sh
+                    } else {
+                        (None, String::new(), AutoShotMeta::default())
+                    };
+                    if let Some(ff) = meta.first_frame.take() {
+                        meta.first_frame = Some(resolve_image_hint(&ff, &images));
+                    }
+                    if let Some(lf) = meta.last_frame.take() {
+                        meta.last_frame = Some(resolve_image_hint(&lf, &images));
+                    }
+                    if !meta.references.is_empty() {
+                        meta.references = meta
+                            .references
+                            .into_iter()
+                            .map(|h| resolve_image_hint(&h, &images))
+                            .collect();
+                    }
+                    let stem = Path::new(img)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned);
+                    let name = title
+                        .or(stem)
+                        .unwrap_or_else(|| format!("镜头 {:02}", i + 1));
+                    specs.push(RawShotSpec {
+                        name,
+                        prompt,
+                        meta,
+                        auto_image: Some(img.clone()),
+                    });
+                }
+            }
+
+            if specs.is_empty() {
+                return Err(failure(
+                    "FILE_NOT_FOUND",
+                    "未识别到有效镜头（请放入分镜图片或 prompts.txt）",
+                ));
+            }
+            if specs.len() > 500 {
+                specs.truncate(500);
+            }
+
+            // Collect resolution alignment notes
+            for note in &global_meta.notes {
+                if !auto_warnings.contains(note) {
+                    auto_warnings.push(note.clone());
+                }
+            }
+
+            let mut defaults = Parameters::default();
+            if let Some((dur, w, h)) = override_legacy_params {
+                defaults.duration_seconds = Some(dur);
+                if w > 0 && h > 0 {
+                    defaults.width = Some(w);
+                    defaults.height = Some(h);
+                }
+            } else {
+                defaults.duration_seconds = Some(global_meta.duration_seconds.unwrap_or(5));
+                if let (Some(w), Some(h)) = (global_meta.width, global_meta.height) {
+                    defaults.width = Some(w);
+                    defaults.height = Some(h);
+                } else {
+                    defaults.aspect_ratio = Some(
+                        global_meta
+                            .aspect_ratio
+                            .clone()
+                            .unwrap_or_else(|| "16:9".into()),
+                    );
+                    defaults.resolution_preset = Some(
+                        global_meta
+                            .resolution_preset
+                            .clone()
+                            .unwrap_or_else(|| "0.98".into()),
+                    );
+                }
+            }
+
+            let mut matched_prompts = 0usize;
+            let mut extracted_meta_rows = 0usize;
+            let mut shots: Vec<ManifestShot> = Vec::with_capacity(specs.len());
+            for spec in specs {
+                for note in &spec.meta.notes {
+                    if !auto_warnings.contains(note) {
+                        auto_warnings.push(note.clone());
+                    }
+                }
+                if !spec.prompt.trim().is_empty() {
+                    matched_prompts += 1;
+                }
+                if spec.meta.duration_seconds.is_some()
+                    || spec.meta.aspect_ratio.is_some()
+                    || spec.meta.resolution_preset.is_some()
+                    || spec.meta.width.is_some()
+                {
+                    extracted_meta_rows += 1;
+                }
+
+                // Determine shot mode + media slots
+                let has_at = spec.prompt.contains('@');
+                let mut first_frame = spec.meta.first_frame.clone();
+                let mut last_frame = spec.meta.last_frame.clone();
+                let mut references = spec.meta.references.clone();
+
+                let shot_mode = if let Some(forced) = &override_mode {
+                    let single_img = first_frame
+                        .clone()
+                        .or_else(|| references.first().cloned())
+                        .or(spec.auto_image.clone());
+                    match forced {
+                        Mode::Reference => {
+                            if references.is_empty() {
+                                if let Some(img) = single_img {
+                                    references.push(img);
+                                }
+                            }
+                            first_frame = None;
+                            last_frame = None;
+                            Mode::Reference
+                        }
+                        Mode::Image => {
+                            if first_frame.is_none() {
+                                first_frame = single_img;
+                            }
+                            last_frame = None;
+                            references.clear();
+                            Mode::Image
+                        }
+                        Mode::FirstLast => {
+                            if first_frame.is_none() {
+                                first_frame = single_img;
+                            }
+                            references.clear();
+                            Mode::FirstLast
+                        }
+                        Mode::Text => {
+                            first_frame = None;
+                            last_frame = None;
+                            references.clear();
+                            Mode::Text
+                        }
+                    }
+                } else {
+                    let explicit_mode = spec.meta.mode.clone().or(global_meta.mode.clone());
+                    let chosen = if let Some(m) = explicit_mode {
+                        m
+                    } else if first_frame.is_some() && last_frame.is_some() {
+                        Mode::FirstLast
+                    } else if references.len() >= 2 || has_at {
+                        Mode::Reference
+                    } else if first_frame.is_some()
+                        || !references.is_empty()
+                        || spec.auto_image.is_some()
+                    {
+                        if generators.contains_key(&Mode::Image) {
+                            Mode::Image
+                        } else if generators.contains_key(&Mode::Reference) {
+                            Mode::Reference
+                        } else {
+                            Mode::Image
+                        }
+                    } else {
+                        Mode::Text
+                    };
+                    match chosen {
+                        Mode::FirstLast => {
+                            if first_frame.is_none() {
+                                first_frame = spec.auto_image.clone();
+                            }
+                            references.clear();
+                        }
+                        Mode::Reference => {
+                            if references.is_empty() {
+                                if let Some(img) = first_frame.take().or(spec.auto_image.clone()) {
+                                    references.push(img);
+                                }
+                            }
+                            first_frame = None;
+                            last_frame = None;
+                        }
+                        Mode::Image => {
+                            if first_frame.is_none() {
+                                first_frame =
+                                    references.first().cloned().or(spec.auto_image.clone());
+                            }
+                            last_frame = None;
+                            references.clear();
+                        }
+                        Mode::Text => {
+                            first_frame = None;
+                            last_frame = None;
+                            references.clear();
+                        }
+                    }
+                    chosen
+                };
+
+                let (shot_w, shot_h, shot_ar, shot_rp) = if override_legacy_params.is_some() {
+                    (None, None, None, None)
+                } else if let (Some(w), Some(h)) = (spec.meta.width, spec.meta.height) {
+                    (Some(w), Some(h), None, None)
+                } else if spec.meta.aspect_ratio.is_some() || spec.meta.resolution_preset.is_some()
+                {
+                    (
+                        None,
+                        None,
+                        spec.meta.aspect_ratio.clone().or_else(|| {
+                            if defaults.width.is_some() {
+                                Some("16:9".into())
+                            } else {
+                                None
+                            }
+                        }),
+                        spec.meta.resolution_preset.clone().or_else(|| {
+                            if defaults.width.is_some() {
+                                Some("0.98".into())
+                            } else {
+                                None
+                            }
+                        }),
+                    )
+                } else {
+                    (None, None, None, None)
+                };
+
+                shots.push(ManifestShot {
+                    id: None,
+                    name: Some(spec.name),
+                    mode: Some(shot_mode),
+                    prompt: spec.prompt,
+                    style: None,
+                    summary: None,
+                    soundscape: None,
+                    music: None,
+                    first_frame,
+                    last_frame,
+                    references,
+                    characters: vec![],
+                    opening_composition: None,
+                    ending_composition: None,
+                    duration_seconds: if override_legacy_params.is_some() {
+                        None
+                    } else {
+                        spec.meta.duration_seconds
+                    },
+                    aspect_ratio: shot_ar,
+                    resolution_preset: shot_rp,
+                    width: shot_w,
+                    height: shot_h,
+                    seed: None,
+                });
+            }
+
+            if let Some(src) = &shared_source_name {
+                auto_warnings.insert(
+                    0,
+                    format!(
+                        "已从「{}」自动识别 {} 个镜头（配对 {} 条提示词，{} 镜含自定义时长/画幅参数，并自动匹配可用视频生成器）。",
+                        src,
+                        shots.len(),
+                        matched_prompts,
+                        extracted_meta_rows
+                    ),
+                );
+            } else if sidecar_matched > 0 {
+                auto_warnings.insert(
+                    0,
+                    format!(
+                        "已自动识别 {} 张分镜图与 {} 个同名 .txt 提示词文件，并自动匹配可用视频生成器。",
+                        images.len(),
+                        sidecar_matched
+                    ),
+                );
+            }
+            if matched_prompts < shots.len() {
+                auto_warnings.push(format!(
+                    "有 {} 个镜头未匹配到提示词：请在文件夹放入 prompts.txt（支持写入时长/画幅/参考图）或与图片同名的 .txt 文件后点「重新校验」。",
+                    shots.len() - matched_prompts
+                ));
+            }
+
+            let folder_title = root
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "分镜文件夹导入".into());
+            let manifest = Manifest {
+                format: "ai-studio-shot-batch".into(),
+                version: 1,
+                name: folder_title,
+                generators,
+                defaults,
+                characters: vec![],
+                queue: QueueOptions::default(),
+                shots,
+            };
+            let parsed = parse_manifest(
+                &serde_json::to_vec(&manifest)
+                    .map_err(|_| failure("INVALID_MANIFEST", "分镜文件夹自动清单生成失败"))?,
+            )?;
+            Ok((parsed, fingerprint, auto_warnings))
+        }
         async fn build(
             &self,
             project: &str,
@@ -1166,36 +2734,50 @@ pub mod folder_batch_import_service {
             };
             let modern = has("manifest.json")?;
             let (filename, format_source) = if modern {
-                ("manifest.json", "manifest")
+                (Some("manifest.json"), "manifest")
             } else {
                 match (has("h3-batch.json")?, has("h3-omni-batch.json")?) {
-                    (true, false) => ("h3-batch.json", "h3-batch"),
-                    (false, true) => ("h3-omni-batch.json", "h3-omni-batch"),
+                    (true, false) => (Some("h3-batch.json"), "h3-batch"),
+                    (false, true) => (Some("h3-omni-batch.json"), "h3-omni-batch"),
                     (true, true) => {
                         return Err(failure(
                             "INVALID_MANIFEST",
                             "同时存在两种旧清单，请保留一种或提供 manifest.json",
                         ))
                     }
+                    _ if !scanned.is_empty()
+                        || find_auto_prompt_file(root, &BTreeSet::new()).is_some() =>
+                    {
+                        (None, "folder-auto")
+                    }
                     _ => {
                         return Err(failure(
                             "FILE_NOT_FOUND",
-                            "文件夹缺少 manifest.json 或受支持的旧版 H3 清单",
+                            "文件夹缺少 manifest.json，且未发现可用的分镜图片或 prompts.txt",
                         ))
                     }
                 }
             };
-            let bytes = read_file(root, filename, 1024 * 1024)?;
-            let mut manifest = if modern {
-                if options.legacy.is_some() {
-                    return Err(failure(
-                        "INVALID_MANIFEST",
-                        "现代 manifest 的生成器与参数不可由旧版选项覆盖",
-                    ));
-                }
-                parse_manifest(&bytes)?
+            let mut auto_warnings: Vec<String> = Vec::new();
+            let (bytes, mut manifest) = if let Some(file_name) = filename {
+                let bytes = read_file(root, file_name, 1024 * 1024)?;
+                let manifest = if modern {
+                    if options.legacy.is_some() {
+                        return Err(failure(
+                            "INVALID_MANIFEST",
+                            "现代 manifest 的生成器与参数不可由旧版选项覆盖",
+                        ));
+                    }
+                    parse_manifest(&bytes)?
+                } else {
+                    legacy_manifest(&bytes, format_source, options)?
+                };
+                (bytes, manifest)
             } else {
-                legacy_manifest(&bytes, format_source, options)?
+                let (manifest, fingerprint, warnings) =
+                    self.auto_folder_manifest(root, &scanned, options).await?;
+                auto_warnings = warnings;
+                (fingerprint, manifest)
             };
             if self
                 .projects
@@ -1652,9 +3234,10 @@ pub mod folder_batch_import_service {
                     ));
                 }
             }
-            if !modern {
+            if !modern && format_source != "folder-auto" {
                 warnings.push("使用旧版 H3 清单，建议迁移到 manifest.json。".into());
             }
+            warnings.extend(auto_warnings);
             if manifest.queue.auto_start == Some(true) {
                 warnings
                     .push("清单申请了自动开始，但仍需在确认区域明确勾选；默认不执行生产。".into());
@@ -1851,13 +3434,22 @@ pub mod folder_batch_import_service {
         let compatibility =
             classify_shot_recipe(ShotStage::Video, &definition.workflow_id, &recipe)
                 .map_err(|_| failure("MODE_MISMATCH", "Recipe 不支持镜头视频输入"))?;
+        let single_image_key = match (&row.mode, &compatibility.input_mode) {
+            (Mode::Image, ShotVideoInputMode::SingleImage { key })
+                if matches!(key.as_str(), "first_frame" | "image" | "reference_image") =>
+            {
+                Some(key.as_str())
+            }
+            _ => None,
+        };
         let compatible = match (&row.mode, &compatibility.input_mode) {
             (Mode::FirstLast, ShotVideoInputMode::FirstLast)
             | (Mode::Reference, ShotVideoInputMode::ReferenceMedia) => true,
             (Mode::Reference, ShotVideoInputMode::ReferenceImages { key, .. }) => {
                 key == "reference_images"
             }
-            (Mode::Image, ShotVideoInputMode::SingleImage { key }) => key == "first_frame",
+            (Mode::Image, ShotVideoInputMode::SingleImage { .. }) => single_image_key.is_some(),
+            (Mode::Text, ShotVideoInputMode::TextOnly) => true,
             _ => false,
         };
         if !compatible {
@@ -1866,20 +3458,30 @@ pub mod folder_batch_import_service {
                 "所选 Recipe 的正式输入模式与该行不一致",
             ));
         }
-        let mut values = BTreeMap::from([
-            ("prompt".into(), InputValue::String(row.prompt.clone())),
-            ("width".into(), InputValue::Integer(row.width)),
-            ("height".into(), InputValue::Integer(row.height)),
-            (
+        let mut values =
+            BTreeMap::from([("prompt".into(), InputValue::String(row.prompt.clone()))]);
+        if recipe.inputs.contains_key("width") {
+            values.insert("width".into(), InputValue::Integer(row.width));
+        }
+        if recipe.inputs.contains_key("height") {
+            values.insert("height".into(), InputValue::Integer(row.height));
+        }
+        if recipe.inputs.contains_key("duration_seconds") {
+            values.insert(
                 "duration_seconds".into(),
                 InputValue::Integer(row.duration_seconds),
-            ),
-        ]);
+            );
+        }
         if let Some(seed) = row.seed {
-            values.insert("seed".into(), InputValue::Seed(SeedValue::Fixed(seed)));
+            if recipe.inputs.contains_key("seed") {
+                values.insert("seed".into(), InputValue::Seed(SeedValue::Fixed(seed)));
+            }
         }
         if let Some(path) = &row.first_frame {
-            values.insert("first_frame".into(), InputValue::Image(path.clone()));
+            values.insert(
+                single_image_key.unwrap_or("first_frame").into(),
+                InputValue::Image(path.clone()),
+            );
         }
         if let Some(path) = &row.last_frame {
             values.insert("last_frame".into(), InputValue::Image(path.clone()));
@@ -2257,16 +3859,18 @@ pub mod folder_batch_import_service {
                 ));
             }
             let files = selected_files(&session.plan, &rows)?;
-            let filename = match preview.format_source.as_str() {
-                "h3-batch" => "h3-batch.json",
-                "h3-omni-batch" => "h3-omni-batch.json",
-                _ => "manifest.json",
-            };
-            if sha(&read_file(&session.root, filename, 1024 * 1024)
-                .map_err(|_| failure("STALE_PREVIEW", "清单已丢失或无法安全读取"))?)
-                != preview.manifest_sha256
-            {
-                return Err(failure("STALE_PREVIEW", "清单已变化，请重新校验"));
+            if preview.format_source != "folder-auto" {
+                let filename = match preview.format_source.as_str() {
+                    "h3-batch" => "h3-batch.json",
+                    "h3-omni-batch" => "h3-omni-batch.json",
+                    _ => "manifest.json",
+                };
+                if sha(&read_file(&session.root, filename, 1024 * 1024)
+                    .map_err(|_| failure("STALE_PREVIEW", "清单已丢失或无法安全读取"))?)
+                    != preview.manifest_sha256
+                {
+                    return Err(failure("STALE_PREVIEW", "清单已变化，请重新校验"));
+                }
             }
             for file in &files {
                 let bytes = read_file(
@@ -5158,6 +6762,120 @@ pub mod folder_batch_import_service {
             assert!(!r.failure.as_ref().unwrap().message.is_empty());
             assert!(r.residual.shot_ids.is_empty(), "{r:?}");
             assert_eq!(count(&f.pool, "shots").await, 0);
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn folder_auto_pairs_natural_sorted_images_with_prompts_txt_and_sidecar_txt() {
+            let f = preview_fixture().await;
+            let auto_dir = f.root.parent().unwrap().join("auto_storyboard");
+            std::fs::create_dir_all(&auto_dir).unwrap();
+            let png = std::fs::read(f.root.join("images/a.png")).unwrap();
+            std::fs::write(auto_dir.join("1.png"), &png).unwrap();
+            std::fs::write(auto_dir.join("2.png"), &png).unwrap();
+            std::fs::write(auto_dir.join("10.png"), &png).unwrap();
+            std::fs::write(auto_dir.join("2.txt"), "Sidecar prompt for shot two").unwrap();
+            std::fs::write(
+                auto_dir.join("prompts.txt"),
+                "1. First prompt\n\n2. Tenth prompt",
+            )
+            .unwrap();
+
+            let p = f
+                .service
+                .pick(TEST_PROJECT, auto_dir.clone())
+                .await
+                .unwrap();
+            assert_eq!(p.format_source, "folder-auto");
+            assert_eq!(p.shot_count, 3);
+            assert_eq!(p.rows[0].first_frame.as_deref(), Some("1.png"));
+            assert_eq!(p.rows[0].prompt, "First prompt");
+            assert_eq!(p.rows[1].first_frame.as_deref(), Some("2.png"));
+            assert_eq!(p.rows[1].prompt, "Sidecar prompt for shot two");
+            assert_eq!(p.rows[2].first_frame.as_deref(), Some("10.png"));
+            assert_eq!(p.rows[2].prompt, "Tenth prompt");
+
+            // Rescan with REF2VA generator switches to Mode::Reference automatically and validates cleanly
+            let fixture_manifest: Manifest =
+                serde_json::from_slice(&std::fs::read(f.root.join("manifest.json")).unwrap())
+                    .unwrap();
+            let ref_gen = &fixture_manifest.generators[&Mode::Reference];
+            let p2 = f
+                .service
+                .rescan(&p.session_id, legacy_options(ref_gen, 1344, 768))
+                .await
+                .unwrap();
+            assert_eq!(p2.valid_count, 3, "{:?}", p2.rows);
+            assert_eq!(p2.rows[0].mode, Mode::Reference);
+            assert_eq!(p2.rows[0].reference_count, 1);
+            let committed = f.service.commit(request(&p2, false)).await.unwrap();
+            assert_eq!(committed.outcome, "completed", "{committed:?}");
+            assert_eq!(committed.created_shot_ids.len(), 3);
+
+            // Empty folder still fails closed with FILE_NOT_FOUND
+            let empty_dir = f.root.parent().unwrap().join("empty_storyboard");
+            std::fs::create_dir_all(&empty_dir).unwrap();
+            let err = f.service.pick(TEST_PROJECT, empty_dir).await.unwrap_err();
+            assert_eq!(err.code, "FILE_NOT_FOUND");
+            f.pool.close().await;
+        }
+        #[tokio::test]
+        async fn folder_auto_parses_inline_duration_resolution_and_mixed_modes_without_rescan() {
+            let f = preview_fixture().await;
+            let script_dir = f.root.parent().unwrap().join("smart_script_folder");
+            std::fs::create_dir_all(&script_dir).unwrap();
+            let png = std::fs::read(f.root.join("images/a.png")).unwrap();
+            std::fs::write(script_dir.join("1.png"), &png).unwrap();
+            std::fs::write(script_dir.join("2.png"), &png).unwrap();
+            std::fs::write(script_dir.join("10.png"), &png).unwrap();
+            std::fs::write(
+                script_dir.join("prompts.txt"),
+                "全局: 5s | 16:9 | 高清\n\n\
+                 ## 镜01 多图参考\n\
+                 参数: 6s | 9:16 | 参考图: 1.png, 2.png\n\
+                 A woman walks through neon rain.\n\n\
+                 ## 镜02 首尾帧\n\
+                 [4s 1280x720 首帧:1.png 尾帧:2.png] Smooth camera glide.\n\n\
+                 ## 镜03 标清顺配\n\
+                 参数: 8秒 | 标清\n\
+                 Wide scenic mountain vista.",
+            )
+            .unwrap();
+
+            // Zero manual rescan needed: initial pick() auto-extracts duration, resolution, mode, images & admitted generators!
+            let p = f.service.pick(TEST_PROJECT, script_dir).await.unwrap();
+            assert_eq!(p.format_source, "folder-auto");
+            assert_eq!(p.shot_count, 3);
+            assert_eq!(p.valid_count, 3, "{:?}", p.rows);
+
+            // Shot 1: Reference mode, 6s, 9:16 0.98 (768x1344), 2 references, clean prompt
+            assert_eq!(p.rows[0].name, "镜01 多图参考");
+            assert_eq!(p.rows[0].mode, Mode::Reference);
+            assert_eq!(p.rows[0].duration_seconds, 6);
+            assert_eq!((p.rows[0].width, p.rows[0].height), (768, 1344));
+            assert_eq!(p.rows[0].reference_count, 2);
+            assert_eq!(p.rows[0].prompt, "A woman walks through neon rain.");
+
+            // Shot 2: FirstLast mode, 4s, snapped 1280x720 -> 1280x736 (preserving 16:9), clean prompt without bracket tag
+            assert_eq!(p.rows[1].name, "镜02 首尾帧");
+            assert_eq!(p.rows[1].mode, Mode::FirstLast);
+            assert_eq!(p.rows[1].duration_seconds, 4);
+            assert_eq!((p.rows[1].width, p.rows[1].height), (1280, 736));
+            assert_eq!(p.rows[1].first_frame.as_deref(), Some("1.png"));
+            assert_eq!(p.rows[1].last_frame.as_deref(), Some("2.png"));
+            assert_eq!(p.rows[1].prompt, "Smooth camera glide.");
+
+            // Shot 3: Auto-paired remaining unused image 10.png, 8s, 0.5 16:9 (960x544)
+            assert_eq!(p.rows[2].name, "镜03 标清顺配");
+            assert_eq!(p.rows[2].duration_seconds, 8);
+            assert_eq!((p.rows[2].width, p.rows[2].height), (960, 544));
+            assert_eq!(p.rows[2].first_frame.as_deref(), Some("10.png"));
+            assert_eq!(p.rows[2].prompt, "Wide scenic mountain vista.");
+
+            // One-click commit with queue creation works right out of pick()
+            let committed = f.service.commit(request(&p, true)).await.unwrap();
+            assert_eq!(committed.outcome, "completed", "{committed:?}");
+            assert_eq!(committed.created_shot_ids.len(), 3);
+            assert!(committed.batch_id.is_some());
             f.pool.close().await;
         }
     }

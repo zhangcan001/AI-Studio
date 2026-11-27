@@ -301,7 +301,7 @@ pub mod story_entities {
 pub mod folder_batch_import {
     use crate::application::folder_batch_import_service::{ImportFailure, Preview, PreviewOptions};
     use crate::{app_state::AppState, error::AppError};
-    use tauri::{AppHandle, State};
+    use tauri::{AppHandle, State, WebviewWindow};
     use tauri_plugin_dialog::DialogExt;
     #[tauri::command(rename_all = "camelCase")]
     pub async fn folder_batch_import_commit(
@@ -323,14 +323,20 @@ pub mod folder_batch_import {
     #[tauri::command(rename_all = "camelCase")]
     pub async fn folder_batch_import_pick(
         app_handle: AppHandle,
+        window: WebviewWindow,
         state: State<'_, AppState>,
         project_id: String,
     ) -> Result<Option<Preview>, AppError> {
         super::validate_project_id(&project_id)?;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        app_handle.dialog().file().pick_folder(move |folder| {
-            let _ = tx.send(folder);
-        });
+        app_handle
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("选择分镜批量导入文件夹（含 manifest.json）")
+            .pick_folder(move |folder| {
+                let _ = tx.send(folder);
+            });
         let Some(folder) = rx
             .await
             .map_err(|_| AppError::filesystem("文件夹选择已中断"))?

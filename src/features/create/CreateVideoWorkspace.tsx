@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { productClient } from "../../product/client";
 import { subscribeRunInvalidation } from "../../product/runInvalidation";
 import type { ProductRun } from "../../product/types";
+import { useTaskStore } from "../../stores/taskStore";
 import { queueRunLabel } from "./createModel";
 import type { CreateController } from "./CreateController";
 import type { CreateRoute } from "./createModel";
@@ -11,6 +12,14 @@ import { AssetImageThumb, CandidateThumbnail, CreateMediaPreview } from "./Creat
 import { RunStatusCard } from "./CreateResults";
 import { modeLabel, packageKind } from "../../product/generatorPresentation";
 import { resolutionTierPresets } from "./CreateInputs";
+
+function formatTaskElapsed(startedAt?: string, nowMs = Date.now()): string | undefined {
+  if (!startedAt) return undefined;
+  const start = Date.parse(startedAt);
+  if (!Number.isFinite(start)) return undefined;
+  const sec = Math.max(0, Math.floor((nowMs - start) / 1000));
+  return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+}
 
 const emptyRunMessages: Record<ProductRun["status"], string> = {
   RUNNING: "视频正在生成，请等待真实结果。可打开运行查看详情，无需重复提交。",
@@ -33,12 +42,50 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
   const rightVideoRef = useRef<HTMLVideoElement>(null);
   const [unavailable, setUnavailable] = useState(new Set<string>());
   const [previewAttempt, setPreviewAttempt] = useState(0);
-  const [inspectorOpen, setInspectorOpen] = useState(() => typeof window === "undefined" || !window.matchMedia?.("(max-width: 1100px)").matches);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const moreActionRef = useRef<HTMLDetailsElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const recentTasks = useTaskStore(state => state.recentTasks);
+  const liveTask = c.run?.status === "RUNNING"
+    ? (c.runRef?.source === "task"
+      ? recentTasks.find(t => t.id === c.runRef?.id)
+      : recentTasks.find(t => t.projectId === route.projectId && ["RUNNING", "COLLECTING", "PREPARING"].includes(t.status)))
+    : undefined;
   useEffect(() => {
-    const query = window.matchMedia?.("(max-width: 1100px)");
-    const resize = () => setInspectorOpen(!query?.matches);
-    query?.addEventListener("change", resize);
-    return () => query?.removeEventListener("change", resize);
+    if (c.run?.status !== "RUNNING") return;
+    setNowTick(Date.now());
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [c.run?.status, liveTask?.id]);
+  const liveStep = liveTask?.progress.mode === "step" && liveTask.progress.total && liveTask.progress.total > 0
+    ? {
+      current: liveTask.progress.current ?? 0,
+      total: liveTask.progress.total,
+      pct: Math.min(100, Math.round(((liveTask.progress.current ?? 0) / liveTask.progress.total) * 100)),
+    }
+    : undefined;
+  const liveElapsed = c.run?.status === "RUNNING"
+    ? formatTaskElapsed(liveTask?.startedAt ?? liveTask?.createdAt ?? c.run.updatedAt, nowTick)
+    : undefined;
+  useEffect(() => {
+    const closeOutside = (e: MouseEvent) => {
+      if (moreActionRef.current?.open && e.target instanceof Node && !moreActionRef.current.contains(e.target)) moreActionRef.current.open = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && moreActionRef.current?.open) { moreActionRef.current.open = false; return; }
+      if (e.code !== "Space" || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A", "SUMMARY"].includes(target.tagName))) return;
+      const video = stageRef.current?.querySelector("video");
+      if (!video) return;
+      e.preventDefault();
+      if (video.paused) void video.play?.().catch(() => {});
+      else video.pause();
+    };
+    document.addEventListener("mousedown", closeOutside);
+    window.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", closeOutside); window.removeEventListener("keydown", onKey); };
   }, []);
   useEffect(() => { if (candidates.length < 2 && compareMode) setCompareMode(false); }, [candidates.length, compareMode]);
   const current = candidates.find(a => a.id === previewId)
@@ -70,7 +117,16 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
     <div className="create-preview-column">
       <section className="create-video-stage" aria-label="视频预览">
         <header><h2>视频预览</h2><div className="create-stage-head-actions">{candidates.length >= 2 && <button type="button" aria-pressed={compareMode} onClick={() => setCompareMode(v => !v)}>A/B 对比</button>}<span className="create-state-pill" role={current ? undefined : "status"} aria-label={current ? undefined : "视频生成状态"}>{current ? current.selected ? "已选用结果" : "候选预览" : runLabel ?? "等待生成"}</span></div></header>
-        {current && runLabel && <p role="status" aria-label="视频生成状态">{runLabel}</p>}
+        {current && runLabel && <p role="status" aria-label="视频生成状态">{runLabel}{liveStep ? ` · ${liveStep.current}/${liveStep.total} 步 (${liveStep.pct}%)` : ""}{liveElapsed ? ` · 已耗时 ${liveElapsed}` : ""}</p>}
+        {current && c.run?.status === "RUNNING" && (liveStep || liveElapsed) && (
+          <div className="create-live-progress" aria-label="ComfyUI 实时采样进度">
+            <div className="create-live-progress-meta">
+              <span>{liveStep ? `采样步数 ${liveStep.current} / ${liveStep.total}（${liveStep.pct}%）` : "ComfyUI 节点推理中…"}</span>
+              {liveElapsed && <span>已耗时 {liveElapsed}</span>}
+            </div>
+            {liveStep && <progress max={liveStep.total} value={liveStep.current} />}
+          </div>
+        )}
         {compareMode && compareLeft && compareRight ? <div className="create-ab-wrap" role="region" aria-label="候选视频 A/B 对比">
           <div className="create-ab-grid">
             {([{ slot: "A", asset: compareLeft, setAsset: setCompareLeftId, ref: leftVideoRef }, { slot: "B", asset: compareRight, setAsset: setCompareRightId, ref: rightVideoRef }] as const).map(side => <div key={side.slot} className="create-ab-pane">
@@ -88,19 +144,38 @@ export function CreateVideoWorkspace({ controller: c, route }: { controller: Cre
             </div>
             <small>左右并排比对候选画面，选用不会自动修改审核状态。</small>
           </div>
-        </div> : <div className="create-video-screen">{current
+        </div> : <div ref={stageRef} className="create-video-screen" title={current ? "按空格键播放/暂停预览" : undefined}>{current
           ? <CreateMediaPreview key={`${route.projectId}:${current.id}:${previewAttempt}`} projectId={route.projectId} asset={current} onUnavailable={() => setUnavailable(previous => new Set([...previous,current.id]))} />
-          : <div className="create-video-empty"><span aria-hidden="true">▷</span><h3>{c.run?.status === "RUNNING" ? "正在生成视频" : runLabel ? "查看本次运行" : "让创意开始流动"}</h3><p>{runMessage}</p></div>}
+          : <div className="create-video-empty">
+              <span aria-hidden="true">▷</span>
+              <h3>{c.run?.status === "RUNNING" ? "正在生成视频" : runLabel ? "查看本次运行" : "让创意开始流动"}</h3>
+              {c.run?.status === "RUNNING" && (liveStep || liveElapsed) && (
+                <div className="create-live-progress" aria-label="ComfyUI 实时采样进度">
+                  <div className="create-live-progress-meta">
+                    <span>{liveStep ? `采样步数 ${liveStep.current} / ${liveStep.total}（${liveStep.pct}%）` : "ComfyUI 节点推理中…"}</span>
+                    {liveElapsed && <span>已耗时 {liveElapsed}</span>}
+                  </div>
+                  {liveStep && <progress max={liveStep.total} value={liveStep.current} />}
+                </div>
+              )}
+              <p>{runMessage}</p>
+            </div>}
         </div>}
-        {current && <div className="create-preview-actions"><div><strong>{current.name}</strong><small>{current.selected ? "已选用；审核状态请在运行详情查看。" : "预览不会选用；选用不等于审核。"}</small></div><button type="button" disabled={c.busy || current.selected || current.reviewState==="REJECTED" || unavailable.has(current.id)} onClick={() => void c.selectResult(current.id)}>选用此结果</button></div>}
+        {current && <div className="create-preview-actions"><div><strong>{current.name}</strong><small>{current.selected ? "已选用；审核状态请在运行详情查看。" : "预览不会选用；选用不等于审核。"}</small></div><button type="button" className={current.selected ? undefined : "primary"} disabled={c.busy || current.selected || current.reviewState==="REJECTED" || unavailable.has(current.id)} onClick={() => void c.selectResult(current.id)}>选用此结果</button></div>}
         <div className="create-action-row" aria-label="结果操作">
-          {current && <ResultFileActions projectId={route.projectId} assetId={current.id}/>}
-          {c.run?.availableActions.includes("RETRY") && <button type="button" disabled={c.busy} title="使用原运行快照重新生成" onClick={() => void c.retry()}>重试失败项（原输入）</button>}
+          <button type="button" disabled={c.busy || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} title="保持当前提示词与参考图不变，换新随机种子再抽一版视频" onClick={() => void c.generateWithRandomSeed()}>换随机种子再抽</button>
           <button type="button" disabled={c.busy || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} title="按当前草稿新建一次运行" onClick={() => void c.generate()}>按当前设置再生成</button>
-          <button type="button" disabled={c.busy || !canUpgradeFinal || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} title="保持当前输入，升到成片分辨率后新建一次运行（仍为高质量工作流）" onClick={() => tiers.final && void c.generateWithResolution(tiers.final.id)}>升成片分辨率再生成</button>
-          <button type="button" disabled={c.busy || !canSwitchStandard || !c.videoInputs.ready} title="切换到 Standard 20步高质量包并新建运行；不恢复已退役的快速预览" onClick={() => void c.generateWithStandardPackage()}>换 Standard 重跑</button>
-          <button type="button" onClick={() => c.openLibrary("videos")}>在资源库查看</button>
           <button type="button" className="primary" disabled={!c.runRef} onClick={c.openRun}>打开运行</button>
+          {c.run?.availableActions.includes("RETRY") && <button type="button" disabled={c.busy} title="使用原运行快照重新生成" onClick={() => void c.retry()}>重试失败项（原输入）</button>}
+          <details ref={moreActionRef} className="create-action-more">
+            <summary>⋯ 更多操作</summary>
+            <div className="create-action-more-menu">
+              {current && <ResultFileActions projectId={route.projectId} assetId={current.id}/>}
+              <button type="button" disabled={c.busy || !canUpgradeFinal || !c.generator?.availability || !c.videoInputs.ready || c.readinessState !== "READY"} title="保持当前输入，升到成片分辨率后新建一次运行" onClick={() => { if (moreActionRef.current) moreActionRef.current.open = false; if (tiers.final) void c.generateWithResolution(tiers.final.id); }}>升成片分辨率再生成</button>
+              <button type="button" disabled={c.busy || !canSwitchStandard || !c.videoInputs.ready} title="切换到 Standard 20步高质量包并新建运行" onClick={() => { if (moreActionRef.current) moreActionRef.current.open = false; void c.generateWithStandardPackage(); }}>换 Standard 重跑</button>
+              <button type="button" onClick={() => { if (moreActionRef.current) moreActionRef.current.open = false; c.openLibrary("videos"); }}>在资源库查看</button>
+            </div>
+          </details>
         </div>
       </section>
       <section className="create-candidate-strip" aria-label="当前镜头候选"><header><h2>当前镜头候选 <small>{candidates.length} 个视频</small></h2><div><button type="button" disabled={c.busy} onClick={() => { void c.refresh(); setUnavailable(new Set()); setPreviewAttempt(n => n+1); }}>刷新结果</button><button type="button" aria-label="在资源库查看视频" onClick={() => c.openLibrary("videos")}>资源库</button></div></header>

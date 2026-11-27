@@ -200,7 +200,11 @@ function App() {
               const shouldSync = activity.activeTaskCount > 0 || activity.productionBusy;
               if (shouldSync) setRecoveryNotice("正在同步上次未完成的任务……");
               return reconcileActiveTasks().then((report) => {
-                if (!cancelled && shouldSync) setRecoveryNotice(`已同步 ${report.examined} 个任务。`);
+                if (!cancelled && shouldSync) {
+                  const message = `已同步 ${report.examined} 个任务。`;
+                  setRecoveryNotice(message);
+                  window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message, tone: "success" } }));
+                }
               });
             })
             .catch((recoveryError: unknown) => {
@@ -546,9 +550,21 @@ function App() {
             <span className="section-label">任务恢复</span>
             <p>{recoveryNotice ?? "启动后检测到尚未结束的任务。"}</p>
           </div>
-          <button type="button" onClick={() => void reconcileTasks()} disabled={reconciling}>
-            {reconciling ? "正在同步..." : "重新同步任务"}
-          </button>
+          <div className="task-recovery-actions">
+            <button type="button" onClick={() => void reconcileTasks()} disabled={reconciling}>
+              {reconciling ? "正在同步..." : "重新同步任务"}
+            </button>
+            {!hasActiveTasks && recoveryNotice && (
+              <button
+                type="button"
+                className="quiet-button banner-dismiss-btn"
+                aria-label="关闭任务恢复提示"
+                onClick={() => setRecoveryNotice(null)}
+              >
+                ×
+              </button>
+            )}
+          </div>
         </section>
       )}
 
@@ -699,8 +715,18 @@ function App() {
         )}
       </Suspense>
 
-      {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
-      {error && <p className="error-message global-error">提示：{error}</p>}
+      {taskEventError && (
+        <div className="error-message global-error global-error-bar" role="alert">
+          <span>{taskEventError}</span>
+          <button type="button" className="banner-dismiss-btn" aria-label="关闭任务事件提示" onClick={() => setTaskEventError(undefined)}>×</button>
+        </div>
+      )}
+      {error && (
+        <div className="error-message global-error global-error-bar" role="alert">
+          <span>提示：{error}</span>
+          <button type="button" className="banner-dismiss-btn" aria-label="关闭错误提示" onClick={() => setError(null)}>×</button>
+        </div>
+      )}
         </div>
       </ShellHost>
     </div>

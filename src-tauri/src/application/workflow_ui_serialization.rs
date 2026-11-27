@@ -242,6 +242,40 @@ impl FrontendSerializationProfile {
             contracts,
         })
     }
+
+    /// Build a verified serialization profile against live ComfyUI `/object_info`
+    /// when every node class and widget slot has already passed schema lineage checks.
+    /// This avoids hard-locking ordinary ComfyUI UI exports to a single frontendVersion.
+    pub fn live_schema_verified_from_context(
+        context: &NormalizationCompatibilityContext,
+        contracts: BTreeSet<FrontendSerializationContract>,
+    ) -> Result<Self, SerializationDescriptorError> {
+        if contracts.is_empty()
+            || (contracts.contains(&FrontendSerializationContract::Current) && contracts.len() > 1)
+        {
+            return Err(SerializationDescriptorError::new(
+                "SERIALIZATION_CONTRACT_SET_INVALID",
+                "a contract set must be non-empty and Current cannot be combined with historical contracts",
+            ));
+        }
+        if context.workflow_format_version != SUPPORTED_WORKFLOW_FORMAT_VERSION
+            || context.serialization_profile_version != SERIALIZATION_PROFILE_VERSION
+        {
+            return Err(SerializationDescriptorError::new(
+                "UNSUPPORTED_HISTORICAL_SERIALIZATION_PROFILE",
+                "no verified serialization profile exists for this source",
+            ));
+        }
+        Ok(Self {
+            frontend_version: context.frontend_version.clone(),
+            workflow_format_version: context.workflow_format_version.clone(),
+            serialization_profile_version: context.serialization_profile_version.clone(),
+            support_model: PROFILE_SUPPORT_MODEL.to_owned(),
+            source_provenance: format!("live object_info schema ({})", context.frontend_version),
+            frontend_source_revision: context.source_frontend_revision.clone(),
+            contracts,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

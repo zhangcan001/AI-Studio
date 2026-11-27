@@ -160,6 +160,24 @@ function ScopedShotBulkConfigPanel({
       .map((shot) => shot.id),
     [selectedIds, scopeShots],
   );
+  const shotIndexById = useMemo(
+    () => new Map(scopeShots.map((shot, idx) => [shot.id, idx + 1])),
+    [scopeShots],
+  );
+  const allVisibleSelected = visibleShots.length > 0 && visibleShots.every((shot) => selectedIds.has(shot.id));
+  function toggleAllVisible() {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        visibleShots.forEach((shot) => next.delete(shot.id));
+      } else {
+        visibleShots.forEach((shot) => next.add(shot.id));
+      }
+      return next;
+    });
+    setLocalError(undefined);
+    setLocalNotice(undefined);
+  }
 
   function reportError(message?: string) {
     setLocalNotice(undefined);
@@ -329,7 +347,11 @@ function ScopedShotBulkConfigPanel({
         setSelectedIds(new Set());
         await refreshPlan();
         if (!isCurrent(requestedOwner)) return;
-        reportNotice(`${stageLabel(nextStage)}已准备 ${result.createdCount} 个镜头；不会启动 GPU，请前往生产队列明确启动。`);
+        const noticeText = `${stageLabel(nextStage)}已准备 ${result.createdCount} 个镜头；不会启动 GPU，请前往生产队列明确启动。`;
+        reportNotice(noticeText);
+        if (result.createdCount > 0) {
+          window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: `已准备 ${result.createdCount} 个镜头，可在生产队列启动`, tone: "success" } }));
+        }
       },
       `${stageLabel(nextStage)}准备操作已完成；批次仍为待启动状态。`,
       // Admission changes batches, not Shot drafts. Fresh plan data above is
@@ -340,37 +362,42 @@ function ScopedShotBulkConfigPanel({
 
   return (
     <section className="shot-bulk-config-panel" aria-label="批量镜头配置">
-      <div className="pipeline-section-heading">
-        <div>
-          <span className="section-label">批量配置</span>
-          <h3>镜头批量生产入口</h3>
-          <p className="pipeline-muted">按镜头顺序准备视频；T2V 不要求图片，其他模式使用各自正式输入。未归档镜头同样可准备。</p>
+      {!videoOnly && (
+        <div className="pipeline-section-heading">
+          <div>
+            <span className="section-label">批量配置</span>
+            <h3>镜头批量生产入口</h3>
+            <p className="pipeline-muted">按镜头顺序准备视频；T2V 不要求图片，其他模式使用各自正式输入。未归档镜头同样可准备。</p>
+          </div>
+          <span className="pipeline-selection-count">{selectedCount} 个镜头已选择</span>
         </div>
-        <span className="pipeline-selection-count">{selectedCount} 个镜头已选择</span>
-      </div>
+      )}
 
-      <div className="pipeline-stage-tabs" role="tablist" aria-label="批量配置阶段">
-        {(videoOnly ? ["video"] as const : ["image", "video"] as const).map((nextStage) => (
-          <button
-            key={nextStage}
-            type="button"
-            className={stage === nextStage ? "active" : ""}
-            role="tab"
-            aria-selected={stage === nextStage}
-            onClick={() => { if(nextStage!==stage)setSelectedIds(new Set());setStage(nextStage); }}
-            disabled={Boolean(busyAction)}
-          >
-            {nextStage === "image" ? "图片历史" : "视频阶段"}
-          </button>
-        ))}
-      </div>
+      {!videoOnly && (
+        <div className="pipeline-stage-tabs" role="tablist" aria-label="批量配置阶段">
+          {(["image", "video"] as const).map((nextStage) => (
+            <button
+              key={nextStage}
+              type="button"
+              className={stage === nextStage ? "active" : ""}
+              role="tab"
+              aria-selected={stage === nextStage}
+              onClick={() => { if(nextStage!==stage)setSelectedIds(new Set());setStage(nextStage); }}
+              disabled={Boolean(busyAction)}
+            >
+              {nextStage === "image" ? "图片历史" : "视频阶段"}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="pipeline-selection-toolbar" aria-label="镜头选择操作">
         <button type="button" className="quiet-button" onClick={() => applyPreset("all")} disabled={Boolean(busyAction)}>全选</button>
         <button type="button" className="quiet-button" onClick={() => setSelectedIds(new Set())} disabled={Boolean(busyAction) || !selectedCount}>取消全选</button>
         <button type="button" className="quiet-button" onClick={() => applyPreset("ready")} disabled={Boolean(busyAction)}>选择就绪项</button>
         <button type="button" className="quiet-button" onClick={() => applyPreset("unconfigured")} disabled={Boolean(busyAction)}>选择未配置</button>
-        <span>{selectedCount} / {scopeShots.length} 已选择</span>
+        <button type="button" className="quiet-button" disabled={Boolean(busyAction)} onClick={() => setSelectedIds(new Set(visibleShots.map(shot => shot.id)))}>仅选择当前筛选</button>
+        <span className="pipeline-selection-count">{selectedCount} / {scopeShots.length} 已选择</span>
       </div>
 
       <div className="pipeline-filter-tabs" role="group" aria-label="项目生产计划筛选">
@@ -381,8 +408,7 @@ function ScopedShotBulkConfigPanel({
         ))}
       </div>
 
-      {selectedIdsInOrder.some(id => !visibleShots.some(shot => shot.id === id)) && <details><summary>筛选隐藏了 {selectedIdsInOrder.filter(id => !visibleShots.some(shot => shot.id === id)).length} 个已选镜头（仍会提交）</summary><ul>{scopeShots.filter(shot => selectedIds.has(shot.id) && !visibleShots.some(visible => visible.id === shot.id)).map(shot => <li key={shot.id}>{shot.name}<button type="button" disabled={Boolean(busyAction)} onClick={() => setSelectedIds(old => { const next = new Set(old); next.delete(shot.id); return next; })}>移除隐藏选择：{shot.name}</button></li>)}</ul></details>}
-      <button type="button" disabled={Boolean(busyAction)} onClick={() => setSelectedIds(new Set(visibleShots.map(shot => shot.id)))}>仅选择当前筛选</button>
+      {selectedIdsInOrder.some(id => !visibleShots.some(shot => shot.id === id)) && <details className="pipeline-quiet-help"><summary>筛选隐藏了 {selectedIdsInOrder.filter(id => !visibleShots.some(shot => shot.id === id)).length} 个已选镜头（仍会提交）</summary><ul>{scopeShots.filter(shot => selectedIds.has(shot.id) && !visibleShots.some(visible => visible.id === shot.id)).map(shot => <li key={shot.id}>{shot.name}<button type="button" disabled={Boolean(busyAction)} onClick={() => setSelectedIds(old => { const next = new Set(old); next.delete(shot.id); return next; })}>移除隐藏选择：{shot.name}</button></li>)}</ul></details>}
       {configurationEditor}
       {unappliedConfiguration && <p role="status">批量生成器与参数尚未应用，不能准备冻结批次。</p>}
       <div className="pipeline-action-grid">
@@ -398,18 +424,17 @@ function ScopedShotBulkConfigPanel({
         <button type="button" hidden={videoOnly} disabled>
           {busyAction === "prepare-image" ? "正在准备图片生产…" : "准备图片生产"}
         </button>
-        <button type="button" onClick={() => void prepareBatch("video")} disabled={stage !== "video" || Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit || unappliedPrompt || unappliedConfiguration}>
+        <button type="button" className="primary" onClick={() => void prepareBatch("video")} disabled={stage !== "video" || Boolean(busyAction) || planLoading || !selectedCount || selectedOverLimit || unappliedPrompt || unappliedConfiguration}>
           {busyAction === "prepare-video" ? "正在准备视频生产…" : "准备视频生产"}
         </button>
+        <button type="button" className="quiet-button" onClick={() => void refreshPlan().catch(error => { if (isCurrent(owner)) reportError(toUserMessage(error)); })} disabled={Boolean(busyAction) || planLoading}>重新检查资格</button>
       </div>
       {stage === "image" && <p className="pipeline-muted">图片生成已退休；仅保留历史记录、候选和提示词编辑，不创建新图片生产。</p>}
-      <button type="button" className="quiet-button" onClick={() => void refreshPlan().catch(error => { if (isCurrent(owner)) reportError(toUserMessage(error)); })} disabled={Boolean(busyAction) || planLoading}>重新检查资格</button>
 
       <div className="pipeline-preparation-summary" aria-label="项目生产准备计划">
-        <span>{planLoading ? "正在进行项目级 Live preflight…" : `本范围${stageLabel(stage)}计划：${scopeShots.length} 个镜头`}</span>
+        <span>{planLoading ? "正在检查镜头生产资格…" : `本范围${stageLabel(stage)}计划：${scopeShots.length} 个镜头`}</span>
         <span>可准备 {scopeShots.filter(s => planByShotId.get(s.id)?.status === "READY" && !planByShotId.get(s.id)?.alreadyPrepared).length} · 已准备 {scopeShots.filter(s => planByShotId.get(s.id)?.alreadyPrepared).length} · 不完整 {scopeShots.filter(s => planByShotId.get(s.id)?.status === "INCOMPLETE").length} · 阻塞 {scopeShots.filter(s => planByShotId.get(s.id)?.status === "BLOCKED").length}</span>
-        <label><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={Boolean(busyAction) || planLoading} /> 允许部分准备：只准备当前可准备镜头，阻塞镜头不写入本批次</label>
-        <small>可准备只是准备前状态；已创建批次为待启动，不等于运行中。只有生产队列的“开始生产”会执行。</small>
+        <label><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={Boolean(busyAction) || planLoading} /> 允许部分准备（跳过阻塞镜头）</label>
       </div>
       {selectedOverLimit && <p className="pipeline-preparation-limit" role="alert">本次最多准备 {MAX_BULK_PREPARATION_ITEMS} 个镜头；系统不会自动拆分批次，请减少选择或使用“选择就绪项”。</p>}
 
@@ -422,10 +447,33 @@ function ScopedShotBulkConfigPanel({
       <div className="pipeline-shot-table-wrap">
         <table className="pipeline-shot-table">
           <thead>
-            <tr><th aria-label="选择" /><th>镜头</th><th>当前提示词快照</th><th>当前阶段计划</th><th>工作流 / Recipe</th><th>参考</th>{!videoOnly && <th>图片状态</th>}<th>视频状态</th></tr>
+            <tr>
+              <th aria-label="选择">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleAllVisible}
+                  disabled={Boolean(busyAction) || !visibleShots.length}
+                  aria-label="全选当前列表镜头"
+                />
+              </th>
+              <th>镜头</th>
+              <th>当前提示词快照</th>
+              <th>当前阶段计划</th>
+              <th>生成器配对</th>
+              <th>参考</th>
+              {!videoOnly && <th>图片状态</th>}
+              <th>视频状态</th>
+            </tr>
           </thead>
           <tbody>
-            {visibleShots.map((shot) => (
+            {visibleShots.map((shot) => {
+              const planItem = planByShotId.get(shot.id);
+              const pairText = planItem?.workflowVersionId && planItem?.recipeId
+                ? `${planItem.workflowVersionId} / ${planItem.recipeId}`
+                : undefined;
+              const displayIndex = shotIndexById.get(shot.id) ?? (shot.ordinal + 1);
+              return (
               <tr key={shot.id} className={selectedIds.has(shot.id) ? "pipeline-shot-row-selected" : ""}>
                 <td>
                   <input
@@ -436,21 +484,26 @@ function ScopedShotBulkConfigPanel({
                     aria-label={`选择 ${shot.name}`}
                   />
                 </td>
-                <td><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong>{!videoOnly && <small>{shot.id}</small>}{onOpenShot && <button type="button" className="quiet-button" onClick={() => onOpenShot(shot.id)}>编辑输入与查看结果</button>}</td>
-                <td><span className="pipeline-prompt-preview">{promptPreview(shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptText ?? shot.promptText)}</span><small>{shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptEntryId && shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId ? `提示词库版本 ${shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId?.slice(-8)}` : "手工/导入阶段快照"}</small></td>
-                <td><strong>{planByShotId.get(shot.id)?.status ? preparationStatusLabel(planByShotId.get(shot.id)!.status) : "等待正式预检"}</strong><small>{planByShotId.get(shot.id)?.alreadyPrepared ? "已准备，待启动" : planByShotId.get(shot.id)?.blockers?.join("；") ?? "可继续检查"}</small>{Boolean(planByShotId.get(shot.id)?.stalePreparedBatchIds?.length) && <small>陈旧准备版本；旧批次快照保留</small>}</td>
-                <td><small>{planByShotId.get(shot.id)?.workflowVersionId && planByShotId.get(shot.id)?.recipeId ? `${planByShotId.get(shot.id)?.workflowVersionId} / ${planByShotId.get(shot.id)?.recipeId}` : "未配置精确配对"}</small></td>
-                <td>{planByShotId.get(shot.id)?.referenceCount ?? 0}</td>
+                <td><strong>{String(displayIndex).padStart(2, "0")} · {shot.name}</strong>{!videoOnly && <small>{shot.id}</small>}{onOpenShot && <button type="button" className="quiet-button" onClick={() => onOpenShot(shot.id)}>编辑输入与查看结果</button>}</td>
+                <td><span className="pipeline-prompt-preview" title={shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptText ?? shot.promptText}>{promptPreview(shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptText ?? shot.promptText)}</span><small>{shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptEntryId && shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId ? `提示词库版本 ${shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId?.slice(-8)}` : "手工/导入阶段快照"}</small></td>
+                <td><strong>{planItem?.status ? preparationStatusLabel(planItem.status) : "等待正式预检"}</strong><small>{planItem?.alreadyPrepared ? "已准备，待启动" : planItem?.blockers?.join("；") ?? "可继续检查"}</small>{Boolean(planItem?.stalePreparedBatchIds?.length) && <small>陈旧准备版本；旧批次快照保留</small>}</td>
+                <td>{pairText ? <span className="pipeline-wf-cell"><span className="pipeline-wf-badge">已配置</span><small className="pipeline-wf-pair" title={pairText}>{pairText}</small></span> : <small>未配置精确配对</small>}</td>
+                <td>{planItem?.referenceCount ?? 0}</td>
                 {!videoOnly && <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "image"))}</span></td>}
                 <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "video"))}</span></td>
               </tr>
-            ))}
+              );
+            })}
             {!visibleShots.length && <tr><td colSpan={videoOnly ? 7 : 8}><p className="empty-state">当前筛选没有匹配的镜头。</p></td></tr>}
           </tbody>
         </table>
       </div>
 
-      <p className="pipeline-human-review-note"><strong>人工审核保持不变：</strong>生成成功、候选选用和人工审核通过是三个独立状态；准备与生成不会自动选择候选或通过审核。</p>
+      <details className="pipeline-quiet-help">
+        <summary>ⓘ 准备与人工审核说明</summary>
+        <p>可准备只是准备前状态；已创建批次为待启动，不等于运行中。只有生产队列的“开始生产”会执行。</p>
+        <p className="pipeline-human-review-note"><strong>人工审核保持不变：</strong>生成成功、候选选用和人工审核通过是三个独立状态；准备与生成不会自动选择候选或通过审核。</p>
+      </details>
       {preparationResult && <div className="pipeline-preparation-result" role="status"><strong>已准备完成 · {preparationResult.createdCount} 个镜头</strong><span>{preparationResult.createdCount > 0 ? "已创建待启动批次；当前尚未开始生产。" : "本次未创建任何批次。"}已准备 {preparationResult.alreadyPreparedCount} · 阻塞跳过 {preparationResult.skippedBlocked} · 不完整跳过 {preparationResult.skippedIncomplete}。</span>{onOpenProductionQueue && (preparationResult.createdCount > 0 || preparationResult.alreadyPreparedCount > 0) && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue(preparationResult.batchId ?? preparationResult.createdBatchIds?.[0] ?? preparationResult.matchingPreparedBatchIds?.[0])}>打开生产队列</button>}</div>}
       {localNotice && <p className="studio-notice">{localNotice}</p>}
       {localError && <p className="error-message" role="alert">{localError}</p>}

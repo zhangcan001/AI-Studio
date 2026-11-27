@@ -193,14 +193,16 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
   const totalShotCount = shotIndex.length || items.length;
   return <section className="storyboard-shot-rows" aria-label="分镜编辑">
     <div className="storyboard-shot-toolbar">
-      <input type="search" aria-label="搜索分镜" placeholder="全项目镜头名 / 提示词" value={query} onChange={e => setQuery(e.target.value)} />
-      <span className="storyboard-shot-count">{matching.length}/{overview.length} 个分镜（本页 {visible.length} 个）</span>
+      <input type="search" aria-label="搜索分镜" placeholder="搜索镜头名或提示词…" value={query} onChange={e => setQuery(e.target.value)} />
+      <span className="storyboard-shot-count" title={`本页显示 ${visible.length} 个，筛选覆盖全项目`}>{matching.length}/{overview.length}</span>
       <div role="group" aria-label="状态筛选" className="storyboard-shot-filters">
         {FILTERS.map(key => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{key === "ALL" ? "全部" : key === "REVIEW" ? "待审核" : key === "UNSELECTED" ? "待选用" : storyboardStatusLabels[key]}</button>)}
       </div>
-      <button type="button" aria-pressed={selectMode} disabled={batchWorking} onClick={() => { setSelectMode(v => !v); setSelectedIds([]); setBatchError(undefined); setBatchNotice(undefined); }}>批量选择</button>
-      <button type="button" onClick={() => onQueue()}>任务队列</button>
-      <button type="button" onClick={() => setRev(v => v + 1)}>刷新角色与场景</button>
+      <div className="storyboard-shot-toolbar-end">
+        <button type="button" aria-pressed={selectMode} disabled={batchWorking} onClick={() => { setSelectMode(v => !v); setSelectedIds([]); setBatchError(undefined); setBatchNotice(undefined); }}>批量选择</button>
+        <button type="button" onClick={() => onQueue()}>任务队列</button>
+        <button type="button" title="刷新项目角色、场景、道具和构图" onClick={() => setRev(v => v + 1)}>刷新角色与场景</button>
+      </div>
     </div>
     {selectMode && <div className="storyboard-batch-bar" role="region" aria-label="分镜批量操作">
       <span>已选 {selectedIds.length} 镜</span>
@@ -220,10 +222,11 @@ export function StoryboardShotRows({ projectId, items, busy, onOpen, onCreate, o
       totalCount={totalShotCount} onMoveTo={onMoveTo}
       movePickerOpen={movePicker?.projectId === projectId && movePicker.shotId === item.id}
       onMovePickerChange={open => setMovePicker(open ? { projectId, shotId: item.id } : undefined)}
-      onOpen={() => onOpen(item.id)} onCreate={onCreate} onChanged={onChanged} isFirst={shotIndex.length ? item.id === shotIndex[0]?.id : item.id === items[0]?.id} isLast={shotIndex.length ? item.id === shotIndex[shotIndex.length-1]?.id : item.id === items[items.length-1]?.id} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} onMove={onMove ? delta => onMove(item.id, delta) : undefined} onInsert={onInsert ? () => onInsert(item.id) : undefined} onClone={onClone ? () => onClone(item.id) : undefined} />; })}
+      onOpen={() => onOpen(item.id)} onChanged={onChanged} isFirst={shotIndex.length ? item.id === shotIndex[0]?.id : item.id === items[0]?.id} isLast={shotIndex.length ? item.id === shotIndex[shotIndex.length-1]?.id : item.id === items[items.length-1]?.id} onRun={onQueue} onReview={onReview ? () => onReview(item.id) : undefined} onMove={onMove ? delta => onMove(item.id, delta) : undefined} onInsert={onInsert ? () => onInsert(item.id) : undefined} onClone={onClone ? () => onClone(item.id) : undefined} />; })}
     {unloaded.length > 0 && <section aria-label="全项目镜头搜索结果"><p>其他页符合条件的镜头，点击定位后编辑；筛选覆盖全项目。</p>{unloaded.map(s => <button type="button" key={s.id} onClick={() => onLocate ? onLocate(s.id) : onOpen(s.id)}>定位{s.name} · {storyboardStatusText(s)}</button>)}</section>}
     {nameOnly.length>0&&<section aria-label="未加载镜头名称搜索结果"><p>以下仅匹配名称，尚无状态详情。</p>{nameOnly.map(s=><button type="button" key={s.id} onClick={()=>onOpen(s.id)}>打开{s.name}</button>)}</section>}
     {!visible.length && !unloaded.length && !nameOnly.length && <p className="storyboard-empty-note">没有符合条件的分镜。</p>}
+    <button type="button" className="storyboard-add-bottom" disabled={busy || batchWorking} title="新分镜追加到末尾" onClick={onCreate}>末尾新建分镜</button>
   </section>;
 }
 
@@ -311,9 +314,9 @@ const SECTION_FIELDS: [keyof ShotPromptSections, string, string][] = [
   ["music", "配乐", "1 句英文；没有配乐留空即可"],
 ];
 
-function ShotRowCard({ projectId, item, position, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onCreate, onChanged, onRun, onReview, onMove, onMoveTo, movePickerOpen, onMovePickerChange, totalCount = 0, selectable = false, selected = false, onToggleSelect, onInsert, onClone, isFirst, isLast, focused }: {
+function ShotRowCard({ projectId, item, position, entities, entitiesReady, entitiesFailed, generatorsFailed, urls, busy, generator, generators, onOpen, onChanged, onRun, onReview, onMove, onMoveTo, movePickerOpen, onMovePickerChange, totalCount = 0, selectable = false, selected = false, onToggleSelect, onInsert, onClone, isFirst, isLast, focused }: {
   projectId: string; item: StoryboardShot; position?: number; entities: StoryEntity[]; entitiesReady: boolean; entitiesFailed: boolean; generatorsFailed: boolean; urls: Record<string, string>; busy: boolean; generator?: GeneratorOption; generators: GeneratorOption[];
-  onOpen: () => void; onCreate: () => void; onChanged: () => void;
+  onOpen: () => void; onChanged: () => void;
   onRun: (ref: RunRef) => void;
   onReview?: () => void;
   isFirst?: boolean;
@@ -761,7 +764,26 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
     const nextPos = atMention.start + token.length;
     setTimeout(() => { if (promptRef.current) { promptRef.current.focus(); promptRef.current.setSelectionRange(nextPos, nextPos); } }, 0);
   };
+  const moreMenuRef = useRef<HTMLDetailsElement>(null);
+  const entityMenuRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (e: MouseEvent) => {
+      if (!(e.target instanceof Node)) return;
+      if (moreMenuRef.current?.open && !moreMenuRef.current.contains(e.target)) moreMenuRef.current.open = false;
+      if (entityMenuRef.current?.open && !entityMenuRef.current.contains(e.target)) entityMenuRef.current.open = false;
+    };
+    const closeEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (moreMenuRef.current?.open) moreMenuRef.current.open = false;
+      if (entityMenuRef.current?.open) entityMenuRef.current.open = false;
+    };
+    document.addEventListener("mousedown", closeOutside);
+    window.addEventListener("keydown", closeEsc);
+    return () => { document.removeEventListener("mousedown", closeOutside); window.removeEventListener("keydown", closeEsc); };
+  }, []);
   const shotNumber = (position ?? item.ordinal) + 1;
+  const statusClass = item.error ? "failed" : item.status.toLowerCase();
+  const visibleEntities = entities.filter(e => bound.some(b => b.id === e.id) || (entityQuery.trim() && e.name.toLowerCase().includes(entityQuery.trim().toLowerCase())));
   return <article id={`storyboard-shot-${item.id}`} data-focused={focused||undefined} data-drag-over={dragOver||undefined} className="shot-row-card" aria-label={`分镜 ${shotNumber} ${item.name}`} data-status={item.status}
     onDragOver={e => { if (disabled || !onMoveTo || !e.dataTransfer.types.includes("application/x-aistudio-shot")) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!dragOver) setDragOver(true); }}
     onDragLeave={() => { if (dragOver) setDragOver(false); }}
@@ -778,27 +800,29 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
     }}>
     <div className="shot-row-index-col">
       {selectable && <input type="checkbox" aria-label={`选择分镜 ${item.name}`} checked={selected} onChange={onToggleSelect} />}
-      <div className="shot-row-index">{shotNumber}</div>
+      <div className="shot-row-index">{String(shotNumber).padStart(2, "0")}</div>
       {onMoveTo && totalCount > 1 && <span className="shot-row-drag" draggable={!disabled} title="按住拖拽调整分镜顺序" aria-hidden="true" onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-shot", JSON.stringify({ projectId, shotId: item.id })); e.dataTransfer.effectAllowed = "move"; }}>⋮⋮</span>}
     </div>
     <div className="shot-row-media">
-      <div className="shot-row-preview">{cover ? <CandidateThumbnail asset={cover} playable /> : <span className="storyboard-cover-empty">暂无结果</span>}
-        {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} title="任务完成比例，不是视频推理百分比" aria-label={runProgressText(item.run)}>{item.run ? `${item.run.progress.succeeded+item.run.progress.failed+item.run.progress.cancelled}/${item.run.progress.total}` : "—"}</span>}</div>
+      <div className="shot-row-preview">{cover ? <CandidateThumbnail asset={cover} playable /> : <span className="storyboard-cover-empty">暂无预览</span>}
+        {percent !== null && <span className="storyboard-ring" style={{ ["--p" as string]: `${percent}` }} title="任务完成比例，不是视频推理百分比" aria-label={runProgressText(item.run)}>{item.run ? `${item.run.progress.succeeded+item.run.progress.failed+item.run.progress.cancelled}/${item.run.progress.total}` : "—"}</span>}
+        <span className="shot-row-aspect-pill" title="当前画幅与分辨率">{shotResolution(item.shot)}</span>
+      </div>
       {item.candidates.length > 0 && <div className="shot-row-strip" aria-label="候选结果">{item.candidates.map(asset => <div key={asset.id}>
         <button type="button" title={`预览：${asset.name}`} aria-label={`预览候选 ${asset.name}`} onClick={() => lightbox?.open({kind:"video",projectId,asset})}><CandidateThumbnail asset={asset} playable={false} /></button>
         <button type="button" title={asset.reviewState==="REJECTED"?"此视频已退回，请先重新审核后再选用。":undefined} disabled={disabled || asset.reviewState==="REJECTED" || item.shot?.selectedResultId === asset.id} onClick={() => void run(async () => { await productClient.creation.selectResult(projectId, item.id, "video", asset.id); invalidateRuns(projectId, { library: false }); onChanged(); })}>{item.shot?.selectedResultId === asset.id ? asset.reviewState === "REJECTED" ? "已选用（已退回）" : "已选用" : `选用 ${asset.name}`}</button>
         <small>{reviewLabel(asset.reviewState)}</small>
       </div>)}</div>}
-      <small className="shot-row-aspect" title="画幅在详情中设置">{shotResolution(item.shot)}</small>
-    </div>
-    <div className="shot-row-actions">
-      <button ref={generateButton} type="button" className="primary" disabled={generating || bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>{item.candidates.length ? "按当前设置再生成" : "生成视频"}</button>
-      <label className="shot-row-entity-search">绑定实体<input type="search" value={entityQuery} onChange={e => setEntityQuery(e.target.value)} placeholder="搜索角色、场景、道具或构图" aria-label={`${item.name} 搜索引用`} /></label>
-      <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? entities.filter(e => bound.some(b => b.id === e.id) || (entityQuery.trim() && e.name.toLowerCase().includes(entityQuery.trim().toLowerCase()))).map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button><button type="button" disabled={bindingsDisabled} aria-label={`插入 @${e.name}`} onClick={() => { const next = `${prompt}${prompt && !/\s$/.test(prompt) ? " " : ""}@${e.name}`; setPrompt(next); useStudioStore.getState().setStoryboardPrompt(draftKey, next); }}>插入 @{e.name}</button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
     </div>
     <div className="shot-row-prompt">
+      <div className="shot-row-head">
+        <input className="shot-row-name-input" aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => {setName(e.target.value);setField(draftKey,"name",e.target.value===item.name?undefined:e.target.value);}} onBlur={e => { if(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]"))return; if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "name"; else saveName(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+        <span className={`storyboard-badge ${statusClass}`}>{item.error ? "读取失败" : storyboardStatusText(item)}</span>
+        {item.candidates.length > 0 && <small className="shot-row-review-meta">{candidateReviewSummary(item.candidates)}</small>}
+        {item.shot?.selectedResultId && selectedResultRejected(item) && <small className="shot-row-review-meta">已选用（已退回）</small>}
+      </div>
       <div className="shot-row-prompt-box">
-        <textarea ref={promptRef} aria-label={`${item.name} 提示词`} placeholder="续写提示词...（输入 @ 唤起角色/场景补全，可写 5秒 / 16:9 / 0.98MP / 50万像素，自动识别）" value={prompt} disabled={bindingsDisabled}
+        <textarea ref={promptRef} aria-label={`${item.name} 提示词`} placeholder="描述画面动作与镜头语言…（输入 @ 引用角色/场景，支持 5秒 / 16:9 自动识别）" value={prompt} disabled={bindingsDisabled}
           onChange={e => { setPrompt(e.target.value); updateAtState(e.target.value, e.target.selectionStart); }}
           onClick={e => updateAtState(e.currentTarget.value, e.currentTarget.selectionStart)}
           onBlur={e => { setAtMention(null); deferredPromptBlur.current = e.relatedTarget === generateButton.current; if (!deferredPromptBlur.current && !(e.relatedTarget instanceof HTMLElement && e.relatedTarget.closest("[data-discard-prompt]"))) savePrompt(); }}
@@ -815,61 +839,70 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
           {atMatches.map((entity, idx) => <li key={entity.id}><button type="button" role="option" aria-selected={idx === atIdx} className={idx === atIdx ? "shot-row-at-active" : undefined} onMouseDown={e => e.preventDefault()} onMouseEnter={() => setAtIdx(idx)} onClick={() => applyAtEntity(entity)}><Avatar entity={entity} url={(entityAvatarAssetId(entity) && urls[entityAvatarAssetId(entity)!]) || undefined} /><span>@{entity.name}</span><small className="muted">{KIND_LABEL[entity.kind]}</small></button></li>)}
         </ul>}
       </div>
-      {fieldsDraft && <section aria-label="未保存的镜头字段"><p role="status">名称、时长或提示词分段尚未保存；本次会话内筛选、翻页后可恢复。</p>
+      <div className="shot-row-entity-bar">
+        {bound.map(e => { const aid = entityAvatarAssetId(e); return <span key={e.id} className="shot-row-inline-chip" title={`${KIND_LABEL[e.kind]} · ${e.name}`}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><span>{e.name}</span></span>; })}
+        <details ref={entityMenuRef} className="shot-row-entity-popover">
+          <summary>{bound.length ? "+ 实体" : "+ 绑定角色/场景"}</summary>
+          <div className="shot-row-entity-popover-body">
+            <label className="shot-row-entity-search"><input type="search" value={entityQuery} onChange={e => setEntityQuery(e.target.value)} placeholder="搜索角色、场景、道具或构图…" aria-label={`${item.name} 搜索引用`} /></label>
+            <ul className="shot-row-entities" aria-label="项目角色与场景" aria-busy={!bindingsReady}>{entities.length ? visibleEntities.map(e => { const aid = entityAvatarAssetId(e); const on = bound.some(b => b.id === e.id); return <li key={e.id}><button type="button" className={on ? "bound" : undefined} aria-pressed={on} disabled={bindingsDisabled} title={(on ? "解除绑定 " : "绑定 ") + `${KIND_LABEL[e.kind]} · ${e.name}`} onClick={() => toggle(e.id)}><Avatar entity={e} url={aid ? urls[aid] : undefined} /><small>{e.name}</small></button><button type="button" disabled={bindingsDisabled} aria-label={`插入 @${e.name}`} onClick={() => { const next = `${prompt}${prompt && !/\s$/.test(prompt) ? " " : ""}@${e.name}`; setPrompt(next); useStudioStore.getState().setStoryboardPrompt(draftKey, next); }}>插入 @{e.name}</button></li>; }) : <li className="muted">{entitiesFailed ? "角色与场景读取失败，请点击上方重试。" : !entitiesReady ? "正在读取当前项目角色与场景…" : "素材库中还没有角色与场景"}</li>}</ul>
+          </div>
+        </details>
+        {byKind.composition.length > 0 && <div className="shot-row-composition-usage">
+          {([["openingEntityId", "开场构图", "endingEntityId"], ["endingEntityId", "结尾构图", "openingEntityId"]] as const).map(([slot, label, other]) => <label key={slot}><span>{label}</span>
+            <select aria-label={`${item.name} ${label}`} value={usage[slot] ?? ""} disabled={bindingsDisabled || !usageReady} onChange={e => chooseUsage(slot, e.target.value)}>
+              <option value="">不指定</option>
+              {byKind.composition.map(e => <option key={e.id} value={e.id} disabled={usage[other] === e.id}>{e.name}</option>)}
+            </select></label>)}
+        </div>}
+      </div>
+      {fieldsDraft && <section className="shot-row-draft-bar" aria-label="未保存的镜头字段"><span role="status">字段未保存</span>
         {fieldsDraft.name!==undefined&&<button type="button" disabled={bindingsDisabled} onClick={saveName}>重试保存名称</button>}
         {fieldsDraft.duration!==undefined&&<button type="button" disabled={bindingsDisabled} onClick={saveDuration}>重试保存时长</button>}
         {fieldsDraft.sections!==undefined&&<button type="button" disabled={bindingsDisabled||!sectionsReady} onClick={saveSections}>重试保存分段</button>}
         <button type="button" data-discard-fields disabled={bindingsDisabled} onClick={()=>{if(!window.confirm("放弃此镜头尚未保存的名称、时长和提示词分段？"))return;setField(draftKey,"name",undefined);setField(draftKey,"duration",undefined);setField(draftKey,"sections",undefined);setName(item.name);durationDirty.current=false;setDurationBadInput(false);setDuration(savedDuration===undefined?"":String(savedDuration));setSections(savedSections.current);}}>放弃未保存字段</button></section>}
       {preview.labels.length > 0 && <p className="shot-row-recognized" aria-label="识别结果">识别到：{preview.labels.join(" · ")}</p>}
-      {preview.warnings.length > 0 && <p role="status" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
-      {prompt !== (item.shot?.prompt ?? "") && <p role="status">提示词尚未保存；筛选或返回列表后可继续编辑。<button type="button" disabled={bindingsDisabled} onClick={savePrompt}>保存提示词</button><button type="button" disabled={bindingsDisabled} data-discard-prompt onClick={() => { if (window.confirm("放弃本镜头未保存的提示词？")) { useStudioStore.getState().setStoryboardPrompt(draftKey, undefined); setPromptLocal(item.shot?.prompt ?? ""); } }}>放弃未保存提示词</button></p>}
-      {promptHints.length > 0 && <ul className="muted" aria-label="提示词写作建议">{promptHints.map(h => <li key={h}>{h}</li>)}</ul>}
-      <details className="shot-row-sections" aria-label="提示词分段">
-        <summary>风格 / 摘要 / 环境声 / 配乐（英文，可选）</summary>
-        {!sectionsReady && !sectionsError && <p role="status">正在读取提示词分段，读取完成后可保存。</p>}
-        {sectionsError && <p role="alert" className="storyboard-error">{sectionsError}</p>}
-        {SECTION_FIELDS.map(([key, label, hint]) => <label key={key}><span>{label}</span>
-          <textarea aria-label={`${item.name} ${label}`} placeholder={hint} value={sections[key] ?? ""} disabled={bindingsDisabled}
-            onChange={e => { editedSections.current.add(key); const next={...sections,[key]:e.target.value};setSections(next);const patch={...useStudioStore.getState().storyboardFields[draftKey]?.sections};if(next[key]===savedSections.current[key])delete patch[key];else patch[key]=next[key];setField(draftKey,"sections",Object.keys(patch).length?patch:undefined); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "sections"; else if(!(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]")))saveSections(); }} /></label>)}
-      </details>
+      {preview.warnings.length > 0 && <p role="status" className="shot-row-inline-note" aria-label="提示词识别提示">{preview.warnings.join(" ")}</p>}
+      {prompt !== (item.shot?.prompt ?? "") && <p role="status" className="shot-row-draft-bar"><span>提示词尚未保存</span><button type="button" disabled={bindingsDisabled} onClick={savePrompt}>保存提示词</button><button type="button" disabled={bindingsDisabled} data-discard-prompt onClick={() => { if (window.confirm("放弃本镜头未保存的提示词？")) { useStudioStore.getState().setStoryboardPrompt(draftKey, undefined); setPromptLocal(item.shot?.prompt ?? ""); } }}>放弃未保存提示词</button></p>}
+      {promptHints.length > 0 && <ul className="shot-row-hints muted" aria-label="提示词写作建议">{promptHints.map(h => <li key={h}>{h}</li>)}</ul>}
       {hasMentions && <section aria-label="角色与场景生成引用" className="composer-entity-references">
-        <p>{entityIssue ?? "角色与场景已保存到正式参考输入，生成时按以下真实顺序引用。"}</p>
+        <p>{entityIssue ?? "角色与场景已进入正式参考输入，生成时按顺序引用。"}</p>
         {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "等待自动应用"}</small>; })}
         <button type="button" disabled={disabled || !canApplyReferences || !entityIssue} onClick={applyReferences}>应用角色与场景参考图</button>
         {referenceMode && <button type="button" disabled={disabled} onClick={() => setReferenceRev(v => v + 1)}>重新读取参考输入</button>}
-        <small>使用封面图（无封面时使用第一张关联图）；保留已有参考顺序及音视频输入，不复制首尾帧，不自动生成。</small>
       </section>}
-      <dl className="shot-row-structured" aria-label="分镜描述">
-        <div><dt>镜号</dt><dd>{shotNumber}</dd></div>
-        <div><dt>时长</dt><dd>{shotDuration(item.shot)}</dd></div>
-        <div><dt>画幅</dt><dd>{shotResolution(item.shot)}</dd></div>
-        <div><dt>场景</dt><dd>{chips(byKind.scene)}</dd></div>
-        <div><dt>角色</dt><dd>{chips(byKind.character)}</dd></div>
-        <div><dt>物品</dt><dd>{chips(byKind.prop)}</dd></div>
-        <div><dt>构图</dt><dd>{chips(byKind.composition)}</dd></div>
-        {byKind.composition.length > 0 && <div><dt>构图用途</dt><dd className="shot-row-composition-usage">
-          {([["openingEntityId", "开场构图", "endingEntityId"], ["endingEntityId", "结尾构图", "openingEntityId"]] as const).map(([slot, label, other]) => <label key={slot}>{label}
-            <select aria-label={`${item.name} ${label}`} value={usage[slot] ?? ""} disabled={bindingsDisabled || !usageReady} onChange={e => chooseUsage(slot, e.target.value)}>
-              <option value="">不指定</option>
-              {byKind.composition.map(e => <option key={e.id} value={e.id} disabled={usage[other] === e.id}>{e.name}</option>)}
-            </select></label>)}
-        </dd></div>}
-        <div><dt>画面内容</dt><dd>{content}</dd></div>
-      </dl>
-      <div className="shot-row-toolbar"><span>{storyboardStatusText(item)}</span><small>{candidateReviewSummary(item.candidates)}</small>{item.shot?.selectedResultId && <small>{selectedResultRejected(item) ? "保留已选用结果（已退回）" : "保留已选用结果"}</small>}{onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}<button type="button" onClick={onOpen}>编辑与详情</button></div>
+      <div className="shot-row-disclosures">
+        <details className="shot-row-sections" aria-label="提示词分段">
+          <summary>风格 / 声效分段</summary>
+          {!sectionsReady && !sectionsError && <p role="status">正在读取提示词分段…</p>}
+          {sectionsError && <p role="alert" className="storyboard-error">{sectionsError}</p>}
+          {SECTION_FIELDS.map(([key, label, hint]) => <label key={key}><span>{label}</span>
+            <textarea aria-label={`${item.name} ${label}`} placeholder={hint} value={sections[key] ?? ""} disabled={bindingsDisabled}
+              onChange={e => { editedSections.current.add(key); const next={...sections,[key]:e.target.value};setSections(next);const patch={...useStudioStore.getState().storyboardFields[draftKey]?.sections};if(next[key]===savedSections.current[key])delete patch[key];else patch[key]=next[key];setField(draftKey,"sections",Object.keys(patch).length?patch:undefined); }} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "sections"; else if(!(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]")))saveSections(); }} /></label>)}
+        </details>
+        <details className="shot-row-details">
+          <summary>分镜结构</summary>
+          <dl className="shot-row-structured" aria-label="分镜描述">
+            <div><dt>时长</dt><dd>{shotDuration(item.shot)}</dd></div>
+            <div><dt>场景</dt><dd>{chips(byKind.scene)}</dd></div>
+            <div><dt>角色</dt><dd>{chips(byKind.character)}</dd></div>
+            <div><dt>物品</dt><dd>{chips(byKind.prop)}</dd></div>
+            <div><dt>构图</dt><dd>{chips(byKind.composition)}</dd></div>
+            <div><dt>画面内容</dt><dd>{content}</dd></div>
+          </dl>
+        </details>
+      </div>
       {error && <p role="alert" className="storyboard-error">{error}</p>}
       {item.error && <p role="alert" className="storyboard-error">{item.error}</p>}
-      {note && <p role="status">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
-      {acceptedRun && <button type="button" onClick={() => onRun(acceptedRun)}>查看已保存运行</button>}
+      {note && <p role="status" className="shot-row-inline-note">{note}{undo && <button type="button" className="shot-row-undo" disabled={bindingsDisabled} onClick={undoRecognized}>撤销</button>}</p>}
+      {acceptedRun && <button type="button" className="shot-row-run-link" onClick={() => onRun(acceptedRun)}>查看已保存运行</button>}
     </div>
     <div className="shot-row-fields">
       <label><span>生成器</span><select aria-label={`${item.name} 生成器`} value={pendingSelection ?? selectionRef ?? ""} disabled={disabled} onChange={e => chooseGenerator(e.target.value)}>
-        {(!selectionRef || !generators.some(g => g.selectionRef === selectionRef)) && <option value={selectionRef ?? ""} disabled>{selectionRef ? "当前生成器不可用" : "请选择本镜头的生成器"}</option>}
+        {(!selectionRef || !generators.some(g => g.selectionRef === selectionRef)) && <option value={selectionRef ?? ""} disabled>{selectionRef ? "当前生成器不可用" : "请选择生成器"}</option>}
         {generators.map(g => <option key={g.selectionRef} value={g.selectionRef} disabled={!g.availability}>{g.mode.toUpperCase()} · {g.name}</option>)}
       </select></label>
       {pendingSelection && !working && <button type="button" onClick={onChanged}>刷新已保存的镜头设置</button>}
-      <label><span>镜号</span><output>{shotNumber}</output></label>
-      <label><span>名称</span><input aria-label={`${item.name} 名称`} value={name} disabled={disabled} onChange={e => {setName(e.target.value);setField(draftKey,"name",e.target.value===item.name?undefined:e.target.value);}} onBlur={e => { if(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]"))return; if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "name"; else saveName(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
       {durationField
         ? <label><span>时长</span><input type="number" aria-label={`${item.name} 时长（秒）`} min={"min" in durationField ? durationField.min : undefined} max={shotDurationMax("max" in durationField ? durationField.max : undefined)} step={durationField.type === "integer" ? 1 : "any"} value={duration} disabled={disabled} aria-invalid={Boolean(durationIssue)} aria-describedby={durationIssue ? `duration-issue-${projectId}-${item.id}` : undefined} onChange={e => changeDuration(e.currentTarget)} onBlur={e => { if (e.relatedTarget === generateButton.current) deferredFieldBlur.current = "duration"; else if(!(e.relatedTarget instanceof HTMLElement&&e.relatedTarget.closest("[data-discard-fields]")))saveDuration(); }} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /><small>秒</small></label>
         : <label><span>时长</span><output title={noGen ?? "当前生成器没有时长参数"}>{shotDuration(item.shot)}</output></label>}
@@ -878,28 +911,34 @@ function ShotRowCard({ projectId, item, position, entities, entitiesReady, entit
         ? <><label><span>画幅</span><select aria-label={`${item.name} 画幅`} value={currentAspect ?? ""} disabled={disabled} onChange={e => chooseAspect(e.target.value)}>{!currentAspect && <option value="" disabled>未设置</option>}{aspects.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
           <label><span>分辨率</span><select aria-label={`${item.name} 分辨率`} value={currentPreset?.id ?? ""} disabled={disabled} onChange={e => choosePreset(presets.find(p => p.id === e.target.value))}>{!currentPreset && <option value="" disabled>{curW && curH ? `${curW}×${curH}` : "未设置"}</option>}{sizeList.map(p => <option key={p.id} value={p.id}>{p.label || `${p.width}×${p.height}`}</option>)}</select></label></>
         : <label><span>画幅</span><output title={noGen ?? "当前生成器没有分辨率预设"}>{shotResolution(item.shot)}</output></label>}
-      {KINDS.map(kind => <label key={kind}><span>{KIND_LABEL[kind]}</span><output>{byKind[kind].map(e => `@${e.name}`).join("、") || "—"}</output></label>)}
-      <div className="shot-row-field-actions">
-        {onMove && <><button type="button" disabled={disabled || isFirst} onClick={() => onMove(-1)}>上移</button><button type="button" disabled={disabled || isLast} onClick={() => onMove(1)}>下移</button></>}
-        {onMoveTo && totalCount > 1 && <>
-          <button type="button" aria-expanded={movePickerOpen} disabled={disabled} onClick={() => onMovePickerChange(!movePickerOpen)}>移至镜号</button>
-          {movePickerOpen && <label className="shot-row-jump">
-            <select aria-label={`${item.name} 移至镜号`} value={position ?? item.ordinal} disabled={disabled} onChange={event => {
-              const target = Number(event.currentTarget.value);
-              onMovePickerChange(false);
-              onMoveTo(item.id, target);
-            }}>
-              {Array.from({ length: totalCount }, (_, idx) => <option key={idx} value={idx}>第 {idx + 1} 镜</option>)}
-            </select>
-          </label>}
-        </>}
-        {onInsert && <button type="button" disabled={disabled} onClick={onInsert}>在此后插入</button>}
-        {onClone && <button type="button" disabled={disabled} title="在此镜头后插入副本，复制生成器、画幅时长与绑定实体（不复制生成结果）" onClick={onClone}>复制此镜</button>}
-        <button type="button" className="success" disabled={disabled} title="新分镜追加到末尾" onClick={onCreate}>末尾新建分镜</button>
-        <button type="button" className="danger" disabled={disabled} onClick={remove}>删除分镜</button>
-        {item.status === "GENERATING" && item.run?.availableActions.includes("CANCEL") && <button type="button" className="danger" disabled={busy} onClick={cancelGeneration}>取消生成</button>}
-      </div>
-      <span className="storyboard-badge">{item.error ? "读取失败" : storyboardStatusText(item)}</span>
+    </div>
+    <div className="shot-row-actions">
+      <button ref={generateButton} type="button" className="primary" disabled={generating || bindingsDisabled || !selectionRef || Boolean(entityIssue) || Boolean(durationIssue)} title={entityIssue ?? durationIssue ?? (selectionRef ? "写入生产队列并生成" : "请先选择本镜头的生成器")} onClick={generate} onBlur={() => { if (deferredPromptBlur.current) { deferredPromptBlur.current = false; savePrompt(); } const field = deferredFieldBlur.current; deferredFieldBlur.current = undefined; if (field === "name") saveName(); if (field === "duration") saveDuration(); if (field === "sections") saveSections(); }}>{item.candidates.length ? "按当前设置再生成" : "生成视频"}</button>
+      <button type="button" onClick={onOpen}>编辑与详情</button>
+      {onReview && item.candidates.length > 0 && item.run && <button type="button" disabled={disabled} onClick={onReview}>审核与选用</button>}
+      {item.status === "GENERATING" && item.run?.availableActions.includes("CANCEL") && <button type="button" className="shot-row-danger" disabled={busy} onClick={cancelGeneration}>取消生成</button>}
+      <details ref={moreMenuRef} className="shot-row-more">
+        <summary aria-label={`${item.name} 更多操作`} title="排序、插入、复制与删除">⋯ 更多</summary>
+        <div className="shot-row-more-menu">
+          {onMove && <><button type="button" disabled={disabled || isFirst} onClick={() => { if (moreMenuRef.current) moreMenuRef.current.open = false; onMove(-1); }}>上移</button><button type="button" disabled={disabled || isLast} onClick={() => { if (moreMenuRef.current) moreMenuRef.current.open = false; onMove(1); }}>下移</button></>}
+          {onMoveTo && totalCount > 1 && <>
+            <button type="button" aria-expanded={movePickerOpen} disabled={disabled} onClick={() => onMovePickerChange(!movePickerOpen)}>移至镜号</button>
+            {movePickerOpen && <label className="shot-row-jump">
+              <select aria-label={`${item.name} 移至镜号`} value={position ?? item.ordinal} disabled={disabled} onChange={event => {
+                const target = Number(event.currentTarget.value);
+                onMovePickerChange(false);
+                if (moreMenuRef.current) moreMenuRef.current.open = false;
+                onMoveTo(item.id, target);
+              }}>
+                {Array.from({ length: totalCount }, (_, idx) => <option key={idx} value={idx}>第 {idx + 1} 镜</option>)}
+              </select>
+            </label>}
+          </>}
+          {onInsert && <button type="button" disabled={disabled} onClick={() => { if (moreMenuRef.current) moreMenuRef.current.open = false; onInsert(); }}>在此后插入</button>}
+          {onClone && <button type="button" disabled={disabled} title="在此镜头后插入副本（不复制生成结果）" onClick={() => { if (moreMenuRef.current) moreMenuRef.current.open = false; onClone(); }}>复制此镜</button>}
+          <button type="button" className="shot-row-danger" disabled={disabled} onClick={() => { if (moreMenuRef.current) moreMenuRef.current.open = false; remove(); }}>删除分镜</button>
+        </div>
+      </details>
     </div>
   </article>;
 }

@@ -117,14 +117,20 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
       if (target) setFocusedId(target.assetId);
     }
   }}>
-    <header><h2>审核 · {item.name}</h2><button type="button" disabled={busy} onClick={() => leave(onClose)}>关闭</button></header>
-    <p>审核、选用和生成保持独立。退回不会自动重跑；修改仅影响此镜头的新运行。</p>
-    <small>未提交说明仅在本次会话内按项目、运行和候选保留；关闭后可恢复。快捷键：↑/↓ 切换候选，N / → 下一待审镜头。</small>
-    {error && <p role="alert">{error}</p>}{navigationNote&&<p role="status">{navigationNote}</p>}
+    <header>
+      <div className="storyboard-review-title"><h2>审核 · {item.name}</h2>
+        <details className="storyboard-review-help"><summary>ⓘ 规则与快捷键</summary>
+          <p>审核、选用和生成保持独立。退回不会自动重跑；修改仅影响此镜头的新运行。</p>
+          <small>未提交说明仅在本次会话内按项目、运行和候选保留；关闭后可恢复。快捷键：↑/↓ 切换候选，N / → 下一待审镜头。</small>
+        </details>
+      </div>
+      <button type="button" disabled={busy} onClick={() => leave(onClose)}>关闭</button>
+    </header>
+    {error && <p role="alert" className="storyboard-error">{error}</p>}{navigationNote&&<p role="status" className="storyboard-review-note">{navigationNote}</p>}
     {stagePlayable && focusedResult && <div className="storyboard-review-stage">
       <video key={`${projectId}:${focusedResult.assetId}`} controls playsInline preload="metadata" aria-label={`审核主预览 ${focusedResult.name}`} src={productClient.creation.mediaUrl(projectId, focusedResult.assetId, "video")} />
     </div>}
-    {!results ? <p role="status">正在读取候选…</p> : !results.length ? <p>该运行没有可审核的结果；更早候选可在运行记录中审核。</p> :
+    {!results ? <p role="status">正在读取候选…</p> : !results.length ? <p className="storyboard-review-note">该运行没有可审核的结果；更早候选可在运行记录中审核。</p> :
       <ul className="storyboard-review-list">{results.map(r => {
         const key = commentKey(r.assetId), comment = comments[key] ?? "";
         const asset = item.candidates.find(a => a.id === r.assetId);
@@ -132,21 +138,23 @@ export function ShotReviewDialog({ projectId, item, onClose, onChanged, onNext, 
         const pending = r.reviewState === "PENDING" && r.reviewRevision !== null && r.assetExists && r.availability !== "missing" && r.availability !== "unavailable";
         return <li key={r.assetId} aria-label={`候选 ${r.name}`} data-focused={focusedResult?.assetId === r.assetId || undefined} onClick={() => setFocusedId(r.assetId)}>
           <div className="storyboard-cover">{asset && <CandidateThumbnail asset={asset} playable />}</div>
-          <div><strong>{r.name}</strong><small>{r.reviewState ? labels[r.reviewState] : "无审核记录"}{chosen ? " · 已选为结果" : ""}</small></div>
-          <label className="storyboard-review-comment" onClick={e => e.stopPropagation()}>审核说明<input value={comment} disabled={busy} onChange={e => useStudioStore.getState().setReviewComment(key, e.target.value)} /></label>
-          <div className="storyboard-card-actions" onClick={e => e.stopPropagation()}>
-            {pending && <><button type="button" disabled={busy} onClick={() => void review(r, "APPROVED")}>通过</button>{!chosen && <button type="button" className="primary" disabled={busy} onClick={() => {
-              const key = commentKey(r.assetId), comment = comments[key] ?? "";
-              if (!runRef || r.reviewRevision === null) return;
-              let reviewed = false;
-              void act(async () => {
-                await productClient.run.resultReview(projectId, { runRef, assetId: r.assetId, decision: "APPROVED", comment, expectedRevision: r.reviewRevision! });
-                reviewed = true;
-                await productClient.creation.selectResult(projectId, item.id, "video", r.assetId);
-              }, { key, comment }, () => reviewed).then(saved => { if (saved && autoNext && onNext) void next(); });
-            }}>通过并选为结果</button>}<button type="button" disabled={busy || !comment.trim()} onClick={() => void review(r, "REJECTED")}>退回</button></>}
-            {r.reviewState && !pending && r.reviewRevision !== null && <button type="button" disabled={busy || (!r.assetExists || r.availability === "missing" || r.availability === "unavailable")} onClick={() => { if (window.confirm("重新打开审核？原审核记录会保留，需要重新明确作出决定。")) void act(() => productClient.run.resultReviewReset(projectId, runRef!, r.assetId, r.reviewRevision!)); }}>重新审核</button>}
-            <button type="button" disabled={busy || chosen || !r.assetExists || r.availability === "missing" || r.availability === "unavailable" || r.reviewState === "REJECTED"} onClick={() => void act(() => productClient.creation.selectResult(projectId, item.id, "video", r.assetId)).then(saved => { if (saved && autoNext && onNext) void next(); })}>{chosen ? "当前结果" : "选为结果"}</button>
+          <div className="storyboard-review-meta">
+            <div className="storyboard-review-item-head"><strong>{r.name}</strong><small>{r.reviewState ? labels[r.reviewState] : "无审核记录"}{chosen ? " · 已选为结果" : ""}</small></div>
+            <label className="storyboard-review-comment" onClick={e => e.stopPropagation()}><span>审核说明</span><input value={comment} disabled={busy} placeholder="填写退回原因或审核备注…" onChange={e => useStudioStore.getState().setReviewComment(key, e.target.value)} /></label>
+            <div className="storyboard-card-actions" onClick={e => e.stopPropagation()}>
+              {pending && <><button type="button" disabled={busy} onClick={() => void review(r, "APPROVED")}>通过</button>{!chosen && <button type="button" className="primary" disabled={busy} onClick={() => {
+                const key = commentKey(r.assetId), comment = comments[key] ?? "";
+                if (!runRef || r.reviewRevision === null) return;
+                let reviewed = false;
+                void act(async () => {
+                  await productClient.run.resultReview(projectId, { runRef, assetId: r.assetId, decision: "APPROVED", comment, expectedRevision: r.reviewRevision! });
+                  reviewed = true;
+                  await productClient.creation.selectResult(projectId, item.id, "video", r.assetId);
+                }, { key, comment }, () => reviewed).then(saved => { if (saved && autoNext && onNext) void next(); });
+              }}>通过并选为结果</button>}<button type="button" disabled={busy || !comment.trim()} onClick={() => void review(r, "REJECTED")}>退回</button></>}
+              {r.reviewState && !pending && r.reviewRevision !== null && <button type="button" disabled={busy || (!r.assetExists || r.availability === "missing" || r.availability === "unavailable")} onClick={() => { if (window.confirm("重新打开审核？原审核记录会保留，需要重新明确作出决定。")) void act(() => productClient.run.resultReviewReset(projectId, runRef!, r.assetId, r.reviewRevision!)); }}>重新审核</button>}
+              <button type="button" disabled={busy || chosen || !r.assetExists || r.availability === "missing" || r.availability === "unavailable" || r.reviewState === "REJECTED"} onClick={() => void act(() => productClient.creation.selectResult(projectId, item.id, "video", r.assetId)).then(saved => { if (saved && autoNext && onNext) void next(); })}>{chosen ? "当前结果" : "选为结果"}</button>
+            </div>
           </div>
         </li>;
       })}</ul>}

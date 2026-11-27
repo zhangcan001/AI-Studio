@@ -1855,9 +1855,21 @@ fn infer_outputs(
         let schema_node = schema.and_then(|schema| schema.node(class_type));
         let schema_output_type = schema_node.and_then(declared_output_media_type);
         let node_output_type = media_output_type_from_node(node);
-        // W-08: animated savers write a video container (webm / animated webp
-        // / apng) even though their input socket is IMAGE frames.
-        let output_type = if is_animated_save_class(class_type) {
+        // W-08: animated savers & video combiners (VHS_VideoCombine, SaveWEBM,
+        // SaveAnimatedWEBP, SaveMP4, etc.) write a video container even when
+        // their input socket is IMAGE frames or muxed IMAGE/VIDEO + AUDIO.
+        let explicit_static_image_format = node
+            .get("inputs")
+            .and_then(Value::as_object)
+            .and_then(|inputs| inputs.get("format"))
+            .and_then(Value::as_str)
+            .map(|s| s.trim().to_ascii_lowercase())
+            .is_some_and(|fmt| {
+                fmt.starts_with("image/") && fmt != "image/gif" && fmt != "image/webp"
+            });
+        let output_type = if (is_animated_save_class(class_type) || is_video_output_class(&lower))
+            && !explicit_static_image_format
+        {
             Some("video".to_owned())
         } else if class_type.to_ascii_lowercase().starts_with("saveaudio") {
             Some("audio".to_owned())
@@ -1872,7 +1884,13 @@ fn infer_outputs(
         if !explicit
             && matches!(
                 class_type.to_ascii_lowercase().as_str(),
-                "vaedecode" | "vaedecodetiled" | "previewimage" | "previewaudio"
+                "vaedecode"
+                    | "vaedecodetiled"
+                    | "previewimage"
+                    | "previewaudio"
+                    | "previewvideo"
+                    | "vhs_previewvideo"
+                    | "previewany"
             )
         {
             continue;
@@ -2490,6 +2508,9 @@ fn media_output_type_from_node(node: &serde_json::Map<String, Value>) -> Option<
         }
     }
 
+    if serialized_media_types.contains("video") {
+        return Some("video".to_owned());
+    }
     if serialized_media_types.len() == 1 {
         return serialized_media_types.into_iter().next().map(str::to_owned);
     }
@@ -2515,6 +2536,9 @@ fn media_output_type_from_node(node: &serde_json::Map<String, Value>) -> Option<
         }
     }
 
+    if socket_media_types.contains("video") {
+        return Some("video".to_owned());
+    }
     (socket_media_types.len() == 1)
         .then(|| socket_media_types.into_iter().next().map(str::to_owned))
         .flatten()
@@ -2539,10 +2563,22 @@ fn is_utility_class(text: &str) -> bool {
 }
 
 pub(crate) fn is_animated_save_class(class_type: &str) -> bool {
+    let lower = class_type.to_ascii_lowercase();
     matches!(
-        class_type.to_ascii_lowercase().as_str(),
-        "savewebm" | "saveanimatedwebp" | "saveanimatedpng"
-    )
+        lower.as_str(),
+        "savewebm"
+            | "saveanimatedwebp"
+            | "saveanimatedpng"
+            | "vhs_videocombine"
+            | "combinevideo"
+            | "savemp4"
+            | "exportvideo"
+            | "savegif"
+    ) || lower.contains("videocombine")
+        || lower.contains("combinevideo")
+        || lower.contains("savemp4")
+        || lower.contains("exportvideo")
+        || lower.contains("savegif")
 }
 
 fn is_video_output_class(text: &str) -> bool {
@@ -4731,6 +4767,56 @@ pub(crate) mod tests {
         );
         assert_eq!(forward.mode, reverse.mode);
         assert_eq!(forward.mode, "first_last_frame_to_video");
+    }
+
+    #[test]
+    fn vhs_video_combine_and_muxed_audio_save_video_resolve_as_video_outputs_ignoring_preview_nodes(
+    ) {
+        // VHS_VideoCombine with linked images + audio + a PreviewImage branch must resolve cleanly as video.
+        let vhs_raw = json!({
+            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "cinematic neon rain"}},
+            "2": {"class_type": "LoadImage", "inputs": {"image": "start.png"}},
+            "3": {"class_type": "LoadAudio", "inputs": {"audio": "bgm.wav"}},
+            "4": {"class_type": "PreviewImage", "inputs": {"images": ["2", 0]}},
+            "5": {"class_type": "VHS_PreviewVideo", "inputs": {"images": ["2", 0]}},
+            "6": {
+                "class_type": "VHS_VideoCombine",
+                "inputs": {
+                    "images": ["2", 0],
+                    "audio": ["3", 0],
+                    "frame_rate": 24,
+                    "format": "mp4"
+                }
+            }
+        });
+        let vhs_bytes = serde_json::to_vec(&vhs_raw).unwrap();
+        let vhs_doc = WorkflowDocument::parse(vhs_raw).unwrap();
+        let vhs_report = WorkflowAnalysisService::analyze_workflow(&vhs_doc, &vhs_bytes);
+        assert_eq!(vhs_report.category, "video", "{vhs_report:?}");
+        assert!(
+            vhs_report.output_root_resolution.is_resolved(),
+            "{vhs_report:?}"
+        );
+        assert_eq!(vhs_report.outputs.len(), 1);
+        assert_eq!(vhs_report.outputs[0].node_id, "6");
+        assert_eq!(vhs_report.outputs[0].output_type, "video");
+
+        // SaveVideo with muxed video + audio sockets resolves as video instead of unknown.
+        let save_raw = json!({
+            "1": {"class_type": "LoadVideo", "inputs": {"video": "clip.mp4"}},
+            "2": {"class_type": "LoadAudio", "inputs": {"audio": "bgm.wav"}},
+            "3": {"class_type": "SaveVideo", "inputs": {"video": ["1", 0], "audio": ["2", 0], "filename_prefix": "out"}}
+        });
+        let save_bytes = serde_json::to_vec(&save_raw).unwrap();
+        let save_doc = WorkflowDocument::parse(save_raw).unwrap();
+        let save_report = WorkflowAnalysisService::analyze_workflow(&save_doc, &save_bytes);
+        assert_eq!(save_report.category, "video", "{save_report:?}");
+        assert!(
+            save_report.output_root_resolution.is_resolved(),
+            "{save_report:?}"
+        );
+        assert_eq!(save_report.outputs[0].node_id, "3");
+        assert_eq!(save_report.outputs[0].output_type, "video");
     }
 }
 

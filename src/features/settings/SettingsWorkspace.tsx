@@ -158,6 +158,7 @@ export function SettingsWorkspace({
       setEndpointDraft(next.endpoint);
       setEndpointTest(undefined);
       setNotice("ComfyUI 地址已保存并应用。");
+      window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: "ComfyUI 地址已保存并应用", tone: "success" } }));
       onEndpointApplied?.();
     } catch (applyError: unknown) {
       setError(applyError);
@@ -242,6 +243,7 @@ export function SettingsWorkspace({
       setEndpointDraft(next.endpoint);
       setEndpointTest(undefined);
       setNotice(`已切换到 ${profile.name}。`);
+      window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: `已切换到 ${profile.name}`, tone: "success" } }));
       onEndpointApplied?.();
       void runPreflight();
     } catch (applyError: unknown) {
@@ -386,8 +388,10 @@ export function SettingsWorkspace({
               {endpointApplying ? "正在保存……" : "保存并应用"}
             </button>
           </div>
-          <p>测试连接仅测试当前输入的地址，不会保存或应用这个地址。</p>
-          {settings && endpointDraft.trim() !== settings.endpoint && <p>当前输入只用于测试；点击“保存并应用”后才会成为 AI Studio 使用的运行环境。</p>}
+          <details className="settings-quiet-help"><summary>ⓘ 连接测试说明</summary>
+            <p>测试连接仅测试当前输入的地址，不会保存或应用这个地址。</p>
+            {settings && endpointDraft.trim() !== settings.endpoint && <p>当前输入只用于测试；点击“保存并应用”后才会成为 AI Studio 使用的运行环境。</p>}
+          </details>
           {settings?.warning && <p className="settings-warning" role="status">{settings.warning}</p>}
           {endpointTest && (
             <p className="settings-notice" role="status">
@@ -401,7 +405,9 @@ export function SettingsWorkspace({
         <div className="settings-card-heading">
           <div>
             <h3 id="settings-preflight-title">运行预检</h3>
-            <p>只读检查当前已应用环境的连接、GPU、节点和生产工作流；不会切换环境、启动生成或修改工作流与模型。预检不保证真实生成成功，还需校验项目生成器与本次输入。</p>
+            <details className="settings-quiet-help"><summary>ⓘ 预检范围说明</summary>
+              <p>只读检查当前已应用环境的连接、GPU、节点和生产工作流；不会切换环境、启动生成或修改工作流与模型。预检不保证真实生成成功，还需校验项目生成器与本次输入。</p>
+            </details>
           </div>
           <button type="button" className="primary-action" onClick={() => void runPreflight()} disabled={preflightLoading}>
             {preflightLoading ? "正在预检……" : "立即预检"}
@@ -541,7 +547,7 @@ function PreflightReportView({ report }: { report: ComfyPreflightReport }) {
         <div><dt>工作流</dt><dd>{workflowSummary.workflowReady} 可用 / {workflowSummary.workflowBlocked} 不可用 / {workflowSummary.workflowTotal} 总计</dd></div>
       </dl>
       {workflowSummary.items?.length ? (
-        <div className="settings-endpoint-form">
+        <div className="settings-endpoint-form settings-preflight-workflows">
           <h4>工作流明细</h4>
           {workflowSummary.items.map((workflow) => (
             <p key={`${workflow.name}-${workflow.version ?? ""}`} className={workflow.status === "READY" ? "settings-notice" : "settings-warning"}>

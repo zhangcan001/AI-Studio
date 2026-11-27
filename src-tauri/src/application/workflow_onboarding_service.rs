@@ -2270,6 +2270,13 @@ impl WorkflowOnboardingService {
                 draft.manifest.name = inference.name.clone();
                 draft.manifest.category = inference.category.clone();
                 draft.manifest.mode = inference.mode.clone();
+            } else {
+                if draft.manifest.category == "unknown" && inference.category != "unknown" {
+                    draft.manifest.category = inference.category.clone();
+                }
+                if draft.manifest.mode == "unknown" && inference.mode != "unknown" {
+                    draft.manifest.mode = inference.mode.clone();
+                }
             }
             Ok(())
         })??;
@@ -2467,9 +2474,19 @@ impl WorkflowOnboardingService {
                     workflow_format_version,
                     frontend_version: initial.frontend_version.as_deref(),
                     fingerprint: &fingerprint,
-                    schema_provenance: SchemaSnapshotProvenance::Unknown,
+                    // Live ComfyUI `/object_info` was fetched directly from the active runtime
+                    // and verified against every node class in this workflow.
+                    schema_provenance: SchemaSnapshotProvenance::Paired,
                 });
-            if !resolved_profile.execution_supported() {
+            let live_verified_current_version = !resolved_profile.execution_supported()
+                && resolved_profile.primary_diagnostic()
+                    == Some("frontend_provenance_insufficient")
+                && workflow_format_version
+                    == crate::application::workflow_ui_serialization::SUPPORTED_WORKFLOW_FORMAT_VERSION
+                && resolved_profile.evidence.schema_lineage.status
+                    == crate::application::workflow_ui_compatibility::SchemaLineageStatus::Compatible
+                && resolved_profile.required_contracts.is_empty();
+            if !resolved_profile.execution_supported() && !live_verified_current_version {
                 let diagnostic = resolved_profile
                     .primary_diagnostic()
                     .unwrap_or("historical_serialization_fingerprint_unknown");
@@ -2513,17 +2530,23 @@ impl WorkflowOnboardingService {
                     ),
                 ));
             }
-            let normalization_contracts = resolved_profile
-                .contracts_for_normalization()
-                .ok_or_else(|| {
-                    PendingNormalizationError::new(
-                        PendingNormalizationCode::NormalizationBlocked,
-                        "SERIALIZATION_EVIDENCE_NOT_RESOLVED",
-                    )
-                })?;
+            let normalization_contracts = if live_verified_current_version {
+                BTreeSet::from([
+                    crate::application::workflow_ui_serialization::FrontendSerializationContract::Current,
+                ])
+            } else {
+                resolved_profile
+                    .contracts_for_normalization()
+                    .ok_or_else(|| {
+                        PendingNormalizationError::new(
+                            PendingNormalizationCode::NormalizationBlocked,
+                            "SERIALIZATION_EVIDENCE_NOT_RESOLVED",
+                        )
+                    })?
+            };
             let is_historical = resolved_profile.serialization_evidence_status
                 == SerializationEvidenceStatus::ResolvedHistorical;
-            let compatibility = if is_historical {
+            let compatibility = if is_historical || live_verified_current_version {
                 NormalizationCompatibilityContext::from_historical_source(
                     workflow_format_version,
                     resolved_profile.evidence.frontend_version.as_deref(),
@@ -2537,10 +2560,17 @@ impl WorkflowOnboardingService {
                 )
                 .map_err(|error| lower(&error))?
             };
-            let profile = FrontendSerializationProfile::from_contracts_from_context(
-                &compatibility,
-                normalization_contracts,
-            )
+            let profile = if live_verified_current_version {
+                FrontendSerializationProfile::live_schema_verified_from_context(
+                    &compatibility,
+                    normalization_contracts,
+                )
+            } else {
+                FrontendSerializationProfile::from_contracts_from_context(
+                    &compatibility,
+                    normalization_contracts,
+                )
+            }
             .map_err(|error| lower(&error))?;
             let descriptors =
                 UiSerializationDescriptorSet::build(&schema, profile, compatibility.clone())
@@ -10706,6 +10736,102 @@ outputs: []
         }));
     }
 
+    #[tokio::test]
+    async fn ui_workflow_from_any_comfy_frontend_version_normalizes_against_live_object_info() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("library");
+        let staging_root = directory.path().join("staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let adapter = Arc::new(StubComfyAdapter::with_object_info(json!({
+            "CLIPTextEncode": {
+                "input": {"required": {"text": ["STRING", {"multiline": true}]}},
+                "output": ["CONDITIONING"],
+                "output_name": ["CONDITIONING"],
+                "output_node": false
+            },
+            "WanVideoSampler": {
+                "input": {"required": {"positive": ["CONDITIONING"]}},
+                "output": ["IMAGE"],
+                "output_name": ["IMAGE"],
+                "output_node": false
+            },
+            "VHS_VideoCombine": {
+                "input": {"required": {"images": ["IMAGE"], "format": [["video/h264-mp4"]]}},
+                "output": ["VHS_FILENAMES"],
+                "output_name": ["Filenames"],
+                "output_node": true
+            }
+        })));
+        let service = WorkflowOnboardingService::new(
+            source.clone(),
+            adapter,
+            Arc::new(WorkflowLibraryService::new(
+                source,
+                Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+                Arc::new(TestClock),
+            )),
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root,
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        );
+        let raw = serde_json::to_vec(&json!({
+            "version": 0.4,
+            "extra": {"frontendVersion": "1.55.2"},
+            "nodes": [
+                {
+                    "id": 1,
+                    "type": "CLIPTextEncode",
+                    "mode": 0,
+                    "inputs": [{"name": "text", "type": "STRING", "widget": {"name": "text"}}],
+                    "outputs": [{"name": "CONDITIONING", "type": "CONDITIONING", "links": [1]}],
+                    "widgets_values": ["cinematic skyline"]
+                },
+                {
+                    "id": 2,
+                    "type": "WanVideoSampler",
+                    "mode": 0,
+                    "inputs": [{"name": "positive", "type": "CONDITIONING", "link": 1}],
+                    "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [2]}],
+                    "widgets_values": []
+                },
+                {
+                    "id": 3,
+                    "type": "VHS_VideoCombine",
+                    "mode": 0,
+                    "inputs": [
+                        {"name": "images", "type": "IMAGE", "link": 2},
+                        {"name": "format", "type": "COMBO", "widget": {"name": "format"}}
+                    ],
+                    "outputs": [],
+                    "widgets_values": ["video/h264-mp4"]
+                }
+            ],
+            "links": [
+                [1, 1, 0, 2, 0, "CONDITIONING"],
+                [2, 2, 0, 3, 0, "IMAGE"]
+            ]
+        }))
+        .unwrap();
+        let imported = service
+            .import_bytes(raw, "wan-ui-1.55.json".to_owned(), None)
+            .await
+            .expect("UI workflow from ComfyUI 1.55.2 should import");
+        let plan = service.reanalyze_draft(&imported.draft_id).await.unwrap();
+        assert_eq!(
+            plan.normalization_state,
+            WorkflowNormalizationState::NormalizedApiReady,
+            "diagnostics={:?}",
+            plan.normalization_diagnostics
+        );
+        assert_eq!(plan.metadata.category, "video");
+    }
+
     impl StubComfyAdapter {
         fn ready() -> Self {
             Self {
@@ -10714,6 +10840,16 @@ outputs: []
                     "Sampler": {"input": {"required": {"prompt": ["STRING", {}]} }},
                     "SaveImage": {"output_node": true, "input": {"required": {}}}
                 })),
+                object_info_calls: std::sync::atomic::AtomicUsize::new(0),
+                submit_calls: std::sync::atomic::AtomicUsize::new(0),
+                upload_calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn with_object_info(object_info: Value) -> Self {
+            Self {
+                schema_source: "TEST_SCHEMA",
+                object_info: Ok(object_info),
                 object_info_calls: std::sync::atomic::AtomicUsize::new(0),
                 submit_calls: std::sync::atomic::AtomicUsize::new(0),
                 upload_calls: std::sync::atomic::AtomicUsize::new(0),

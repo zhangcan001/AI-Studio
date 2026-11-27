@@ -128,9 +128,31 @@ function MediaLightbox({ target, onClose }: { target: LightboxTarget; onClose: (
   const shown = target.kind === "image" ? imageUrl : undefined;
   const modal = useRef<HTMLDialogElement>(null);
   useEffect(() => { const previous = document.activeElement; modal.current?.showModal?.(); return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); }; }, []);
+  const titleText = target.kind === "image" ? target.name : target.asset.name;
   return <div className="media-lightbox-backdrop" role="presentation" onClick={onClose}>
-    <dialog ref={modal} open={typeof HTMLDialogElement.prototype.showModal !== "function" ? true : undefined} onCancel={e => { e.preventDefault(); onClose(); }} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }} aria-modal="true" aria-label={target.kind === "image" ? `预览 ${target.name}` : `播放 ${target.asset.name}`} className="media-lightbox" onClick={e => e.stopPropagation()}>
-      <header><strong>{target.kind === "image" ? target.name : target.asset.name}</strong><button type="button" onClick={onClose}>关闭</button></header>
+    <dialog
+      ref={modal}
+      open={typeof HTMLDialogElement.prototype.showModal !== "function" ? true : undefined}
+      onCancel={e => { e.preventDefault(); onClose(); }}
+      onKeyDown={e => {
+        if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+        if ((e.key === " " || e.code === "Space") && target.kind !== "image") {
+          const el = e.target as HTMLElement | null;
+          if (el && (el.tagName === "BUTTON" || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) return;
+          const mediaEl = modal.current?.querySelector<HTMLMediaElement>("video, audio");
+          if (mediaEl) {
+            e.preventDefault();
+            if (mediaEl.paused) void mediaEl.play().catch(() => {});
+            else mediaEl.pause();
+          }
+        }
+      }}
+      aria-modal="true"
+      aria-label={target.kind === "image" ? `预览 ${target.name}` : `播放 ${target.asset.name}`}
+      className="media-lightbox"
+      onClick={e => e.stopPropagation()}
+    >
+      <header><strong title={titleText}>{titleText}</strong><button type="button" onClick={onClose}>关闭</button></header>
       <div className="media-lightbox-body">
         {target.kind === "image"
           ? (shown ? <img src={shown} alt={target.name} /> : failed ? <div role="alert">无法读取图片。<button type="button" onClick={() => setAttempt(n => n + 1)}>重试读取</button></div> : <p role="status">正在读取图片…</p>)

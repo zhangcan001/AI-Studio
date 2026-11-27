@@ -8,8 +8,8 @@ import type { FolderImportPreview, FolderImportResult } from "../../types/folder
 import { subscribeRunInvalidation } from "../../product/runInvalidation";
 import { subscribeVideoInputInvalidation } from "../../product/videoInputInvalidation";
 import { STORY_ENTITIES_CHANGED } from "../../types/storyEntity";
-const api=vi.hoisted(()=>({pick:vi.fn(),rescan:vi.fn(),discard:vi.fn(),commit:vi.fn(),generators:vi.fn()}));
-vi.mock("../../product/client",()=>({productClient:{creation:{generatorsList:api.generators},folderImport:{pick:api.pick,rescan:api.rescan,discard:api.discard,commit:api.commit}}}));
+const api=vi.hoisted(()=>({pick:vi.fn(),rescan:vi.fn(),discard:vi.fn(),commit:vi.fn(),generators:vi.fn(),assetsImport:vi.fn(),createShot:vi.fn(),updateShot:vi.fn(),shotsConfigure:vi.fn(),inputsSave:vi.fn(),libraryList:vi.fn()}));
+vi.mock("../../product/client",()=>({productClient:{library:{list:api.libraryList,imageGet:vi.fn().mockRejectedValue(new Error("no-thumb"))},creation:{generatorsList:api.generators,assetsImport:api.assetsImport,createShot:api.createShot,updateShot:api.updateShot,shotsConfigure:api.shotsConfigure,inputsSave:api.inputsSave},folderImport:{pick:api.pick,rescan:api.rescan,discard:api.discard,commit:api.commit}}}));
 function preview(id="session",bad=true):FolderImportPreview{return {sessionId:id,previewVersion:1,nameSuffix:null,displayRootName:"fixture",manifestSha256:"abc",formatSource:"manifest",shotCount:3,validCount:bad?2:3,errorCount:bad?1:0,warningCount:0,maxQueueItems:100,createQueueDefault:true,characters:[],errors:[],warnings:[],rows:[0,1,2].map(i=>({rowKey:`r${i}`,rowNumber:i+1,manifestId:null,mode:i===0?"firstLast":"reference",name:`镜头${i}`,prompt:"真实完整原文",promptSections:{style:null,summary:null,soundscape:null,music:null},referencePreview:["a.png","b.png"],promptPreview:"真实原文",durationSeconds:6,width:1280,height:768,generatorLabel:"Exact",firstFrame:i===0?"a.png":null,lastFrame:i===0?"b.png":null,referenceCount:2,entityNames:[],errors:i===2&&bad?[{code:"FILE_NOT_FOUND",message:"图片缺失"}]:[],warnings:[]}))};}
 function result(outcome:FolderImportResult["outcome"]="completed"):FolderImportResult{return {outcome,failure:outcome==="completed"?null:{stage:"C3",code:"PROMPT_SAVE_FAILED",message:"写入失败"},compensationErrors:[],createdRows:[{rowKey:"r0",shotId:"s1",name:"镜头0"},{rowKey:"r1",shotId:"s2",name:"镜头1"}],createdShotIds:["s1","s2"],reusedEntityIds:[],createdEntityIds:[],importedAssetIds:["a","b"],batchId:"batch",itemCount:2,autoStarted:false,residual:{unverifiedFileCleanup:false,shotIds:[],entityIds:[],assetIds:[],batchId:null},warnings:[]};}
 function deferred<T>(){let resolve!:(v:T)=>void;let reject!:(e:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
@@ -198,4 +198,67 @@ it("broadcasts entity, run, and video input invalidations on completed folder im
     unsubInput();
     window.removeEventListener(STORY_ENTITIES_CHANGED, onEntity);
   }
+});
+
+it("auto-configures and auto-selects valid rows for folder-auto storyboard folders", async () => {
+  const initial = { ...preview("auto", false), formatSource: "folder-auto" as FolderImportPreview["formatSource"], validCount: 0, errorCount: 3, rows: preview("auto", false).rows.map(r => ({ ...r, errors: [{ code: "GENERATOR_UNAVAILABLE", message: "需要生成器" }] })) };
+  const resolved = { ...preview("auto", false), formatSource: "folder-auto" as FolderImportPreview["formatSource"], previewVersion: 2 };
+  api.pick.mockResolvedValueOnce(initial);
+  api.generators.mockResolvedValueOnce([{ selectionRef: "generator:v1:7b7d", name: "Auto I2V", version: "1.0", mode: "I2V", mediaKind: "video", availability: true, recommended: true, availabilityReason: null, fields: [{ key: "duration_seconds", type: "integer", default: 5 }], resolutionPresets: [{ id: "mp-0_98-16x9", label: "16:9", width: 1344, height: 768 }] }]);
+  api.rescan.mockResolvedValueOnce(resolved);
+  render(<FolderBatchImportPanel projectId="p" onImported={vi.fn()} onCancel={vi.fn()} />);
+  await pick();
+  await waitFor(() => expect(api.rescan).toHaveBeenCalledWith("auto", { nameSuffix: null, legacy: { selectionRef: "generator:v1:7b7d", durationSeconds: 5, width: 1344, height: 768 } }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "确认导入" })).toHaveProperty("disabled", false));
+});
+
+it("visual batch pairing board pairs folder images with pasted prompts, binds inputs, and configures generator", async () => {
+  const onImported = vi.fn();
+  const onOpenBatch = vi.fn();
+  api.generators.mockResolvedValue([{ selectionRef: "generator:v1:i2v", name: "Wan I2V", version: "2.1", mode: "I2V", mediaKind: "video", availability: true, recommended: true, availabilityReason: null, fields: [{ key: "duration_seconds", type: "integer", default: 5 }], resolutionPresets: [{ id: "p1", label: "16:9", width: 1344, height: 768 }] }]);
+  api.assetsImport.mockResolvedValueOnce({
+    imported: [
+      { id: "ast-10", name: "10.png", mediaKind: "image" },
+      { id: "ast-2", name: "2.png", mediaKind: "image" },
+    ],
+    failed: [],
+    cancelled: false,
+  });
+  api.createShot.mockResolvedValueOnce({ id: "shot-1" }).mockResolvedValueOnce({ id: "shot-2" });
+  api.updateShot.mockResolvedValue({});
+  api.inputsSave.mockResolvedValue({});
+  api.shotsConfigure.mockResolvedValue({});
+
+  render(<FolderBatchImportPanel projectId="p" initialTab="board" onImported={onImported} onCancel={vi.fn()} onOpenBatch={onOpenBatch} />);
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "配对表视频生成器" })).toHaveProperty("value", "generator:v1:i2v"));
+  fireEvent.click(screen.getByRole("button", { name: "+ 导入图片文件夹" }));
+  await screen.findByDisplayValue("2");
+  expect(screen.getByDisplayValue("10")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "粘贴批量提示词" }));
+  fireEvent.change(screen.getByLabelText("粘贴批量提示词"), { target: { value: "1. First shot motion\n\n2. Tenth shot motion" } });
+  fireEvent.click(screen.getByRole("button", { name: "按顺序填入配对表（2 条）" }));
+
+  const commitBtn = screen.getByRole("button", { name: "一键创建 2 个分镜并配参" });
+  expect(commitBtn).toHaveProperty("disabled", false);
+  fireEvent.click(commitBtn);
+
+  await screen.findByText(/创建 2 个分镜镜头/);
+  expect(api.inputsSave).toHaveBeenCalledWith({
+    selection: { projectId: "p", shotId: "shot-1", selectionRef: "generator:v1:i2v" },
+    expected: null,
+    inputs: [{ inputKey: "first_frame", ordinal: 0, assetId: "ast-2" }],
+  });
+  expect(api.inputsSave).toHaveBeenCalledWith({
+    selection: { projectId: "p", shotId: "shot-2", selectionRef: "generator:v1:i2v" },
+    expected: null,
+    inputs: [{ inputKey: "first_frame", ordinal: 0, assetId: "ast-10" }],
+  });
+  expect(api.shotsConfigure).toHaveBeenCalledWith("p", expect.objectContaining({
+    shotIds: ["shot-1", "shot-2"],
+    selectionRef: "generator:v1:i2v",
+  }));
+  expect(onImported).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "去批量准备视频 / 加入生产队列" }));
+  expect(onOpenBatch).toHaveBeenCalledOnce();
 });

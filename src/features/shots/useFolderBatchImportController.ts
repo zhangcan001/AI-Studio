@@ -29,24 +29,26 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
   const scope = useRef(projectId); scope.current = projectId;
   const operation = useRef(0); const locked = useRef(false); const mounted = useRef(true);
   const session = useRef<{ project: string; id: string } | undefined>(undefined);
+  const autoInitSession = useRef("");
   const imported = useRef(onImported); imported.current = onImported;
   const discard = (id: string) => { void productClient.folderImport.discard(id).catch(() => { /* backend TTL owns abandoned previews */ }); };
   useEffect(() => {
     setUiProject(projectId);
-    mounted.current = true; locked.current = false; operation.current++;
+    mounted.current = true; locked.current = false; operation.current++; autoInitSession.current = "";
     setPreview(undefined); setResult(undefined); setError(undefined); setBusy(undefined);
     setSuffix(""); setSelected(new Set()); setNewlyValid(new Set()); setAutoStart(false); setCreateQueue(true);setLegacy({selectionRef:"",durationSeconds:6,width:0,height:0});setValidatedLegacy("");setGenerators([]);
     return () => { mounted.current = false; operation.current++; if (session.current?.project === projectId) { discard(session.current.id); session.current = undefined; } };
   }, [projectId]);
   const ownsPreview=Boolean(preview && session.current?.project===projectId && uiProject===projectId);
   const legacyMode=Boolean(ownsPreview && preview?.formatSource!=="manifest");
+  const autoFolderMode=Boolean(ownsPreview && (preview?.formatSource as string | undefined)==="folder-auto");
   useEffect(()=>{let cancelled=false;if(!legacyMode)return;const project=projectId;void productClient.creation.generatorsList(project,"video").then(options=>{if(!cancelled && scope.current===project)setGenerators(options.filter(o=>o.mediaKind==="video"));}).catch(e=>{if(!cancelled && scope.current===project)setError(importError(e));});return()=>{cancelled=true;};},[projectId,legacyMode]);
   const current = (project: string, ticket: number) => mounted.current && scope.current === project && operation.current === ticket;
-  const accept = (p: FolderImportPreview, revalidate = false) => {
+  const accept = (p: FolderImportPreview, revalidate = false, selectAllValid = false) => {
     const wasBlocked = new Set(preview?.rows.filter(row => row.errors.length > 0).map(row => row.rowKey));
-    setNewlyValid(new Set(revalidate ? p.rows.filter(row => !row.errors.length && wasBlocked.has(row.rowKey)).map(row => row.rowKey) : []));
+    setNewlyValid(new Set(revalidate && !selectAllValid ? p.rows.filter(row => !row.errors.length && wasBlocked.has(row.rowKey)).map(row => row.rowKey) : []));
     session.current = { project: projectId, id: p.sessionId }; setPreview(p); setResult(undefined);
-    setSelected(previous => new Set(p.rows.filter(r => r.errors.length === 0 && (!revalidate || previous.has(r.rowKey))).map(r => r.rowKey)));
+    setSelected(previous => new Set(p.rows.filter(r => r.errors.length === 0 && (!revalidate || selectAllValid || previous.has(r.rowKey))).map(r => r.rowKey)));
     if (!revalidate) setCreateQueue(p.createQueueDefault); setAutoStart(false); setSuffix(p.nameSuffix ?? "");setValidatedLegacy(p.formatSource==="manifest"?"":JSON.stringify(legacyRef.current));
   };
   const begin = (kind: "pick" | "rescan" | "commit") => {
@@ -60,17 +62,45 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
     try {
       const p = await productClient.folderImport.pick(project);
       if (!current(project, ticket)) { if (p) discard(p.sessionId); return; }
-      if (p) { if (session.current) discard(session.current.id); accept(p); }
+      if (p) { if (session.current) discard(session.current.id); autoInitSession.current = ""; setLegacy({selectionRef:"",durationSeconds:6,width:0,height:0}); accept(p); }
     } catch (e) { if (current(project, ticket)) setError(importError(e)); }
     finally { finish(project, ticket); }
   };
-  const rescan = async () => {
+  const rescan = async (overrideLegacy?: FolderImportLegacyDefaults, selectAllValid = false) => {
     if (!ownsPreview || !preview || result) return;
     const project = projectId, ticket = begin("rescan"); if (ticket === undefined) return;
-    try { const p = await productClient.folderImport.rescan(preview.sessionId, { nameSuffix: suffix || null, ...(legacyMode ? {legacy} : {}) }); if (current(project, ticket)) accept(p, true); }
+    const activeLegacy = overrideLegacy ?? legacyRef.current;
+    if (overrideLegacy) { legacyRef.current = overrideLegacy; setLegacy(overrideLegacy); }
+    try { const p = await productClient.folderImport.rescan(preview.sessionId, { nameSuffix: suffix || null, ...(legacyMode ? {legacy: activeLegacy} : {}) }); if (current(project, ticket)) accept(p, true, selectAllValid); }
     catch (e) { if (current(project, ticket)) setError(importError(e)); }
     finally { finish(project, ticket); }
   };
+  useEffect(() => {
+    if (!autoFolderMode || !preview || result || busy || !generators.length) return;
+    if (autoInitSession.current === preview.sessionId || legacyRef.current.selectionRef) return;
+    const needsGenerator = preview.rows.some(r => r.errors.some(e => e.code === "GENERATOR_UNAVAILABLE"));
+    if (!needsGenerator) {
+      autoInitSession.current = preview.sessionId;
+      return;
+    }
+    const available = generators.filter(g => g.availability);
+    const preferred =
+      available.find(g => g.recommended && ["I2V", "REF2VA"].includes((g.mode ?? "").toUpperCase()))
+      ?? available.find(g => ["I2V", "REF2VA"].includes((g.mode ?? "").toUpperCase()))
+      ?? available[0];
+    if (!preferred) return;
+    autoInitSession.current = preview.sessionId;
+    const preset = preferred.resolutionPresets?.[0];
+    const durField = preferred.fields.find(f => f.key === "duration_seconds" && (f.type === "integer" || f.type === "number"));
+    const rawDur = durField && "default" in durField && typeof durField.default === "number" ? Math.round(durField.default) : 5;
+    const nextLegacy: FolderImportLegacyDefaults = {
+      selectionRef: preferred.selectionRef,
+      durationSeconds: Math.min(11, Math.max(1, rawDur)),
+      width: preset?.width ?? 1344,
+      height: preset?.height ?? 768,
+    };
+    void rescan(nextLegacy, true);
+  }, [autoFolderMode, preview?.sessionId, result, busy, generators]);
   const dirty = Boolean(preview && ((preview.nameSuffix ?? "") !== suffix || (legacyMode && JSON.stringify(legacy)!==validatedLegacy)));
   const overQueueLimit = Boolean(preview && createQueue && selected.size > preview.maxQueueItems);
   const canCommit = Boolean(ownsPreview && preview && !busy && !result && !dirty && selected.size && !overQueueLimit && preview.errors.length === 0);
@@ -96,6 +126,18 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
       }
       if (!current(project, ticket)) return;
       setResult(r);
+      if (r.outcome === "completed") {
+        window.dispatchEvent(new CustomEvent("ai-studio:toast", {
+          detail: {
+            message: `已导入 ${r.createdShotIds.length} 个镜头${r.importedAssetIds.length ? `、${r.importedAssetIds.length} 项素材` : ""}`,
+            tone: "success",
+          },
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent("ai-studio:toast", {
+          detail: { message: "批量导入未完全成功，请查看回执详情", tone: "warning" },
+        }));
+      }
       // Refresh failures must not turn a completed write into a retryable commit.
       try { await imported.current(); } catch { if (current(project, ticket)) setError("导入结果已保存，但列表刷新失败，请手动刷新；不要重复提交。"); }
     } catch (e) { if (current(project, ticket)) setError(importError(e)); }
@@ -108,5 +150,5 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
     setSelected(new Set(keys.filter(key => valid.has(key))));
   };
   const selectNewlyValid = () => { selectRows([...selected, ...newlyValid]); setNewlyValid(new Set()); };
-  return { newlyValid, selectNewlyValid, selectRows, legacyMode,legacy,setLegacy,generators,preview:ownsPreview?preview:undefined, result:ownsPreview?result:undefined, error:uiProject===projectId?error:undefined, busy:uiProject===projectId?busy:undefined, suffix, setSuffix, selected, toggle, createQueue, setCreateQueue: (value: boolean) => { setCreateQueue(value); if (!value) setAutoStart(false); }, autoStart, setAutoStart, dirty, overQueueLimit, canCommit, pick, rescan, commit };
+  return { newlyValid, selectNewlyValid, selectRows, legacyMode, autoFolderMode, legacy, setLegacy, generators, preview:ownsPreview?preview:undefined, result:ownsPreview?result:undefined, error:uiProject===projectId?error:undefined, busy:uiProject===projectId?busy:undefined, suffix, setSuffix, selected, toggle, createQueue, setCreateQueue: (value: boolean) => { setCreateQueue(value); if (!value) setAutoStart(false); }, autoStart, setAutoStart, dirty, overQueueLimit, canCommit, pick, rescan, commit };
 }

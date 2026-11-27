@@ -117,7 +117,10 @@ export function GeneratorSettingsPage({ projectId, navigate, onDirtyChange }: { 
     setChoices(current => { const next = { ...current }; delete next[key]; return next; });
     try {
       await refresh(token, true);
-      if (token === generation.current) setNotice("生成器设置已保存；已有镜头与历史运行不变。");
+      if (token === generation.current) {
+        setNotice("生成器设置已保存；已有镜头与历史运行不变。");
+        window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: "生成器设置已保存", tone: "success" } }));
+      }
     } catch (e) {
       if (token === generation.current) {
         setError(normalizeProductError(e).message);
@@ -151,7 +154,10 @@ export function GeneratorSettingsPage({ projectId, navigate, onDirtyChange }: { 
       for (const item of dirtySlots) retainedConflictKeysRef.current.delete(item.key);
       if (token === generation.current) {
         await refresh(token, true);
-        if (token === generation.current) setNotice(`已批量保存 ${savedCount} 项生成器设置。`);
+        if (token === generation.current) {
+          setNotice(`已批量保存 ${savedCount} 项生成器设置。`);
+          window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: `已保存 ${savedCount} 项生成器设置`, tone: "success" } }));
+        }
       }
     } catch (e) {
       if (savedCount > 0) notifyBindingsChanged(projectId);
@@ -196,21 +202,29 @@ export function GeneratorSettingsPage({ projectId, navigate, onDirtyChange }: { 
     <header className="generator-settings-head"><div><h1>生成器</h1><p>设置视频和视频模式的默认生成器。只影响后续选择，不自动替换已有镜头。</p></div>{dirtySlots.length > 0 && <button type="button" className="primary" disabled={busy || !!error} onClick={() => void saveAll()}>保存全部修改（{dirtySlots.length}）</button>}</header>
     {loading && <p role="status">正在读取生成器…</p>}{(batchError || error) && <p role="alert">{[batchError, error].filter(Boolean).join(" ")}</p>}{notice && <p role="status">{notice}</p>}
     {!loading && !error && !options.length && <p role="status" data-testid="no-video-generators">暂无可用的视频生成器。请刷新设置并检查本地运行环境，或更新包含所需内置生成器的软件版本。</p>}
-    {!loading && slots.map(slot => {
+    {!loading && <div className="generator-settings-grid">{slots.map(slot => {
       const key = `${slot.stage}:${slot.mode}`;
       const binding = bindings.find(b => b.stage === slot.stage && b.mode === slot.mode);
       const available = options.filter(o => o.mediaKind === (slot.stage === "IMAGE" ? "image" : "video") && (slot.mode === "DEFAULT" || bindingModes(o).includes(slot.mode)));
       const selected = choices[key] ?? binding?.selectionRef ?? "";
       const isDirty = choices[key] !== undefined && choices[key] !== (binding?.selectionRef ?? "") && choices[key] !== "";
       const option = available.find(o => o.selectionRef === selected);
-      return <article key={key}><h2>{slot.label}{isDirty && <span className="generator-dirty-badge">未保存修改</span>}</h2><label>生成器<select aria-label={slot.label} disabled={busy || !!error} value={selected} onChange={e => setChoices(c => ({ ...c, [key]: e.target.value }))}>
-        <option value="">未配置</option>{binding && !available.some(o => o.selectionRef === binding.selectionRef) && <option value={binding.selectionRef}>原生成器不可用，请检查本地运行环境或明确选择其他生成器</option>}
-        {available.map((o, i) => <option key={o.selectionRef} value={o.selectionRef}>{generatorLabel(o, i)}{!o.availability ? " · 不可用" : ""}</option>)}
-      </select></label>
-      {option && <><p>{generatorLabel(option, available.indexOf(option))}</p><p>输入要求：{option.fields.filter(f => "required" in f && f.required).map(fieldLabel).join("、") || "无必填素材"}</p><p>{option.availability ? "可用" : "当前不可用，请检查本地节点、模型与运行环境"}</p></>}
-      <button type="button" disabled={busy || !!error || !option?.availability || selected === binding?.selectionRef} onClick={() => void save(slot.stage, slot.mode, selected)}>保存设置</button>
-    </article>; })}
-    <button type="button" disabled={loading || busy} onClick={() => void handleRefresh()}>刷新设置</button>
-    <button type="button" onClick={() => navigate({ kind: "system-settings", section: "general", returnTo: { kind: "project-settings", projectId, section: "generators" } })}>检查本地运行环境</button>
+      return <article key={key}>
+        <header className="generator-card-head">
+          <h2>{slot.label}{isDirty && <span className="generator-dirty-badge">未保存修改</span>}</h2>
+          {option && <span className={`generator-status-pill ${option.availability ? "ready" : "blocked"}`}>{option.availability ? "可用" : "不可用"}</span>}
+        </header>
+        <label><span>生成器</span><select aria-label={slot.label} disabled={busy || !!error} value={selected} onChange={e => setChoices(c => ({ ...c, [key]: e.target.value }))}>
+          <option value="">未配置</option>{binding && !available.some(o => o.selectionRef === binding.selectionRef) && <option value={binding.selectionRef}>原生成器不可用，请检查本地运行环境或明确选择其他生成器</option>}
+          {available.map((o, i) => <option key={o.selectionRef} value={o.selectionRef}>{generatorLabel(o, i)}{!o.availability ? " · 不可用" : ""}</option>)}
+        </select></label>
+        {option && <p className="generator-card-meta">输入要求：{option.fields.filter(f => "required" in f && f.required).map(fieldLabel).join("、") || "无必填素材"}{!option.availability ? " · 当前不可用，请检查本地节点、模型与运行环境" : ""}</p>}
+        <div className="generator-card-foot"><button type="button" className={isDirty ? "primary" : undefined} disabled={busy || !!error || !option?.availability || selected === binding?.selectionRef} onClick={() => void save(slot.stage, slot.mode, selected)}>保存设置</button></div>
+      </article>;
+    })}</div>}
+    <footer className="generator-settings-footer">
+      <button type="button" disabled={loading || busy} onClick={() => void handleRefresh()}>刷新设置</button>
+      <button type="button" onClick={() => navigate({ kind: "system-settings", section: "general", returnTo: { kind: "project-settings", projectId, section: "generators" } })}>检查本地运行环境</button>
+    </footer>
   </section>;
 }

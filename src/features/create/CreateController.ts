@@ -464,6 +464,14 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     if (ack.accepted) {
       if (submissionIntents.current.get(fingerprint) === request.submissionIdempotencyKey) submissionIntents.current.delete(fingerprint);
       if (attempt.current === request.submissionIdempotencyKey) attempt.current = null;
+      const toastMsg = ack.startOutcome === "FAILED_TO_START"
+        ? "已保存运行，但启动失败，请在运行页查看原因"
+        : ack.startOutcome === "QUEUED"
+          ? "已加入生产队列，将在当前任务结束后自动启动"
+          : "已提交视频生成任务";
+      window.dispatchEvent(new CustomEvent("ai-studio:toast", {
+        detail: { message: toastMsg, tone: ack.startOutcome === "FAILED_TO_START" ? "warning" : "success" },
+      }));
     }
     if (!mounted.current || token !== epoch.current || draft.key !== currentDraft.current.key) return;
     // A committed run belongs to this scope even if runtime/input evidence changed
@@ -476,6 +484,22 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
     useStudioStore.getState().loadCreationDraft(request.values, false, request.promptId && request.promptVersionId ? {promptId:request.promptId,promptVersionId:request.promptVersionId} : undefined);
   }
   function generate() { setPendingStandardRun(undefined); return mutate(() => commitGenerate()); }
+  function generateWithRandomSeed() {
+    setPendingStandardRun(undefined);
+    return mutate(async () => {
+      const store = useStudioStore.getState();
+      const seedField = generator?.fields.find(item => item.type === "seed" || item.key === "seed");
+      const nextValues = { ...store.values };
+      if (seedField) {
+        const nextSeed = Math.floor(Math.random() * 2_000_000_000) + 1;
+        nextValues[seedField.key] = { type: "integer", value: nextSeed };
+        store.loadCreationDraft(nextValues, true, store.creationPromptProvenance);
+      }
+      attempt.current = null;
+      setAccepted(null);
+      await commitGenerate({ values: nextValues });
+    });
+  }
   function generateWithResolution(presetId: string) {
     return mutate(async () => {
       const preset = generator?.resolutionPresets?.find(item => item.id === presetId);
@@ -542,7 +566,7 @@ export function useCreateController({ route, runtime, navigate, onDirtyChange }:
   const setReferences = (ids: string[]) => mutate(async () => { const token = epoch.current; await productClient.creation.referencesSet(route.projectId, route.shotId!, route.stage, ids); await refreshContext(token); });
   const retry = () => mutate(async () => { if (!run?.availableActions.includes("RETRY")) return; const token = epoch.current; const next = await productClient.run.retry(route.projectId, { ref: run.ref, selectedItemIds: run.recoverability.retryItemIds }); if (!mounted.current || token !== epoch.current) return; setRun(next); setRunRef(next.ref); setAccepted(null); });
   return { videoInputs, libraryIntent, librarySlots, libraryRejectReason, libraryNeedsGeneratedVideoConfirm, libraryApplyReady, generatedVideoConfirm, setGeneratedVideoConfirm, libraryAssetMeta, applyLibraryAsset, context, generators, generator, selection, values, readiness, readinessState, accepted, run, runRef, error, loading, busy: busy || Boolean(pendingStandardRun),
-    setValue, removeValue, chooseResolution, applyPromptChoice, openLibrary, chooseGenerator, generate, generateWithResolution, generateWithStandardPackage, createShot, selectResult, setReferences, retry, recheckReadiness,
+    setValue, removeValue, chooseResolution, applyPromptChoice, openLibrary, chooseGenerator, generate, generateWithRandomSeed, generateWithResolution, generateWithStandardPackage, createShot, selectResult, setReferences, retry, recheckReadiness,
     openRuntimeSettings: () => {
       useStudioStore.getState().setCreationLabReturn({ scope: key, selectionRef: selection, runRef, accepted });
       return navigate({ kind: "system-settings", section: "general", returnTo: route });

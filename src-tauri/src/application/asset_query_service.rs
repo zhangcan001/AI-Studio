@@ -297,6 +297,25 @@ impl AssetQueryService {
             .collect())
     }
 
+    /// Project-scoped external source hashes for duplicate-import avoidance (Rust-internal only).
+    pub async fn existing_source_hashes(
+        &self,
+        project_id: &str,
+    ) -> Result<std::collections::HashMap<String, String>, AssetQueryError> {
+        if project_id.trim().is_empty() {
+            return Err(AssetQueryError::InvalidProjectId(
+                "project id must not be empty".to_owned(),
+            ));
+        }
+        let mut map = std::collections::HashMap::new();
+        for asset in self.asset_repository.list_recent(project_id, 500).await? {
+            if asset.source_task_id.is_none() && !asset.sha256.is_empty() {
+                map.entry(asset.sha256).or_insert(asset.name);
+            }
+        }
+        Ok(map)
+    }
+
     pub async fn get(
         &self,
         project_id: &str,

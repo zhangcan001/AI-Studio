@@ -81,7 +81,7 @@ export function LibraryPage(props:LibraryProps) {
   useEffect(()=>{++batchEpoch.current;setBatchMode(false);setSelectedKeys([]);setBatchPlan(undefined);setBatchNotice(undefined);setBatchBusy(false);},[props.route.projectId,c.category]);
   const [importing,setImporting]=useState(false),[importNotice,setImportNotice]=useState<string>();
   const importLock=useRef(false),owner=useRef(props.route.projectId); owner.current=props.route.projectId;
-  const importMedia=async(folder=false)=>{if(importLock.current)return;const project=props.route.projectId;importLock.current=true;setImporting(true);setImportNotice(undefined);try{const result=await productClient.creation.assetsImport(project,folder);if(owner.current!==project)return;if(!result.cancelled){if(result.imported.length>0)invalidateVideoInputs(project);setImportNotice(`导入成功 ${result.imported.length} 项，失败 ${result.failed.length} 项。${result.failed.map(f=>f.displayName+"："+f.error).join("；")}`);await c.refresh();}}catch(cause){if(owner.current===project)setImportNotice(normalizeProductError(cause).message);}finally{importLock.current=false;if(owner.current===project)setImporting(false);}};
+  const importMedia=async(folder=false)=>{if(importLock.current)return;const project=props.route.projectId;importLock.current=true;setImporting(true);setImportNotice(undefined);try{const result=await productClient.creation.assetsImport(project,folder);if(owner.current!==project)return;if(!result.cancelled){if(result.imported.length>0)invalidateVideoInputs(project);const msg=`导入成功 ${result.imported.length} 项，失败 ${result.failed.length} 项。${result.failed.map(f=>f.displayName+"："+f.error).join("；")}`;setImportNotice(msg);window.dispatchEvent(new CustomEvent("ai-studio:toast",{detail:{message:`已导入 ${result.imported.length} 项素材${result.failed.length?`，失败 ${result.failed.length} 项`:""}`,tone:result.failed.length?"warning":"success"}}));await c.refresh();}}catch(cause){if(owner.current===project)setImportNotice(normalizeProductError(cause).message);}finally{importLock.current=false;if(owner.current===project)setImporting(false);}};
   const entityDirty = useRef(false);
   const onEntityDirty = useCallback((dirty: boolean) => { entityDirty.current = dirty; draftFlags.current.entity=dirty;props.onDirtyChange?.(dirty||draftFlags.current.detail); }, [props.onDirtyChange]);
   const onDetailDirty=useCallback((dirty:boolean)=>{draftFlags.current.detail=dirty;props.onDirtyChange?.(dirty||draftFlags.current.entity);},[props.onDirtyChange]);
@@ -137,10 +137,12 @@ export function LibraryPage(props:LibraryProps) {
     if(!failureMessage){
       setSelectedKeys([]);setBatchPlan(undefined);
       setBatchNotice(`已批量删除 ${deletedKeys.length} 项${skipped?`（跳过受保护资源 ${skipped} 项）`:""}；历史任务和运行记录仍保留。`);
+      window.dispatchEvent(new CustomEvent("ai-studio:toast",{detail:{message:`已批量删除 ${deletedKeys.length} 项素材`,tone:"success"}}));
     }else if(deletedKeys.length>0){
       setSelectedKeys(remainingSelected);
       setBatchPlan(remainingAllowed.length?{scope:nextScope,allowed:remainingAllowed,blocked:skipped}:undefined);
       setBatchNotice(`已删除 ${deletedKeys.length} 项，剩余 ${remainingAllowed.length} 项未删除：${failureMessage}`);
+      window.dispatchEvent(new CustomEvent("ai-studio:toast",{detail:{message:`已删除 ${deletedKeys.length} 项，部分失败`,tone:"warning"}}));
     }else{
       setBatchNotice(failureMessage);
     }
@@ -154,23 +156,21 @@ export function LibraryPage(props:LibraryProps) {
   const pager=c.list?.coverage==="keyset-page"&&(c.canPrevious||c.list.nextCursor)&&<nav className="library-pagination" aria-label="资源分页"><button type="button" disabled={!c.canPrevious||c.loading} onClick={c.previousPage}>上一页</button><span>第 {c.pageIndex+1} 页</span><button type="button" disabled={!c.list.nextCursor||c.loading} onClick={c.nextPage}>下一页</button></nav>;
   return <div className="library-page">
     <header className="library-toolbar">
-      <h1>资源库</h1>
-      {!entityKind&&<input type="search" className="library-search" aria-label="搜索资源名称" placeholder={c.category==="prompts"?"搜索提示词（名称 / 标签）":"搜索资源名称"} value={searchDraft} onChange={e=>onSearchInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){clearTimeout(searchTimer.current);c.setSearch(searchDraft);}}}/>}
+      <h1>素材库</h1>
+      {!entityKind&&<input type="search" className="library-search" aria-label="搜索资源名称" placeholder={c.category==="prompts"?"搜索提示词（名称 / 标签）":"搜索素材名称"} value={searchDraft} onChange={e=>onSearchInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){clearTimeout(searchTimer.current);c.setSearch(searchDraft);}}}/>}
       {c.mediaCategory&&!entityKind&&<div className="library-filters" aria-label="媒体筛选" title="卡片徽章标出外部导入 / 生成结果；来源与收藏筛选会在本会话内记住（按项目）。">
         <select aria-label="素材来源" value={c.sourceKind} onChange={e=>c.setSourceKind(e.target.value as typeof c.sourceKind)}><option value="all">全部来源</option><option value="source">外部导入</option><option value="generated">生成结果</option></select>
         <select aria-label="标签" value={c.tagId} onChange={e=>c.setTagId(e.target.value)}><option value="">全部标签</option>{c.tags.map(tag=><option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>
         <label className="library-check"><input type="checkbox" checked={c.favoriteOnly} onChange={e=>c.setFavoriteOnly(e.target.checked)}/>仅收藏</label>
       </div>}
       {!entityKind&&c.hasActiveFilters&&<button type="button" onClick={()=>{clearTimeout(searchTimer.current);setSearchDraft("");c.clearFilters();}}>清除筛选</button>}
-      {!entityKind&&<><button type="button" disabled={importing||batchBusy} onClick={()=>void importMedia()}>导入素材</button><button type="button" disabled={importing||batchBusy} onClick={()=>void importMedia(true)}>导入素材文件夹</button>{c.mediaCategory&&<button type="button" disabled={batchBusy} aria-pressed={batchMode} onClick={()=>{resetBatchPlan();setBatchMode(v=>!v);setSelectedKeys([]);}}>批量管理</button>}<button type="button" disabled={batchBusy} onClick={()=>void c.refresh()}>刷新</button></>}
-      {importNotice&&<p role="status">{importNotice}</p>}
-      {batchNotice&&<p role="status">{batchNotice}</p>}
-      <details ref={advancedRef} className="library-advanced"><summary>高级</summary><div className="library-advanced-body">
-        <button type="button" onClick={()=>{if(advancedRef.current)advancedRef.current.open=false;void safeNavigate({...props.route,filter:"advanced-assets"});}}>素材与参考集管理</button>
-        <button type="button" onClick={()=>{if(advancedRef.current)advancedRef.current.open=false;void safeNavigate({...props.route,filter:"advanced-prompts"});}}>高级提示词编辑器</button>
-        {c.mediaCategory&&<ProjectMediaInspection inspection={c.mediaInspection} open={id=>{if(advancedRef.current)advancedRef.current.open=false;c.open({kind:"asset",id});}}/>}
-      </div></details>
+      {!entityKind&&<><button type="button" className="primary" disabled={importing||batchBusy} onClick={()=>void importMedia()}>导入素材</button><button type="button" disabled={importing||batchBusy} onClick={()=>void importMedia(true)}>导入素材文件夹</button>{c.mediaCategory&&<button type="button" disabled={batchBusy} aria-pressed={batchMode} onClick={()=>{resetBatchPlan();setBatchMode(v=>!v);setSelectedKeys([]);}}>批量管理</button>}<button type="button" disabled={batchBusy} onClick={()=>void c.refresh()}>刷新</button></>}
+      {c.mediaCategory&&!entityKind&&<details ref={advancedRef} className="library-advanced"><summary>体检</summary><div className="library-advanced-body">
+        <ProjectMediaInspection inspection={c.mediaInspection} open={id=>{if(advancedRef.current)advancedRef.current.open=false;c.open({kind:"asset",id});}}/>
+      </div></details>}
     </header>
+    {importNotice&&<div className="library-banner" role="status"><span>{importNotice}</span><button type="button" className="library-banner-close" aria-label="关闭导入提示" onClick={()=>setImportNotice(undefined)}>×</button></div>}
+    {batchNotice&&<div className="library-banner" role="status"><span>{batchNotice}</span><button type="button" className="library-banner-close" aria-label="关闭批量提示" onClick={()=>setBatchNotice(undefined)}>×</button></div>}
     {batchMode&&!entityKind&&<div className="library-batch-bar" role="region" aria-label="批量资源操作">
       <span>已选择 {selectedKeys.length} 项</span>
       <button type="button" disabled={!visibleResources?.length||batchBusy} onClick={()=>{resetBatchPlan();setSelectedKeys(visibleResources?.map(i=>resourceKey(i.resourceRef))??[]);}}>全选本页</button>
@@ -181,7 +181,10 @@ export function LibraryPage(props:LibraryProps) {
     </div>}
     {c.category==="profiles"&&<p role="note">旧设定入口已停用，请使用角色、场景、道具或构图分类。旧记录仍保留用于历史查看与备份。</p>}
     {c.category==="prompts"&&<p role="note">提示词分类入口已停用。当前无法在资源库中新增提示词，已有记录仍保留用于历史查看与备份。</p>}
-    {c.queryError&&<p role="alert">{c.queryError}</p>}{c.actionError&&<p role="alert">{c.actionError}</p>}{c.notice&&<p role="status">{c.notice}</p>}{c.loading&&<p role="status">正在读取资源…</p>}
+    {c.queryError&&<div className="library-error-bar" role="alert"><span>{c.queryError}</span><button type="button" onClick={()=>void c.refresh()}>重试</button></div>}
+    {c.actionError&&<div className="library-error-bar" role="alert"><span>{c.actionError}</span></div>}
+    {c.notice&&<p className="library-notice-line" role="status">{c.notice}</p>}
+    {c.loading&&!c.list&&<p className="library-notice-line" role="status">正在读取资源…</p>}
     <div className="library-layout" data-detail={showDetail?"open":"closed"}>
       <nav aria-label="资源分类" className="library-nav">
         {categories.filter(cat=>cat.key!=="profiles"&&cat.key!=="prompts").map(cat=><button type="button" key={cat.key} disabled={batchBusy} aria-pressed={!entityKind&&cat.key===c.category} onClick={()=>{void Promise.resolve(safeNavigate({kind:"library",projectId:props.route.projectId,filter:cat.key})).then(ok=>{if(ok!==false)setEntityKind(null);});}}><LibraryNavIcon name={cat.key}/>{cat.label}</button>)}

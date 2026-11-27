@@ -160,7 +160,11 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       if (!mounted.current || scope !== scopeEpoch.current) return;
       closeEditor();
       await reload();
-      if (mounted.current && scope === scopeEpoch.current) setNotice(`${editing ? "已更新" : "已创建"}${label}「${payload.name}」。${editing&&editing.name!==payload.name?"镜头正式提示词中的精确 @引用已同步；历史批次与结果保持不变。":""}`);
+      if (mounted.current && scope === scopeEpoch.current) {
+        const msg = `${editing ? "已更新" : "已创建"}${label}「${payload.name}」。${editing&&editing.name!==payload.name?"镜头正式提示词中的精确 @引用已同步；历史批次与结果保持不变。":""}`;
+        setNotice(msg);
+        window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: `${editing ? "已更新" : "已创建"}${label}「${payload.name}」`, tone: "success" } }));
+      }
     } catch (cause) {
       if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
     } finally {
@@ -233,6 +237,14 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       const details = failures.slice(0, 4).join("；");
       const remaining = failures.length > 4 ? `；另有 ${failures.length - 4} 项失败` : "";
       setNotice(`批量导入完成：成功创建 ${created} 个${label}。${failures.length ? `失败 ${failures.length} 项：${details}${remaining}。已导入的图片仍保留在媒体库。` : ""}`);
+      if (created > 0 || failures.length > 0) {
+        window.dispatchEvent(new CustomEvent("ai-studio:toast", {
+          detail: {
+            message: failures.length ? `批量导入完成：成功 ${created} 个，失败 ${failures.length} 项` : `批量导入完成：已创建 ${created} 个${label}`,
+            tone: failures.length ? "warning" : "success",
+          },
+        }));
+      }
     } catch (cause) {
       if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
     } finally {
@@ -252,7 +264,10 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
       window.dispatchEvent(new CustomEvent(STORY_ENTITIES_CHANGED, { detail: { projectId } }));
       if (!mounted.current || scope !== scopeEpoch.current) return;
       await reload();
-      if (mounted.current && scope === scopeEpoch.current) setNotice(`已删除${label}「${entity.name}」。`);
+      if (mounted.current && scope === scopeEpoch.current) {
+        setNotice(`已删除${label}「${entity.name}」。`);
+        window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: `已删除${label}「${entity.name}」`, tone: "info" } }));
+      }
     } catch (cause) {
       if (mounted.current && scope === scopeEpoch.current) setError(entityError(cause));
     } finally {
@@ -289,12 +304,15 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
     <header className="story-entities-header">
       <div>
         <h2>{label}</h2>
-        <p className="story-entity-import-hint">可批量选择多张图片；可每张图片新建一项，也可将本次所选图片归为同一{label}，确认后保存。不按文件名猜测合并。</p>
+        <details className="story-entity-quiet-help">
+          <summary>ⓘ 批量导入说明</summary>
+          <p className="story-entity-import-hint">可批量选择多张图片；可每张图片新建一项，也可将本次所选图片归为同一{label}，确认后保存。不按文件名猜测合并。</p>
+        </details>
       </div>
       <div className="story-entity-header-actions">
         <label>导入方式<select aria-label="实体图片导入方式" value={importMode} disabled={busy} onChange={e => setImportMode(e.target.value as "separate" | "group")}><option value="separate">每张图新建一项</option><option value="group">所选图片归为同一项（确认后保存）</option></select></label>
         <button type="button" onClick={() => void importImages()} disabled={busy || loading}>{busy ? "正在处理…" : `批量导入${label}图片`}</button>
-        <button type="button" onClick={() => openCreate()} disabled={busy || loading}>新建{label}</button>
+        <button type="button" className="primary" onClick={() => openCreate()} disabled={busy || loading}>新建{label}</button>
         <button type="button" onClick={() => void reload()} disabled={busy || loading}>刷新</button>
       </div>
     </header>
@@ -315,14 +333,17 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
         </div>
         <div className="story-entity-actions">
           <button type="button" onClick={() => openEdit(entity)} disabled={busy}>编辑</button>
-          <button type="button" onClick={() => void remove(entity)} disabled={busy}>删除</button>
+          <button type="button" className="story-entity-danger" onClick={() => void remove(entity)} disabled={busy}>删除</button>
         </div>
       </li>)}
     </ul>
     {formOpen && <>
       <div className="story-entity-backdrop" role="presentation" onClick={() => { if (!busy && allowReplace()) closeEditor(); }} />
       <div className="story-entity-editor" role="dialog" aria-label={editing ? `编辑${label}` : `新建${label}`}>
-        <h3>{editing ? `编辑「${editing.name}」` : `新建${label}`}</h3>
+        <header className="story-entity-editor-head">
+          <h3>{editing ? `编辑「${editing.name}」` : `新建${label}`}</h3>
+          <button type="button" className="story-entity-editor-close" aria-label="关闭编辑" disabled={busy} onClick={() => { if (allowReplace()) closeEditor(); }}>×</button>
+        </header>
         {error && <p role="alert">{error}</p>}
         {notice && <p role="status">{notice}</p>}
         <label>名称<input aria-label={`${label}名称`} disabled={saving} value={draftName} onChange={event => setDraftName(event.target.value)} /></label>
@@ -336,8 +357,8 @@ export function StoryEntityCategorySection({ projectId, kind, onDirtyChange }: {
         </div>
         <div className="story-entity-images-row">
           <span>关联图片（{draftImages.length}）</span>
-          <div className="story-entity-image-chips">{draftImages.map(id => <span key={id} className="story-entity-image-chip">
-            <EntityThumb projectId={projectId} assetId={id} name={id} />
+          <div className="story-entity-image-chips">{draftImages.map((id, index) => <span key={id} className="story-entity-image-chip">
+            <EntityThumb projectId={projectId} assetId={id} name={`关联图片 ${index + 1}`} />
             {draftCover === id ? <small className="story-entity-cover-tag">封面</small> : <button type="button" className="story-entity-set-cover" aria-label={`将图片 ${id} 设为封面`} disabled={saving} onClick={() => { coverRevisionRef.current += 1; setDraftCover(id); }}>设封面</button>}
             <button type="button" className="story-entity-remove-img" aria-label={`移除图片 ${id}`} disabled={saving} onClick={() => { setDraftImages(ids => ids.filter(value => value !== id)); if (draftCover === id) { coverRevisionRef.current += 1; setDraftCover(null); } }}>×</button>
           </span>)}</div>

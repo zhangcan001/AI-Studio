@@ -19,7 +19,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use std::path::Path;
-use tauri::{ipc::Response, AppHandle, State};
+use tauri::{ipc::Response, AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
 #[tauri::command(rename_all = "camelCase")]
@@ -506,10 +506,18 @@ pub async fn asset_pick_and_import_source_assets(
         };
         paths.push(path);
     }
+    let existing_hashes = state
+        .assets
+        .query
+        .existing_source_hashes(&project_id)
+        .await
+        .unwrap_or_default();
+    let (unique_paths, dup_skips) = filter_duplicate_source_paths(paths, existing_hashes);
+    failed.extend(dup_skips);
     let result = state
         .assets
         .source_import
-        .import_files(&project_id, &paths)
+        .import_files(&project_id, &unique_paths)
         .await;
     imported.extend(result.imported.into_iter().map(AssetView::from));
     failed.extend(
@@ -615,7 +623,14 @@ pub async fn asset_pick_and_import_source_folder(
 ) -> Result<AssetSourceImportBatchView, AppError> {
     super::validate_project_id(&project_id)?;
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app_handle.dialog().file().pick_folder(move |folder| {
+    let mut dialog = app_handle
+        .dialog()
+        .file()
+        .set_title("选择要导入的素材文件夹");
+    if let Some(window) = app_handle.webview_windows().into_values().next() {
+        dialog = dialog.set_parent(&window);
+    }
+    dialog.pick_folder(move |folder| {
         let _ = tx.send(folder);
     });
     let Some(folder) = rx
@@ -631,23 +646,210 @@ pub async fn asset_pick_and_import_source_folder(
     let path = folder
         .into_path()
         .map_err(|_| AppError::invalid_input("目录不可访问"))?;
+    let (scanned_paths, mut failed) = scan_source_media_folder(&path);
+    let existing_hashes = state
+        .assets
+        .query
+        .existing_source_hashes(&project_id)
+        .await
+        .unwrap_or_default();
+    let (unique_paths, dup_skips) = filter_duplicate_source_paths(scanned_paths, existing_hashes);
+    failed.extend(dup_skips);
     let result = state
         .assets
         .source_import
-        .import_directory(&project_id, &path)
+        .import_files(&project_id, &unique_paths)
         .await;
+    failed.extend(result.failed.into_iter().map(|f| AssetImportFailureView {
+        display_name: f.display_name,
+        error: f.error,
+    }));
     Ok(AssetSourceImportBatchView {
         imported: result.imported.into_iter().map(AssetView::from).collect(),
-        failed: result
-            .failed
-            .into_iter()
-            .map(|f| AssetImportFailureView {
-                display_name: f.display_name,
-                error: f.error,
-            })
-            .collect(),
+        failed,
         cancelled: false,
     })
+}
+
+fn is_reparse_or_link(metadata: &std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+fn safe_folder_path(root: &Path, path: &Path) -> bool {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    for ancestor in path.ancestors() {
+        let Ok(meta) = std::fs::symlink_metadata(ancestor) else {
+            return false;
+        };
+        if is_reparse_or_link(&meta) {
+            return false;
+        }
+    }
+    match (std::fs::canonicalize(root), std::fs::canonicalize(path)) {
+        (Ok(r), Ok(p)) => p.starts_with(r),
+        _ => false,
+    }
+}
+
+fn is_supported_source_media(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|ext| {
+            matches!(
+                ext.as_str(),
+                "png"
+                    | "jpg"
+                    | "jpeg"
+                    | "webp"
+                    | "mp4"
+                    | "webm"
+                    | "mov"
+                    | "mkv"
+                    | "wav"
+                    | "flac"
+                    | "mp3"
+                    | "ogg"
+                    | "opus"
+                    | "m4a"
+            )
+        })
+}
+
+fn scan_source_media_folder(root: &Path) -> (Vec<std::path::PathBuf>, Vec<AssetImportFailureView>) {
+    const MAX_FILES: usize = 500;
+    const MAX_ENTRIES: usize = 10_000;
+    const MAX_DEPTH: usize = 32;
+    let mut files = Vec::new();
+    let mut failed = Vec::new();
+    let root_name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("所选目录")
+        .to_owned();
+    if !safe_folder_path(root, root) || !root.is_dir() {
+        failed.push(AssetImportFailureView {
+            display_name: root_name,
+            error: "目录不可访问或包含不安全路径/符号链接。".to_owned(),
+        });
+        return (files, failed);
+    }
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    let mut entries_seen = 0usize;
+    while let Some((dir, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            files.clear();
+            failed.push(AssetImportFailureView {
+                display_name: root_name,
+                error: "目录层数超过安全限制。".to_owned(),
+            });
+            return (files, failed);
+        }
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut children = Vec::new();
+        for entry in read_dir {
+            entries_seen += 1;
+            if entries_seen > MAX_ENTRIES {
+                files.clear();
+                failed.push(AssetImportFailureView {
+                    display_name: root_name,
+                    error: "目录条目超过安全扫描限制。".to_owned(),
+                });
+                return (files, failed);
+            }
+            if let Ok(entry) = entry {
+                children.push(entry.path());
+            }
+        }
+        children.sort();
+        for child in children {
+            if !safe_folder_path(root, &child) {
+                continue;
+            }
+            let Ok(meta) = std::fs::symlink_metadata(&child) else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push((child, depth + 1));
+            } else if meta.is_file() && is_supported_source_media(&child) {
+                files.push(child);
+                if files.len() > MAX_FILES {
+                    files.clear();
+                    failed.push(AssetImportFailureView {
+                        display_name: root_name,
+                        error: "媒体文件数量超过单次 500 项导入限制。".to_owned(),
+                    });
+                    return (files, failed);
+                }
+            }
+        }
+    }
+    files.sort();
+    (files, failed)
+}
+
+fn sha256_source_file(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn filter_duplicate_source_paths(
+    paths: Vec<std::path::PathBuf>,
+    mut existing_hashes: std::collections::HashMap<String, String>,
+) -> (Vec<std::path::PathBuf>, Vec<AssetImportFailureView>) {
+    let mut unique = Vec::with_capacity(paths.len());
+    let mut skipped = Vec::new();
+    for path in paths {
+        let display_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("所选文件")
+            .to_owned();
+        match sha256_source_file(&path) {
+            Ok(hash) => {
+                if let Some(existing_name) = existing_hashes.get(&hash) {
+                    skipped.push(AssetImportFailureView {
+                        display_name,
+                        error: format!("已跳过重复素材（与已有「{existing_name}」内容一致）"),
+                    });
+                } else {
+                    existing_hashes.insert(hash, display_name);
+                    unique.push(path);
+                }
+            }
+            Err(_) => unique.push(path),
+        }
+    }
+    (unique, skipped)
 }
 
 fn selected_file_display_name(file: &FilePath) -> String {

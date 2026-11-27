@@ -109,6 +109,7 @@ export function ImageAssetPicker({
 }) {
   const [tab, setTab] = useState<ImagePickTab>("all");
   const [keyword, setKeyword] = useState("");
+  const [searchNow, setSearchNow] = useState(0);
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [tags, setTags] = useState<LibraryTag[]>([]);
   const [busy, setBusy] = useState(false);
@@ -121,10 +122,12 @@ export function ImageAssetPicker({
   const epoch = useRef(0);
   const pageLock = useRef<object | null>(null);
   const currentQuery = useRef<LibraryQuery | undefined>(undefined);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setTab("all"); setKeyword(""); setError(undefined);
+    setTimeout(() => searchInputRef.current?.focus(), 0);
   }, [open, projectId]);
 
   useEffect(() => {
@@ -135,42 +138,48 @@ export function ImageAssetPicker({
     if (!open) return;
     let alive = true;
     setBusy(true); setError(undefined);
-    const hints = TABS.find(t => t.id === tab)?.tagHints ?? [];
-    const tagsFn = productClient.library.tagsList;
-    const listFn = productClient.library.list;
-    void (typeof tagsFn === "function" ? tagsFn(projectId) : Promise.resolve([] as LibraryTag[]))
-      .catch(() => [] as LibraryTag[])
-      .then(async tagList => {
+    const runFetch = () => {
       if (!alive || !current()) return;
-      setTags(tagList);
-      const tagId = (tab === "character" || tab === "scene" || tab === "prop" || tab === "composition")
-        ? (tagList.find(tag => matchesHints(tag.name, hints))?.id ?? null)
-        : null;
-      try {
-        if (typeof listFn !== "function") {
-          if (alive && current()) { setItems([]); setLoadedScope(scope); setBusy(false); }
-          return;
-        }
-        const query: LibraryQuery = {
-          category: "images", keyword: keyword.trim() || null, favoriteOnly: null,
-          tagId, sourceKind: "source", cursor: null, limit: 100,
-        };
-        currentQuery.current = query;
-        const page = await listFn(projectId, query);
+      const hints = TABS.find(t => t.id === tab)?.tagHints ?? [];
+      const tagsFn = productClient.library.tagsList;
+      const listFn = productClient.library.list;
+      void (typeof tagsFn === "function" ? tagsFn(projectId) : Promise.resolve([] as LibraryTag[]))
+        .catch(() => [] as LibraryTag[])
+        .then(async tagList => {
         if (!alive || !current()) return;
-        setItems(page.items.filter(i => i.resourceRef.kind === "asset" && i.sourceOrigin !== "generated"));
-        setNextCursor(page.nextCursor ?? null); setLoadedScope(scope);
-      } catch (cause) {
-        if (alive && current()) {
-          setItems([]); setLoadedScope(scope);
-          setError(cause instanceof Error ? cause.message : "无法读取图片素材");
+        setTags(tagList);
+        const tagId = (tab === "character" || tab === "scene" || tab === "prop" || tab === "composition")
+          ? (tagList.find(tag => matchesHints(tag.name, hints))?.id ?? null)
+          : null;
+        try {
+          if (typeof listFn !== "function") {
+            if (alive && current()) { setItems([]); setLoadedScope(scope); setBusy(false); }
+            return;
+          }
+          const query: LibraryQuery = {
+            category: "images", keyword: keyword.trim() || null, favoriteOnly: null,
+            tagId, sourceKind: "source", cursor: null, limit: 100,
+          };
+          currentQuery.current = query;
+          const page = await listFn(projectId, query);
+          if (!alive || !current()) return;
+          setItems(page.items.filter(i => i.resourceRef.kind === "asset" && i.sourceOrigin !== "generated"));
+          setNextCursor(page.nextCursor ?? null); setLoadedScope(scope);
+        } catch (cause) {
+          if (alive && current()) {
+            setItems([]); setLoadedScope(scope);
+            setError(cause instanceof Error ? cause.message : "无法读取图片素材");
+          }
+        } finally {
+          if (alive && current()) setBusy(false);
         }
-      } finally {
-        if (alive && current()) setBusy(false);
-      }
-    });
-    return () => { alive = false; ++epoch.current; };
-  }, [open, projectId, tab, keyword, scope]);
+      });
+    };
+    const delay = keyword.trim() && searchNow === 0 ? 140 : 0;
+    const timer = delay ? setTimeout(runFetch, delay) : undefined;
+    if (!delay) runFetch();
+    return () => { alive = false; ++epoch.current; if (timer) clearTimeout(timer); };
+  }, [open, projectId, tab, keyword, scope, searchNow]);
 
   async function loadMore() {
     if (loadedScope !== scope || !nextCursor || !currentQuery.current || pageLock.current) return;
@@ -245,7 +254,7 @@ export function ImageAssetPicker({
     <dialog ref={dialog} open={typeof HTMLDialogElement.prototype.showModal !== "function" ? true : undefined} onCancel={e => { e.preventDefault(); onClose(); }} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }} aria-modal="true" aria-label={title} className="image-asset-picker" onClick={e => e.stopPropagation()}>
       <header><strong>{title}</strong><button type="button" onClick={onClose}>关闭</button></header>
       <div className="image-asset-picker-toolbar">
-        <input aria-label="搜索图片" placeholder="搜索名称…" value={keyword} onChange={e => setKeyword(e.target.value)} />
+        <input ref={searchInputRef} type="search" aria-label="搜索图片" placeholder="搜索图片名称（回车立即查找）…" value={keyword} onChange={e => { setSearchNow(0); setKeyword(e.target.value); }} onKeyDown={e => { if (e.key === "Enter") setSearchNow(n => n + 1); }} />
         <div className="image-asset-picker-tabs" role="tablist" aria-label="素材分类">
           {TABS.map(t => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</button>)}
         </div>
@@ -256,13 +265,13 @@ export function ImageAssetPicker({
       <div className="image-asset-picker-grid" role="listbox" aria-label="图片网格">
         {localRows.map(a => <button key={`local-${a.id}`} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: a.id, mediaKind: "image", sourceOrigin: "source" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(a.id); onClose(); }}>
           <PickerTileThumb projectId={projectId} assetId={a.id} name={a.name} enqueue={thumbQueue.current!} />
-          <span className="image-asset-tile-name">{a.name}</span>
+          <span className="image-asset-tile-name" title={a.name}>{a.name}</span>
         </button>)}
         {libraryRows.map(item => {
           const id = item.resourceRef.kind === "asset" ? item.resourceRef.id : "";
           return <button key={id} type="button" role="option" aria-selected="false" className="image-asset-tile" draggable onDragStart={e => { e.dataTransfer.setData("application/x-aistudio-asset", JSON.stringify({ projectId, assetId: id, mediaKind: "image", sourceOrigin: item.sourceOrigin ?? "source" })); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => { onSelect(id); onClose(); }}>
             <PickerTileThumb projectId={projectId} assetId={id} name={item.title} thumbnailAvailable={item.thumbnailAvailable} enqueue={thumbQueue.current!} />
-            <span className="image-asset-tile-name">{item.title}</span>
+            <span className="image-asset-tile-name" title={item.title}>{item.title}</span>
           </button>;
         })}
       </div>

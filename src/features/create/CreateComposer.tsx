@@ -109,6 +109,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
   const [entityFilter, setEntityFilter] = useState("");
   const [entityActiveIdx, setEntityActiveIdx] = useState(0);
   const entityFilterRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLElement>(null);
   const [dropSlot, setDropSlot] = useState<string | null>(null);
   const [entityUrls, setEntityUrls] = useState<Record<string, string>>({});
   const [promptPicker, setPromptPicker] = useState(false);
@@ -389,15 +390,29 @@ export function CreateComposer({ controller: c }: { controller: CreateController
     setEntityPicker(false); setEntityFilter(""); emit(); if (shotId && !isBound(entity.id)) toggleBound(entity.id);
   };
   useEffect(() => { if (entityPicker) { setEntityFilter(""); setEntityActiveIdx(0); setTimeout(() => entityFilterRef.current?.focus(), 0); } }, [entityPicker]);
+  useEffect(() => {
+    if (!picker && !entityPicker) return;
+    const onOutside = (e: MouseEvent) => {
+      if (composerRef.current && e.target instanceof Node && !composerRef.current.contains(e.target)) {
+        setPicker(null);
+        setEntityPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, [picker, entityPicker]);
 
   if (!c.generator) return null;
   return <div className="create-composer-wrap">
     <ReadinessStatus controller={c} />
     {prompt.includes("@") && <section aria-label="角色与场景生成引用" className="composer-entity-references">
-      <p>{entityIssue ?? "角色与场景已进入正式参考输入；后端将按实际顺序编译 H3 引用标签。"}</p>
-      {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id}>@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "等待自动应用"}</small>; })}
-      <button type="button" disabled={locked || !canApplyEntities || !entityIssue} onClick={() => { if (entityField && canApplyEntities) setField(entityField, combinedIds); }}>应用角色与场景参考图</button>
-      <small>使用封面图（无封面时使用第一张关联图）；保留已有参考顺序，不修改首尾帧。仅绑定镜头不等于用于生成。</small>
+      <span className="composer-entity-ref-status">{entityIssue ?? "角色与场景已进入正式参考输入"}</span>
+      {mentions.entities.map(entity => { const id = entityAvatarAssetId(entity); const index = id ? referenceIds.indexOf(id) : -1; return <small key={entity.id} className="composer-entity-ref-tag">@{entity.name} → {index >= 0 ? `<Picture ${index + 1}>` : "等待自动应用"}</small>; })}
+      <button type="button" className="composer-entity-apply-btn" disabled={locked || !canApplyEntities || !entityIssue} onClick={() => { if (entityField && canApplyEntities) setField(entityField, combinedIds); }}>应用角色与场景参考图</button>
+      <details className="composer-quiet-help">
+        <summary aria-label="引用规则说明">ⓘ</summary>
+        <small>使用封面图（无封面时使用第一张关联图）；保留已有参考顺序，不修改首尾帧。仅绑定镜头不等于用于生成；后端将按实际顺序编译引用标签。</small>
+      </details>
     </section>}
     {projectId && shotId && allEntities.length > 0 && <div className="composer-entity-strip" role="group" aria-label="镜头角色与场景">
       {allEntities.map(entity => { const aid = entityAvatarAssetId(entity); const cover = aid ? entityUrls[aid] : undefined; const bound = isBound(entity.id);
@@ -406,7 +421,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
           {cover ? <img src={cover} alt="" /> : <span className="composer-entity-glyph">{entity.name.slice(0, 1)}</span>}<small>{entity.name}</small></button>; })}
     </div>}
     {binding.error && allEntities.length > 0 && <p role="alert">{binding.error}<button type="button" disabled={bindBusy} onClick={binding.reload}>重试读取绑定</button></p>}
-    <section className="create-composer" aria-label="创作输入框" data-inputs={inputsState}>
+    <section ref={composerRef} className="create-composer" aria-label="创作输入框" data-inputs={inputsState}>
     {vi.enabled && !mediaFields.length && <small className="composer-hint">T2V 无需图片输入。</small>}
     {vi.enabled && vi.dirty && !vi.busy && !pendingSave.current && <p role="status" className="composer-unsaved">输入尚未保存。<button type="button" onClick={() => void vi.save()}>保存输入</button></p>}
     {mediaFields.length > 0 && <div className="composer-refs" aria-label="参考素材">
@@ -473,7 +488,7 @@ export function CreateComposer({ controller: c }: { controller: CreateController
           else if (e.key === "Escape") { setPicker(null); setEntityPicker(false); }
         }}
         onPaste={e => { e.preventDefault(); const text = e.clipboardData.getData("text/plain"); const sel = window.getSelection(); if (sel?.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); const node = document.createTextNode(text); r.insertNode(node); r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); } emit(); }} />
-      <span className="composer-count">{prompt.length} 字{prompt.trim().length > 0 && <button type="button" className="composer-copy-btn" onClick={() => { void Promise.resolve().then(() => navigator.clipboard.writeText(prompt)).then(() => setRecognitionNote("提示词已复制")); }}>复制提示词</button>}</span>
+      <span className="composer-count">{prompt.length} 字{prompt.trim().length > 0 && <button type="button" className="composer-copy-btn" onClick={() => { void Promise.resolve().then(() => navigator.clipboard.writeText(prompt)).then(() => { setRecognitionNote("提示词已复制"); window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: "提示词已复制", tone: "success" } })); }); }}>复制提示词</button>}</span>
     </div>}
     {promptWarnings.length > 0 && <p role="status" aria-label="提示词识别提示">{promptWarnings.join(" ")}</p>}
     {recognitionNote && <p role="status">{recognitionNote}</p>}
@@ -516,7 +531,6 @@ export function CreateComposer({ controller: c }: { controller: CreateController
         else setPicker(picker === "add" ? null : "add");
       }}>+</button>
       <div className="composer-segment" role="group" aria-label="生成类型">
-        <button type="button" aria-pressed="true">视频</button>
         <select aria-label="视频模式" value={currentMode ?? ""} disabled={c.busy || vi.busy} onChange={e => pickMode(e.target.value)}>
           {!modes.includes(currentMode ?? "") && <option value={currentMode ?? ""}>{currentMode ?? "选择模式"}</option>}
           {modes.map(m => <option key={m} value={m} disabled={!c.generators.some(g => g.mediaKind === "video" && g.availability && modeLabel(g) === m)}>{m}</option>)}

@@ -4,8 +4,48 @@ import type { ComfyStatus } from "../../types/comfy";
 import { productClient } from "../../product/client";
 import { subscribeRunInvalidation } from "../../product/runInvalidation";
 import type { CreationShotSummary, ProductRun } from "../../product/types";
+import { useTaskStore } from "../../stores/taskStore";
 import { ShellIcon, ShellNavigation, ShellTopbar, type TopbarQueueSummary } from "./ShellChrome";
 import "./AppShellV3.css";
+
+function formatElapsedMmSs(startedAt?: string, nowMs = Date.now()): string | undefined {
+  if (!startedAt) return undefined;
+  const start = Date.parse(startedAt);
+  if (!Number.isFinite(start)) return undefined;
+  const sec = Math.max(0, Math.floor((nowMs - start) / 1000));
+  return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+}
+
+const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
+  {
+    title: "全局导航",
+    items: [
+      ["Alt + K", "快速跳转页面与镜头"],
+      ["Ctrl + Shift + K", "快速跳转面板（备选）"],
+      ["Ctrl + K", "直达创作台 / 镜头内打开跳转"],
+      ["?", "打开 / 关闭快捷键速查"],
+      ["Esc", "关闭当前弹窗或浮层"],
+    ],
+  },
+  {
+    title: "创作与预览",
+    items: [
+      ["Ctrl + Enter", "提交当前镜头生成"],
+      ["Space", "播放 / 暂停预览视频、灯箱与顺片"],
+      ["[ / ]", "单镜编辑时切换上一镜 / 下一镜"],
+      ["@", "在提示词中插入角色或场景参考"],
+      ["Alt + 点击参考图", "灯箱放大查看高清参考图"],
+    ],
+  },
+  {
+    title: "运行与审片",
+    items: [
+      ["↑ / ↓", "运行页列表快速切换运行记录"],
+      ["← / →", "审片弹窗切换上一个 / 下一个候选"],
+      ["A / X / S", "审片弹窗快速通过 / 退回 / 选用"],
+    ],
+  },
+];
 
 export interface AppShellV3Props {
   route: AppRoute;
@@ -24,8 +64,67 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
   const [paletteQuery, setPaletteQuery] = useState("");
   const [paletteIndex, setPaletteIndex] = useState(0);
   const [paletteShots, setPaletteShots] = useState<{ projectId: string; items: CreationShotSummary[] }>();
+  const [toasts, setToasts] = useState<{ id: number; message: string; tone: "info" | "success" | "warning" | "error" }[]>([]);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const toastSeq = useRef(0);
   const paletteDialog = useRef<HTMLDialogElement>(null);
   const paletteInput = useRef<HTMLInputElement>(null);
+  const shortcutsDialog = useRef<HTMLDialogElement>(null);
+  const settingsMoreRef = useRef<HTMLDetailsElement>(null);
+  const recentTasks = useTaskStore(state => state.recentTasks);
+  const liveTask = useMemo(
+    () => (projectId ? recentTasks.find(t => t.projectId === projectId && ["RUNNING", "COLLECTING", "PREPARING"].includes(t.status)) : undefined),
+    [projectId, recentTasks],
+  );
+  useEffect(() => {
+    if (!liveTask) return;
+    setNowTick(Date.now());
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [liveTask?.id, liveTask?.status]);
+  useEffect(() => {
+    if (shortcutsOpen) shortcutsDialog.current?.showModal?.();
+  }, [shortcutsOpen]);
+
+  useEffect(() => {
+    const closeOutside = (e: MouseEvent) => {
+      if (settingsMoreRef.current?.open && e.target instanceof Node && !settingsMoreRef.current.contains(e.target)) {
+        settingsMoreRef.current.open = false;
+      }
+    };
+    const closeEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && settingsMoreRef.current?.open) settingsMoreRef.current.open = false;
+    };
+    document.addEventListener("mousedown", closeOutside);
+    window.addEventListener("keydown", closeEsc);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      window.removeEventListener("keydown", closeEsc);
+    };
+  }, []);
+
+  useEffect(() => {
+    const timers = new Map<number, ReturnType<typeof setTimeout>>();
+    const onToast = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string; tone?: "info" | "success" | "warning" | "error" }>).detail;
+      const message = detail?.message?.trim();
+      if (!message) return;
+      const id = ++toastSeq.current;
+      const tone = detail?.tone ?? "info";
+      setToasts(prev => [...prev.slice(-2), { id, message, tone }]);
+      const timer = setTimeout(() => {
+        timers.delete(id);
+        setToasts(prev => prev.filter(t => t.id !== id));
+      }, 3200);
+      timers.set(id, timer);
+    };
+    window.addEventListener("ai-studio:toast", onToast);
+    return () => {
+      window.removeEventListener("ai-studio:toast", onToast);
+      timers.forEach(clearTimeout);
+    };
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia?.("(max-width: 960px)");
@@ -97,6 +196,15 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (event.repeat) return;
+      if (event.key === "?" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const target = event.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+        const openDialog = document.querySelector("dialog[open]");
+        if (openDialog && openDialog !== shortcutsDialog.current) return;
+        event.preventDefault();
+        setShortcutsOpen(open => !open);
+        return;
+      }
       const key = event.key.toLowerCase();
       const isPaletteShortcut = (event.altKey && key === "k") || ((event.ctrlKey || event.metaKey) && event.shiftKey && key === "k");
       const isQuickCreateShortcut = (event.ctrlKey || event.metaKey) && !event.shiftKey && key === "k" && Boolean(projectId);
@@ -123,19 +231,25 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
 
   const ownedRuns = projectId && activeRuns?.projectId === projectId ? activeRuns.items : [];
   const queueSummary: TopbarQueueSummary | undefined = useMemo(() => {
-    if (!projectId || !ownedRuns.length) return undefined;
+    if (!projectId || (!ownedRuns.length && !liveTask)) return undefined;
     const running = ownedRuns.filter(r => r.status === "RUNNING");
     const paused = ownedRuns.filter(r => r.status === "PAUSED");
     const primary = running[0] ?? paused[0] ?? ownedRuns[0];
-    const done = primary.progress.succeeded + primary.progress.failed + primary.progress.cancelled;
-    const progressPart = primary.progress.total > 0 ? ` ${done}/${primary.progress.total}` : "";
-    const statusWord = running.length ? "队列生成中" : paused.length ? "队列已暂停" : "队列排队中";
+    const done = primary ? primary.progress.succeeded + primary.progress.failed + primary.progress.cancelled : 0;
+    const progressPart = primary && primary.progress.total > 1 ? ` ${done}/${primary.progress.total}` : "";
+    const stepPart = liveTask?.progress.mode === "step" && liveTask.progress.total && liveTask.progress.total > 0
+      ? ` · ${liveTask.progress.current ?? 0}/${liveTask.progress.total}步 (${Math.min(100, Math.round(((liveTask.progress.current ?? 0) / liveTask.progress.total) * 100))}%)`
+      : "";
+    const elapsed = liveTask ? formatElapsedMmSs(liveTask.startedAt ?? liveTask.createdAt, nowTick) : undefined;
+    const elapsedPart = elapsed ? ` · ${elapsed}` : "";
+    const statusWord = (running.length || liveTask) ? "生成中" : paused.length ? "队列已暂停" : "队列排队中";
+    const targetRef = primary?.ref ?? (liveTask ? { source: "task" as const, id: liveTask.id } : undefined);
     return {
-      label: `${statusWord}${progressPart}${ownedRuns.length > 1 ? ` · ${ownedRuns.length} 批` : ""}`,
-      detail: `${primary.title} · 点击查看运行进度`,
-      onOpen: () => navigate({ kind: "runs", projectId, filter: "active", run: primary.ref }),
+      label: `${statusWord}${progressPart}${stepPart}${elapsedPart}${ownedRuns.length > 1 ? ` · ${ownedRuns.length}批` : ""}`,
+      detail: `${primary?.title ?? "当前视频任务"} · 点击查看实时运行进度`,
+      onOpen: () => navigate({ kind: "runs", projectId, filter: "active", run: targetRef }),
     };
-  }, [projectId, ownedRuns, navigate]);
+  }, [projectId, ownedRuns, liveTask, nowTick, navigate]);
 
   const paletteItems = useMemo(() => {
     const items: { id: string; label: string; group: string; target: AppRoute }[] = [];
@@ -181,27 +295,39 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
       <div className="v3-secondary">
         {(route.kind === "system-settings" || route.kind === "project-settings") && <nav aria-label="设置上下文">
           {projectId && <button type="button" title="项目设置" onClick={() => navigate({ kind: "project-settings", projectId, section: "general" })}>项目设置</button>}
-          {route.kind === "project-settings" && projectId && <>
-            <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>生成器</button>
-            <details><summary>高级项目操作</summary>
-              {[
-                ["advanced-project", "生产分析与 Handoff 导入"], ["advanced-shots", "镜头结构与一致性编辑"],
-                ["advanced-production", "高级生产编辑"], ["advanced-review", "产物审核工作区"], ["advanced-tasks", "任务审计与诊断"],
-              ].map(([section, label]) => <button type="button" key={section} onClick={() => navigate({ kind: "project-settings", projectId, section })}>{label}</button>)}
-            </details>
-          </>}
           <button type="button" title="高级工具" onClick={() => navigate({ kind: "system-settings", section: "advanced-tools", returnTo: settingsReturn })}>高级工具</button>
         </nav>}
       </div>
       <button type="button" className="v3-collapse" aria-label={collapsed ? "展开导航" : "折叠导航"} title={collapsed ? "展开导航" : "折叠导航"} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}><ShellIcon name="collapse" /><span className="v3-nav-label">折叠导航</span></button>
     </aside>
     <div className="v3-layout">
-      <ShellTopbar route={route} projectName={projectName} projectSelector={projectSelector} runtime={runtime} back={back} queueSummary={queueSummary} onOpenPalette={projectId ? () => setPaletteOpen(true) : undefined} onOpenProjects={route.kind !== "project-list" ? () => navigate({ kind: "project-list" }) : undefined} />
+      <ShellTopbar route={route} projectName={projectName} projectSelector={projectSelector} runtime={runtime} back={back} queueSummary={queueSummary} onOpenPalette={projectId ? () => setPaletteOpen(true) : undefined} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenProjects={route.kind !== "project-list" ? () => navigate({ kind: "project-list" }) : undefined} />
       {(route.kind === "system-settings" || route.kind === "project-settings") && <nav className="v3-settings-bar" aria-label="设置分区切换">
         <button type="button" aria-current={route.kind === "system-settings" && route.section === "general" ? "page" : undefined} onClick={() => navigate({ kind: "system-settings", section: "general", returnTo: settingsReturn })}>运行环境与诊断</button>
         {projectId && <button type="button" aria-current={route.kind === "project-settings" && route.section === "general" ? "page" : undefined} onClick={() => navigate({ kind: "project-settings", projectId, section: "general" })}>当前项目与备份</button>}
         {projectId && <button type="button" aria-current={route.kind === "project-settings" && route.section === "generators" ? "page" : undefined} onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>默认视频生成器</button>}
         <button type="button" aria-current={route.kind === "system-settings" && route.section === "advanced-tools" ? "page" : undefined} onClick={() => navigate({ kind: "system-settings", section: "advanced-tools", returnTo: settingsReturn })}>本地工具中心</button>
+        {projectId && (
+          <details ref={settingsMoreRef} className="v3-settings-more" data-active={route.kind === "project-settings" && (route.section === "advanced-tasks" || route.section === "advanced-project") ? "true" : undefined}>
+            <summary>更多 ▾</summary>
+            <div className="v3-settings-more-menu">
+              <button
+                type="button"
+                aria-current={route.kind === "project-settings" && route.section === "advanced-tasks" ? "page" : undefined}
+                onClick={() => { if (settingsMoreRef.current) settingsMoreRef.current.open = false; navigate({ kind: "project-settings", projectId, section: "advanced-tasks" }); }}
+              >
+                任务审计与诊断
+              </button>
+              <button
+                type="button"
+                aria-current={route.kind === "project-settings" && route.section === "advanced-project" ? "page" : undefined}
+                onClick={() => { if (settingsMoreRef.current) settingsMoreRef.current.open = false; navigate({ kind: "project-settings", projectId, section: "advanced-project" }); }}
+              >
+                外部交接包导入
+              </button>
+            </div>
+          </details>
+        )}
       </nav>}
       <main id="v3-main" className="v3-main" tabIndex={-1}>{children}</main>
     </div>
@@ -222,5 +348,29 @@ export function AppShellV3({ route, projectName, projectSelector, runtime, navig
         </ul>
       </div>
     </dialog>}
+    {shortcutsOpen && <dialog ref={shortcutsDialog} open={typeof HTMLDialogElement.prototype.showModal !== "function" ? true : undefined} className="v3-shortcuts-dialog" aria-label="键盘快捷键速查" onCancel={e => { e.preventDefault(); setShortcutsOpen(false); }} onClick={e => { if (e.target === shortcutsDialog.current) setShortcutsOpen(false); }}>
+      <div className="v3-shortcuts-box">
+        <header className="v3-shortcuts-head">
+          <h2>键盘快捷键速查</h2>
+          <button type="button" onClick={() => setShortcutsOpen(false)}>关闭</button>
+        </header>
+        <div className="v3-shortcuts-grid">
+          {SHORTCUT_GROUPS.map(group => (
+            <section key={group.title} className="v3-shortcut-group">
+              <h3>{group.title}</h3>
+              {group.items.map(([keys, desc]) => (
+                <div key={keys} className="v3-shortcut-row">
+                  <span>{desc}</span>
+                  <kbd className="v3-kbd">{keys}</kbd>
+                </div>
+              ))}
+            </section>
+          ))}
+        </div>
+      </div>
+    </dialog>}
+    {toasts.length > 0 && <div className="v3-toasts" aria-live="polite" aria-label="系统提示">
+      {toasts.map(toast => <button key={toast.id} type="button" className={`v3-toast v3-toast-${toast.tone}`} onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}>{toast.message}</button>)}
+    </div>}
   </div>;
 }

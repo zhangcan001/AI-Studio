@@ -138,7 +138,9 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
     try {
       const exported = await exportProjectBackup(projectId);
       if (exported) {
-        setBackupNotice(`项目归档已保存：${exported.fileName}（${exported.entries} 个文件）`);
+        const msg = `项目归档已保存：${exported.fileName}（${exported.entries} 个文件）`;
+        setBackupNotice(msg);
+        window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: msg, tone: "success" } }));
       }
     } catch (backupError: unknown) {
       setError(toUserMessage(backupError));
@@ -172,6 +174,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
       setBackupPreview(undefined);
       setRestoreReport(restored);
       setBackupNotice(`项目已恢复：${restored.name}`);
+      window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: `项目已恢复：${restored.name}`, tone: "success" } }));
       onProjectRestored(restored);
     } catch (backupError: unknown) {
       setBackupPreview(undefined);
@@ -192,7 +195,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
         <div className="project-heading-actions">
           <button type="button" onClick={() => activeProjectId && void exportBackup(activeProjectId)} disabled={saving || backupBusy || !activeProjectId}>导出归档</button>
           <button type="button" onClick={() => void inspectBackup()} disabled={saving || backupBusy}>检查归档</button>
-          <button type="button" onClick={beginCreate} disabled={saving || backupBusy}>新建项目</button>
+          <button type="button" className="primary" onClick={beginCreate} disabled={saving || backupBusy}>+ 新建项目</button>
         </div>
       </div>
 
@@ -289,39 +292,6 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
         </form>
       )}
 
-      {activeProjectId && showWorkflowSettings && (
-        <>
-          <ProjectWorkflowSettings
-            projectId={activeProjectId}
-            catalog={catalog}
-            onConfigChanged={setProjectWorkflowConfig}
-          />
-          {projectWorkflowConfig && (
-            <>
-              <ProjectProductionReadiness config={projectWorkflowConfig} catalog={catalog} />
-              <ProjectWorkflowPreflight config={projectWorkflowConfig} catalog={catalog} />
-            </>
-          )}
-        </>
-      )}
-
-      <section className="project-templates" aria-labelledby="project-templates-title">
-        <div className="section-heading"><div><span className="section-label">可复用创作起点</span><h3 id="project-templates-title">项目模板</h3><p className="section-description">从已保存的工作流和无素材参数创建新项目。</p></div></div>
-        <div className="project-template-grid">
-          {templates.map((template) => <article key={template.id} className="project-template-card">
-            <div><strong>{template.name}</strong><p>{template.description || "暂无说明"}</p><small>{template.available ? "工作流可用" : "工作流当前不可用"}</small></div>
-            <div><button type="button" onClick={() => beginTemplateForm("createProject", template)} disabled={templateBusy || !template.available}>从模板新建</button><button type="button" className="quiet-button" onClick={() => beginTemplateForm("edit", template)} disabled={templateBusy}>编辑</button><button type="button" className="quiet-button" onClick={() => void removeTemplate(template)} disabled={templateBusy}>删除</button></div>
-          </article>)}
-          {!templates.length && <p className="empty-state">尚未保存项目模板。请在创作页保存当前草稿。</p>}
-        </div>
-        {templateForm && <form className="project-form project-template-form" onSubmit={(event) => void submitTemplateForm(event)}>
-          <div className="section-heading"><div><span className="section-label">{templateForm.kind === "edit" ? "编辑模板" : "创建新项目"}</span><h3>{templateForm.template.name}</h3></div></div>
-          <label><span>{templateForm.kind === "edit" ? "模板名称" : "项目名称"}</span><input autoFocus required maxLength={80} value={templateName} onChange={(event) => setTemplateName(event.target.value)} /></label>
-          <label><span>{templateForm.kind === "edit" ? "模板说明" : "项目说明"} <small>可选</small></span><textarea rows={3} maxLength={500} value={templateDescription} onChange={(event) => setTemplateDescription(event.target.value)} /></label>
-          <div className="project-form-actions"><button type="submit" disabled={templateBusy || !templateName.trim()}>{templateBusy ? "正在保存..." : templateForm.kind === "edit" ? "保存修改" : "创建并打开"}</button><button type="button" className="quiet-button" onClick={() => setTemplateForm(undefined)} disabled={templateBusy}>取消</button></div>
-        </form>}
-      </section>
-
       {projects.length > 0 && (
         <div className="project-list-toolbar">
           <input
@@ -366,12 +336,12 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
               return (
                 <div className="project-table-row" role="row" key={project.id} onDoubleClick={() => { if (canOpenRow) onOpen(project.id); }}>
                   <strong role="cell">{projectDisplayName(project.id, project.name)}</strong>
-                  <span role="cell" className="project-description-cell">{project.description || "—"}</span>
+                  <span role="cell" className="project-description-cell" title={project.description ?? undefined}>{project.description || "—"}</span>
                   <span role="cell">{formatDateTime(project.createdAt)}</span>
                   <span role="cell">{formatDateTime(project.updatedAt)}</span>
                   <span role="cell">{active ? <span className="active-project-badge">当前项目</span> : ""}</span>
                   <span role="cell" className="project-row-actions">
-                    <button type="button" onClick={() => onOpen(project.id)} disabled={!canOpenRow}>
+                    <button type="button" className={active && !showWorkflowSettings ? "primary" : undefined} onClick={() => onOpen(project.id)} disabled={!canOpenRow}>
                       {active && !showWorkflowSettings ? "进入项目" : "打开"}
                     </button>
                     <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving || backupBusy}>编辑</button>
@@ -380,11 +350,44 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
                 </div>
               );
             })}
-            {!projects.length && <p className="empty-state">暂无项目。创建第一个项目后，可以导入 Production Handoff 或建立镜头。</p>}
+            {!projects.length && <p className="empty-state">暂无项目。创建第一个项目后，可以导入外部交接包或建立镜头。</p>}
             {projects.length > 0 && !filteredProjects.length && <p className="empty-state">没有匹配的项目。</p>}
           </div>
         );
       })()}
+
+      {activeProjectId && showWorkflowSettings && (
+        <>
+          <ProjectWorkflowSettings
+            projectId={activeProjectId}
+            catalog={catalog}
+            onConfigChanged={setProjectWorkflowConfig}
+          />
+          {projectWorkflowConfig && (
+            <>
+              <ProjectProductionReadiness config={projectWorkflowConfig} catalog={catalog} />
+              <ProjectWorkflowPreflight config={projectWorkflowConfig} catalog={catalog} />
+            </>
+          )}
+        </>
+      )}
+
+      <section className="project-templates" aria-labelledby="project-templates-title">
+        <div className="section-heading"><div><span className="section-label">可复用创作起点</span><h3 id="project-templates-title">项目模板</h3><p className="section-description">从已保存的工作流和无素材参数创建新项目。</p></div></div>
+        <div className="project-template-grid">
+          {templates.map((template) => <article key={template.id} className="project-template-card">
+            <div><strong>{template.name}</strong><p>{template.description || "暂无说明"}</p><small>{template.available ? "工作流可用" : "工作流当前不可用"}</small></div>
+            <div><button type="button" onClick={() => beginTemplateForm("createProject", template)} disabled={templateBusy || !template.available}>从模板新建</button><button type="button" className="quiet-button" onClick={() => beginTemplateForm("edit", template)} disabled={templateBusy}>编辑</button><button type="button" className="quiet-button" onClick={() => void removeTemplate(template)} disabled={templateBusy}>删除</button></div>
+          </article>)}
+          {!templates.length && <p className="empty-state">尚未保存项目模板。请在创作页保存当前草稿。</p>}
+        </div>
+        {templateForm && <form className="project-form project-template-form" onSubmit={(event) => void submitTemplateForm(event)}>
+          <div className="section-heading"><div><span className="section-label">{templateForm.kind === "edit" ? "编辑模板" : "创建新项目"}</span><h3>{templateForm.template.name}</h3></div></div>
+          <label><span>{templateForm.kind === "edit" ? "模板名称" : "项目名称"}</span><input autoFocus required maxLength={80} value={templateName} onChange={(event) => setTemplateName(event.target.value)} /></label>
+          <label><span>{templateForm.kind === "edit" ? "模板说明" : "项目说明"} <small>可选</small></span><textarea rows={3} maxLength={500} value={templateDescription} onChange={(event) => setTemplateDescription(event.target.value)} /></label>
+          <div className="project-form-actions"><button type="submit" disabled={templateBusy || !templateName.trim()}>{templateBusy ? "正在保存..." : templateForm.kind === "edit" ? "保存修改" : "创建并打开"}</button><button type="button" className="quiet-button" onClick={() => setTemplateForm(undefined)} disabled={templateBusy}>取消</button></div>
+        </form>}
+      </section>
     </section>
   );
 }
