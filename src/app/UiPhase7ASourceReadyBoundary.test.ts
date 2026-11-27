@@ -50,7 +50,11 @@ it("template/history/runs reuse stay on video create, not studio/image", () => {
 
 it("Create generate and Queue start invalidate Runs without Library thrash", () => {
   const create = readFileSync("src/features/create/CreateController.ts", "utf8");
-  expect(create).toContain('invalidateRuns(route.projectId, { library: false })');
+  // The self-invalidation wrapper preserves the current draft while notifying
+  // other consumers. Check both the dispatcher and its no-Library call site.
+  expect(create).toContain('try { invalidateRuns(route.projectId, options); }');
+  expect(create).toContain('finally { selfInvalidation.current = false; }');
+  expect(create).toContain('notifyRuns({ library: false });');
   const queue = readFileSync("src/features/studio/ProductionQueuePanel.tsx", "utf8");
   expect(queue).toContain("projectGenerationRef");
   expect(queue).toContain('invalidateRuns(projectId, { library: false })');

@@ -378,6 +378,9 @@ it("shows read-only duration/aspect when no generator exists and never sends val
 it("explains an incomplete width-only setting instead of silently ignoring it", async () => {
   render(<StoryboardShotRows {...props()} items={[shot("width-only", 0)]} />);
   const box = await screen.findByLabelText("镜头1 提示词");
+  // Initial entity discovery triggers a second binding read. Wait for the
+  // visible bound entity before editing, rather than a transient enabled input.
+  await waitFor(() => expect(screen.getByTitle("解除绑定 角色 · 阿离").hasAttribute("disabled")).toBe(false));
   await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
   fireEvent.change(box, { target: { value: "画幅1920" } });
   expect(screen.getByRole("status", { name: "提示词识别提示" }).textContent).toContain("画幅/分辨率信息不完整");

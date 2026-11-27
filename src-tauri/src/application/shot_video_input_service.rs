@@ -2494,14 +2494,15 @@ inputs:
     label: Image
     required: true
 bindings:
-  - input: prompt
+  - source: prompt
     target: { node: "1", input: "text" }
-  - input: image
+  - source: image
     target: { node: "2", input: "image" }
 outputs:
   - id: video
     type: video
     node: "3"
+    required: true
 "#,
         )
         .unwrap();

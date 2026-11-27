@@ -48,7 +48,22 @@ it('AUDIT-02 invalidation during input save releases the write lock after comple
 it('AUDIT-03 background input invalidation does not silently discard an unsaved draft', async () => { const h = renderHook(() => usePersistentVideoInputs(route, mediaGenerator, false)); await waitFor(() => expect(h.result.current.ready).toBe(true)); act(() => useStudioStore.getState().setValue('first_frame', { type: 'image_asset', assetId: 'unsaved-first' })); expect(h.result.current.dirty).toBe(true); await act(async () => { invalidateVideoInputs('p'); }); await waitFor(() => expect(api.inputsGet).toHaveBeenCalledTimes(2)); expect(useStudioStore.getState().values.first_frame).toEqual({ type: 'image_asset', assetId: 'unsaved-first' }); });
 it('AUDIT-04 lost generation acknowledgement reuses the original row submission key', async () => { api.generate.mockRejectedValueOnce(new Error('IPC response lost after persistence')); const summary = shots[0]; const item: StoryboardShot = { ...summary, shot: context('shot1').selectedShot, candidates: [], run: null, status: 'TODO' }; render(<StoryboardShotRows projectId='p' items={[item]} busy={false} onOpen={vi.fn()} onCreate={vi.fn()} onChanged={vi.fn()} onQueue={vi.fn()}/>); const button = await screen.findByRole('button', { name: '生成视频' }); await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false)); fireEvent.click(button); await screen.findByRole('alert'); fireEvent.click(button); await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2)); const keys = api.generate.mock.calls.map(c => c[0].submissionIdempotencyKey); expect(keys[1]).toBe(keys[0]); });
 it('AUDIT-05 workbench count includes shots outside the bounded detail window', async () => { shots = Array.from({ length: 65 }, (_, i) => ({ id: `shot${i + 1}`, name: `镜头${i + 1}`, ordinal: i })); render(<StoryboardWorkbench route={{ kind: 'create', projectId: 'p', stage: 'video' }} navigate={vi.fn()}/>); await screen.findByText(/另有 5 个镜头未在此展开/); const stats = screen.getByLabelText('镜头统计'); expect(within(stats).getByText('镜头总数').nextSibling?.textContent).toBe('65'); });
-it('AUDIT-06 a post-create context read failure does not freeze the retained workbench', async () => { api.get.mockImplementation((_p, id) => id === 'shot3' ? Promise.reject({ code: 'INVALID_INPUT', message: '新镜头读取失败' }) : Promise.resolve(context(id))); render(<Host initialShot=''/>); const add = await screen.findByRole('button', { name: '+ 新建镜头' }); await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false)); fireEvent.click(add); await screen.findByRole('alert'); fireEvent.click(screen.getByRole('button', { name: '展开分镜列表' })); const again = await screen.findByRole('button', { name: '+ 新建镜头' }); expect(again.hasAttribute('disabled')).toBe(false); });
+it('AUDIT-06 a post-create context read failure does not freeze the retained workbench', async () => {
+    api.get.mockImplementation((_p, id) => id === 'shot3' ? Promise.reject({ code: 'INVALID_INPUT', message: '新镜头读取失败' }) : Promise.resolve(context(id)));
+    render(<Host />);
+    await screen.findByRole('textbox', { name: '提示词' });
+    // The list's add button now creates in place. The inline editor's add
+    // action opens the new Shot and exercises the failing context read.
+    const editor = screen.getByRole('region', { name: '镜头内联创作' });
+    const add = within(editor).getByRole('button', { name: '+ 新建镜头' });
+    await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(add);
+    expect((await screen.findByRole('alert')).textContent).toContain('输入无效，请检查后重试。');
+    expect(api.get).toHaveBeenCalledWith('p', 'shot3', 'video');
+    fireEvent.click(screen.getByRole('button', { name: '展开分镜列表' }));
+    const again = await screen.findByRole('button', { name: '+ 新建镜头' });
+    await waitFor(() => expect(again.hasAttribute('disabled')).toBe(false));
+});
 it('CONTROL healthy workbench reads do not submit or select results', async () => { render(<Host />); await screen.findByRole('textbox', { name: '提示词' }); await screen.findByRole('button', { name: '操作镜头二' }); expect(useStudioStore.getState().values.prompt).toEqual({ type: 'string', value: 'saved-shot1' }); expect(api.generate).not.toHaveBeenCalled(); expect(api.selectResult).not.toHaveBeenCalled(); });
 it('reusing another Run into the same Shot remains repeatable and never generates', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -132,13 +147,23 @@ it('mixed-batch history requires an explicit target Shot instead of guessing its
     await screen.findByRole('textbox', { name: '提示词' });
     await reuse();
     await screen.findByText(/请选择目标镜头；历史输入只载入/);
-    const picker = await screen.findByRole('combobox', { name: '镜头' });
-    expect((picker as HTMLSelectElement).value).toBe('');
     expect(useStudioStore.getState().pendingRunIntent?.target?.shotId).toBeNull();
-    fireEvent.change(picker, { target: { value: 'shot2' } });
+    expect(screen.getByRole('button', { name: '操作镜头一' }).getAttribute('aria-current')).toBeNull();
+    expect(screen.getByRole('button', { name: '操作镜头二' }).getAttribute('aria-current')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '操作镜头二' }));
     await waitFor(() => expect(useStudioStore.getState().values.prompt).toEqual({ type: 'string', value: 'history-prompt' }));
     expect(screen.getByRole('button', { name: '操作镜头二' }).getAttribute('aria-current')).toBe('true');
     expect(useStudioStore.getState().pendingRunIntent).toBeUndefined();
+    expect(api.generate).not.toHaveBeenCalled();
+});
+it('a declined sidebar target clears its own mixed-batch reuse without applying or generating', async () => {
+    useStudioStore.getState().setPendingRunIntent({ projectId: 'p', stage: 'video', selectionRef: 'g', values: { prompt: { type: 'string', value: 'history-prompt' } }, target: { shotId: null, requestId: 'sidebar-denied', approved: true } });
+    render(<Host deny initialShot='' />);
+    fireEvent.click(await screen.findByRole('button', { name: '操作镜头二' }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: 'create', projectId: 'p', stage: 'video', shotId: 'shot2' }));
+    await waitFor(() => expect(useStudioStore.getState().pendingRunIntent).toBeUndefined());
+    expect(useStudioStore.getState().values.prompt).not.toEqual({ type: 'string', value: 'history-prompt' });
+    expect(api.inputsSave).not.toHaveBeenCalled();
     expect(api.generate).not.toHaveBeenCalled();
 });
 it('a rejected navigation rolls back only its own staged reuse intent', async () => {

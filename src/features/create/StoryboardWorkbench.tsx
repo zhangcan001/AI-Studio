@@ -273,7 +273,21 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
     const store=useStudioStore.getState(),keys=storyboardDraftKeys(store,projectId,shotId);
     const drafts=keys.map(key=>({key,prompt:store.storyboardPrompts[key],fields:store.storyboardFields[key]}));
     if(keys.length&&!window.confirm("此镜头有未保存的分镜草稿。请取消并先在分镜行保存；确定则放弃此镜头各生成器的分镜草稿，进入已保存的设置与生成。不会自动生成。"))return false;
-    const accepted=await navigate({kind:"create",projectId,stage:"video",shotId});
+    // The sidebar replaces CreatePage's selector, so it must also assign the
+    // explicit destination of a mixed-batch reuse intent before navigation.
+    const intent=store.pendingRunIntent;
+    const choosingForReuse=Boolean(!route.shotId && intent?.projectId===projectId
+      && intent.stage==="video" && intent.target?.shotId===null);
+    if(choosingForReuse && intent?.target)store.setPendingRunIntent({...intent,target:{...intent.target,shotId}});
+    const rollbackReuse=()=>{
+      const pending=useStudioStore.getState().pendingRunIntent;
+      if(choosingForReuse && pending?.target?.requestId===intent?.target?.requestId
+        && pending?.target?.shotId===shotId)useStudioStore.getState().setPendingRunIntent(undefined);
+    };
+    let accepted;
+    try { accepted=await navigate({kind:"create",projectId,stage:"video",shotId}); }
+    catch(cause){rollbackReuse();throw cause;}
+    if(accepted===false)rollbackReuse();
     if(accepted!==false)useStudioStore.setState(state=>{
       const prompts={...state.storyboardPrompts},fields={...state.storyboardFields};
       for(const draft of drafts){

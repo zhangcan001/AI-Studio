@@ -90,7 +90,21 @@ it("phase7_target14 old new resume Back and project switch retain isolation",()=
  expect(read("src/app/routes/useAppRoute.ts")).toContain("writeRouteResume(state.current)");expect(app()).not.toContain("saveWorkspaceResume(");
 });
 it("phase7_target15 keyboard skip focus and active navigation survive single shell",()=>{
- const navigate=vi.fn();render(<ShellHost route={create} projectSelector={null} navigate={navigate} back={vi.fn()}><p>content</p></ShellHost>);expect(screen.getByRole("button",{name:"创作"}).getAttribute("aria-current")).toBe("page");expect(screen.getByRole("link",{name:"跳到主要内容"}).getAttribute("href")).toBe("#v3-main");document.getElementById("v3-main")!.focus();expect(document.activeElement?.id).toBe("v3-main");fireEvent.keyDown(window,{key:"k",ctrlKey:true});fireEvent.keyDown(window,{key:"K",metaKey:true});expect(navigate).toHaveBeenCalledTimes(2);expect(navigate).toHaveBeenLastCalledWith({kind:"create",projectId:project,stage:"video"});
+ const navigate=vi.fn();
+ const view=render(<ShellHost route={create} projectSelector={null} navigate={navigate} back={vi.fn()}><p>content</p></ShellHost>);
+ expect(screen.getByRole("button",{name:"创作"}).getAttribute("aria-current")).toBe("page");
+ expect(screen.getByRole("link",{name:"跳到主要内容"}).getAttribute("href")).toBe("#v3-main");
+ document.getElementById("v3-main")!.focus();expect(document.activeElement?.id).toBe("v3-main");
+ // On a selected Shot, the shortcut opens quick jump without leaving its draft.
+ fireEvent.keyDown(window,{key:"k",ctrlKey:true});
+ expect(screen.getByRole("dialog",{name:"快速跳转面板"})).toBeTruthy();
+ expect(navigate).not.toHaveBeenCalled();
+ fireEvent.keyDown(window,{key:"K",metaKey:true});
+ expect(screen.queryByRole("dialog",{name:"快速跳转面板"})).toBeNull();
+ // Outside single-Shot Create, both platforms still use guarded navigation.
+ view.rerender(<ShellHost route={{kind:"project",projectId:project,page:"overview"}} projectSelector={null} navigate={navigate} back={vi.fn()}><p>content</p></ShellHost>);
+ fireEvent.keyDown(window,{key:"k",ctrlKey:true});fireEvent.keyDown(window,{key:"K",metaKey:true});
+ expect(navigate).toHaveBeenCalledTimes(2);expect(navigate).toHaveBeenLastCalledWith({kind:"create",projectId:project,stage:"video"});
 });
 it("phase7_target16 frozen migration domain and CSS boundaries are unchanged",()=>{
  const successor=minimaxVideoPhase2ParentReader('.');expect(successor.violations).toEqual([]);
