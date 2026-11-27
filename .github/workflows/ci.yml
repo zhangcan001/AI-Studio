@@ -10,6 +10,12 @@ on:
     paths-ignore:
       - "**/*.md"
   workflow_dispatch:
+    inputs:
+      backend_only:
+        description: Run only Rust checks when frontend checks already passed
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -62,6 +68,7 @@ jobs:
 
   frontend_tests:
     name: Frontend tests (${{ matrix.shard }}/4)
+    if: ${{ !inputs.backend_only }}
     runs-on: windows-latest
     # Ordinary unit/UI shards stay free of multi-minute Boundary probes so the
     # vitest worker RPC channel is not held open across a 7–17 minute sync run.
@@ -123,6 +130,7 @@ jobs:
 
   frontend_boundary_tests:
     name: Frontend Boundary probes (${{ matrix.shard }}/3)
+    if: ${{ !inputs.backend_only }}
     runs-on: windows-latest
     # Separate VMs may run in parallel; each VM runs one Vitest process/file
     # at a time. Explicit discovery avoids literal CLI globs omitting tests.
@@ -160,7 +168,7 @@ jobs:
     name: Frontend source checks
     # Retain the stable required-check name; require shards + Boundary job.
     needs: [frontend_tests, frontend_boundary_tests]
-    if: ${{ always() }}
+    if: ${{ always() && !inputs.backend_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

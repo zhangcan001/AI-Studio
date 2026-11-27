@@ -83,7 +83,7 @@ use std::{
     fs,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 use tempfile::{tempdir, TempDir};
@@ -324,6 +324,9 @@ struct CountingComfyAdapter {
     object_info_hold_notify: Arc<Notify>,
     object_info_hold_release: Arc<Notify>,
     hold_submission: Arc<AtomicBool>,
+    accept_next_submission: Arc<AtomicBool>,
+    accepted_prompt_id: Arc<Mutex<Option<String>>>,
+    cancelled_prompt_ids: Arc<Mutex<Vec<String>>>,
     reject_submission_as_validation_error: Arc<AtomicBool>,
     submission_released: Arc<AtomicBool>,
     submission_started: Arc<AtomicBool>,
@@ -352,6 +355,9 @@ impl CountingComfyAdapter {
             object_info_hold_notify: Arc::new(Notify::new()),
             object_info_hold_release: Arc::new(Notify::new()),
             hold_submission: Arc::new(AtomicBool::new(false)),
+            accept_next_submission: Arc::new(AtomicBool::new(false)),
+            accepted_prompt_id: Arc::new(Mutex::new(None)),
+            cancelled_prompt_ids: Arc::new(Mutex::new(Vec::new())),
             reject_submission_as_validation_error: Arc::new(AtomicBool::new(false)),
             submission_started: Arc::new(AtomicBool::new(false)),
             submission_notify: Arc::new(Notify::new()),
@@ -376,6 +382,9 @@ impl CountingComfyAdapter {
         self.object_info_hold_started.store(false, Ordering::SeqCst);
         self.object_info_hold_released.store(true, Ordering::SeqCst);
         self.hold_submission.store(false, Ordering::SeqCst);
+        self.accept_next_submission.store(false, Ordering::SeqCst);
+        *self.accepted_prompt_id.lock().unwrap() = None;
+        self.cancelled_prompt_ids.lock().unwrap().clear();
         self.reject_submission_as_validation_error
             .store(false, Ordering::SeqCst);
         self.submission_released.store(true, Ordering::SeqCst);
@@ -448,6 +457,10 @@ impl CountingComfyAdapter {
     fn reject_submission_as_validation_error(&self) {
         self.reject_submission_as_validation_error
             .store(true, Ordering::SeqCst);
+    }
+
+    fn accept_next_submission(&self) {
+        self.accept_next_submission.store(true, Ordering::SeqCst);
     }
 
     fn release_submission(&self) {
@@ -553,16 +566,33 @@ impl ComfyAdapter for CountingComfyAdapter {
 
     async fn cancel_prompt(
         &self,
-        _prompt_id: &str,
+        prompt_id: &str,
     ) -> Result<ai_studio_lib::application::ports::CancelPromptResult, ComfyAdapterError> {
+        if self.accepted_prompt_id.lock().unwrap().as_deref() == Some(prompt_id) {
+            self.cancelled_prompt_ids
+                .lock()
+                .unwrap()
+                .push(prompt_id.to_owned());
+            return Ok(
+                ai_studio_lib::application::ports::CancelPromptResult::CancellationRequested,
+            );
+        }
         Ok(ai_studio_lib::application::ports::CancelPromptResult::NotFoundOrAlreadyFinished)
     }
 
     async fn get_queue_state(
         &self,
     ) -> Result<ai_studio_lib::application::ports::ComfyQueueState, ComfyAdapterError> {
+        let running_prompt_ids = self
+            .accepted_prompt_id
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|id| !self.cancelled_prompt_ids.lock().unwrap().contains(id))
+            .cloned()
+            .collect();
         Ok(ai_studio_lib::application::ports::ComfyQueueState {
-            running_prompt_ids: Vec::new(),
+            running_prompt_ids,
             pending_prompt_ids: Vec::new(),
         })
     }
@@ -577,7 +607,7 @@ impl ComfyAdapter for CountingComfyAdapter {
     async fn submit_workflow(
         &self,
         _client_id: &str,
-        _prompt_id: &str,
+        prompt_id: &str,
         _workflow: Value,
     ) -> Result<PromptSubmission, ComfyAdapterError> {
         self.submit_calls.fetch_add(1, Ordering::SeqCst);
@@ -597,6 +627,16 @@ impl ComfyAdapter for CountingComfyAdapter {
             return Err(ComfyAdapterError::WorkflowValidation {
                 message: "DEV-052 deterministic validation rejection".to_owned(),
                 node_errors: json!({"test": "deterministic rejection"}),
+            });
+        }
+        // Cancellation tests opt into one acknowledged remote submission.
+        // Preparation tests retain the default hard rejection of execution.
+        if self.accept_next_submission.swap(false, Ordering::SeqCst) {
+            *self.accepted_prompt_id.lock().unwrap() = Some(prompt_id.to_owned());
+            return Ok(PromptSubmission {
+                prompt_id: prompt_id.to_owned(),
+                number: Some(1),
+                node_errors: json!({}),
             });
         }
         Err(ComfyAdapterError::Incompatible(
@@ -1654,6 +1694,7 @@ async fn cancelling_one_running_item_interrupts_it_and_batch_continues() {
         .create_direct_generation_batch(direct_generation_batch_request(&harness, 2))
         .await
         .expect("batch should be persisted before queue start");
+    harness.comfy.accept_next_submission();
     harness.comfy.hold_submission();
     harness
         .admission
@@ -1695,6 +1736,15 @@ async fn cancelling_one_running_item_interrupts_it_and_batch_continues() {
         ProductionBatchItemStatus::Cancelled
     );
     assert_ne!(settled.batch.status, ProductionBatchStatus::Paused);
+    let task = SqliteTaskRepository::new(harness.pool.clone())
+        .find_by_id(&TaskId::parse(settled.items[0].task_id.clone().unwrap()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        *harness.comfy.cancelled_prompt_ids.lock().unwrap(),
+        vec![task.prompt_id.unwrap()]
+    );
 }
 
 #[tokio::test]
@@ -1705,6 +1755,7 @@ async fn cancelling_whole_batch_interrupts_running_item_and_completes() {
         .create_direct_generation_batch(direct_generation_batch_request(&harness, 3))
         .await
         .expect("batch should be persisted before queue start");
+    harness.comfy.accept_next_submission();
     harness.comfy.hold_submission();
     harness
         .admission
@@ -1738,6 +1789,16 @@ async fn cancelling_whole_batch_interrupts_running_item_and_completes() {
         .iter()
         .all(|item| item.status == ProductionBatchItemStatus::Cancelled));
     assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+
+    let task = SqliteTaskRepository::new(harness.pool.clone())
+        .find_by_id(&TaskId::parse(completed.items[0].task_id.clone().unwrap()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        *harness.comfy.cancelled_prompt_ids.lock().unwrap(),
+        vec![task.prompt_id.unwrap()]
+    );
 
     let first = completed.items[0].id.as_str().to_owned();
     let after_delete = harness

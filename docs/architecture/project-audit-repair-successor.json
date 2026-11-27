@@ -4,11 +4,11 @@
   "files": {
     ".github/workflows/ci.yml": {
       "beforeHash": "6257ef874b6622a1f598db8e60af78ed835efb5572bde0d62824c084e3539d65",
-      "afterHash": "5cc98e278d5bf7e429f0f9af42c3e3b382e03f22d51ae685610edf90df1f751f"
+      "afterHash": "a87bce3982ab8e9114754c18a834268014e8a2ebd3e7f99c1e2f5251f34669c8"
     },
     "scripts/audit70-ci-integration-successor-guard.mjs": {
       "beforeHash": "438a4f81dfdf0460453b3ca1e99873a3ab4a3a62feac63b7f9e2eb357ed38cc7",
-      "afterHash": "d058be5c9bd4d08f69488fe7beace02b02b3b7ad6dfae51a30d5b28265401729"
+      "afterHash": "8116f0b3c2dab7254eb0466dd279b5c47b3c1f1a0869bf15d52b3bcac0df3795"
     },
     "scripts/testing/audit-repair.test.mjs": {
       "beforeHash": "53a48b2ebad6583e3c267eea71d3ab6d48b58b09f359bb0e2c684da498fb9133",
@@ -381,6 +381,10 @@
     "src-tauri/tests/dev052_production_preparation.rs": {
       "beforeHash": "41bc345a54ff02b438680d8f741666437f7332d0ead61241050bc1ce1231e9d3",
       "afterHash": "f128fd634c8f7bca944a4c00203ae7b6c17d246c80070fca4fcee95d78fcdb66"
+    },
+    "src-tauri/tests/dev052_runtime_integration.rs": {
+      "beforeHash": "5801a2dd3f1b1981d6218c3abe8cc0d5f0a983636d241d85a102959c203ad211",
+      "afterHash": "382336dfb6749152e0cc0b334b4a610c2d3e52ea3cda5d8be1c86f52a66f4f0c"
     },
     "src-tauri/tests/dev059_production_package.rs": {
       "beforeHash": "6102a5e8f81c540d0c6826f6482ce7a98a5b8895530ab726833a53af418c2e81",

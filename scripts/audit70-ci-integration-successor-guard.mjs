@@ -100,6 +100,7 @@ const REPAIR_SCOPE = [
   "src-tauri/src/main.rs",
   "src-tauri/tauri.conf.json",
   "src-tauri/tests/dev052_production_preparation.rs",
+  "src-tauri/tests/dev052_runtime_integration.rs",
   "src-tauri/tests/dev059_production_package.rs",
   "src-tauri/tests/support/product_facade_contract.rs",
   "src-tauri/tests/support/run_workspace_contract.rs",
